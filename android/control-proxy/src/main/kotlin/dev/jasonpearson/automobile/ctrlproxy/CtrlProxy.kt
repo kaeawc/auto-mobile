@@ -94,6 +94,11 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.put
 
 /**
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
@@ -194,6 +199,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     encodeDefaults = true
   }
   private val jsonLenient = Json { ignoreUnknownKeys = true }
+
+  private fun webSocketFrameJson(
+    type: String,
+    timestamp: Long = System.currentTimeMillis(),
+    requestId: String? = null,
+    perfTiming: JsonElement? = null,
+    buildContent: JsonObjectBuilder.() -> Unit,
+  ): String =
+    jsonCompact.encodeToString(
+      buildJsonObject {
+        put("type", type)
+        put("timestamp", timestamp)
+        if (requestId != null) {
+          put("requestId", requestId)
+        }
+        buildContent()
+        if (perfTiming != null) {
+          put("perfTiming", perfTiming)
+        }
+      }
+    )
+
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
   private lateinit var webSocketServer: WebSocketServer
@@ -1526,9 +1553,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    val eventJson = jsonCompact.encodeToString(interaction)
     webSocketServer.broadcast(
-      """{"type":"interaction_event","timestamp":${interaction.timestamp},"event":$eventJson}"""
+      webSocketFrameJson("interaction_event", timestamp = interaction.timestamp) {
+        put("event", jsonCompact.encodeToJsonElement(interaction))
+      }
     )
   }
 
@@ -1557,19 +1585,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       val timestamp = System.currentTimeMillis()
-      val safeAction = jsonCompact.encodeToString(action)
-      val safePackageName = jsonCompact.encodeToString(packageName)
-      val message = buildString {
-        append("""{"type":"package_event","timestamp":$timestamp,"event":{""")
-        append(""""action":$safeAction,"packageName":$safePackageName,"userId":$userId""")
-        if (isSystem != null) {
-          append(""","isSystem":$isSystem""")
+      val message =
+        webSocketFrameJson("package_event", timestamp = timestamp) {
+          put(
+            "event",
+            buildJsonObject {
+              put("action", action)
+              put("packageName", packageName)
+              put("userId", userId)
+              if (isSystem != null) {
+                put("isSystem", isSystem)
+              }
+              if (removedForAllUsers) {
+                put("removedForAllUsers", true)
+              }
+            },
+          )
         }
-        if (removedForAllUsers) {
-          append(""","removedForAllUsers":true""")
-        }
-        append("}}")
-      }
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")
     } catch (e: CancellationException) {
@@ -4330,20 +4362,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "set_text_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"set_text_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
+        webSocketFrameJson("set_text_result", requestId = requestId, perfTiming = perfTiming) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
           if (error != null) {
-            append(""","error":"$error"""")
+            put("error", error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
@@ -4365,21 +4389,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "ime_action_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"ime_action_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","action":"$action"""")
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
+        webSocketFrameJson("ime_action_result", requestId = requestId, perfTiming = perfTiming) {
+          put("action", action)
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
           if (error != null) {
-            append(""","error":"$error"""")
+            put("error", error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(TAG, "Broadcasted IME action result to ${webSocketServer.getConnectionCount()} clients")
@@ -4400,20 +4416,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "select_all_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"select_all_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
+        webSocketFrameJson("select_all_result", requestId = requestId, perfTiming = perfTiming) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
           if (error != null) {
-            append(""","error":"$error"""")
+            put("error", error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(TAG, "Broadcasted select all result to ${webSocketServer.getConnectionCount()} clients")
@@ -4435,21 +4443,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "action_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"action_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","action":"$action"""")
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
+        webSocketFrameJson("action_result", requestId = requestId, perfTiming = perfTiming) {
+          put("action", action)
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
           if (error != null) {
-            append(""","error":"$error"""")
+            put("error", error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(TAG, "Broadcasted action result to ${webSocketServer.getConnectionCount()} clients")
@@ -4472,40 +4472,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "clipboard_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"clipboard_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","action":"$action"""")
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
+        webSocketFrameJson("clipboard_result", requestId = requestId, perfTiming = perfTiming) {
+          put("action", action)
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
           if (text != null) {
-            // Escape text for JSON
-            val escapedText =
-              text
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t")
-            append(""","text":"$escapedText"""")
+            put("text", text)
           }
           if (error != null) {
-            // Escape error message for JSON
-            val escapedError =
-              error
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t")
-            append(""","error":"$escapedError"""")
+            put("error", error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(TAG, "Broadcasted clipboard result to ${webSocketServer.getConnectionCount()} clients")
@@ -4586,15 +4562,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       )
     }
-  }
-
-  private fun escapeJsonString(value: String): String {
-    return value
-      .replace("\\", "\\\\")
-      .replace("\"", "\\\"")
-      .replace("\n", "\\n")
-      .replace("\r", "\\r")
-      .replace("\t", "\\t")
   }
 
   private suspend fun broadcastInstalledPackagesResult(
@@ -4705,24 +4672,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "ca_cert_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"ca_cert_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","action":"$action"""")
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
+        webSocketFrameJson("ca_cert_result", requestId = requestId, perfTiming = perfTiming) {
+          put("action", action)
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
           if (alias != null) {
-            append(""","alias":"${escapeJsonString(alias)}"""")
+            put("alias", alias)
           }
           if (error != null) {
-            append(""","error":"${escapeJsonString(error)}"""")
+            put("error", error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(TAG, "Broadcasted ca_cert_result to ${webSocketServer.getConnectionCount()} clients")
@@ -4745,25 +4704,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     resultBroadcaster.guard(requestId, "device_owner_status_result") {
       val success = error == null
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append(
-            """{"type":"device_owner_status_result","timestamp":${System.currentTimeMillis()}"""
-          )
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          append(""","packageName":"${escapeJsonString(packageName)}"""")
-          append(""","isDeviceOwner":$isDeviceOwner""")
-          append(""","isAdminActive":$isAdminActive""")
+        webSocketFrameJson(
+          "device_owner_status_result",
+          requestId = requestId,
+          perfTiming = perfTiming,
+        ) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
+          put("packageName", packageName)
+          put("isDeviceOwner", isDeviceOwner)
+          put("isAdminActive", isAdminActive)
           if (error != null) {
-            append(""","error":"${escapeJsonString(error)}"""")
+            put("error", error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(
@@ -4787,31 +4740,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     resultBroadcaster.guard(requestId, "permission_result") {
       val success = result.error == null
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"permission_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          append(""","permission":"${escapeJsonString(result.permission)}"""")
-          append(""","granted":${result.granted}""")
-          append(""","requestLaunched":${result.requestLaunched}""")
-          append(""","canRequest":${result.canRequest}""")
-          append(""","requiresSettings":${result.requiresSettings}""")
+        webSocketFrameJson("permission_result", requestId = requestId, perfTiming = perfTiming) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
+          put("permission", result.permission)
+          put("granted", result.granted)
+          put("requestLaunched", result.requestLaunched)
+          put("canRequest", result.canRequest)
+          put("requiresSettings", result.requiresSettings)
           if (result.instructions != null) {
-            append(""","instructions":"${escapeJsonString(result.instructions)}"""")
+            put("instructions", result.instructions)
           }
           if (result.adbCommand != null) {
-            append(""","adbCommand":"${escapeJsonString(result.adbCommand)}"""")
+            put("adbCommand", result.adbCommand)
           }
           if (result.error != null) {
-            append(""","error":"${escapeJsonString(result.error)}"""")
+            put("error", result.error)
           }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
         }
       }
       Log.d(TAG, "Broadcasted permission result to ${webSocketServer.getConnectionCount()} clients")

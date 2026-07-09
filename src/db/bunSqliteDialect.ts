@@ -367,8 +367,15 @@ export class BunSqliteConnectionState {
     this.#clearStatementCache();
     if (this.#db) {
       try {
+        this.#db.exec("PRAGMA optimize;");
+      } catch (error) {
+        // Best-effort: stale planner stats are preferable to blocking shutdown.
+        logger.debug(`PRAGMA optimize on close failed: ${error}`);
+      }
+      try {
         // Flush the WAL into the main DB and truncate the `-wal`/`-shm`
         // sidecars so a clean shutdown leaves a single-file artifact. Stays
+        // after PRAGMA optimize because optimize may write planner stats.
         // synchronous — close() runs inside destroy() and must not introduce
         // an await point that could reorder with the mutex (issue #2802).
         this.#db.exec("PRAGMA wal_checkpoint(TRUNCATE);");

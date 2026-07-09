@@ -10,6 +10,7 @@ import type {
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
 import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
 import type {
@@ -162,6 +163,7 @@ export class FailureAnalyticsRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
   private getBarrier: () => DbWriteBarrier;
+  private idGenerator: IdGenerator;
 
   constructor(
     timer: Timer = defaultTimer,
@@ -170,10 +172,12 @@ export class FailureAnalyticsRepository {
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     this.timer = timer;
     this.db = db ?? null;
     this.getBarrier = getBarrier;
+    this.idGenerator = idGenerator;
   }
 
   private getDb(): Kysely<Database> {
@@ -189,7 +193,7 @@ export class FailureAnalyticsRepository {
   async recordFailure(input: RecordFailureInput): Promise<string> {
     const db = this.getDb();
     const now = this.timer.now();
-    const occurrenceId = crypto.randomUUID();
+    const occurrenceId = this.idGenerator.next();
 
     try {
       await db.transaction().execute(async trx => {
@@ -200,7 +204,7 @@ export class FailureAnalyticsRepository {
         // migration 2026_07_01_000) or both read a stale total_count and clobber
         // (lost increments). A single INSERT ... ON CONFLICT DO UPDATE makes the
         // count bump atomic. The candidate id is used only on the first-seen path.
-        const candidateGroupId = crypto.randomUUID();
+        const candidateGroupId = this.idGenerator.next();
         const nowIso = new Date().toISOString();
 
         const upserted = await trx
@@ -318,7 +322,7 @@ export class FailureAnalyticsRepository {
         // Insert capture if provided
         if (input.capture) {
           const capture: NewFailureCapture = {
-            id: crypto.randomUUID(),
+            id: this.idGenerator.next(),
             occurrence_id: occurrenceId,
             type: input.capture.type,
             path: input.capture.path,

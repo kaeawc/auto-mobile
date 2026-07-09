@@ -22,6 +22,32 @@ const noAvdConfigReader: AvdConfigReader = {
 };
 
 describe("AndroidEmulatorClient listAvds", () => {
+  test("does not read AVD config files when the emulator command is missing", async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), "automobile-home-"));
+    const originalHome = process.env.HOME;
+
+    try {
+      mkdirSync(join(homeDir, ".android", "avd"), { recursive: true });
+      writeFileSync(join(homeDir, ".android", "avd", "Pixel_9.ini"), "path=/host/Pixel_9.avd\n");
+      process.env.HOME = homeDir;
+
+      const execAsync = async (_command: string): Promise<ExecResult> => {
+        throw new Error("emulator: command not found");
+      };
+      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer(), undefined, noAvdConfigReader);
+      (client as any).ensureEmulatorPath = async () => "emulator";
+
+      await expect(client.listAvds()).rejects.toThrow("Android emulator not found");
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   test("reports deleted daemon cwd failures separately from a missing emulator binary", async () => {
     const sdkDir = mkdtempSync(join(tmpdir(), "android-sdk-"));
     const originalAndroidHome = process.env.ANDROID_HOME;

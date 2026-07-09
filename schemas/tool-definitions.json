@@ -449,6 +449,11 @@
             "ios"
           ]
         },
+        "appId": {
+          "description": "Android app package for locale changes",
+          "type": "string",
+          "minLength": 1
+        },
         "locale": {
           "description": "Locale tag (e.g., ar-SA, ja-JP)",
           "type": "string",
@@ -503,7 +508,23 @@
       "required": [
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "android"
+          }
+        },
+        "required": [
+          "platform",
+          "locale"
+        ]
+      },
+      "then": {
+        "required": [
+          "appId"
+        ]
+      }
     }
   },
   {
@@ -3117,102 +3138,6 @@
             {
               "type": "object",
               "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Element resource ID / accessibility identifier"
-                },
-                "timeout": {
-                  "description": "Wait timeout ms (default: 5000)",
-                  "type": "number"
-                },
-                "container": {
-                  "description": "Scope match to a container",
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "elementId": {
-                          "type": "string",
-                          "description": "Container resource ID"
-                        }
-                      },
-                      "required": [
-                        "elementId"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "text": {
-                          "type": "string",
-                          "description": "Container text"
-                        }
-                      },
-                      "required": [
-                        "text"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "elementId"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Element text"
-                },
-                "timeout": {
-                  "description": "Wait timeout ms (default: 5000)",
-                  "type": "number"
-                },
-                "container": {
-                  "description": "Scope match to a container",
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "elementId": {
-                          "type": "string",
-                          "description": "Container resource ID"
-                        }
-                      },
-                      "required": [
-                        "elementId"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "text": {
-                          "type": "string",
-                          "description": "Container text"
-                        }
-                      },
-                      "required": [
-                        "text"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "text"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
                 "textAny": {
                   "minItems": 1,
                   "type": "array",
@@ -3221,6 +3146,101 @@
                     "minLength": 1
                   },
                   "description": "Ordered text variants; first visible match wins"
+                },
+                "elementId": {
+                  "not": {}
+                },
+                "text": {
+                  "not": {}
+                },
+                "className": {
+                  "not": {}
+                },
+                "contentDescription": {
+                  "not": {}
+                },
+                "matchType": {
+                  "not": {}
+                },
+                "textMatch": {
+                  "not": {}
+                },
+                "activeWindow": {
+                  "description": "Foreground app/window predicates",
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "appId": {
+                          "description": "Foreground app bundle ID / package name",
+                          "type": "string"
+                        },
+                        "packageName": {
+                          "type": "string"
+                        },
+                        "bundleId": {
+                          "type": "string"
+                        },
+                        "activityName": {
+                          "description": "Foreground Android activity name",
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "appId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "appId"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "packageName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "packageName"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "bundleId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "bundleId"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "activityName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "activityName"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      ]
+                    }
+                  ]
                 },
                 "timeout": {
                   "description": "Wait timeout ms (default: 5000)",
@@ -3262,6 +3282,301 @@
                 "textAny"
               ],
               "additionalProperties": false
+            },
+            {
+              "allOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "description": "Element resource ID / accessibility identifier",
+                      "type": "string"
+                    },
+                    "text": {
+                      "description": "Element text",
+                      "type": "string"
+                    },
+                    "textAny": {
+                      "not": {}
+                    },
+                    "className": {
+                      "description": "Element class name",
+                      "type": "string"
+                    },
+                    "contentDescription": {
+                      "description": "Element content description / accessibility label",
+                      "type": "string"
+                    },
+                    "matchType": {
+                      "description": "Whether element predicates must all match the same node or any one may match",
+                      "type": "string",
+                      "enum": [
+                        "all",
+                        "any"
+                      ]
+                    },
+                    "textMatch": {
+                      "description": "How to match text predicates",
+                      "type": "string",
+                      "enum": [
+                        "exact",
+                        "contains",
+                        "regex"
+                      ]
+                    },
+                    "activeWindow": {
+                      "description": "Foreground app/window predicates",
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "appId": {
+                              "description": "Foreground app bundle ID / package name",
+                              "type": "string"
+                            },
+                            "packageName": {
+                              "type": "string"
+                            },
+                            "bundleId": {
+                              "type": "string"
+                            },
+                            "activityName": {
+                              "description": "Foreground Android activity name",
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "appId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "appId"
+                              ],
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "packageName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "packageName"
+                              ],
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "bundleId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "bundleId"
+                              ],
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "activityName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "activityName"
+                              ],
+                              "additionalProperties": {}
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "timeout": {
+                      "description": "Wait timeout ms (default: 5000)",
+                      "type": "number"
+                    },
+                    "container": {
+                      "description": "Scope match to a container",
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "elementId": {
+                              "type": "string",
+                              "description": "Container resource ID"
+                            }
+                          },
+                          "required": [
+                            "elementId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string",
+                              "description": "Container text"
+                            }
+                          },
+                          "required": [
+                            "text"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "className": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "className"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "contentDescription": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "contentDescription"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "activeWindow": {
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "appId": {
+                                  "description": "Foreground app bundle ID / package name",
+                                  "type": "string"
+                                },
+                                "packageName": {
+                                  "type": "string"
+                                },
+                                "bundleId": {
+                                  "type": "string"
+                                },
+                                "activityName": {
+                                  "description": "Foreground Android activity name",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "appId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "appId"
+                                  ],
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "packageName": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "packageName"
+                                  ],
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "bundleId": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "bundleId"
+                                  ],
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "activityName": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "activityName"
+                                  ],
+                                  "additionalProperties": {}
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "activeWindow"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -4502,58 +4817,36 @@
             "service"
           ],
           "additionalProperties": {}
-        }
-      },
-      "additionalProperties": {},
-      "$defs": {
-        "__schema0": {
+        },
+        "artifact": {
           "type": "object",
           "properties": {
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
-                },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+            "path": {
+              "type": "string"
             },
-            "node": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/__schema0"
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/__schema0"
-                  }
-                }
-              ]
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
             }
           },
+          "required": [
+            "path",
+            "format",
+            "payload",
+            "bytes",
+            "tool"
+          ],
           "additionalProperties": {}
         }
       }
@@ -6686,560 +6979,604 @@
           "additionalProperties": {}
         },
         "observation": {
-          "type": "object",
-          "properties": {
-            "selectedElements": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "text": {
-                    "type": "string"
-                  },
-                  "resourceId": {
-                    "type": "string"
-                  },
-                  "contentDesc": {
-                    "type": "string"
-                  },
-                  "bounds": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "selectedElements": {
+                  "type": "array",
+                  "items": {
                     "type": "object",
                     "properties": {
-                      "left": {
-                        "type": "number"
-                      },
-                      "top": {
-                        "type": "number"
-                      },
-                      "right": {
-                        "type": "number"
-                      },
-                      "bottom": {
-                        "type": "number"
-                      },
-                      "centerX": {
-                        "type": "number"
-                      },
-                      "centerY": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
-                    ],
-                    "additionalProperties": false,
-                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
-                  },
-                  "indexInMatches": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "totalMatches": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "selectionStrategy": {
-                    "type": "string"
-                  },
-                  "selectedState": {
-                    "type": "object",
-                    "properties": {
-                      "method": {
-                        "type": "string",
-                        "enum": [
-                          "accessibility",
-                          "visual"
-                        ]
-                      },
-                      "confidence": {
-                        "type": "number"
-                      },
-                      "reason": {
+                      "text": {
                         "type": "string"
+                      },
+                      "resourceId": {
+                        "type": "string"
+                      },
+                      "contentDesc": {
+                        "type": "string"
+                      },
+                      "bounds": {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "number"
+                          },
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          },
+                          "centerX": {
+                            "type": "number"
+                          },
+                          "centerY": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "left",
+                          "top",
+                          "right",
+                          "bottom"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                      },
+                      "indexInMatches": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "totalMatches": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "selectionStrategy": {
+                        "type": "string"
+                      },
+                      "selectedState": {
+                        "type": "object",
+                        "properties": {
+                          "method": {
+                            "type": "string",
+                            "enum": [
+                              "accessibility",
+                              "visual"
+                            ]
+                          },
+                          "confidence": {
+                            "type": "number"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "method",
+                          "confidence"
+                        ],
+                        "additionalProperties": false
                       }
                     },
-                    "required": [
-                      "method",
-                      "confidence"
-                    ],
-                    "additionalProperties": false
+                    "additionalProperties": {}
                   }
                 },
-                "additionalProperties": {}
-              }
-            },
-            "focusedElement": {
-              "type": "object",
-              "properties": {
-                "bounds": {
+                "focusedElement": {
                   "type": "object",
                   "properties": {
-                    "left": {
-                      "type": "number"
+                    "bounds": {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "type": "number"
+                        },
+                        "top": {
+                          "type": "number"
+                        },
+                        "right": {
+                          "type": "number"
+                        },
+                        "bottom": {
+                          "type": "number"
+                        },
+                        "centerX": {
+                          "type": "number"
+                        },
+                        "centerY": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "left",
+                        "top",
+                        "right",
+                        "bottom"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                     },
-                    "top": {
-                      "type": "number"
+                    "text": {
+                      "type": "string"
                     },
-                    "right": {
-                      "type": "number"
+                    "resource-id": {
+                      "type": "string"
                     },
-                    "bottom": {
-                      "type": "number"
+                    "content-desc": {
+                      "type": "string"
                     },
-                    "centerX": {
-                      "type": "number"
+                    "class": {
+                      "type": "string"
                     },
-                    "centerY": {
-                      "type": "number"
+                    "package": {
+                      "type": "string"
+                    },
+                    "checkable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "checked": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "clickable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "focusable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "focused": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "accessibility-focused": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "scrollable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "selected": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
                     }
                   },
                   "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
+                    "bounds"
                   ],
-                  "additionalProperties": false,
-                  "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                  "additionalProperties": {}
                 },
-                "text": {
-                  "type": "string"
-                },
-                "resource-id": {
-                  "type": "string"
-                },
-                "content-desc": {
-                  "type": "string"
-                },
-                "class": {
-                  "type": "string"
-                },
-                "package": {
-                  "type": "string"
-                },
-                "checkable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "checked": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "clickable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "enabled": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focusable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "accessibility-focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "scrollable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "selected": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "bounds"
-              ],
-              "additionalProperties": {}
-            },
-            "accessibilityFocusedElement": {
-              "type": "object",
-              "properties": {
-                "bounds": {
+                "accessibilityFocusedElement": {
                   "type": "object",
                   "properties": {
-                    "left": {
-                      "type": "number"
+                    "bounds": {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "type": "number"
+                        },
+                        "top": {
+                          "type": "number"
+                        },
+                        "right": {
+                          "type": "number"
+                        },
+                        "bottom": {
+                          "type": "number"
+                        },
+                        "centerX": {
+                          "type": "number"
+                        },
+                        "centerY": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "left",
+                        "top",
+                        "right",
+                        "bottom"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
                     },
-                    "top": {
-                      "type": "number"
+                    "text": {
+                      "type": "string"
                     },
-                    "right": {
-                      "type": "number"
+                    "resource-id": {
+                      "type": "string"
                     },
-                    "bottom": {
-                      "type": "number"
+                    "content-desc": {
+                      "type": "string"
                     },
-                    "centerX": {
-                      "type": "number"
+                    "class": {
+                      "type": "string"
                     },
-                    "centerY": {
-                      "type": "number"
+                    "package": {
+                      "type": "string"
+                    },
+                    "checkable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "checked": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "clickable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "focusable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "focused": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "accessibility-focused": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "scrollable": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
+                    },
+                    "selected": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "string",
+                          "const": "true"
+                        },
+                        {
+                          "type": "string",
+                          "const": "false"
+                        }
+                      ]
                     }
                   },
                   "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
+                    "bounds"
                   ],
-                  "additionalProperties": false,
-                  "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                  "additionalProperties": {}
                 },
-                "text": {
-                  "type": "string"
-                },
-                "resource-id": {
-                  "type": "string"
-                },
-                "content-desc": {
-                  "type": "string"
-                },
-                "class": {
-                  "type": "string"
-                },
-                "package": {
-                  "type": "string"
-                },
-                "checkable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "checked": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "clickable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "enabled": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focusable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "accessibility-focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "scrollable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "selected": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "bounds"
-              ],
-              "additionalProperties": {}
-            },
-            "activeWindow": {
-              "type": "object",
-              "properties": {
-                "appId": {
-                  "type": "string"
-                },
-                "activityName": {
-                  "type": "string"
-                },
-                "layoutSeqSum": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "type": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": {}
-            },
-            "screenIdentity": {
-              "type": "object",
-              "properties": {
-                "platform": {
-                  "type": "string",
-                  "enum": [
-                    "ios",
-                    "android"
-                  ]
-                },
-                "source": {
-                  "type": "string",
-                  "enum": [
-                    "heuristic",
-                    "sdk"
-                  ]
-                },
-                "confidence": {
-                  "type": "string",
-                  "enum": [
-                    "high",
-                    "medium",
-                    "low"
-                  ]
-                },
-                "key": {
-                  "type": "string"
-                },
-                "components": {
+                "activeWindow": {
                   "type": "object",
                   "properties": {
-                    "bundleId": {
+                    "appId": {
                       "type": "string"
                     },
-                    "navigationTitle": {
+                    "activityName": {
                       "type": "string"
                     },
-                    "selectedTab": {
-                      "type": "string"
+                    "layoutSeqSum": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     },
-                    "modalClass": {
+                    "type": {
                       "type": "string"
-                    },
-                    "modalTitle": {
-                      "type": "string"
-                    },
-                    "focusedElementId": {
-                      "type": "string"
-                    },
-                    "keyboardVisible": {
-                      "type": "boolean"
                     }
                   },
+                  "additionalProperties": {}
+                },
+                "screenIdentity": {
+                  "type": "object",
+                  "properties": {
+                    "platform": {
+                      "type": "string",
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "heuristic",
+                        "sdk"
+                      ]
+                    },
+                    "confidence": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ]
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "components": {
+                      "type": "object",
+                      "properties": {
+                        "bundleId": {
+                          "type": "string"
+                        },
+                        "navigationTitle": {
+                          "type": "string"
+                        },
+                        "selectedTab": {
+                          "type": "string"
+                        },
+                        "modalClass": {
+                          "type": "string"
+                        },
+                        "modalTitle": {
+                          "type": "string"
+                        },
+                        "focusedElementId": {
+                          "type": "string"
+                        },
+                        "keyboardVisible": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "platform",
+                    "source",
+                    "confidence",
+                    "key",
+                    "components"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "artifact": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "format": {
+                      "type": "string",
+                      "const": "json"
+                    },
+                    "payload": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "tool": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "format",
+                    "payload",
+                    "bytes",
+                    "tool"
+                  ],
                   "additionalProperties": {}
                 }
               },
               "required": [
-                "platform",
-                "source",
-                "confidence",
-                "key",
-                "components"
+                "artifact"
               ],
               "additionalProperties": {}
             }
-          },
-          "additionalProperties": {}
+          ]
         },
         "observationDiff": {
           "type": "object",

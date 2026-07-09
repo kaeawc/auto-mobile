@@ -12,6 +12,8 @@
  * scripts/generate-release-constants.sh
  */
 
+import { ActionableError } from "../models/ActionableError";
+
 export const LATEST_RELEASE_VERSION = "latest";
 
 export interface ReleaseChecksumEntry {
@@ -289,7 +291,21 @@ export function isPinnedVersionKnown(
 export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
   const trimmed = env[AUTOMOBILE_ASSET_BASE_URL_ENV]?.trim();
   if (trimmed && trimmed.length > 0) {
-    return trimmed.replace(/\/+$/, "");
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new ActionableError(
+        `${AUTOMOBILE_ASSET_BASE_URL_ENV} must be an absolute URL, for example https://mirror.example/auto-mobile.`
+      );
+    }
+    if (trimmed.includes("?") || trimmed.includes("#")) {
+      throw new ActionableError(
+        `${AUTOMOBILE_ASSET_BASE_URL_ENV} must not include a query string or fragment; ` +
+        `use a path-only base URL such as ${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}.`
+      );
+    }
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
   }
   return DEFAULT_ASSET_BASE_URL;
 }
@@ -349,14 +365,14 @@ export function resolveDaemonInstallSpecifier(env: EnvLike = process.env): strin
   return `${DAEMON_PACKAGE_NAME}@${resolveAssetVersion(resolvePinnedVersion(env))}`;
 }
 
-export const APK_URL: string = resolveApkUrl();
-export const APK_SHA256_CHECKSUM: string = resolveApkChecksum();
+export const APK_URL: string = resolveApkUrl({});
+export const APK_SHA256_CHECKSUM: string = resolveApkChecksum({});
 
 export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
-export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl();
-export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum();
+export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl({});
+export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum({});
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
 // SHA256 of the simulator runner binary (CtrlProxyUITests-Runner), empty = skip
 // verification. Resolved through RELEASE_CHECKSUM_REGISTRY so pinned iOS
 // downloads verify against the runner hash recorded for the same release entry.
-export const IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM: string = resolveRunnerChecksum();
+export const IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM: string = resolveRunnerChecksum({});

@@ -617,7 +617,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const isInstalled = await this.isInstalled();
     perf.endOperation("checkInstalled");
 
-    if (isInstalled && this.shouldSkipDownloadIfInstalled() && !options.allowDownloadWhenInstalled) {
+    if (
+      isInstalled &&
+      this.shouldSkipDownloadIfInstalled() &&
+      !AndroidCtrlProxyManager.isKnownExplicitPinConfigured() &&
+      !options.allowDownloadWhenInstalled
+    ) {
       logger.warn("[CTRL_PROXY] Skipping APK download/version check (preinstalled APK allowed)");
       return this.cacheVersionCheckResult({
         status: "skipped",
@@ -657,6 +662,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         const prefetchedUpgradeResult = await this.tryUpgradeFromCompletedPrefetch(result, perf);
         if (prefetchedUpgradeResult) {
           return this.cacheVersionCheckResult(prefetchedUpgradeResult);
+        }
+
+        if (AndroidCtrlProxyManager.isKnownExplicitPinConfigured()) {
+          throw AndroidCtrlProxyManager.createKnownPinMismatchError(expectedSha, installedSha);
         }
 
         logger.warn("[CTRL_PROXY] Installed APK SHA differs from expected release; accepting preinstalled CtrlProxy for nonblocking readiness", {
@@ -751,6 +760,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.warn("[CTRL_PROXY] Completed prefetched APK install failed; verified existing CtrlProxy remains installed for readiness", {
         error: upgradeResult.error || upgradeResult.upgradeError || upgradeResult.reinstallError
       });
+      if (AndroidCtrlProxyManager.isKnownExplicitPinConfigured()) {
+        throw AndroidCtrlProxyManager.createKnownPinMismatchError(
+          result.expectedSha256 ?? "",
+          result.installedSha256
+        );
+      }
       return {
         ...upgradeResult,
         status: "skipped",
@@ -1633,6 +1648,22 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return false;
     }
     return isExplicitPin() && !isPinnedVersionKnown();
+  }
+
+  private static isKnownExplicitPinConfigured(): boolean {
+    if (AndroidCtrlProxyManager.isChecksumSkipConfigured()) {
+      return false;
+    }
+    return isExplicitPin() && isPinnedVersionKnown();
+  }
+
+  private static createKnownPinMismatchError(expectedSha: string, installedSha: string | null | undefined): ActionableError {
+    return new ActionableError(
+      `Installed CtrlProxy APK SHA differs from expected release checksum for ` +
+      `AUTOMOBILE_VERSION=${resolvePinnedVersion()}. Expected: ${expectedSha}, Got: ${installedSha ?? "unknown"}. ` +
+      `Install the pinned CtrlProxy APK, restart with a matching daemon, or set ` +
+      `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.`
+    );
   }
 
   private shouldSkipDownloadIfInstalled(): boolean {

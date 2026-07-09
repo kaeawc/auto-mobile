@@ -11,6 +11,10 @@ export function hasAccessibilityAction(
   return Array.isArray(value) && value.some(item => item === action);
 }
 
+export function isClickableElementProperties(props: Record<string, unknown>): boolean {
+  return isTruthyFlag(props.clickable) || hasAccessibilityAction(props.actions, "click");
+}
+
 export function buildContainerFromElement(element: Element): { elementId?: string; text?: string } | null {
   if (element["resource-id"]) {
     return { elementId: element["resource-id"] };

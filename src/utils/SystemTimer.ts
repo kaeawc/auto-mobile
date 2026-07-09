@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 /**
  * Interface for timer utilities
  * Provides sleep/delay functionality and timeout/interval management
@@ -50,7 +52,7 @@ export interface Timer {
  */
 export class SystemTimer implements Timer {
   async sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return sleep(ms);
   }
 
   setTimeout(callback: () => void, ms: number): NodeJS.Timeout {

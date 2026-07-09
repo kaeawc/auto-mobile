@@ -146,9 +146,7 @@ struct SdkHighlightColorComponents: Equatable {
 
     static func parse(hex: String) -> SdkHighlightColorComponents {
         let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        let scanner = Scanner(string: trimmed)
-        var value: UInt64 = 0
-        guard scanner.scanHexInt64(&value) else {
+        guard let value = UInt64(trimmed, radix: 16) else {
             return SdkHighlightColorComponents(red: 0, green: 0, blue: 0, alpha: 1)
         }
 

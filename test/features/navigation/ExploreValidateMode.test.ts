@@ -219,6 +219,26 @@ describe("ExploreValidateMode", () => {
 
       expect(hashEdgeAction(edge1)).toBe(hashEdgeAction(edge2));
     });
+
+    test("should hash reordered interaction args identically", () => {
+      const edge1 = createMockEdge("A", "B", {
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Button", enabled: true },
+          timestamp: 1000
+        }
+      });
+
+      const edge2 = createMockEdge("A", "B", {
+        interaction: {
+          toolName: "tapOn",
+          args: { enabled: true, text: "Button" },
+          timestamp: 1000
+        }
+      });
+
+      expect(hashEdgeAction(edge1)).toBe(hashEdgeAction(edge2));
+    });
   });
 
   describe("markNodeVisited", () => {

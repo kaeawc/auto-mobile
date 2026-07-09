@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import { z } from "zod";
 import {
   addDeviceTargetingToSchema,
@@ -248,6 +249,85 @@ describe("appId aliases on tool schemas", () => {
       expect("packageName" in (result.data.notification ?? {})).toBe(false);
     }
   });
+
+  test("changeLocalizationSchema accepts appId aliases for Android app-scoped locale changes", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "android",
+      packageName: "com.example.app",
+      locale: "fr-FR",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("com.example.app");
+      expect("packageName" in result.data).toBe(false);
+    }
+  });
+
+  test("changeLocalizationSchema rejects appId for iOS locale changes", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "ios",
+      bundleId: "com.example.app",
+      locale: "fr-FR",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(issue => issue.message.includes("appId is only supported for Android"))).toBe(true);
+    }
+  });
+
+  test("changeLocalizationSchema rejects appId when locale is omitted", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "android",
+      appId: "com.example.app",
+      timeZone: "Europe/Paris",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(issue => issue.message.includes("appId only applies when locale is provided"))).toBe(true);
+    }
+  });
+
+  test("changeLocalizationSchema requires appId for Android locale changes", () => {
+    const result = changeLocalizationSchema.safeParse({
+      platform: "android",
+      locale: "fr-FR",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(issue => issue.message.includes("appId is required for Android locale changes"))).toBe(true);
+    }
+  });
+});
+
+describe("generated tool definitions", () => {
+  test("changeLocalization generated schema conditionally requires appId for Android locale changes", () => {
+    const schemas = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
+      name: string;
+      inputSchema?: {
+        properties?: Record<string, unknown>;
+        if?: unknown;
+        then?: unknown;
+        required?: string[];
+      };
+    }>;
+    const changeLocalization = schemas.find(schema => schema.name === "changeLocalization");
+
+    expect(changeLocalization?.inputSchema?.properties?.appId).toBeDefined();
+    expect(changeLocalization?.inputSchema?.if).toEqual({
+      properties: {
+        platform: { const: "android" },
+      },
+      required: ["platform", "locale"],
+    });
+    expect(changeLocalization?.inputSchema?.then).toEqual({
+      required: ["appId"],
+    });
+    expect(changeLocalization?.inputSchema?.required).toEqual(["platform"]);
+  });
 });
 
 describe("platform field accepted by all device-targeting tool schemas", () => {
@@ -272,7 +352,7 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ["observeSchema", observeSchema, { platform: "ios" }],
     ["identifyInteractionsSchema", identifyInteractionsSchema, { platform: "ios" }],
     ["deviceSnapshotSchema", deviceSnapshotSchema, { action: "capture" }],
-    ["changeLocalizationSchema", changeLocalizationSchema, { platform: "ios", locale: "en_US" }],
+    ["changeLocalizationSchema", changeLocalizationSchema, { platform: "ios", timeZone: "Europe/Paris" }],
     ["getDeviceStateSchema", getDeviceStateSchema, {}],
     ["setDeviceStateSchema", setDeviceStateSchema, { doNotDisturb: { enabled: true } }],
     ["shakeSchema", shakeSchema, { platform: "ios" }],

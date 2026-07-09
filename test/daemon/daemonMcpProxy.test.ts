@@ -430,7 +430,7 @@ describe("DaemonMcpProxy", () => {
     });
 
     describe("startup option mismatch handling", () => {
-      function runningStatus(options: { embeddedSdk?: boolean; toolResultsNoStructuredContent?: boolean }) {
+      function runningStatus(options: { embeddedSdk?: boolean; toolResultsNoStructuredContent?: boolean; toolOutputsDir?: string }) {
         return {
           running: true,
           pid: 1234,
@@ -492,6 +492,34 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ toolResultsNoStructuredContent: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when tool outputs directory differs", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ toolOutputsDir: "/tmp/old-artifacts" }), // ensureVersionMatches
+          runningStatus({ toolOutputsDir: "/tmp/old-artifacts" }), // ensureBuildMatches
+          runningStatus({ toolOutputsDir: "/tmp/old-artifacts" }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ toolOutputsDir: "/tmp/new-artifacts" }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { toolOutputsDir: "/tmp/new-artifacts" },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ toolOutputsDir: "/tmp/new-artifacts" });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

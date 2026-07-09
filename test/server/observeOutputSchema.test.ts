@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod";
 import {
   observeResultSchema,
+  observeToolResultSchema,
   viewHierarchyNodeSchema,
 } from "../../src/server/toolOutputSchemas";
 import {
@@ -107,6 +108,20 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
   });
 });
 
+describe("observeToolResultSchema: artifact metadata (#3480)", () => {
+  test("accepts artifact metadata in place of an inline ObserveResult", () => {
+    expect(() => observeToolResultSchema.parse({
+      artifact: {
+        path: "/tmp/auto-mobile/123-observe-id.json",
+        format: "json",
+        payload: "ObserveResult",
+        bytes: 123,
+        tool: "observe",
+      },
+    })).not.toThrow();
+  });
+});
+
 describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () => {
   test("accepts a node whose `node` child is a single object", () => {
     const node = { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, node: { bounds: [1, 2, 3, 4] } };
@@ -187,6 +202,14 @@ describe("observe tool registration advertises the schema (#3025)", () => {
     } finally {
       serverConfig.setToolResultsNoStructuredContentEnabled(original);
     }
+  });
+
+  test("tools/list advertises observe artifact metadata shape", () => {
+    withFreshRegistry(() => {
+      const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
+      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain("\"artifact\"");
+      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain("\"payload\"");
+    });
   });
 
   test("composes with --tool-results-no-structured-content: outputSchema suppressed", () => {

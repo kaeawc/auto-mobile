@@ -1,15 +1,24 @@
 import type { Kysely } from "kysely";
-import { getDatabase } from "../../db/database";
 import { Database, NewMemoryThresholds, MemoryThresholds } from "../../db/types";
 import { logger } from "../../utils/logger";
-import { sql } from "kysely";
 import { MemoryBaseline } from "../../db/types";
 import {
-  adjustWeight,
-  calculateWeightedAverage,
-  WEIGHT_BOUNDS,
-  DEFAULT_TTL,
-} from "../shared/MetricsUtils";
+  GenericThresholdManager,
+  type ThresholdDescriptor,
+  type ThresholdWhere,
+} from "../shared/GenericThresholdManager";
+
+const MEMORY_THRESHOLD_DESCRIPTOR: ThresholdDescriptor<MemoryThresholds> = {
+  tableName: "memory_thresholds",
+  logPrefix: "MemoryThresholdManager",
+  weightedColumns: [
+    { column: "heap_growth_threshold_mb" },
+    { column: "native_heap_growth_threshold_mb" },
+    { column: "gc_count_threshold", round: true },
+    { column: "gc_duration_threshold_ms" },
+    { column: "unreachable_objects_threshold", round: true },
+  ],
+};
 
 /**
  * Default memory thresholds for different app profiles
@@ -45,7 +54,7 @@ const DEFAULT_THRESHOLDS = {
  * Manages memory thresholds with TTL, per-app profiles, and weighted averaging
  */
 export class MemoryThresholdManager {
-  private readonly injectedDb: Kysely<Database> | null;
+  private readonly thresholds: GenericThresholdManager<MemoryThresholds>;
 
   /**
    * @param db Optional Kysely handle, resolved LAZILY (per use, via {@link db})
@@ -54,37 +63,30 @@ export class MemoryThresholdManager {
    * paths (issue #3067).
    */
   constructor(db?: Kysely<Database>) {
-    this.injectedDb = db ?? null;
+    this.thresholds = new GenericThresholdManager(MEMORY_THRESHOLD_DESCRIPTOR, db);
   }
 
   /** The injected DB, or the shared singleton resolved on first use. */
   private get db(): Kysely<Database> {
-    return this.injectedDb ?? getDatabase();
+    return this.thresholds.db;
   }
 
   /**
    * Clean up expired thresholds based on TTL
    */
   async cleanupExpiredThresholds(deviceId: string): Promise<void> {
-    try {
-      const deleted = await this.db
-        .deleteFrom("memory_thresholds")
-        .where("device_id", "=", deviceId)
-        .where(
-          sql`datetime(created_at, '+' || ttl_hours || ' hours')`,
-          "<",
-          sql`datetime('now')`
-        )
-        .execute();
+    await this.cleanupExpiredThresholdsWith(this.db, deviceId);
+  }
 
-      if (deleted.length > 0) {
-        logger.info(
-          `[MemoryThresholdManager] Cleaned up ${deleted.length} expired thresholds for device ${deviceId}`
-        );
-      }
-    } catch (error) {
-      logger.warn(`[MemoryThresholdManager] Failed to cleanup expired thresholds: ${error}`);
-    }
+  private async cleanupExpiredThresholdsWith(
+    db: Kysely<Database>,
+    deviceId: string
+  ): Promise<void> {
+    await this.thresholds.cleanupExpiredThresholds(
+      this.deviceWhere(deviceId),
+      `device ${deviceId}`,
+      db
+    );
   }
 
   /**
@@ -94,22 +96,20 @@ export class MemoryThresholdManager {
     deviceId: string,
     packageName: string
   ): Promise<MemoryThresholds[]> {
-    await this.cleanupExpiredThresholds(deviceId);
+    return await this.getValidThresholdsWith(this.db, deviceId, packageName);
+  }
 
-    const thresholds = await this.db
-      .selectFrom("memory_thresholds")
-      .selectAll()
-      .where("device_id", "=", deviceId)
-      .where("package_name", "=", packageName)
-      .where(
-        sql`datetime(created_at, '+' || ttl_hours || ' hours')`,
-        ">=",
-        sql`datetime('now')`
-      )
-      .orderBy("created_at", "desc")
-      .execute();
-
-    return thresholds;
+  private async getValidThresholdsWith(
+    db: Kysely<Database>,
+    deviceId: string,
+    packageName: string
+  ): Promise<MemoryThresholds[]> {
+    return await this.thresholds.getValidThresholds(
+      this.packageWhere(deviceId, packageName),
+      this.deviceWhere(deviceId),
+      `device ${deviceId}`,
+      db
+    );
   }
 
   /**
@@ -118,44 +118,9 @@ export class MemoryThresholdManager {
   calculateWeightedAverageThresholds(
     thresholds: MemoryThresholds[]
   ): Omit<NewMemoryThresholds, "device_id" | "package_name" | "created_at"> | null {
-    if (thresholds.length === 0) {
-      return null;
-    }
-
-    const getWeight = (t: MemoryThresholds) => t.weight;
-
-    const heapGrowth = calculateWeightedAverage(
-      thresholds,
-      t => t.heap_growth_threshold_mb,
-      getWeight
-    );
-    if (heapGrowth === null) {return null;}
-
-    return {
-      heap_growth_threshold_mb: heapGrowth,
-      native_heap_growth_threshold_mb: calculateWeightedAverage(
-        thresholds,
-        t => t.native_heap_growth_threshold_mb,
-        getWeight
-      )!,
-      gc_count_threshold: Math.round(
-        calculateWeightedAverage(thresholds, t => t.gc_count_threshold, getWeight)!
-      ),
-      gc_duration_threshold_ms: calculateWeightedAverage(
-        thresholds,
-        t => t.gc_duration_threshold_ms,
-        getWeight
-      )!,
-      unreachable_objects_threshold: Math.round(
-        calculateWeightedAverage(
-          thresholds,
-          t => t.unreachable_objects_threshold,
-          getWeight
-        )!
-      ),
-      weight: WEIGHT_BOUNDS.max / 2, // Start at 1.0
-      ttl_hours: DEFAULT_TTL.thresholdHours,
-    };
+    return this.thresholds.calculateWeightedAverageThresholds(thresholds) as
+      | Omit<NewMemoryThresholds, "device_id" | "package_name" | "created_at">
+      | null;
   }
 
   /**
@@ -200,54 +165,79 @@ export class MemoryThresholdManager {
     gcDurationThresholdMs: number;
     unreachableObjectsThreshold: number;
   }> {
-    // Try to get existing weighted thresholds
-    const existingThresholds = await this.getValidThresholds(deviceId, packageName);
+    const db = this.db;
+    const run = async (executor: Kysely<Database>) => {
+      // Try to get existing weighted thresholds
+      const existingThresholds = await this.getValidThresholdsWith(executor, deviceId, packageName);
 
-    if (existingThresholds.length > 0) {
-      const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
-      if (weighted) {
-        logger.info(
-          `[MemoryThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for ${packageName}`
-        );
-        return {
-          heapGrowthThresholdMb: weighted.heap_growth_threshold_mb,
-          nativeHeapGrowthThresholdMb: weighted.native_heap_growth_threshold_mb,
-          gcCountThreshold: weighted.gc_count_threshold,
-          gcDurationThresholdMs: weighted.gc_duration_threshold_ms,
-          unreachableObjectsThreshold: weighted.unreachable_objects_threshold,
-        };
+      if (existingThresholds.length > 0) {
+        const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
+        if (weighted) {
+          logger.info(
+            `[MemoryThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for ${packageName}`
+          );
+          return {
+            heapGrowthThresholdMb: weighted.heap_growth_threshold_mb,
+            nativeHeapGrowthThresholdMb: weighted.native_heap_growth_threshold_mb,
+            gcCountThreshold: weighted.gc_count_threshold,
+            gcDurationThresholdMs: weighted.gc_duration_threshold_ms,
+            unreachableObjectsThreshold: weighted.unreachable_objects_threshold,
+          };
+        }
       }
-    }
 
-    // Try to create adaptive thresholds from baseline
-    if (baseline && baseline.sample_count >= 3) {
+      // Try to create adaptive thresholds from baseline
+      if (baseline && baseline.sample_count >= 3) {
+        logger.info(
+          `[MemoryThresholdManager] Creating adaptive thresholds from baseline for ${packageName} (${baseline.sample_count} samples)`
+        );
+        const adaptiveThresholds = this.createThresholdsFromBaseline(baseline);
+
+        // Store these thresholds for future use
+        await this.storeThresholdsWith(executor, deviceId, packageName, adaptiveThresholds);
+
+        return adaptiveThresholds;
+      }
+
+      // Fall back to default profile
       logger.info(
-        `[MemoryThresholdManager] Creating adaptive thresholds from baseline for ${packageName} (${baseline.sample_count} samples)`
+        `[MemoryThresholdManager] Using default '${profile}' profile for ${packageName}`
       );
-      const adaptiveThresholds = this.createThresholdsFromBaseline(baseline);
+      const defaultThresholds = DEFAULT_THRESHOLDS[profile];
 
-      // Store these thresholds for future use
-      await this.storeThresholds(deviceId, packageName, adaptiveThresholds);
+      // Store defaults for future weight adjustment
+      await this.storeThresholdsWith(executor, deviceId, packageName, defaultThresholds);
 
-      return adaptiveThresholds;
+      return defaultThresholds;
+    };
+
+    if (db.isTransaction) {
+      return run(db);
     }
-
-    // Fall back to default profile
-    logger.info(
-      `[MemoryThresholdManager] Using default '${profile}' profile for ${packageName}`
-    );
-    const defaultThresholds = DEFAULT_THRESHOLDS[profile];
-
-    // Store defaults for future weight adjustment
-    await this.storeThresholds(deviceId, packageName, defaultThresholds);
-
-    return defaultThresholds;
+    return db.transaction().execute(run);
   }
 
   /**
    * Store new thresholds for a device/package
    */
   async storeThresholds(
+    deviceId: string,
+    packageName: string,
+    thresholds: {
+      heapGrowthThresholdMb: number;
+      nativeHeapGrowthThresholdMb: number;
+      gcCountThreshold: number;
+      gcDurationThresholdMs: number;
+      unreachableObjectsThreshold: number;
+    },
+    weight: number = 1.0,
+    ttlHours: number = 24
+  ): Promise<void> {
+    await this.storeThresholdsWith(this.db, deviceId, packageName, thresholds, weight, ttlHours);
+  }
+
+  private async storeThresholdsWith(
+    db: Kysely<Database>,
     deviceId: string,
     packageName: string,
     thresholds: {
@@ -272,19 +262,11 @@ export class MemoryThresholdManager {
       ttl_hours: ttlHours,
     };
 
-    try {
-      await this.db
-        .insertInto("memory_thresholds")
-        .values(newThresholds)
-        .execute();
-
-      logger.info(
-        `[MemoryThresholdManager] Stored new thresholds for ${packageName} on device ${deviceId}`
-      );
-    } catch (error) {
-      logger.error(`[MemoryThresholdManager] Failed to store thresholds: ${error}`);
-      throw error;
-    }
+    await this.thresholds.storeThresholds(
+      newThresholds,
+      `${packageName} on device ${deviceId}`,
+      db
+    );
   }
 
   /**
@@ -296,32 +278,28 @@ export class MemoryThresholdManager {
     packageName: string,
     passed: boolean
   ): Promise<void> {
-    try {
-      const thresholds = await this.getValidThresholds(deviceId, packageName);
-
-      if (thresholds.length === 0) {
-        logger.warn(
-          `[MemoryThresholdManager] No thresholds found for ${packageName} on device ${deviceId}`
-        );
-        return;
+    await this.thresholds.updateThresholdWeight(
+      this.packageWhere(deviceId, packageName),
+      passed,
+      {
+        cleanupWhere: this.deviceWhere(deviceId),
+        missingMessage: `No thresholds found for ${packageName} on device ${deviceId}`,
+        updatedMessage: `Updated threshold weight for ${packageName} (${passed ? "passed" : "failed"})`,
       }
+    );
+  }
 
-      // Update the most recent threshold
-      const mostRecent = thresholds[0];
-      const currentWeight = mostRecent.weight;
-      const newWeight = adjustWeight(currentWeight, passed);
+  private deviceWhere(deviceId: string): Array<ThresholdWhere<MemoryThresholds>> {
+    return [{ column: "device_id", value: deviceId }];
+  }
 
-      await this.db
-        .updateTable("memory_thresholds")
-        .set({ weight: newWeight })
-        .where("id", "=", mostRecent.id)
-        .execute();
-
-      logger.debug(
-        `[MemoryThresholdManager] Updated threshold weight from ${currentWeight.toFixed(2)} to ${newWeight.toFixed(2)} for ${packageName} (${passed ? "passed" : "failed"})`
-      );
-    } catch (error) {
-      logger.warn(`[MemoryThresholdManager] Failed to update threshold weight: ${error}`);
-    }
+  private packageWhere(
+    deviceId: string,
+    packageName: string
+  ): Array<ThresholdWhere<MemoryThresholds>> {
+    return [
+      ...this.deviceWhere(deviceId),
+      { column: "package_name", value: packageName },
+    ];
   }
 }

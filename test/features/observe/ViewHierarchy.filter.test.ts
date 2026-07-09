@@ -37,4 +37,36 @@ describe("ViewHierarchy filtering", () => {
       "actions": ["click"],
     });
   });
+
+  test("filters a cloned hierarchy without mutating the source", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const source = {
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          node: [
+            {
+              text: "Keep me",
+              bounds: { left: 10, top: 10, right: 100, bottom: 80 },
+            },
+            {
+              bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            },
+          ],
+        },
+      },
+    };
+    const originalChildren = source.hierarchy.node.node;
+
+    const result = viewHierarchy.filterViewHierarchy(source);
+
+    expect(result).not.toBe(source);
+    expect(result.hierarchy).not.toBe(source.hierarchy);
+    expect(result.hierarchy.node).toEqual({
+      text: "Keep me",
+      bounds: { left: 10, top: 10, right: 100, bottom: 80 },
+    });
+    expect(source.hierarchy.node.node).toBe(originalChildren);
+    expect(source.hierarchy.node.node).toHaveLength(2);
+  });
 });

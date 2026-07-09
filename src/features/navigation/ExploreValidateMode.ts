@@ -66,16 +66,12 @@ export function hashEdgeAction(edge: NavigationEdge): string {
   const stableData = {
     toolName: edge.interaction.toolName,
     // Sort args keys for stability, exclude any timestamp-like fields
-    args: Object.keys(edge.interaction.args)
-      .filter(k => !k.toLowerCase().includes("timestamp"))
-      .sort()
-      .reduce(
-        (acc, key) => {
-          acc[key] = edge.interaction!.args[key];
-          return acc;
-        },
-        {} as Record<string, any>
-      ),
+    args: Object.fromEntries(
+      Object.keys(edge.interaction.args)
+        .filter(k => !k.toLowerCase().includes("timestamp"))
+        .sort()
+        .map(key => [key, edge.interaction!.args[key]])
+    ),
     // Include edge type for additional uniqueness
     edgeType: edge.edgeType
   };

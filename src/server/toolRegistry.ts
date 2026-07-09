@@ -25,19 +25,29 @@ import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { finalizeToolResponse, type ObservationBaselineStore } from "./finalizeToolResponse";
+import { finalizeToolResponse, type ObservationArtifactWriter, type ObservationBaselineStore } from "./finalizeToolResponse";
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
+import { applyJsonSchemaOverride } from "./toolSchemaHelpers";
 import {
   InternalToolName,
   InternalToolPayloads,
   narrowInternalToolEnvelope,
 } from "./internalToolPayloads";
+import { JsonToolOutputArtifactWriter } from "./toolOutputArtifactWriter";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
+
+function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
+  return flattenTopLevelUnion(toJSONSchema(schema, {
+    override: ({ zodSchema, jsonSchema }) => {
+      applyJsonSchemaOverride(zodSchema, jsonSchema);
+    },
+  }));
+}
 
 // Progress notification interface
 export interface ProgressCallback {
@@ -161,6 +171,8 @@ interface AfterToolCallResult {
 interface AfterToolCallHandler {
   handle(input: AfterToolCallInput): Promise<AfterToolCallResult>;
 }
+
+type ObservationArtifactWriterFactory = (outputDirectory: string, timer: Timer) => ObservationArtifactWriter;
 
 export interface PlanLifecycleInput {
   name: string;
@@ -514,7 +526,12 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   }
 }
 
-class DefaultAfterToolCallHandler implements AfterToolCallHandler {
+export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
+  constructor(
+    private readonly createArtifactWriter: ObservationArtifactWriterFactory =
+    (outputDirectory, timer) => new JsonToolOutputArtifactWriter({ outputDirectory, timer })
+  ) {}
+
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
     const { name, args, internalCall, response, sessionUuid, shouldResolveDevice, signal, timer, toolStartMs } = input;
 
@@ -555,18 +572,6 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     }
 
     const durationMs = timer.now() - toolStartMs;
-    TelemetryRecorder.getInstance().recordToolCallEvent({
-      timestamp: toolStartMs,
-      toolName: name,
-      durationMs,
-      success: toolSuccess,
-      error: toolError,
-      args: typeof args === "object" ? args : null,
-    });
-
-    if (toolSuccess) {
-      getMcpRecorder()?.record(name, args);
-    }
 
     // Typed envelope views (issues #2932 / #3222): the heterogeneous pipeline
     // hands back `any`, so narrow to the concrete tool payload via
@@ -611,16 +616,36 @@ class DefaultAfterToolCallHandler implements AfterToolCallHandler {
           set: (uuid, observation) => DaemonState.getInstance().getSessionManager().setLastRenderedObservation(uuid, observation),
         }
         : undefined;
+    const artifactDirectory = serverConfig.getToolOutputArtifactDirectory();
+    const artifactWriter = artifactDirectory && !internalCall
+      ? this.createArtifactWriter(artifactDirectory, timer)
+      : undefined;
+
+    const finalizedResponse = finalizeToolResponse(response, {
+      name,
+      args,
+      sessionUuid,
+      baselineStore,
+      internal: internalCall,
+      artifactWriter,
+    });
+
+    TelemetryRecorder.getInstance().recordToolCallEvent({
+      timestamp: toolStartMs,
+      toolName: name,
+      durationMs,
+      success: toolSuccess,
+      error: toolError,
+      args: typeof args === "object" ? args : null,
+    });
+
+    if (toolSuccess) {
+      getMcpRecorder()?.record(name, args);
+    }
 
     return {
       durationMs,
-      finalizedResponse: finalizeToolResponse(response, {
-        name,
-        args,
-        sessionUuid,
-        baselineStore,
-        internal: internalCall,
-      }),
+      finalizedResponse,
     };
   }
 }
@@ -1075,7 +1100,7 @@ class ToolRegistryClass {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
       cached = {
-        inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)) as Record<string, unknown>,
+        inputSchema: toAdvertisedJsonSchema(tool.schema),
         outputSchemasByRuntimeFlags: new Map(),
       };
       this.toolDefinitionSchemaCache.set(tool.name, cached);
@@ -1085,7 +1110,7 @@ class ToolRegistryClass {
     if (!cached.outputSchemasByRuntimeFlags.has(outputSchemaCacheKey)) {
       const outputSchema = toolHasOutputSchema(tool) && !suppressOutputSchema
         ? advertiseBoundsForCompact(
-          flattenTopLevelUnion(toJSONSchema(tool.outputSchema)),
+          toAdvertisedJsonSchema(tool.outputSchema),
           compactBounds
         ) as Record<string, unknown>
         : undefined;

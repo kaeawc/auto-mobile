@@ -41,6 +41,7 @@ class ServerConfig {
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
   private _toolResultsCompactJson: boolean = false;
+  private _toolOutputsDir: string | undefined;
 
   private constructor() {}
 
@@ -125,6 +126,18 @@ class ServerConfig {
 
   getAppearanceDefaults(): AppearanceConfigInput {
     return { ...this._appearanceDefaults };
+  }
+
+  setToolOutputsDir(dir: string | undefined): void {
+    this._toolOutputsDir = dir;
+  }
+
+  getToolOutputsDir(): string | undefined {
+    return this._toolOutputsDir;
+  }
+
+  isToolOutputArtifactModeEnabled(): boolean {
+    return this._toolOutputsDir !== undefined;
   }
 
   setSkipCtrlProxyDownload(skip: boolean): void {
@@ -259,6 +272,14 @@ class ServerConfig {
 
   isToolResultsCompactJsonEnabled(): boolean {
     return this._toolResultsCompactJson;
+  }
+
+  setToolOutputArtifactDirectory(directory: string | undefined): void {
+    this.setToolOutputsDir(directory);
+  }
+
+  getToolOutputArtifactDirectory(): string | undefined {
+    return this.getToolOutputsDir();
   }
 
 }

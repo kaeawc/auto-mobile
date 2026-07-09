@@ -209,7 +209,7 @@ describe("Simctl", function() {
         });
       };
 
-      simctl = new Simctl(mockDevice, mockExecAsync, null, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, timer);
 
       const bootPromise = simctl.startSimulator("test-ios-device-id", 1234);
       while (!resolveCommand) {
@@ -235,7 +235,7 @@ describe("Simctl", function() {
         });
       };
 
-      simctl = new Simctl(mockDevice, mockExecAsync, null, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, timer);
 
       const bootPromise = simctl.startSimulator("test-ios-device-id");
       while (!resolveCommand) {
@@ -247,53 +247,6 @@ describe("Simctl", function() {
         `Command timed out after ${DEFAULT_DEVICE_READY_TIMEOUT_MS}ms: xcrun simctl bootstatus test-ios-device-id -b`,
       );
       resolveCommand?.(createExecResult("late bootstatus", ""));
-    });
-  });
-
-  describe("docker host-control mode (iOS unsupported)", function() {
-    // Driving the iOS simulator from inside Docker is intentionally unsupported
-    // for now (see SimCtlClient.executeCommand). The simctl surface must fail fast
-    // rather than route to the host, where container-local paths (push/install)
-    // would silently break.
-    test("should report unavailable when host control is enabled in docker", async function() {
-      mockExecAsync = async (): Promise<ExecResult> => {
-        throw new Error("Command not found: xcrun");
-      };
-
-      const hostControlRunner = {
-        isAvailable: async () => true,
-        isRunningInDocker: () => true,
-        runSimctl: async () => createExecResult("simctl version 1.2.3", ""),
-        shouldUseHostControl: () => true
-      };
-
-      simctl = new Simctl(null, mockExecAsync, hostControlRunner);
-
-      const available = await simctl.isAvailable();
-      expect(available).toBe(false);
-    });
-
-    test("should fail fast instead of routing simctl to the host", async function() {
-      let hostInvoked = false;
-
-      mockExecAsync = async (): Promise<ExecResult> => {
-        throw new Error("Local simctl should not be invoked");
-      };
-
-      const hostControlRunner = {
-        isAvailable: async () => true,
-        isRunningInDocker: () => true,
-        runSimctl: async () => {
-          hostInvoked = true;
-          return createExecResult("command executed", "");
-        },
-        shouldUseHostControl: () => true
-      };
-
-      simctl = new Simctl(mockDevice, mockExecAsync, hostControlRunner);
-
-      await expect(simctl.executeCommand("list devices")).rejects.toThrow(/not supported yet/i);
-      expect(hostInvoked).toBe(false);
     });
   });
 
@@ -325,7 +278,7 @@ describe("Simctl", function() {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, null, undefined, "darwin");
+      simctl = new Simctl(null, mockExecAsync, undefined, "darwin");
       forceStaticAvailabilityPath(simctl);
 
       await expect(simctl.listSimulatorImages()).rejects.toThrow(/transient xcrun failure/);
@@ -361,7 +314,7 @@ describe("Simctl", function() {
         return createExecResult("", "");
       };
 
-      simctl = new Simctl(null, mockExecAsync, null, timer);
+      simctl = new Simctl(null, mockExecAsync, timer);
 
       expect(await simctl.listSimulatorImages()).toEqual([]);
       const devices = await simctl.listSimulatorImages();
@@ -589,7 +542,7 @@ describe("Simctl", function() {
     test("skips open -a Simulator when AUTOMOBILE_IOS_HEADLESS=true (no launchctl probe)", async function() {
       process.env[HEADLESS_ENV] = "true";
       try {
-        simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "darwin");
+        simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
         await simctl.openSimulatorApp();
         expect(openCalls()).toHaveLength(0);
         expect(launchctlCalls()).toHaveLength(0);
@@ -601,7 +554,7 @@ describe("Simctl", function() {
     test("forces open -a Simulator when AUTOMOBILE_IOS_HEADLESS=false even if session is non-Aqua", async function() {
       process.env[HEADLESS_ENV] = "false";
       try {
-        simctl = new Simctl(null, recordingExec("System"), null, new FakeTimer(), "darwin");
+        simctl = new Simctl(null, recordingExec("System"), new FakeTimer(), "darwin");
         await simctl.openSimulatorApp();
         expect(openCalls()).toHaveLength(1);
         expect(launchctlCalls()).toHaveLength(0);
@@ -611,34 +564,34 @@ describe("Simctl", function() {
     });
 
     test("calls open -a Simulator when launchctl reports an Aqua GUI session", async function() {
-      simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
       await simctl.openSimulatorApp();
       expect(launchctlCalls()).toHaveLength(1);
       expect(openCalls()).toHaveLength(1);
     });
 
     test("skips open -a Simulator when launchctl reports a non-Aqua (headless) session", async function() {
-      simctl = new Simctl(null, recordingExec("System"), null, new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec("System"), new FakeTimer(), "darwin");
       await simctl.openSimulatorApp();
       expect(launchctlCalls()).toHaveLength(1);
       expect(openCalls()).toHaveLength(0);
     });
 
     test("skips open -a Simulator on non-darwin platforms without any exec", async function() {
-      simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "linux");
+      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "linux");
       await simctl.openSimulatorApp();
       expect(calls).toHaveLength(0);
     });
 
     test("attempts open -a Simulator when launchctl probe fails (safe fallback)", async function() {
-      simctl = new Simctl(null, recordingExec(new Error("launchctl unavailable")), null, new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec(new Error("launchctl unavailable")), new FakeTimer(), "darwin");
       await simctl.openSimulatorApp();
       expect(launchctlCalls()).toHaveLength(1);
       expect(openCalls()).toHaveLength(1);
     });
 
     test("caches the headless detection so launchctl is probed at most once", async function() {
-      simctl = new Simctl(null, recordingExec("Aqua"), null, new FakeTimer(), "darwin");
+      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
       await simctl.openSimulatorApp();
       await simctl.openSimulatorApp();
       await simctl.openSimulatorApp();

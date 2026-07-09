@@ -292,7 +292,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
     return Array.from(this.nodes.keys());
   }
 
-  getNode(screenName: string): NavigationNode | undefined {
+  async getNode(screenName: string): Promise<NavigationNode | undefined> {
     this.trackCall("getNode", [screenName]);
     return this.nodes.get(screenName);
   }

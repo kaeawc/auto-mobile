@@ -20,12 +20,11 @@ function sortValue(value: unknown): unknown {
   }
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
-    const sortedKeys = Object.keys(record).sort();
-    const sorted: Record<string, unknown> = {};
-    for (const key of sortedKeys) {
-      sorted[key] = sortValue(record[key]);
-    }
-    return sorted;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map(key => [key, sortValue(record[key])])
+    );
   }
   return value;
 }

@@ -1,10 +1,9 @@
 import { sql, type Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
-import { Database, MemoryBaseline, NewMemoryBaseline, MemoryBaselineUpdate } from "../../db/types";
+import { Database, MemoryBaseline } from "../../db/types";
 import { logger } from "../../utils/logger";
 import { MemoryMetrics } from "./MemoryMetricsCollector";
 import {
-  exponentialMovingAverage,
   safeDivide,
   getCutoffDate,
   DEFAULT_EMA_ALPHA,
@@ -69,52 +68,12 @@ export class MemoryBaselineManager {
     alpha: number = DEFAULT_EMA_ALPHA
   ): Promise<void> {
     try {
-      const existingBaseline = await this.getBaseline(deviceId, packageName, toolName);
+      const now = new Date().toISOString();
+      const unreachableObjects = metrics.unreachableObjects?.count || 0;
 
-      if (existingBaseline) {
-        // Update existing baseline with exponential moving average
-        const updated: MemoryBaselineUpdate = {
-          java_heap_baseline_mb: exponentialMovingAverage(
-            existingBaseline.java_heap_baseline_mb,
-            metrics.postSnapshot.javaHeapMb,
-            alpha
-          ),
-          native_heap_baseline_mb: exponentialMovingAverage(
-            existingBaseline.native_heap_baseline_mb,
-            metrics.postSnapshot.nativeHeapMb,
-            alpha
-          ),
-          gc_count_baseline: exponentialMovingAverage(
-            existingBaseline.gc_count_baseline,
-            metrics.gcCount,
-            alpha
-          ),
-          gc_duration_baseline_ms: exponentialMovingAverage(
-            existingBaseline.gc_duration_baseline_ms,
-            metrics.gcTotalDurationMs,
-            alpha
-          ),
-          unreachable_objects_baseline: exponentialMovingAverage(
-            existingBaseline.unreachable_objects_baseline,
-            metrics.unreachableObjects?.count || 0,
-            alpha
-          ),
-          sample_count: existingBaseline.sample_count + 1,
-          last_updated: new Date().toISOString(),
-        };
-
-        await this.db
-          .updateTable("memory_baselines")
-          .set(updated)
-          .where("id", "=", existingBaseline.id)
-          .execute();
-
-        logger.info(
-          `[MemoryBaselineManager] Updated baseline for ${packageName}/${toolName} (sample ${updated.sample_count})`
-        );
-      } else {
-        // Create new baseline
-        const newBaseline: NewMemoryBaseline = {
+      await this.db
+        .insertInto("memory_baselines")
+        .values({
           device_id: deviceId,
           package_name: packageName,
           tool_name: toolName,
@@ -122,20 +81,26 @@ export class MemoryBaselineManager {
           native_heap_baseline_mb: metrics.postSnapshot.nativeHeapMb,
           gc_count_baseline: metrics.gcCount,
           gc_duration_baseline_ms: metrics.gcTotalDurationMs,
-          unreachable_objects_baseline: metrics.unreachableObjects?.count || 0,
+          unreachable_objects_baseline: unreachableObjects,
           sample_count: 1,
-          last_updated: new Date().toISOString(),
-        };
+          last_updated: now,
+        })
+        .onConflict(oc =>
+          oc.columns(["device_id", "package_name", "tool_name"]).doUpdateSet({
+            java_heap_baseline_mb: sql<number>`${alpha} * ${metrics.postSnapshot.javaHeapMb} + (1 - ${alpha}) * java_heap_baseline_mb`,
+            native_heap_baseline_mb: sql<number>`${alpha} * ${metrics.postSnapshot.nativeHeapMb} + (1 - ${alpha}) * native_heap_baseline_mb`,
+            gc_count_baseline: sql<number>`${alpha} * ${metrics.gcCount} + (1 - ${alpha}) * gc_count_baseline`,
+            gc_duration_baseline_ms: sql<number>`${alpha} * ${metrics.gcTotalDurationMs} + (1 - ${alpha}) * gc_duration_baseline_ms`,
+            unreachable_objects_baseline: sql<number>`${alpha} * ${unreachableObjects} + (1 - ${alpha}) * unreachable_objects_baseline`,
+            sample_count: sql<number>`sample_count + 1`,
+            last_updated: now,
+          })
+        )
+        .execute();
 
-        await this.db
-          .insertInto("memory_baselines")
-          .values(newBaseline)
-          .execute();
-
-        logger.info(
-          `[MemoryBaselineManager] Created new baseline for ${packageName}/${toolName}`
-        );
-      }
+      logger.info(
+        `[MemoryBaselineManager] Upserted baseline for ${packageName}/${toolName}`
+      );
     } catch (error) {
       logger.error(`[MemoryBaselineManager] Failed to update baseline: ${error}`);
       throw error;

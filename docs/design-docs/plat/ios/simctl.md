@@ -36,7 +36,6 @@ For `launchApp` specifically:
 - **Physical device** — `xcrun devicectl device process launch --device <udid> --terminate-existing --json-output <file> --quiet <bundle-id>`; the launched PID is read from `result.process.processIdentifier` in the JSON output. `--terminate-existing` is the **authoritative cold-boot relaunch**: it terminates any already-running instance and starts a fresh process (which foregrounds). `devicectl` has no foreground-if-running verb, so a warm launch also relaunches this way. The device path therefore issues **no separate pre-terminate** — that would be a redundant round-trip.
 - **No standalone devicectl terminate _within launch_.** `launchApp` relies on `--terminate-existing` for its cold-boot relaunch rather than a separate pre-terminate round-trip. The standalone `terminateApp` tool does implement a device terminate (see below).
 - **`clearAppData` on a device** — wipes the sandbox via `devicectl` uninstall+reinstall (`clearAppDataViaReinstall`) before relaunching; a failed clear aborts the launch rather than launching with stale data.
-- **Docker / host control** — no `devicectl` launch bridge exists, so `launchApp` returns an explicit, actionable error instead of a confusing simctl failure.
 
 For `terminateApp` specifically:
 
@@ -47,7 +46,7 @@ For `terminateApp` specifically:
   3. Force-kill the matched PID with the dedicated verb: `xcrun devicectl device process terminate --device <udid> --pid <pid> --kill --quiet` → `{ wasInstalled: true, wasRunning: true }`. `--kill` sends SIGKILL (uncatchable), matching Android `am force-stop` semantics; the bare verb would send a catchable SIGTERM.
   - **Already-exited race (#3054).** The resolved PID can exit on its own between step 2 and the kill; devicectl then returns non-zero (ESRCH / "No such process") and the promisified `exec` rejects. `isDevicectlProcessGoneError` recognizes that text and treats it as `{ wasInstalled: true, wasRunning: true }` (the app was running and is now gone) instead of a false `success: false`, mirroring the simulator's "found nothing to terminate" tolerance. Any other terminate failure (device locked, not connected) still propagates.
   - **JSON field-name caveat.** The `device info processes` envelope is **not formally documented by Apple**; `findRunningProcessPid` deep-walks it and accepts several spellings (executable as a string or `{ url | path }`; PID as `processIdentifier` / `pid` / `processID`). A basename fallback matches when the process path root differs from the `info apps` bundle URL (e.g. `/var` vs `/private/var` symlink). Pin the real field names against captured device output when possible.
-  - **iOS ≤16 / non-macOS / Docker (host control)** — `devicectl` process management requires iOS 17+ on a macOS host; unsupported combinations surface as a clear, non-crashing `success: false` error (thrown by `DeviceAppManager.terminateApp`, mapped to a result by `TerminateApp`) rather than a silent `success: true` no-op.
+  - **iOS ≤16 / non-macOS** — `devicectl` process management requires iOS 17+ on a macOS host; unsupported combinations surface as a clear, non-crashing `success: false` error (thrown by `DeviceAppManager.terminateApp`, mapped to a result by `TerminateApp`) rather than a silent `success: true` no-op.
 
 ## Live locale changes
 
@@ -229,9 +228,6 @@ hosts come from two different sources.
   via `devicectl`) returns an explicit "not yet implemented" error.
 - iOS has no runtime intent resolver, so only *declared* schemes/domains are reported.
 - `supportedMimeTypes` is best-effort document-type metadata, not a routing guarantee.
-- Unsupported under host control (Docker/external-emulator mode): `get_app_container`
-  resolves to a macOS host path, but `plutil`/`codesign` run inside the container, so the
-  call returns an explicit unsupported error instead of a misleading failure.
 
 ## Notification authorization read
 
@@ -275,9 +271,6 @@ rather than throwing.
   disk would not take effect without restarting the daemon.
 - This is per-app *authorization status*, a different concept from Android's DND
   *policy access* — see [Notifications](../android/notifications.md).
-- Unsupported under host control (Docker/external-emulator mode): the BulletinBoard plist
-  lives on the macOS host but `plutil` runs inside the container, so the read returns an
-  explicit `supported: false` rather than reporting every app as unknown.
 
 ## Device settings snapshot
 

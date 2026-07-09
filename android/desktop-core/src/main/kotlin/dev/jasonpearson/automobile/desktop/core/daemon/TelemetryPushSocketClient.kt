@@ -38,18 +38,12 @@ import kotlinx.serialization.json.Json
  * Client for the telemetry push Unix socket server. Subscribes to receive real-time telemetry
  * events (network, log, custom, OS) from the MCP server.
  *
- * Socket path: ~/.auto-mobile/telemetry-push.sock or /tmp/auto-mobile-telemetry-push.sock (in
- * external mode)
+ * Socket path: ~/.auto-mobile/telemetry-push.sock
  */
 class TelemetryPushSocketClient : TelemetryPushClient {
   companion object {
     private fun getSocketPath(): String {
-      val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
-      return if (isExternalMode) {
-        "/tmp/auto-mobile-telemetry-push.sock"
-      } else {
-        "${System.getProperty("user.home")}/.auto-mobile/telemetry-push.sock"
-      }
+      return "${System.getProperty("user.home")}/.auto-mobile/telemetry-push.sock"
     }
 
     fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))

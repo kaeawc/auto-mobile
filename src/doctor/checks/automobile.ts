@@ -18,9 +18,12 @@ import {
 } from "../../daemon/buildIdentity";
 import type { BuildIdentity } from "../../daemon/buildIdentity";
 import {
+  isExplicitPin,
   LATEST_RELEASE_VERSION,
+  resolveApkUrl,
   resolveAssetVersion,
   resolveDaemonInstallSpecifier,
+  resolveIpaUrl,
   resolvePinnedVersion,
 } from "../../constants/release";
 import { getMcpServerVersion } from "../../utils/mcpVersion";
@@ -30,6 +33,7 @@ import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
 import { WebpBinaryResolver, type ResolvedWebpBinaries } from "../../utils/image/webp/WebpBinaryResolver";
 import { logger } from "../../utils/logger";
+import { ActionableError } from "../../models/ActionableError";
 
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
 
@@ -322,6 +326,10 @@ export async function checkCtrlProxy(
 ): Promise<CheckResult> {
   try {
     const adb = adbFactory.create();
+    // Validate hermetic asset configuration before device-dependent shortcuts so
+    // a malformed mirror fails the doctor gate even on hosts with no Android device.
+    resolveApkUrl();
+    resolveIpaUrl();
     const devices = await adb.getBootedAndroidDevices();
 
     if (devices.length === 0) {
@@ -390,6 +398,15 @@ export async function checkCtrlProxy(
       diagnostics.push("acceptedPreinstalled=true");
     }
 
+    if (versionResult.status === "failed" && isExplicitPin()) {
+      return {
+        name: "CtrlProxy",
+        status: "fail",
+        message: diagnostics.join("; "),
+        recommendation: "CtrlProxy APK provisioning failed for an explicit AutoMobile version pin. Fix the pinned asset source, checksum, or mirror configuration and re-run doctor."
+      };
+    }
+
     if (downloadUnavailable) {
       return {
         name: "CtrlProxy",
@@ -448,6 +465,13 @@ export async function checkCtrlProxy(
         : "Review CtrlProxy installation status",
     };
   } catch (error) {
+    if (error instanceof ActionableError) {
+      return {
+        name: "CtrlProxy",
+        status: "fail",
+        message: error.message,
+      };
+    }
     logger.debug(`CtrlProxy check failed: ${error}`);
     return {
       name: "CtrlProxy",

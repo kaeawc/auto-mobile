@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 data class SchemaPathSegment(val key: String, val isArrayItem: Boolean)
 
@@ -158,18 +159,10 @@ object JsonSchemaIntrospector {
   private fun JsonObject.stringValue(key: String): String? = this[key]?.stringValue()
 
   private fun JsonObject.booleanValue(key: String): Boolean? {
-    return (this[key] as? JsonPrimitive)?.booleanValueOrNull()
+    return (this[key] as? JsonPrimitive)?.booleanOrNull
   }
 
   private fun JsonElement.stringValue(): String? = (this as? JsonPrimitive)?.content
-
-  private fun JsonPrimitive.booleanValueOrNull(): Boolean? {
-    return when (content.lowercase()) {
-      "true" -> true
-      "false" -> false
-      else -> null
-    }
-  }
 
   private fun JsonElement.asObjectOrNull(): JsonObject? = this as? JsonObject
 

@@ -1,7 +1,11 @@
+import Ajv2020 from "ajv/dist/2020";
 import { describe, expect, test } from "bun:test";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
-import type { ViewHierarchyResult } from "../../src/models";
-import { findWaitForElement, observeSchema } from "../../src/server/observeTools";
+import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
+import { findWaitForElement, observeSchema, registerObserveTools, waitForObservation } from "../../src/server/observeTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const bounds = (left: number, top: number, right: number, bottom: number) => ({
   left,
@@ -81,10 +85,6 @@ describe("observeSchema waitFor.container", () => {
 
   test.each([
     {
-      waitFor: { elementId: "com.app:id/name", text: "Name" },
-      label: "elementId and text",
-    },
-    {
       waitFor: { elementId: "com.app:id/name", textAny: ["Name", "Label"] },
       label: "elementId and textAny",
     },
@@ -96,7 +96,7 @@ describe("observeSchema waitFor.container", () => {
       waitFor: { elementId: "com.app:id/name", text: "Name", textAny: ["Name", "Label"] },
       label: "elementId, text, and textAny",
     },
-  ])("rejects waitFor with mixed selectors: $label", ({ waitFor }) => {
+  ])("rejects waitFor with textAny mixed with element fields: $label", ({ waitFor }) => {
     expect(() =>
       observeSchema.parse({
         platform: "ios",
@@ -115,6 +115,267 @@ describe("observeSchema waitFor.container", () => {
         },
       })
     ).toThrow();
+  });
+});
+
+describe("observeSchema rich waitFor predicates", () => {
+  test("accepts element predicates combined on the same node", () => {
+    const parsed = observeSchema.parse({
+      platform: "ios",
+      waitFor: {
+        elementId: "home_tab_bar",
+        className: "UITabBar",
+        contentDescription: "Home tab",
+        text: "Home",
+        textMatch: "exact",
+        matchType: "all",
+        timeout: 25000,
+      },
+    });
+
+    expect(parsed.waitFor).toMatchObject({
+      elementId: "home_tab_bar",
+      className: "UITabBar",
+      contentDescription: "Home tab",
+      text: "Home",
+      textMatch: "exact",
+      matchType: "all",
+    });
+  });
+
+  test("accepts activeWindow predicates with an element predicate", () => {
+    const parsed = observeSchema.parse({
+      platform: "android",
+      waitFor: {
+        activeWindow: {
+          appId: "com.example.app",
+          activityName: "com.example.app.HomeActivity",
+        },
+        className: "android.widget.FrameLayout",
+        timeout: 10000,
+      },
+    });
+
+    expect(parsed.waitFor).toMatchObject({
+      activeWindow: {
+        appId: "com.example.app",
+        activityName: "com.example.app.HomeActivity",
+      },
+      className: "android.widget.FrameLayout",
+    });
+  });
+
+  test("accepts activeWindow appId aliases", () => {
+    const androidParsed = observeSchema.parse({
+      platform: "android",
+      waitFor: {
+        activeWindow: {
+          packageName: "com.example.android",
+        },
+      },
+    });
+    const iosParsed = observeSchema.parse({
+      platform: "ios",
+      waitFor: {
+        activeWindow: {
+          bundleId: "com.example.ios",
+        },
+      },
+    });
+
+    expect(androidParsed.waitFor?.activeWindow?.appId).toBe("com.example.android");
+    expect(iosParsed.waitFor?.activeWindow?.appId).toBe("com.example.ios");
+  });
+
+  test("rejects a rich waitFor with no predicate fields", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "android",
+        waitFor: {
+          matchType: "all",
+        },
+      })
+    ).toThrow();
+  });
+
+  test("rejects invalid waitFor regex text", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "android",
+        waitFor: {
+          text: "[",
+          textMatch: "regex",
+        },
+      })
+    ).toThrow();
+  });
+});
+
+describe("published observe waitFor input schema", () => {
+  const validatePublishedObserveInput = (input: unknown) => {
+    (ToolRegistry as any).tools.clear();
+    registerObserveTools();
+    const observeTool = ToolRegistry.getToolDefinitions()
+      .find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    const validate = ajv.compile(observeTool!.inputSchema);
+    return {
+      valid: validate(input),
+      errors: validate.errors,
+    };
+  };
+
+  test.each([
+    {
+      label: "legacy elementId with timeout",
+      input: {
+        platform: "android",
+        waitFor: { elementId: "com.app:id/name", timeout: 5000 },
+      },
+    },
+    {
+      label: "legacy elementId with container",
+      input: {
+        platform: "android",
+        waitFor: {
+          elementId: "com.app:id/name",
+          container: { text: "People" },
+        },
+      },
+    },
+    {
+      label: "text with textMatch",
+      input: {
+        platform: "ios",
+        waitFor: { text: "Home", textMatch: "contains", timeout: 5000 },
+      },
+    },
+    {
+      label: "combined rich predicates",
+      input: {
+        platform: "ios",
+        waitFor: {
+          elementId: "home_tab_bar",
+          text: "Home",
+          className: "UITabBar",
+          contentDescription: "Home tab",
+          textMatch: "exact",
+          matchType: "all",
+        },
+      },
+    },
+    {
+      label: "activeWindow appId and activityName",
+      input: {
+        platform: "android",
+        waitFor: {
+          activeWindow: {
+            appId: "com.example.app",
+            activityName: "com.example.app.HomeActivity",
+          },
+          timeout: 5000,
+        },
+      },
+    },
+    {
+      label: "activeWindow packageName alias",
+      input: {
+        platform: "android",
+        waitFor: {
+          activeWindow: { packageName: "com.example.app" },
+        },
+      },
+    },
+    {
+      label: "activeWindow bundleId alias",
+      input: {
+        platform: "ios",
+        waitFor: {
+          activeWindow: { bundleId: "com.example.app" },
+        },
+      },
+    },
+  ])("accepts runtime-valid waitFor input: $label", ({ input }) => {
+    expect(observeSchema.safeParse(input).success).toBe(true);
+
+    const result = validatePublishedObserveInput(input);
+
+    expect(result.valid).toBe(true);
+  });
+
+  test.each([
+    {
+      label: "waitFor has only timeout",
+      input: {
+        platform: "android",
+        waitFor: { timeout: 5000 },
+      },
+    },
+    {
+      label: "activeWindow is empty",
+      input: {
+        platform: "android",
+        waitFor: { activeWindow: {} },
+      },
+    },
+    {
+      label: "textAny mixed with elementId",
+      input: {
+        platform: "android",
+        waitFor: {
+          elementId: "com.app:id/name",
+          textAny: ["Name"],
+        },
+      },
+    },
+    {
+      label: "textAny mixed with matchType",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          matchType: "any",
+        },
+      },
+    },
+    {
+      label: "textAny mixed with className",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          className: "android.widget.TextView",
+        },
+      },
+    },
+    {
+      label: "textAny mixed with contentDescription",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          contentDescription: "Name",
+        },
+      },
+    },
+    {
+      label: "textAny mixed with textMatch",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          textMatch: "exact",
+        },
+      },
+    },
+  ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
+    expect(observeSchema.safeParse(input).success).toBe(false);
+
+    const result = validatePublishedObserveInput(input);
+
+    expect(result.valid).toBe(false);
   });
 });
 
@@ -168,5 +429,469 @@ describe("findWaitForElement textAny", () => {
 
     expect(element?.text).toBe("Done");
     expect(element?.bounds).toEqual(bounds(20, 20, 120, 70));
+  });
+});
+
+describe("findWaitForElement rich predicates", () => {
+  test("matches all specified element fields on the same node by default", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "text": "Home",
+          "resource-id": "home_label",
+          "class": "android.widget.TextView",
+          "bounds": bounds(10, 10, 110, 60),
+        },
+      },
+      {
+        $: {
+          "text": "Settings",
+          "resource-id": "home_tab",
+          "class": "android.widget.BottomNavigationView",
+          "content-desc": "Home tab",
+          "bounds": bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        elementId: "home_tab",
+        className: "android.widget.BottomNavigationView",
+        contentDescription: "Home tab",
+      } as any,
+      hierarchy
+    );
+
+    expect(element?.["resource-id"]).toBe("home_tab");
+    expect(element?.class).toBe("android.widget.BottomNavigationView");
+  });
+
+  test("requires elementId and text to match the same node", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "text": "Profile",
+          "resource-id": "home_tab",
+          "bounds": bounds(10, 10, 110, 60),
+        },
+      },
+      {
+        $: {
+          "text": "Home",
+          "resource-id": "other_tab",
+          "bounds": bounds(10, 80, 190, 140),
+        },
+      },
+      {
+        $: {
+          "text": "Home",
+          "resource-id": "home_tab",
+          "bounds": bounds(10, 150, 190, 190),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        elementId: "home_tab",
+        text: "Home",
+      } as any,
+      hierarchy
+    );
+
+    expect(element?.bounds).toEqual(bounds(10, 150, 190, 190));
+  });
+
+  test("does not satisfy elementId and text across different nodes", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "text": "Profile",
+          "resource-id": "home_tab",
+          "bounds": bounds(10, 10, 110, 60),
+        },
+      },
+      {
+        $: {
+          "text": "Home",
+          "resource-id": "other_tab",
+          "bounds": bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        elementId: "home_tab",
+        text: "Home",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
+  test("scopes rich predicates to the requested container", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "resource-id": "outside_container",
+          "bounds": bounds(0, 0, 200, 80),
+        },
+        node: [
+          {
+            $: {
+              "resource-id": "home_tab",
+              "class": "UITabBar",
+              "content-desc": "Home tab",
+              "bounds": bounds(10, 10, 190, 60),
+            },
+          },
+        ],
+      },
+      {
+        $: {
+          "resource-id": "target_container",
+          "bounds": bounds(0, 90, 200, 190),
+        },
+        node: [
+          {
+            $: {
+              "resource-id": "settings_tab",
+              "class": "UITabBar",
+              "content-desc": "Settings tab",
+              "bounds": bounds(10, 110, 190, 160),
+            },
+          },
+        ],
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        className: "UITabBar",
+        contentDescription: "Settings tab",
+        container: { elementId: "target_container" },
+      } as any,
+      hierarchy
+    );
+
+    expect(element?.["resource-id"]).toBe("settings_tab");
+  });
+
+  test("returns null for rich predicates when the requested container is missing", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "class": "UITabBar",
+          "content-desc": "Home tab",
+          "bounds": bounds(10, 10, 190, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        className: "UITabBar",
+        contentDescription: "Home tab",
+        container: { elementId: "missing_container" },
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
+  test("does not satisfy matchType all across different nodes", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { text: "Home", bounds: bounds(10, 10, 110, 60) } },
+      {
+        $: {
+          "class": "UITabBar",
+          "resource-id": "home_tab_bar",
+          "bounds": bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        text: "Home",
+        className: "UITabBar",
+        matchType: "all",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
+  test("matches any specified element field when matchType is any", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "class": "UITabBar",
+          "resource-id": "home_tab_bar",
+          "bounds": bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        text: "Home",
+        className: "UITabBar",
+        matchType: "any",
+      } as any,
+      hierarchy
+    );
+
+    expect(element?.class).toBe("UITabBar");
+  });
+
+  test("honors exact, contains, and regex text matching modes", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { text: "Welcome Home", bounds: bounds(10, 10, 180, 60) } },
+    ]);
+
+    expect(findWaitForElement(finder, { text: "Home", textMatch: "contains" } as any, hierarchy)?.text).toBe("Welcome Home");
+    expect(findWaitForElement(finder, { text: "^Welcome\\s+Home$", textMatch: "regex" } as any, hierarchy)?.text).toBe("Welcome Home");
+    expect(findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy)).toBeNull();
+  });
+
+  test("matches iOS accessibility labels exposed as text for contentDescription", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          text: "Home",
+          class: "XCUIElementTypeButton",
+          bounds: bounds(10, 10, 180, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home",
+      } as any,
+      hierarchy,
+      "ios"
+    );
+
+    expect(element?.text).toBe("Home");
+  });
+
+  test("does not match Android text-only nodes for contentDescription", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          text: "Home",
+          class: "android.widget.TextView",
+          bounds: bounds(10, 10, 180, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home",
+      } as any,
+      hierarchy,
+      "android"
+    );
+
+    expect(element).toBeNull();
+  });
+});
+
+describe("waitForObservation activeWindow", () => {
+  const makeObservation = (
+    appId: string,
+    activityName: string,
+    nodes: unknown[] = []
+  ): ObserveResult => ({
+    updatedAt: 0,
+    screenSize: { width: 200, height: 200 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    activeWindow: { appId, activityName, layoutSeqSum: 0 },
+    viewHierarchy: makeHierarchy(nodes),
+  });
+
+  test("keeps polling until activeWindow and element predicates are both true", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observations = [
+      makeObservation("com.browser", "", [
+        { $: { class: "UITabBar", bounds: bounds(10, 10, 100, 60) } },
+      ]),
+      makeObservation("com.example.app", "com.example.app.HomeActivity", [
+        { $: { class: "UITabBar", bounds: bounds(10, 10, 100, 60) } },
+      ]),
+    ];
+    observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: { appId: "com.example.app" },
+        className: "UITabBar",
+        timeout: 500,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(outcome.observation.activeWindow?.appId).toBe("com.example.app");
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
+  });
+
+  test("keeps polling until Android activityName matches", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observations = [
+      makeObservation("com.example.app", "com.example.app.SplashActivity"),
+      makeObservation("com.example.app", "com.example.app.HomeActivity"),
+    ];
+    observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          appId: "com.example.app",
+          activityName: "com.example.app.HomeActivity",
+        },
+        timeout: 500,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(outcome.observation.activeWindow?.activityName).toBe("com.example.app.HomeActivity");
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
+  });
+
+  test("times out when only activeWindow appId matches but activityName does not", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation("com.example.app", "com.example.app.SplashActivity"));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          appId: "com.example.app",
+          activityName: "com.example.app.HomeActivity",
+        },
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("ignores Android-only activityName on iOS", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation("com.example.ios", ""));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          appId: "com.example.ios",
+          activityName: "com.example.ios.IgnoredActivity",
+        },
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer,
+      "ios"
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(observeScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("does not satisfy iOS activeWindow with only Android activityName", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation("com.example.ios", ""));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: {
+          activityName: "com.example.ios.IgnoredActivity",
+        },
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer,
+      "ios"
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("times out when only the element predicate matches", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation("com.browser", "", [
+      { $: { class: "UITabBar", bounds: bounds(10, 10, 100, 60) } },
+    ]));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        activeWindow: { appId: "com.example.app" },
+        className: "UITabBar",
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(outcome.awaitedElement).toBeUndefined();
+    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
   });
 });

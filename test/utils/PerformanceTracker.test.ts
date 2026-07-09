@@ -397,6 +397,26 @@ describe("PerformanceTracker", function() {
       expect(Math.max(...remainingDurations)).toBeGreaterThan(50);
     });
 
+    test("should truncate a cloned copy without mutating source timings", function() {
+      setMaxPerfTimingSizeBytes(200);
+      const timings: TimingEntry[] = [
+        { name: "large1", durationMs: 100 },
+        { name: "large2", durationMs: 90 },
+        { name: "medium", durationMs: 50 },
+        { name: "small1", durationMs: 10 },
+        { name: "small2", durationMs: 5 },
+        { name: "small3", durationMs: 1 }
+      ];
+      const originalNames = timings.map(entry => entry.name);
+
+      const result = processTimingData(timings);
+
+      expect(result).not.toBeNull();
+      expect(result!.truncated).toBe(true);
+      expect(result!.data).not.toBe(timings);
+      expect(timings.map(entry => entry.name)).toEqual(originalNames);
+    });
+
     test("should set truncated flag when truncation occurs", function() {
       setMaxPerfTimingSizeBytes(100);
 

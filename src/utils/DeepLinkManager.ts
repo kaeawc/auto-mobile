@@ -18,8 +18,6 @@ import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { quoteSimctlArg } from "./ios-cmdline-tools/iosAppContainer";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
-import { shouldUseHostControl } from "./hostControlClient";
-import { isRunningInDocker } from "./dockerEnv";
 
 /**
  * Runs a host program (NOT `xcrun simctl`) **by argv, never via a shell**. Used
@@ -112,14 +110,12 @@ export class DeepLinkManager implements DeepLinkManager {
   private geometry: ElementGeometry;
   private simctl: SimCtlClient;
   private hostExec: HostExec;
-  private isHostControlMode: () => boolean;
 
   constructor(
     device: BootedDevice | null = null,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     simctl: SimCtlClient | null = null,
-    hostExec: HostExec | null = null,
-    hostControlGate: (() => boolean) | null = null
+    hostExec: HostExec | null = null
   ) {
     // Detect if the argument is a factory (has create method) or an executor
     if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
@@ -137,7 +133,6 @@ export class DeepLinkManager implements DeepLinkManager {
     this.device = device;
     this.simctl = simctl ?? new SimCtlClient(device);
     this.hostExec = hostExec ?? defaultHostExec;
-    this.isHostControlMode = hostControlGate ?? (() => shouldUseHostControl() && isRunningInDocker());
     this.parser = new DefaultElementParser();
     this.geometry = new DefaultElementGeometry();
   }
@@ -241,19 +236,6 @@ export class DeepLinkManager implements DeepLinkManager {
         return this.emptyIosResult(
           bundleId,
           `Physical-device deep-link discovery for ${bundleId} is not yet implemented`
-        );
-      }
-
-      // Under host control (Docker/external-emulator mode), `get_app_container`
-      // resolves to a macOS host path while `plutil`/`codesign` run inside the
-      // container — the host path is not mounted and the tools may be absent.
-      // Gate as explicitly unsupported instead of reporting a misleading failure.
-      if (this.isHostControlMode()) {
-        return this.emptyIosResult(
-          bundleId,
-          `Deep-link discovery for ${bundleId} is not supported under host control ` +
-          `(Docker/external-emulator mode): the installed .app path resolves to the ` +
-          `macOS host, but plutil/codesign run inside the container`
         );
       }
 

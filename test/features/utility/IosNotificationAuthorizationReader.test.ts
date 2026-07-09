@@ -63,7 +63,7 @@ ${lines.join("\n")}
 }
 
 /** Fake deps: maps the outer path to canned plutil-xml; nested blobs matched by temp path. */
-function fakeDeps(opts: { outer?: string | Error; nested?: string; hostControl?: boolean }): {
+function fakeDeps(opts: { outer?: string | Error; nested?: string }): {
   deps: BulletinBoardReaderDeps;
   plutilPaths: string[];
 } {
@@ -86,7 +86,6 @@ function fakeDeps(opts: { outer?: string | Error; nested?: string; hostControl?:
     },
     rmTemp: async () => {},
     deviceDataRoot: (udid: string) => `/fake/CoreSimulator/Devices/${udid}`,
-    isHostControlMode: () => opts.hostControl ?? false,
   };
   return { deps, plutilPaths };
 }
@@ -184,21 +183,6 @@ describe("BulletinBoardAuthorizationReader", () => {
 
     expect(result.authorizationStatus).toBe("ephemeral");
     expect(result.allowed).toBe(true);
-  });
-
-  test("host-control mode returns explicit unsupported, not a misleading unknown", async () => {
-    const { deps, plutilPaths } = fakeDeps({
-      outer: outerXml({ "com.apple.MobileSMS": "QUJD" }),
-      hostControl: true,
-    });
-    const reader = new BulletinBoardAuthorizationReader(deps);
-    const result = await reader.read(SIM_UDID, "com.apple.MobileSMS");
-
-    expect(result.supported).toBe(false);
-    expect(result.method).toBe("unsupported");
-    expect(result.error).toContain("host control");
-    // No host plutil read attempted in this environment.
-    expect(plutilPaths).toHaveLength(0);
   });
 
   test("denied app maps to denied + allowed false", async () => {

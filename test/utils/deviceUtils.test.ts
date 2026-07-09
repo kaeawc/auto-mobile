@@ -26,7 +26,6 @@ describe("MultiPlatformDeviceManager", () => {
   test("isDeviceImageRunning uses UDID when present for iOS", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,
-      isUnsupportedDockerHostControlMode: () => false,
       getBootedSimulators: async () => [{ name: "iPhone 15", platform: "ios", deviceId: "booted-1" }],
       isSimulatorRunning: async () => {
         throw new Error("should not use name-based check when deviceId is present");
@@ -50,7 +49,6 @@ describe("MultiPlatformDeviceManager", () => {
   test("isDeviceImageRunning falls back to name-based check for iOS without UDID", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,
-      isUnsupportedDockerHostControlMode: () => false,
       getBootedSimulators: async () => [],
       isSimulatorRunning: async (name: string) => name === "iPhone 15"
     } as unknown as SimCtlClient;
@@ -78,7 +76,6 @@ describe("MultiPlatformDeviceManager", () => {
       };
       const fakeSimctl = {
         isAvailable: async () => false,
-        isUnsupportedDockerHostControlMode: () => false,
         getBootedSimulators: async () => {
           simctlListCalls++;
           throw new Error("simctl should not be queried");
@@ -110,9 +107,8 @@ describe("MultiPlatformDeviceManager", () => {
       };
       const fakeSimctl = {
         isAvailable: async () => true,
-        isUnsupportedDockerHostControlMode: () => false,
         getBootedSimulators: async () => {
-          throw new Error("host-control simctl unavailable");
+          throw new Error("simctl unavailable");
         }
       } as unknown as SimCtlClient;
       const fakeEmulator = {
@@ -141,7 +137,6 @@ describe("MultiPlatformDeviceManager", () => {
       };
       const fakeSimctl = {
         isAvailable: async () => false,
-        isUnsupportedDockerHostControlMode: () => false,
         listSimulatorImages: async () => {
           simctlListCalls++;
           throw new Error("simctl should not be queried");
@@ -173,9 +168,8 @@ describe("MultiPlatformDeviceManager", () => {
       };
       const fakeSimctl = {
         isAvailable: async () => true,
-        isUnsupportedDockerHostControlMode: () => false,
         listSimulatorImages: async () => {
-          throw new Error("host-control simctl unavailable");
+          throw new Error("simctl unavailable");
         }
       } as unknown as SimCtlClient;
       const fakeEmulator = {
@@ -197,7 +191,6 @@ describe("MultiPlatformDeviceManager", () => {
   test("listDeviceImages(ios) surfaces iOS image discovery failures", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,
-      isUnsupportedDockerHostControlMode: () => false,
       listSimulatorImages: async () => {
         throw new Error("simctl list devices exploded");
       }
@@ -215,40 +208,4 @@ describe("MultiPlatformDeviceManager", () => {
     await expect(manager.listDeviceImages("ios")).rejects.toThrow(/simctl list devices exploded/);
   });
 
-  test("listDeviceImages(either) keeps Android working and skips iOS in unsupported Docker host-control mode", async () => {
-    await withProcessPlatform("linux", async () => {
-      let simctlListCalls = 0;
-      const androidImage: DeviceInfo = {
-        name: "Pixel_8",
-        platform: "android",
-        isRunning: false
-      };
-      // Unsupported Docker mode: isAvailable() returns false, but the manager must
-      // tell this apart from "simctl absent" via isUnsupportedDockerHostControlMode()
-      // and must never query the host for simulators.
-      const fakeSimctl = {
-        isAvailable: async () => false,
-        isUnsupportedDockerHostControlMode: () => true,
-        listSimulatorImages: async () => {
-          simctlListCalls++;
-          throw new Error("simctl should not be queried in unsupported Docker mode");
-        }
-      } as unknown as SimCtlClient;
-      const fakeEmulator = {
-        listAvds: async () => [androidImage]
-      } as unknown as AndroidEmulatorClient;
-
-      const manager = new MultiPlatformDeviceManager(
-        new FakeAdbClient() as unknown as AdbClient,
-        fakeSimctl,
-        fakeEmulator
-      );
-
-      const devices = await manager.listDeviceImages("either");
-
-      // Android discovery is unaffected; iOS is skipped without probing simctl.
-      expect(devices).toEqual([androidImage]);
-      expect(simctlListCalls).toBe(0);
-    });
-  });
 });

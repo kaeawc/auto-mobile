@@ -259,4 +259,5 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       "AVD 'Missing_Device' not found. Available AVDs: Pixel_9_Pro, Medium_Phone_API_35"
     );
   });
+
 });

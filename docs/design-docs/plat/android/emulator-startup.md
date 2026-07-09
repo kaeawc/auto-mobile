@@ -41,7 +41,6 @@ actionable message instead of `code: null`, pointing you at
 |----------|--------|--------|
 | `AUTOMOBILE_EMULATOR_HEADLESS` | `true` / `false` / unset | Force headless (`-no-window -no-audio`), force windowed, or auto-detect (default). |
 | `AUTOMOBILE_EMULATOR_ARGS` | space-separated args | Extra arguments appended to the `emulator` command (e.g. `-gpu swiftshader_indirect`). |
-| `AUTOMOBILE_EMULATOR_EXTERNAL` | `true` / unset | Skip launching a local emulator; attach to an externally managed device (e.g. a cloud ADB session) and read AVD metadata from config files. |
 
 ### Running emulators in CI
 

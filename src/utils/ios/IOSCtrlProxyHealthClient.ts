@@ -11,13 +11,13 @@ export function isValidCtrlProxyPort(value: unknown): value is number {
 
 /**
  * Host/transport context the health client needs to reach a runner. Supplied by
- * {@link IOSCtrlProxyManager} so the client stays agnostic of host-control gating
+ * {@link IOSCtrlProxyManager} so the client stays agnostic of remote gating
  * and device identity.
  */
 export interface CtrlProxyHealthContext {
-  /** true when reaching the runner through the host-control daemon (Docker). */
-  useHostControl(): boolean;
-  /** Host to probe when {@link useHostControl} is true. */
+  /** true when reaching the runner through the remote daemon (Docker). */
+  useRemoteRunner(): boolean;
+  /** Host to probe when {@link useRemoteRunner} is true. */
   getHost(): string;
   /** The device this manager owns; used to reject cross-device runners. */
   readonly deviceId: string;
@@ -29,7 +29,7 @@ export interface CtrlProxyHealthContext {
  * Extracted from {@link IOSCtrlProxyManager} (issue #3218) so runner-readiness /
  * health-poll decisions live in one focused, injectable collaborator. Behavior is
  * unchanged: local probes go through `curl` on the injected {@link ProcessExecutor}
- * and host-control probes use `fetch` with a timer-driven abort, exactly as before.
+ * and remote probes use `fetch` with a timer-driven abort, exactly as before.
  */
 export class IOSCtrlProxyHealthClient {
   private static readonly FETCH_TIMEOUT_MS = 2000;
@@ -95,13 +95,13 @@ export class IOSCtrlProxyHealthClient {
 
   /**
    * Raw `/health` body, or null when the runner does not answer. Local probes use
-   * `curl` (bounded by `--max-time`); host-control probes use `fetch` bounded by a
+   * `curl` (bounded by `--max-time`); remote probes use `fetch` bounded by a
    * timer-driven `AbortController`.
    */
   public async readHealthEndpointBodyOnPort(port: number): Promise<string | null> {
     try {
-      const host = this.context.useHostControl() ? this.context.getHost() : "localhost";
-      if (this.context.useHostControl()) {
+      const host = this.context.useRemoteRunner() ? this.context.getHost() : "localhost";
+      if (this.context.useRemoteRunner()) {
         const controller = new AbortController();
         const timeoutId = this.timer.setTimeout(
           () => controller.abort(),

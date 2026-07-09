@@ -106,6 +106,7 @@ export class YamlPlanSerializer implements PlanSerializer {
         timestamp: string;
         tool: string;
         params: Record<string, any>;
+        optional?: boolean;
         result: { success: boolean; data?: any; error?: string };
       }> = [];
 
@@ -158,7 +159,8 @@ export class YamlPlanSerializer implements PlanSerializer {
         if (YamlPlanSerializer.shouldIncludeInPlan(toolCall.tool, isLastObserve)) {
           planSteps.push({
             tool: toolCall.tool,
-            params: toolCall.params
+            params: toolCall.params,
+            ...(toolCall.optional === true ? { optional: true } : {})
           });
         }
       }

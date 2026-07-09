@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod";
-import { elementBoundsSchema, elementSchema, tapOnResultSchema } from "../../src/server/toolOutputSchemas";
+import { elementBoundsSchema, elementSchema, tapOnResultSchema, toolOutputArtifactMetadataSchema } from "../../src/server/toolOutputSchemas";
 
 /**
  * Wire-schema coverage for the `--observe-result-compact` tuple form (issue #2990,
@@ -49,6 +49,48 @@ describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
     // so an external client can decode [l,t,r,b] from the wire schema alone.
     expect(json).toContain("left, top, right, bottom");
     expect(json.toLowerCase()).toContain("observe-result-compact");
+  });
+});
+
+describe("tool output artifact metadata schema (#3480)", () => {
+  const metadata = {
+    artifact: {
+      path: "/tmp/auto-mobile/123-tapOn-id.json",
+      format: "json",
+      payload: "ObserveResult",
+      bytes: 123,
+      tool: "tapOn",
+    },
+  };
+
+  test("accepts the shared artifact metadata shape", () => {
+    expect(toolOutputArtifactMetadataSchema.parse(metadata)).toEqual(metadata);
+  });
+
+  test("tapOn results accept artifact metadata in the embedded observation field", () => {
+    expect(() => tapOnResultSchema.parse({
+      success: true,
+      observation: metadata,
+    })).not.toThrow();
+  });
+
+  test("accepts ObserveDiff artifact metadata for diffed observations", () => {
+    expect(toolOutputArtifactMetadataSchema.parse({
+      artifact: {
+        ...metadata.artifact,
+        payload: "ObserveDiff",
+      },
+    }).artifact.payload).toBe("ObserveDiff");
+  });
+
+  test("accepts non-observation artifact payload labels", () => {
+    expect(toolOutputArtifactMetadataSchema.parse({
+      artifact: {
+        ...metadata.artifact,
+        payload: "NetworkGraph",
+        tool: "getNetworkGraph",
+      },
+    }).artifact.payload).toBe("NetworkGraph");
   });
 });
 

@@ -495,7 +495,7 @@ function removeTimingEntry(parent: TimingData, key: string | number): void {
  */
 function truncateTimingData(timings: TimingData, maxSizeBytes: number): ProcessedTimingData {
   // Make a deep copy to avoid mutating the original
-  const workingCopy = JSON.parse(JSON.stringify(timings)) as TimingData;
+  const workingCopy = structuredClone(timings) as TimingData;
 
   let currentSize = estimateTimingDataSize(workingCopy);
   if (currentSize <= maxSizeBytes) {

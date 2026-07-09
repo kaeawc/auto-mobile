@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import fs from "fs/promises";
 import * as yaml from "js-yaml";
+import os from "os";
+import path from "path";
 import { YamlPlanSerializer } from "../../../src/utils/plan/PlanSerializer";
 import type { Plan } from "../../../src/models/Plan";
 
@@ -11,6 +14,39 @@ import type { Plan } from "../../../src/models/Plan";
  */
 describe("YamlPlanSerializer", () => {
   const serializer = new YamlPlanSerializer();
+
+  describe("exportPlanFromLogs", () => {
+    test("preserves step-level optional flag when present in logged tool calls", async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "plan-serializer-"));
+      const outputPath = path.join(tempDir, "exported.yaml");
+      try {
+        await fs.writeFile(
+          path.join(tempDir, "tool-calls.json"),
+          JSON.stringify({
+            timestamp: "2026-07-09T00:00:00.000Z",
+            tool: "tapOn",
+            params: { text: "Not Now" },
+            optional: true,
+            result: { success: true },
+          }) + "\n",
+          "utf-8"
+        );
+
+        const result = await serializer.exportPlanFromLogs(tempDir, "Optional Export", outputPath);
+
+        expect(result.success).toBe(true);
+        const exported = yaml.load(result.planContent ?? "") as Plan;
+        expect(exported.steps[0]).toMatchObject({
+          tool: "tapOn",
+          params: { text: "Not Now" },
+          optional: true,
+        });
+        expect(exported.steps[0].params.optional).toBeUndefined();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
 
   describe("importPlanFromYaml", () => {
     test("imports a valid plan with name and steps", () => {

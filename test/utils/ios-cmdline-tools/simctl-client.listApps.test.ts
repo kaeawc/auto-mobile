@@ -3,15 +3,6 @@ import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient"
 import { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 
-const createHostControlRunner = () => ({
-  isAvailable: async () => false,
-  isRunningInDocker: () => false,
-  runSimctl: async () => {
-    throw new Error("Host control should not be used in tests");
-  },
-  shouldUseHostControl: () => false
-});
-
 describe("SimCtlClient listApps", () => {
   test("pipes listapps through plutil and uses --all flag", async () => {
     const device: BootedDevice = {
@@ -36,7 +27,7 @@ describe("SimCtlClient listApps", () => {
       return createExecResult("{}", "");
     };
 
-    const simctl = new SimCtlClient(device, execAsync, createHostControlRunner());
+    const simctl = new SimCtlClient(device, execAsync);
     const apps = await simctl.listApps();
 
     expect(execCalls.some(c => c.includes("listapps ios-device-123 --all | plutil"))).toBe(true);
@@ -69,7 +60,7 @@ describe("SimCtlClient listApps", () => {
       return createExecResult("{}", "");
     };
 
-    const simctl = new SimCtlClient(device, execAsync, createHostControlRunner());
+    const simctl = new SimCtlClient(device, execAsync);
     const apps = await simctl.listApps();
 
     expect(execCalls.some(c => c.includes("listapps ios-device-456 --all | plutil"))).toBe(true);

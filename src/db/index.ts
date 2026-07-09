@@ -15,6 +15,15 @@ export {
   getDbWriteBarrier,
   resetDbWriteBarrier,
 } from "./dbWriteBarrier";
+export {
+  KeyedJsonConfigRepository,
+  createAppearanceConfigRepository,
+  createDeviceSnapshotConfigRepository,
+  createVideoRecordingConfigRepository,
+  type ConfigRepository,
+  type KeyedJsonConfigRepositoryOptions,
+  type KeyedJsonConfigTableName,
+} from "./keyedJsonConfigRepository";
 export type {
   Database,
   DeviceConfigTable,

@@ -1,67 +1,51 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import {
-  DeviceSnapshotSocketRequest,
-  DeviceSnapshotSocketResponse,
-} from "./deviceSnapshotSocketTypes";
+import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
 import { getDeviceSnapshotConfig, updateDeviceSnapshotConfig } from "../server/deviceSnapshotManager";
 import { DEVICE_SNAPSHOT_SOCKET_CONFIG } from "./daemonFiles";
+import type { DeviceSnapshotConfig, DeviceSnapshotConfigInput } from "../models";
+
+interface DeviceSnapshotSocketServerDependencies {
+  getConfig: () => Promise<DeviceSnapshotConfig>;
+  updateConfig: (update: DeviceSnapshotConfigInput | null) => Promise<{
+    config: DeviceSnapshotConfig;
+    evictedSnapshotNames: string[];
+  }>;
+}
+
+const defaultDependencies: DeviceSnapshotSocketServerDependencies = {
+  getConfig: getDeviceSnapshotConfig,
+  updateConfig: updateDeviceSnapshotConfig,
+};
 
 /**
  * Socket server for device snapshot configuration.
  * Handles config/get and config/set requests.
  */
-export class DeviceSnapshotSocketServer extends RequestResponseSocketServer<
-  DeviceSnapshotSocketRequest,
-  DeviceSnapshotSocketResponse
+export class DeviceSnapshotSocketServer extends ConfigSocketServer<
+  DeviceSnapshotConfig,
+  DeviceSnapshotConfigInput,
+  "device_snapshot_request",
+  "device_snapshot_response",
+  "evictedSnapshotNames"
 > {
-  constructor(socketPath: string = getSocketPath(DEVICE_SNAPSHOT_SOCKET_CONFIG), timer: Timer = defaultTimer) {
-    super(socketPath, timer, "DeviceSnapshot");
-  }
-
-  protected async handleRequest(
-    request: DeviceSnapshotSocketRequest
-  ): Promise<DeviceSnapshotSocketResponse> {
-    switch (request.method) {
-      case "config/get": {
-        const config = await getDeviceSnapshotConfig();
-        return {
-          id: request.id,
-          type: "device_snapshot_response",
-          success: true,
-          result: { config },
-        };
-      }
-      case "config/set": {
-        if (!request.params || !("config" in request.params)) {
-          throw new Error("config/set requires params.config");
-        }
-        const update = request.params.config ?? null;
-        const { config, evictedSnapshotNames } = await updateDeviceSnapshotConfig(update);
-        return {
-          id: request.id,
-          type: "device_snapshot_response",
-          success: true,
-          result: {
-            config,
-            evictedSnapshotNames: evictedSnapshotNames.length > 0
-              ? evictedSnapshotNames
-              : undefined,
-          },
-        };
-      }
-      default:
-        throw new Error(`Unsupported device snapshot method: ${request.method}`);
-    }
-  }
-
-  protected createErrorResponse(id: string | undefined, error: string): DeviceSnapshotSocketResponse {
-    return {
-      id: id ?? "unknown",
-      type: "device_snapshot_response",
-      success: false,
-      error,
-    };
+  constructor(
+    socketPath: string = getSocketPath(DEVICE_SNAPSHOT_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+    dependencies: DeviceSnapshotSocketServerDependencies = defaultDependencies
+  ) {
+    super({
+      socketPath,
+      timer,
+      serverName: "DeviceSnapshot",
+      responseType: "device_snapshot_response",
+      evictedKey: "evictedSnapshotNames",
+      methodLabel: "device snapshot",
+      getConfig: dependencies.getConfig,
+      updateConfig: async update => {
+        const { config, evictedSnapshotNames } = await dependencies.updateConfig(update);
+        return { config, evictedItems: evictedSnapshotNames };
+      },
+    });
   }
 }
 

@@ -145,6 +145,18 @@ const observationDiffMetadataSchema = z.object({
   toScreen: observationDiffScreenIdentitySchema.optional()
 }).passthrough();
 
+const toolOutputArtifactDetailsSchema = z.object({
+  path: z.string(),
+  format: z.literal("json"),
+  payload: z.string(),
+  bytes: z.number().int().nonnegative(),
+  tool: z.string()
+}).passthrough();
+
+export const toolOutputArtifactMetadataSchema = z.object({
+  artifact: toolOutputArtifactDetailsSchema
+}).passthrough();
+
 const tapOnSearchUntilSchema = z.object({
   durationMs: z.number().int(),
   requestCount: z.number().int(),
@@ -156,7 +168,7 @@ export const tapOnResultSchema = z.object({
   action: z.string().optional(),
   message: z.string().optional(),
   element: elementSchema.optional(),
-  observation: observationSummarySchema.optional(),
+  observation: z.union([observationSummarySchema, toolOutputArtifactMetadataSchema]).optional(),
   observationDiff: observationDiffMetadataSchema.optional(),
   selectedElement: selectedElementSchema.optional(),
   selectedElements: z.array(selectedElementSchema).optional(),
@@ -360,3 +372,8 @@ export const observeResultSchema = z.object({
   predictions: predictionsSchema.optional(),
   accessibilityState: accessibilityStateSchema.optional()
 }).passthrough();
+
+export const observeToolResultSchema = z.union([
+  observeResultSchema,
+  toolOutputArtifactMetadataSchema,
+]);

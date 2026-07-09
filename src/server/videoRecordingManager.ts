@@ -25,7 +25,10 @@ import {
   VideoRecordingRepository,
   type VideoRecordingRecord,
 } from "../db/videoRecordingRepository";
-import { VideoRecordingConfigRepository } from "../db/videoRecordingConfigRepository";
+import {
+  createVideoRecordingConfigRepository,
+  type ConfigRepository,
+} from "../db/keyedJsonConfigRepository";
 import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingResourceUris";
 import { VisualHighlightClient } from "../features/debug/VisualHighlight";
 
@@ -63,7 +66,7 @@ interface VideoArchiveEvictionResult {
 interface VideoRecordingManagerDependencies {
   videoRecorderService: VideoRecorderService;
   recordingRepository: VideoRecordingRepository;
-  configRepository: VideoRecordingConfigRepository;
+  configRepository: ConfigRepository<VideoRecordingConfig>;
   highlightClient: VisualHighlightClient;
   timer: Timer;
   now: () => Date;
@@ -140,7 +143,7 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
     moduleDependencies = {
       videoRecorderService: await createRecorderService(),
       recordingRepository: new VideoRecordingRepository(),
-      configRepository: new VideoRecordingConfigRepository(),
+      configRepository: createVideoRecordingConfigRepository(),
       highlightClient: new VisualHighlightClient(),
       timer: defaultTimer,
       now: () => new Date(),
@@ -157,7 +160,7 @@ export async function setVideoRecordingManagerDependencies(
   const current = moduleDependencies ?? {
     videoRecorderService: deps.videoRecorderService ?? await createRecorderService(),
     recordingRepository: deps.recordingRepository ?? new VideoRecordingRepository(),
-    configRepository: deps.configRepository ?? new VideoRecordingConfigRepository(),
+    configRepository: deps.configRepository ?? createVideoRecordingConfigRepository(),
     highlightClient: deps.highlightClient ?? new VisualHighlightClient(),
     timer: deps.timer ?? defaultTimer,
     now: deps.now ?? (() => new Date()),

@@ -132,6 +132,33 @@ describe("TestExecutionRepository", () => {
       expect(runs[0].steps[1].errorMessage).toBe("Element not visible");
     });
 
+    test("roundtrips step details through getTestRuns", async () => {
+      await repo.recordExecution(
+        makeExecution({
+          steps: [
+            makeStep({
+              status: "skipped",
+              details: {
+                device: "device-a",
+                trackIndex: 0,
+                optional: true,
+                error: "element not found",
+              },
+            }),
+          ],
+        })
+      );
+
+      const runs = await repo.getTestRuns();
+
+      expect((runs[0].steps[0] as any).details).toEqual({
+        device: "device-a",
+        trackIndex: 0,
+        optional: true,
+        error: "element not found",
+      });
+    });
+
     test("records execution with screens visited", async () => {
       await repo.recordExecution(
         makeExecution({

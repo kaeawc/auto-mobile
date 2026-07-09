@@ -66,6 +66,27 @@ function makeObserveResultWithBounds(): ObserveResult {
   } as ObserveResult;
 }
 
+class FakeObservationArtifactWriter {
+  writes: Array<{ tool: string; payload: string; data: unknown }> = [];
+  throwOnWrite: Error | undefined;
+
+  writeJsonArtifact(input: { tool: string; payload: string; data: unknown }): unknown {
+    if (this.throwOnWrite) {
+      throw this.throwOnWrite;
+    }
+    this.writes.push(input);
+    return {
+      artifact: {
+        path: `/tmp/auto-mobile/${input.tool}-${this.writes.length}.json`,
+        format: "json",
+        payload: input.payload,
+        bytes: 123,
+        tool: input.tool,
+      },
+    };
+  }
+}
+
 describe("finalizeToolResponse", () => {
   let originalDropElements: boolean;
   let originalCompact: boolean;
@@ -1024,6 +1045,401 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.added).toHaveLength(1);
       expect(obsSc.added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
       expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+  });
+
+  describe("observation artifact mode (#3480)", () => {
+    let originalDiff: boolean;
+    let originalNoObserve: boolean;
+
+    function sameScreenObserve(): ObserveResult {
+      return {
+        ...makeObserveResultWithBounds(),
+        activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: {
+            node: {
+              "resource-id": "com.example:id/root",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+              "node": [{ "resource-id": "com.example:id/child", "text": "Hello" } as any],
+            } as any,
+          },
+        },
+      } as ObserveResult;
+    }
+
+    function makeStore(): { store: { get: (u: string) => ObserveResult | undefined; set: (u: string, o: ObserveResult) => void }; map: Map<string, ObserveResult> } {
+      const map = new Map<string, ObserveResult>();
+      return {
+        map,
+        store: {
+          get: (u: string) => map.get(u),
+          set: (u: string, o: ObserveResult) => { map.set(u, o); },
+        },
+      };
+    }
+
+    beforeEach(() => {
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+      serverConfig.setActionsDiffObserveEnabled(false);
+      serverConfig.setActionsNoObserveEnabled(false);
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+      serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+    });
+
+    test("observe returns artifact metadata instead of an inline ObserveResult", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(makeObserveResult()),
+        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
+      );
+
+      expect(finalized.structuredContent).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/observe-1.json",
+          format: "json",
+          payload: "ObserveResult",
+          bytes: 123,
+          tool: "observe",
+        },
+      });
+      expect((finalized.structuredContent as any).viewHierarchy).toBeUndefined();
+      expect(writer.writes).toHaveLength(1);
+      expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("action observation fields are replaced with artifact metadata", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn", sessionUuid: "s1", artifactWriter: writer } as any
+      );
+
+      expect((finalized.structuredContent as any).success).toBe(true);
+      expect((finalized.structuredContent as any).observation).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/tapOn-1.json",
+          format: "json",
+          payload: "ObserveResult",
+          bytes: 123,
+          tool: "tapOn",
+        },
+      });
+      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeUndefined();
+      expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+      expect(JSON.parse(finalized.content[0].text)).toEqual(finalized.structuredContent);
+    });
+
+    test("artifact writer receives the compacted diff after existing output transforms", () => {
+      serverConfig.setObserveResultCompactEnabled(true);
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const { store } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse(sameScreenObserve()),
+        { name: "observe", sessionUuid: "s1", baselineStore: store }
+      );
+
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node = [
+        { "resource-id": "com.example:id/added", "bounds": { left: 5, top: 6, right: 7, bottom: 8 } },
+      ];
+      const writer = new FakeObservationArtifactWriter();
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any
+      );
+
+      expect((writer.writes[0].data as any).isDiff).toBe(true);
+      expect(writer.writes[0].payload).toBe("ObserveDiff");
+      expect((writer.writes[0].data as any).added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
+      expect((finalized.structuredContent as any).observation.artifact.path).toBe("/tmp/auto-mobile/tapOn-1.json");
+      expect((finalized.structuredContent as any).observation.artifact.payload).toBe("ObserveDiff");
+      expect((finalized.structuredContent as any).observationDiff).toMatchObject({
+        mode: "diff",
+        reason: "diff_emitted",
+      });
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("internal calls receive full observations and do not write artifacts", () => {
+      serverConfig.setActionsNoObserveEnabled(true);
+      const writer = new FakeObservationArtifactWriter();
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
+        { name: "tapOn", sessionUuid: "s1", internal: true, artifactWriter: writer } as any
+      );
+
+      expect(writer.writes).toHaveLength(0);
+      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("artifact write failures are loud and do not produce inline fallback output", () => {
+      const writer = new FakeObservationArtifactWriter();
+      writer.throwOnWrite = new Error("artifact disk is full");
+      const response = createStructuredToolResponse(makeObserveResult());
+
+      expect(() => finalizeToolResponse(
+        response,
+        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
+      )).toThrow("artifact disk is full");
+      expect((response.structuredContent as any).viewHierarchy).toBeDefined();
+      expect((response.structuredContent as any).artifact).toBeUndefined();
+    });
+
+    test("artifact write failures do not advance the diff baseline", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const { store, map } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse(sameScreenObserve()),
+        { name: "observe", sessionUuid: "s1", baselineStore: store }
+      );
+      const renderedBaseline = map.get("s1");
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node = [
+        { "resource-id": "com.example:id/not-rendered", "bounds": { left: 1, top: 2, right: 3, bottom: 4 } },
+      ];
+      const writer = new FakeObservationArtifactWriter();
+      writer.throwOnWrite = new Error("artifact disk is full");
+
+      expect(() => finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any
+      )).toThrow("artifact disk is full");
+      expect(map.get("s1")).toBe(renderedBaseline);
+    });
+  });
+
+  describe("non-observation artifact mode (#3481)", () => {
+    test("executePlan artifacts large failure/debug observation subtrees and keeps summaries inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const failureObservation = {
+        capturedAtMs: 123,
+        activeWindow: { appId: "com.example" },
+        viewHierarchy: { hierarchy: { node: { "resource-id": "root" } } },
+        rawViewHierarchy: "<hierarchy><node text=\"large\" /></hierarchy>",
+        visibleTextsSample: ["Submit"],
+        resourceIdsSample: ["com.example:id/submit"],
+      };
+      const stepObservation = {
+        capturedAtMs: 456,
+        viewHierarchy: { hierarchy: { node: { "resource-id": "step-root" } } },
+        visibleTextsSample: ["Step"],
+      };
+      const debugFailureObservation = {
+        capturedAtMs: 789,
+        viewHierarchy: { hierarchy: { node: { "resource-id": "debug-failure-root" } } },
+        rawViewHierarchy: "<hierarchy><node text=\"debug failure\" /></hierarchy>",
+        visibleTextsSample: ["Debug failure"],
+      };
+      const payload = {
+        success: false,
+        executedSteps: 1,
+        totalSteps: 2,
+        failedStep: {
+          stepIndex: 1,
+          tool: "tapOn",
+          error: "Button missing",
+          failureObservation,
+        },
+        debug: {
+          executionTimeMs: 50,
+          steps: [
+            {
+              step: "1: observe",
+              status: "completed",
+              durationMs: 10,
+              details: { stepObservation, failureObservation: debugFailureObservation },
+            },
+          ],
+        },
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "executePlan", artifactWriter: writer } as any
+      );
+
+      const failedObservation = (finalized.structuredContent as any).failedStep.failureObservation;
+      expect(failedObservation.capturedAtMs).toBe(123);
+      expect(failedObservation.visibleTextsSample).toEqual(["Submit"]);
+      expect(failedObservation.resourceIdsSample).toEqual(["com.example:id/submit"]);
+      expect(failedObservation.viewHierarchy).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/executePlan-1.json",
+          format: "json",
+          payload: "ExecutePlanFailureObservationViewHierarchy",
+          bytes: 123,
+          tool: "executePlan",
+        },
+      });
+      expect(failedObservation.rawViewHierarchy).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/executePlan-2.json",
+          format: "json",
+          payload: "ExecutePlanFailureObservationRawViewHierarchy",
+          bytes: 123,
+          tool: "executePlan",
+        },
+      });
+
+      const finalizedStepObservation = (finalized.structuredContent as any).debug.steps[0].details.stepObservation;
+      expect(finalizedStepObservation.visibleTextsSample).toEqual(["Step"]);
+      expect(finalizedStepObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugStepObservationViewHierarchy");
+      const finalizedDebugFailureObservation = (finalized.structuredContent as any).debug.steps[0].details.failureObservation;
+      expect(finalizedDebugFailureObservation.visibleTextsSample).toEqual(["Debug failure"]);
+      expect(finalizedDebugFailureObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationViewHierarchy");
+      expect(finalizedDebugFailureObservation.rawViewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationRawViewHierarchy");
+      expect(writer.writes.map(write => write.payload)).toEqual([
+        "ExecutePlanFailureObservationViewHierarchy",
+        "ExecutePlanFailureObservationRawViewHierarchy",
+        "ExecutePlanDebugStepObservationViewHierarchy",
+        "ExecutePlanDebugFailureObservationViewHierarchy",
+        "ExecutePlanDebugFailureObservationRawViewHierarchy",
+      ]);
+      expect(writer.writes[0].data).toEqual(failureObservation.viewHierarchy);
+      expect(writer.writes[1].data).toBe(failureObservation.rawViewHierarchy);
+      expect(writer.writes[2].data).toEqual(stepObservation.viewHierarchy);
+      expect(writer.writes[3].data).toEqual(debugFailureObservation.viewHierarchy);
+      expect(writer.writes[4].data).toBe(debugFailureObservation.rawViewHierarchy);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("bugReport artifacts raw report details and keeps status summaries inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const payload = {
+        reportId: "bug-1",
+        timestamp: 123,
+        device: { deviceId: "emulator-5554", platform: "android" },
+        screenState: { currentPackage: "com.example" },
+        viewHierarchy: {
+          rawXml: "<hierarchy><node text=\"large\" /></hierarchy>",
+          elementCount: 42,
+          filteredNodeCount: 3,
+          clickableElements: [{ text: "Submit", bounds: { left: 0, top: 0, right: 1, bottom: 1 } }],
+        },
+        logcat: {
+          errors: ["E/Example: one", "E/Example: two"],
+          warnings: ["W/Example: warn"],
+          appLogs: ["I/Example: app"],
+        },
+        windowState: {
+          focusedWindow: "com.example/.Main",
+          windows: ["Window #1", "Window #2"],
+        },
+        savedTo: "/tmp/bug-report.json",
+        errors: [],
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "bugReport", artifactWriter: writer } as any
+      );
+
+      const report = finalized.structuredContent as any;
+      expect(report.reportId).toBe("bug-1");
+      expect(report.device.deviceId).toBe("emulator-5554");
+      expect(report.viewHierarchy.elementCount).toBe(42);
+      expect(report.viewHierarchy.clickableElements).toHaveLength(1);
+      expect(report.viewHierarchy.rawXml.artifact.payload).toBe("BugReportViewHierarchyRawXml");
+      expect(report.logcatSummary).toEqual({ errorCount: 2, warningCount: 1, appLogCount: 1 });
+      expect(report.logcat).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/bugReport-2.json",
+          format: "json",
+          payload: "BugReportLogcat",
+          bytes: 123,
+          tool: "bugReport",
+        },
+      });
+      expect(report.windowState.focusedWindow).toBe("com.example/.Main");
+      expect(report.windowState.windows.artifact.payload).toBe("BugReportWindowList");
+      expect(writer.writes.map(write => write.payload)).toEqual([
+        "BugReportViewHierarchyRawXml",
+        "BugReportLogcat",
+        "BugReportWindowList",
+      ]);
+      expect(writer.writes[0].data).toBe(payload.viewHierarchy.rawXml);
+      expect(writer.writes[1].data).toEqual(payload.logcat);
+      expect(writer.writes[2].data).toEqual(payload.windowState.windows);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("getNetworkGraph artifacts aggregate graph and keeps host count inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const payload = {
+        graph: [
+          {
+            scheme: "https",
+            host: "api.example.com",
+            paths: {
+              v1: {
+                paths: {
+                  "users[GET]": { method: "GET", success: 10, errors: 1, p50: 100, p95: 200 },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "getNetworkGraph", artifactWriter: writer } as any
+      );
+
+      expect(finalized.structuredContent).toEqual({
+        graph: {
+          artifact: {
+            path: "/tmp/auto-mobile/getNetworkGraph-1.json",
+            format: "json",
+            payload: "NetworkGraph",
+            bytes: 123,
+            tool: "getNetworkGraph",
+          },
+        },
+        graphSummary: { hostCount: 1 },
+      });
+      expect(writer.writes).toEqual([
+        { tool: "getNetworkGraph", payload: "NetworkGraph", data: payload.graph },
+      ]);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("internal executePlan calls do not artifact non-observation payloads", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const payload = {
+        success: false,
+        executedSteps: 1,
+        totalSteps: 2,
+        failedStep: {
+          stepIndex: 1,
+          tool: "tapOn",
+          error: "Button missing",
+          failureObservation: {
+            capturedAtMs: 123,
+            viewHierarchy: { hierarchy: { node: { text: "keep inline" } } },
+          },
+        },
+      };
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(payload),
+        { name: "executePlan", internal: true, artifactWriter: writer } as any
+      );
+
+      expect(writer.writes).toHaveLength(0);
+      expect(finalized.structuredContent).toEqual(payload);
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(payload));
     });
   });
 

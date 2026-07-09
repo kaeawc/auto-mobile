@@ -15,3 +15,4 @@ Quick reference for AI agents working in `ios/`. Run all commands from the repo 
 ## Notes
 - Use the scripts in `scripts/ios/` instead of invoking Xcode directly.
 - If you need XcodeGen, install it with `brew install xcodegen`.
+- When adding, removing, or renaming files under `ios/control-proxy`, run `scripts/ios/xcodegen-generate.sh` from the repository root and commit the updated `ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj`.

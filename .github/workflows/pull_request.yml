@@ -1221,8 +1221,8 @@ jobs:
       - name: "Install XcodeGen"
         run: brew install xcodegen
 
-      - name: "Generate Xcode Projects"
-        run: ./scripts/ios/xcodegen-generate.sh
+      - name: "Check XcodeGen Project Drift"
+        run: ./scripts/ios/xcodegen-drift-check.sh --all
 
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
@@ -1273,8 +1273,14 @@ jobs:
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
+      - name: "Install XcodeGen"
+        run: brew install xcodegen
+
       - name: "Install xcpretty"
         run: gem install xcpretty
+
+      - name: "Check CtrlProxy XcodeGen Project Drift"
+        run: ./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy
 
       - name: "Build CtrlProxy iOS for Testing"
         run: ./scripts/ios/ctrl-proxy-build-for-testing.sh

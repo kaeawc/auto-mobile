@@ -6,7 +6,7 @@ import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
-import { ANDROID_INPUT_CLASSES, hasAccessibilityAction } from "../../utils/elementProperties";
+import { ANDROID_INPUT_CLASSES, isClickableElementProperties } from "../../utils/elementProperties";
 
 /**
  * Handles searching and selection of elements in view hierarchy
@@ -287,9 +287,7 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   private isClickableNode(props: Record<string, unknown>): boolean {
-    return props.clickable === "true" ||
-      props.clickable === true ||
-      hasAccessibilityAction(props.actions, "click");
+    return isClickableElementProperties(props);
   }
 
   /**

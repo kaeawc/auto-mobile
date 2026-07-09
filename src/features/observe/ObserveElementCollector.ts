@@ -1,6 +1,6 @@
 import type { ObserveResult, ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import type { Element } from "../../models/Element";
-import { hasAccessibilityAction } from "../../utils/elementProperties";
+import { isClickableElementProperties } from "../../utils/elementProperties";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { FlattenedElementEntry, IdentifyMediaViews } from "./IdentifyMediaViews";
@@ -59,7 +59,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       }
 
       const nodeProperties = this.parser.extractNodeProperties(node);
-      if (this.isClickableNode(nodeProperties)) {
+      if (isClickableElementProperties(nodeProperties)) {
         collections.clickable.push(parsedNode);
       }
       if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
@@ -76,9 +76,4 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     });
   }
 
-  private isClickableNode(props: Record<string, unknown>): boolean {
-    return props.clickable === "true" ||
-      props.clickable === true ||
-      hasAccessibilityAction(props.actions, "click");
-  }
 }

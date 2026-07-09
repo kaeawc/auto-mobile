@@ -2,7 +2,7 @@ import { ChildProcess } from "child_process";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import { SimCtlClient, DOCKER_IOS_UNSUPPORTED_MESSAGE } from "./ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { logger } from "./logger";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
@@ -86,9 +86,6 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
   private simctl: SimCtlClient;
-  // Ensures the "iOS-in-Docker unsupported" warning is emitted only once per
-  // manager, since discovery polls frequently.
-  private loggedDockerIosUnsupported = false;
 
   /**
    * Create a PlatformDeviceManager instance
@@ -106,26 +103,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.emulator = emulator || new AndroidEmulatorClient();
   }
 
-  private async canDiscoverIosLocallyOrViaHostControl(): Promise<boolean> {
+  private async canDiscoverIosLocally(): Promise<boolean> {
     if (process.platform === "darwin") {
       return true;
-    }
-
-    // Distinguish "iOS-in-Docker is intentionally unsupported" from "simctl is
-    // simply absent". Both yield no simulators, but the former is a deliberate
-    // limitation we want to make visible rather than have iOS quietly vanish from
-    // discovery. We log once and stay resilient (return false) so that mixed
-    // Android+iOS Docker setups still discover their Android devices.
-    //
-    // Probe defensively: injected SimCtl fakes in tests may omit this method, and
-    // a missing probe simply means "not the unsupported Docker mode" (the default
-    // for any non-Docker host), so fall through to the normal availability check.
-    if (this.simctl.isUnsupportedDockerHostControlMode?.()) {
-      if (!this.loggedDockerIosUnsupported) {
-        this.loggedDockerIosUnsupported = true;
-        logger.warn(`[DeviceManager] ${DOCKER_IOS_UNSUPPORTED_MESSAGE}`);
-      }
-      return false;
     }
 
     try {
@@ -136,7 +116,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   }
 
   private async listIosDeviceImagesIfAvailable(options: { swallowDiscoveryErrors: boolean }): Promise<DeviceInfo[]> {
-    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+    if (!(await this.canDiscoverIosLocally())) {
       return [];
     }
     try {
@@ -151,7 +131,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   }
 
   private async getBootedIosDevicesIfAvailable(): Promise<BootedDevice[]> {
-    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+    if (!(await this.canDiscoverIosLocally())) {
       return [];
     }
     try {
@@ -188,7 +168,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.isAvdRunning(device.name);
       case "ios":
-        if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+        if (!(await this.canDiscoverIosLocally())) {
           return false;
         }
         if (device.deviceId) {
@@ -246,7 +226,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private async discoverBootedIosDevices(): Promise<{ devices: BootedDevice[]; succeeded: boolean }> {
     // iOS tooling that is genuinely unavailable on this host cannot confirm a
     // device is gone, so report it as un-discovered rather than empty.
-    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+    if (!(await this.canDiscoverIosLocally())) {
       return { devices: [], succeeded: false };
     }
     try {

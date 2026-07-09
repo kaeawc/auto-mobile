@@ -2,8 +2,6 @@ import * as os from "os";
 import * as path from "path";
 import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../../utils/logger";
-import { shouldUseHostControl } from "../../../utils/hostControlClient";
-import { isRunningInDocker } from "../../../utils/dockerEnv";
 import type { NotificationPolicyAccessState } from "../NotificationPolicy";
 
 /**
@@ -45,13 +43,6 @@ export interface BulletinBoardReaderDeps {
   rmTemp(path: string): Promise<void>;
   /** Absolute path of a simulator device root (…/CoreSimulator/Devices/<udid>). */
   deviceDataRoot(udid: string): string;
-  /**
-   * True when running in Docker/external-emulator host-control mode. There the
-   * CoreSimulator BulletinBoard plist lives on the macOS host and host `plutil`
-   * is not reachable from inside the container, so the read must be gated as
-   * unsupported rather than silently reporting every app as unknown.
-   */
-  isHostControlMode(): boolean;
 }
 
 /**
@@ -102,16 +93,6 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
         method: "unsupported",
         error:
           "iOS notification authorization can only be read on simulators (no host-side API on physical devices)",
-      };
-    }
-
-    if (this.deps.isHostControlMode()) {
-      return {
-        supported: false,
-        method: "unsupported",
-        error:
-          "iOS notification authorization cannot be read under host control (Docker/external-emulator mode): " +
-          "the CoreSimulator BulletinBoard plist is on the macOS host and host plutil is unreachable from the container",
       };
     }
 
@@ -211,6 +192,5 @@ export function defaultBulletinBoardReader(): IosNotificationAuthorizationReader
     },
     deviceDataRoot: udid =>
       path.join(os.homedir(), "Library/Developer/CoreSimulator/Devices", udid),
-    isHostControlMode: () => shouldUseHostControl() && isRunningInDocker(),
   });
 }

@@ -59,16 +59,14 @@ describe("DeviceAppManager launch precondition drift guard (issue #3123)", () =>
       const body = extractMethodBody(source, methodName);
       expect(
         body,
-        `${methodName} must use getLaunchPrecondition so host-control and non-darwin guards cannot drift.`
+        `${methodName} must use getLaunchPrecondition so non-darwin guards cannot drift.`
       ).toContain("this.getLaunchPrecondition()");
     }
   });
 
-  test("launch entry points do not duplicate host-control or platform guard reads", () => {
+  test("launch entry points do not duplicate platform guard reads", () => {
     for (const methodName of ["launchApp", "launchWithPayloadUrl"]) {
       const body = extractMethodBody(source, methodName);
-      expect(body, `${methodName} must not read the host-control gate directly.`)
-        .not.toContain("this.isHostControlMode()");
       expect(body, `${methodName} must not read the platform gate directly.`)
         .not.toContain("this.deps.platform()");
     }

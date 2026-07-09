@@ -154,10 +154,10 @@ describe("DevicePool", () => {
         const fakeSimctl = {
           isAvailable: async () => true,
           getBootedSimulators: async () => {
-            throw new Error("host-control simctl unavailable");
+            throw new Error("simctl unavailable");
           },
           getBootedSimulatorsChecked: async () => {
-            throw new Error("host-control simctl unavailable");
+            throw new Error("simctl unavailable");
           }
         } as unknown as SimCtlClient;
         const fakeEmulator = {

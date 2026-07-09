@@ -264,16 +264,6 @@ export class AdbClient implements AdbExecutor {
     const adbPath = await this.ensureAdbPath();
     const baseArgs: string[] = [];
 
-    // Support remote ADB server connection (for Docker containers connecting to host)
-    const adbServerHost = process.env.AUTOMOBILE_ADB_SERVER_HOST;
-    const adbServerPort = process.env.AUTOMOBILE_ADB_SERVER_PORT;
-    if (adbServerHost) {
-      baseArgs.push("-H", adbServerHost);
-      if (adbServerPort) {
-        baseArgs.push("-P", adbServerPort);
-      }
-    }
-
     if (deviceId) {
       baseArgs.push("-s", deviceId);
     }

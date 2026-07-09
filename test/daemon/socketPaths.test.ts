@@ -33,21 +33,21 @@ describe("daemon socket paths", () => {
     });
   });
 
-  test("publishes external-mode socket paths", () => {
+  test("ignores legacy external-mode socket path configuration", () => {
     process.env.AUTOMOBILE_EMULATOR_EXTERNAL = "true";
 
     expect(getDaemonSocketPaths()).toEqual({
       "control": SOCKET_PATH,
-      "appearance": "/tmp/auto-mobile-appearance.sock",
-      "device-snapshot": "/tmp/auto-mobile-device-snapshot.sock",
-      "failures-push": "/tmp/auto-mobile-failures-push.sock",
-      "failures-stream": "/tmp/auto-mobile-failures-stream.sock",
-      "observation-stream": "/tmp/auto-mobile-observation-stream.sock",
-      "performance-push": "/tmp/auto-mobile-performance-push.sock",
-      "performance-stream": "/tmp/auto-mobile-performance-stream.sock",
-      "telemetry-push": "/tmp/auto-mobile-telemetry-push.sock",
-      "test-recording": "/tmp/auto-mobile-test-recording.sock",
-      "video-recording": "/tmp/auto-mobile-video-recording.sock",
+      "appearance": path.join(os.homedir(), ".auto-mobile", "appearance.sock"),
+      "device-snapshot": path.join(os.homedir(), ".auto-mobile", "device-snapshot.sock"),
+      "failures-push": path.join(os.homedir(), ".auto-mobile", "failures-push.sock"),
+      "failures-stream": path.join(os.homedir(), ".auto-mobile", "failures-stream.sock"),
+      "observation-stream": path.join(os.homedir(), ".auto-mobile", "observation-stream.sock"),
+      "performance-push": path.join(os.homedir(), ".auto-mobile", "performance-push.sock"),
+      "performance-stream": path.join(os.homedir(), ".auto-mobile", "performance-stream.sock"),
+      "telemetry-push": path.join(os.homedir(), ".auto-mobile", "telemetry-push.sock"),
+      "test-recording": path.join(os.homedir(), ".auto-mobile", "test-recording.sock"),
+      "video-recording": path.join(os.homedir(), ".auto-mobile", "video-recording.sock"),
     });
   });
 });

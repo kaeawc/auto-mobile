@@ -75,6 +75,5 @@ export const DEFAULT_SOCKET_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
  * Get the socket path based on environment mode.
  */
 export function getSocketPath(config: SocketServerConfig): string {
-  const isExternalMode = process.env.AUTOMOBILE_EMULATOR_EXTERNAL === "true";
-  return isExternalMode ? config.externalPath : config.defaultPath;
+  return config.defaultPath;
 }

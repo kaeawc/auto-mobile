@@ -143,10 +143,7 @@ export class PortManager {
     }
   }
 
-  /**
-   * Reserve a known port for a device, such as a port owned by an existing
-   * host-control process discovered after this process starts.
-   */
+  /** Reserve a known port for a device discovered after this process starts. */
   public static reserve(deviceId: string, port: number): void {
     for (const [allocatedDeviceId, allocatedPort] of this.allocatedPorts) {
       if (allocatedDeviceId !== deviceId && allocatedPort === port) {

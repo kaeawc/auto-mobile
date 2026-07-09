@@ -22,7 +22,7 @@ const DEVICE_ID = "SIM-DEVICE-1";
 
 function localContext(): CtrlProxyHealthContext {
   return {
-    useHostControl: () => false,
+    useRemoteRunner: () => false,
     getHost: () => "unused.local",
     deviceId: DEVICE_ID,
   };

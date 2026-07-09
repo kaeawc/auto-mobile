@@ -11,15 +11,9 @@ const execResult = (stdout = ""): ExecResult => ({
   includes: (value: string) => stdout.includes(value),
 });
 
-interface HostControlOverrides {
-  shouldUseHostControl?: () => boolean;
-  isRunningInDocker?: () => boolean;
-}
-
 interface Overrides {
   platform?: () => NodeJS.Platform;
   exec?: (command: string) => Promise<ExecResult>;
-  hostControl?: HostControlOverrides;
 }
 
 interface Harness {
@@ -29,8 +23,8 @@ interface Harness {
 
 // Build a DeviceAppManager wired for the URL-launch surface only. The
 // open-URL primitive (isAvailable / launchWithPayloadUrl) touches nothing but
-// `platform`, `exec`, and the two host-control flags, so the file/temp deps are
-// stubbed to throw — any use would be a real regression the test should catch.
+// `platform` and `exec`, so the file/temp deps are stubbed to throw — any use
+// would be a real regression the test should catch.
 const makeInspector = (overrides: Overrides = {}): Harness => {
   const commands: string[] = [];
   const unused = () => { throw new Error("unexpected filesystem dependency use in URL-launch path"); };
@@ -47,14 +41,6 @@ const makeInspector = (overrides: Overrides = {}): Harness => {
     stat: unused,
     tmpdir: () => "/tmp",
     logger: { debug: () => {}, warn: () => {} },
-    hostControl: {
-      shouldUseHostControl: overrides.hostControl?.shouldUseHostControl ?? (() => false),
-      isRunningInDocker: overrides.hostControl?.isRunningInDocker ?? (() => false),
-      isAvailable: async () => false,
-      getAppBundleHash: async () => ({ success: false }),
-      uninstallApp: async () => ({ success: false }),
-      installApp: async () => ({ success: false }),
-    },
   });
   return { inspector, commands };
 };
@@ -80,14 +66,6 @@ describe("DeviceAppManager.isUrlLaunchAvailable", () => {
     expect(await inspector.isUrlLaunchAvailable()).toBe(false);
   });
 
-  test("reports available under host control so the caller reaches the explicit launch error", async () => {
-    const { inspector, commands } = makeInspector({
-      platform: () => "linux",
-      hostControl: { shouldUseHostControl: () => true, isRunningInDocker: () => true },
-    });
-    expect(await inspector.isUrlLaunchAvailable()).toBe(true);
-    expect(commands).toHaveLength(0);
-  });
 });
 
 describe("DeviceAppManager.launchWithPayloadUrl", () => {
@@ -115,19 +93,6 @@ describe("DeviceAppManager.launchWithPayloadUrl", () => {
     await expect(
       inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
     ).rejects.toThrow(/macOS/);
-    await expect(
-      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
-    ).rejects.toBeInstanceOf(ActionableError);
-    expect(commands).toHaveLength(0);
-  });
-
-  test("throws an explicit host-control ActionableError under Docker host control", async () => {
-    const { inspector, commands } = makeInspector({
-      hostControl: { shouldUseHostControl: () => true, isRunningInDocker: () => true },
-    });
-    await expect(
-      inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
-    ).rejects.toThrow(/host control/i);
     await expect(
       inspector.launchWithPayloadUrl("udid", "com.apple.mobilesafari", "https://example.com")
     ).rejects.toBeInstanceOf(ActionableError);

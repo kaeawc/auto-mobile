@@ -271,7 +271,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
 
     fakeTimer.enableAutoAdvance();
     fakeAdb.setDevices([
-      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
+      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554", source: "local" },
     ]);
     fakeAdb.setCommandResponse("emu avd name", createExecResult(""));
     fakeAdb.setCommandResponse("get-state", createExecResult("device\n"));
@@ -283,8 +283,8 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
 
     const child = await client.startEmulator("Pixel_9_Pro");
     fakeAdb.setDevices([
-      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
-      { name: "Unknown (emulator-5558)", platform: "android", deviceId: "emulator-5558" },
+      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554", source: "local" },
+      { name: "Unknown (emulator-5558)", platform: "android", deviceId: "emulator-5558", source: "local" },
     ]);
 
     const readyDevice = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, child);
@@ -427,8 +427,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
   test("targets the selected emulator deviceId during already-running readiness waits", async () => {
     fakeTimer.enableAutoAdvance();
     const scopedFactory = new DeviceScopedAdbClientFactory([
-      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
-      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554", source: "local" },
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556", source: "local" },
     ]);
     const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
     skipEmulatorPathDetection(client);
@@ -449,7 +449,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     fakeTimer.enableAutoAdvance();
     const scopedFactory = new DeviceScopedAdbClientFactory(
       [
-        { name: "am-api32-ga-arm64", platform: "android", deviceId: "emulator-5556" },
+        { name: "am-api32-ga-arm64", platform: "android", deviceId: "emulator-5556", source: "local" },
       ],
       new Map([
         ["emulator-5556", "am-api32-ga-arm64"],
@@ -476,7 +476,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     fakeTimer.enableAutoAdvance();
     const scopedFactory = new DeviceScopedAdbClientFactory(
       [
-        { name: "am-api32-ga-arm64", platform: "android", deviceId: "emulator-5556" },
+        { name: "am-api32-ga-arm64", platform: "android", deviceId: "emulator-5556", source: "local" },
       ],
       new Map([
         ["emulator-5556", "am-api32-ga-arm64"],

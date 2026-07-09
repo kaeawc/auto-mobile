@@ -37,19 +37,12 @@ import kotlinx.serialization.json.contentOrNull
  * Client for the observation stream Unix socket server. Subscribes to receive real-time hierarchy
  * and screenshot updates from the MCP server.
  *
- * Socket path: ~/.auto-mobile/observation-stream.sock or /tmp/auto-mobile-observation-stream.sock
- * (in external mode)
+ * Socket path: ~/.auto-mobile/observation-stream.sock
  */
 class ObservationStreamClient {
   companion object {
     internal fun getSocketPath(): String {
-      // Check for external mode (matches the server's logic)
-      val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
-      return if (isExternalMode) {
-        "/tmp/auto-mobile-observation-stream.sock"
-      } else {
-        "${System.getProperty("user.home")}/.auto-mobile/observation-stream.sock"
-      }
+      return "${System.getProperty("user.home")}/.auto-mobile/observation-stream.sock"
     }
 
     fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))

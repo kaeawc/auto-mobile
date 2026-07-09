@@ -396,7 +396,6 @@ async function main() {
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
   const appearanceSocketServer = await import("./daemon/appearanceSocketServer");
   const appearanceSyncScheduler = await import("./utils/appearance/AppearanceSyncScheduler");
-  const hostEmulatorAutoConnect = await import("./utils/hostEmulatorAutoConnect");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
@@ -410,11 +409,8 @@ async function main() {
   const { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } = deviceSnapshotSocketServer;
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
-  const { startHostEmulatorAutoConnect, stopHostEmulatorAutoConnect } = hostEmulatorAutoConnect;
-
   setProcessShutdownHandler(async signal => {
     logger.info(`Received ${signal} signal, shutting down`);
-    await stopHostEmulatorAutoConnect();
     await stopVideoRecordingSocketServer();
     await stopTestRecordingSocketServer();
     await stopDeviceSnapshotSocketServer();
@@ -692,7 +688,6 @@ async function main() {
       } else {
         logger.info("Starting MCP server in direct mode (--no-proxy flag)");
         // Start auxiliary services only in direct mode
-        await startHostEmulatorAutoConnect();
         await startVideoRecordingSocketServer();
         await startTestRecordingSocketServer();
         await startDeviceSnapshotSocketServer();

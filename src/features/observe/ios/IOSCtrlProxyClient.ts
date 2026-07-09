@@ -26,8 +26,6 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/Perfo
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
-import { shouldUseHostControl, getHostControlHost } from "../../../utils/hostControlClient";
-import { isRunningInDocker } from "../../../utils/dockerEnv";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../../utils/factories/PlatformDeviceManagerFactory";
 import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
@@ -978,9 +976,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   private resolveWebSocketHost(): string {
-    if (shouldUseHostControl() && isRunningInDocker()) {
-      return getHostControlHost();
-    }
     return "localhost";
   }
 

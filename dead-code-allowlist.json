@@ -11,7 +11,6 @@
     "src/features/snapshot/index.ts",
     "src/features/video/index.ts",
     "src/models/index.ts",
-    "src/utils/hostControlClient.ts",
     "src/utils/interfaces/PlanExecutor.ts",
     "src/utils/interfaces/PlanSerializer.ts",
     "src/utils/interfaces/index.ts",

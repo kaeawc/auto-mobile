@@ -36,18 +36,12 @@ import kotlinx.serialization.json.Json
  * Client for the failures push Unix socket server. Subscribes to receive real-time failure
  * notifications from the MCP server.
  *
- * Socket path: ~/.auto-mobile/failures-push.sock or /tmp/auto-mobile-failures-push.sock (in
- * external mode)
+ * Socket path: ~/.auto-mobile/failures-push.sock
  */
 class FailuresPushSocketClient {
   companion object {
     private fun getSocketPath(): String {
-      val isExternalMode = System.getenv("AUTOMOBILE_EMULATOR_EXTERNAL") == "true"
-      return if (isExternalMode) {
-        "/tmp/auto-mobile-failures-push.sock"
-      } else {
-        "${System.getProperty("user.home")}/.auto-mobile/failures-push.sock"
-      }
+      return "${System.getProperty("user.home")}/.auto-mobile/failures-push.sock"
     }
   }
 

@@ -22,10 +22,8 @@ export interface SocketResponse {
  * Configuration for socket server paths.
  */
 export interface SocketServerConfig {
-  /** Default socket path when not in external mode */
+  /** Socket path used by the daemon and clients. */
   defaultPath: string;
-  /** Socket path when in external mode (Docker) */
-  externalPath: string;
 }
 
 /**
@@ -75,6 +73,5 @@ export const DEFAULT_SOCKET_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
  * Get the socket path based on environment mode.
  */
 export function getSocketPath(config: SocketServerConfig): string {
-  const isExternalMode = process.env.AUTOMOBILE_EMULATOR_EXTERNAL === "true";
-  return isExternalMode ? config.externalPath : config.defaultPath;
+  return config.defaultPath;
 }

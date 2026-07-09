@@ -648,10 +648,10 @@ function mapIosAppContainerError(error: unknown, context: IosAppContainerCommand
     );
   }
 
-  if (/host-control|docker|Driving the iOS simulator from inside Docker/i.test(message)) {
+  if (/docker|iOS simulator tooling is only available on macOS/i.test(message)) {
     return new ActionableError(
       `iOS simulator app file ${context.operation} requires local macOS simctl access; ` +
-      `host-control or Docker simulator access is unsupported. Original error: ${message}`
+      `Docker-to-host simulator access is unsupported. Original error: ${message}`
     );
   }
 

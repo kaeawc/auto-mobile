@@ -7,8 +7,6 @@ import { hashAppBundle } from "./AppBundleHasher";
 import { isProcessAlreadyGoneError } from "./iosProcessErrors";
 import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
 import { logger } from "../logger";
-import { isRunningInDocker } from "../dockerEnv";
-import { getDeviceAppBundleHash, installDeviceApp, isHostControlAvailable, shouldUseHostControl, uninstallDeviceApp } from "../hostControlClient";
 import type { Logger } from "../logger";
 
 interface DeviceAppManagerDependencies {
@@ -21,19 +19,11 @@ interface DeviceAppManagerDependencies {
   stat: (path: string) => Promise<{ isDirectory: () => boolean }>;
   tmpdir: () => string;
   logger: Pick<Logger, "debug" | "warn">;
-  hostControl: {
-    shouldUseHostControl: () => boolean;
-    isRunningInDocker: () => boolean;
-    isAvailable: () => Promise<boolean>;
-    getAppBundleHash: (deviceId: string, bundleId: string) => Promise<{ success: boolean; error?: string; data?: { hash: string | null } }>;
-    uninstallApp: (deviceId: string, bundleId: string) => Promise<{ success: boolean; error?: string }>;
-    installApp: (deviceId: string, artifactPath: string) => Promise<{ success: boolean; error?: string; data?: { message: string } }>;
-  };
 }
 
 type LaunchPreconditionResult =
   | { ok: true }
-  | { ok: false; reason: "host-control" | "non-darwin" };
+  | { ok: false; reason: "non-darwin" };
 
 const defaultDependencies: DeviceAppManagerDependencies = {
   platform: () => process.platform,
@@ -58,14 +48,6 @@ const defaultDependencies: DeviceAppManagerDependencies = {
   stat: async path => fs.stat(path),
   tmpdir,
   logger,
-  hostControl: {
-    shouldUseHostControl,
-    isRunningInDocker,
-    isAvailable: () => isHostControlAvailable(),
-    getAppBundleHash: async (deviceId: string, bundleId: string) => getDeviceAppBundleHash({ deviceId, bundleId }),
-    uninstallApp: async (deviceId: string, bundleId: string) => uninstallDeviceApp({ deviceId, bundleId }),
-    installApp: async (deviceId: string, artifactPath: string) => installDeviceApp({ deviceId, artifactPath })
-  }
 };
 
 const quoteShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
@@ -395,7 +377,7 @@ export interface DeviceUrlLauncher {
   /**
    * Open `url` on a physical iOS device by launching `bundleId` with the URL as
    * its launch payload. Throws with actionable context on failure (unsupported
-   * host, host-control mode, or an underlying devicectl error).
+   * host or an underlying devicectl error).
    */
   launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void>;
 }
@@ -407,22 +389,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     this.deps = deps;
   }
 
-  /**
-   * Docker host-control mode: we're proxying a physical device through the
-   * host-control bridge rather than driving a local `devicectl`. The bridge
-   * exposes install/uninstall but no process-launch/URL primitives, so the
-   * launch-family methods return an explicit "not supported under host control"
-   * posture instead of shelling out. Single source for the host-control gate
-   * expression that devicectl entry points share.
-   */
-  private isHostControlMode(): boolean {
-    return this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
-  }
-
   private getLaunchPrecondition(): LaunchPreconditionResult {
-    if (this.isHostControlMode()) {
-      return { ok: false, reason: "host-control" };
-    }
     if (this.deps.platform() !== "darwin") {
       return { ok: false, reason: "non-darwin" };
     }
@@ -432,22 +399,14 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   /**
    * True when the physical-device open-URL path is usable.
    *
-   * Under Docker host control we report `true` even though `devicectl` isn't
-   * reachable locally: the host-control bridge exposes no launch-with-URL
-   * primitive yet, so we let the caller proceed to {@link launchWithPayloadUrl},
-   * which returns the precise "not supported under host control" error rather
-   * than the generic missing-devicectl message. Otherwise this requires a macOS
-   * host with a working `devicectl` (Xcode 15+).
+   * Requires a macOS host with a working `devicectl` (Xcode 15+).
    *
    * Part of the {@link DeviceUrlLauncher} seam OpenURL depends on; simulators are
    * handled by the `simctl openurl` path in OpenURL and never reach this method.
-   * Named distinctly from the host-control `isAvailable()` dependency so the
-   * multi-purpose class exposes an unambiguous URL-launch availability check.
+   * Named distinctly so the multi-purpose class exposes an unambiguous
+   * URL-launch availability check.
    */
   async isUrlLaunchAvailable(): Promise<boolean> {
-    if (this.isHostControlMode()) {
-      return true;
-    }
     if (this.deps.platform() !== "darwin") {
       return false;
     }
@@ -473,12 +432,6 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    */
   async launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void> {
     const precondition = this.getLaunchPrecondition();
-    if (!precondition.ok && precondition.reason === "host-control") {
-      throw new ActionableError(
-        "Opening a URL on a physical iOS device is not supported under host control: " +
-        "the host-control bridge exposes no devicectl launch-with-URL primitive."
-      );
-    }
     if (!precondition.ok && precondition.reason === "non-darwin") {
       throw new ActionableError("Opening URLs on a physical iOS device requires macOS");
     }
@@ -501,21 +454,6 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return this.getSimulatorAppBundleHash(deviceUdid, bundleId);
     }
 
-    if (this.isHostControlMode()) {
-      const available = await this.deps.hostControl.isAvailable();
-      if (!available) {
-        this.deps.logger.warn("[DeviceAppManager] Host control not available for devicectl");
-        return null;
-      }
-
-      const result = await this.deps.hostControl.getAppBundleHash(deviceUdid, bundleId);
-      if (!result.success) {
-        this.deps.logger.warn(`[DeviceAppManager] Host control devicectl failed: ${result.error || "Unknown error"}`);
-        return null;
-      }
-      return result.data?.hash ?? null;
-    }
-
     // withInstalledAppBundle propagates callback errors; preserve this method's
     // null-on-failure contract by swallowing a hashing failure here.
     try {
@@ -534,20 +472,8 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * returns in a fresh state. Throws if the installed bundle can't be resolved,
    * or with the underlying devicectl error if the uninstall/install step fails
    * (so a post-uninstall install failure surfaces rather than being masked).
-   *
-   * Not available under host control (Docker): the host-control bridge exposes
-   * install/uninstall but no primitive to copy the installed bundle off-device,
-   * so we can't obtain a reinstall artifact. We fail with an explicit message
-   * rather than the misleading "could not resolve bundle" from the darwin path.
    */
   public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
-    if (this.isHostControlMode()) {
-      throw new ActionableError(
-        `Clearing app data via uninstall+reinstall is not supported under host control for ${bundleId}: ` +
-        "the host-control bridge cannot copy the installed bundle off-device to reinstall it."
-      );
-    }
-
     const done = await this.withInstalledAppBundle(deviceUdid, bundleId, async bundlePath => {
       await this.uninstallApp(deviceUdid, bundleId, false);
       await this.installApp(deviceUdid, bundlePath);
@@ -561,8 +487,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   /**
    * Copy the device-installed `.app` bundle to a temp dir and run `fn` against
    * its on-disk path, cleaning up temp dirs afterward. Returns null if the bundle
-   * can't be located (or not on macOS). Local devicectl path only — host-control
-   * callers handle their own remote primitives.
+   * can't be located (or not on macOS).
    *
    * Lookup failures (info/copy) are swallowed → null. The callback's own errors
    * PROPAGATE: clearAppDataViaReinstall must surface an install failure that
@@ -645,22 +570,6 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return this.uninstallSimulatorApp(deviceUdid, bundleId);
     }
 
-    if (this.isHostControlMode()) {
-      const available = await this.deps.hostControl.isAvailable();
-      if (!available) {
-        this.deps.logger.warn("[DeviceAppManager] Host control not available for devicectl uninstall");
-        return;
-      }
-
-      const result = await this.deps.hostControl.uninstallApp(deviceUdid, bundleId);
-      if (!result.success) {
-        throw new ActionableError(
-          `Failed to uninstall ${bundleId} on physical device via host control: ${result.error || "unknown error"}`
-        );
-      }
-      return;
-    }
-
     if (this.deps.platform() !== "darwin") {
       return;
     }
@@ -682,22 +591,6 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   }
 
   public async installApp(deviceUdid: string, artifactPath: string): Promise<void> {
-    if (this.isHostControlMode()) {
-      const available = await this.deps.hostControl.isAvailable();
-      if (!available) {
-        this.deps.logger.warn("[DeviceAppManager] Host control not available for devicectl install");
-        throw new ActionableError("Host control not available for physical device app installation");
-      }
-
-      const result = await this.deps.hostControl.installApp(deviceUdid, artifactPath);
-      if (!result.success) {
-        throw new ActionableError(
-          `Failed to install app on physical device via host control: ${result.error || "unknown error"}`
-        );
-      }
-      return;
-    }
-
     if (this.deps.platform() !== "darwin") {
       throw new ActionableError("Physical device app installation requires macOS");
     }
@@ -732,9 +625,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * resolve a PID by bundle (only `install`/`info apps` do), so a reliable
    * terminate-by-bundle needs the follow-up device app-listing work.
    *
-   * Gated to macOS + local devicectl. Host control (Docker) exposes no launch
-   * bridge, so we return an explicit, actionable error rather than a confusing
-   * simctl-style failure.
+   * Gated to macOS + local devicectl.
    */
   public async launchApp(
     deviceUdid: string,
@@ -742,14 +633,6 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     options: { terminateExisting?: boolean } = {}
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
     const precondition = this.getLaunchPrecondition();
-    if (!precondition.ok && precondition.reason === "host-control") {
-      return {
-        success: false,
-        error: `Launching apps on a physical device is not supported under host control for ${bundleId}: ` +
-          "the host-control bridge exposes install/uninstall but no devicectl process-launch primitive."
-      };
-    }
-
     if (!precondition.ok && precondition.reason === "non-darwin") {
       return { success: false, error: "Physical device app launch requires macOS" };
     }
@@ -808,20 +691,13 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    *   way, so we report success rather than a false failure.
    *
    * Throws on an underlying devicectl failure that is *not* the already-exited
-   * race (e.g. device locked / not connected). Gated to macOS + local devicectl:
-   * host control (Docker) exposes no process-management bridge, and non-darwin
-   * hosts have no devicectl, so both throw an explicit, actionable error rather
-   * than a confusing simctl-style failure (iOS ≤16 devices reject the devicectl
-   * terminate at the tool level and surface as a thrown devicectl error).
+   * race (e.g. device locked / not connected). Gated to macOS + local devicectl;
+   * non-darwin hosts have no devicectl, so they throw an explicit, actionable
+   * error rather than a confusing simctl-style failure (iOS ≤16 devices reject
+   * the devicectl terminate at the tool level and surface as a thrown devicectl
+   * error).
    */
   public async terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
-    if (this.isHostControlMode()) {
-      throw new ActionableError(
-        `Terminating an app on a physical device is not supported under host control for ${bundleId}: ` +
-        "the host-control bridge exposes install/uninstall but no devicectl process-management primitive."
-      );
-    }
-
     if (this.deps.platform() !== "darwin") {
       throw new ActionableError("Physical iOS device app termination requires macOS");
     }

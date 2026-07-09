@@ -5,21 +5,10 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
-import { isRunningInDocker } from "../dockerEnv";
-import { isHostControlAvailable, runSimctlExec, shouldUseHostControl } from "../hostControlClient";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
-
-/**
- * Shared message for the intentionally-unsupported "drive iOS simulator from
- * inside Docker via host-control" mode. Used by both the hard failure in
- * executeCommand and by callers (e.g. device discovery) that surface the reason.
- */
-export const DOCKER_IOS_UNSUPPORTED_MESSAGE =
-  "Driving the iOS simulator from inside Docker (host-control mode) is not " +
-  "supported yet. Run AutoMobile directly on a macOS host for iOS simulator automation.";
 
 export interface AppleDevice {
   udid: string;
@@ -247,13 +236,6 @@ export interface SimCtl {
   pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }>;
 }
 
-interface SimctlHostControlRunner {
-  isAvailable(): Promise<boolean>;
-  isRunningInDocker(): boolean;
-  runSimctl(args: string[]): Promise<ExecResult>;
-  shouldUseHostControl(): boolean;
-}
-
 // Enhance the standard execAsync result to implement the ExecResult interface
 const execAsync = async (file: string, args: string[], maxBuffer?: number): Promise<ExecResult> => {
   const options = maxBuffer ? { maxBuffer } : undefined;
@@ -355,7 +337,6 @@ interface SimulatorList {
 export class SimCtlClient implements SimCtl {
   device: BootedDevice | null;
   execAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
-  private hostControl: SimctlHostControlRunner;
   private timer: Timer;
   private platform: NodeJS.Platform;
   private readonly usesInjectedExecAsync: boolean;
@@ -371,13 +352,11 @@ export class SimCtlClient implements SimCtl {
    * Create an IosUtils instance
    * @param device - Optional device
    * @param execAsyncFn - promisified exec function (for testing)
-   * @param hostControlRunner - host control runner (for testing)
    * @param timer - Timer for delays and time tracking
    */
   constructor(
     device: BootedDevice | null = null,
     execAsyncFn: ((file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>) | null = null,
-    hostControlRunner: SimctlHostControlRunner | null = null,
     timer: Timer = defaultTimer,
     platform: NodeJS.Platform = process.platform
   ) {
@@ -386,18 +365,6 @@ export class SimCtlClient implements SimCtl {
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
     this.platform = platform;
-    this.hostControl = hostControlRunner || {
-      isAvailable: () => isHostControlAvailable(),
-      isRunningInDocker,
-      runSimctl: async (args: string[]) => {
-        const result = await runSimctlExec(args);
-        if (!result.success || !result.data) {
-          throw new Error(result.error || "Host control simctl failed");
-        }
-        return result.data;
-      },
-      shouldUseHostControl
-    };
   }
 
   /**
@@ -430,18 +397,6 @@ export class SimCtlClient implements SimCtl {
     const command = displayCommand ?? args.map(arg => JSON.stringify(arg)).join(" ");
     const hostArgs = args;
     const localArgs = ["simctl", ...hostArgs];
-
-    // Driving the iOS simulator from inside Docker (host-control mode) is
-    // intentionally unsupported right now — see the deferral note on
-    // pushNotification(). Forwarding simctl to the host "works" for stdout-only
-    // commands but silently breaks any command that references a container-local
-    // path (`push`, `install`, ...), because the file lives in the container while
-    // simctl runs on the host. Rather than expose that half-working surface, fail
-    // fast with a clear message. When the iOS roadmap picks this up, restore the
-    // host-control routing that previously lived here.
-    if (this.isUnsupportedDockerHostControlMode()) {
-      throw new ActionableError(DOCKER_IOS_UNSUPPORTED_MESSAGE);
-    }
 
     const fullCommand = `xcrun simctl ${command}`;
     const startTime = this.timer.now();
@@ -503,27 +458,7 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with boolean indicating availability
    */
   async isAvailable(): Promise<boolean> {
-    // iOS simulator control is unavailable in Docker host-control mode — it is
-    // intentionally unsupported for now (see executeCommand). Report unavailable
-    // rather than probing the host so callers fail fast instead of half-working.
-    // Callers that need to tell this apart from "simctl is simply absent" should
-    // check isUnsupportedDockerHostControlMode() so they can surface the reason.
-    if (this.isUnsupportedDockerHostControlMode()) {
-      return false;
-    }
-
     return this.isLocalSimctlAvailable();
-  }
-
-  /**
-   * True when iOS control is being requested from inside a Docker container in
-   * host-control mode, which AutoMobile intentionally does not support yet (see
-   * executeCommand / pushNotification). Exposed so discovery and diagnostics can
-   * distinguish "deliberately unsupported here" from "simctl is absent" and
-   * surface the difference instead of silently reporting no simulators.
-   */
-  isUnsupportedDockerHostControlMode(): boolean {
-    return this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker();
   }
 
   private async ensureLocalSimctlAvailable(): Promise<void> {
@@ -1075,18 +1010,6 @@ export class SimCtlClient implements SimCtl {
   /**
    * Deliver a simulated remote push to a booted simulator via `simctl push`.
    * Writes the payload to a temp .apns file because executeCommand cannot stream stdin.
-   *
-   * KNOWN LIMITATION — Docker host-control mode (intentionally deferred):
-   * When AutoMobile runs inside a container with host-control enabled,
-   * `executeCommand` forwards `simctl push ...` to the macOS host daemon, but the
-   * `.apns` temp file below is created on the *container's* filesystem. The host
-   * cannot see that path, so the push fails in that configuration. Fixing it
-   * properly (stream the payload over host-control/stdin, create the temp file on
-   * the host side, or share a mount) is real container<->host plumbing that is
-   * easy to get subtly wrong, and Docker-driven iOS control is not a use case we
-   * support right now. We are deferring this until the iOS roadmap items that
-   * actually depend on it land. Local (non-Docker) macOS — the supported path —
-   * works correctly because the temp file and `simctl` share one filesystem.
    */
   async pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }> {
     const dir = await fsPromises.mkdtemp(join(tmpdir(), "automobile-apns-"));

@@ -755,9 +755,7 @@ function createIosMetadataSource(device: BootedDevice): IosAppMetadataSource {
   return {
     listApps: (deviceId?: string) => simctl.listApps(deviceId),
     getPhysicalDeviceAppInfo: async (deviceId: string, bundleId: string) => {
-      // devicectl requires macOS — in Docker/Linux containers physical device
-      // metadata is not available (host control only exposes bundle hash, not
-      // full app info). Match DeviceAppManager's platform guard.
+      // devicectl requires macOS; match DeviceAppManager's platform guard.
       if (process.platform !== "darwin") {
         return null;
       }

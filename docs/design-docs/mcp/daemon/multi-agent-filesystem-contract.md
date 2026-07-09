@@ -67,7 +67,7 @@ for historical continuity; resolve them as
 | `${TMPDIR}/auto-mobile/cache` (dumpsys) | N | `dumpsys-window-<deviceId>.json` — per-device. |
 | `${TMPDIR}/auto-mobile/cache/screen-size` | N | `md5(deviceId).json` — per-device, content is stable; concurrent writes are idempotent. (No longer CWD-relative.) |
 | daemon control socket / PID / lock | 1 (daemon) | discovered by clients via env — see §2. |
-| auxiliary sockets (video, snapshot, …) | 1 (daemon) | path depends on `AUTOMOBILE_EMULATOR_EXTERNAL`. |
+| auxiliary sockets (video, snapshot, …) | 1 (daemon) | resolved from the configured/default daemon paths; clients and daemon must agree on explicit overrides. |
 | `${TMPDIR}/auto-mobile/logs/daemon.log` | 1 daemon | stable daemon log; rotated files are `daemon-<timestamp>.log`. |
 | `${TMPDIR}/auto-mobile/logs/stdio-<pid>.log` | 1 each | per-stdio-client file; pruning only trims this pid's files + sweeps stale others by mtime. |
 | `${TMPDIR}/auto-mobile/tool_logs` (`LOG_DIR`) | N | routed through `tempDir` (honors `AUTOMOBILE_DATA_DIR`, not `TMPDIR`). |
@@ -100,11 +100,6 @@ export AUTOMOBILE_DAEMON_SOCKET_PATH=/var/run/auto-mobile/daemon.sock
 export AUTOMOBILE_DAEMON_PID_FILE_PATH=/var/run/auto-mobile/daemon.pid
 export AUTOMOBILE_DAEMON_LOCK_FILE_PATH=/var/run/auto-mobile/daemon.lock
 
-# Container/external-emulator mode flips ALL auxiliary socket paths
-# (~/.auto-mobile/*.sock  <->  /tmp/auto-mobile-*.sock). It MUST be the same
-# string for clients and daemon. "true" vs unset → different paths → no connect.
-export AUTOMOBILE_EMULATOR_EXTERNAL=true   # set on BOTH, or on NEITHER
-
 # Log routing (after the code fix in §4): keep this per-host, not per-client.
 export AUTOMOBILE_LOG_LEVEL=warn           # quieter shared log in prod
 ```
@@ -124,12 +119,6 @@ export AUTOMOBILE_LOG_LEVEL=warn           # quieter shared log in prod
   you override them, override them for **both** sides. The daemon already
   propagates non-default values to the child it spawns (`manager.ts` `childEnv`),
   but a *client* that connects must also see the same override.
-- **`AUTOMOBILE_EMULATOR_EXTERNAL`** — `getSocketPath()` returns
-  `defaultPath` (`~/.auto-mobile/*.sock`) vs `externalPath`
-  (`/tmp/auto-mobile-*.sock`) based purely on this var. A client that resolves
-  it differently than the daemon looks for auxiliary sockets in the wrong place
-  (issues #2446 / #2461). It is read at call time in each process, so it must be
-  identical in each process's environment.
 
 ### Single-user requirement
 
@@ -179,7 +168,6 @@ export AUTOMOBILE_DATA_DIR=/run/auto-mobile/agent-$AGENT_ID
 export AUTOMOBILE_DAEMON_SOCKET_PATH=/run/auto-mobile/daemon.sock
 export AUTOMOBILE_DAEMON_PID_FILE_PATH=/run/auto-mobile/daemon.pid
 export AUTOMOBILE_DAEMON_LOCK_FILE_PATH=/run/auto-mobile/daemon.lock
-export AUTOMOBILE_EMULATOR_EXTERNAL=...   # identical everywhere (see §2)
 ```
 
 With this, the only shared filesystem state is the daemon's socket/PID/lock — and
@@ -207,7 +195,6 @@ cross-agent data loss as defense-in-depth:
 - [ ] All clients + daemon run as the **same OS user**.
 - [ ] **Per-agent `AUTOMOBILE_DATA_DIR`** (preferred), with explicit
       `AUTOMOBILE_DAEMON_*` paths pointing every agent at the one shared daemon.
-- [ ] `AUTOMOBILE_EMULATOR_EXTERNAL` is the **same** value everywhere.
 - [ ] If overriding `AUTOMOBILE_DAEMON_{SOCKET,PID,LOCK}_FILE_PATH`, set them
       everywhere.
 - [ ] One pinned package version across the fleet.

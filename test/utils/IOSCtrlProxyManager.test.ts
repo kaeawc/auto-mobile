@@ -14,6 +14,18 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
 
+interface FakeListeningProcess {
+  pid: number;
+  port: number;
+  command: string;
+  alive: boolean;
+  ppid?: number;
+  pgid?: number;
+  environment?: string;
+  ignoreTerm?: boolean;
+  ignoreKill?: boolean;
+}
+
 /**
  * A minimal format-version-1 xctestrun with a single UI-test bundle, used by the
  * boundary test to model what the in-simulator runner actually reads.
@@ -56,22 +68,10 @@ function installListeningProcessFakes(
   fakeExecutor: FakeProcessExecutor,
   processes: FakeListeningProcess[]
 ): void {
-  const markProcessTreeDead = (rootPid: number, signal: "TERM" | "KILL") => {
-    const queue = [rootPid];
-    const visited = new Set<number>();
-    while (queue.length > 0) {
-      const pid = queue.shift()!;
-      if (visited.has(pid)) {
-        continue;
-      }
-      visited.add(pid);
-      const process = processes.find(candidate => candidate.pid === pid);
-      if (process && !(signal === "TERM" ? process.ignoreTerm : process.ignoreKill)) {
-        process.alive = false;
-      }
-      for (const child of processes.filter(candidate => candidate.ppid === pid)) {
-        queue.push(child.pid);
-      }
+  const markProcessDead = (pid: number, signal: "TERM" | "KILL") => {
+    const process = processes.find(candidate => candidate.pid === pid);
+    if (process && !(signal === "TERM" ? process.ignoreTerm : process.ignoreKill)) {
+      process.alive = false;
     }
   };
 
@@ -99,30 +99,37 @@ function installListeningProcessFakes(
       ""
     );
   });
+  fakeExecutor.setCommandHandler("ps -axo pid=,ppid=", () =>
+    createExecResult(
+      processes
+        .filter(process => process.alive)
+        .map(process => `${process.pid} ${process.ppid ?? 1}`)
+        .join("\n"),
+      ""
+    )
+  );
   fakeExecutor.setCommandHandler("kill -TERM", command => {
     const groupPid = Number(command.match(/kill -TERM -- -(\d+)/)?.[1]);
     if (!Number.isNaN(groupPid)) {
-      markProcessTreeDead(groupPid, "TERM");
+      for (const process of processes.filter(candidate => candidate.alive && (candidate.pgid ?? candidate.pid) === groupPid)) {
+        markProcessDead(process.pid, "TERM");
+      }
       return createExecResult("", "");
     }
     const pid = Number(command.match(/kill -TERM\s+(\d+)/)?.[1]);
-    const process = processes.find(candidate => candidate.pid === pid);
-    if (process && !process.ignoreTerm) {
-      process.alive = false;
-    }
+    markProcessDead(pid, "TERM");
     return createExecResult("", "");
   });
   fakeExecutor.setCommandHandler("kill -KILL", command => {
     const groupPid = Number(command.match(/kill -KILL -- -(\d+)/)?.[1]);
     if (!Number.isNaN(groupPid)) {
-      markProcessTreeDead(groupPid, "KILL");
+      for (const process of processes.filter(candidate => candidate.alive && (candidate.pgid ?? candidate.pid) === groupPid)) {
+        markProcessDead(process.pid, "KILL");
+      }
       return createExecResult("", "");
     }
     const pid = Number(command.match(/kill -KILL\s+(\d+)/)?.[1]);
-    const process = processes.find(candidate => candidate.pid === pid);
-    if (process && !process.ignoreKill) {
-      process.alive = false;
-    }
+    markProcessDead(pid, "KILL");
     return createExecResult("", "");
   });
   fakeExecutor.setCommandHandler("kill -0", command => {
@@ -1840,7 +1847,8 @@ describe("IOSCtrlProxyManager", function() {
       await manager.start();
 
       expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -2225")).toBe(true);
-      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2227")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2226")).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2227")).toBe(true);
       expect(daemonShell.alive).toBe(false);
       expect(daemonXcodebuild.alive).toBe(false);
       expect(staleListener.alive).toBe(false);

@@ -1912,12 +1912,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
-   * Terminate a runner process TREE rooted at `pid` (TERM → wait → KILL), signaling the
-   * process group first and falling back to the single PID. Under `spawn(..., {shell:
-   * true, detached: true})` the tracked PID is a /bin/sh group leader whose xcodebuild
-   * child does NOT die when only the shell is signaled (#2834 review) — the group signal
-   * (`kill -- -pid`) reaches both. The single-PID fallback covers processes that predate
-   * detachment (not group leaders) or whose group is already gone. Scoped to this tree —
+   * Terminate a runner process TREE rooted at `pid` (TERM → wait → KILL). The process
+   * group signal handles current detached launches; the descendant fallback handles
+   * legacy/orphaned shell roots that are not process-group leaders. Scoped to this tree —
    * deliberately NOT a machine-wide pkill sweep, which would hit other devices' runners.
    */
   private static async terminateProcessTree(
@@ -1925,19 +1922,76 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer,
     pid: number
   ): Promise<void> {
-    try {
-      await processExecutor.exec(`kill -TERM -- -${pid} 2>/dev/null || kill -TERM ${pid} 2>/dev/null`);
-    } catch {
-      // Process/group may have already exited.
-    }
+    const processTreePids = await IOSCtrlProxyManager.findDescendantProcessIds(processExecutor, pid);
+    const descendantFirstPids = [...processTreePids].reverse();
 
-    if (!await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid)) {
+    try {
+      await processExecutor.exec(`kill -TERM -- -${pid} 2>/dev/null`);
+    } catch {
+      // Process group may not exist when pid is not a group leader.
+    }
+    await IOSCtrlProxyManager.signalProcessIds(processExecutor, [...descendantFirstPids, pid], "TERM");
+
+    if (!await IOSCtrlProxyManager.waitForProcessesExit(processExecutor, timer, [pid, ...processTreePids])) {
       try {
-        await processExecutor.exec(`kill -KILL -- -${pid} 2>/dev/null || kill -KILL ${pid} 2>/dev/null`);
+        await processExecutor.exec(`kill -KILL -- -${pid} 2>/dev/null`);
       } catch {
-        // Process/group may have exited between liveness check and kill.
+        // Process group may not exist when pid is not a group leader.
       }
-      await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid);
+      await IOSCtrlProxyManager.signalProcessIds(processExecutor, [...descendantFirstPids, pid], "KILL");
+      await IOSCtrlProxyManager.waitForProcessesExit(processExecutor, timer, [pid, ...processTreePids]);
+    }
+  }
+
+  private static async findDescendantProcessIds(
+    processExecutor: ProcessExecutor,
+    rootPid: number
+  ): Promise<number[]> {
+    try {
+      const { stdout } = await processExecutor.exec("ps -axo pid=,ppid=");
+      const childrenByParent = new Map<number, number[]>();
+      for (const line of stdout.trim().split("\n")) {
+        const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+        if (!match) {
+          continue;
+        }
+        const pid = Number(match[1]);
+        const ppid = Number(match[2]);
+        const siblings = childrenByParent.get(ppid) ?? [];
+        siblings.push(pid);
+        childrenByParent.set(ppid, siblings);
+      }
+
+      const descendants: number[] = [];
+      const queue = [...(childrenByParent.get(rootPid) ?? [])];
+      const visited = new Set<number>();
+      while (queue.length > 0) {
+        const pid = queue.shift()!;
+        if (visited.has(pid)) {
+          continue;
+        }
+        visited.add(pid);
+        descendants.push(pid);
+        queue.push(...(childrenByParent.get(pid) ?? []));
+      }
+      return descendants;
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Failed to enumerate descendants for PID ${rootPid}: ${error}`);
+      return [];
+    }
+  }
+
+  private static async signalProcessIds(
+    processExecutor: ProcessExecutor,
+    pids: number[],
+    signal: "TERM" | "KILL"
+  ): Promise<void> {
+    for (const pid of pids) {
+      try {
+        await processExecutor.exec(`kill -${signal} ${pid} 2>/dev/null`);
+      } catch {
+        // Process may have already exited.
+      }
     }
   }
 
@@ -1960,6 +2014,32 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
       await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid);
     }
+  }
+
+  private static async waitForProcessesExit(
+    processExecutor: ProcessExecutor,
+    timer: Timer,
+    pids: number[]
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < IOSCtrlProxyManager.PORT_RELEASE_ATTEMPTS; attempt++) {
+      if (await IOSCtrlProxyManager.haveProcessesExited(processExecutor, pids)) {
+        return true;
+      }
+      await timer.sleep(IOSCtrlProxyManager.PORT_RELEASE_GRACE_MS);
+    }
+    return IOSCtrlProxyManager.haveProcessesExited(processExecutor, pids);
+  }
+
+  private static async haveProcessesExited(
+    processExecutor: ProcessExecutor,
+    pids: number[]
+  ): Promise<boolean> {
+    for (const pid of pids) {
+      if (await IOSCtrlProxyManager.isProcessRunningWithExecutor(processExecutor, pid)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static async waitForProcessExit(

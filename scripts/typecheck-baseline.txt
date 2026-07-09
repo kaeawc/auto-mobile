@@ -190,8 +190,6 @@ src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable
 src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
 src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
 src/index.ts: error TS2322: Type 'string | number | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2339: Property 'networkMockable' does not exist on type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
-src/index.ts: error TS2353: Object literal may only specify known properties, and 'networkMockable' does not exist in type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
 src/server/appFileService.ts: error TS2345: Argument of type 'PutAppFileRequest' is not assignable to parameter of type 'PutAppFileArgs'.
 src/server/appFileService.ts: error TS2430: Interface 'PutAppFileRequest' incorrectly extends interface 'PutAppFileArgs'.
 src/server/appResources.ts: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("platform" | "type" | "search" | "deviceId" | "profile")[]'.
@@ -355,7 +353,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 48 :: src/db/migrator.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
 # swap-fp: 5 :: src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type '{ bounds: NormalizedHighlightBounds | undefined; type: "box"; style?: HighlightStyle | null; }' is not assignable to type 'HighlightShape'.
 # swap-fp: 5 :: src/features/observe/ios/CtrlProxyHighlights.ts: error TS2322: Type '{ bounds: { x: number; y: number; width: number; height: number; sourceWidth: number | null | undefined; sourceHeight: number | null | undefined; } | null | undefined; type: "box"; style?: HighlightStyle | null; }' is not assignable to type 'HighlightShape'.
-# swap-fp: 5 :: src/index.ts: error TS2353: Object literal may only specify known properties, and 'networkMockable' does not exist in type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
 # swap-fp: 5 :: src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
 # swap-fp: 5,21,76 :: src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
 # swap-fp: 5,7,7 :: src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
@@ -391,7 +388,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["predictive-ui", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["raw-element-search", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["ui-perf-mode", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
-# swap-fp: 7 :: src/index.ts: error TS2339: Property 'networkMockable' does not exist on type '{ cliMode: boolean; cliArgs: string[]; daemonPort: number | undefined; daemonHost: string | undefined; debugPerf: boolean; debug: boolean; uiPerfMode: boolean; memPerfAuditMode: boolean; ... 23 more ...; outputReduction: OutputReductionFlags; }'.
 # swap-fp: 7 :: src/server/deviceTools.ts: error TS2322: Type 'TimingData | null' is not assignable to type 'Record<string, number>'.
 # swap-fp: 7 :: src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' is not assignable to type 'SwipeDirection'.
 # swap-fp: 7,7 :: src/features/video/PlatformVideoCaptureBackend.ts: error TS2322: Type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to type 'ChildProcessWithoutNullStreams'.

@@ -52,6 +52,12 @@ import {
   resolvePathFromDaemonLaunchWorkingDirectory,
   resolveStableDaemonWorkingDirectory,
 } from "../utils/workingDirectory";
+import {
+  parseToolOutputsDirConfig,
+  TOOL_OUTPUTS_DIR_FLAG,
+  TOOL_OUTPUT_DIR_FLAG_ALIAS,
+  TOOL_OUTPUTS_DIR_ENV,
+} from "../utils/toolOutputArtifacts";
 
 /**
  * Check that bunx is available on PATH.
@@ -631,6 +637,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (this.socketPath !== SOCKET_PATH) {
       childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
     }
+    if (options.toolOutputsDir) {
+      childEnv[TOOL_OUTPUTS_DIR_ENV] = options.toolOutputsDir;
+    }
 
     try {
       let retriedIncompleteExtraction = false;
@@ -1170,6 +1179,11 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
   const options: DaemonOptions = shouldSkipCtrlProxyDownload(args, env)
     ? { skipCtrlProxyDownload: true }
     : {};
+  options.toolOutputsDir = parseToolOutputsDirConfig(
+    [],
+    env,
+    resolveDaemonLaunchWorkingDirectory()
+  );
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
       options.port = parseInt(args[i + 1], 10);
@@ -1207,6 +1221,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       i++;
     } else if (args[i] === "--video-archive-size-mb") {
       options.videoMaxArchiveSizeMb = Number(args[i + 1]);
+      i++;
+    } else if (args[i] === TOOL_OUTPUTS_DIR_FLAG || args[i] === TOOL_OUTPUT_DIR_FLAG_ALIAS) {
+      const toolOutputsDir = args[i + 1];
+      if (toolOutputsDir && !toolOutputsDir.startsWith("--")) {
+        options.toolOutputsDir = toolOutputsDir;
+      }
       i++;
     } else if (args[i] === "--network-mockable") {
       options.networkMockable = true;

@@ -4,7 +4,7 @@ import * as path from "path";
 import { ActionableError, BootedDevice, DeviceSnapshotConfig, DeviceSnapshotConfigInput, DeviceSnapshotManifest } from "../models";
 import { DeviceSnapshotRepository, type DeviceSnapshotRecord } from "../db/deviceSnapshotRepository";
 import {
-  KeyedJsonConfigRepository,
+  createDeviceSnapshotConfigRepository,
   type ConfigRepository,
 } from "../db/keyedJsonConfigRepository";
 import { DeviceSnapshotStore, type SnapshotPathOptions } from "../utils/DeviceSnapshotStore";
@@ -86,10 +86,7 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
   if (!moduleDependencies) {
     moduleDependencies = {
       snapshotRepository: new DeviceSnapshotRepository(),
-      configRepository: new KeyedJsonConfigRepository<DeviceSnapshotConfig>({
-        tableName: "device_snapshot_configs",
-        loggerTag: "DeviceSnapshotConfigRepository",
-      }),
+      configRepository: createDeviceSnapshotConfigRepository(),
       snapshotStore: new DeviceSnapshotStore(),
       timer: defaultTimer,
       now: () => new Date(),

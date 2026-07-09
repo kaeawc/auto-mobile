@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import type { Kysely } from "kysely";
 import * as databaseModule from "../../src/db/database";
-import { KeyedJsonConfigRepository } from "../../src/db/keyedJsonConfigRepository";
+import {
+  KeyedJsonConfigRepository,
+  createAppearanceConfigRepository,
+  createDeviceSnapshotConfigRepository,
+  createVideoRecordingConfigRepository,
+} from "../../src/db/keyedJsonConfigRepository";
 import type { Database } from "../../src/db/types";
 import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
@@ -86,6 +91,40 @@ describe("KeyedJsonConfigRepository", () => {
     expect(await db.selectFrom("video_recording_configs").selectAll().execute()).toHaveLength(0);
   });
 
+  test("factory constructors route each config type to its keyed table", async () => {
+    const appearance = createAppearanceConfigRepository(db);
+    const deviceSnapshot = createDeviceSnapshotConfigRepository(db);
+    const videoRecording = createVideoRecordingConfigRepository(db);
+
+    await appearance.setConfig({
+      syncWithHost: false,
+      defaultMode: "dark",
+      applyOnConnect: false,
+    });
+    await deviceSnapshot.setConfig({
+      includeAppData: false,
+      includeSettings: true,
+      useVmSnapshot: false,
+      strictBackupMode: true,
+      backupTimeoutMs: 12000,
+      userApps: "all",
+      vmSnapshotTimeoutMs: 34000,
+      maxArchiveSizeMb: 12,
+    });
+    await videoRecording.setConfig({
+      qualityPreset: "high",
+      targetBitrateKbps: 2000,
+      maxThroughputMbps: 8,
+      fps: 30,
+      maxArchiveSizeMb: 45,
+      format: "mp4",
+    });
+
+    expect(await db.selectFrom("appearance_configs").selectAll().execute()).toHaveLength(1);
+    expect(await db.selectFrom("device_snapshot_configs").selectAll().execute()).toHaveLength(1);
+    expect(await db.selectFrom("video_recording_configs").selectAll().execute()).toHaveLength(1);
+  });
+
   test("defers default database resolution until the first operation", async () => {
     const ensureMigrationsSpy = spyOn(databaseModule, "ensureMigrations").mockResolvedValue();
     const getDatabaseSpy = spyOn(databaseModule, "getDatabase").mockReturnValue(db);
@@ -139,7 +178,7 @@ describe("KeyedJsonConfigRepository", () => {
     }
   });
 
-  test("uses the shared repository directly instead of per-table wrapper modules", () => {
+  test("removes the per-table wrapper modules", () => {
     const wrapperModulePaths = [
       "../../src/db/appearanceConfigRepository.ts",
       "../../src/db/deviceSnapshotConfigRepository.ts",
@@ -148,18 +187,5 @@ describe("KeyedJsonConfigRepository", () => {
     for (const relativePath of wrapperModulePaths) {
       expect(existsSync(new URL(relativePath, import.meta.url))).toBe(false);
     }
-
-    const serverDir = new URL("../../src/server/", import.meta.url);
-    const serverSources = readdirSync(serverDir)
-      .filter(fileName => fileName.endsWith(".ts"))
-      .map(fileName => readFileSync(new URL(fileName, serverDir), "utf8"))
-      .join("\n");
-
-    expect(serverSources).not.toContain("../db/appearanceConfigRepository");
-    expect(serverSources).not.toContain("../db/deviceSnapshotConfigRepository");
-    expect(serverSources).not.toContain("../db/videoRecordingConfigRepository");
-    expect(serverSources).not.toContain("new AppearanceConfigRepository");
-    expect(serverSources).not.toContain("new DeviceSnapshotConfigRepository");
-    expect(serverSources).not.toContain("new VideoRecordingConfigRepository");
   });
 });

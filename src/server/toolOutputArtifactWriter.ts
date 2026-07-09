@@ -5,6 +5,7 @@ import { toActionableError } from "../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { stringifyToolResponse } from "../utils/toolUtils";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import type {
   ObservationArtifactMetadata,
   ObservationArtifactWriter,
@@ -49,7 +50,7 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
   private readonly timer: Timer;
 
   constructor(options: JsonToolOutputArtifactWriterOptions) {
-    this.outputDirectory = path.resolve(options.outputDirectory);
+    this.outputDirectory = resolvePathFromDaemonLaunchWorkingDirectory(options.outputDirectory);
     this.fileSystem = options.fileSystem ?? new NodeToolOutputArtifactFileSystem();
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
     this.timer = options.timer ?? defaultTimer;

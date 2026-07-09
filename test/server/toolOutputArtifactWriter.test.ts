@@ -6,6 +6,7 @@ import {
 import { stringifyToolResponse } from "../../src/utils/toolUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 
 class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   ensureCalls: string[] = [];
@@ -70,6 +71,35 @@ describe("JsonToolOutputArtifactWriter", () => {
       },
     });
     expect(second.artifact.path).toBe("/tmp/auto-mobile artifacts/1234-tapOn-id_2.json");
+  });
+
+  test("resolves relative artifact directories from the daemon launch cwd", () => {
+    const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+    process.env[DAEMON_LAUNCH_CWD_ENV] = "/workspace/project";
+    try {
+      const fileSystem = new FakeArtifactFileSystem();
+      const writer = new JsonToolOutputArtifactWriter({
+        outputDirectory: "scratch/artifacts",
+        fileSystem,
+        idGenerator: new FakeIdGenerator(["id"]),
+        timer: new FakeTimer(),
+      });
+
+      const metadata = writer.writeJsonArtifact({
+        tool: "observe",
+        payload: "ObserveResult",
+        data: { updatedAt: 1 },
+      });
+
+      expect(fileSystem.ensureCalls).toEqual(["/workspace/project/scratch/artifacts"]);
+      expect(metadata.artifact.path).toBe("/workspace/project/scratch/artifacts/0-observe-id.json");
+    } finally {
+      if (originalLaunchCwd === undefined) {
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
+      } else {
+        process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
+      }
+    }
   });
 
   test("write failures surface as actionable artifact failures", () => {

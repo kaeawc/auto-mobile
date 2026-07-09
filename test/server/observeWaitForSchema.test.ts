@@ -469,6 +469,59 @@ describe("findWaitForElement rich predicates", () => {
     expect(element?.class).toBe("android.widget.BottomNavigationView");
   });
 
+  test("ignores camelCase className attributes on parsed elements", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          className: "android.widget.BottomNavigationView",
+          bounds: bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        className: "android.widget.BottomNavigationView",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
+  test.each([
+    {
+      label: "contentDescription",
+      attributes: { contentDescription: "Home tab" },
+    },
+    {
+      label: "accessibilityLabel",
+      attributes: { accessibilityLabel: "Home tab" },
+    },
+  ])("ignores camelCase $label attributes on parsed elements", ({ attributes }) => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          ...attributes,
+          bounds: bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home tab",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
   test("requires elementId and text to match the same node", () => {
     const finder = new DefaultElementFinder();
     const hierarchy = makeHierarchy([

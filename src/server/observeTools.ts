@@ -265,22 +265,16 @@ const collectCandidateElements = (
 const getClassName = (element: Element): string | undefined =>
   typeof element.class === "string"
     ? element.class
-    : typeof element.className === "string"
-      ? element.className
-      : undefined;
+    : undefined;
 
 const getContentDescription = (element: Element, platform?: BootedDevice["platform"]): string | undefined =>
   typeof element["content-desc"] === "string"
     ? element["content-desc"]
     : typeof element["ios-accessibility-label"] === "string"
       ? element["ios-accessibility-label"]
-      : typeof element.contentDescription === "string"
-        ? element.contentDescription
-        : typeof element.accessibilityLabel === "string"
-          ? element.accessibilityLabel
-          : platform === "ios" && typeof element.text === "string"
-            ? element.text
-            : undefined;
+      : platform === "ios" && typeof element.text === "string"
+        ? element.text
+        : undefined;
 
 const textFieldsForElement = (element: Element): string[] => [
   element.text,

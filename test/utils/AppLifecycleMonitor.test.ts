@@ -156,6 +156,7 @@ describe("AppLifecycleMonitor", () => {
 
       // Clear events from the launch
       launchEvents.length = 0;
+      fakeAdb.clearHistory();
 
       // Simulate package termination
       fakeAdb.setCommandResponse("shell pidof com.example.app", { stdout: "", stderr: "" });
@@ -163,6 +164,7 @@ describe("AppLifecycleMonitor", () => {
       // Check for changes to detect termination
       await monitor.checkForChanges(testDevice);
 
+      expect(fakeAdb.getExecutedCommands()).toContain("shell pidof com.example.app || true");
       expect(terminateEvents).toHaveLength(1);
       expect(terminateEvents[0].type).toBe("terminate");
       expect(terminateEvents[0].appId).toBe("com.example.app");

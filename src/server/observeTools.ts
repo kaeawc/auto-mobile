@@ -55,47 +55,33 @@ const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(z.union([
   z.object({ activityName: z.string() }).passthrough(),
 ]));
 
-const waitForBaseSchema = z.object({
-  elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
-  text: z.string().optional().describe("Element text"),
-  textAny: z.array(z.string().min(1)).min(1).optional().describe("Ordered text variants; first visible match wins"),
-  className: z.string().optional().describe("Element class name"),
-  contentDescription: z.string().optional().describe("Element content description / accessibility label"),
+const waitForCommonShape = {
   activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
-  matchType: z.enum(["all", "any"]).optional().describe("Whether element predicates must all match the same node or any one may match"),
-  textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match text predicates"),
   timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
   container: waitForContainerField
-}).strict().superRefine((value, ctx) => {
-  const hasElementPredicate =
-    value.elementId !== undefined ||
-    value.text !== undefined ||
-    value.textAny !== undefined ||
-    value.className !== undefined ||
-    value.contentDescription !== undefined;
-  if (!hasElementPredicate && value.activeWindow === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Provide at least one waitFor predicate"
-    });
-  }
+};
 
-  if (
-    value.textAny !== undefined &&
-    (
-      value.elementId !== undefined ||
-      value.text !== undefined ||
-      value.className !== undefined ||
-      value.contentDescription !== undefined ||
-      value.textMatch !== undefined ||
-      value.matchType !== undefined
-    )
-  ) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "textAny cannot be combined with element field predicates"
-    });
-  }
+const waitForTextAnySchema = z.object({
+  textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
+  elementId: z.never().optional(),
+  text: z.never().optional(),
+  className: z.never().optional(),
+  contentDescription: z.never().optional(),
+  matchType: z.never().optional(),
+  textMatch: z.never().optional(),
+  ...waitForCommonShape,
+}).strict();
+
+const waitForElementBaseSchema = z.object({
+  elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
+  text: z.string().optional().describe("Element text"),
+  textAny: z.never().optional(),
+  className: z.string().optional().describe("Element class name"),
+  contentDescription: z.string().optional().describe("Element content description / accessibility label"),
+  matchType: z.enum(["all", "any"]).optional().describe("Whether element predicates must all match the same node or any one may match"),
+  textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match text predicates"),
+  ...waitForCommonShape,
+}).strict().superRefine((value, ctx) => {
 
   if (value.textMatch === "regex" && value.text !== undefined) {
     try {
@@ -112,13 +98,17 @@ const waitForBaseSchema = z.object({
 const waitForPredicatePresenceSchema = z.union([
   z.object({ elementId: z.string() }).passthrough(),
   z.object({ text: z.string() }).passthrough(),
-  z.object({ textAny: z.array(z.string().min(1)).min(1) }).passthrough(),
   z.object({ className: z.string() }).passthrough(),
   z.object({ contentDescription: z.string() }).passthrough(),
   z.object({ activeWindow: activeWindowWaitForSchema }).passthrough(),
 ]);
 
-const waitForSchema = waitForBaseSchema.and(waitForPredicatePresenceSchema);
+const waitForElementSchema = waitForElementBaseSchema.and(waitForPredicatePresenceSchema);
+
+const waitForSchema = z.union([
+  waitForTextAnySchema,
+  waitForElementSchema,
+]);
 
 export const observeSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
@@ -287,7 +277,9 @@ const getContentDescription = (element: Element): string | undefined =>
         ? element.contentDescription
         : typeof element.accessibilityLabel === "string"
           ? element.accessibilityLabel
-          : undefined;
+          : typeof element.text === "string"
+            ? element.text
+            : undefined;
 
 const textFieldsForElement = (element: Element): string[] => [
   element.text,

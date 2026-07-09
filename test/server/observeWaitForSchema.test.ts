@@ -320,6 +320,26 @@ describe("published observe waitFor input schema", () => {
         waitFor: { activeWindow: {} },
       },
     },
+    {
+      label: "textAny mixed with elementId",
+      input: {
+        platform: "android",
+        waitFor: {
+          elementId: "com.app:id/name",
+          textAny: ["Name"],
+        },
+      },
+    },
+    {
+      label: "textAny mixed with matchType",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Name"],
+          matchType: "any",
+        },
+      },
+    },
   ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(false);
 
@@ -623,6 +643,29 @@ describe("findWaitForElement rich predicates", () => {
     expect(findWaitForElement(finder, { text: "Home", textMatch: "contains" } as any, hierarchy)?.text).toBe("Welcome Home");
     expect(findWaitForElement(finder, { text: "^Welcome\\s+Home$", textMatch: "regex" } as any, hierarchy)?.text).toBe("Welcome Home");
     expect(findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy)).toBeNull();
+  });
+
+  test("matches iOS accessibility labels exposed as text for contentDescription", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          text: "Home",
+          class: "XCUIElementTypeButton",
+          bounds: bounds(10, 10, 180, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home",
+      } as any,
+      hierarchy
+    );
+
+    expect(element?.text).toBe("Home");
   });
 });
 

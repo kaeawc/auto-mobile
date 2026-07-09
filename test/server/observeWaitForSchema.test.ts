@@ -1,5 +1,6 @@
 import Ajv2020 from "ajv/dist/2020";
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { findWaitForElement, observeSchema, registerObserveTools, waitForObservation } from "../../src/server/observeTools";
@@ -257,6 +258,22 @@ describe("published observe waitFor input schema", () => {
     registerObserveTools();
     const observeTool = ToolRegistry.getToolDefinitions()
       .find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
+
+    expect(descriptions.length).toBeGreaterThan(0);
+    expect(new Set(descriptions)).toEqual(new Set([
+      "How to match waitFor.text; does not affect contentDescription",
+    ]));
+  });
+
+  test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
+    const toolDefinitions = JSON.parse(readFileSync(
+      new URL("../../schemas/tool-definitions.json", import.meta.url),
+      "utf8"
+    )) as Array<{ name: string; inputSchema: unknown }>;
+    const observeTool = toolDefinitions.find(tool => tool.name === "observe");
     expect(observeTool).toBeDefined();
 
     const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
@@ -713,6 +730,17 @@ describe("findWaitForElement rich predicates", () => {
     expect(findWaitForElement(finder, { text: "Home", textMatch: "contains" } as any, hierarchy)?.text).toBe("Welcome Home");
     expect(findWaitForElement(finder, { text: "^Welcome\\s+Home$", textMatch: "regex" } as any, hierarchy)?.text).toBe("Welcome Home");
     expect(findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy)).toBeNull();
+  });
+
+  test("keeps contentDescription exact-only when textMatch is non-exact", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { "content-desc": "Home tab", "bounds": bounds(10, 10, 180, 60) } },
+    ]);
+
+    expect(findWaitForElement(finder, { contentDescription: "Home tab", textMatch: "exact" } as any, hierarchy)?.["content-desc"]).toBe("Home tab");
+    expect(findWaitForElement(finder, { contentDescription: "Home", textMatch: "contains" } as any, hierarchy)).toBeNull();
+    expect(findWaitForElement(finder, { contentDescription: "^Home", textMatch: "regex" } as any, hierarchy)).toBeNull();
   });
 
   test("matches iOS accessibility labels exposed as text for contentDescription", () => {

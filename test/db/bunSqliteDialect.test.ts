@@ -542,30 +542,30 @@ describe("BunSqliteConnectionState — C6 word-boundary RETURNING detection", ()
 });
 
 describe("BunSqliteConnectionState — close-time database maintenance", () => {
-  test("issues wal_checkpoint(TRUNCATE) and PRAGMA optimize before closing the handle", () => {
+  test("issues PRAGMA optimize before the final wal_checkpoint(TRUNCATE)", () => {
     const db = new FakeDatabase();
     const state = makeState(db);
 
     state.close();
 
     expect(db.lifecycleEvents).toEqual([
-      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "exec:PRAGMA optimize;",
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "close",
     ]);
   });
 
   test("a failing checkpoint never blocks the close", () => {
     const db = new FakeDatabase();
-    db.throwOnExec = new Error("database is locked");
+    db.throwOnExecSql.set("PRAGMA wal_checkpoint(TRUNCATE);", new Error("database is locked"));
     const state = makeState(db);
 
     // Best-effort: the checkpoint error must be swallowed, not rethrown.
     expect(() => state.close()).not.toThrow();
 
     expect(db.lifecycleEvents).toEqual([
-      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "exec:PRAGMA optimize;",
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "close",
     ]);
   });
@@ -587,8 +587,8 @@ describe("BunSqliteConnectionState — close-time database maintenance", () => {
     }
 
     expect(db.lifecycleEvents).toEqual([
-      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "exec:PRAGMA optimize;",
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "close",
     ]);
   });
@@ -601,8 +601,8 @@ describe("BunSqliteConnectionState — close-time database maintenance", () => {
     state.close();
 
     expect(db.lifecycleEvents).toEqual([
-      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "exec:PRAGMA optimize;",
+      "exec:PRAGMA wal_checkpoint(TRUNCATE);",
       "close",
     ]);
   });

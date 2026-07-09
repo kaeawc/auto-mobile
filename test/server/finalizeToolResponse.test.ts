@@ -1235,6 +1235,12 @@ describe("finalizeToolResponse", () => {
         viewHierarchy: { hierarchy: { node: { "resource-id": "step-root" } } },
         visibleTextsSample: ["Step"],
       };
+      const debugFailureObservation = {
+        capturedAtMs: 789,
+        viewHierarchy: { hierarchy: { node: { "resource-id": "debug-failure-root" } } },
+        rawViewHierarchy: "<hierarchy><node text=\"debug failure\" /></hierarchy>",
+        visibleTextsSample: ["Debug failure"],
+      };
       const payload = {
         success: false,
         executedSteps: 1,
@@ -1252,7 +1258,7 @@ describe("finalizeToolResponse", () => {
               step: "1: observe",
               status: "completed",
               durationMs: 10,
-              details: { stepObservation },
+              details: { stepObservation, failureObservation: debugFailureObservation },
             },
           ],
         },
@@ -1289,14 +1295,22 @@ describe("finalizeToolResponse", () => {
       const finalizedStepObservation = (finalized.structuredContent as any).debug.steps[0].details.stepObservation;
       expect(finalizedStepObservation.visibleTextsSample).toEqual(["Step"]);
       expect(finalizedStepObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugStepObservationViewHierarchy");
+      const finalizedDebugFailureObservation = (finalized.structuredContent as any).debug.steps[0].details.failureObservation;
+      expect(finalizedDebugFailureObservation.visibleTextsSample).toEqual(["Debug failure"]);
+      expect(finalizedDebugFailureObservation.viewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationViewHierarchy");
+      expect(finalizedDebugFailureObservation.rawViewHierarchy.artifact.payload).toBe("ExecutePlanDebugFailureObservationRawViewHierarchy");
       expect(writer.writes.map(write => write.payload)).toEqual([
         "ExecutePlanFailureObservationViewHierarchy",
         "ExecutePlanFailureObservationRawViewHierarchy",
         "ExecutePlanDebugStepObservationViewHierarchy",
+        "ExecutePlanDebugFailureObservationViewHierarchy",
+        "ExecutePlanDebugFailureObservationRawViewHierarchy",
       ]);
       expect(writer.writes[0].data).toEqual(failureObservation.viewHierarchy);
       expect(writer.writes[1].data).toBe(failureObservation.rawViewHierarchy);
       expect(writer.writes[2].data).toEqual(stepObservation.viewHierarchy);
+      expect(writer.writes[3].data).toEqual(debugFailureObservation.viewHierarchy);
+      expect(writer.writes[4].data).toBe(debugFailureObservation.rawViewHierarchy);
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
 

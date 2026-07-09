@@ -22,11 +22,13 @@ export interface ObservationBaselineStore {
   set(sessionUuid: string, observation: ObserveResult): void;
 }
 
+export type ObservationArtifactPayload = "ObserveResult" | "ObserveDiff";
+
 export interface ObservationArtifactMetadata {
   artifact: {
     path: string;
     format: "json";
-    payload: "ObserveResult";
+    payload: ObservationArtifactPayload;
     bytes: number;
     tool: string;
   };
@@ -34,7 +36,7 @@ export interface ObservationArtifactMetadata {
 
 export interface ObservationArtifactWriteInput {
   tool: string;
-  payload: "ObserveResult";
+  payload: ObservationArtifactPayload;
   data: unknown;
 }
 
@@ -328,9 +330,20 @@ function writeObservationArtifact(
 ): ObservationArtifactMetadata {
   return ctx.artifactWriter!.writeJsonArtifact({
     tool: ctx.name,
-    payload: "ObserveResult",
+    payload: getObservationArtifactPayload(observationPayload),
     data: observationPayload,
   });
+}
+
+function getObservationArtifactPayload(observationPayload: unknown): ObservationArtifactPayload {
+  if (
+    observationPayload &&
+    typeof observationPayload === "object" &&
+    (observationPayload as Record<string, unknown>).isDiff === true
+  ) {
+    return "ObserveDiff";
+  }
+  return "ObserveResult";
 }
 
 /**

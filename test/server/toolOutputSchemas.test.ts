@@ -73,6 +73,15 @@ describe("tool output artifact metadata schema (#3480)", () => {
       observation: metadata,
     })).not.toThrow();
   });
+
+  test("accepts ObserveDiff artifact metadata for diffed observations", () => {
+    expect(toolOutputArtifactMetadataSchema.parse({
+      artifact: {
+        ...metadata.artifact,
+        payload: "ObserveDiff",
+      },
+    }).artifact.payload).toBe("ObserveDiff");
+  });
 });
 
 /**

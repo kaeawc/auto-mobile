@@ -5,7 +5,7 @@ import type { BootedDevice } from "../../src/models";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
-import type { ObservationArtifactWriter } from "../../src/server/finalizeToolResponse";
+import type { ObservationArtifactPayload, ObservationArtifactWriter } from "../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -192,7 +192,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   class FakeObservationArtifactWriter implements ObservationArtifactWriter {
     writes: Array<{ tool: string; payload: string; data: unknown }> = [];
 
-    writeJsonArtifact(input: { tool: string; payload: "ObserveResult"; data: unknown }) {
+    writeJsonArtifact(input: { tool: string; payload: ObservationArtifactPayload; data: unknown }) {
       this.writes.push(input);
       return {
         artifact: {

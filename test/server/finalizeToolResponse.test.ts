@@ -1157,8 +1157,10 @@ describe("finalizeToolResponse", () => {
       );
 
       expect((writer.writes[0].data as any).isDiff).toBe(true);
+      expect(writer.writes[0].payload).toBe("ObserveDiff");
       expect((writer.writes[0].data as any).added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
       expect((finalized.structuredContent as any).observation.artifact.path).toBe("/tmp/auto-mobile/tapOn-1.json");
+      expect((finalized.structuredContent as any).observation.artifact.payload).toBe("ObserveDiff");
       expect((finalized.structuredContent as any).observationDiff).toMatchObject({
         mode: "diff",
         reason: "diff_emitted",

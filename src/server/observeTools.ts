@@ -110,12 +110,27 @@ const waitForSchema = z.union([
   waitForElementSchema,
 ]);
 
-export const observeSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
+const observeBaseSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
   raw: z.boolean().optional().describe("Include raw view hierarchy"),
   skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling")
-})));
+})).superRefine((value, ctx) => {
+  const activeWindow = value.waitFor?.activeWindow;
+  if (
+    value.platform === "ios" &&
+    activeWindow?.activityName !== undefined &&
+    activeWindow.appId === undefined
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["waitFor", "activeWindow", "activityName"],
+      message: "activityName is Android-only; use appId/bundleId on iOS"
+    });
+  }
+});
+
+export const observeSchema = withAppIdAliases(observeBaseSchema);
 
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,

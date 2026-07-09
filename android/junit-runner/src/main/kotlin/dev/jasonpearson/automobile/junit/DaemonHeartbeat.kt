@@ -8,7 +8,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -166,7 +169,8 @@ internal object DaemonHeartbeat {
     connection.readTimeout = 2000
     connection.doOutput = true
 
-    val payload = """{"sessionId":"$sessionId"}"""
+    val payload =
+      json.encodeToString(buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) })
     connection.outputStream.use { it.write(payload.toByteArray()) }
 
     connection.inputStream.use { it.readBytes() }

@@ -1620,6 +1620,7 @@ describe("IOSCtrlProxyManager", function() {
         // xcodebuild points at the per-launch copy; the bare build-setting token is gone.
         expect(spawn.command).toContain("-xctestrun \"/tmp/automobile-runner-DEV.xctestrun\"");
         expect(spawn.command).not.toMatch(/(?:^|\s)CTRL_PROXY_IOS_PORT=/);
+        expect(spawn.options?.detached).toBe(true);
 
         // Host env still carries identity vars for daemon-side process discovery.
         expect(spawn.options?.env).toMatchObject({

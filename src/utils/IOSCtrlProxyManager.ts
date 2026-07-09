@@ -2112,7 +2112,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // The runner env is ALSO set on the host xcodebuild process env so the daemon
     // can later discover/own/recover this process by reading its env via `ps eww`.
     // Routed through the injected processExecutor so tests can observe/control the process.
-    const child = this.processExecutor.spawn(command, [], { shell: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    // Match the simulator path's detached shell group so stop()/forceRestart() can
+    // terminate the shell and xcodebuild child through terminateProcessTree().
+    const child = this.processExecutor.spawn(command, [], { shell: true, detached: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
 
     child.on("error", error => {
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);

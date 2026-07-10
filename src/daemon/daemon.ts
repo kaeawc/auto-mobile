@@ -80,6 +80,10 @@ import {
   resolveStableDaemonWorkingDirectory,
 } from "../utils/workingDirectory";
 import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
+import {
+  DefaultObservationStreamHealth,
+  type ObservationStreamHealth,
+} from "./ObservationStreamHealth";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -98,10 +102,6 @@ const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DatabaseHealthFailureRecovery = (code: number) => void;
-interface ObservationStreamHealth {
-  isHealthy(): boolean;
-  recover(): Promise<void>;
-}
 
 /**
  * Main daemon process
@@ -170,14 +170,14 @@ export class Daemon {
       logger.close();
       process.exit(code);
     });
-    this.observationStreamHealth = {
-      isHealthy: () => this.isObservationStreamSocketHealthy(),
-      recover: async () => {
-        await stopDeviceDataStreamSocketServer();
+    this.observationStreamHealth = new DefaultObservationStreamHealth({
+      getServer: getDeviceDataStreamServer,
+      stopServer: stopDeviceDataStreamSocketServer,
+      startServer: async () => {
         await startDeviceDataStreamSocketServer(this.timer);
-        this.setupDeviceDataStreamCallback();
       },
-    };
+      configureCallbacks: () => this.setupDeviceDataStreamCallback(),
+    });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     // Register centralized cleanup for session-scoped state
@@ -1236,13 +1236,6 @@ export class Daemon {
     } catch (error) {
       logger.error(`Recovery attempt failed: ${error}`);
     }
-  }
-
-  private isObservationStreamSocketHealthy(): boolean {
-    const server = getDeviceDataStreamServer();
-    return server !== null &&
-      server.isListening() &&
-      server.hasActiveSocketPath();
   }
 
   /**

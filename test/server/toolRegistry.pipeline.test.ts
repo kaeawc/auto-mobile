@@ -11,6 +11,10 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
 import { getMcpRecordingStatus, resetMcpRecordingState, startMcpRecording } from "../../src/server/mcpRecordingManager";
+import {
+  stripToolResultStructuredContent,
+  structuredContentOmissionReason,
+} from "../../src/server/stripToolResultStructuredContent";
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
@@ -307,6 +311,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   test("oversized occlusion-heavy observe auto-spills to an artifact when no directory is configured", async () => {
     const originalObserveCompact = serverConfig.isObserveResultCompactEnabled();
     const originalCompactJson = serverConfig.isToolResultsCompactJsonEnabled();
+    const originalNoStructuredContent = serverConfig.isToolResultsNoStructuredContentEnabled();
     const writer = new FakeObservationArtifactWriter();
     const requestedDirectories: string[] = [];
     const handler = new DefaultAfterToolCallHandler(outputDirectory => {
@@ -318,6 +323,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     serverConfig.setToolOutputArtifactDirectory(undefined);
     serverConfig.setObserveResultCompactEnabled(true);
     serverConfig.setToolResultsCompactJsonEnabled(true);
+    serverConfig.setToolResultsNoStructuredContentEnabled(true);
 
     try {
       const result = await handler.handle({
@@ -331,6 +337,10 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         timer,
         toolStartMs: 20,
       });
+      const wireResult = stripToolResultStructuredContent(
+        result.finalizedResponse,
+        structuredContentOmissionReason(true)
+      );
 
       expect(requestedDirectories).toEqual([expect.stringContaining("auto-mobile-tool-outputs")]);
       expect(writer.writes).toHaveLength(1);
@@ -339,7 +349,8 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(writtenRoot.node[0]["view-id"]).toBe("com.example:id/floating_overlay");
       expect(writtenRoot.node[1].occludedByViewId).toBe("com.example:id/floating_overlay");
       expect(writtenRoot.node[1].bounds).toEqual([24, 0, 1056, 120]);
-      expect(result.finalizedResponse.structuredContent).toEqual({
+      expect(wireResult.structuredContent).toBeUndefined();
+      expect(JSON.parse(wireResult.content[0].text)).toEqual({
         artifact: {
           path: "/tmp/artifacts/observe-1.json",
           format: "json",
@@ -348,11 +359,11 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           tool: "observe",
         },
       });
-      expect(() => JSON.parse(result.finalizedResponse.content[0].text)).not.toThrow();
-      expect(result.finalizedResponse.content[0].text).toBe(stringifyToolResponse(result.finalizedResponse.structuredContent));
+      expect(wireResult.content[0].text).not.toContain("\n");
     } finally {
       serverConfig.setObserveResultCompactEnabled(originalObserveCompact);
       serverConfig.setToolResultsCompactJsonEnabled(originalCompactJson);
+      serverConfig.setToolResultsNoStructuredContentEnabled(originalNoStructuredContent);
     }
   });
 

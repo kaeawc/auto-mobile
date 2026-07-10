@@ -396,6 +396,7 @@ export class DevicePool {
 
     // Validate we have enough devices
     await this.ensurePoolRefreshed();
+    await this.pruneStaleIdleIosDevices(this.getDevicesByPlatform(platform));
     let stats = this.getStatsForPlatform(platform);
 
     if (stats.total < requiredCount) {
@@ -546,6 +547,7 @@ export class DevicePool {
     );
 
     await this.ensurePoolRefreshed();
+    await this.pruneStaleIdleIosDevices(this.getDevicesMatchingAnyRequest(requests));
 
     let needsRefresh = false;
     for (const request of requests) {
@@ -1069,6 +1071,30 @@ export class DevicePool {
     return idleDevices[0];
   }
 
+  private getDevicesMatchingAnyRequest(requests: DeviceAllocationRequest[]): PooledDevice[] {
+    const devicesById = new Map<string, PooledDevice>();
+    for (const request of requests) {
+      for (const device of this.getDevicesMatchingCriteria(request.criteria)) {
+        devicesById.set(device.id, device);
+      }
+    }
+    return Array.from(devicesById.values());
+  }
+
+  private async pruneStaleIdleIosDevices(candidates: PooledDevice[]): Promise<number> {
+    let removedCount = 0;
+    for (const candidate of candidates) {
+      const device = this.devices.get(candidate.id);
+      if (!device || device.platform !== "ios" || device.status !== "idle" || device.sessionId) {
+        continue;
+      }
+      if (!(await this.isIdleDeviceStillAssignable(device))) {
+        removedCount++;
+      }
+    }
+    return removedCount;
+  }
+
   private async isIdleDeviceStillAssignable(device: PooledDevice): Promise<boolean> {
     if (device.platform !== "ios") {
       return true;
@@ -1136,6 +1162,15 @@ export class DevicePool {
       }
 
       const device = this.devices.get(deviceId);
+      if (
+        device &&
+        device.status === "idle" &&
+        !device.sessionId &&
+        !(await this.isIdleDeviceStillAssignable(device))
+      ) {
+        throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
+      }
+
       if (!device) {
         throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
       }

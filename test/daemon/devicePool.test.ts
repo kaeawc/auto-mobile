@@ -432,6 +432,7 @@ describe("DevicePool", () => {
 
     test("should bind a specific device to a session", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
 
       const sessionId = await devicePool.bindOrReuseDeviceSession("session-1", "sim-1", "ios");
 
@@ -444,6 +445,7 @@ describe("DevicePool", () => {
 
     test("should reuse a live session when the device is already bound", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
       await devicePool.bindOrReuseDeviceSession("session-1", "sim-1", "ios");
 
       const sessionId = await devicePool.bindOrReuseDeviceSession("session-2", "sim-1", "ios");
@@ -451,6 +453,17 @@ describe("DevicePool", () => {
       expect(sessionId).toBe("session-1");
       expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
       expect(sessionManager.getSession("session-2")).toBeNull();
+    });
+
+    test("rejects binding a stale idle iOS simulator that is no longer booted", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-stale", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [];
+
+      await expect(
+        devicePool.bindOrReuseDeviceSession("session-stale", "sim-stale", "ios")
+      ).rejects.toThrow(/not available/);
+      expect(devicePool.getDevice("sim-stale")).toBeNull();
+      expect(sessionManager.getSession("session-stale")).toBeNull();
     });
   });
 
@@ -474,6 +487,25 @@ describe("DevicePool", () => {
         DEFAULT_DEVICE_READY_TIMEOUT_MS,
       ]);
       expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("should boot a platform replacement when a stale pooled iOS simulator masked the shortage", async () => {
+      const images: DeviceInfo[] = [
+        { name: "iPhone 16", platform: "ios", isRunning: false, deviceId: "sim-replacement", state: "Shutdown", isAvailable: true },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+      await devicePool.initializeWithDevices([
+        createBootedDevice("sim-stale", "ios", "iPhone 15"),
+      ]);
+      fakeDeviceManager.bootedDevices = [];
+
+      const assignments = await devicePool.assignMultipleDevices(["session-a"], 1000, "ios");
+
+      expect(assignments.get("session-a")).toBe("sim-replacement");
+      expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-replacement"]);
+      expect(devicePool.getDevice("sim-stale")).toBeNull();
     });
 
     test("should boot shutdown iOS simulator matching allocation criteria", async () => {
@@ -662,6 +694,41 @@ describe("DevicePool", () => {
       expect(assignments.get("session-a")).toBe("sim-replacement");
       expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-replacement"]);
       expect(devicePool.getDevice("sim-failed")?.status).toBe("error");
+    });
+
+    test("should boot a criteria replacement when a stale pooled iOS simulator matched first", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-replacement",
+          state: "Shutdown",
+          isAvailable: true,
+          iosVersion: "17.5",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+      await devicePool.initializeWithDevices([
+        createBootedDevice("sim-stale", "ios", "iPhone 15 Pro", "17.5"),
+      ]);
+      fakeDeviceManager.bootedDevices = [];
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-a",
+            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-a")).toBe("sim-replacement");
+      expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-replacement"]);
+      expect(devicePool.getDevice("sim-stale")).toBeNull();
     });
 
     test("should recover errored pooled simulator when its own image is rebooted", async () => {

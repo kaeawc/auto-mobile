@@ -1848,7 +1848,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   private fun findDescendantViewIdMatchingLabel(element: UIElementInfo, label: String): String? {
     for (child in decodeChildrenFromNode(element.node)) {
       val childViewId = child.viewId?.takeIf { it.isNotBlank() }
-      if (childViewId != null && child.hasOccluderLabel(label)) {
+      if (childViewId != null && child.hasSemanticOccluderLabel(label)) {
         return childViewId
       }
       findDescendantViewIdMatchingLabel(child, label)?.let { return it }
@@ -1856,8 +1856,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     return null
   }
 
-  private fun UIElementInfo.hasOccluderLabel(label: String): Boolean {
-    return resourceId == label || contentDesc == label || text == label || className == label
+  private fun UIElementInfo.hasSemanticOccluderLabel(label: String): Boolean {
+    return resourceId == label || contentDesc == label || text == label
   }
 
   /** Extract information about a single focused element. Used for getCurrentFocus command. */

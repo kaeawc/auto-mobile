@@ -424,7 +424,9 @@ export class DevicePool {
 
     // Validate we have enough devices
     await this.ensurePoolRefreshed();
-    await this.pruneStaleIdleIosDevices(this.getDevicesByPlatform(platform));
+    const preallocationCandidates = this.getDevicesByPlatform(platform);
+    await this.pruneStaleIdleIosDevices(preallocationCandidates);
+    await this.evictUnavailableIdleDevicesMatching(device => !platform || device.platform === platform);
     let stats = this.getStatsForPlatform(platform);
 
     if (stats.total < requiredCount) {
@@ -580,10 +582,14 @@ export class DevicePool {
     );
 
     await this.ensurePoolRefreshed();
-    await this.pruneStaleIdleIosDevices(this.getDevicesMatchingAnyRequest(requests));
+    const sortedRequests = this.criteriaMatcher.sortBySpecificity(requests);
+    await this.pruneStaleIdleIosDevices(this.getDevicesMatchingAnyRequest(sortedRequests));
+    await this.evictUnavailableIdleDevicesMatching(device =>
+      sortedRequests.some(request => this.criteriaMatcher.filterDevices([device], request.criteria).length > 0)
+    );
 
     let needsRefresh = false;
-    for (const request of requests) {
+    for (const request of sortedRequests) {
       const candidates = this.getDevicesMatchingCriteria(request.criteria);
       if (candidates.length === 0) {
         needsRefresh = true;
@@ -595,7 +601,7 @@ export class DevicePool {
       await this.refreshDevices();
     }
 
-    const started = await this.startAdditionalDevicesForCriteria(this.criteriaMatcher.sortBySpecificity(requests));
+    const started = await this.startAdditionalDevicesForCriteria(sortedRequests);
     if (started > 0) {
       logger.info(`[DevicePool] Started ${started} additional device(s) for criteria-based allocation`);
     }
@@ -611,7 +617,6 @@ export class DevicePool {
       }
     }
 
-    const sortedRequests = this.criteriaMatcher.sortBySpecificity(requests);
     let attemptCount = 0;
 
     while (assignments.size < requiredCount) {
@@ -855,6 +860,19 @@ export class DevicePool {
     }
     this.lastUsedAtMarker = now;
     return now;
+  }
+
+  private async evictUnavailableIdleDevicesMatching(matches: (device: PooledDevice) => boolean): Promise<number> {
+    let evicted = 0;
+    for (const device of Array.from(this.devices.values())) {
+      if (device.status !== "idle" || !matches(device)) {
+        continue;
+      }
+      if (!await this.ensurePooledDevicePresentForUse(device)) {
+        evicted++;
+      }
+    }
+    return evicted;
   }
 
   private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {

@@ -629,6 +629,53 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
+    test("boots replacement emulator after stale pooled emulator is evicted before allocation", async () => {
+      const images: DeviceInfo[] = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      const manager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+
+      const assignments = await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+
+      expect(assignments.get("session-1")).toBe("emulator-5554");
+      expect(manager.startedDevices.map(device => device.deviceId)).toEqual(["emulator-5554"]);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
+    });
+
+    test("boots criteria replacement emulator after stale matching pooled emulator is evicted", async () => {
+      const images: DeviceInfo[] = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      const manager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [{ sessionId: "session-1", criteria: { platform: "android" } }],
+        1000
+      );
+
+      expect(assignments.get("session-1")).toBe("emulator-5554");
+      expect(manager.startedDevices.map(device => device.deviceId)).toEqual(["emulator-5554"]);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
+    });
+
     test("should auto-start iOS simulators when pool is short", async () => {
       const images: DeviceInfo[] = [
         { name: "iPhone 15 Pro", platform: "ios", isRunning: false, deviceId: "sim-1", state: "Shutdown", isAvailable: true },

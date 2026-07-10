@@ -215,11 +215,12 @@ describe("disconnect monitor miss counting", () => {
     expect(result.disconnected).toEqual(["emulator-5554"]);
   });
 
-  test("forced missing devices beat a stale booted-device cache entry", () => {
+  test("fresh booted scan clears a stale forced missing flag", () => {
+    const forceDisconnectedDeviceIds = new Set(["emulator-5554"]);
     const result = evaluateDeviceDisconnects({
       deviceDisconnectMisses: new Map(),
       confirmedDisconnectedDeviceIds: new Set(),
-      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      forceDisconnectedDeviceIds,
       bootedDeviceIds: new Set(["emulator-5554"]),
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
@@ -229,7 +230,8 @@ describe("disconnect monitor miss counting", () => {
     });
 
     expect(result.skippedAdbUnreachable).toBe(false);
-    expect(result.disconnected).toEqual(["emulator-5554"]);
+    expect(result.disconnected).toEqual([]);
+    expect(forceDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
   });
 
   test("skips idle candidates from platforms whose discovery did not succeed", () => {

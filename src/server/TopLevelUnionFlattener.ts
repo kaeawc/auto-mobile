@@ -55,7 +55,10 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     : [];
 
   const result: Record<string, unknown> = {
-    ...(schema.$schema ? { $schema: schema.$schema } : {}),
+    ...("$schema" in schema ? { $schema: schema.$schema } : {}),
+    ...("$id" in schema ? { $id: schema.$id } : {}),
+    ...("$defs" in schema ? { $defs: schema.$defs } : {}),
+    ...("definitions" in schema ? { definitions: schema.definitions } : {}),
     type: "object",
     properties: mergedProperties,
   };

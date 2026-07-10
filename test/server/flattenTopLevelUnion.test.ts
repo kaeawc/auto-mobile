@@ -87,6 +87,28 @@ describe("flattenTopLevelUnion", () => {
     expect(result.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
   });
 
+  test("preserves $defs referenced by flattened branch properties", () => {
+    const schema = {
+      $defs: {
+        node: {
+          type: "object",
+          properties: {
+            child: { "$ref": "#/$defs/node" },
+          },
+        },
+      },
+      anyOf: [
+        { type: "object", properties: { node: { "$ref": "#/$defs/node" } } },
+        { type: "object", properties: { artifact: { type: "object" } } },
+      ],
+    };
+
+    const result = flattenTopLevelUnion(schema);
+
+    expect(result.$defs).toEqual(schema.$defs);
+    expect((result.properties as any).node).toEqual({ "$ref": "#/$defs/node" });
+  });
+
   test("handles empty properties in branches", () => {
     const schema = {
       anyOf: [

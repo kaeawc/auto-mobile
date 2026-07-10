@@ -6,6 +6,16 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { FakeToolRegistry } from "../../fakes/FakeToolRegistry";
 import { z } from "zod";
+import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
+
+const listToolsResponseSchema = z.object({
+  tools: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    inputSchema: z.object({}).passthrough(),
+    outputSchema: z.object({}).passthrough().optional()
+  }).passthrough())
+});
 
 describe("MCP Tools List", () => {
   let fixture: McpTestFixture;
@@ -40,14 +50,6 @@ describe("MCP Tools List", () => {
       await client.connect(clientTransport);
 
       // Send list_tools request
-      const listToolsResponseSchema = z.object({
-        tools: z.array(z.object({
-          name: z.string(),
-          description: z.string(),
-          inputSchema: z.object({}).passthrough()
-        }))
-      });
-
       const result = await client.request({
         method: "tools/list",
         params: {}
@@ -82,14 +84,6 @@ describe("MCP Tools List", () => {
       const { client } = fixture.getContext();
 
       // Send list_tools request
-      const listToolsResponseSchema = z.object({
-        tools: z.array(z.object({
-          name: z.string(),
-          description: z.string(),
-          inputSchema: z.object({}).passthrough()
-        }))
-      });
-
       const result = await client.request({
         method: "tools/list",
         params: {}
@@ -115,6 +109,21 @@ describe("MCP Tools List", () => {
       const toolNames = result.tools.map(tool => tool.name);
       expect(toolNames).toContain("observe");
       expect(toolNames).toContain("tapOn");
+      expect(toolNames).toContain("inputText");
+    });
+
+    test("strict clients can compile observe outputSchema", async function() {
+      const { client } = fixture.getContext();
+
+      const result = await client.request({
+        method: "tools/list",
+        params: {}
+      }, listToolsResponseSchema);
+
+      const observe = result.tools.find(tool => tool.name === "observe");
+
+      expect(observe?.outputSchema).toBeDefined();
+      expect(() => compileJsonSchema(observe!.outputSchema)).not.toThrow();
     });
   });
 });

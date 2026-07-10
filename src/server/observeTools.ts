@@ -10,7 +10,7 @@ import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchy
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
-import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases, withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeToolResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
@@ -79,7 +79,7 @@ const waitForElementBaseSchema = z.object({
   className: z.string().optional().describe("Element class name"),
   contentDescription: z.string().optional().describe("Element content description / accessibility label"),
   matchType: z.enum(["all", "any"]).optional().describe("Whether element predicates must all match the same node or any one may match"),
-  textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match text predicates"),
+  textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match waitFor.text; does not affect contentDescription"),
   ...waitForCommonShape,
 }).strict().superRefine((value, ctx) => {
 
@@ -110,12 +110,50 @@ const waitForSchema = z.union([
   waitForElementSchema,
 ]);
 
-export const observeSchema = withAppIdAliases(addDeviceTargetingToSchema(z.object({
+const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
   raw: z.boolean().optional().describe("Include raw view hierarchy"),
   skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling")
-})));
+})).superRefine((value, ctx) => {
+  const activeWindow = value.waitFor?.activeWindow;
+  if (
+    value.platform === "ios" &&
+    activeWindow?.activityName !== undefined &&
+    activeWindow.appId === undefined
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["waitFor", "activeWindow", "activityName"],
+      message: "activityName is Android-only; use appId/bundleId on iOS"
+    });
+  }
+}), jsonSchema => {
+  jsonSchema.if = {
+    required: ["platform", "waitFor"],
+    properties: {
+      platform: { const: "ios" },
+      waitFor: {
+        required: ["activeWindow"],
+        properties: {
+          activeWindow: {
+            required: ["activityName"],
+            not: {
+              anyOf: [
+                { required: ["appId"] },
+                { required: ["bundleId"] },
+                { required: ["packageName"] }
+              ]
+            }
+          }
+        }
+      }
+    }
+  };
+  jsonSchema.then = false;
+});
+
+export const observeSchema = withAppIdAliases(observeBaseSchema);
 
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
@@ -265,22 +303,16 @@ const collectCandidateElements = (
 const getClassName = (element: Element): string | undefined =>
   typeof element.class === "string"
     ? element.class
-    : typeof element.className === "string"
-      ? element.className
-      : undefined;
+    : undefined;
 
 const getContentDescription = (element: Element, platform?: BootedDevice["platform"]): string | undefined =>
   typeof element["content-desc"] === "string"
     ? element["content-desc"]
     : typeof element["ios-accessibility-label"] === "string"
       ? element["ios-accessibility-label"]
-      : typeof element.contentDescription === "string"
-        ? element.contentDescription
-        : typeof element.accessibilityLabel === "string"
-          ? element.accessibilityLabel
-          : platform === "ios" && typeof element.text === "string"
-            ? element.text
-            : undefined;
+      : platform === "ios" && typeof element.text === "string"
+        ? element.text
+        : undefined;
 
 const textFieldsForElement = (element: Element): string[] => [
   element.text,

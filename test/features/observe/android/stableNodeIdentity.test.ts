@@ -79,6 +79,19 @@ describe("assignStableViewIds (#3228)", () => {
     expect(rowA["view-id"]).not.toEqual(rowB["view-id"]);
   });
 
+  test("canonical class and legacy className participate equivalently in identity", () => {
+    const canonical = node({ "view-id": generatedUuid("canonical"), "class": "android.widget.ImageView" });
+    const legacy = node({ "view-id": generatedUuid("legacy"), "className": "android.widget.ImageView" });
+    const different = node({ "view-id": generatedUuid("different"), "class": "android.widget.TextView" });
+
+    assignStableViewIds(canonical);
+    assignStableViewIds(legacy);
+    assignStableViewIds(different);
+
+    expect(canonical["view-id"]).toEqual(legacy["view-id"]);
+    expect(canonical["view-id"]).not.toEqual(different["view-id"]);
+  });
+
   test("interaction-state flips (checked/focused) do not change identity", () => {
     const off = node({ "view-id": generatedUuid("t"), "content-desc": "Wifi toggle", "checked": "false" });
     const on = node({ "view-id": generatedUuid("t"), "content-desc": "Wifi toggle", "checked": "true", "focused": "true" });

@@ -1,5 +1,6 @@
 import Ajv2020 from "ajv/dist/2020";
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { findWaitForElement, observeSchema, registerObserveTools, waitForObservation } from "../../src/server/observeTools";
@@ -227,6 +228,62 @@ describe("published observe waitFor input schema", () => {
     };
   };
 
+  const collectTextMatchDescriptions = (schema: unknown): string[] => {
+    if (schema === null || typeof schema !== "object") {
+      return [];
+    }
+
+    const record = schema as Record<string, unknown>;
+    const descriptions: string[] = [];
+    const properties = record.properties;
+    if (properties !== null && typeof properties === "object") {
+      const textMatch = (properties as Record<string, unknown>).textMatch;
+      if (textMatch !== null && typeof textMatch === "object") {
+        const description = (textMatch as Record<string, unknown>).description;
+        if (typeof description === "string") {
+          descriptions.push(description);
+        }
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      descriptions.push(...collectTextMatchDescriptions(value));
+    }
+
+    return descriptions;
+  };
+
+  test("documents textMatch as applying only to waitFor.text", () => {
+    (ToolRegistry as any).tools.clear();
+    registerObserveTools();
+    const observeTool = ToolRegistry.getToolDefinitions()
+      .find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
+
+    expect(descriptions.length).toBeGreaterThan(0);
+    expect(new Set(descriptions)).toEqual(new Set([
+      "How to match waitFor.text; does not affect contentDescription",
+    ]));
+  });
+
+  test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
+    const toolDefinitions = JSON.parse(readFileSync(
+      new URL("../../schemas/tool-definitions.json", import.meta.url),
+      "utf8"
+    )) as Array<{ name: string; inputSchema: unknown }>;
+    const observeTool = toolDefinitions.find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
+
+    expect(descriptions.length).toBeGreaterThan(0);
+    expect(new Set(descriptions)).toEqual(new Set([
+      "How to match waitFor.text; does not affect contentDescription",
+    ]));
+  });
+
   test.each([
     {
       label: "legacy elementId with timeout",
@@ -370,6 +427,17 @@ describe("published observe waitFor input schema", () => {
         },
       },
     },
+    {
+      label: "iOS activeWindow has activityName without app id",
+      input: {
+        platform: "ios",
+        waitFor: {
+          activeWindow: {
+            activityName: "com.example.ios.IgnoredActivity",
+          },
+        },
+      },
+    },
   ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(false);
 
@@ -467,6 +535,59 @@ describe("findWaitForElement rich predicates", () => {
 
     expect(element?.["resource-id"]).toBe("home_tab");
     expect(element?.class).toBe("android.widget.BottomNavigationView");
+  });
+
+  test("ignores camelCase className attributes on parsed elements", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          className: "android.widget.BottomNavigationView",
+          bounds: bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        className: "android.widget.BottomNavigationView",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
+  });
+
+  test.each([
+    {
+      label: "contentDescription",
+      attributes: { contentDescription: "Home tab" },
+    },
+    {
+      label: "accessibilityLabel",
+      attributes: { accessibilityLabel: "Home tab" },
+    },
+  ])("ignores camelCase $label attributes on parsed elements", ({ attributes }) => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          ...attributes,
+          bounds: bounds(10, 80, 190, 140),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home tab",
+      } as any,
+      hierarchy
+    );
+
+    expect(element).toBeNull();
   });
 
   test("requires elementId and text to match the same node", () => {
@@ -675,6 +796,17 @@ describe("findWaitForElement rich predicates", () => {
     expect(findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy)).toBeNull();
   });
 
+  test("keeps contentDescription exact-only when textMatch is non-exact", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { "content-desc": "Home tab", "bounds": bounds(10, 10, 180, 60) } },
+    ]);
+
+    expect(findWaitForElement(finder, { contentDescription: "Home tab", textMatch: "exact" } as any, hierarchy)?.["content-desc"]).toBe("Home tab");
+    expect(findWaitForElement(finder, { contentDescription: "Home", textMatch: "contains" } as any, hierarchy)).toBeNull();
+    expect(findWaitForElement(finder, { contentDescription: "^Home", textMatch: "regex" } as any, hierarchy)).toBeNull();
+  });
+
   test("matches iOS accessibility labels exposed as text for contentDescription", () => {
     const finder = new DefaultElementFinder();
     const hierarchy = makeHierarchy([
@@ -697,6 +829,30 @@ describe("findWaitForElement rich predicates", () => {
     );
 
     expect(element?.text).toBe("Home");
+  });
+
+  test("matches canonical iOS accessibility labels for contentDescription", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      {
+        $: {
+          "ios-accessibility-label": "Home",
+          "class": "XCUIElementTypeButton",
+          "bounds": bounds(10, 10, 180, 60),
+        },
+      },
+    ]);
+
+    const element = findWaitForElement(
+      finder,
+      {
+        contentDescription: "Home",
+      } as any,
+      hierarchy,
+      "ios"
+    );
+
+    expect(element?.["ios-accessibility-label"]).toBe("Home");
   });
 
   test("does not match Android text-only nodes for contentDescription", () => {
@@ -846,28 +1002,18 @@ describe("waitForObservation activeWindow", () => {
     expect(observeScreen.getExecuteCallCount()).toBe(1);
   });
 
-  test("does not satisfy iOS activeWindow with only Android activityName", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult(() => makeObservation("com.example.ios", ""));
-
-    const outcome = await waitForObservation(
-      observeScreen,
-      {
-        activeWindow: {
-          activityName: "com.example.ios.IgnoredActivity",
+  test("rejects iOS activeWindow with only Android activityName", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "ios",
+        waitFor: {
+          activeWindow: {
+            activityName: "com.example.ios.IgnoredActivity",
+          },
+          timeout: 250,
         },
-        timeout: 250,
-      } as any,
-      undefined,
-      false,
-      timer,
-      "ios"
-    );
-
-    expect(outcome.awaitTimeout).toBe(true);
-    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
+      })
+    ).toThrow("activityName is Android-only; use appId/bundleId on iOS");
   });
 
   test("times out when only the element predicate matches", async () => {

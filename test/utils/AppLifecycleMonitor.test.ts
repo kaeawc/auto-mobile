@@ -1,9 +1,10 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { AppLifecycleMonitor, DefaultAppLifecycleMonitor, AppLifecycleEvent } from "../../src/utils/AppLifecycleMonitor";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AppLifecycleMonitorFactory } from "../../src/utils/factories/AppLifecycleMonitorFactory";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
+import { logger } from "../../src/utils/logger";
 
 describe("AppLifecycleMonitor", () => {
   let monitor: DefaultAppLifecycleMonitor;
@@ -155,6 +156,7 @@ describe("AppLifecycleMonitor", () => {
 
       // Clear events from the launch
       launchEvents.length = 0;
+      fakeAdb.clearHistory();
 
       // Simulate package termination
       fakeAdb.setCommandResponse("shell pidof com.example.app", { stdout: "", stderr: "" });
@@ -162,6 +164,7 @@ describe("AppLifecycleMonitor", () => {
       // Check for changes to detect termination
       await monitor.checkForChanges(testDevice);
 
+      expect(fakeAdb.getExecutedCommands()).toContain("shell pidof com.example.app || true");
       expect(terminateEvents).toHaveLength(1);
       expect(terminateEvents[0].type).toBe("terminate");
       expect(terminateEvents[0].appId).toBe("com.example.app");
@@ -215,6 +218,33 @@ describe("AppLifecycleMonitor", () => {
   });
 
   describe("error handling", () => {
+    test("preserves running package state and suppresses terminate event when pidof probe fails", async () => {
+      const terminateEvents: AppLifecycleEvent[] = [];
+      const probeError = new Error("adb transport closed");
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+      try {
+        monitor.addEventListener("terminate", async event => {
+          terminateEvents.push(event);
+        });
+
+        fakeAdb.setCommandResponse("shell pidof com.example.app", { stdout: "12345", stderr: "" });
+        await monitor.trackPackage(testDevice, "com.example.app");
+        expect(monitor.getRunningPackages()).toEqual(["com.example.app"]);
+
+        fakeAdb.setCommandError("shell pidof com.example.app", probeError);
+        await monitor.checkForChanges(testDevice);
+
+        expect(monitor.getRunningPackages()).toEqual(["com.example.app"]);
+        expect(terminateEvents).toEqual([]);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy.mock.calls[0]?.[0]).toContain("Failed to check whether com.example.app is running");
+        expect(warnSpy.mock.calls[0]?.[1]).toBe(probeError);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
     test("should handle event emission errors gracefully", async () => {
       fakeAdb.setCommandResponse("shell pidof com.example.app", { stdout: "12345", stderr: "" });
 

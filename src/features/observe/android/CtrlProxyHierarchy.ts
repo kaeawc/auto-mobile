@@ -862,6 +862,7 @@ export class CtrlProxyHierarchy {
       converted["view-id"] = node["view-id"];
     }
     if (node.className) {
+      converted.class = node.className;
       converted.className = node.className;
     }
     if (node.packageName) {

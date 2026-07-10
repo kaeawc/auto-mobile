@@ -131,7 +131,9 @@ export class NavigationScreenshotManager {
       });
 
       return path.join(this.screenshotDir, matching[0]);
-    } catch {
+    } catch (error) {
+      // Screenshot lookup is best-effort; callers can capture a fresh image when lookup fails.
+      logger.debug(`[NAV_SCREENSHOT] Failed to find existing screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
       return null;
     }
   }
@@ -372,7 +374,9 @@ export class NavigationScreenshotManager {
         return null;
       }
       return await this.fs.readFileBuffer(screenshotPath);
-    } catch {
+    } catch (error) {
+      // Screenshot reads are best-effort; callers treat null as an unavailable image.
+      logger.debug(`[NAV_SCREENSHOT] Failed to read screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
       return null;
     }
   }

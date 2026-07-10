@@ -3316,7 +3316,7 @@
                       ]
                     },
                     "textMatch": {
-                      "description": "How to match text predicates",
+                      "description": "How to match waitFor.text; does not affect contentDescription",
                       "type": "string",
                       "enum": [
                         "exact",
@@ -3606,6 +3606,49 @@
       "required": [
         "platform"
       ],
+      "if": {
+        "required": [
+          "platform",
+          "waitFor"
+        ],
+        "properties": {
+          "platform": {
+            "const": "ios"
+          },
+          "waitFor": {
+            "required": [
+              "activeWindow"
+            ],
+            "properties": {
+              "activeWindow": {
+                "required": [
+                  "activityName"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "appId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "bundleId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "packageName"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": false,
       "additionalProperties": false
     },
     "outputSchema": {

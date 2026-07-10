@@ -112,17 +112,6 @@ src/features/navigation/Explore.ts: error TS2345: Argument of type 'NavigationGr
 src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.
 src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.
 src/features/navigation/ExploreElementExtraction.ts: error TS2322: Type '{}' is not assignable to type 'string'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'backStackDepth' does not exist on type 'Promise<NavigationNode | undefined>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'reason' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'reason' does not exist on type 'Promise<BackButtonRecommendation>'.
-src/features/navigation/NavigateTo.ts: error TS2339: Property 'shouldUseBack' does not exist on type 'Promise<BackButtonRecommendation>'.
 src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'NavigationGraphService' is not assignable to parameter of type 'NavigationGraphManager'.
 src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphManager"' declares 'ToolCallInteraction' locally, but it is not exported.
@@ -291,12 +280,10 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 25,27 :: src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 # swap-fp: 26 :: src/daemon/telemetryPushSocketServer.ts: error TS2339: Property 'sessionId' does not exist on type '{ type: "crash" | "anr" | "tool_failure"; title: string; severity: "critical" | "high" | "medium" | "low"; stack_trace_json: string | null; timestamp: number; occurrenceId: string; groupId: string; deviceId: string | null; screen: string | null; }'.
 # swap-fp: 27 :: src/db/migrator.ts: error TS7006: Parameter 'index' implicitly has an 'any' type.
-# swap-fp: 27 :: src/features/navigation/NavigateTo.ts: error TS2339: Property 'shouldUseBack' does not exist on type 'Promise<BackButtonRecommendation>'.
 # swap-fp: 27,45 :: src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 28 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'DataTypeExpression'.
 # swap-fp: 28,61 :: src/server/navigationTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'GetNavigationGraphArgs'.
 # swap-fp: 29 :: src/server/systemTrayHelpers.ts: error TS2741: Property 'getDeviceTimestampMs' is missing in type 'AdbExecutor' but required in type 'SystemTrayAdb'.
-# swap-fp: 29,29,30,31,45,47,65 :: src/features/navigation/NavigateTo.ts: error TS2339: Property 'backPresses' does not exist on type 'Promise<BackButtonRecommendation>'.
 # swap-fp: 3 :: src/daemon/failuresStreamSocketServer.ts: error TS2559: Type 'FailuresStreamSocketRequest' has no properties in common with type 'SocketRequest'.
 # swap-fp: 3 :: src/daemon/performanceStreamSocketServer.ts: error TS2559: Type 'PerformanceStreamSocketRequest' has no properties in common with type 'SocketRequest'.
 # swap-fp: 3 :: src/daemon/testRecordingSocketServer.ts: error TS2559: Type 'TestRecordingCommand' has no properties in common with type 'SocketRequest'.
@@ -357,7 +344,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 5,21,76 :: src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
 # swap-fp: 5,7,7 :: src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 # swap-fp: 50 :: src/db/failureAnalyticsRepository.ts: error TS2367: This comparison appears to be unintentional because the types '"crash" | "anr" | "tool_failure"' and '"nonfatal"' have no overlap.
-# swap-fp: 50 :: src/features/navigation/NavigateTo.ts: error TS2339: Property 'backStackDepth' does not exist on type 'Promise<NavigationNode | undefined>'.
 # swap-fp: 51 :: src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
 # swap-fp: 52 :: src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
 # swap-fp: 52 :: src/features/performance/PerformanceMonitor.ts: error TS2345: Argument of type 'PerformanceDataPusher' is not assignable to parameter of type 'PerformancePushSocketServer'.
@@ -396,7 +382,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 78 :: src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 # swap-fp: 8,8 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
 # swap-fp: 80 :: src/features/utility/ios/IosNotificationAuthorizationReader.ts: error TS2339: Property 'toString' does not exist on type 'never'.
-# swap-fp: 81,86 :: src/features/navigation/NavigateTo.ts: error TS2339: Property 'reason' does not exist on type 'Promise<BackButtonRecommendation>'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 86,86 :: src/utils/ios-cmdline-tools/DeviceAppManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 # swap-fp: 86,86 :: src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2339: Property 'toString' does not exist on type 'never'.

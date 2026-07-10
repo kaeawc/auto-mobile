@@ -42,3 +42,16 @@
 @test "prepare-release.yml runs the release-integrity gate" {
   grep -q "verify-release-integrity.sh" ".github/workflows/prepare-release.yml"
 }
+
+@test "build-ctrl-proxy-ios-ipa.yml removes untrusted Homebrew aws tap before installing XcodeGen" {
+  workflow=".github/workflows/build-ctrl-proxy-ios-ipa.yml"
+
+  grep -Fq "brew untap aws/tap || true" "$workflow"
+  grep -Fq "brew install xcodegen" "$workflow"
+  ! grep -Fq "HOMEBREW_NO_REQUIRE_TAP_TRUST" "$workflow"
+
+  untap_line="$(grep -Fn "brew untap aws/tap || true" "$workflow" | cut -d: -f1 | head -n 1)"
+  install_line="$(grep -Fn "brew install xcodegen" "$workflow" | cut -d: -f1 | head -n 1)"
+
+  [[ "$untap_line" -lt "$install_line" ]]
+}

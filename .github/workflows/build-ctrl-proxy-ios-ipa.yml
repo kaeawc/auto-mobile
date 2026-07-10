@@ -41,7 +41,9 @@ jobs:
           key: homebrew-xcodegen-${{ runner.os }}
 
       - name: "Install XcodeGen"
-        run: brew install xcodegen
+        run: |
+          brew untap aws/tap || true
+          brew install xcodegen
 
       - name: "Cache Ruby gems"
         uses: actions/cache@v5

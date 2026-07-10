@@ -7,6 +7,11 @@ import { logger } from "../../src/utils/logger";
 
 const originalWarn = logger.warn;
 
+interface WarnCall {
+  message: string;
+  args: unknown[];
+}
+
 function registerThrowingTool(name: string): void {
   ToolRegistry.register(
     name,
@@ -25,9 +30,9 @@ afterEach(() => {
 
 describe("PlanExecutor catch logging", () => {
   test("warns before returning a skipped status from an optional thrown step", async () => {
-    const warnMessages: string[] = [];
-    logger.warn = (message: string) => {
-      warnMessages.push(message);
+    const warnCalls: WarnCall[] = [];
+    logger.warn = (message: string, ...args: unknown[]) => {
+      warnCalls.push({ message, args });
     };
     registerThrowingTool("optionalThrowingTool");
     const executor = new DefaultPlanExecutor();
@@ -39,15 +44,16 @@ describe("PlanExecutor catch logging", () => {
     const result = await executor.executePlan(plan, 0);
 
     expect(result.success).toBe(true);
-    expect(warnMessages).toContain(
-      "[PLAN_STEP_1] optional step optionalThrowingTool threw; returning skipped status: Error: optionalThrowingTool boom"
-    );
+    expect(warnCalls).toContainEqual({
+      message: "[PLAN_STEP_1] optional step optionalThrowingTool threw; returning skipped status",
+      args: [expect.objectContaining({ message: "optionalThrowingTool boom" })],
+    });
   });
 
   test("warns before returning a failed status from a thrown step", async () => {
-    const warnMessages: string[] = [];
-    logger.warn = (message: string) => {
-      warnMessages.push(message);
+    const warnCalls: WarnCall[] = [];
+    logger.warn = (message: string, ...args: unknown[]) => {
+      warnCalls.push({ message, args });
     };
     registerThrowingTool("requiredThrowingTool");
     const executor = new DefaultPlanExecutor();
@@ -59,8 +65,9 @@ describe("PlanExecutor catch logging", () => {
     const result = await executor.executePlan(plan, 0);
 
     expect(result.success).toBe(false);
-    expect(warnMessages).toContain(
-      "[PLAN_STEP_1] step requiredThrowingTool threw; returning failed status: Error: requiredThrowingTool boom"
-    );
+    expect(warnCalls).toContainEqual({
+      message: "[PLAN_STEP_1] step requiredThrowingTool threw; returning failed status",
+      args: [expect.objectContaining({ message: "requiredThrowingTool boom" })],
+    });
   });
 });

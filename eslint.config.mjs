@@ -100,7 +100,7 @@ function catchConventionRule() {
 		create(context) {
 			function reportStatusReturnsWithoutWarn(statements, hasPriorWarn) {
 				for (const statement of statements) {
-					if (hasLoggerMethodCall(statement, "warn")) {
+					if (statement.type === "ExpressionStatement" && isLoggerMethodCall(statement.expression, "warn")) {
 						hasPriorWarn = true;
 					}
 					if (statement.type === "ReturnStatement" && isStatusObjectReturn(statement.argument) && !hasPriorWarn) {

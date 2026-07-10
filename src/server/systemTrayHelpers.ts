@@ -267,8 +267,9 @@ export const resolveAppLabel = async (device: BootedDevice, appId: string): Prom
     if (info.success && info.applicationLabel) {
       return info.applicationLabel;
     }
-  } catch {
-    // fall through
+  } catch (error) {
+    // CtrlProxy package info is a fast path; dumpsys below is the fallback.
+    logger.debug(`CtrlProxy app label lookup failed for ${appId}: ${error}`, error);
   }
 
   try {

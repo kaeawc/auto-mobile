@@ -486,7 +486,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     } catch (error) {
       const errorMessage = `${error}`;
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
-        logger.warn(`${context.logPrefix} optional step ${step.tool} threw; returning skipped status: ${errorMessage}`, error);
+        logger.warn(`${context.logPrefix} optional step ${step.tool} threw; returning skipped status`, error);
         return {
           status: "skipped",
           error: errorMessage,
@@ -507,7 +507,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           context.deviceId,
           context.sessionUuid,
         );
-      logger.warn(`${context.logPrefix} step ${step.tool} threw; returning failed status: ${errorMessage}`, error);
+      logger.warn(`${context.logPrefix} step ${step.tool} threw; returning failed status`, error);
       return {
         status: "failed",
         error: errorMessage,

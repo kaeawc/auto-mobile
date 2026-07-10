@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { ESLint } from "eslint";
-import fs from "node:fs";
 
 async function lintSnippet(code: string, filePath = "src/errorHandlingConventionFixture.ts"): Promise<string[]> {
   const eslint = new ESLint({
@@ -15,10 +14,17 @@ async function lintSnippet(code: string, filePath = "src/errorHandlingConvention
 }
 
 describe("error-handling convention lint backstop", () => {
-  test("has no historical catch convention allowlist entries", () => {
-    const config = fs.readFileSync("eslint.config.mjs", "utf8");
+  test("rejects a fallback return at a formerly allowlisted path and line", async () => {
+    const messages = await lintSnippet(`${"\n".repeat(145)}export function probe(): boolean {
+  try {
+    return true;
+  } catch {
+    return false;
+  }
+}
+`, "src/daemon/client.ts");
 
-    expect(config).not.toContain("catchConventionAllowlist");
+    expect(messages).toContain("Catch blocks that return a fallback must log the caught error before returning.");
   });
 
   test("rejects empty catch bodies", async () => {
@@ -167,6 +173,26 @@ export function check(error: unknown): { status: "fail" | "skip"; message?: stri
       return { status: "fail", message: caught.message };
     }
     logger.warn(\`check failed: \${caught}\`, caught);
+    return { status: "skip", message: "Could not check" };
+  }
+}
+`);
+
+    expect(messages).toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+  });
+
+  test("rejects branch status returns that are not preceded by a warning on that branch", async () => {
+    const messages = await lintSnippet(`
+import { logger } from "../utils/logger";
+
+export function check(caught: unknown): { status: "fail" | "skip"; message?: string } {
+  try {
+    throw caught;
+  } catch (error) {
+    if (error instanceof Error) {
+      logger.warn(\`check failed: \${error.message}\`, error);
+      return { status: "fail", message: error.message };
+    }
     return { status: "skip", message: "Could not check" };
   }
 }

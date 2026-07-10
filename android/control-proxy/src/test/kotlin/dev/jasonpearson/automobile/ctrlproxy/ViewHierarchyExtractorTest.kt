@@ -600,6 +600,85 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `cross-window occlusion does not link matching descendant that does not overlap`() {
+    val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
+    val appRoot =
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 200, 200),
+        children = listOf(target),
+      )
+    val nonOverlappingChild =
+      elementWithBounds(text = "Demos", viewId = "stable-demos", bounds = bounds(150, 150, 190, 190))
+    val labelledWrapper =
+      elementWithBounds(
+        contentDesc = "Demos",
+        bounds = bounds(0, 0, 50, 50),
+        children = listOf(nonOverlappingChild),
+      )
+
+    val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
+    val overlayEntry =
+      extractor.createWindowEntry(windowId = 2, windowLayer = 1, hierarchy = labelledWrapper)
+    val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, overlayEntry))
+    val filtered =
+      extractor.filterOccludedHierarchyForTest(
+        element = appRoot,
+        occlusionInfo = occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
+
+    assertNotNull(filtered)
+    val targetResult = findElementByResourceId(filtered!!, "partial-target")
+    assertNotNull(targetResult)
+    assertEquals("partial", targetResult!!.occlusionState)
+    assertEquals("Demos", targetResult.occludedBy)
+    assertNull(targetResult.occludedByViewId)
+  }
+
+  @Test
+  fun `cross-window occlusion prefers direct wrapper view id over equal-overlap child`() {
+    val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
+    val appRoot =
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 200, 200),
+        children = listOf(target),
+      )
+    val labelledChild =
+      elementWithBounds(text = "Demos", viewId = "stable-demos-child", bounds = bounds(0, 0, 50, 50))
+    val labelledWrapper =
+      elementWithBounds(
+        contentDesc = "Demos",
+        viewId = "stable-demos-wrapper",
+        bounds = bounds(0, 0, 50, 50),
+        children = listOf(labelledChild),
+      )
+
+    val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
+    val overlayEntry =
+      extractor.createWindowEntry(windowId = 2, windowLayer = 1, hierarchy = labelledWrapper)
+    val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, overlayEntry))
+    val filtered =
+      extractor.filterOccludedHierarchyForTest(
+        element = appRoot,
+        occlusionInfo = occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
+
+    assertNotNull(filtered)
+    val targetResult = findElementByResourceId(filtered!!, "partial-target")
+    assertNotNull(targetResult)
+    assertEquals("partial", targetResult!!.occlusionState)
+    assertEquals("Demos", targetResult.occludedBy)
+    assertEquals("stable-demos-wrapper", targetResult.occludedByViewId)
+  }
+
+  @Test
   fun `hidden root occlusion retains children`() {
     val child = elementWithBounds(resourceId = "root-child", bounds = bounds(98, 98, 100, 100))
     val root =

@@ -1601,10 +1601,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
         intersections.add(intersection)
 
-        if (overlapArea > maxOverlap) {
+        val occluderViewId = occluder.element.viewId?.takeIf { it.isNotBlank() }
+        val shouldPreferOccluder =
+          overlapArea > maxOverlap ||
+            (overlapArea == maxOverlap && occludedByViewId == null && occluderViewId != null)
+        if (shouldPreferOccluder) {
           maxOverlap = overlapArea
           occludedBy = resolveOccluderLabel(occluder)
-          occludedByViewId = resolveOccluderViewId(occluder)
+          occludedByViewId = occluderViewId
         }
       }
 
@@ -1837,27 +1841,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       ?: element.text?.takeIf { it.isNotBlank() }
       ?: element.className?.takeIf { it.isNotBlank() }
       ?: "unlabeled view"
-  }
-
-  private fun resolveOccluderViewId(occluder: OcclusionNode): String? {
-    occluder.element.viewId?.takeIf { it.isNotBlank() }?.let { return it }
-    val label = resolveOccluderLabel(occluder).takeUnless { it == "unlabeled view" } ?: return null
-    return findDescendantViewIdMatchingLabel(occluder.element, label)
-  }
-
-  private fun findDescendantViewIdMatchingLabel(element: UIElementInfo, label: String): String? {
-    for (child in decodeChildrenFromNode(element.node)) {
-      val childViewId = child.viewId?.takeIf { it.isNotBlank() }
-      if (childViewId != null && child.hasSemanticOccluderLabel(label)) {
-        return childViewId
-      }
-      findDescendantViewIdMatchingLabel(child, label)?.let { return it }
-    }
-    return null
-  }
-
-  private fun UIElementInfo.hasSemanticOccluderLabel(label: String): Boolean {
-    return resourceId == label || contentDesc == label || text == label
   }
 
   /** Extract information about a single focused element. Used for getCurrentFocus command. */

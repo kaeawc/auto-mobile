@@ -6,7 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { FakeToolRegistry } from "../../fakes/FakeToolRegistry";
 import { z } from "zod";
-import { unresolvedLocalRefs } from "../../helpers/jsonSchemaRefs";
+import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 
 const listToolsResponseSchema = z.object({
   tools: z.array(z.object({
@@ -112,7 +112,7 @@ describe("MCP Tools List", () => {
       expect(toolNames).toContain("inputText");
     });
 
-    test("strict clients can resolve observe outputSchema local references", async function() {
+    test("strict clients can compile observe outputSchema", async function() {
       const { client } = fixture.getContext();
 
       const result = await client.request({
@@ -123,7 +123,7 @@ describe("MCP Tools List", () => {
       const observe = result.tools.find(tool => tool.name === "observe");
 
       expect(observe?.outputSchema).toBeDefined();
-      expect(unresolvedLocalRefs(observe?.outputSchema)).toEqual([]);
+      expect(() => compileJsonSchema(observe!.outputSchema)).not.toThrow();
     });
   });
 });

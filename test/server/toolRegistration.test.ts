@@ -4,7 +4,7 @@ import type { RegisteredTool } from "../../src/server/toolRegistry";
 import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
-import { unresolvedLocalRefs } from "../helpers/jsonSchemaRefs";
+import { compileJsonSchema } from "../helpers/jsonSchemaCompile";
 
 /**
  * Tool Registration Regression Tests
@@ -651,7 +651,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     }
   });
 
-  test("should keep generated observe outputSchema local references resolvable", async () => {
+  test("should keep generated observe outputSchema compilable by strict clients", async () => {
     const fs = await import("fs/promises");
     const path = await import("path");
     const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
@@ -661,7 +661,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     const observe = schemas.find(schema => schema.name === "observe");
 
     expect(observe?.outputSchema).toBeDefined();
-    expect(unresolvedLocalRefs(observe?.outputSchema)).toEqual([]);
+    expect(() => compileJsonSchema(observe!.outputSchema)).not.toThrow();
   });
 
   test("should keep committed tool definitions in sync with all served tool modes", async () => {

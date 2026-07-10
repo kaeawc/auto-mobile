@@ -140,7 +140,6 @@ export class Daemon {
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
   private observationStreamHealth: ObservationStreamHealth;
-  private observationStreamHealth: ObservationStreamHealth;
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;

@@ -202,7 +202,9 @@ export async function isToolInPath(toolName: string, systemDetection = createDef
     const command = systemDetection.getCurrentPlatform() === "win32" ? "where" : "which";
     await systemDetection.exec(`${command} ${toolName}`);
     return true;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return false;
   }
 }
@@ -216,7 +218,9 @@ export async function getToolPathFromPath(toolName: string, systemDetection = cr
     const result = await systemDetection.exec(`${command} ${toolName}`);
     const path = result.stdout.trim().split("\n")[0]; // Take first result if multiple
     return path || null;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return null;
   }
 }

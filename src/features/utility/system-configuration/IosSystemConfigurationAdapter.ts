@@ -1,4 +1,5 @@
 import type { ProcessExecutor } from "../../../utils/ProcessExecutor";
+import { logger } from "../../../utils/logger";
 import type {
   BootedDevice,
   GetCalendarSystemResult,
@@ -289,7 +290,9 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
         iosSpawnCommand(this.device.deviceId, `defaults read ${domain} ${key}`)
       );
       return normalizeSettingValue(result.stdout);
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts fallback failed: ${error}`, error);
       return null;
     }
   }

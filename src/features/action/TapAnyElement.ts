@@ -134,7 +134,9 @@ export class TapAnyElement extends BaseVisualChange {
     if (!viewHierarchy) {return null;}
     try {
       return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy.hierarchy));
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/features/action/TapAnyElement.ts fallback failed: ${error}`, error);
       return null;
     }
   }

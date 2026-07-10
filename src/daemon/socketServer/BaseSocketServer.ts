@@ -103,7 +103,9 @@ export abstract class BaseSocketServer {
     try {
       const stats = statSync(this.socketPath);
       return { dev: stats.dev, ino: stats.ino };
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -227,7 +229,9 @@ export abstract class BaseSocketServer {
   protected parseJson<T>(line: string): T | null {
     try {
       return JSON.parse(line) as T;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts fallback failed: ${error}`, error);
       return null;
     }
   }

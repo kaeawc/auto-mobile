@@ -100,8 +100,9 @@ const defaultRecordingFileProbe: RecordingFileProbe = {
     try {
       const stats = await fsPromises.stat(filePath);
       return stats.size;
-    } catch {
-      // Missing file (ENOENT) is the expected "not ready yet" state during the poll.
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/features/video/FfmpegVideoProcessingBackend.ts fallback failed: ${error}`, error);
       return null;
     }
   },

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ESLint } from "eslint";
+import fs from "node:fs";
 
 async function lintSnippet(code: string, filePath = "src/errorHandlingConventionFixture.ts"): Promise<string[]> {
   const eslint = new ESLint({
@@ -14,6 +15,12 @@ async function lintSnippet(code: string, filePath = "src/errorHandlingConvention
 }
 
 describe("error-handling convention lint backstop", () => {
+  test("has no historical catch convention allowlist entries", () => {
+    const config = fs.readFileSync("eslint.config.mjs", "utf8");
+
+    expect(config).not.toContain("catchConventionAllowlist");
+  });
+
   test("rejects empty catch bodies", async () => {
     const messages = await lintSnippet(`
 export function cleanup(): void {

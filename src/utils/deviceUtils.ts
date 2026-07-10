@@ -110,7 +110,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     try {
       return await this.simctl.isAvailable();
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/deviceUtils.ts fallback failed: ${error}`, error);
       return false;
     }
   }

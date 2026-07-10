@@ -5,6 +5,7 @@ import { unlink } from "node:fs/promises";
 import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { PidFileData } from "./types";
+import { logger } from "../utils/logger";
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
   defaultPath: path.join(os.homedir(), ".auto-mobile", "video-recording.sock"),
@@ -140,7 +141,9 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
   }
   try {
     return JSON.parse(readFileSync(pidFilePath, "utf-8")) as PidFileData;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/daemon/daemonFiles.ts fallback failed: ${error}`, error);
     return null;
   }
 }
@@ -149,7 +152,9 @@ export function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/daemon/daemonFiles.ts fallback failed: ${error}`, error);
     return false;
   }
 }

@@ -1,5 +1,6 @@
 import path from "path";
 import { readdirAsync, statAsync, unlinkAsync } from "./io";
+import { logger } from "./logger";
 
 export interface LogPruneOptions {
   /** Directory containing the `.log` files. */
@@ -68,7 +69,9 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   let entries: string[];
   try {
     entries = await readdirAsync(opts.dir);
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/logPruner.ts fallback failed: ${error}`, error);
     return;
   }
   const logFiles = entries.filter(f => f.endsWith(".log"));

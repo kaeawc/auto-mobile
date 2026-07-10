@@ -18,6 +18,8 @@ async function runCommand(command: string, args: string[]): Promise<CommandResul
       stderr: result.stderr ? result.stderr.toString() : "",
     };
   } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/hostAppearance.ts fallback failed: ${error}`, error);
     return null;
   }
 }

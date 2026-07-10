@@ -3,6 +3,7 @@ import path from "path";
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
+import { logger } from "./logger";
 
 /**
  * Identity of the git commit a dev/source checkout is built from.
@@ -54,8 +55,9 @@ const readPackageName = (dir: string): string | null => {
   try {
     const raw = fs.readFileSync(path.join(dir, "package.json"), "utf-8");
     return (JSON.parse(raw) as { name?: string }).name ?? null;
-  } catch {
-    // No/unreadable package.json at the repo root — treat as not-ours.
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/mcpVersion.ts fallback failed: ${error}`, error);
     return null;
   }
 };
@@ -69,8 +71,9 @@ const readPackageVersionFromDisk = (): string | null => {
     const raw = fs.readFileSync(packagePath, "utf-8");
     const parsed = JSON.parse(raw) as { version?: string };
     return parsed.version ?? null;
-  } catch {
-    // Unreadable/malformed package.json — fall through to unknown.
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/mcpVersion.ts fallback failed: ${error}`, error);
     return null;
   }
 };
@@ -85,8 +88,9 @@ const runGit: GitRunner = (cwd, args) => {
       return null;
     }
     return result.stdout.trim();
-  } catch {
-    // git missing or not a checkout (release install) — no dev stamp.
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/mcpVersion.ts fallback failed: ${error}`, error);
     return null;
   }
 };

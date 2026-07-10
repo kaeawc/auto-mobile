@@ -1,6 +1,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "../daemon/daemonFiles";
+import { logger } from "./logger";
 
 /**
  * The canonical cross-process file-lock primitive (issue #2794).
@@ -123,9 +124,9 @@ export function tryAcquireExclusiveLock(
   let content: string;
   try {
     content = readFileSync(lockFilePath, "utf-8").trim();
-  } catch {
-    // File vanished between the failed `wx` create and this read — another opener
-    // is churning it; treat as contended and let the caller retry.
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return false;
   }
 
@@ -177,8 +178,9 @@ export function tryAcquireExclusiveLock(
   const reclaimMarker = `${lockFilePath}.${pid}.reclaim`;
   try {
     renameSync(lockFilePath, reclaimMarker);
-  } catch {
-    // Another opener reclaimed it first (path already moved/gone); retry.
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return false;
   }
   try {
@@ -211,8 +213,9 @@ export function releaseExclusiveLock(
   let content: string;
   try {
     content = readFileSync(lockFilePath, "utf-8").trim();
-  } catch {
-    // Already gone (never acquired, or reclaimed elsewhere) — nothing to release.
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return;
   }
 
@@ -249,9 +252,9 @@ function writeExclusiveLockFile(lockFilePath: string, pid: number, ownerToken?: 
     writeFileSync(fd, formatLockContent(pid, ownerToken));
     closeSync(fd);
     return true;
-  } catch {
-    // Expected: `wx` (O_EXCL) throws EEXIST when another opener already holds the
-    // lock. The caller treats false as "contended" and retries.
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return false;
   }
 }

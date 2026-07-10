@@ -107,7 +107,9 @@ export class TerminateApp extends BaseVisualChange {
           const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
           const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true);
           return parseInt(isInstalledOutput.trim(), 10) > 0;
-        } catch {
+        } catch (error) {
+          // This probe is best-effort; callers can safely use the fallback value.
+          logger.debug(`src/features/action/TerminateApp.ts fallback failed: ${error}`, error);
           return false;
         }
       });

@@ -277,6 +277,8 @@ export const resolveAppLabel = async (device: BootedDevice, appId: string): Prom
     const result = await adb.executeCommand(`shell dumpsys package ${appId}`, undefined, undefined, true);
     return parseAppLabelFromDumpsys(result.stdout);
   } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/server/systemTrayHelpers.ts fallback failed: ${error}`, error);
     return null;
   }
 };

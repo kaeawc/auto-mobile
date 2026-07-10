@@ -7,6 +7,7 @@ import { ActionableError } from "../../../models/ActionableError";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../ChecksumCalculator";
 import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader";
 import { DefaultProcessExecutor, type ProcessExecutor } from "../../ProcessExecutor";
+import { logger } from "../../logger";
 
 const LIBWEBP_VERSION = "1.6.0";
 const WEBP_DOWNLOAD_BASE_URL = "https://storage.googleapis.com/downloads.webmproject.org/releases/webp";
@@ -254,7 +255,9 @@ async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Pr
     }
     await fs.access(filePath, fsConstants.X_OK);
     return true;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/image/webp/WebpBinaryResolver.ts fallback failed: ${error}`, error);
     return false;
   }
 }

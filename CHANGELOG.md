@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.43] - 2026-07-10
+### Other
+- Invalid observe outputSchema breaks strict MCP tools/list clients ([#3542](https://github.com/kaeawc/auto-mobile/issues/3542))
+- observe returns malformed/truncated JSON on occlusion-heavy screens (regression in current main) ([#3539](https://github.com/kaeawc/auto-mobile/issues/3539))
+
 ## [v0.0.42] - 2026-07-10
 ### Added
 - docs/observe: contentDescription waitFor predicate silently ignores textMatch ([#3514](https://github.com/kaeawc/auto-mobile/issues/3514)) (documentation)

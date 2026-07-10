@@ -2886,6 +2886,7 @@ _install_dev_tools_brew() {
 
     if [[ ${missing} -gt 0 ]]; then
         log_warn "${missing} dev tool(s) could not be installed"
+        return 1
     else
         log_info "Development tools ready."
     fi
@@ -2941,6 +2942,7 @@ _install_dev_tools_apt() {
 
     if [[ ${missing} -gt 0 ]]; then
         log_warn "${missing} dev tool(s) could not be installed"
+        return 1
     else
         log_info "Development tools ready."
     fi

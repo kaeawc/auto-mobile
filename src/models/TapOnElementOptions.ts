@@ -12,6 +12,12 @@ export interface TapOnElementOptions {
   // Works with both text and elementId selectors.
   sibling?: boolean;
 
+  // When multiple elements match the selector, tap the one at this 0-based position among
+  // the on-screen matches (in hierarchy order, i.e. top-to-bottom for a vertical list)
+  // instead of applying selectionStrategy. Use for repeated controls with no unique text
+  // (e.g. the 2nd identical row action). Out of range → no match.
+  index?: number;
+
   // Container to restrict search
   container?: {
     elementId?: string;

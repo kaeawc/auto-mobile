@@ -313,7 +313,8 @@ export class TapOnElement extends BaseVisualChange {
             container: options.container,
             fuzzyMatch: true,
             caseSensitive: false,
-            strategy: options.selectionStrategy
+            strategy: options.selectionStrategy,
+            index: options.index
           }),
           containerFound
         };
@@ -324,7 +325,8 @@ export class TapOnElement extends BaseVisualChange {
           container: options.container,
           partialMatch: true,
           caseSensitive: false,
-          strategy: options.selectionStrategy
+          strategy: options.selectionStrategy,
+          index: options.index
         }),
         containerFound
       };
@@ -340,13 +342,15 @@ export class TapOnElement extends BaseVisualChange {
             container: options.container,
             fuzzyMatch: true,
             caseSensitive: false,
-            strategy: options.selectionStrategy
+            strategy: options.selectionStrategy,
+            index: options.index
           })
           : this.elementSelector.selectByText(viewHierarchy, text, {
             container: options.container,
             partialMatch: true,
             caseSensitive: false,
-            strategy: options.selectionStrategy
+            strategy: options.selectionStrategy,
+            index: options.index
           });
         lastSelection = selection;
         if (selection.element) {
@@ -376,7 +380,8 @@ export class TapOnElement extends BaseVisualChange {
           selection: this.elementSelector.selectClickableSiblingOfResourceId(viewHierarchy, options.elementId, {
             container: options.container,
             partialMatch: false,
-            strategy: options.selectionStrategy
+            strategy: options.selectionStrategy,
+            index: options.index
           }),
           containerFound
         };
@@ -386,7 +391,8 @@ export class TapOnElement extends BaseVisualChange {
         selection: this.elementSelector.selectByResourceId(viewHierarchy, options.elementId, {
           container: options.container,
           partialMatch: false,
-          strategy: options.selectionStrategy
+          strategy: options.selectionStrategy,
+          index: options.index
         }),
         containerFound
       };

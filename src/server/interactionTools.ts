@@ -149,6 +149,11 @@ export const tapOnSchema = addDeviceTargetingToSchema(z.object({
   selectionStrategy: elementSelectionStrategySchema.optional().describe(
     "Selection strategy when multiple match (default: first)"
   ),
+  index: z.number().int().nonnegative().optional().describe(
+    "0-based index to tap the Nth on-screen match (in hierarchy order, i.e. top-to-bottom "
+    + "for a vertical list) instead of applying "
+    + "selectionStrategy — for repeated controls with no unique text. Out of range → no match."
+  ),
   duration: z.number().optional().describe("Long press duration (ms)"),
   searchUntil: z.object({
     duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
@@ -420,6 +425,7 @@ export function registerInteractionTools() {
       elementId: args.selector.elementId,
       sibling: args.sibling,
       selectionStrategy: args.selectionStrategy,
+      index: args.index,
       action: args.action,
       duration: args.duration,
       searchUntil: args.searchUntil,

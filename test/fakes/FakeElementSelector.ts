@@ -13,6 +13,7 @@ import type { ElementSelector } from "../../src/utils/interfaces/ElementSelector
  */
 export class FakeElementSelector implements ElementSelector {
   lastStrategy?: ElementSelectionStrategy;
+  lastIndex?: number;
   lastText?: string;
   textCalls: string[] = [];
   lastResourceId?: string;
@@ -58,10 +59,12 @@ export class FakeElementSelector implements ElementSelector {
       partialMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
+    this.lastIndex = options?.index;
     this.lastText = text;
     this.textCalls.push(text);
     return this.buildSelectionResult(options?.strategy);
@@ -74,10 +77,12 @@ export class FakeElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
+    this.lastIndex = options?.index;
     this.lastResourceId = resourceId;
     return this.buildSelectionResult(options?.strategy);
   }
@@ -120,10 +125,12 @@ export class FakeElementSelector implements ElementSelector {
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
+    this.lastIndex = options?.index;
     this.lastText = text;
     this.textCalls.push(text);
     return this.buildSelectionResult(options?.strategy);
@@ -136,10 +143,12 @@ export class FakeElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
+      index?: number;
     }
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
+    this.lastIndex = options?.index;
     this.lastResourceId = resourceId;
     return this.buildSelectionResult(options?.strategy);
   }

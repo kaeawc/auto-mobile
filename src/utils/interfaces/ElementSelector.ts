@@ -11,6 +11,8 @@ export interface ElementSelector {
       partialMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
+      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
+      index?: number;
     }
   ): ElementSelectionResult;
 
@@ -21,6 +23,8 @@ export interface ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
+      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
+      index?: number;
     }
   ): ElementSelectionResult;
 
@@ -32,6 +36,8 @@ export interface ElementSelector {
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
+      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
+      index?: number;
     }
   ): ElementSelectionResult;
 
@@ -42,6 +48,8 @@ export interface ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
+      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
+      index?: number;
     }
   ): ElementSelectionResult;
 }

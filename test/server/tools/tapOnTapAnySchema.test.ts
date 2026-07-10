@@ -97,6 +97,7 @@ describe("tapOn schema", () => {
       action: "longPress",
       duration: 2000,
       selectionStrategy: "random",
+      index: 1,
       searchUntil: { duration: 3000 },
       preTapStability: true,
       retryIfNoChange: true,
@@ -104,6 +105,7 @@ describe("tapOn schema", () => {
     });
     expect(result.action).toBe("longPress");
     expect(result.duration).toBe(2000);
+    expect(result.index).toBe(1);
     expect(result.preTapStability).toBe(true);
   });
 

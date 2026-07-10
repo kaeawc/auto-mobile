@@ -124,7 +124,8 @@ export class DefaultElementFinder implements ElementFinder {
   private collectTextMatchesInRoots(
     rootNodes: ViewHierarchyNode[],
     text: string,
-    matchesText: (input?: string) => boolean
+    matchesText: (input?: string) => boolean,
+    sortByArea: boolean = true
   ): { exactMatches: Element[]; partialMatches: Element[] } {
     const partialMatches: Element[] = [];
     const exactMatches: Element[] = [];
@@ -198,10 +199,10 @@ export class DefaultElementFinder implements ElementFinder {
       });
     }
 
-    if (exactMatches.length > 0) {
+    if (sortByArea && exactMatches.length > 0) {
       this.sortElementsByArea(exactMatches);
     }
-    if (partialMatches.length > 0) {
+    if (sortByArea && partialMatches.length > 0) {
       this.sortElementsByArea(partialMatches);
     }
 
@@ -211,7 +212,8 @@ export class DefaultElementFinder implements ElementFinder {
   private collectResourceIdMatchesInRoots(
     rootNodes: ViewHierarchyNode[],
     resourceId: string,
-    partialMatch: boolean
+    partialMatch: boolean,
+    sortByArea: boolean = true
   ): Element[] {
     const matches: Element[] = [];
 
@@ -233,7 +235,7 @@ export class DefaultElementFinder implements ElementFinder {
       });
     }
 
-    if (matches.length > 0) {
+    if (sortByArea && matches.length > 0) {
       this.sortElementsByArea(matches);
     }
 
@@ -290,6 +292,17 @@ export class DefaultElementFinder implements ElementFinder {
     return isClickableElementProperties(props);
   }
 
+  private isCollectionNode(props: Record<string, unknown>): boolean {
+    const className = typeof props.class === "string" ? props.class : "";
+    const scrollable = props.scrollable === "true" || props.scrollable === true;
+    return scrollable ||
+      className.includes("RecyclerView") ||
+      className.includes("ListView") ||
+      className.includes("ScrollView") ||
+      className.includes("CollectionView") ||
+      className.includes("TableView");
+  }
+
   /**
    * Find elements in the view hierarchy that match the specified text
    * @param viewHierarchy - The view hierarchy to search
@@ -304,7 +317,8 @@ export class DefaultElementFinder implements ElementFinder {
     text: string,
     container: { elementId?: string; text?: string } | null = null,
     partialMatch: boolean = true,
-    caseSensitive: boolean = false
+    caseSensitive: boolean = false,
+    preserveTraversalOrder: boolean = false
   ): Element[] {
     if (!viewHierarchy || !text) {
       return [];
@@ -324,18 +338,33 @@ export class DefaultElementFinder implements ElementFinder {
     };
 
     if (containerNode) {
-      return selectMatches(this.collectTextMatchesInRoots([containerNode], text, matchesText));
+      return selectMatches(this.collectTextMatchesInRoots(
+        [containerNode],
+        text,
+        matchesText,
+        !preserveTraversalOrder
+      ));
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatches = selectMatches(this.collectTextMatchesInRoots(rootNodes, text, matchesText));
+    const mainMatches = selectMatches(this.collectTextMatchesInRoots(
+      rootNodes,
+      text,
+      matchesText,
+      !preserveTraversalOrder
+    ));
     if (mainMatches.length > 0) {
       return mainMatches;
     }
 
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
     for (const windowRoots of windowRootGroups) {
-      const windowMatches = selectMatches(this.collectTextMatchesInRoots(windowRoots, text, matchesText));
+      const windowMatches = selectMatches(this.collectTextMatchesInRoots(
+        windowRoots,
+        text,
+        matchesText,
+        !preserveTraversalOrder
+      ));
       if (windowMatches.length > 0) {
         return windowMatches;
       }
@@ -376,7 +405,8 @@ export class DefaultElementFinder implements ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container: { elementId?: string; text?: string } | null = null,
-    partialMatch: boolean = false
+    partialMatch: boolean = false,
+    preserveTraversalOrder: boolean = false
   ): Element[] {
     if (!viewHierarchy || !resourceId) {
       return [];
@@ -391,18 +421,33 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     if (containerNode) {
-      return this.collectResourceIdMatchesInRoots([containerNode], resourceId, partialMatch);
+      return this.collectResourceIdMatchesInRoots(
+        [containerNode],
+        resourceId,
+        partialMatch,
+        !preserveTraversalOrder
+      );
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatches = this.collectResourceIdMatchesInRoots(rootNodes, resourceId, partialMatch);
+    const mainMatches = this.collectResourceIdMatchesInRoots(
+      rootNodes,
+      resourceId,
+      partialMatch,
+      !preserveTraversalOrder
+    );
     if (mainMatches.length > 0) {
       return mainMatches;
     }
 
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
     for (const windowRoots of windowRootGroups) {
-      const windowMatches = this.collectResourceIdMatchesInRoots(windowRoots, resourceId, partialMatch);
+      const windowMatches = this.collectResourceIdMatchesInRoots(
+        windowRoots,
+        resourceId,
+        partialMatch,
+        !preserveTraversalOrder
+      );
       if (windowMatches.length > 0) {
         return windowMatches;
       }
@@ -1050,14 +1095,29 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Recursively search for clickable siblings of text-matching elements.
-   * When a node has children where one directly matches text and another is clickable,
-   * we return the clickable sibling.
+   * Recursively find the clickable control that shares a ROW with a text-matching
+   * element — the control a user taps "next to" that text (a remove button, a row
+   * checkbox, etc.).
    *
-   * Uses nodeHasText (shallow) instead of nodeOrDescendantHasText (deep) to avoid
-   * false positives: a parent whose deeply-nested descendant has the text should not
-   * cause its other children to be collected as "siblings." The recursion naturally
-   * finds the correct level.
+   * The text is frequently NOT a direct sibling of the control. List rows commonly nest
+   * the label under an intermediate container (e.g. a name/email pair inside an avatar
+   * group) while the action sits as a sibling of that container. So we match on a child
+   * whose SUBTREE contains the text (deep), and collect the clickable, non-text children
+   * at the DEEPEST qualifying node — the row.
+   *
+   * Two rules keep the deep match precise, addressing the false-positive the previous
+   * shallow (`nodeHasText`) version guarded against — i.e. stopping a list/recycler
+   * ancestor from collecting every sibling row's control at once:
+   *   - Recurse FIRST and bail if a descendant level already matched, so the nearest
+   *     (deepest) row wins when the matching row yields a control.
+   *   - Only collect at a node whose text-bearing child is NOT itself clickable. A
+   *     clickable text-bearing child means that child is the row/list-item and THIS node
+   *     is the list, so its other clickable children are sibling rows, not this row's
+   *     control. This is essential when the matching row has NO control of its own:
+   *     without it, recursion would unwind to the list and return a different row's
+   *     control (a silent wrong tap); with it, the result is a clean "not found".
+   * This keeps the old direct-sibling case working (the text's parent is the row) while
+   * also reaching a nested label, which previously returned "no clickable sibling".
    */
   private findClickableSiblingsInNode(
     node: ViewHierarchyNode,
@@ -1073,25 +1133,48 @@ export class DefaultElementFinder implements ElementFinder {
       ? children
       : [children];
 
-    // Check if any direct child has matching text (shallow — not descendants)
-    const hasTextMatch = childArray.some(child => this.nodeHasText(child, matchesText));
-
-    if (hasTextMatch) {
-      for (const child of childArray) {
-        const childProps = this.parser.extractNodeProperties(child);
-        const isClickable = this.isClickableNode(childProps);
-
-        if (isClickable && !this.nodeHasText(child, matchesText)) {
-          const parsedNode = this.parser.parseNodeBounds(child);
-          if (parsedNode) {
-            results.push(parsedNode);
-          }
-        }
-      }
-    }
-
+    // Recurse first so the DEEPEST (nearest-to-text) row wins. If a descendant level
+    // already produced matches, don't also collect at this (ancestor) level — that is
+    // what would pull sibling rows' controls in from a shared list container.
+    const before = results.length;
     for (const child of childArray) {
       this.findClickableSiblingsInNode(child, matchesText, results);
+    }
+    if (results.length > before) {
+      return;
+    }
+
+    // At this level, which child's SUBTREE contains the text (deep, so a label nested
+    // under an avatar/content group still counts)?
+    const textChild = childArray.find(child =>
+      this.nodeOrDescendantHasText(child, matchesText)
+    );
+    if (!textChild) {
+      return;
+    }
+
+    // If that text-bearing child is ITSELF clickable under a collection node, it is a
+    // row/list-item and THIS node is the list. Collecting here would grab a sibling
+    // ROW's control. A non-collection parent can still be an actual row with a
+    // clickable content group plus a trailing action, so let that case collect below.
+    if (
+      this.isClickableNode(this.parser.extractNodeProperties(textChild)) &&
+      this.isCollectionNode(this.parser.extractNodeProperties(node))
+    ) {
+      return;
+    }
+
+    // THIS node is the row: its clickable, non-text children are the action control(s).
+    for (const child of childArray) {
+      const childProps = this.parser.extractNodeProperties(child);
+      const isClickable = this.isClickableNode(childProps);
+
+      if (isClickable && !this.nodeOrDescendantHasText(child, matchesText)) {
+        const parsedNode = this.parser.parseNodeBounds(child);
+        if (parsedNode) {
+          results.push(parsedNode);
+        }
+      }
     }
   }
 

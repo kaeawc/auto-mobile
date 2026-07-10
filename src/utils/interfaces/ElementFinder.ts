@@ -7,7 +7,8 @@ export interface ElementFinder {
     text: string,
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
-    caseSensitive?: boolean
+    caseSensitive?: boolean,
+    preserveTraversalOrder?: boolean
   ): Element[];
 
   findElementByText(
@@ -22,7 +23,8 @@ export interface ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container?: { elementId?: string; text?: string } | null,
-    partialMatch?: boolean
+    partialMatch?: boolean,
+    preserveTraversalOrder?: boolean
   ): Element[];
 
   findElementByResourceId(

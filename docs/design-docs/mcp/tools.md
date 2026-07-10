@@ -8,7 +8,7 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 
 #### Interactions
 
-- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selector strategies include `text`, `elementId`, `clickable` (first clickable element), `siblingOfText` (clickable sibling of a text element), and `tapClickableParent` (nearest clickable ancestor of a text match).
+- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selectors include `selector.text`, `selector.textAny`, and `selector.elementId`; `sibling: true` taps a clickable sibling of the selector match. When multiple elements match, `index` (0-based) taps the Nth on-screen match instead of applying `selectionStrategy`.
 - 👉 `swipeOn` handles directional swipes and scrolling within container bounds.
 - ↔️ `dragAndDrop` for element-to-element moves.
 - 🔍 `pinchOn` for zoom in/out gestures.

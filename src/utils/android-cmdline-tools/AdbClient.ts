@@ -398,6 +398,7 @@ export class AdbClient implements AdbExecutor {
     if (!deviceId || !isAdbMissingDeviceError(error, deviceId)) {
       return;
     }
+    resetAdbDeviceListCache();
     notifyAdbMissingDevice(deviceId, error);
   }
 
@@ -408,9 +409,11 @@ export class AdbClient implements AdbExecutor {
   }
 
   private getAbortError(signal?: AbortSignal): Error {
-    return signal?.reason instanceof Error
-      ? signal.reason
-      : new Error(OPERATION_CANCELLED_MESSAGE);
+    const reason = signal?.reason;
+    if (reason instanceof Error && reason.message.startsWith("device-disconnected:")) {
+      return reason;
+    }
+    return new Error(OPERATION_CANCELLED_MESSAGE);
   }
 
   private shouldSkipMissingAdbProbe(): boolean {

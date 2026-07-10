@@ -26,16 +26,17 @@ export function evaluateDeviceDisconnects(
   const forceDisconnectedDeviceIds = input.forceDisconnectedDeviceIds ?? new Set<string>();
 
   for (const deviceId of input.candidateDeviceIds) {
+    if (forceDisconnectedDeviceIds.has(deviceId)) {
+      input.deviceDisconnectMisses.delete(deviceId);
+      disconnected.push(deviceId);
+      continue;
+    }
+
     if (input.bootedDeviceIds.has(deviceId)) {
       input.deviceDisconnectMisses.delete(deviceId);
       input.confirmedDisconnectedDeviceIds.delete(deviceId);
       forceDisconnectedDeviceIds.delete(deviceId);
       continue;
-    }
-
-    if (forceDisconnectedDeviceIds.has(deviceId)) {
-      input.deviceDisconnectMisses.delete(deviceId);
-      disconnected.push(deviceId);
     }
   }
 

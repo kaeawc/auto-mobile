@@ -1,3 +1,4 @@
+import type { ChildProcess } from "child_process";
 import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
 import { SessionManager } from "./sessionManager";
@@ -17,6 +18,7 @@ import {
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
+import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 
@@ -69,6 +71,10 @@ interface AssignableIdleDeviceSelection {
   livenessUnknown: boolean;
 }
 
+interface DeviceDisconnectSessionReleaser {
+  (sessionId: string, deviceId: string, releaseReason: string): Promise<void>;
+}
+
 /**
  * Device Pool
  *
@@ -96,6 +102,7 @@ export class DevicePool {
   private readonly retryExecutor: RetryExecutor;
   private readonly deviceSessionRepository: DeviceSessionRepository;
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
+  private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -113,7 +120,8 @@ export class DevicePool {
     deviceManager: PlatformDeviceManager = new MultiPlatformDeviceManager(),
     retryExecutor: RetryExecutor = defaultRetryExecutor,
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
-    criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher()
+    criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher(),
+    releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
@@ -123,6 +131,13 @@ export class DevicePool {
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
     this.criteriaMatcher = criteriaMatcher;
+    this.releaseSessionForDisconnectedDevice = releaseSessionForDisconnectedDevice ?? (async (
+      sessionId,
+      _deviceId,
+      releaseReason
+    ) => {
+      await this.sessionManager.releaseSession(sessionId, releaseReason);
+    });
 
     // Free autolocked devices when their session expires (idle timeout auto-release).
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
@@ -700,6 +715,7 @@ export class DevicePool {
           device
         );
         await this.addDevice(ready);
+        this.trackStartedDeviceProcess(ready, childProcess);
         started++;
       }
 
@@ -764,6 +780,7 @@ export class DevicePool {
         device
       );
       await this.addDevice(ready);
+      this.trackStartedDeviceProcess(ready, childProcess);
       return this.devices.get(ready.deviceId) ?? null;
     } catch (error) {
       logger.warn(`[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`);
@@ -841,7 +858,7 @@ export class DevicePool {
   }
 
   private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
-    return device.platform === "android" && /^emulator-\d+$/.test(device.id);
+    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
   }
 
   private async ensurePooledDevicePresentForUse(device: PooledDevice): Promise<boolean> {
@@ -870,11 +887,44 @@ export class DevicePool {
   private async evictMissingPooledDevice(device: PooledDevice, reason: string): Promise<void> {
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
     if (device.sessionId) {
-      await this.sessionManager.releaseSession(device.sessionId, `device-disconnected:${device.id}`);
+      await this.releaseSessionForDisconnectedDevice(
+        device.sessionId,
+        device.id,
+        `device-disconnected:${device.id}`
+      );
       device.sessionId = null;
     }
     device.status = "idle";
     await this.removeDevice(device.id);
+  }
+
+  private trackStartedDeviceProcess(device: BootedDevice, childProcess: ChildProcess | null | undefined): void {
+    if (device.platform !== "android" || consolePortFromSerial(device.deviceId) === null) {
+      return;
+    }
+    if (!childProcess || typeof childProcess.once !== "function") {
+      return;
+    }
+
+    childProcess.once("exit", (code, signal) => {
+      void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal);
+    });
+  }
+
+  private async evictStartedDeviceAfterProcessExit(
+    deviceId: string,
+    code: number | null,
+    signal: NodeJS.Signals | null
+  ): Promise<void> {
+    const device = this.devices.get(deviceId);
+    if (!device) {
+      return;
+    }
+
+    await this.evictMissingPooledDevice(
+      device,
+      `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`
+    );
   }
 
   private suppressAutoStartForDevice(device: PooledDevice): void {

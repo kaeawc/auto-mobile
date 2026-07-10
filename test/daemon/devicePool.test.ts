@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
+import { EventEmitter } from "node:events";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -70,6 +71,22 @@ describe("DevicePool", () => {
     async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
       this.detailedBootedCalls++;
       return super.getBootedDevicesDetailed(platform);
+    }
+  }
+
+  class FakeChildProcess extends EventEmitter {
+    pid = 12345;
+    kill(): boolean {
+      return false;
+    }
+  }
+
+  class FakeDeviceManagerWithStartedProcess extends FakeDeviceManagerWithMinimalReadyDevice {
+    readonly childProcess = new FakeChildProcess();
+
+    async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<FakeChildProcess> {
+      await super.startDevice(device, timeoutMs);
+      return this.childProcess;
     }
   }
 
@@ -481,6 +498,20 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
+    test("evicts stale idle Android emulator and assigns the next live candidate", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        createBootedDevice("emulator-5556", "android", "Pixel 9"),
+      ]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5556", "android", "Pixel 9")];
+
+      const deviceId = await devicePool.assignDeviceToSession("session-1", "android");
+
+      expect(deviceId).toBe("emulator-5556");
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(devicePool.getDevice("emulator-5556")?.sessionId).toBe("session-1");
+    });
+
     test("should bind a specific device to a session", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
@@ -564,6 +595,40 @@ describe("DevicePool", () => {
   });
 
   describe("assignMultipleDevices", () => {
+    test("evicts a started emulator when its process exits after readiness", async () => {
+      const images: DeviceInfo[] = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      const manager = new FakeDeviceManagerWithStartedProcess(images);
+      const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        async (sessionId, deviceId, reason) => {
+          releaseCalls.push({ sessionId, deviceId, reason });
+          await sessionManager.releaseSession(sessionId, reason);
+        }
+      );
+
+      const assignments = await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+      expect(assignments.get("session-1")).toBe("emulator-5554");
+
+      manager.childProcess.emit("exit", 0, null);
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(releaseCalls).toEqual([
+        { sessionId: "session-1", deviceId: "emulator-5554", reason: "device-disconnected:emulator-5554" },
+      ]);
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
     test("should auto-start iOS simulators when pool is short", async () => {
       const images: DeviceInfo[] = [
         { name: "iPhone 15 Pro", platform: "ios", isRunning: false, deviceId: "sim-1", state: "Shutdown", isAvailable: true },

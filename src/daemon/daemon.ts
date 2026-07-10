@@ -197,18 +197,12 @@ export class Daemon {
       this.installedAppsRepository,
       undefined,
       undefined,
-      this.deviceSessionRepository
+      this.deviceSessionRepository,
+      undefined,
+      (sessionId, _deviceId, releaseReason) => this.cancelAndReleaseSession(sessionId, releaseReason)
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);
-    this.unsubscribeAdbMissingDevice = onAdbMissingDevice(event => {
-      if (!this.devicePool.getDevice(event.deviceId) && !this.sessionManager.getSessionForDevice(event.deviceId)) {
-        return;
-      }
-      logger.warn(`[Daemon] ADB reported tracked device ${event.deviceId} missing: ${event.message}`);
-      this.forceDisconnectedDeviceIds.add(event.deviceId);
-      this.deviceDisconnectMisses.set(event.deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
-    });
 
     // Apply CLI flags to serverConfig so daemon tools respect them
     if (options.networkMockable) {
@@ -353,6 +347,7 @@ export class Daemon {
 
     startAppearanceSyncScheduler();
     startPerformanceMonitor();
+    this.startAdbMissingDeviceListener();
     this.startDeviceDisconnectMonitor();
 
     // Write PID file
@@ -1188,6 +1183,21 @@ export class Daemon {
     }, DEVICE_DISCONNECT_POLL_INTERVAL_MS);
 
     this.deviceDisconnectTimer.unref();
+  }
+
+  private startAdbMissingDeviceListener(): void {
+    if (this.unsubscribeAdbMissingDevice) {
+      return;
+    }
+
+    this.unsubscribeAdbMissingDevice = onAdbMissingDevice(event => {
+      if (!this.devicePool.getDevice(event.deviceId) && !this.sessionManager.getSessionForDevice(event.deviceId)) {
+        return;
+      }
+      logger.warn(`[Daemon] ADB reported tracked device ${event.deviceId} missing: ${event.message}`);
+      this.forceDisconnectedDeviceIds.add(event.deviceId);
+      this.deviceDisconnectMisses.set(event.deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
+    });
   }
 
   private async cancelAndReleaseSession(sessionId: string, releaseReason: string = "explicit-release"): Promise<void> {

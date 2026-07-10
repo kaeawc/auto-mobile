@@ -65,4 +65,16 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     expect(isAdbMissingDeviceError(new Error("error: device not found"), "emulator-5554")).toBe(false);
     expect(isAdbMissingDeviceError(new Error("adb: device 'emulator-5554' not found"), "emulator-5554")).toBe(true);
   });
+
+  test("keeps default aborts on the Operation cancelled contract", async () => {
+    const adb = new AdbClient(
+      { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
+      async () => createExecResult("")
+    );
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(adb.executeCommand("shell true", undefined, undefined, true, controller.signal))
+      .rejects.toThrow("Operation cancelled");
+  });
 });

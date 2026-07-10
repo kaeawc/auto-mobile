@@ -215,6 +215,23 @@ describe("disconnect monitor miss counting", () => {
     expect(result.disconnected).toEqual(["emulator-5554"]);
   });
 
+  test("forced missing devices beat a stale booted-device cache entry", () => {
+    const result = evaluateDeviceDisconnects({
+      deviceDisconnectMisses: new Map(),
+      confirmedDisconnectedDeviceIds: new Set(),
+      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      bootedDeviceIds: new Set(["emulator-5554"]),
+      candidateDeviceIds: new Set(["emulator-5554"]),
+      succeededPlatforms: new Set(["android" as const]),
+      candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
+      idleCandidateIds: new Set<string>(),
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    });
+
+    expect(result.skippedAdbUnreachable).toBe(false);
+    expect(result.disconnected).toEqual(["emulator-5554"]);
+  });
+
   test("skips idle candidates from platforms whose discovery did not succeed", () => {
     const misses = new Map<string, number>();
     misses.set("sim-1", 2);

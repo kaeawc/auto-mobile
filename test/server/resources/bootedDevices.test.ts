@@ -429,7 +429,13 @@ describe("MCP Booted Device Resources", () => {
       const sessionManager = new SessionManager(fakeTimer);
       const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
-      const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo);
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceUtils
+      );
       // An idle Android phantom (no longer booted) plus an assigned iOS device.
       await devicePool.initializeWithDevices([mockAndroidDevice1, mockIosDevice1]);
       await devicePool.assignDeviceToSession("session-ios", "ios");

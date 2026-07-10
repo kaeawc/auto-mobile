@@ -201,6 +201,7 @@ describe("DevicePool", () => {
 
     test("keeps missing assigned devices until session cleanup releases them", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-old", "ios", "iPhone 15")];
       await devicePool.assignDeviceToSession("session-1", "ios");
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
 
@@ -390,6 +391,43 @@ describe("DevicePool", () => {
       await devicePool.releaseDevice(device1);
       const device2 = await devicePool.assignDeviceToSession("session-2");
       expect(device1).toBe(device2);
+    });
+
+    test("evicts a released iOS simulator that is no longer booted before reassignment", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("sim-old", "ios", "iPhone 15"),
+        createBootedDevice("sim-new", "ios", "iPhone 16"),
+      ]);
+      fakeDeviceManager.bootedDevices = [
+        createBootedDevice("sim-old", "ios", "iPhone 15"),
+        createBootedDevice("sim-new", "ios", "iPhone 16"),
+      ];
+
+      const firstDevice = await devicePool.assignDeviceToSession("session-1", "ios");
+      expect(firstDevice).toBe("sim-old");
+      await devicePool.releaseDevice(firstDevice);
+      fakeDeviceManager.bootedDevices = [
+        createBootedDevice("sim-new", "ios", "iPhone 16"),
+      ];
+
+      const secondDevice = await devicePool.assignDeviceToSession("session-2", "ios");
+
+      expect(secondDevice).toBe("sim-new");
+      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getDevice("sim-new")?.sessionId).toBe("session-2");
+    });
+
+    test("keeps assigning a pooled iOS simulator when liveness discovery fails", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("sim-1", "ios", "iPhone 15"),
+      ]);
+      fakeDeviceManager.bootedDevices = [];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>(["ios"]);
+
+      const deviceId = await devicePool.assignDeviceToSession("session-1", "ios");
+
+      expect(deviceId).toBe("sim-1");
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
     });
 
     test("should bind a specific device to a session", async () => {
@@ -716,6 +754,10 @@ describe("DevicePool", () => {
         createBootedDevice("sim-1", "ios", "iPhone 15 Pro", "17.5"),
         createBootedDevice("sim-2", "ios", "iPhone 15", "17.4"),
       ]);
+      fakeDeviceManager.bootedDevices = [
+        createBootedDevice("sim-1", "ios", "iPhone 15 Pro", "17.5"),
+        createBootedDevice("sim-2", "ios", "iPhone 15", "17.4"),
+      ];
 
       const assignments = await devicePool.assignMultipleDevicesByCriteria(
         [

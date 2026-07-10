@@ -977,19 +977,10 @@ export class DevicePool {
       let candidates = selectCandidates();
       let totalDevices = candidates.length;
 
-      // Find idle devices and prefer most recently released for reuse
-      const idleDevices = candidates.filter(d => d.status === "idle");
-      let device: PooledDevice | undefined;
-      if (idleDevices.length > 0) {
-        if (this.lastReleasedDeviceId) {
-          device = idleDevices.find(d => d.id === this.lastReleasedDeviceId);
-        }
-        if (!device) {
-          // Sort by lastUsedAt (ascending) to get least recently used device
-          // This provides better load distribution across devices
-          idleDevices.sort((a, b) => a.lastUsedAt - b.lastUsedAt);
-          device = idleDevices[0];
-        }
+      let device = await this.selectAssignableIdleDevice(candidates);
+      if (!device) {
+        candidates = selectCandidates();
+        totalDevices = candidates.length;
       }
 
       // If no devices available and pool is empty, try to refresh
@@ -1005,7 +996,11 @@ export class DevicePool {
         await this.refreshDevices();
         candidates = selectCandidates();
         totalDevices = candidates.length;
-        device = candidates.find(d => d.status === "idle");
+        device = await this.selectAssignableIdleDevice(candidates);
+        if (!device) {
+          candidates = selectCandidates();
+          totalDevices = candidates.length;
+        }
       }
 
       if (!device) {
@@ -1040,6 +1035,62 @@ export class DevicePool {
         totalDevices,
       };
     });
+  }
+
+  private async selectAssignableIdleDevice(candidates: PooledDevice[]): Promise<PooledDevice | undefined> {
+    let device = this.selectIdleDevice(candidates);
+
+    while (device && !(await this.isIdleDeviceStillAssignable(device))) {
+      const staleDeviceId = device.id;
+      candidates = candidates.filter(candidate => candidate.id !== staleDeviceId);
+      device = this.selectIdleDevice(candidates);
+    }
+
+    return device;
+  }
+
+  private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
+    // Find idle devices and prefer most recently released for reuse
+    const idleDevices = candidates.filter(d => d.status === "idle");
+    if (idleDevices.length === 0) {
+      return undefined;
+    }
+
+    if (this.lastReleasedDeviceId) {
+      const lastReleased = idleDevices.find(d => d.id === this.lastReleasedDeviceId);
+      if (lastReleased) {
+        return lastReleased;
+      }
+    }
+
+    // Sort by lastUsedAt (ascending) to get least recently used device.
+    // This provides better load distribution across devices.
+    idleDevices.sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+    return idleDevices[0];
+  }
+
+  private async isIdleDeviceStillAssignable(device: PooledDevice): Promise<boolean> {
+    if (device.platform !== "ios") {
+      return true;
+    }
+
+    const discovery = await this.deviceManager.getBootedDevicesDetailed("ios");
+    if (!discovery.succeededPlatforms.has("ios")) {
+      logger.warn(
+        `[DevicePool] Retaining idle iOS simulator ${device.id}: iOS liveness discovery failed before assignment`
+      );
+      return true;
+    }
+
+    if (discovery.devices.some(booted => booted.deviceId === device.id)) {
+      return true;
+    }
+
+    logger.warn(
+      `[DevicePool] Removing idle iOS simulator ${device.id}: simctl no longer reports it as booted`
+    );
+    await this.removeDevice(device.id);
+    return false;
   }
 
   /**

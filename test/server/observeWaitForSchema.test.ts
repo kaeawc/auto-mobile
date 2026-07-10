@@ -1,5 +1,6 @@
 import Ajv2020 from "ajv/dist/2020";
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { findWaitForElement, observeSchema, registerObserveTools, waitForObservation } from "../../src/server/observeTools";
@@ -226,6 +227,62 @@ describe("published observe waitFor input schema", () => {
       errors: validate.errors,
     };
   };
+
+  const collectTextMatchDescriptions = (schema: unknown): string[] => {
+    if (schema === null || typeof schema !== "object") {
+      return [];
+    }
+
+    const record = schema as Record<string, unknown>;
+    const descriptions: string[] = [];
+    const properties = record.properties;
+    if (properties !== null && typeof properties === "object") {
+      const textMatch = (properties as Record<string, unknown>).textMatch;
+      if (textMatch !== null && typeof textMatch === "object") {
+        const description = (textMatch as Record<string, unknown>).description;
+        if (typeof description === "string") {
+          descriptions.push(description);
+        }
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      descriptions.push(...collectTextMatchDescriptions(value));
+    }
+
+    return descriptions;
+  };
+
+  test("documents textMatch as applying only to waitFor.text", () => {
+    (ToolRegistry as any).tools.clear();
+    registerObserveTools();
+    const observeTool = ToolRegistry.getToolDefinitions()
+      .find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
+
+    expect(descriptions.length).toBeGreaterThan(0);
+    expect(new Set(descriptions)).toEqual(new Set([
+      "How to match waitFor.text; does not affect contentDescription",
+    ]));
+  });
+
+  test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
+    const toolDefinitions = JSON.parse(readFileSync(
+      new URL("../../schemas/tool-definitions.json", import.meta.url),
+      "utf8"
+    )) as Array<{ name: string; inputSchema: unknown }>;
+    const observeTool = toolDefinitions.find(tool => tool.name === "observe");
+    expect(observeTool).toBeDefined();
+
+    const descriptions = collectTextMatchDescriptions(observeTool!.inputSchema);
+
+    expect(descriptions.length).toBeGreaterThan(0);
+    expect(new Set(descriptions)).toEqual(new Set([
+      "How to match waitFor.text; does not affect contentDescription",
+    ]));
+  });
 
   test.each([
     {
@@ -726,6 +783,17 @@ describe("findWaitForElement rich predicates", () => {
     expect(findWaitForElement(finder, { text: "Home", textMatch: "contains" } as any, hierarchy)?.text).toBe("Welcome Home");
     expect(findWaitForElement(finder, { text: "^Welcome\\s+Home$", textMatch: "regex" } as any, hierarchy)?.text).toBe("Welcome Home");
     expect(findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy)).toBeNull();
+  });
+
+  test("keeps contentDescription exact-only when textMatch is non-exact", () => {
+    const finder = new DefaultElementFinder();
+    const hierarchy = makeHierarchy([
+      { $: { "content-desc": "Home tab", "bounds": bounds(10, 10, 180, 60) } },
+    ]);
+
+    expect(findWaitForElement(finder, { contentDescription: "Home tab", textMatch: "exact" } as any, hierarchy)?.["content-desc"]).toBe("Home tab");
+    expect(findWaitForElement(finder, { contentDescription: "Home", textMatch: "contains" } as any, hierarchy)).toBeNull();
+    expect(findWaitForElement(finder, { contentDescription: "^Home", textMatch: "regex" } as any, hierarchy)).toBeNull();
   });
 
   test("matches iOS accessibility labels exposed as text for contentDescription", () => {

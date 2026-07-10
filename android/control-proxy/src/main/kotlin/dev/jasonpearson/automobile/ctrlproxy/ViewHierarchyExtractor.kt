@@ -1601,14 +1601,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
         intersections.add(intersection)
 
-        val occluderViewId = occluder.element.viewId?.takeIf { it.isNotBlank() }
-        val shouldPreferOccluder =
-          overlapArea > maxOverlap ||
-            (overlapArea == maxOverlap && occludedByViewId == null && occluderViewId != null)
-        if (shouldPreferOccluder) {
+        if (overlapArea > maxOverlap) {
           maxOverlap = overlapArea
           occludedBy = resolveOccluderLabel(occluder)
-          occludedByViewId = occluderViewId
+          occludedByViewId =
+            resolveViewIdForOcclusionNode(
+              occluder.element,
+              occluder.key.windowKey,
+              occluder.key.path,
+            )
         }
       }
 
@@ -1716,6 +1717,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val nodeToUse = filteredNodeElement
 
     return element.copy(
+      viewId = resolveViewIdForOcclusionNode(element, windowKey, path),
       node = nodeToUse,
       occlusionState = occlusionState,
       occludedBy = info?.occludedBy,
@@ -1841,6 +1843,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       ?: element.text?.takeIf { it.isNotBlank() }
       ?: element.className?.takeIf { it.isNotBlank() }
       ?: "unlabeled view"
+  }
+
+  private fun resolveViewIdForOcclusionNode(
+    element: UIElementInfo,
+    windowKey: Int,
+    path: String,
+  ): String {
+    return element.viewId?.takeIf { it.isNotBlank() }
+      ?: generateDeterministicUuid("occlusion/window:$windowKey/path:$path")
   }
 
   /** Extract information about a single focused element. Used for getCurrentFocus command. */

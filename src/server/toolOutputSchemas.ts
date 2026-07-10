@@ -62,6 +62,7 @@ export const elementSchema = z.object({
   "bounds": elementBoundsSchema,
   "text": z.string().optional(),
   "resource-id": z.string().optional(),
+  "view-id": z.string().optional(),
   "content-desc": z.string().optional(),
   "occlusionState": z.string().optional(),
   "occludedBy": z.string().optional(),

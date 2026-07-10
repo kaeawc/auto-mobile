@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod";
 import {
+  elementSchema,
   observeResultSchema,
   observeToolResultSchema,
   viewHierarchyNodeSchema,
@@ -161,6 +162,27 @@ describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () 
       viewHierarchyNodeSchema.parse({
         bounds: { left: 0, top: 0, right: 10, bottom: 10 },
         occludedByViewId: 123,
+      })
+    ).toThrow();
+  });
+});
+
+describe("elementSchema: occlusion link fields", () => {
+  test("advertises both view-id targets and occludedByViewId references", () => {
+    const schemaJson = JSON.stringify(toJSONSchema(elementSchema));
+    expect(schemaJson).toContain("\"view-id\"");
+    expect(schemaJson).toContain("\"occludedByViewId\"");
+    expect(() =>
+      elementSchema.parse({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        "view-id": "id/target",
+        occludedByViewId: "id/occluder",
+      })
+    ).not.toThrow();
+    expect(() =>
+      elementSchema.parse({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        "view-id": 123,
       })
     ).toThrow();
   });

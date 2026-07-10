@@ -84,12 +84,19 @@ describe("device state tools", () => {
   test("setActiveDevice rejects devices owned by another live session", async () => {
     const fakeTimer = new FakeTimer();
     const sessionManager = new SessionManager(fakeTimer);
+    const fakeDeviceManager = new FakeDeviceManager(
+      [],
+      [
+        createBootedDevice("sim-a", "ios", "iPhone 15"),
+        createBootedDevice("sim-b", "ios", "iPhone 16"),
+      ]
+    );
     const devicePool = new DevicePool(
       sessionManager,
       "test-daemon-session-id",
       fakeTimer,
       new FakeInstalledAppsRepository(),
-      new FakeDeviceManager(),
+      fakeDeviceManager,
       new DefaultRetryExecutor(fakeTimer)
     );
     await devicePool.initializeWithDevices([

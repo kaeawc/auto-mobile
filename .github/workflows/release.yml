@@ -2,9 +2,7 @@
 name: Release
 
 "on":
-  push:
-    tags:
-      - 'v*.*.*'
+  create:
 
 permissions:
   contents: write
@@ -13,10 +11,34 @@ permissions:
   packages: write
 
 jobs:
+  validate-release-tag:
+    name: "Validate Release Tag"
+    runs-on: ubuntu-latest
+    if: github.event.ref_type == 'tag'
+    outputs:
+      is_release_tag: ${{ steps.validate.outputs.is_release_tag }}
+    steps:
+      - name: "Validate tag format"
+        id: validate
+        shell: bash
+        env:
+          TAG: ${{ github.event.ref }}
+        run: |
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
+            echo "Ignoring non-release tag: $TAG"
+          fi
+
   build-ctrl-proxy-ios-ipa:
+    needs: validate-release-tag
+    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
     uses: ./.github/workflows/build-ctrl-proxy-ios-ipa.yml
 
   build-control-proxy-apk:
+    needs: validate-release-tag
+    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
     uses: ./.github/workflows/build-control-proxy-apk.yml
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
@@ -26,8 +48,12 @@ jobs:
       RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
   verify-and-release:
+    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-latest
-    needs: [build-ctrl-proxy-ios-ipa, build-control-proxy-apk]
+    needs:
+      - validate-release-tag
+      - build-ctrl-proxy-ios-ipa
+      - build-control-proxy-apk
 
     steps:
       - name: Checkout code
@@ -35,6 +61,7 @@ jobs:
         with:
           lfs: false
           fetch-depth: 0
+          ref: refs/tags/${{ github.event.ref }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -51,10 +78,12 @@ jobs:
 
       - name: Extract version from tag
         id: version
+        env:
+          TAG: ${{ github.event.ref }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

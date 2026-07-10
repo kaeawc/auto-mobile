@@ -34,6 +34,7 @@ val npmPackageVersion =
 dependencies {
   // Shared validation module
   api(project(":test-plan-validation"))
+  api(libs.kotlin.stdlib.consumer)
 
   // JUnit dependencies
   implementation(libs.junit)
@@ -63,6 +64,7 @@ tasks.withType<KotlinCompile>().configureEach {
     languageVersion.set(
       KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
     )
+    apiVersion.set(KotlinVersion.fromVersion(libs.versions.build.kotlin.consumer.api.get()))
   }
 }
 

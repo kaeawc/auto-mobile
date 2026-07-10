@@ -427,6 +427,17 @@ describe("published observe waitFor input schema", () => {
         },
       },
     },
+    {
+      label: "iOS activeWindow has activityName without app id",
+      input: {
+        platform: "ios",
+        waitFor: {
+          activeWindow: {
+            activityName: "com.example.ios.IgnoredActivity",
+          },
+        },
+      },
+    },
   ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(false);
 
@@ -991,28 +1002,18 @@ describe("waitForObservation activeWindow", () => {
     expect(observeScreen.getExecuteCallCount()).toBe(1);
   });
 
-  test("does not satisfy iOS activeWindow with only Android activityName", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult(() => makeObservation("com.example.ios", ""));
-
-    const outcome = await waitForObservation(
-      observeScreen,
-      {
-        activeWindow: {
-          activityName: "com.example.ios.IgnoredActivity",
+  test("rejects iOS activeWindow with only Android activityName", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "ios",
+        waitFor: {
+          activeWindow: {
+            activityName: "com.example.ios.IgnoredActivity",
+          },
+          timeout: 250,
         },
-        timeout: 250,
-      } as any,
-      undefined,
-      false,
-      timer,
-      "ios"
-    );
-
-    expect(outcome.awaitTimeout).toBe(true);
-    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
+      })
+    ).toThrow("activityName is Android-only; use appId/bundleId on iOS");
   });
 
   test("times out when only the element predicate matches", async () => {

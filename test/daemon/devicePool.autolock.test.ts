@@ -207,6 +207,17 @@ describe("DevicePool autolock", () => {
       expect(session!.expiresAt).toBe(timer.now() + 60_000);
     });
 
+    it("rejects autolock for a stale idle iOS simulator", async () => {
+      await pool.initializeWithDevices([
+        { name: "iPhone 15", platform: "ios", deviceId: "sim-stale" },
+      ]);
+      fakeDeviceUtils.setBootedDevices("ios", []);
+
+      await expect(pool.autolockDevice("sim-stale", "ios"))
+        .rejects.toThrow(/not available for autolock/);
+      expect(pool.getDevice("sim-stale")).toBeNull();
+    });
+
     it("maps an MCP session to its generated autolock session", async () => {
       await pool.initializeWithDevices([
         { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },

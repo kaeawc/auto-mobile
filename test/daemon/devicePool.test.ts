@@ -59,6 +59,15 @@ describe("DevicePool", () => {
     }
   }
 
+  class CountingFakeDeviceManager extends FakeDeviceManager {
+    detailedBootedCalls = 0;
+
+    async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
+      this.detailedBootedCalls++;
+      return super.getBootedDevicesDetailed(platform);
+    }
+  }
+
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer);
@@ -417,17 +426,43 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("sim-new")?.sessionId).toBe("session-2");
     });
 
-    test("keeps assigning a pooled iOS simulator when liveness discovery fails", async () => {
+    test("does not assign but retains a pooled iOS simulator when liveness discovery fails", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("sim-1", "ios", "iPhone 15"),
       ]);
       fakeDeviceManager.bootedDevices = [];
       fakeDeviceManager.failedPlatforms = new Set<Platform>(["ios"]);
 
+      await expect(devicePool.assignDeviceToSession("session-1", "ios"))
+        .rejects.toThrow(/Unable to verify iOS simulator liveness/);
+
+      expect(devicePool.getDevice("sim-1")?.status).toBe("idle");
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
+    test("validates multiple idle iOS candidates with one liveness discovery snapshot", async () => {
+      const countingDeviceManager = new CountingFakeDeviceManager([], [
+        createBootedDevice("sim-live", "ios", "iPhone 16"),
+      ]);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        countingDeviceManager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      await devicePool.initializeWithDevices([
+        createBootedDevice("sim-stale", "ios", "iPhone 15"),
+        createBootedDevice("sim-live", "ios", "iPhone 16"),
+      ]);
+
       const deviceId = await devicePool.assignDeviceToSession("session-1", "ios");
 
-      expect(deviceId).toBe("sim-1");
-      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
+      expect(deviceId).toBe("sim-live");
+      expect(devicePool.getDevice("sim-stale")).toBeNull();
+      expect(countingDeviceManager.detailedBootedCalls).toBe(1);
     });
 
     test("should bind a specific device to a session", async () => {

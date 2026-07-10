@@ -420,9 +420,10 @@ describe("MCP Booted Device Resources", () => {
     });
 
     test("preserves pool stats for a platform whose discovery fails", async function() {
-      // Android discovery succeeds with zero booted devices; iOS discovery fails.
+      // Android discovery succeeds with zero booted devices; iOS discovery fails
+      // after the iOS device has already been assigned.
       fakeDeviceUtils.setBootedDevices("android", []);
-      fakeDeviceUtils.failedPlatforms = new Set<Platform>(["ios"]);
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
 
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
@@ -439,6 +440,8 @@ describe("MCP Booted Device Resources", () => {
       // An idle Android phantom (no longer booted) plus an assigned iOS device.
       await devicePool.initializeWithDevices([mockAndroidDevice1, mockIosDevice1]);
       await devicePool.assignDeviceToSession("session-ios", "ios");
+      fakeDeviceUtils.setBootedDevices("ios", []);
+      fakeDeviceUtils.failedPlatforms = new Set<Platform>(["ios"]);
       DaemonState.getInstance().initialize(sessionManager, devicePool);
 
       const { client } = fixture.getContext();

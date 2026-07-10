@@ -64,7 +64,6 @@ export const STABLE_VIEW_ID_PREFIX = "s-";
  * between captures (#3051, #3519).
  */
 const CONTENT_FIELDS: readonly string[] = [
-  "className",
   "resource-id",
   "content-desc",
   "text",
@@ -115,6 +114,7 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
     // JSON-encoding the field array keeps values from straddling separator
     // boundaries (text can contain any delimiter we might pick by hand).
     const canonical = JSON.stringify([
+      node["class"] ?? node.className ?? "",
       ...CONTENT_FIELDS.map(field => node[field] ?? ""),
       childHashes,
     ]);

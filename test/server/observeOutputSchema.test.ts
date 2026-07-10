@@ -174,14 +174,14 @@ describe("elementSchema: occlusion link fields", () => {
     expect(schemaJson).toContain("\"occludedByViewId\"");
     expect(() =>
       elementSchema.parse({
-        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
         "view-id": "id/target",
-        occludedByViewId: "id/occluder",
+        "occludedByViewId": "id/occluder",
       })
     ).not.toThrow();
     expect(() =>
       elementSchema.parse({
-        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
         "view-id": 123,
       })
     ).toThrow();

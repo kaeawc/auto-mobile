@@ -22,6 +22,22 @@ import {
   type CachedHierarchy,
 } from "../../../src/features/observe/DeviceServiceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger, type Logger } from "../../../src/utils/logger";
+
+function captureDebugLogs(): { messages: string[]; restore(): void } {
+  const messages: string[] = [];
+  const originalDebug = logger.debug;
+  logger.debug = ((message: string) => {
+    messages.push(message);
+  }) as Logger["debug"];
+
+  return {
+    messages,
+    restore: () => {
+      logger.debug = originalDebug;
+    },
+  };
+}
 
 describe("DeviceServiceUtils", () => {
   // ===========================================================================
@@ -457,6 +473,19 @@ describe("DeviceServiceUtils", () => {
       const result = parseMessage(data);
 
       expect(result).toBeNull();
+    });
+
+    test("logs invalid JSON before returning null", () => {
+      const debugLogs = captureDebugLogs();
+      try {
+        const result = parseMessage("not valid json");
+
+        expect(result).toBeNull();
+        expect(debugLogs.messages).toHaveLength(1);
+        expect(debugLogs.messages[0]).toContain("Failed to parse device service message");
+      } finally {
+        debugLogs.restore();
+      }
     });
 
     test("returns null for empty string", () => {

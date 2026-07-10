@@ -49,7 +49,7 @@ export async function checkAndroidCommandLineTools(
   try {
     locations = await dependencies.detectAndroidCommandLineTools();
   } catch (error) {
-    dependencies.logger.debug(`Failed to detect Android command line tools: ${error}`);
+    dependencies.logger.warn(`Failed to detect Android command line tools: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name,
       status: "warn",
@@ -162,6 +162,7 @@ export async function checkAdbInstallation(
       value: adbPath,
     };
   } catch (error) {
+    logger.warn(`ADB installation check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "ADB Installation",
       status: "fail",
@@ -193,6 +194,7 @@ export async function checkAdbVersion(
       value: version,
     };
   } catch (error) {
+    logger.warn(`ADB version check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "ADB Version",
       status: "warn",
@@ -217,6 +219,7 @@ async function checkEmulator(): Promise<CheckResult> {
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.warn(`Android emulator check failed: ${errorMsg}`, error);
 
     // Check if it's a "not found" error
     if (errorMsg.includes("not found") || errorMsg.includes("ENOENT")) {
@@ -265,6 +268,7 @@ export async function checkConnectedDevices(
       value: devices.length,
     };
   } catch (error) {
+    logger.warn(`Connected Android devices check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Connected Devices",
       status: "warn",
@@ -300,7 +304,7 @@ async function checkAvailableAvds(): Promise<CheckResult> {
       value: avds.length,
     };
   } catch (error) {
-    logger.debug(`Failed to list AVDs: ${error}`);
+    logger.warn(`Failed to list AVDs: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "Available AVDs",
       status: "skip",

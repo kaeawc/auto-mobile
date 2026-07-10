@@ -3328,7 +3328,7 @@
                       ]
                     },
                     "textMatch": {
-                      "description": "How to match text predicates",
+                      "description": "How to match waitFor.text; does not affect contentDescription",
                       "type": "string",
                       "enum": [
                         "exact",
@@ -3618,7 +3618,50 @@
       "required": [
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": [
+          "platform",
+          "waitFor"
+        ],
+        "properties": {
+          "platform": {
+            "const": "ios"
+          },
+          "waitFor": {
+            "required": [
+              "activeWindow"
+            ],
+            "properties": {
+              "activeWindow": {
+                "required": [
+                  "activityName"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "appId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "bundleId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "packageName"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": false
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -57,10 +57,12 @@ describe("BaseSocketServer close ownership", () => {
     server = new TestServer(socketPath, new FakeTimer());
     await server.start();
     expect(existsSync(socketPath)).toBe(true);
+    expect(server.hasActiveSocketPath()).toBe(true);
 
     await server.close();
 
     expect(existsSync(socketPath)).toBe(false);
+    expect(server.hasActiveSocketPath()).toBe(false);
   });
 
   (isWindows ? test.skip : test)("does NOT remove a replacement socket rebound at the same path", async () => {
@@ -71,7 +73,9 @@ describe("BaseSocketServer close ownership", () => {
     // Simulate a fast restart: our socket is replaced by a successor process
     // binding the same path before our close() runs.
     await unlink(socketPath);
+    expect(server.hasActiveSocketPath()).toBe(false);
     const replacement = await listenOnSocket(socketPath);
+    expect(server.hasActiveSocketPath()).toBe(false);
 
     try {
       await server.close();

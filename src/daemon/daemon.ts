@@ -17,7 +17,6 @@ import {
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
 import { mkdir, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
@@ -41,7 +40,7 @@ import { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } from 
 import { startAppearanceSocketServer, stopAppearanceSocketServer } from "./appearanceSocketServer";
 import { startPerformanceStreamSocketServer, stopPerformanceStreamSocketServer } from "./performanceStreamSocketServer";
 import { startPerformancePushSocketServer, stopPerformancePushSocketServer } from "./performancePushSocketServer";
-import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, getDeviceDataStreamServer, getDeviceDataStreamSocketPath, type NavigationGraphStreamData } from "./deviceDataStreamSocketServer";
+import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, getDeviceDataStreamServer, type NavigationGraphStreamData } from "./deviceDataStreamSocketServer";
 import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from "./failuresStreamSocketServer";
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
@@ -1243,7 +1242,7 @@ export class Daemon {
     const server = getDeviceDataStreamServer();
     return server !== null &&
       server.isListening() &&
-      existsSync(getDeviceDataStreamSocketPath());
+      server.hasActiveSocketPath();
   }
 
   /**

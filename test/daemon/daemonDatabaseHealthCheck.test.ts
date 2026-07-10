@@ -199,6 +199,78 @@ describe("Daemon database health check", () => {
     expect(exitCodes).toEqual([1]);
   });
 
+  test("counts repeated HTTP failures as HTTP recovery without probing socket or database health", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    const daemon = buildDaemon(timer, databaseHealthProbe);
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+    const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
+    let observationHealthChecks = 0;
+
+    internals.httpServer = { listening: false };
+    internals.socketServer = { isListening: () => true };
+    internals.observationStreamHealth = {
+      isHealthy: () => {
+        observationHealthChecks += 1;
+        return true;
+      },
+      recover: async () => {},
+    };
+    internals.attemptRecovery = async failureKind => {
+      recoveryCalls.push({ at: timer.now(), failureKind });
+    };
+
+    internals.startHealthCheckTimer();
+
+    for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    expect(observationHealthChecks).toBe(0);
+    expect(databaseHealthProbe.checkCalls).toBe(0);
+    expect(recoveryCalls).toEqual([{
+      at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
+      failureKind: "http",
+    }]);
+  });
+
+  test("counts repeated control socket failures as socket recovery before observation and database checks", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    const daemon = buildDaemon(timer, databaseHealthProbe);
+    const internals = daemon as unknown as DaemonHealthInternals;
+    cleanup = { internals, timer };
+    const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
+    let observationHealthChecks = 0;
+
+    internals.httpServer = { listening: true };
+    internals.socketServer = { isListening: () => false };
+    internals.observationStreamHealth = {
+      isHealthy: () => {
+        observationHealthChecks += 1;
+        return true;
+      },
+      recover: async () => {},
+    };
+    internals.attemptRecovery = async failureKind => {
+      recoveryCalls.push({ at: timer.now(), failureKind });
+    };
+
+    internals.startHealthCheckTimer();
+
+    for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
+      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    expect(observationHealthChecks).toBe(0);
+    expect(databaseHealthProbe.checkCalls).toBe(0);
+    expect(recoveryCalls).toEqual([{
+      at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
+      failureKind: "socket",
+    }]);
+  });
+
   test("counts a missing observation stream socket as a socket health failure", async () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();

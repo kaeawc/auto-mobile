@@ -35,7 +35,7 @@ import {
   InternalToolPayloads,
   narrowInternalToolEnvelope,
 } from "./internalToolPayloads";
-import { JsonToolOutputArtifactWriter } from "./toolOutputArtifactWriter";
+import { JsonToolOutputArtifactWriter, type ToolOutputArtifactRetention } from "./toolOutputArtifactWriter";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 
 // Re-exported for backward compatibility; the implementation now lives in
@@ -173,7 +173,17 @@ interface AfterToolCallHandler {
   handle(input: AfterToolCallInput): Promise<AfterToolCallResult>;
 }
 
-type ObservationArtifactWriterFactory = (outputDirectory: string, timer: Timer) => ObservationArtifactWriter;
+type ObservationArtifactWriterFactory = (
+  outputDirectory: string,
+  timer: Timer,
+  retention?: ToolOutputArtifactRetention
+) => ObservationArtifactWriter;
+
+const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
+  maxAgeMs: 24 * 60 * 60 * 1000,
+  maxFiles: 500,
+  overflowMinAgeMs: 60 * 60 * 1000,
+};
 
 export interface PlanLifecycleInput {
   name: string;
@@ -530,7 +540,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   constructor(
     private readonly createArtifactWriter: ObservationArtifactWriterFactory =
-    (outputDirectory, timer) => new JsonToolOutputArtifactWriter({ outputDirectory, timer })
+    (outputDirectory, timer, retention) => new JsonToolOutputArtifactWriter({ outputDirectory, timer, retention })
   ) {}
 
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
@@ -621,7 +631,9 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
     const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
     const artifactWriter = !internalCall
-      ? this.createArtifactWriter(artifactDirectory, timer)
+      ? configuredArtifactDirectory
+        ? this.createArtifactWriter(artifactDirectory, timer)
+        : this.createArtifactWriter(artifactDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION)
       : undefined;
 
     const finalizedResponse = finalizeToolResponse(response, {

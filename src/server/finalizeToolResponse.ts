@@ -125,7 +125,6 @@ export interface FinalizeToolResponseContext {
    * is large enough to risk client-side truncation.
    */
   artifactMode?: ObservationArtifactMode;
-  artifactInlineMaxBytes?: number;
 }
 
 type ObservationDiffMode = "diff" | "full";
@@ -359,8 +358,7 @@ function shouldArtifactObservationPayload(
     return true;
   }
 
-  const inlineMaxBytes = ctx.artifactInlineMaxBytes ?? DEFAULT_OBSERVATION_INLINE_MAX_BYTES;
-  return Buffer.byteLength(stringifyToolResponse(payload), "utf8") > inlineMaxBytes;
+  return Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES;
 }
 
 function writeObservationArtifact(

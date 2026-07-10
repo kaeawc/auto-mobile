@@ -15,6 +15,7 @@ import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,
 } from "../../src/server/stripToolResultStructuredContent";
+import type { ToolOutputArtifactRetention } from "../../src/server/toolOutputArtifactWriter";
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
@@ -272,8 +273,10 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   test("configured artifact directory creates a writer and replaces observe output metadata", async () => {
     const writer = new FakeObservationArtifactWriter();
     const requestedDirectories: string[] = [];
-    const handler = new DefaultAfterToolCallHandler(outputDirectory => {
+    const requestedRetentions: Array<ToolOutputArtifactRetention | undefined> = [];
+    const handler = new DefaultAfterToolCallHandler((outputDirectory, _timer, retention) => {
       requestedDirectories.push(outputDirectory);
+      requestedRetentions.push(retention);
       return writer;
     });
     const timer = new FakeTimer();
@@ -294,6 +297,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     expect(result.durationMs).toBe(5);
     expect(requestedDirectories).toEqual(["/tmp/artifacts"]);
+    expect(requestedRetentions).toEqual([undefined]);
     expect(writer.writes).toHaveLength(1);
     expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
     expect(result.finalizedResponse.structuredContent).toEqual({
@@ -314,8 +318,10 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const originalNoStructuredContent = serverConfig.isToolResultsNoStructuredContentEnabled();
     const writer = new FakeObservationArtifactWriter();
     const requestedDirectories: string[] = [];
-    const handler = new DefaultAfterToolCallHandler(outputDirectory => {
+    const requestedRetentions: Array<ToolOutputArtifactRetention | undefined> = [];
+    const handler = new DefaultAfterToolCallHandler((outputDirectory, _timer, retention) => {
       requestedDirectories.push(outputDirectory);
+      requestedRetentions.push(retention);
       return writer;
     });
     const timer = new FakeTimer();
@@ -342,7 +348,14 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         structuredContentOmissionReason(true)
       );
 
-      expect(requestedDirectories).toEqual([expect.stringContaining("auto-mobile-tool-outputs")]);
+      expect(requestedDirectories).toEqual([expect.stringContaining("tool_outputs")]);
+      expect(requestedRetentions).toEqual([
+        {
+          maxAgeMs: 24 * 60 * 60 * 1000,
+          maxFiles: 500,
+          overflowMinAgeMs: 60 * 60 * 1000,
+        },
+      ]);
       expect(writer.writes).toHaveLength(1);
       const writtenRoot = (writer.writes[0].data as any).viewHierarchy.hierarchy.node;
       expect(writtenRoot["view-id"]).toBeUndefined();

@@ -91,6 +91,7 @@ export const TEMP_SUBDIRS = {
   NAVIGATION_SCREENSHOTS: "navigation-screenshots",
   VIEW_HIERARCHY: "view_hierarchy",
   OBSERVE_RESULTS: "observe_results",
+  TOOL_OUTPUTS: "tool_outputs",
   WINDOW: "window",
   CACHE: "cache",
   STATE: "state",

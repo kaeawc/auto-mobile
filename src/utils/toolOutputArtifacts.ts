@@ -1,18 +1,14 @@
 import { promises as fsPromises, constants as fsConstants } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { ActionableError } from "../models";
 import type { FileSystem } from "./filesystem/DefaultFileSystem";
 import { serverConfig } from "./ServerConfig";
+import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
 
 export const TOOL_OUTPUTS_DIR_FLAG = "--tool-outputs-dir";
 export const TOOL_OUTPUT_DIR_FLAG_ALIAS = "--tool-output-dir";
 export const TOOL_OUTPUTS_DIR_ENV = "AUTOMOBILE_TOOL_OUTPUTS_DIR";
 export const TOOL_OUTPUTS_DIR_ENV_ALIAS = "AUTO_MOBILE_TOOL_OUTPUTS_DIR";
-
-function currentUserId(): string {
-  return process.getuid?.()?.toString() ?? process.env.USERNAME ?? "default";
-}
 
 export interface ToolOutputsDirValidationDeps extends Pick<FileSystem, "ensureDir"> {
   stat(dirPath: string): Promise<{ isDirectory(): boolean }>;
@@ -68,7 +64,7 @@ export function parseToolOutputsDirConfig(
 }
 
 export function getDefaultToolOutputsDir(): string {
-  return path.join(tmpdir(), `auto-mobile-tool-outputs-${currentUserId()}`);
+  return getTempDir(TEMP_SUBDIRS.TOOL_OUTPUTS);
 }
 
 function errorMessage(error: unknown): string {

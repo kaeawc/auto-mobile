@@ -15,7 +15,7 @@ describe("gradle-task-run action", () => {
     expect(action).not.toContain("actions/upload-artifact@v4.4.0");
     expect(action).not.toContain("gradle/actions/setup-gradle@v4");
 
-    expect(action).toContain("gradle/actions/setup-gradle@v6.2.0");
+    expect(action).toContain("gradle/actions/setup-gradle@v5.0.2");
     expect(action).toContain("actions/cache/restore@v5.1.0");
     expect(action).toContain("actions/cache/save@v5.1.0");
     expect(action).toContain("actions/upload-artifact@v7.0.1");

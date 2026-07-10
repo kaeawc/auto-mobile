@@ -177,7 +177,7 @@ runs:
         echo "ANDROID_HOME: $ANDROID_HOME"
 
     - name: "Setup Gradle"
-      uses: gradle/actions/setup-gradle@v6.2.0
+      uses: gradle/actions/setup-gradle@v5.0.2
       with:
         gradle-version: ${{ steps.eval_gradle.outputs.version }}
         cache-encryption-key: ${{ inputs.gradle-encryption-key }}

@@ -839,6 +839,42 @@ export class DevicePool {
     return now;
   }
 
+  private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
+    return device.platform === "android" && /^emulator-\d+$/.test(device.id);
+  }
+
+  private async ensurePooledDevicePresentForUse(device: PooledDevice): Promise<boolean> {
+    if (!this.shouldValidatePooledDevicePresence(device)) {
+      return true;
+    }
+
+    const discovery = await this.deviceManager.getBootedDevicesDetailed(device.platform);
+    if (!discovery.succeededPlatforms.has(device.platform)) {
+      logger.warn(
+        `Retaining ${device.id}: ${device.platform} discovery did not succeed during assignment liveness check`
+      );
+      return true;
+    }
+
+    if (discovery.devices.some(booted => booted.deviceId === device.id)) {
+      this.refreshMissingDeviceMisses.delete(device.id);
+      return true;
+    }
+
+    await this.evictMissingPooledDevice(device, "not present in adb devices");
+    return false;
+  }
+
+  private async evictMissingPooledDevice(device: PooledDevice, reason: string): Promise<void> {
+    logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
+    if (device.sessionId) {
+      await this.sessionManager.releaseSession(device.sessionId);
+      device.sessionId = null;
+    }
+    device.status = "idle";
+    await this.removeDevice(device.id);
+  }
+
   private suppressAutoStartForDevice(device: PooledDevice): void {
     this.suppressedAutoStartDeviceImageKeys.add(device.id);
     this.suppressedAutoStartDeviceImageKeys.add(`${device.platform}:${device.name}`);
@@ -1086,12 +1122,21 @@ export class DevicePool {
     let livenessUnknown = false;
 
     while (device) {
+      const skippedDeviceId = device.id;
+      if (this.shouldValidatePooledDevicePresence(device)) {
+        if (await this.ensurePooledDevicePresentForUse(device)) {
+          return { device, livenessUnknown };
+        }
+        candidates = candidates.filter(candidate => candidate.id !== skippedDeviceId);
+        device = this.selectIdleDevice(candidates);
+        continue;
+      }
+
       const status = this.getIdleDeviceLivenessStatus(device, iosLiveness);
       if (status === "assignable") {
         return { device, livenessUnknown };
       }
 
-      const skippedDeviceId = device.id;
       if (status === "stale") {
         logger.warn(
           `[DevicePool] Removing idle iOS simulator ${device.id}: simctl no longer reports it as booted`
@@ -1279,6 +1324,13 @@ export class DevicePool {
       }
       await this.assertIdleDeviceAssignable(device, `Device '${deviceId}' is not available in the device pool.`);
 
+      if (!await this.ensurePooledDevicePresentForUse(device)) {
+        throw new ActionableError(
+          `Device '${deviceId}' is not available in the device pool. ` +
+          "It may have been shut down or disconnected."
+        );
+      }
+
       if (device.sessionId) {
         const existingSession = this.sessionManager.getSession(device.sessionId);
         if (
@@ -1358,6 +1410,17 @@ export class DevicePool {
       `Device '${deviceId}' is not available for autolock.\n` +
       `The device may have been shut down or disconnected.`
     );
+
+    if (!await this.ensurePooledDevicePresentForUse(device)) {
+      throw new ActionableError(
+        `Device '${deviceId}' is not available for autolock.\n` +
+        `The device may have been shut down or disconnected.\n\n` +
+        `Options:\n` +
+        `  - Use 'startDevice' with the same criteria to boot a new device\n` +
+        `  - Use 'startDevice' with deviceId to restart this specific device\n` +
+        `  - Use 'listDevices' to see currently available devices`
+      );
+    }
 
     device.sessionId = sessionId;
     device.status = "busy";

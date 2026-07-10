@@ -84,6 +84,7 @@ import {
   DefaultObservationStreamHealth,
   type ObservationStreamHealth,
 } from "./ObservationStreamHealth";
+import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -125,6 +126,7 @@ export class Daemon {
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
+  private forceDisconnectedDeviceIds: Set<string> = new Set();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
@@ -138,6 +140,8 @@ export class Daemon {
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
   private observationStreamHealth: ObservationStreamHealth;
+  private observationStreamHealth: ObservationStreamHealth;
+  private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
@@ -197,6 +201,14 @@ export class Daemon {
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);
+    this.unsubscribeAdbMissingDevice = onAdbMissingDevice(event => {
+      if (!this.devicePool.getDevice(event.deviceId) && !this.sessionManager.getSessionForDevice(event.deviceId)) {
+        return;
+      }
+      logger.warn(`[Daemon] ADB reported tracked device ${event.deviceId} missing: ${event.message}`);
+      this.forceDisconnectedDeviceIds.add(event.deviceId);
+      this.deviceDisconnectMisses.set(event.deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
+    });
 
     // Apply CLI flags to serverConfig so daemon tools respect them
     if (options.networkMockable) {
@@ -1086,6 +1098,7 @@ export class Daemon {
           succeededPlatforms,
           candidatePlatforms,
           idleCandidateIds,
+          forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
           missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
         });
 
@@ -1166,6 +1179,7 @@ export class Daemon {
           if (deviceCleanupSucceeded) {
             this.confirmedDisconnectedDeviceIds.add(deviceId);
             this.deviceDisconnectMisses.delete(deviceId);
+            this.forceDisconnectedDeviceIds.delete(deviceId);
           }
         }
       } catch (error) {
@@ -1430,6 +1444,10 @@ export class Daemon {
     if (this.deviceDisconnectTimer) {
       clearInterval(this.deviceDisconnectTimer);
       this.deviceDisconnectTimer = null;
+    }
+    if (this.unsubscribeAdbMissingDevice) {
+      this.unsubscribeAdbMissingDevice();
+      this.unsubscribeAdbMissingDevice = null;
     }
 
     // Stop the session cleanup interval before the DB drain below. It is the one

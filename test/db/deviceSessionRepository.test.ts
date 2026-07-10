@@ -191,6 +191,8 @@ describe("DeviceSessionRepository", () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
+    const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     const sessionManager = new SessionManager(timer, repo);
     const pool = new DevicePool(
       sessionManager,
@@ -203,9 +205,7 @@ describe("DeviceSessionRepository", () => {
     );
 
     try {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await pool.initializeWithDevices([androidDevice]);
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       const row = await repo.getSession(sessionId!);

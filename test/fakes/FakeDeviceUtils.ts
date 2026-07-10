@@ -176,6 +176,17 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     if (device.deviceId) {
       this.runningDeviceNames.add(device.deviceId);
     }
+    const bootedDevice: BootedDevice = {
+      name: device.name,
+      platform: device.platform,
+      deviceId: device.deviceId || `mock-${device.name}`,
+      source: device.source,
+      iosVersion: device.iosVersion,
+    };
+    const existingBootedDevices = this.bootedDevices.get(device.platform) || [];
+    if (!existingBootedDevices.some(booted => booted.deviceId === bootedDevice.deviceId)) {
+      this.bootedDevices.set(device.platform, [...existingBootedDevices, bootedDevice]);
+    }
 
     // Return mock process if configured, otherwise return a default mock
     if (this.mockChildProcesses.has(device.name)) {

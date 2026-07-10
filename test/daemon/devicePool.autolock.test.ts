@@ -25,6 +25,12 @@ describe("DevicePool autolock", () => {
   let sessionManager: SessionManager;
   let timer: FakeTimer;
   let fakeDeviceUtils: FakeDeviceUtils;
+  const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+
+  const initializeLiveAndroidDevice = async (): Promise<void> => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    await pool.initializeWithDevices([androidDevice]);
+  };
 
   beforeEach(() => {
     clearAutolockEnv();
@@ -57,9 +63,7 @@ describe("DevicePool autolock", () => {
 
   it("assigns device to session when pool has the device", async () => {
     // We can test the session creation path directly through assignDeviceToSession
-    await pool.initializeWithDevices([
-      { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-    ]);
+    await initializeLiveAndroidDevice();
 
     const deviceId = await pool.assignDeviceToSession("test-session-uuid", "android");
     expect(deviceId).toBe("emulator-5554");
@@ -70,9 +74,7 @@ describe("DevicePool autolock", () => {
   });
 
   it("session expires and frees device after timeout", async () => {
-    await pool.initializeWithDevices([
-      { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-    ]);
+    await initializeLiveAndroidDevice();
 
     // Create session with short timeout
     await pool.assignDeviceToSession("test-session", "android");
@@ -118,13 +120,15 @@ describe("DevicePool autolock", () => {
       source: "local" as const,
     };
 
+    const bootedDevice = { name: "Medium_Phone_API_35", platform: "android" as const, deviceId: "emulator-5554" };
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
-    fakeDeviceUtils.setBootedDevices("android", []);
-    await pool.initializeWithDevices([
-      { name: "Medium_Phone_API_35", platform: "android", deviceId: "emulator-5554" },
-    ]);
+    fakeDeviceUtils.setBootedDevices("android", [bootedDevice]);
+    await pool.initializeWithDevices([bootedDevice]);
 
     await pool.assignDeviceToSession("active-session", "android");
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.markDeviceAsStopped("Medium_Phone_API_35");
+    fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
     await pool.removeDisconnectedDevice("emulator-5554");
     await pool.releaseDevice("emulator-5554");
     await pool.removeDevice("emulator-5554");
@@ -188,9 +192,7 @@ describe("DevicePool autolock", () => {
     });
 
     it("locks the device to a generated session UUID", async () => {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
 
@@ -219,9 +221,7 @@ describe("DevicePool autolock", () => {
     });
 
     it("maps an MCP session to its generated autolock session", async () => {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
 
@@ -231,9 +231,7 @@ describe("DevicePool autolock", () => {
     });
 
     it("clears MCP session mapping when the autolock session expires", async () => {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(sessionId);
@@ -248,9 +246,7 @@ describe("DevicePool autolock", () => {
       // The daemon heartbeat watchdog reaps sessions whose heartbeat is stale.
       // Autolock clients do not send heartbeats, so the heartbeat timeout must
       // match the idle timeout or the device would be released far too early.
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
       const session = sessionManager.getSession(sessionId!);
@@ -285,9 +281,7 @@ describe("DevicePool autolock", () => {
         return now - lastHeartbeat > heartbeatTimeoutMs;
       };
 
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
       const session = sessionManager.getSession(sessionId!)!;
@@ -322,9 +316,7 @@ describe("DevicePool autolock", () => {
         return now - session.lastHeartbeat > session.heartbeatTimeoutMs;
       };
 
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
 
@@ -347,9 +339,7 @@ describe("DevicePool autolock", () => {
     });
 
     it("auto-releases the device after the idle timeout (periodic cleanup)", async () => {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
@@ -366,9 +356,7 @@ describe("DevicePool autolock", () => {
     });
 
     it("auto-releases the device on lazy session expiry", async () => {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
 
@@ -384,9 +372,7 @@ describe("DevicePool autolock", () => {
     });
 
     it("heartbeat before the idle timeout keeps the device locked", async () => {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
 
@@ -402,9 +388,7 @@ describe("DevicePool autolock", () => {
     });
 
     it("does not release a device re-locked by a different session", async () => {
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      await initializeLiveAndroidDevice();
 
       const firstSession = await pool.autolockDevice("emulator-5554", "android");
       // Simulate the device being re-locked under a new session before the old
@@ -426,9 +410,7 @@ describe("DevicePool autolock", () => {
 
     describe("assertAutolockAccess", () => {
       beforeEach(async () => {
-        await pool.initializeWithDevices([
-          { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-        ]);
+        await initializeLiveAndroidDevice();
       });
 
       it("allows the owning session", async () => {
@@ -463,9 +445,7 @@ describe("DevicePool autolock", () => {
   it("assertAutolockAccess no-ops when autolock is disabled even if a device is locked", async () => {
     // Lock a device while enabled...
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
-    await pool.initializeWithDevices([
-      { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-    ]);
+    await initializeLiveAndroidDevice();
     await pool.autolockDevice("emulator-5554", "android");
 
     // ...then disable autolock: enforcement is bypassed.

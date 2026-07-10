@@ -43,4 +43,19 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       { name: "emulator-5554", platform: "android", deviceId: "emulator-5554" },
     ]);
   });
+
+  test("does not retry commands when adb reports the target serial is gone", async () => {
+    let calls = 0;
+    const execAsync = async (): Promise<ExecResult> => {
+      calls++;
+      throw new Error("Command failed: adb -s emulator-5554 shell true\nstderr: adb: device 'emulator-5554' not found");
+    };
+    const adb = new AdbClient(
+      { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
+      execAsync
+    );
+
+    await expect(adb.executeCommand("shell true")).rejects.toThrow(/device 'emulator-5554' not found/);
+    expect(calls).toBe(1);
+  });
 });

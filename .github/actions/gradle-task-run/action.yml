@@ -152,11 +152,13 @@ runs:
         echo "GRADLE_FLAGS: $GRADLE_FLAGS"
 
     - name: "Hash Gradle Tasks"
-      uses: pplanel/hash-calculator-action@v1.3.2
       id: gradle-task-hash
-      with:
-        input: ${{ inputs.gradle-tasks }}
-        method: MD5
+      shell: ${{ inputs.shell }}
+      env:
+        GRADLE_TASKS: ${{ inputs.gradle-tasks }}
+      run: |
+        digest=$(printf '%s' "$GRADLE_TASKS" | openssl dgst -md5 -r | awk '{print $1}')
+        echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
     - name: "Debug cache key inputs"
       shell: ${{ inputs.shell }}
@@ -175,7 +177,7 @@ runs:
         echo "ANDROID_HOME: $ANDROID_HOME"
 
     - name: "Setup Gradle"
-      uses: gradle/actions/setup-gradle@v4
+      uses: gradle/actions/setup-gradle@v5.0.2
       with:
         gradle-version: ${{ steps.eval_gradle.outputs.version }}
         cache-encryption-key: ${{ inputs.gradle-encryption-key }}
@@ -188,7 +190,7 @@ runs:
 
     - name: "Restore Android SDK Cache"
       id: cache-android-sdk
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5.1.0
       with:
         path: |
           ~/.android
@@ -200,7 +202,7 @@ runs:
       uses: android-actions/setup-android@v3.2.2
 
     - name: "Save Android SDK Cache"
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v5.1.0
       if: steps.cache-android-sdk.outputs.cache-hit != 'true'
       with:
         path: |
@@ -255,7 +257,7 @@ runs:
         fi
 
     - name: "Store Config Cache Report"
-      uses: actions/upload-artifact@v4.4.0
+      uses: actions/upload-artifact@v7.0.1
       if: success()
       with:
         name: config-cache-report-${{ steps.sanitize-name.outputs.sanitized_name }}-${{ runner.os }}

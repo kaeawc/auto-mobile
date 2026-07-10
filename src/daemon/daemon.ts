@@ -17,6 +17,7 @@ import {
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
 import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
@@ -40,7 +41,7 @@ import { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } from 
 import { startAppearanceSocketServer, stopAppearanceSocketServer } from "./appearanceSocketServer";
 import { startPerformanceStreamSocketServer, stopPerformanceStreamSocketServer } from "./performanceStreamSocketServer";
 import { startPerformancePushSocketServer, stopPerformancePushSocketServer } from "./performancePushSocketServer";
-import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, getDeviceDataStreamServer, type NavigationGraphStreamData } from "./deviceDataStreamSocketServer";
+import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, getDeviceDataStreamServer, getDeviceDataStreamSocketPath, type NavigationGraphStreamData } from "./deviceDataStreamSocketServer";
 import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from "./failuresStreamSocketServer";
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
@@ -98,6 +99,10 @@ const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DatabaseHealthFailureRecovery = (code: number) => void;
+interface ObservationStreamHealth {
+  isHealthy(): boolean;
+  recover(): Promise<void>;
+}
 
 /**
  * Main daemon process
@@ -133,6 +138,7 @@ export class Daemon {
   private databaseHealthProbe: DatabaseHealthProbe;
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
+  private observationStreamHealth: ObservationStreamHealth;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
@@ -165,6 +171,14 @@ export class Daemon {
       logger.close();
       process.exit(code);
     });
+    this.observationStreamHealth = {
+      isHealthy: () => this.isObservationStreamSocketHealthy(),
+      recover: async () => {
+        await stopDeviceDataStreamSocketServer();
+        await startDeviceDataStreamSocketServer(this.timer);
+        this.setupDeviceDataStreamCallback();
+      },
+    };
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     // Register centralized cleanup for session-scoped state
@@ -967,9 +981,13 @@ export class Daemon {
           logger.warn("Health check failed: HTTP server not listening");
           recordHealthCheckFailure("http");
         } else {
-          // Check if socket server is active before probing shared dependencies.
+          // Check socket servers before probing shared dependencies; clients
+          // can only subscribe to advertised streams while their socket paths exist.
           if (!this.socketServer || !this.socketServer.isListening()) {
             logger.warn("Health check failed: Socket server not listening");
+            recordHealthCheckFailure("socket");
+          } else if (!this.observationStreamHealth.isHealthy()) {
+            logger.warn("Health check failed: Observation stream socket unavailable");
             recordHealthCheckFailure("socket");
           } else {
             try {
@@ -1206,9 +1224,26 @@ export class Daemon {
           logger.error(`Failed to restart socket server: ${error}`);
         }
       }
+
+      if (!this.observationStreamHealth.isHealthy()) {
+        logger.info("Restarting observation stream socket server...");
+        try {
+          await this.observationStreamHealth.recover();
+          logger.info("Observation stream socket server restarted successfully");
+        } catch (error) {
+          logger.error(`Failed to restart observation stream socket server: ${error}`);
+        }
+      }
     } catch (error) {
       logger.error(`Recovery attempt failed: ${error}`);
     }
+  }
+
+  private isObservationStreamSocketHealthy(): boolean {
+    const server = getDeviceDataStreamServer();
+    return server !== null &&
+      server.isListening() &&
+      existsSync(getDeviceDataStreamSocketPath());
   }
 
   /**

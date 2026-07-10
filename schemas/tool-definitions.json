@@ -3665,6 +3665,67 @@
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "number"
+                },
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "centerX": {
+                  "type": "number"
+                },
+                "centerY": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false,
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
+            "node": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema0"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
       "type": "object",
       "properties": {
         "screenSize": {

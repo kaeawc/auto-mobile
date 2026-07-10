@@ -4,6 +4,7 @@ import type { RegisteredTool } from "../../src/server/toolRegistry";
 import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
+import { unresolvedLocalRefs } from "../helpers/jsonSchemaRefs";
 
 /**
  * Tool Registration Regression Tests
@@ -23,6 +24,7 @@ interface ToolSchemaDefinition {
   name: string;
   description: string;
   inputSchema: any;
+  outputSchema?: Record<string, unknown>;
 }
 
 interface FileSystemOperations {
@@ -647,6 +649,19 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       expect(schemas[0]).toHaveProperty("description");
       expect(schemas[0]).toHaveProperty("inputSchema");
     }
+  });
+
+  test("should keep generated observe outputSchema local references resolvable", async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
+
+    const content = await fs.readFile(schemaPath, "utf-8");
+    const schemas = JSON.parse(content) as ToolSchemaDefinition[];
+    const observe = schemas.find(schema => schema.name === "observe");
+
+    expect(observe?.outputSchema).toBeDefined();
+    expect(unresolvedLocalRefs(observe?.outputSchema)).toEqual([]);
   });
 
   test("should keep committed tool definitions in sync with all served tool modes", async () => {

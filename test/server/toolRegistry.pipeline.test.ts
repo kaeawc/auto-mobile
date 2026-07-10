@@ -226,6 +226,40 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     },
   });
 
+  const makeLargeOcclusionHeavyObservePayload = () => {
+    const overlayId = "com.example:id/floating_overlay";
+    return {
+      updatedAt: 1,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            "resource-id": "com.example:id/root",
+            "view-id": "com.example:id/root",
+            "node": [
+              {
+                "resource-id": overlayId,
+                "view-id": overlayId,
+                "bounds": { left: 850, top: 1500, right: 1030, bottom: 1680 },
+                "content-desc": "Compose floating action button",
+              },
+              ...Array.from({ length: 900 }, (_, index) => ({
+                "resource-id": `com.example:id/card_${index}`,
+                "view-id": `com.example:id/card_${index}`,
+                "text": `Occlusion-heavy card row ${index} ${"detail ".repeat(12)}`,
+                "bounds": { left: 24, top: index * 4, right: 1056, bottom: index * 4 + 120 },
+                "occlusionState": "partial",
+                "occludedBy": "Compose floating action button",
+                "occludedByViewId": overlayId,
+              })),
+            ],
+          },
+        },
+      },
+    };
+  };
+
   afterEach(() => {
     serverConfig.setToolOutputArtifactDirectory(undefined);
     resetMcpRecordingState();
@@ -267,6 +301,81 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         tool: "observe",
       },
     });
+    expect(result.finalizedResponse.content[0].text).toBe(stringifyToolResponse(result.finalizedResponse.structuredContent));
+  });
+
+  test("oversized occlusion-heavy observe auto-spills to an artifact when no directory is configured", async () => {
+    const originalObserveCompact = serverConfig.isObserveResultCompactEnabled();
+    const originalCompactJson = serverConfig.isToolResultsCompactJsonEnabled();
+    const writer = new FakeObservationArtifactWriter();
+    const requestedDirectories: string[] = [];
+    const handler = new DefaultAfterToolCallHandler(outputDirectory => {
+      requestedDirectories.push(outputDirectory);
+      return writer;
+    });
+    const timer = new FakeTimer();
+    timer.setCurrentTime(25);
+    serverConfig.setToolOutputArtifactDirectory(undefined);
+    serverConfig.setObserveResultCompactEnabled(true);
+    serverConfig.setToolResultsCompactJsonEnabled(true);
+
+    try {
+      const result = await handler.handle({
+        name: "observe",
+        args: {},
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse(makeLargeOcclusionHeavyObservePayload()),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 20,
+      });
+
+      expect(requestedDirectories).toEqual([expect.stringContaining("auto-mobile-tool-outputs")]);
+      expect(writer.writes).toHaveLength(1);
+      const writtenRoot = (writer.writes[0].data as any).viewHierarchy.hierarchy.node;
+      expect(writtenRoot["view-id"]).toBeUndefined();
+      expect(writtenRoot.node[0]["view-id"]).toBe("com.example:id/floating_overlay");
+      expect(writtenRoot.node[1].occludedByViewId).toBe("com.example:id/floating_overlay");
+      expect(writtenRoot.node[1].bounds).toEqual([24, 0, 1056, 120]);
+      expect(result.finalizedResponse.structuredContent).toEqual({
+        artifact: {
+          path: "/tmp/artifacts/observe-1.json",
+          format: "json",
+          payload: "ObserveResult",
+          bytes: 123,
+          tool: "observe",
+        },
+      });
+      expect(() => JSON.parse(result.finalizedResponse.content[0].text)).not.toThrow();
+      expect(result.finalizedResponse.content[0].text).toBe(stringifyToolResponse(result.finalizedResponse.structuredContent));
+    } finally {
+      serverConfig.setObserveResultCompactEnabled(originalObserveCompact);
+      serverConfig.setToolResultsCompactJsonEnabled(originalCompactJson);
+    }
+  });
+
+  test("small observe results remain inline when no artifact directory is configured", async () => {
+    const writer = new FakeObservationArtifactWriter();
+    const handler = new DefaultAfterToolCallHandler(() => writer);
+    serverConfig.setToolOutputArtifactDirectory(undefined);
+
+    const result = await handler.handle({
+      name: "observe",
+      args: {},
+      device: undefined,
+      internalCall: false,
+      response: createStructuredToolResponse(makeObservePayload()),
+      sessionUuid: "session-1",
+      shouldResolveDevice: false,
+      timer: new FakeTimer(),
+      toolStartMs: 0,
+    });
+
+    expect(writer.writes).toHaveLength(0);
+    expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
+    expect((result.finalizedResponse.structuredContent as any).artifact).toBeUndefined();
     expect(result.finalizedResponse.content[0].text).toBe(stringifyToolResponse(result.finalizedResponse.structuredContent));
   });
 

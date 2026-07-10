@@ -36,6 +36,7 @@ import {
   narrowInternalToolEnvelope,
 } from "./internalToolPayloads";
 import { JsonToolOutputArtifactWriter } from "./toolOutputArtifactWriter";
+import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -616,8 +617,10 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
           set: (uuid, observation) => DaemonState.getInstance().getSessionManager().setLastRenderedObservation(uuid, observation),
         }
         : undefined;
-    const artifactDirectory = serverConfig.getToolOutputArtifactDirectory();
-    const artifactWriter = artifactDirectory && !internalCall
+    const configuredArtifactDirectory = serverConfig.getToolOutputArtifactDirectory();
+    const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
+    const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
+    const artifactWriter = !internalCall
       ? this.createArtifactWriter(artifactDirectory, timer)
       : undefined;
 
@@ -628,6 +631,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       baselineStore,
       internal: internalCall,
       artifactWriter,
+      artifactMode,
     });
 
     TelemetryRecorder.getInstance().recordToolCallEvent({

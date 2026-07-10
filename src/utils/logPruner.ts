@@ -14,6 +14,8 @@ export interface LogPruneOptions {
   now?: number;
   /** Injectable liveness check for testing; defaults to a signal-0 probe. */
   isProcessAlive?: (pid: number) => boolean;
+  /** Optional diagnostic sink. Kept injectable so log pruning does not import the logger that calls it. */
+  logger?: { debug(message: string, ...args: unknown[]): void };
 }
 
 function defaultIsProcessAlive(pid: number): boolean {
@@ -68,7 +70,9 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   let entries: string[];
   try {
     entries = await readdirAsync(opts.dir);
-  } catch {
+  } catch (error) {
+    // Startup log pruning is best-effort; an unreadable directory only skips cleanup.
+    opts.logger?.debug(`log pruning skipped because the log directory could not be read: ${error}`, error);
     return;
   }
   const logFiles = entries.filter(f => f.endsWith(".log"));

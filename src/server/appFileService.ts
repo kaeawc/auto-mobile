@@ -22,6 +22,7 @@ import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import { logger } from "../utils/logger";
 
 export interface PutAppFileRequest extends PutAppFileArgs {
   device: BootedDevice;
@@ -774,7 +775,9 @@ function decodeUtf8Text(buffer: Buffer): string | undefined {
   try {
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer);
     return text.includes("\u0000") ? undefined : text;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/server/appFileService.ts fallback failed: ${error}`, error);
     return undefined;
   }
 }

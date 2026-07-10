@@ -62,7 +62,9 @@ export class DeviceSnapshotStore {
     try {
       await fs.access(this.getSnapshotPathWithOptions(snapshotName, options));
       return true;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/DeviceSnapshotStore.ts fallback failed: ${error}`, error);
       return false;
     }
   }

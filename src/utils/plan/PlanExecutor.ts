@@ -146,7 +146,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
           if (parsed && typeof parsed === "object") {
             return parsed as Record<string, unknown>;
           }
-        } catch {
+        } catch (error) {
+          // This probe is best-effort; callers can safely use the fallback value.
+          logger.debug(`src/utils/plan/PlanExecutor.ts fallback failed: ${error}`, error);
           return null;
         }
       }
@@ -484,6 +486,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     } catch (error) {
       const errorMessage = `${error}`;
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
+        logger.warn(`${context.logPrefix} optional step ${step.tool} threw; returning skipped status`, error);
         return {
           status: "skipped",
           error: errorMessage,
@@ -504,6 +507,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           context.deviceId,
           context.sessionUuid,
         );
+      logger.warn(`${context.logPrefix} step ${step.tool} threw; returning failed status`, error);
       return {
         status: "failed",
         error: errorMessage,

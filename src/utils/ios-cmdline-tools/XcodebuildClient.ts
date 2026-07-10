@@ -91,7 +91,9 @@ export class XcodebuildClient implements Xcodebuild {
     try {
       await this.execAsync("xcodebuild", ["-version"]);
       return true;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/ios-cmdline-tools/XcodebuildClient.ts fallback failed: ${error}`, error);
       return false;
     }
   }

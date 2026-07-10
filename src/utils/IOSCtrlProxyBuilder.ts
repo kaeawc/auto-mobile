@@ -204,7 +204,9 @@ export class IOSCtrlProxyBuilder {
       await fs.access(buildDir);
       this.cachedBuildProductsPath.set(platform, buildDir);
       return buildDir;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -263,7 +265,9 @@ export class IOSCtrlProxyBuilder {
       const fullPath = path.join(productsDir, selected);
       this.cachedXctestrunPath.set(cacheKey, fullPath);
       return fullPath;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -563,7 +567,9 @@ export class IOSCtrlProxyBuilder {
     try {
       await IOSCtrlProxyBuilder.prefetchPromise;
       return IOSCtrlProxyBuilder.prefetchResult;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -613,7 +619,9 @@ export class IOSCtrlProxyBuilder {
     try {
       await fs.access(appPath);
       return appPath;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -631,7 +639,9 @@ export class IOSCtrlProxyBuilder {
       const hash = await hashAppBundle(appPath);
       this.cachedAppBundleHash.set(platform, hash);
       return hash;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -649,7 +659,9 @@ export class IOSCtrlProxyBuilder {
     try {
       await fs.access(runnerBinaryPath);
       return runnerBinaryPath;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -761,7 +773,9 @@ export class IOSCtrlProxyBuilder {
       if (!stats.isFile() || stats.size < IOSCtrlProxyBuilder.MIN_BUNDLE_SIZE_BYTES) {
         return false;
       }
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return false;
     }
 
@@ -847,7 +861,9 @@ export class IOSCtrlProxyBuilder {
     try {
       const raw = await fs.readFile(this.getMetadataPath(), "utf-8");
       return JSON.parse(raw) as IOSCtrlProxyBundleMetadata;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }

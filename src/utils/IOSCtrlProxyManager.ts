@@ -1378,7 +1378,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // On macOS/Linux, kill -0 checks if process exists without actually killing it
       await this.processExecutor.exec(`kill -0 ${pid} 2>/dev/null`);
       return true;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
     }
   }
@@ -1406,7 +1408,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return status.success &&
           (status.data?.running ?? false) &&
           status.data?.pid === this.xcTestProcessId;
-      } catch {
+      } catch (error) {
+        // This probe is best-effort; callers can safely use the fallback value.
+        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -1479,7 +1483,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return status.success &&
           (status.data?.running ?? false) &&
           status.data?.pid === this.xcTestProcessId;
-      } catch {
+      } catch (error) {
+        // This probe is best-effort; callers can safely use the fallback value.
+        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -1550,8 +1556,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         }
       }
       return null;
-    } catch {
-      // pgrep exits 1 when no process matches
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -1824,7 +1831,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         command: match[2],
         environment,
       };
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -1837,7 +1846,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const { stdout } = await processExecutor.exec(`ps eww -p ${pid} -o command= 2>/dev/null`);
       const output = stdout.trim();
       return output.length > 0 ? output : undefined;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return undefined;
     }
   }
@@ -2063,7 +2074,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     try {
       await processExecutor.exec(`kill -0 ${pid} 2>/dev/null`);
       return true;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
     }
   }
@@ -2081,7 +2094,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       try {
         const status = await this.remoteRunner.getIproxyStatus({ pid: this.iproxyProcessId });
         return status.success && (status.data?.running ?? false);
-      } catch {
+      } catch (error) {
+        // This probe is best-effort; callers can safely use the fallback value.
+        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -2518,7 +2533,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
         const { stdout } = await this.processExecutor.exec("xcrun simctl list devices");
         return stdout.includes(this.device.deviceId);
-      } catch {
+      } catch (error) {
+        // This probe is best-effort; callers can safely use the fallback value.
+        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -2534,7 +2551,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       const { stdout } = await this.processExecutor.exec("idevice_id -l");
       return stdout.split("\n").some(line => line.trim() === this.device.deviceId);
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
     }
   }

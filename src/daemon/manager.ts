@@ -67,7 +67,9 @@ function resolvePackageRunner(): string | null {
   try {
     execSync("which bunx", { stdio: "ignore" });
     return "bunx";
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/daemon/manager.ts fallback failed: ${error}`, error);
     return null;
   }
 }
@@ -1170,6 +1172,8 @@ export class DaemonManager implements DaemonManagerLike {
       const pidData: PidFileData = JSON.parse(pidFileContent);
       return pidData.pid;
     } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/daemon/manager.ts fallback failed: ${error}`, error);
       return null;
     }
   }

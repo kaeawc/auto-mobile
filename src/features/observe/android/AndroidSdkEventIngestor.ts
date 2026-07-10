@@ -342,8 +342,9 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
   private resolveCurrentScreen(): string | undefined {
     try {
       return this.getNavigationScreenSource().getCurrentScreen() ?? undefined;
-    } catch {
-      // Continue without screen — screen attribution is best-effort.
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/features/observe/android/AndroidSdkEventIngestor.ts fallback failed: ${error}`, error);
       return undefined;
     }
   }

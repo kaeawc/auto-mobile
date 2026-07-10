@@ -413,9 +413,9 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     try {
       await this.deps.exec("xcrun devicectl --version");
       return true;
-    } catch {
-      // Missing/broken devicectl → not available; OpenURL surfaces the
-      // actionable Xcode 15+/iOS 17+ guidance to the caller.
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/ios-cmdline-tools/DeviceAppManager.ts fallback failed: ${error}`, error);
       return false;
     }
   }

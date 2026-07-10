@@ -146,7 +146,9 @@ export class DaemonClient {
           }
           return false;
         }
-      } catch {
+      } catch (error) {
+        // This probe is best-effort; callers can safely use the fallback value.
+        logger.debug(`src/daemon/client.ts fallback failed: ${error}`, error);
         return false;
       }
     }

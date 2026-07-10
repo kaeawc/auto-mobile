@@ -127,6 +127,7 @@ function directoryExists(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
   } catch {
-    return false;
+    // Bootstrap runs before logger setup; missing tool directories are expected.
   }
+  return false;
 }

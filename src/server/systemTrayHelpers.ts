@@ -267,8 +267,9 @@ export const resolveAppLabel = async (device: BootedDevice, appId: string): Prom
     if (info.success && info.applicationLabel) {
       return info.applicationLabel;
     }
-  } catch {
-    // fall through
+  } catch (error) {
+    // CtrlProxy package info is a fast path; dumpsys below is the fallback.
+    logger.debug(`CtrlProxy app label lookup failed for ${appId}: ${error}`, error);
   }
 
   try {
@@ -277,6 +278,8 @@ export const resolveAppLabel = async (device: BootedDevice, appId: string): Prom
     const result = await adb.executeCommand(`shell dumpsys package ${appId}`, undefined, undefined, true);
     return parseAppLabelFromDumpsys(result.stdout);
   } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/server/systemTrayHelpers.ts fallback failed: ${error}`, error);
     return null;
   }
 };

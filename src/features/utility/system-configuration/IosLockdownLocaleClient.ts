@@ -1,5 +1,6 @@
 import type { ProcessExecutor } from "../../../utils/ProcessExecutor";
 import { normalizeSettingValue } from "./parsing";
+import { logger } from "../../../utils/logger";
 
 const LOCKDOWN_INTERNATIONAL_DOMAIN = "com.apple.international";
 const LOCKDOWN_COMMAND_TIMEOUT_MS = 15000;
@@ -91,7 +92,9 @@ export class CommandLineLockdownLocaleClient implements LockdownLocaleClient {
         .map(value => value.trim().replace(/^"|"$/g, "").replace(/^\d+:\s*/, ""))
         .filter(Boolean);
       return values.length > 0 ? values : undefined;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/features/utility/system-configuration/IosLockdownLocaleClient.ts fallback failed: ${error}`, error);
       return undefined;
     }
   }

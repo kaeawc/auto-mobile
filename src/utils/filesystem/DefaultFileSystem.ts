@@ -1,12 +1,15 @@
 import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
 import { readFileAsync, readdirAsync } from "../io";
+import { logger } from "../logger";
 
 export async function pathExists(filePath: string): Promise<boolean> {
   try {
     await fsPromises.access(filePath);
     return true;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/filesystem/DefaultFileSystem.ts fallback failed: ${error}`, error);
     return false;
   }
 }

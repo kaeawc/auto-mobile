@@ -1,5 +1,6 @@
 import type { ProcessExecutor } from "../ProcessExecutor";
 import type { Timer } from "../SystemTimer";
+import { logger } from "../logger";
 
 /**
  * Single source of truth for "is this a usable TCP port number".
@@ -64,7 +65,9 @@ export class IOSCtrlProxyHealthClient {
     try {
       const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown };
       return health.status === "ok" && health.deviceId === deviceId;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return false;
     }
   }
@@ -88,7 +91,9 @@ export class IOSCtrlProxyHealthClient {
         return null;
       }
       return isValidCtrlProxyPort(health.port) ? health.port : null;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -122,7 +127,9 @@ export class IOSCtrlProxyHealthClient {
         `curl -s --max-time 2 http://${host}:${port}/health`
       );
       return stdout;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return null;
     }
   }

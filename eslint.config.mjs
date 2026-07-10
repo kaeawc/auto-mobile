@@ -2,79 +2,6 @@ import typescriptEslint from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 import stylistic from "@stylistic/eslint-plugin";
 import importRules from "eslint-plugin-import";
-import path from "node:path";
-
-const catchConventionAllowlist = new Set([
-	"src/daemon/client.ts:150:fallback",
-	"src/daemon/daemonFiles.ts:144:fallback",
-	"src/daemon/daemonFiles.ts:153:fallback",
-	"src/daemon/manager.ts:71:fallback",
-	"src/daemon/manager.ts:1173:fallback",
-	"src/daemon/socketServer.ts:1658:fallback",
-	"src/daemon/socketServer/BaseSocketServer.ts:107:fallback",
-	"src/daemon/socketServer/BaseSocketServer.ts:231:fallback",
-	"src/features/action/InstallApp.ts:137:fallback",
-	"src/features/action/TapAnyElement.ts:138:fallback",
-	"src/features/action/TerminateApp.ts:111:fallback",
-	"src/features/observe/android/AndroidSdkEventIngestor.ts:347:fallback",
-	"src/features/preferences/AppPreferences.ts:245:fallback",
-	"src/features/utility/system-configuration/IosLockdownLocaleClient.ts:95:fallback",
-	"src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts:293:fallback",
-	"src/features/video/FfmpegVideoProcessingBackend.ts:105:fallback",
-	"src/server/appFileService.ts:778:fallback",
-	"src/server/systemTrayHelpers.ts:280:fallback",
-	"src/utils/AppLifecycleMonitor.ts:135:fallback",
-	"src/utils/ChildProcessTracker.ts:159:fallback",
-	"src/utils/DeviceSnapshotStore.ts:66:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:208:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:267:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:567:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:617:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:635:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:653:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:765:fallback",
-	"src/utils/IOSCtrlProxyBuilder.ts:851:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:1382:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:1410:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:1483:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:1555:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:1828:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:1841:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:2067:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:2085:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:2522:fallback",
-	"src/utils/IOSCtrlProxyManager.ts:2538:fallback",
-	"src/utils/android-cmdline-tools/detection.ts:206:fallback",
-	"src/utils/android-cmdline-tools/detection.ts:220:fallback",
-	"src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts:21:fallback",
-	"src/utils/deviceUtils.ts:114:fallback",
-	"src/utils/dockerEnv.ts:12:fallback",
-	"src/utils/envBootstrap.ts:130:fallback",
-	"src/utils/fileLock.ts:129:fallback",
-	"src/utils/fileLock.ts:182:fallback",
-	"src/utils/fileLock.ts:216:fallback",
-	"src/utils/fileLock.ts:255:fallback",
-	"src/utils/filesystem/DefaultFileSystem.ts:10:fallback",
-	"src/utils/hostAppearance.ts:21:fallback",
-	"src/utils/image/webp/WebpBinaryResolver.ts:258:fallback",
-	"src/utils/ios-cmdline-tools/DeviceAppManager.ts:419:fallback",
-	"src/utils/ios-cmdline-tools/SimCtlClient.ts:492:fallback",
-	"src/utils/ios-cmdline-tools/XcodebuildClient.ts:95:fallback",
-	"src/utils/ios/IOSCtrlProxyHealthClient.ts:68:fallback",
-	"src/utils/ios/IOSCtrlProxyHealthClient.ts:92:fallback",
-	"src/utils/ios/IOSCtrlProxyHealthClient.ts:126:fallback",
-	"src/utils/logPruner.ts:72:fallback",
-	"src/utils/mcpVersion.ts:59:fallback",
-	"src/utils/mcpVersion.ts:74:fallback",
-	"src/utils/mcpVersion.ts:90:fallback",
-	"src/utils/plan/PlanExecutor.ts:150:fallback",
-	"src/utils/plan/PlanExecutor.ts:487:status",
-	"src/utils/plan/PlanExecutor.ts:507:status",
-]);
-
-function relativeLintPath(filename) {
-	return path.relative(process.cwd(), filename).replace(/\\/g, "/");
-}
 
 function propertyName(node) {
 	if (!node) {
@@ -161,11 +88,6 @@ function isFallbackReturn(argument) {
 	return !argument || argument.type === "Literal" && argument.value === null || isUndefinedReturn(argument) || isBooleanReturn(argument) || isStatusObjectReturn(argument);
 }
 
-function isAllowed(context, node, kind) {
-	const key = `${relativeLintPath(context.filename)}:${node.loc.start.line}:${kind}`;
-	return catchConventionAllowlist.has(key);
-}
-
 function catchConventionRule() {
 	return {
 		meta: {
@@ -178,10 +100,10 @@ function catchConventionRule() {
 		create(context) {
 			function reportStatusReturnsWithoutWarn(statements, hasPriorWarn) {
 				for (const statement of statements) {
-					if (hasLoggerMethodCall(statement, "warn")) {
+					if (statement.type === "ExpressionStatement" && isLoggerMethodCall(statement.expression, "warn")) {
 						hasPriorWarn = true;
 					}
-					if (statement.type === "ReturnStatement" && isStatusObjectReturn(statement.argument) && !hasPriorWarn && !isAllowed(context, statement, "status")) {
+					if (statement.type === "ReturnStatement" && isStatusObjectReturn(statement.argument) && !hasPriorWarn) {
 						context.report({ node: statement, messageId: "statusReturn" });
 					}
 					if (statement.type === "IfStatement") {
@@ -202,7 +124,7 @@ function catchConventionRule() {
 			return {
 				CatchClause(node) {
 					const statements = node.body.body;
-					if (statements.length === 1 && statements[0].type === "ReturnStatement" && isFallbackReturn(statements[0].argument) && !hasAnyLoggerCall(node.body) && !isAllowed(context, statements[0], "fallback")) {
+					if (statements.length === 1 && statements[0].type === "ReturnStatement" && isFallbackReturn(statements[0].argument) && !hasAnyLoggerCall(node.body)) {
 						context.report({ node: statements[0], messageId: "fallbackReturn" });
 					}
 					reportStatusReturnsWithoutWarn(statements, false);

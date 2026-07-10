@@ -488,7 +488,9 @@ export class SimCtlClient implements SimCtl {
     try {
       await this.ensureLocalSimctlAvailable();
       return true;
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/utils/ios-cmdline-tools/SimCtlClient.ts fallback failed: ${error}`, error);
       return false;
     }
   }

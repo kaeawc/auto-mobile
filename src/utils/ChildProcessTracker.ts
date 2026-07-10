@@ -1,5 +1,6 @@
 import { promises as fsPromises } from "node:fs";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import { logger } from "./logger";
 
 export const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
@@ -155,7 +156,9 @@ export async function getFileSize(filePath: string): Promise<number | undefined>
   try {
     const stats = await fsPromises.stat(filePath);
     return stats.size;
-  } catch {
+  } catch (error) {
+    // This probe is best-effort; callers can safely use the fallback value.
+    logger.debug(`src/utils/ChildProcessTracker.ts fallback failed: ${error}`, error);
     return undefined;
   }
 }

@@ -5,6 +5,7 @@ import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlC
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
+import { logger } from "../../utils/logger";
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
@@ -241,7 +242,9 @@ export class AppPreferences {
         input.key,
       ], IOS_DEFAULTS_TIMEOUT_MS);
       return parseIosDefaultsType(result.stdout);
-    } catch {
+    } catch (error) {
+      // This probe is best-effort; callers can safely use the fallback value.
+      logger.debug(`src/features/preferences/AppPreferences.ts fallback failed: ${error}`, error);
       return undefined;
     }
   }

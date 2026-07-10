@@ -528,6 +528,19 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
+    test("releases an active session when its Android emulator is stale before reuse", async () => {
+      await initializeLiveDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      fakeDeviceManager.bootedDevices = [];
+
+      await expect(devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"))
+        .rejects.toThrow(/not available|shut down|disconnected/);
+
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+      expect(sessionManager.getSession("session-2")).toBeNull();
+    });
+
     test("evicts a stale pooled Android emulator before autolock", async () => {
       const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       try {

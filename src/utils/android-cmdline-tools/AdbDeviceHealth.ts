@@ -21,6 +21,10 @@ export function isAdbMissingDeviceError(error: unknown, expectedDeviceId?: strin
     return !expectedDeviceId || missingDeviceId === expectedDeviceId;
   }
 
+  if (expectedDeviceId) {
+    return false;
+  }
+
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return message.includes("device not found") || message.includes("no devices");
 }

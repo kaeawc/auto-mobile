@@ -14,4 +14,17 @@ describe("ExecutionTracker", function() {
     expect(execution.id).toBe("execution-1");
     expect(execution.startTime).toBe(1234);
   });
+
+  test("uses custom cancellation reason as abort signal reason", async function() {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
+    const execution = tracker.startExecution("tapOn", undefined, "session-uuid");
+
+    const cancelled = await tracker.cancelSessionUuidExecutions(
+      "session-uuid",
+      "device-disconnected:emulator-5554"
+    );
+
+    expect(cancelled).toBe(1);
+    expect(execution.abortController.signal.reason).toEqual(new Error("device-disconnected:emulator-5554"));
+  });
 });

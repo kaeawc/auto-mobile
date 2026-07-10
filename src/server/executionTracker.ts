@@ -95,8 +95,8 @@ export class ExecutionTracker {
     return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
   }
 
-  async cancelSessionUuidExecutions(sessionUuid: string): Promise<number> {
-    return this.cancelExecutionsForKey(sessionUuid, this.sessionUuidExecutions, "sessionUuid");
+  async cancelSessionUuidExecutions(sessionUuid: string, reason: string = "unspecified"): Promise<number> {
+    return this.cancelExecutionsForKey(sessionUuid, this.sessionUuidExecutions, "sessionUuid", reason);
   }
 
   hasActiveSessionUuidExecutions(sessionUuid: string): boolean {
@@ -166,7 +166,11 @@ export class ExecutionTracker {
       if (!execution) {
         continue;
       }
-      execution.abortController.abort();
+      if (cancelReason === "unspecified") {
+        execution.abortController.abort();
+      } else {
+        execution.abortController.abort(new Error(cancelReason));
+      }
       cancelled++;
       logger.info(
         `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${cancelReason})`

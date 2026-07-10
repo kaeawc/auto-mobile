@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AdbClient, resetAdbClientCaches } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ExecResult } from "../../../src/models";
+import { isAdbMissingDeviceError } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 
 function createExecResult(stdout: string, stderr: string = ""): ExecResult {
   return {
@@ -57,5 +58,11 @@ describe("AdbClient.getBootedAndroidDevices", () => {
 
     await expect(adb.executeCommand("shell true")).rejects.toThrow(/device 'emulator-5554' not found/);
     expect(calls).toBe(1);
+  });
+
+  test("does not treat generic no-device output as serial-specific disappearance", () => {
+    expect(isAdbMissingDeviceError(new Error("error: no devices/emulators found"), "emulator-5554")).toBe(false);
+    expect(isAdbMissingDeviceError(new Error("error: device not found"), "emulator-5554")).toBe(false);
+    expect(isAdbMissingDeviceError(new Error("adb: device 'emulator-5554' not found"), "emulator-5554")).toBe(true);
   });
 });

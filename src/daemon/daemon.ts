@@ -1169,7 +1169,7 @@ export class Daemon {
             logger.warn(
               `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionId}`
             );
-            await this.cancelAndReleaseSession(sessionId);
+            await this.cancelAndReleaseSession(sessionId, `device-disconnected:${deviceId}`);
           }
 
           await this.devicePool.removeDisconnectedDevice(deviceId);
@@ -1190,13 +1190,16 @@ export class Daemon {
     this.deviceDisconnectTimer.unref();
   }
 
-  private async cancelAndReleaseSession(sessionId: string): Promise<void> {
-    const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId);
-    const deviceId = await this.sessionManager.releaseSession(sessionId);
+  private async cancelAndReleaseSession(sessionId: string, releaseReason: string = "explicit-release"): Promise<void> {
+    const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
+    const deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason);
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId);
     }
-    logger.info(`Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"}`);
+    logger.info(
+      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
+      `(reason=${releaseReason})`
+    );
   }
 
   /**

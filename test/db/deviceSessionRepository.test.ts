@@ -187,6 +187,21 @@ describe("DeviceSessionRepository", () => {
     }
   });
 
+  test("SessionManager persists custom infrastructure release reasons", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, repo);
+
+    try {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.releaseSession("session-1", "device-disconnected:emulator-5554");
+
+      const row = await repo.getSession("session-1");
+      expect(row!.release_reason).toBe("device-disconnected:emulator-5554");
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("DevicePool autolock persists MCP and daemon session ownership", async () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();

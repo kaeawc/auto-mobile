@@ -16,6 +16,7 @@ import {
   DeviceAllocationCriteria,
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
+import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 
@@ -848,6 +849,7 @@ export class DevicePool {
       return true;
     }
 
+    resetAdbDeviceListCache();
     const discovery = await this.deviceManager.getBootedDevicesDetailed(device.platform);
     if (!discovery.succeededPlatforms.has(device.platform)) {
       logger.warn(
@@ -868,7 +870,7 @@ export class DevicePool {
   private async evictMissingPooledDevice(device: PooledDevice, reason: string): Promise<void> {
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
     if (device.sessionId) {
-      await this.sessionManager.releaseSession(device.sessionId);
+      await this.sessionManager.releaseSession(device.sessionId, `device-disconnected:${device.id}`);
       device.sessionId = null;
     }
     device.status = "idle";

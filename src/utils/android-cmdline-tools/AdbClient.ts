@@ -41,6 +41,10 @@ export function resetAdbClientCaches(): void {
   adbPathCache = null;
 }
 
+export function resetAdbDeviceListCache(): void {
+  deviceListCache = null;
+}
+
 
 // Enhance the standard execFileAsync result to implement the ExecResult interface
 const execFileAsync: ExecFileAsync = async (
@@ -403,6 +407,12 @@ export class AdbClient implements AdbExecutor {
     return err.code === "ENOENT" || message.includes("ENOENT") || message.includes("Executable not found");
   }
 
+  private getAbortError(signal?: AbortSignal): Error {
+    return signal?.reason instanceof Error
+      ? signal.reason
+      : new Error(OPERATION_CANCELLED_MESSAGE);
+  }
+
   private shouldSkipMissingAdbProbe(): boolean {
     if (this.isTestMode) {
       return false;
@@ -455,7 +465,7 @@ export class AdbClient implements AdbExecutor {
         return result;
       } catch (error) {
         if (resolvedSignal?.aborted) {
-          throw new Error(OPERATION_CANCELLED_MESSAGE);
+          throw this.getAbortError(resolvedSignal);
         }
         this.notifyMissingDeviceIfNeeded(error);
         const duration = this.timer.now() - startTime;
@@ -473,7 +483,7 @@ export class AdbClient implements AdbExecutor {
     return this.retryExecutor.executeOrThrow(
       async () => {
         if (resolvedSignal?.aborted) {
-          throw new Error(OPERATION_CANCELLED_MESSAGE);
+          throw this.getAbortError(resolvedSignal);
         }
         const result = await this.execWithSignal(adbPath, fullArgs, maxBuffer, timeoutMs, resolvedSignal);
         return result;
@@ -507,7 +517,7 @@ export class AdbClient implements AdbExecutor {
     signal?: AbortSignal
   ): Promise<ExecResult> {
     if (signal?.aborted) {
-      throw new Error(OPERATION_CANCELLED_MESSAGE);
+      throw this.getAbortError(signal);
     }
 
     if (this.isTestMode) {
@@ -550,7 +560,7 @@ export class AdbClient implements AdbExecutor {
         settled = true;
         cleanup();
         child.kill("SIGTERM");
-        reject(new Error(OPERATION_CANCELLED_MESSAGE));
+        reject(this.getAbortError(signal));
       };
 
       const onExit = () => {

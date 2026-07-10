@@ -293,7 +293,7 @@ export class SessionManager {
    * Called when a test completes or times out.
    * Returns the device ID so DevicePool can mark it as available.
    */
-  async releaseSession(sessionId: string): Promise<string | null> {
+  async releaseSession(sessionId: string, releaseReason: string = "explicit-release"): Promise<string | null> {
     const session = this.getSession(sessionId);
     if (!session) {
       logger.warn(`Cannot release session ${sessionId}: not found`);
@@ -310,7 +310,7 @@ export class SessionManager {
     // and therefore barrier-tracked. The cleanup/disconnect timers are cleared before
     // the shutdown drain (#2792/#2912), so awaited writes have small exposure. Do not
     // wrap this in the DbWriteBarrier (#2885) — that would be a non-bug fix.
-    await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), "explicit-release");
+    await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), releaseReason);
 
     // Notify release callbacks for centralized cleanup
     for (const callback of this.releaseCallbacks) {

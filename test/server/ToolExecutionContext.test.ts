@@ -76,6 +76,28 @@ describe("ToolExecutionContext", () => {
     expect(passed.platform).toBe("android");
   });
 
+  test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
+    const staleDeviceManager = new FakeDeviceManager();
+    const stalePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, staleDeviceManager);
+    await stalePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+    staleDeviceManager.bootedDevices = [];
+
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        }
+      } as any);
+
+    await expect(createToolExecutionContext("session-stale", sessionManager, stalePool, sessionOptions))
+      .rejects.toThrow(/No devices in pool|not available|disconnected/);
+    expect(setupCalls).toBe(0);
+    expect(stalePool.getDevice("emulator-5554")).toBeNull();
+  });
+
   test("writes the keep-awake state to the typed keepScreenAwake slot on setup (#2973)", async () => {
     AndroidCtrlProxyManager.getInstance = () =>
       ({

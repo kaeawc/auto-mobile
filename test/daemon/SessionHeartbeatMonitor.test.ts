@@ -201,10 +201,11 @@ describe("SessionHeartbeatMonitor", () => {
     beforeEach(async () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "60"; // 60s idle timeout
-      pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, new FakeDeviceUtils());
-      await pool.initializeWithDevices([
-        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
-      ]);
+      const fakeDeviceUtils = new FakeDeviceUtils();
+      const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, fakeDeviceUtils);
+      await pool.initializeWithDevices([androidDevice]);
     });
 
     // Mirrors daemon.ts cancelAndReleaseSession (minus execution cancellation).

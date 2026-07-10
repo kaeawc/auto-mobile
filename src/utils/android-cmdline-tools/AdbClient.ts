@@ -10,6 +10,7 @@ import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { TTLCache } from "../cache/Cache";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { wrapCommandError } from "../CommandError";
+import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
@@ -38,6 +39,10 @@ function getAdbPathCache(): TTLCache<string, string> {
 export function resetAdbClientCaches(): void {
   deviceListCache = null;
   adbPathCache = null;
+}
+
+export function resetAdbDeviceListCache(): void {
+  deviceListCache = null;
 }
 
 
@@ -370,6 +375,9 @@ export class AdbClient implements AdbExecutor {
    */
   private isNonRetryableError(error: Error): boolean {
     const message = error.message.toLowerCase();
+    if (isAdbMissingDeviceError(error, this.device?.deviceId)) {
+      return true;
+    }
     const nonRetryablePatterns = [
       "operation cancelled",
       "unauthorized",
@@ -385,10 +393,27 @@ export class AdbClient implements AdbExecutor {
     return nonRetryablePatterns.some(pattern => message.includes(pattern));
   }
 
+  private notifyMissingDeviceIfNeeded(error: unknown): void {
+    const deviceId = this.device?.deviceId;
+    if (!deviceId || !isAdbMissingDeviceError(error, deviceId)) {
+      return;
+    }
+    resetAdbDeviceListCache();
+    notifyAdbMissingDevice(deviceId, error);
+  }
+
   private isMissingExecutableError(error: unknown): boolean {
     const err = error as NodeJS.ErrnoException;
     const message = error instanceof Error ? error.message : String(error);
     return err.code === "ENOENT" || message.includes("ENOENT") || message.includes("Executable not found");
+  }
+
+  private getAbortError(signal?: AbortSignal): Error {
+    const reason = signal?.reason;
+    if (reason instanceof Error && reason.message.startsWith("device-disconnected:")) {
+      return reason;
+    }
+    return new Error(OPERATION_CANCELLED_MESSAGE);
   }
 
   private shouldSkipMissingAdbProbe(): boolean {
@@ -443,8 +468,9 @@ export class AdbClient implements AdbExecutor {
         return result;
       } catch (error) {
         if (resolvedSignal?.aborted) {
-          throw new Error(OPERATION_CANCELLED_MESSAGE);
+          throw this.getAbortError(resolvedSignal);
         }
+        this.notifyMissingDeviceIfNeeded(error);
         const duration = this.timer.now() - startTime;
         const message = (error as Error).message;
         if (this.isMissingExecutableError(error)) {
@@ -460,7 +486,7 @@ export class AdbClient implements AdbExecutor {
     return this.retryExecutor.executeOrThrow(
       async () => {
         if (resolvedSignal?.aborted) {
-          throw new Error(OPERATION_CANCELLED_MESSAGE);
+          throw this.getAbortError(resolvedSignal);
         }
         const result = await this.execWithSignal(adbPath, fullArgs, maxBuffer, timeoutMs, resolvedSignal);
         return result;
@@ -473,7 +499,11 @@ export class AdbClient implements AdbExecutor {
           if (resolvedSignal?.aborted) {
             return false;
           }
-          return !this.isNonRetryableError(error);
+          const retryable = !this.isNonRetryableError(error);
+          if (!retryable) {
+            this.notifyMissingDeviceIfNeeded(error);
+          }
+          return retryable;
         },
         onRetry: (error, attempt) => {
           logger.debug(`[ADB] Retrying command (attempt ${attempt + 1}): ${command} - ${error.message}`);
@@ -490,7 +520,7 @@ export class AdbClient implements AdbExecutor {
     signal?: AbortSignal
   ): Promise<ExecResult> {
     if (signal?.aborted) {
-      throw new Error(OPERATION_CANCELLED_MESSAGE);
+      throw this.getAbortError(signal);
     }
 
     if (this.isTestMode) {
@@ -533,7 +563,7 @@ export class AdbClient implements AdbExecutor {
         settled = true;
         cleanup();
         child.kill("SIGTERM");
-        reject(new Error(OPERATION_CANCELLED_MESSAGE));
+        reject(this.getAbortError(signal));
       };
 
       const onExit = () => {

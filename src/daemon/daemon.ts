@@ -84,6 +84,7 @@ import {
   DefaultObservationStreamHealth,
   type ObservationStreamHealth,
 } from "./ObservationStreamHealth";
+import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -125,6 +126,7 @@ export class Daemon {
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
+  private forceDisconnectedDeviceIds: Set<string> = new Set();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
@@ -138,6 +140,7 @@ export class Daemon {
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
   private observationStreamHealth: ObservationStreamHealth;
+  private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
@@ -193,7 +196,9 @@ export class Daemon {
       this.installedAppsRepository,
       undefined,
       undefined,
-      this.deviceSessionRepository
+      this.deviceSessionRepository,
+      undefined,
+      (sessionId, _deviceId, releaseReason) => this.cancelAndReleaseSession(sessionId, releaseReason)
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);
@@ -341,6 +346,7 @@ export class Daemon {
 
     startAppearanceSyncScheduler();
     startPerformanceMonitor();
+    this.startAdbMissingDeviceListener();
     this.startDeviceDisconnectMonitor();
 
     // Write PID file
@@ -1086,6 +1092,7 @@ export class Daemon {
           succeededPlatforms,
           candidatePlatforms,
           idleCandidateIds,
+          forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
           missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
         });
 
@@ -1156,7 +1163,7 @@ export class Daemon {
             logger.warn(
               `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionId}`
             );
-            await this.cancelAndReleaseSession(sessionId);
+            await this.cancelAndReleaseSession(sessionId, `device-disconnected:${deviceId}`);
           }
 
           await this.devicePool.removeDisconnectedDevice(deviceId);
@@ -1166,6 +1173,7 @@ export class Daemon {
           if (deviceCleanupSucceeded) {
             this.confirmedDisconnectedDeviceIds.add(deviceId);
             this.deviceDisconnectMisses.delete(deviceId);
+            this.forceDisconnectedDeviceIds.delete(deviceId);
           }
         }
       } catch (error) {
@@ -1176,13 +1184,31 @@ export class Daemon {
     this.deviceDisconnectTimer.unref();
   }
 
-  private async cancelAndReleaseSession(sessionId: string): Promise<void> {
-    const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId);
-    const deviceId = await this.sessionManager.releaseSession(sessionId);
+  private startAdbMissingDeviceListener(): void {
+    if (this.unsubscribeAdbMissingDevice) {
+      return;
+    }
+
+    this.unsubscribeAdbMissingDevice = onAdbMissingDevice(event => {
+      if (!this.devicePool.getDevice(event.deviceId) && !this.sessionManager.getSessionForDevice(event.deviceId)) {
+        return;
+      }
+      logger.warn(`[Daemon] ADB reported tracked device ${event.deviceId} missing: ${event.message}`);
+      this.forceDisconnectedDeviceIds.add(event.deviceId);
+      this.deviceDisconnectMisses.set(event.deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
+    });
+  }
+
+  private async cancelAndReleaseSession(sessionId: string, releaseReason: string = "explicit-release"): Promise<void> {
+    const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
+    const deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason);
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId);
     }
-    logger.info(`Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"}`);
+    logger.info(
+      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
+      `(reason=${releaseReason})`
+    );
   }
 
   /**
@@ -1430,6 +1456,10 @@ export class Daemon {
     if (this.deviceDisconnectTimer) {
       clearInterval(this.deviceDisconnectTimer);
       this.deviceDisconnectTimer = null;
+    }
+    if (this.unsubscribeAdbMissingDevice) {
+      this.unsubscribeAdbMissingDevice();
+      this.unsubscribeAdbMissingDevice = null;
     }
 
     // Stop the session cleanup interval before the DB drain below. It is the one

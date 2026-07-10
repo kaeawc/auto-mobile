@@ -1,3 +1,4 @@
+import type { ChildProcess } from "child_process";
 import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
 import { SessionManager } from "./sessionManager";
@@ -16,6 +17,8 @@ import {
   DeviceAllocationCriteria,
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
+import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
+import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 
@@ -68,6 +71,10 @@ interface AssignableIdleDeviceSelection {
   livenessUnknown: boolean;
 }
 
+interface DeviceDisconnectSessionReleaser {
+  (sessionId: string, deviceId: string, releaseReason: string): Promise<void>;
+}
+
 /**
  * Device Pool
  *
@@ -95,6 +102,7 @@ export class DevicePool {
   private readonly retryExecutor: RetryExecutor;
   private readonly deviceSessionRepository: DeviceSessionRepository;
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
+  private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -112,7 +120,8 @@ export class DevicePool {
     deviceManager: PlatformDeviceManager = new MultiPlatformDeviceManager(),
     retryExecutor: RetryExecutor = defaultRetryExecutor,
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
-    criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher()
+    criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher(),
+    releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
@@ -122,6 +131,13 @@ export class DevicePool {
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
     this.criteriaMatcher = criteriaMatcher;
+    this.releaseSessionForDisconnectedDevice = releaseSessionForDisconnectedDevice ?? (async (
+      sessionId,
+      _deviceId,
+      releaseReason
+    ) => {
+      await this.sessionManager.releaseSession(sessionId, releaseReason);
+    });
 
     // Free autolocked devices when their session expires (idle timeout auto-release).
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
@@ -408,7 +424,9 @@ export class DevicePool {
 
     // Validate we have enough devices
     await this.ensurePoolRefreshed();
-    await this.pruneStaleIdleIosDevices(this.getDevicesByPlatform(platform));
+    const preallocationCandidates = this.getDevicesByPlatform(platform);
+    await this.pruneStaleIdleIosDevices(preallocationCandidates);
+    await this.evictUnavailableIdleDevicesMatching(device => !platform || device.platform === platform);
     let stats = this.getStatsForPlatform(platform);
 
     if (stats.total < requiredCount) {
@@ -564,10 +582,14 @@ export class DevicePool {
     );
 
     await this.ensurePoolRefreshed();
-    await this.pruneStaleIdleIosDevices(this.getDevicesMatchingAnyRequest(requests));
+    const sortedRequests = this.criteriaMatcher.sortBySpecificity(requests);
+    await this.pruneStaleIdleIosDevices(this.getDevicesMatchingAnyRequest(sortedRequests));
+    await this.evictUnavailableIdleDevicesMatching(device =>
+      sortedRequests.some(request => this.criteriaMatcher.filterDevices([device], request.criteria).length > 0)
+    );
 
     let needsRefresh = false;
-    for (const request of requests) {
+    for (const request of sortedRequests) {
       const candidates = this.getDevicesMatchingCriteria(request.criteria);
       if (candidates.length === 0) {
         needsRefresh = true;
@@ -579,7 +601,7 @@ export class DevicePool {
       await this.refreshDevices();
     }
 
-    const started = await this.startAdditionalDevicesForCriteria(this.criteriaMatcher.sortBySpecificity(requests));
+    const started = await this.startAdditionalDevicesForCriteria(sortedRequests);
     if (started > 0) {
       logger.info(`[DevicePool] Started ${started} additional device(s) for criteria-based allocation`);
     }
@@ -595,7 +617,6 @@ export class DevicePool {
       }
     }
 
-    const sortedRequests = this.criteriaMatcher.sortBySpecificity(requests);
     let attemptCount = 0;
 
     while (assignments.size < requiredCount) {
@@ -699,6 +720,7 @@ export class DevicePool {
           device
         );
         await this.addDevice(ready);
+        this.trackStartedDeviceProcess(ready, childProcess);
         started++;
       }
 
@@ -763,6 +785,7 @@ export class DevicePool {
         device
       );
       await this.addDevice(ready);
+      this.trackStartedDeviceProcess(ready, childProcess);
       return this.devices.get(ready.deviceId) ?? null;
     } catch (error) {
       logger.warn(`[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`);
@@ -837,6 +860,89 @@ export class DevicePool {
     }
     this.lastUsedAtMarker = now;
     return now;
+  }
+
+  private async evictUnavailableIdleDevicesMatching(matches: (device: PooledDevice) => boolean): Promise<number> {
+    let evicted = 0;
+    for (const device of Array.from(this.devices.values())) {
+      if (device.status !== "idle" || !matches(device)) {
+        continue;
+      }
+      if (!await this.ensurePooledDevicePresentForUse(device)) {
+        evicted++;
+      }
+    }
+    return evicted;
+  }
+
+  private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
+    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
+  }
+
+  private async ensurePooledDevicePresentForUse(device: PooledDevice): Promise<boolean> {
+    if (!this.shouldValidatePooledDevicePresence(device)) {
+      return true;
+    }
+
+    resetAdbDeviceListCache();
+    const discovery = await this.deviceManager.getBootedDevicesDetailed(device.platform);
+    if (!discovery.succeededPlatforms.has(device.platform)) {
+      logger.warn(
+        `Retaining ${device.id}: ${device.platform} discovery did not succeed during assignment liveness check`
+      );
+      return true;
+    }
+
+    if (discovery.devices.some(booted => booted.deviceId === device.id)) {
+      this.refreshMissingDeviceMisses.delete(device.id);
+      return true;
+    }
+
+    await this.evictMissingPooledDevice(device, "not present in adb devices");
+    return false;
+  }
+
+  private async evictMissingPooledDevice(device: PooledDevice, reason: string): Promise<void> {
+    logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
+    if (device.sessionId) {
+      await this.releaseSessionForDisconnectedDevice(
+        device.sessionId,
+        device.id,
+        `device-disconnected:${device.id}`
+      );
+      device.sessionId = null;
+    }
+    device.status = "idle";
+    await this.removeDevice(device.id);
+  }
+
+  private trackStartedDeviceProcess(device: BootedDevice, childProcess: ChildProcess | null | undefined): void {
+    if (device.platform !== "android" || consolePortFromSerial(device.deviceId) === null) {
+      return;
+    }
+    if (!childProcess || typeof childProcess.once !== "function") {
+      return;
+    }
+
+    childProcess.once("exit", (code, signal) => {
+      void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal);
+    });
+  }
+
+  private async evictStartedDeviceAfterProcessExit(
+    deviceId: string,
+    code: number | null,
+    signal: NodeJS.Signals | null
+  ): Promise<void> {
+    const device = this.devices.get(deviceId);
+    if (!device) {
+      return;
+    }
+
+    await this.evictMissingPooledDevice(
+      device,
+      `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`
+    );
   }
 
   private suppressAutoStartForDevice(device: PooledDevice): void {
@@ -1086,12 +1192,21 @@ export class DevicePool {
     let livenessUnknown = false;
 
     while (device) {
+      const skippedDeviceId = device.id;
+      if (this.shouldValidatePooledDevicePresence(device)) {
+        if (await this.ensurePooledDevicePresentForUse(device)) {
+          return { device, livenessUnknown };
+        }
+        candidates = candidates.filter(candidate => candidate.id !== skippedDeviceId);
+        device = this.selectIdleDevice(candidates);
+        continue;
+      }
+
       const status = this.getIdleDeviceLivenessStatus(device, iosLiveness);
       if (status === "assignable") {
         return { device, livenessUnknown };
       }
 
-      const skippedDeviceId = device.id;
       if (status === "stale") {
         logger.warn(
           `[DevicePool] Removing idle iOS simulator ${device.id}: simctl no longer reports it as booted`
@@ -1279,6 +1394,13 @@ export class DevicePool {
       }
       await this.assertIdleDeviceAssignable(device, `Device '${deviceId}' is not available in the device pool.`);
 
+      if (!await this.ensurePooledDevicePresentForUse(device)) {
+        throw new ActionableError(
+          `Device '${deviceId}' is not available in the device pool. ` +
+          "It may have been shut down or disconnected."
+        );
+      }
+
       if (device.sessionId) {
         const existingSession = this.sessionManager.getSession(device.sessionId);
         if (
@@ -1358,6 +1480,17 @@ export class DevicePool {
       `Device '${deviceId}' is not available for autolock.\n` +
       `The device may have been shut down or disconnected.`
     );
+
+    if (!await this.ensurePooledDevicePresentForUse(device)) {
+      throw new ActionableError(
+        `Device '${deviceId}' is not available for autolock.\n` +
+        `The device may have been shut down or disconnected.\n\n` +
+        `Options:\n` +
+        `  - Use 'startDevice' with the same criteria to boot a new device\n` +
+        `  - Use 'startDevice' with deviceId to restart this specific device\n` +
+        `  - Use 'listDevices' to see currently available devices`
+      );
+    }
 
     device.sessionId = sessionId;
     device.status = "busy";

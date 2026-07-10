@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
+import { EventEmitter } from "node:events";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -47,6 +48,11 @@ describe("DevicePool", () => {
     iosVersion
   });
 
+  const initializeLiveDevices = async (devices: BootedDevice[]): Promise<void> => {
+    fakeDeviceManager.bootedDevices = [...devices];
+    await devicePool.initializeWithDevices(devices);
+  };
+
   class FakeDeviceManagerWithMinimalReadyDevice extends FakeDeviceManager {
     async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
       const id = device.deviceId ?? device.name;
@@ -65,6 +71,22 @@ describe("DevicePool", () => {
     async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
       this.detailedBootedCalls++;
       return super.getBootedDevicesDetailed(platform);
+    }
+  }
+
+  class FakeChildProcess extends EventEmitter {
+    pid = 12345;
+    kill(): boolean {
+      return false;
+    }
+  }
+
+  class FakeDeviceManagerWithStartedProcess extends FakeDeviceManagerWithMinimalReadyDevice {
+    readonly childProcess = new FakeChildProcess();
+
+    async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<FakeChildProcess> {
+      await super.startDevice(device, timeoutMs);
+      return this.childProcess;
     }
   }
 
@@ -322,7 +344,7 @@ describe("DevicePool", () => {
 
   describe("assignDeviceToSession", () => {
     test("should assign device to session when devices available", async () => {
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const deviceId = await devicePool.assignDeviceToSession("session-1");
       expect(deviceId).toBe("emulator-5554");
       const device = devicePool.getDevice("emulator-5554");
@@ -335,7 +357,7 @@ describe("DevicePool", () => {
     test("should throw error when no devices available after timeout", async () => {
       // Use manual mode so we can control time advancement
 
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       await devicePool.assignDeviceToSession("session-1");
 
       // Start the second assignment (will wait for a device)
@@ -361,7 +383,7 @@ describe("DevicePool", () => {
     test("should wait and succeed when device becomes available", async () => {
       // Use manual mode so we can control time advancement
 
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const device1 = await devicePool.assignDeviceToSession("session-1");
 
       // Start the second assignment (will wait for a device)
@@ -395,7 +417,7 @@ describe("DevicePool", () => {
     });
 
     test("should reuse device after session release", async () => {
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const device1 = await devicePool.assignDeviceToSession("session-1");
       await devicePool.releaseDevice(device1);
       const device2 = await devicePool.assignDeviceToSession("session-2");
@@ -465,6 +487,31 @@ describe("DevicePool", () => {
       expect(countingDeviceManager.detailedBootedCalls).toBe(1);
     });
 
+    test("evicts a stale idle Android emulator before assigning it", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+      fakeDeviceManager.bootedDevices = [];
+
+      await expect(devicePool.assignDeviceToSession("session-1", "android"))
+        .rejects.toThrow(/No healthy android devices|No devices in pool/);
+
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
+    test("evicts stale idle Android emulator and assigns the next live candidate", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        createBootedDevice("emulator-5556", "android", "Pixel 9"),
+      ]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5556", "android", "Pixel 9")];
+
+      const deviceId = await devicePool.assignDeviceToSession("session-1", "android");
+
+      expect(deviceId).toBe("emulator-5556");
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(devicePool.getDevice("emulator-5556")?.sessionId).toBe("session-1");
+    });
+
     test("should bind a specific device to a session", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
@@ -500,9 +547,135 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("sim-stale")).toBeNull();
       expect(sessionManager.getSession("session-stale")).toBeNull();
     });
+
+    test("evicts a stale pooled Android emulator before direct binding", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+      fakeDeviceManager.bootedDevices = [];
+
+      await expect(devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android"))
+        .rejects.toThrow(/not available|shut down|disconnected/);
+
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
+    test("releases an active session when its Android emulator is stale before reuse", async () => {
+      await initializeLiveDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      fakeDeviceManager.bootedDevices = [];
+
+      await expect(devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"))
+        .rejects.toThrow(/not available|shut down|disconnected/);
+
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+      expect(sessionManager.getSession("session-2")).toBeNull();
+    });
+
+    test("evicts a stale pooled Android emulator before autolock", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      try {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+        await devicePool.initializeWithDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+        fakeDeviceManager.bootedDevices = [];
+
+        await expect(devicePool.autolockDevice("emulator-5554", "android", "mcp-session-1"))
+          .rejects.toThrow(/not available|shut down|disconnected/);
+
+        expect(devicePool.getDevice("emulator-5554")).toBeNull();
+        expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
+      } finally {
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
+    });
   });
 
   describe("assignMultipleDevices", () => {
+    test("evicts a started emulator when its process exits after readiness", async () => {
+      const images: DeviceInfo[] = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      const manager = new FakeDeviceManagerWithStartedProcess(images);
+      const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        async (sessionId, deviceId, reason) => {
+          releaseCalls.push({ sessionId, deviceId, reason });
+          await sessionManager.releaseSession(sessionId, reason);
+        }
+      );
+
+      const assignments = await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+      expect(assignments.get("session-1")).toBe("emulator-5554");
+
+      manager.childProcess.emit("exit", 0, null);
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(releaseCalls).toEqual([
+        { sessionId: "session-1", deviceId: "emulator-5554", reason: "device-disconnected:emulator-5554" },
+      ]);
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
+    test("boots replacement emulator after stale pooled emulator is evicted before allocation", async () => {
+      const images: DeviceInfo[] = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      const manager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+
+      const assignments = await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+
+      expect(assignments.get("session-1")).toBe("emulator-5554");
+      expect(manager.startedDevices.map(device => device.deviceId)).toEqual(["emulator-5554"]);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
+    });
+
+    test("boots criteria replacement emulator after stale matching pooled emulator is evicted", async () => {
+      const images: DeviceInfo[] = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      const manager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [{ sessionId: "session-1", criteria: { platform: "android" } }],
+        1000
+      );
+
+      expect(assignments.get("session-1")).toBe("emulator-5554");
+      expect(manager.startedDevices.map(device => device.deviceId)).toEqual(["emulator-5554"]);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
+    });
+
     test("should auto-start iOS simulators when pool is short", async () => {
       const images: DeviceInfo[] = [
         { name: "iPhone 15 Pro", platform: "ios", isRunning: false, deviceId: "sim-1", state: "Shutdown", isAvailable: true },
@@ -917,7 +1090,7 @@ describe("DevicePool", () => {
 
   describe("releaseDevice", () => {
     test("should release device assigned to session", async () => {
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const deviceId = await devicePool.assignDeviceToSession("session-1");
       await devicePool.releaseDevice(deviceId);
       const device = devicePool.getDevice(deviceId);
@@ -962,7 +1135,7 @@ describe("DevicePool", () => {
     });
 
     test("should clear error count when device assignment succeeds", async () => {
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       devicePool.recordDeviceError("emulator-5554");
       expect(devicePool.getDevice("emulator-5554")?.errorCount).toBe(1);
       await devicePool.releaseDevice("emulator-5554");

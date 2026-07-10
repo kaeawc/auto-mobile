@@ -14,6 +14,7 @@ export interface DisconnectMonitorEvaluationInput {
   succeededPlatforms: Set<Platform>;
   candidatePlatforms: Map<string, Platform>;
   idleCandidateIds: Set<string>;
+  forceDisconnectedDeviceIds?: Set<string>;
   missThreshold: number;
 }
 
@@ -22,6 +23,26 @@ export function evaluateDeviceDisconnects(
 ): DisconnectMonitorEvaluation {
   const disconnected: string[] = [];
   const missed: Array<{ deviceId: string; misses: number }> = [];
+  const forceDisconnectedDeviceIds = input.forceDisconnectedDeviceIds ?? new Set<string>();
+
+  for (const deviceId of input.candidateDeviceIds) {
+    if (input.bootedDeviceIds.has(deviceId)) {
+      input.deviceDisconnectMisses.delete(deviceId);
+      input.confirmedDisconnectedDeviceIds.delete(deviceId);
+      forceDisconnectedDeviceIds.delete(deviceId);
+      continue;
+    }
+
+    if (forceDisconnectedDeviceIds.has(deviceId)) {
+      input.deviceDisconnectMisses.delete(deviceId);
+      disconnected.push(deviceId);
+      continue;
+    }
+  }
+
+  if (disconnected.length > 0) {
+    return { disconnected, missed, skippedAdbUnreachable: false };
+  }
 
   if (input.bootedDeviceIds.size === 0 && input.candidateDeviceIds.size > 0) {
     return { disconnected, missed, skippedAdbUnreachable: true };

@@ -166,10 +166,10 @@ export class ExecutionTracker {
       if (!execution) {
         continue;
       }
-      if (cancelReason === "unspecified") {
-        execution.abortController.abort();
-      } else {
+      if (cancelReason.startsWith("device-disconnected:")) {
         execution.abortController.abort(new Error(cancelReason));
+      } else {
+        execution.abortController.abort();
       }
       cancelled++;
       logger.info(

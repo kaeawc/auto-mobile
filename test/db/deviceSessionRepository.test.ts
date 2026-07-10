@@ -202,6 +202,31 @@ describe("DeviceSessionRepository", () => {
     }
   });
 
+  test("DevicePool stale emulator eviction persists device-disconnected release reason", async () => {
+    const timer = new FakeTimer();
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    const sessionManager = new SessionManager(timer, repo);
+    const pool = new DevicePool(sessionManager, "daemon-session-1", timer, undefined, fakeDeviceUtils, undefined, repo);
+
+    try {
+      await pool.initializeWithDevices([androidDevice]);
+      await pool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      fakeDeviceUtils.setBootedDevices("android", []);
+      fakeDeviceUtils.markDeviceAsStopped("Pixel 7");
+      fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
+
+      await expect(pool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"))
+        .rejects.toThrow(/not available|shut down|disconnected/);
+
+      const row = await repo.getSession("session-1");
+      expect(row!.release_reason).toBe("device-disconnected:emulator-5554");
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("DevicePool autolock persists MCP and daemon session ownership", async () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();

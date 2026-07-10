@@ -27,4 +27,13 @@ describe("ExecutionTracker", function() {
     expect(cancelled).toBe(1);
     expect(execution.abortController.signal.reason).toEqual(new Error("device-disconnected:emulator-5554"));
   });
+
+  test("keeps transport cancellation reasons log-only", async function() {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
+    const execution = tracker.startExecution("tapOn", "session-id");
+
+    await tracker.cancelSessionExecutions("session-id", "streamable_http_onclose");
+
+    expect(execution.abortController.signal.reason).not.toEqual(new Error("streamable_http_onclose"));
+  });
 });

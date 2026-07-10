@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { logger } from "./logger";
 
 /**
  * Bootstrap process.env so spawn/exec can find platform tooling even when the
@@ -127,9 +126,8 @@ function androidHomeCandidates(): string[] {
 function directoryExists(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
-  } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/utils/envBootstrap.ts fallback failed: ${error}`, error);
-    return false;
+  } catch {
+    // Bootstrap runs before logger setup; missing tool directories are expected.
   }
+  return false;
 }

@@ -3,7 +3,6 @@ import path from "path";
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
-import { logger } from "./logger";
 
 /**
  * Identity of the git commit a dev/source checkout is built from.
@@ -55,11 +54,10 @@ const readPackageName = (dir: string): string | null => {
   try {
     const raw = fs.readFileSync(path.join(dir, "package.json"), "utf-8");
     return (JSON.parse(raw) as { name?: string }).name ?? null;
-  } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/utils/mcpVersion.ts fallback failed: ${error}`, error);
-    return null;
+  } catch {
+    // Version probing runs before logger setup; fall back to unstamped metadata.
   }
+  return null;
 };
 
 const readPackageVersionFromDisk = (): string | null => {
@@ -71,11 +69,10 @@ const readPackageVersionFromDisk = (): string | null => {
     const raw = fs.readFileSync(packagePath, "utf-8");
     const parsed = JSON.parse(raw) as { version?: string };
     return parsed.version ?? null;
-  } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/utils/mcpVersion.ts fallback failed: ${error}`, error);
-    return null;
+  } catch {
+    // Version probing runs before logger setup; fall back to other version sources.
   }
+  return null;
 };
 
 /** Runs a git subcommand in `cwd` and returns trimmed stdout, or null on any failure. */
@@ -88,11 +85,10 @@ const runGit: GitRunner = (cwd, args) => {
       return null;
     }
     return result.stdout.trim();
-  } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/utils/mcpVersion.ts fallback failed: ${error}`, error);
-    return null;
+  } catch {
+    // Git metadata is optional; package/env versions remain usable without it.
   }
+  return null;
 };
 
 /**

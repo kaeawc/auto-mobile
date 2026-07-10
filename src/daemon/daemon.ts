@@ -80,6 +80,10 @@ import {
   resolveStableDaemonWorkingDirectory,
 } from "../utils/workingDirectory";
 import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
+import {
+  DefaultObservationStreamHealth,
+  type ObservationStreamHealth,
+} from "./ObservationStreamHealth";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -133,6 +137,7 @@ export class Daemon {
   private databaseHealthProbe: DatabaseHealthProbe;
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
+  private observationStreamHealth: ObservationStreamHealth;
   private options: DaemonOptions;
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
@@ -164,6 +169,14 @@ export class Daemon {
       cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
       logger.close();
       process.exit(code);
+    });
+    this.observationStreamHealth = new DefaultObservationStreamHealth({
+      getServer: getDeviceDataStreamServer,
+      stopServer: stopDeviceDataStreamSocketServer,
+      startServer: async () => {
+        await startDeviceDataStreamSocketServer(this.timer);
+      },
+      configureCallbacks: () => this.setupDeviceDataStreamCallback(),
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
@@ -967,9 +980,13 @@ export class Daemon {
           logger.warn("Health check failed: HTTP server not listening");
           recordHealthCheckFailure("http");
         } else {
-          // Check if socket server is active before probing shared dependencies.
+          // Check socket servers before probing shared dependencies; clients
+          // can only subscribe to advertised streams while their socket paths exist.
           if (!this.socketServer || !this.socketServer.isListening()) {
             logger.warn("Health check failed: Socket server not listening");
+            recordHealthCheckFailure("socket");
+          } else if (!this.observationStreamHealth.isHealthy()) {
+            logger.warn("Health check failed: Observation stream socket unavailable");
             recordHealthCheckFailure("socket");
           } else {
             try {
@@ -1204,6 +1221,16 @@ export class Daemon {
           logger.info("Socket server restarted successfully");
         } catch (error) {
           logger.error(`Failed to restart socket server: ${error}`);
+        }
+      }
+
+      if (!this.observationStreamHealth.isHealthy()) {
+        logger.info("Restarting observation stream socket server...");
+        try {
+          await this.observationStreamHealth.recover();
+          logger.info("Observation stream socket server restarted successfully");
+        } catch (error) {
+          logger.error(`Failed to restart observation stream socket server: ${error}`);
         }
       }
     } catch (error) {

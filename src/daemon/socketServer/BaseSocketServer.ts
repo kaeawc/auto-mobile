@@ -134,6 +134,15 @@ export abstract class BaseSocketServer {
   }
 
   /**
+   * Return true only while this server is listening through the same socket file
+   * it created. A listening Unix server whose path was unlinked or replaced is
+   * still alive for existing connections, but new clients cannot reach it there.
+   */
+  hasActiveSocketPath(): boolean {
+    return this.isOwnedSocketFile();
+  }
+
+  /**
    * Handle a new connection. Sets up line-based protocol.
    */
   protected handleConnection(socket: Socket): void {

@@ -44,6 +44,10 @@ export interface ObservationArtifactWriter {
   writeJsonArtifact(input: ObservationArtifactWriteInput): ObservationArtifactMetadata;
 }
 
+export type ObservationArtifactMode = "always" | "oversized";
+
+export const DEFAULT_OBSERVATION_INLINE_MAX_BYTES = 64 * 1024;
+
 type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
 
 function classifyObservationAction(
@@ -115,6 +119,12 @@ export interface FinalizeToolResponseContext {
    * this writer so in-process consumers still receive full observations.
    */
   artifactWriter?: ObservationArtifactWriter;
+  /**
+   * Configured artifact mode keeps the historical "always artifact" behavior.
+   * The automatic fallback only spills observations whose finalized inline JSON
+   * is large enough to risk client-side truncation.
+   */
+  artifactMode?: ObservationArtifactMode;
 }
 
 type ObservationDiffMode = "diff" | "full";
@@ -299,7 +309,13 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     }
   }
 
-  if (ctx.artifactWriter && !ctx.internal && hasArtifactableObservation && sanitizedPayload) {
+  if (
+    ctx.artifactWriter
+    && !ctx.internal
+    && hasArtifactableObservation
+    && sanitizedPayload
+    && shouldArtifactObservationPayload(ctx, sanitizedPayload)
+  ) {
     if (isObserveTool) {
       sanitizedPayload = writeObservationArtifact(ctx, sanitizedPayload) as unknown as Record<string, unknown>;
     } else {
@@ -310,7 +326,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     }
   }
 
-  sanitizedPayload ??= artifactNonObservationPayload(ctx, payload);
+  if (artifactMode(ctx) === "always") {
+    sanitizedPayload ??= artifactNonObservationPayload(ctx, payload);
+  }
 
   if (!sanitizedPayload) {
     return response;
@@ -326,6 +344,21 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   pendingBaselineUpdate && ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
 
   return response;
+}
+
+function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode {
+  return ctx.artifactMode ?? "always";
+}
+
+function shouldArtifactObservationPayload(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>
+): boolean {
+  if (artifactMode(ctx) === "always") {
+    return true;
+  }
+
+  return Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES;
 }
 
 function writeObservationArtifact(

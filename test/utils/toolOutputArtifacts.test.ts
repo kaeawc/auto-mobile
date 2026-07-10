@@ -5,6 +5,7 @@ import path from "node:path";
 import { ActionableError } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import {
+  getDefaultToolOutputsDir,
   getValidatedToolOutputsDirForWrite,
   parseToolOutputsDirConfig,
   validateToolOutputsDirForWrite,
@@ -111,6 +112,39 @@ describe("parseToolOutputsDirConfig", () => {
       { AUTOMOBILE_TOOL_OUTPUTS_DIR: "   " },
       path.resolve("launch-root")
     )).toBeUndefined();
+  });
+});
+
+describe("getDefaultToolOutputsDir", () => {
+  test("uses the stable AutoMobile data directory instead of TMPDIR", () => {
+    const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    const originalLegacyDataDir = process.env.AUTO_MOBILE_DATA_DIR;
+    const originalTmpDir = process.env.TMPDIR;
+    const dataDir = path.join(tmpdir(), "auto-mobile-data-dir-test");
+    const ephemeralTmpDir = path.join(tmpdir(), "bunx-ephemeral-test");
+
+    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+    delete process.env.AUTO_MOBILE_DATA_DIR;
+    process.env.TMPDIR = ephemeralTmpDir;
+    try {
+      expect(getDefaultToolOutputsDir()).toBe(path.join(dataDir, "tool_outputs"));
+    } finally {
+      if (originalDataDir === undefined) {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+      } else {
+        process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+      }
+      if (originalLegacyDataDir === undefined) {
+        delete process.env.AUTO_MOBILE_DATA_DIR;
+      } else {
+        process.env.AUTO_MOBILE_DATA_DIR = originalLegacyDataDir;
+      }
+      if (originalTmpDir === undefined) {
+        delete process.env.TMPDIR;
+      } else {
+        process.env.TMPDIR = originalTmpDir;
+      }
+    }
   });
 });
 

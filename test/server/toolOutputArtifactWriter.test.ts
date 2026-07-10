@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import {
   JsonToolOutputArtifactWriter,
+  type ToolOutputArtifactDirectoryEntry,
   type ToolOutputArtifactFileSystem,
 } from "../../src/server/toolOutputArtifactWriter";
 import { stringifyToolResponse } from "../../src/utils/toolUtils";
@@ -13,6 +14,9 @@ class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   ensureCalls: string[] = [];
   assertWritableCalls: string[] = [];
   writes: Array<{ path: string; content: string; mode: number }> = [];
+  entries: ToolOutputArtifactDirectoryEntry[] = [];
+  listCalls: string[] = [];
+  deleteCalls: string[] = [];
   writeError: Error | undefined;
 
   ensureDirectory(dirPath: string): void {
@@ -28,6 +32,15 @@ class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
       throw this.writeError;
     }
     this.writes.push({ path: filePath, content, mode });
+  }
+
+  listFiles(dirPath: string): ToolOutputArtifactDirectoryEntry[] {
+    this.listCalls.push(dirPath);
+    return this.entries;
+  }
+
+  deleteFile(filePath: string): void {
+    this.deleteCalls.push(filePath);
   }
 }
 
@@ -75,6 +88,94 @@ describe("JsonToolOutputArtifactWriter", () => {
       },
     });
     expect(second.artifact.path).toBe(secondPath);
+    expect(fileSystem.listCalls).toEqual([]);
+    expect(fileSystem.deleteCalls).toEqual([]);
+  });
+
+  test("prunes stale JSON artifacts when retention is configured", () => {
+    const fileSystem = new FakeArtifactFileSystem();
+    const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
+    fileSystem.entries = [
+      {
+        path: path.join(outputDirectory, "old-observe.json"),
+        name: "old-observe.json",
+        isFile: true,
+        mtimeMs: 1_000,
+      },
+      {
+        path: path.join(outputDirectory, "recent-observe.json"),
+        name: "recent-observe.json",
+        isFile: true,
+        mtimeMs: 9_500,
+      },
+      {
+        path: path.join(outputDirectory, "old-note.txt"),
+        name: "old-note.txt",
+        isFile: true,
+        mtimeMs: 1_000,
+      },
+      {
+        path: path.join(outputDirectory, "nested"),
+        name: "nested",
+        isFile: false,
+        mtimeMs: 1_000,
+      },
+    ];
+    const timer = new FakeTimer();
+    timer.setCurrentTime(10_000);
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory,
+      fileSystem,
+      idGenerator: new FakeIdGenerator(["id"]),
+      timer,
+      retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
+    });
+
+    writer.writeJsonArtifact({
+      tool: "observe",
+      payload: "ObserveResult",
+      data: { updatedAt: 1 },
+    });
+
+    expect(fileSystem.listCalls).toEqual([outputDirectory]);
+    expect(fileSystem.deleteCalls).toEqual([path.join(outputDirectory, "old-observe.json")]);
+    expect(fileSystem.writes).toHaveLength(1);
+  });
+
+  test("prunes file-count overflow only after the overflow age gate", () => {
+    const fileSystem = new FakeArtifactFileSystem();
+    const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
+    fileSystem.entries = [
+      {
+        path: path.join(outputDirectory, "older-observe.json"),
+        name: "older-observe.json",
+        isFile: true,
+        mtimeMs: 1_000,
+      },
+      {
+        path: path.join(outputDirectory, "fresh-observe.json"),
+        name: "fresh-observe.json",
+        isFile: true,
+        mtimeMs: 9_900,
+      },
+    ];
+    const timer = new FakeTimer();
+    timer.setCurrentTime(10_000);
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory,
+      fileSystem,
+      idGenerator: new FakeIdGenerator(["id"]),
+      timer,
+      retention: { maxAgeMs: 20_000, maxFiles: 1, overflowMinAgeMs: 5_000 },
+    });
+
+    writer.writeJsonArtifact({
+      tool: "observe",
+      payload: "ObserveResult",
+      data: { updatedAt: 1 },
+    });
+
+    expect(fileSystem.deleteCalls).toEqual([path.join(outputDirectory, "older-observe.json")]);
   });
 
   test("resolves relative artifact directories from the daemon launch cwd", () => {

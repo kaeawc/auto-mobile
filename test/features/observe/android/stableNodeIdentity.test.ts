@@ -123,6 +123,28 @@ describe("assignStableViewIds (#3228)", () => {
     expect(root).toEqual(snapshot);
   });
 
+  test("rewrites occludedByViewId references when generated occluder ids are stabilized", () => {
+    const occluderUuid = generatedUuid("overlay");
+    const occluded = node({
+      "view-id": generatedUuid("covered"),
+      "text": "Covered",
+      "occlusionState": "partial",
+      "occludedBy": "unlabeled view",
+      "occludedByViewId": occluderUuid,
+    });
+    const occluder = node({
+      "view-id": occluderUuid,
+      "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+    });
+    const root = node({ "view-id": generatedUuid("root") }, [occluded, occluder]);
+
+    assignStableViewIds(root);
+
+    const children = root.node as Record<string, unknown>[];
+    expect(children[0].occludedByViewId).toBe(children[1]["view-id"]);
+    expect(GENERATED_VIEW_ID_PATTERN.test(children[0].occludedByViewId as string)).toBe(false);
+  });
+
   test("handles single-object and array child slots plus non-object input", () => {
     const single = node({ "view-id": generatedUuid("p") }, [node({ "view-id": generatedUuid("c"), "text": "only" })]);
     expect(Array.isArray(single.node)).toBe(false); // single child is an object, not an array

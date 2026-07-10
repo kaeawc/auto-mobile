@@ -60,8 +60,8 @@ export const STABLE_VIEW_ID_PREFIX = "s-";
  * `bounds` and sibling order shift on scroll; `focused` / `checked` /
  * `selected` / `enabled` flip on interaction (a toggle should surface as a
  * `changed` delta, not an identity change); `extras` and
- * `occlusionState`/`occludedBy` churn nondeterministically between captures
- * (#3051).
+ * `occlusionState`/`occludedBy`/`occludedByViewId` churn nondeterministically
+ * between captures (#3051, #3519).
  */
 const CONTENT_FIELDS: readonly string[] = [
   "resource-id",
@@ -90,9 +90,9 @@ function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] 
  * own output. Accepts the converted hierarchy root (or any node-like object);
  * a non-object input is ignored.
  */
-export function assignStableViewIds(root: unknown): void {
+export function assignStableViewIds(root: unknown): Map<string, string> {
   if (!root || typeof root !== "object") {
-    return;
+    return new Map();
   }
   if (Array.isArray(root)) {
     // A multi-root capture: each root is an independent tree, but duplicates
@@ -101,7 +101,7 @@ export function assignStableViewIds(root: unknown): void {
     for (const item of root) {
       assignStableViewIds(item);
     }
-    return;
+    return new Map();
   }
   const rootNode = root as Record<string, unknown>;
 
@@ -127,18 +127,66 @@ export function assignStableViewIds(root: unknown): void {
   // Pass 2 (pre-order): assign ids, suffixing content-identical duplicates by
   // document-order occurrence so ids stay unique within the capture.
   const occurrences = new Map<string, number>();
+  const rewrittenViewIds = new Map<string, string>();
   const assign = (node: Record<string, unknown>): void => {
     const viewId = node["view-id"];
     if (typeof viewId === "string" && GENERATED_VIEW_ID_PATTERN.test(viewId)) {
       const hash = contentHash.get(node)!;
       const seen = (occurrences.get(hash) ?? 0) + 1;
       occurrences.set(hash, seen);
-      node["view-id"] =
+      const stableViewId =
         seen === 1 ? `${STABLE_VIEW_ID_PREFIX}${hash}` : `${STABLE_VIEW_ID_PREFIX}${hash}-${seen}`;
+      node["view-id"] = stableViewId;
+      rewrittenViewIds.set(viewId, stableViewId);
     }
     for (const child of toChildArray(node)) {
       assign(child);
     }
   };
   assign(rootNode);
+
+  // Keep occlusion links pointing at the final emitted hierarchy ids. The
+  // runner fills occludedByViewId from the occluding node's pre-ingest view-id;
+  // generated UUID ids are rewritten above, so references to those ids must
+  // follow the same rewrite.
+  applyStableViewIdRewrites(rootNode, rewrittenViewIds);
+  return rewrittenViewIds;
+}
+
+/**
+ * Apply a view-id rewrite map produced from a related hierarchy tree. This keeps
+ * mirror nodes (for example `accessibility-focused-element`) linked to the exact
+ * ids emitted in the full hierarchy rather than recomputing them in isolation.
+ */
+export function applyStableViewIdRewrites(
+  root: unknown,
+  rewrittenViewIds: ReadonlyMap<string, string>
+): void {
+  if (!root || typeof root !== "object" || rewrittenViewIds.size === 0) {
+    return;
+  }
+  if (Array.isArray(root)) {
+    for (const item of root) {
+      applyStableViewIdRewrites(item, rewrittenViewIds);
+    }
+    return;
+  }
+  const node = root as Record<string, unknown>;
+  const viewId = node["view-id"];
+  if (typeof viewId === "string") {
+    const stableViewId = rewrittenViewIds.get(viewId);
+    if (stableViewId) {
+      node["view-id"] = stableViewId;
+    }
+  }
+  const occludedByViewId = node.occludedByViewId;
+  if (typeof occludedByViewId === "string") {
+    const stableViewId = rewrittenViewIds.get(occludedByViewId);
+    if (stableViewId) {
+      node.occludedByViewId = stableViewId;
+    }
+  }
+  for (const child of toChildArray(node)) {
+    applyStableViewIdRewrites(child, rewrittenViewIds);
+  }
 }

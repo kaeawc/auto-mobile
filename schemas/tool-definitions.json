@@ -165,7 +165,19 @@
             "resource-id": {
               "type": "string"
             },
+            "view-id": {
+              "type": "string"
+            },
             "content-desc": {
+              "type": "string"
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
               "type": "string"
             },
             "class": {
@@ -3606,6 +3618,7 @@
       "required": [
         "platform"
       ],
+      "additionalProperties": false,
       "if": {
         "required": [
           "platform",
@@ -3648,8 +3661,7 @@
           }
         }
       },
-      "then": false,
-      "additionalProperties": false
+      "then": false
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4158,7 +4170,19 @@
             "resource-id": {
               "type": "string"
             },
+            "view-id": {
+              "type": "string"
+            },
             "content-desc": {
+              "type": "string"
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
               "type": "string"
             },
             "class": {
@@ -4348,7 +4372,19 @@
             "resource-id": {
               "type": "string"
             },
+            "view-id": {
+              "type": "string"
+            },
             "content-desc": {
+              "type": "string"
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
               "type": "string"
             },
             "class": {
@@ -4538,7 +4574,19 @@
             "resource-id": {
               "type": "string"
             },
+            "view-id": {
+              "type": "string"
+            },
             "content-desc": {
+              "type": "string"
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
               "type": "string"
             },
             "class": {
@@ -6877,7 +6925,19 @@
             "resource-id": {
               "type": "string"
             },
+            "view-id": {
+              "type": "string"
+            },
             "content-desc": {
+              "type": "string"
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
               "type": "string"
             },
             "class": {
@@ -7157,7 +7217,19 @@
                     "resource-id": {
                       "type": "string"
                     },
+                    "view-id": {
+                      "type": "string"
+                    },
                     "content-desc": {
+                      "type": "string"
+                    },
+                    "occlusionState": {
+                      "type": "string"
+                    },
+                    "occludedBy": {
+                      "type": "string"
+                    },
+                    "occludedByViewId": {
                       "type": "string"
                     },
                     "class": {
@@ -7347,7 +7419,19 @@
                     "resource-id": {
                       "type": "string"
                     },
+                    "view-id": {
+                      "type": "string"
+                    },
                     "content-desc": {
+                      "type": "string"
+                    },
+                    "occlusionState": {
+                      "type": "string"
+                    },
+                    "occludedBy": {
+                      "type": "string"
+                    },
+                    "occludedByViewId": {
                       "type": "string"
                     },
                     "class": {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod";
 import {
+  elementSchema,
   observeResultSchema,
   observeToolResultSchema,
   viewHierarchyNodeSchema,
@@ -137,10 +138,53 @@ describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () 
   });
 
   test("keeps the polymorphic `$` attribute bag and per-node metadata", () => {
-    const node = { "$": { class: "android.widget.TextView" }, "view-id": "id/foo", "occlusionState": "none" };
+    const node = {
+      "$": { class: "android.widget.TextView" },
+      "view-id": "id/foo",
+      "occlusionState": "partial",
+      "occludedBy": "unlabeled view",
+      "occludedByViewId": "id/occluder",
+    };
     const parsed = viewHierarchyNodeSchema.parse(node) as Record<string, unknown>;
     expect(parsed["$"]).toEqual({ class: "android.widget.TextView" });
     expect(parsed["view-id"]).toBe("id/foo");
+    expect(parsed.occlusionState).toBe("partial");
+    expect(parsed.occludedBy).toBe("unlabeled view");
+    expect(parsed.occludedByViewId).toBe("id/occluder");
+  });
+
+  test("advertises occlusion metadata as typed node properties", () => {
+    const schemaJson = JSON.stringify(toJSONSchema(viewHierarchyNodeSchema));
+    expect(schemaJson).toContain("\"occlusionState\"");
+    expect(schemaJson).toContain("\"occludedBy\"");
+    expect(schemaJson).toContain("\"occludedByViewId\"");
+    expect(() =>
+      viewHierarchyNodeSchema.parse({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        occludedByViewId: 123,
+      })
+    ).toThrow();
+  });
+});
+
+describe("elementSchema: occlusion link fields", () => {
+  test("advertises both view-id targets and occludedByViewId references", () => {
+    const schemaJson = JSON.stringify(toJSONSchema(elementSchema));
+    expect(schemaJson).toContain("\"view-id\"");
+    expect(schemaJson).toContain("\"occludedByViewId\"");
+    expect(() =>
+      elementSchema.parse({
+        "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+        "view-id": "id/target",
+        "occludedByViewId": "id/occluder",
+      })
+    ).not.toThrow();
+    expect(() =>
+      elementSchema.parse({
+        "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+        "view-id": 123,
+      })
+    ).toThrow();
   });
 });
 

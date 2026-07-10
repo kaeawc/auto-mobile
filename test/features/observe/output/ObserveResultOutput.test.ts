@@ -340,6 +340,49 @@ describe("sanitizeObserveResult", () => {
       expect(out.viewHierarchy!.hierarchy!.node!["view-id"]).toBe("distinct-uuid");
     });
 
+    test("preserves duplicate view-id when referenced by occludedByViewId", () => {
+      const obs: ObserveResult = {
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: {
+          hierarchy: {
+            node: [
+              {
+                "resource-id": "id/covered",
+                "view-id": "id/covered",
+                "occludedByViewId": "id/overlay",
+                "node": [],
+                "$": {},
+              },
+              {
+                "resource-id": "id/overlay",
+                "view-id": "id/overlay",
+                "node": [],
+                "$": {},
+              },
+              {
+                "resource-id": "id/unreferenced",
+                "view-id": "id/unreferenced",
+                "node": [],
+                "$": {},
+              },
+            ] as any,
+          },
+        },
+      };
+
+      const out = sanitizeObserveResult(obs, DROP_NONE);
+      const [covered, overlay, unreferenced] = out.viewHierarchy!.hierarchy!.node as unknown as Array<
+        Record<string, unknown>
+      >;
+
+      expect(covered.occludedByViewId).toBe("id/overlay");
+      expect(covered["view-id"]).toBeUndefined();
+      expect(overlay["view-id"]).toBe("id/overlay");
+      expect(unreferenced["view-id"]).toBeUndefined();
+    });
+
     test("omits default-false booleans and empty-string fields (synthetic)", () => {
       const obs: ObserveResult = {
         updatedAt: 0,

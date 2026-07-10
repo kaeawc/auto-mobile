@@ -98,8 +98,10 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   reduceTopLevelDebugPerfTelemetry(out);
 
   if (cfg.trimNodes !== false) {
-    for (const root of toNodeArray(out.viewHierarchy?.hierarchy?.node)) {
-      trimHierarchyNodes(root);
+    const roots = toNodeArray(out.viewHierarchy?.hierarchy?.node);
+    const referencedOccluderViewIds = collectOccludedByViewIds(roots);
+    for (const root of roots) {
+      trimHierarchyNodes(root, referencedOccluderViewIds);
     }
   }
 
@@ -199,7 +201,30 @@ function toNodeArray(
  * `view-id` when it duplicates `resource-id`, omit default-false booleans, and
  * omit empty-string fields. Lossless for decision-making.
  */
-function trimHierarchyNodes(node: ViewHierarchyNode | undefined): void {
+function collectOccludedByViewIds(nodes: ViewHierarchyNode[]): Set<string> {
+  const referencedViewIds = new Set<string>();
+  const visit = (node: ViewHierarchyNode | undefined): void => {
+    if (!node) {
+      return;
+    }
+    const occludedByViewId = (node as unknown as Record<string, unknown>).occludedByViewId;
+    if (typeof occludedByViewId === "string" && occludedByViewId !== "") {
+      referencedViewIds.add(occludedByViewId);
+    }
+    for (const child of toNodeArray(node.node)) {
+      visit(child);
+    }
+  };
+  for (const node of nodes) {
+    visit(node);
+  }
+  return referencedViewIds;
+}
+
+function trimHierarchyNodes(
+  node: ViewHierarchyNode | undefined,
+  referencedOccluderViewIds: ReadonlySet<string>
+): void {
   if (!node) {
     return;
   }
@@ -207,7 +232,11 @@ function trimHierarchyNodes(node: ViewHierarchyNode | undefined): void {
   const attrs = node as unknown as Record<string, unknown>;
 
   // Drop view-id when it is identical to resource-id (redundant duplicate).
-  if (attrs["view-id"] !== undefined && attrs["view-id"] === attrs["resource-id"]) {
+  if (
+    typeof attrs["view-id"] === "string"
+    && attrs["view-id"] === attrs["resource-id"]
+    && !referencedOccluderViewIds.has(attrs["view-id"])
+  ) {
     delete attrs["view-id"];
   }
 
@@ -231,7 +260,7 @@ function trimHierarchyNodes(node: ViewHierarchyNode | undefined): void {
   }
 
   for (const child of toNodeArray(node.node)) {
-    trimHierarchyNodes(child);
+    trimHierarchyNodes(child, referencedOccluderViewIds);
   }
 }
 

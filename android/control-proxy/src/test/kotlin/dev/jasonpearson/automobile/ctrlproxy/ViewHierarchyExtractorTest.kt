@@ -488,6 +488,79 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `cross-window occlusion keeps partial overlap and annotates metadata`() {
+    val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
+    val appRoot =
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 200, 200),
+        children = listOf(target),
+      )
+    val occluder =
+      elementWithBounds(
+        resourceId = "partial-occluder",
+        viewId = "stable-partial-occluder",
+        bounds = bounds(0, 0, 50, 50),
+      )
+
+    val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
+    val overlayEntry =
+      extractor.createWindowEntry(windowId = 2, windowLayer = 1, hierarchy = occluder)
+    val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, overlayEntry))
+    val filtered =
+      extractor.filterOccludedHierarchyForTest(
+        element = appRoot,
+        occlusionInfo = occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
+
+    assertNotNull(filtered)
+    val targetResult = findElementByResourceId(filtered!!, "partial-target")
+    assertNotNull(targetResult)
+    assertEquals("partial", targetResult!!.occlusionState)
+    assertEquals("partial-occluder", targetResult.occludedBy)
+    assertEquals("stable-partial-occluder", targetResult.occludedByViewId)
+  }
+
+  @Test
+  fun `cross-window occlusion annotates unlabeled occluder with view id`() {
+    val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
+    val appRoot =
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 200, 200),
+        children = listOf(target),
+      )
+    val occluder =
+      elementWithBounds(
+        viewId = "stable-unlabeled-occluder",
+        bounds = bounds(0, 0, 50, 50),
+      )
+
+    val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
+    val overlayEntry =
+      extractor.createWindowEntry(windowId = 2, windowLayer = 1, hierarchy = occluder)
+    val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, overlayEntry))
+    val filtered =
+      extractor.filterOccludedHierarchyForTest(
+        element = appRoot,
+        occlusionInfo = occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
+
+    assertNotNull(filtered)
+    val targetResult = findElementByResourceId(filtered!!, "partial-target")
+    assertNotNull(targetResult)
+    assertEquals("partial", targetResult!!.occlusionState)
+    assertEquals("unlabeled view", targetResult.occludedBy)
+    assertEquals("stable-unlabeled-occluder", targetResult.occludedByViewId)
+  }
+
+  @Test
   fun `hidden root occlusion retains children`() {
     val child = elementWithBounds(resourceId = "root-child", bounds = bounds(98, 98, 100, 100))
     val root =
@@ -515,6 +588,7 @@ class ViewHierarchyExtractorTest {
     assertNotNull(filtered)
     assertEquals("hidden", filtered!!.occlusionState)
     assertEquals("occluding-root", filtered.occludedBy)
+    assertEquals("occluding-root", filtered.occludedByViewId)
     assertNotNull(findElementByResourceId(filtered, "root-child"))
   }
 
@@ -1079,6 +1153,22 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `occludedByViewId field is serialized to JSON with correct key`() {
+    val element =
+      UIElementInfo(
+        text = "Covered",
+        occlusionState = "partial",
+        occludedBy = "unlabeled view",
+        occludedByViewId = "stable-unlabeled-occluder",
+      )
+    val jsonString = json.encodeToString(UIElementInfo.serializer(), element)
+    assertTrue(
+      "JSON should contain occludedByViewId field",
+      jsonString.contains("\"occludedByViewId\""),
+    )
+  }
+
+  @Test
   fun `detectContentHiddenRegions finds large empty non-interactive Compose descendant with sparse child coverage`() {
     val visibleToolbar =
       elementWithBounds(
@@ -1284,6 +1374,7 @@ class ViewHierarchyExtractorTest {
 
   private fun elementWithBounds(
     resourceId: String? = null,
+    viewId: String? = resourceId,
     bounds: ElementBounds? = null,
     className: String? = null,
     text: String? = null,
@@ -1299,6 +1390,7 @@ class ViewHierarchyExtractorTest {
       }
     return UIElementInfo(
       resourceId = resourceId,
+      viewId = viewId,
       bounds = bounds,
       className = className,
       text = text,

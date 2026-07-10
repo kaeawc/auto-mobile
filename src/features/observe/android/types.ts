@@ -69,6 +69,7 @@ export interface AccessibilityNode {
   "long-clickable"?: string;
   occlusionState?: string;
   occludedBy?: string;
+  occludedByViewId?: string;
   extras?: Record<string, string>;
   recomposition?: RecompositionNodeInfo;
   node?: AccessibilityNode | AccessibilityNode[];

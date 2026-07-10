@@ -52,6 +52,8 @@ data class UIElementInfo(
   @SerialName("extras") val extras: Map<String, String>? = null, // Custom extras from semantics
   val occlusionState: String? = null, // visible | partial | hidden
   val occludedBy: String? = null, // Resource ID or label of the occluding view
+  @SerialName("occludedByViewId")
+  val occludedByViewId: String? = null, // Stable view-id of the occluding view
   val recomposition: RecompositionEntry? = null,
 
   // Use JsonElement to allow flexible structure matching test expectations

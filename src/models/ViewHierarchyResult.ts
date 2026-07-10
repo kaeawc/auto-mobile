@@ -106,6 +106,7 @@ export interface ViewHierarchyNode {
   recompositionMetrics?: RecompositionMetrics;
   occlusionState?: string;
   occludedBy?: string;
+  occludedByViewId?: string;
   "test-tag"?: string;
   "view-id"?: string;
   extras?: Record<string, string>;

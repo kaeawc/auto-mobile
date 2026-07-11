@@ -11,12 +11,22 @@ set -euo pipefail
 FILE_PATH="${1:?Usage: verify-transit-sha256.sh <file-path> <expected-sha256>}"
 EXPECTED="${2:?Usage: verify-transit-sha256.sh <file-path> <expected-sha256>}"
 
+# sha256sum is GNU coreutils and absent on stock macOS; fall back to shasum
+# (matching verify-release-integrity.sh) so this works on any runner (#3658).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
 if [ ! -f "$FILE_PATH" ]; then
   echo "ERROR: File not found at $FILE_PATH"
   exit 1
 fi
 
-ACTUAL=$(sha256sum "$FILE_PATH" | cut -d' ' -f1)
+ACTUAL=$(sha256_of "$FILE_PATH")
 echo "Expected: $EXPECTED"
 echo "Actual:   $ACTUAL"
 

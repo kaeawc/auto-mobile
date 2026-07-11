@@ -17,8 +17,8 @@ export function resolveContainerSwipeCoordinates(
     effectiveBounds = {
       left: Math.max(containerElement.bounds.left, insets.left),
       top: Math.max(containerElement.bounds.top, insets.top),
-      right: Math.min(containerElement.bounds.right, observeResult.screenSize?.width ?? containerElement.bounds.right) - insets.right,
-      bottom: Math.min(containerElement.bounds.bottom, observeResult.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom
+      right: Math.min(containerElement.bounds.right, (observeResult.screenSize?.width ?? containerElement.bounds.right) - insets.right),
+      bottom: Math.min(containerElement.bounds.bottom, (observeResult.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom)
     };
   }
 

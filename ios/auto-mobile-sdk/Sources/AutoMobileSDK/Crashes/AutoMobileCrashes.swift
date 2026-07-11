@@ -23,7 +23,26 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     /// Provide a closure that returns the current screen name for crash context.
     public var currentScreenProvider: (@Sendable () -> String?)?
 
+    /// The process-global uncaught-exception handler that routes to this class.
+    private static let uncaughtExceptionHandler: @convention(c) (NSException) -> Void = { exception in
+        AutoMobileCrashes.shared.handleException(exception)
+    }
+
+    /// Injectable accessors for the process-global uncaught-exception handler
+    /// (testing seam, #3633). Default to the real Foundation APIs; tests override
+    /// them so they don't clobber the test runner's own handler.
+    var captureUncaughtHandler: () -> (@convention(c) (NSException) -> Void)? = {
+        NSGetUncaughtExceptionHandler()
+    }
+
+    var installUncaughtHandler: (( @convention(c) (NSException) -> Void)?) -> Void = {
+        NSSetUncaughtExceptionHandler($0)
+    }
+
     private init() {}
+
+    /// Test-only instance to exercise initialize/reset in isolation.
+    static func makeTestInstance() -> AutoMobileCrashes { AutoMobileCrashes() }
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
         lock.lock()
@@ -34,14 +53,12 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         _isInitialized = true
         self.bundleId = bundleId
         self.buffer = buffer
+        // Capture the previous handler under the lock so the locked reads in
+        // handleException/reset can't observe a stale nil (issue #3633).
+        previousExceptionHandler = captureUncaughtHandler()
         lock.unlock()
 
-        // Save the previous handler so we can chain to it
-        previousExceptionHandler = NSGetUncaughtExceptionHandler()
-
-        NSSetUncaughtExceptionHandler { exception in
-            AutoMobileCrashes.shared.handleException(exception)
-        }
+        installUncaughtHandler(Self.uncaughtExceptionHandler)
 
         // Signal handlers are opt-in via enableSignalHandlers() because they
         // interfere with debuggers and test frameworks. NSSetUncaughtExceptionHandler
@@ -151,11 +168,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         lock.unlock()
 
         // Restore process-level handler outside the lock
-        if let prevHandler = prevHandler {
-            NSSetUncaughtExceptionHandler(prevHandler)
-        } else {
-            NSSetUncaughtExceptionHandler(nil)
-        }
+        installUncaughtHandler(prevHandler)
     }
 }
 

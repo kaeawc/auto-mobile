@@ -12,21 +12,20 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 | `initialize` | `initialize(Context)` | `initialize(bundleId:)` | Android uses Context; iOS uses optional bundleId |
 | `initialize` (config) | `initialize(Context, Configuration)` | `initialize(bundleId:configuration:)` | Aligned |
 | `setEnabled` | `setEnabled(Boolean)` | `setEnabled(Bool)` | Aligned |
-| `isEnabled` | `isEnabled()` | `isEnabled` (property) | Aligned |
+| `isEnabled` | `isTrackingEnabled` (val) | `isEnabled` (property) | Naming differs: Android `isTrackingEnabled`, iOS `isEnabled` |
 | `addNavigationListener` | `addNavigationListener(NavigationListener)` | `addNavigationListener(NavigationListener)` | Aligned |
 | `removeNavigationListener` | `removeNavigationListener(NavigationListener)` | `removeNavigationListener(NavigationListener)` | Aligned |
 | `clearNavigationListeners` | `clearNavigationListeners()` | `clearNavigationListeners()` | Aligned |
 | `notifyNavigationEvent` | `notifyNavigationEvent(NavigationEvent)` | `notifyNavigationEvent(NavigationEvent)` | Aligned |
-| `listenerCount` | `getListenerCount()` | `listenerCount` (property) | Aligned |
+| `listenerCount` | `listenerCount` (val) | `listenerCount` (property) | Aligned (Kotlin val; JVM getter `getListenerCount()`) |
 | `currentSessionId` | `currentSessionId()` | `currentSessionId()` | Aligned |
 | `addBreadcrumb` | `addBreadcrumb(String, BreadcrumbCategory, Map)` | `addBreadcrumb(message:category:metadata:)` | Aligned |
 | `shutdown` | `shutdown()` | `shutdown()` | Aligned |
 | `setUserId` | `setUserId(String?)` | `setUserId(String?)` | Aligned |
 | `setTag` | `setTag(String, String)` | `setTag(String, value: String)` | Aligned |
 | `removeTag` | `removeTag(String)` | `removeTag(String)` | Aligned |
-| `dropReport` | `getDropReport()` | `dropReport` (property) | Aligned |
-| `trackEvent` | `trackEvent(String, Map)` | -- | Android-only convenience; iOS uses event buffer directly |
-| `contextSnapshot` | `getContextSnapshot()` | `sdkContext?.snapshot()` | Android exposes directly; iOS via SdkContext |
+| `dropReport` | `dropReport` (val) | `dropReport` (property) | Aligned (Kotlin val; JVM getter `getDropReport()`) |
+| `contextSnapshot` | `contextSnapshot` (val) | `sdkContext?.snapshot()` | Android `val contextSnapshot` (JVM getter `getContextSnapshot()`); iOS via SdkContext |
 | `configuration` | `getConfiguration()` (internal) | `configuration` (property) | Both available |
 
 ## 2. Configuration
@@ -47,7 +46,7 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 |-----|---------|-----|-------|
 | `NavigationEvent` | data class | struct | Aligned fields: destination, timestamp, source, arguments, metadata |
 | `NavigationListener` | interface | protocol (class-bound) | Aligned |
-| `NavigationSource` | enum (6 values) | enum `NavigationSourceType` (4 values) | Platform-specific sources; see below |
+| `NavigationSource` | enum (6 values) | enum `NavigationSource` (4 values) | Platform-specific sources; see below. (iOS wire discriminator is `NavigationSourceType`) |
 
 **Platform-specific navigation sources (correctly different):**
 - Android: `NAVIGATION_COMPONENT`, `COMPOSE_NAVIGATION`, `CIRCUIT`, `CUSTOM`, `DEEP_LINK`, `ACTIVITY`
@@ -59,7 +58,7 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 |-----|----------------------------------|----------------------------|-------|
 | Singleton | `INSTANCE` (object) | `shared` (static let) | Platform idiom |
 | `initialize` | `initialize(Context)` | -- | iOS needs no Context; no explicit init needed |
-| `overrideResult` | `overrideResult(BiometricResult, Long)` | `overrideResult(BiometricResult, ttlMs: Double)` | Aligned |
+| `overrideResult` | `overrideResult(BiometricResult, Long)` | `overrideResult(BiometricResult, ttlMs: Int64)` | Aligned (Kotlin `Long` / Swift `Int64`) |
 | `consumeOverride` | `consumeOverride()` | `consumeOverride()` | Aligned |
 | `clearOverride` | `clearOverride()` | `clearOverride()` | Aligned |
 | `hasOverride` | `hasOverride` (property) | `hasOverride` (property) | Aligned |

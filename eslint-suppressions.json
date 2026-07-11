@@ -1,5 +1,43 @@
 {
+  "src/cli/index.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 4
+    }
+  },
+  "src/daemon/buildIdentity.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/daemon/daemon.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    }
+  },
+  "src/daemon/daemonFiles.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 4
+    }
+  },
+  "src/daemon/debugTools.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/daemon/directModeGuard.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    }
+  },
+  "src/daemon/socketServer/PushSubscriptionSocketServer.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 4
+    }
+  },
   "src/daemon/telemetryPushSocketServer.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 2
     }
@@ -16,6 +54,11 @@
   },
   "src/db/logEventRepository.ts": {
     "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/db/migrationLock.ts": {
+    "auto-mobile/catch-convention": {
       "count": 1
     }
   },
@@ -39,8 +82,63 @@
       "count": 1
     }
   },
+  "src/features/accessibility/ContrastChecker.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
   "src/features/accessibility/WcagAudit.ts": {
     "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/features/action/AppPermissions.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/action/BaseVisualChange.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/action/CaptureSnapshot.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    }
+  },
+  "src/features/action/ClearAppData.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/action/HomeScreen.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/action/InstallApp.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 3
+    }
+  },
+  "src/features/action/LaunchApp.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    }
+  },
+  "src/features/action/PressButton.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/action/RecentApps.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/action/TerminateApp.ts": {
+    "auto-mobile/catch-convention": {
       "count": 1
     }
   },
@@ -49,8 +147,43 @@
       "count": 1
     }
   },
+  "src/features/navigation/DefaultUIStateSetup.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    }
+  },
+  "src/features/navigation/Explore.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    }
+  },
+  "src/features/navigation/NavigateTo.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/navigation/NavigationScreenshotManager.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 3
+    }
+  },
+  "src/features/observe/DeviceServiceClient.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/observe/TakeScreenshot.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
   "src/features/observe/ios/CtrlProxyHierarchy.ts": {
     "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/features/observe/ios/IOSCtrlProxyClient.ts": {
+    "auto-mobile/catch-convention": {
       "count": 1
     }
   },
@@ -59,9 +192,19 @@
       "count": 2
     }
   },
+  "src/features/observe/ios/IosSdkEventIngestor.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 4
+    }
+  },
   "src/features/observe/output/ObserveResultOutput.ts": {
     "auto-mobile/no-unknown-cast": {
       "count": 8
+    }
+  },
+  "src/features/record/android/AxisRanges.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
     }
   },
   "src/features/record/android/DualTrackRecorder.ts": {
@@ -69,9 +212,57 @@
       "count": 1
     }
   },
+  "src/features/utility/SystemConfigurationManager.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/utility/ios/IosNotificationAuthorizationReader.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/utility/system-configuration/IosLockdownLocaleClient.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/video/NoopVideoCaptureBackend.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/video/VideoRecorderService.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/server/appFileContract.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
   "src/server/finalizeToolResponse.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 3
+    }
+  },
+  "src/server/networkGraph.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/server/observeTools.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/server/toolRegistry.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
     }
   },
   "src/server/toolSchemaHelpers.ts": {
@@ -79,8 +270,98 @@
       "count": 2
     }
   },
+  "src/utils/DebugContextBuilder.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/DeepLinkManager.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/IOSCtrlProxyBuilder.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 4
+    }
+  },
+  "src/utils/IOSCtrlProxyManager.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 10
+    }
+  },
+  "src/utils/android-cmdline-tools/AndroidBuildToolsLocator.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/describeUnknownError.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/deviceUtils.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/envBootstrap.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/fileLock.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 2
+    }
+  },
   "src/utils/image/loadSharp.ts": {
     "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/utils/ios-cmdline-tools/DeviceAppManager.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/ios-cmdline-tools/SimCtlClient.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/ios-cmdline-tools/XcodeSigning.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/logPruner.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/mcpVersion.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 3
+    }
+  },
+  "src/utils/plan/PlanExecutor.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/requireBootedDevice.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/truncateBodyText.ts": {
+    "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/utils/workingDirectory.ts": {
+    "auto-mobile/catch-convention": {
       "count": 1
     }
   }

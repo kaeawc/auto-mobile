@@ -1408,7 +1408,7 @@ public class CommandHandler: CommandHandling {
                 databasePath: databasePath,
                 table: table,
                 limit: request.limit ?? 50,
-                offset: Int(request.offset ?? 0)
+                offset: Self.sanitizedTableOffset(request.offset)
             )
             return TableDataResponse(
                 requestId: request.requestId,
@@ -1426,6 +1426,18 @@ public class CommandHandler: CommandHandling {
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
+    }
+
+    /// Convert a wire-supplied table `offset` into a safe non-negative `Int`.
+    ///
+    /// `offset` is decoded as a `Double` (see `Models.swift`) and is untrusted:
+    /// a non-finite value (`NaN`/`±Inf`) or a magnitude beyond `Int64` would trap
+    /// `Int(_:)` and crash the runner (issue #3616). Non-finite or negative values
+    /// clamp to 0; values at/above `Int.max` clamp to `Int.max`.
+    static func sanitizedTableOffset(_ value: Double?) -> Int {
+        guard let value = value, value.isFinite, value >= 0 else { return 0 }
+        if value >= Double(Int.max) { return Int.max }
+        return Int(value)
     }
 
     private func handleGetTableStructure(

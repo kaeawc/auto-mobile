@@ -60,13 +60,43 @@ function extractAffectedTables(query: string): string[] {
 }
 
 /**
+ * Strip leading SQL comments and whitespace so keyword detection sees the first
+ * significant token.
+ *
+ * Handles line comments (`-- ...` to end of line) and block comments
+ * (`/* ... *\/`), including several stacked in sequence, e.g.
+ * `-- note\n/* x *\/  DELETE FROM t`. Without this, a mutation whose text does
+ * not literally start with the keyword is misclassified as a non-mutation.
+ */
+export function stripLeadingSqlNoise(query: string): string {
+  let text = query.trimStart();
+
+  for (;;) {
+    if (text.startsWith("--")) {
+      const newline = text.indexOf("\n");
+      text = newline === -1 ? "" : text.slice(newline + 1);
+    } else if (text.startsWith("/*")) {
+      const end = text.indexOf("*/");
+      text = end === -1 ? "" : text.slice(end + 2);
+    } else {
+      break;
+    }
+    text = text.trimStart();
+  }
+
+  return text;
+}
+
+/**
  * Determine if query is a mutation (modifies data)
  *
  * Handles CTE queries (WITH ... SELECT/INSERT/UPDATE/DELETE) by looking past
- * the CTE prefix to find the actual statement type.
+ * the CTE prefix to find the actual statement type. Leading comments and
+ * whitespace are stripped first so a commented-out preamble does not hide the
+ * statement keyword.
  */
-function isMutationQuery(query: string): boolean {
-  const upperQuery = query.trim().toUpperCase();
+export function isMutationQuery(query: string): boolean {
+  const upperQuery = stripLeadingSqlNoise(query).toUpperCase();
 
   // Direct mutations
   if (

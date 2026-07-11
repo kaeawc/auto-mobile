@@ -29,7 +29,8 @@
         "src/**",
         "test/**",
         "scripts/**/*.ts",
-        "eslint.config.mjs"
+        "eslint.config.mjs",
+        "eslint-suppressions.json"
       ],
       "outputs": [],
       "outputLogs": "new-only",

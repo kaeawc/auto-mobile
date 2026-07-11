@@ -750,4 +750,71 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(resolved.width, 402)
         XCTAssertEqual(resolved.height, 874)
     }
+
+    // MARK: - ThreadSafeCache (#3614)
+
+    func testThreadSafeCacheBasics() {
+        let cache = ThreadSafeCache<Int>()
+        XCTAssertNil(cache.value(forKey: "a"))
+        cache.set(1, forKey: "a")
+        cache.set(2, forKey: "b")
+        XCTAssertEqual(cache.value(forKey: "a"), 1)
+        XCTAssertEqual(cache.count, 2)
+        cache.removeAll()
+        XCTAssertEqual(cache.count, 0)
+        XCTAssertNil(cache.value(forKey: "b"))
+    }
+
+    /// Concurrent set/read/removeAll from many threads. Under a bare `Dictionary`
+    /// (the pre-fix `elementCache`) this trips the Swift runtime; with the lock it
+    /// completes cleanly. Mirrors the real hazard: command handling on the server
+    /// queue vs. hierarchy polling on main both mutating the cache (#3614).
+    func testThreadSafeCacheConcurrentAccessDoesNotCrash() {
+        let cache = ThreadSafeCache<Int>()
+        DispatchQueue.concurrentPerform(iterations: 2_000) { i in
+            cache.set(i, forKey: "k\(i % 32)")
+            _ = cache.value(forKey: "k\(i % 32)")
+            _ = cache.count
+            if i % 50 == 0 { cache.removeAll() }
+        }
+        // No assertion on final contents (removeAll races sets); the point is no crash.
+        _ = cache.count
+    }
+
+    // MARK: - ForegroundTracker (#3614)
+
+    func testForegroundTrackerSetAndSwitch() {
+        let tracker = ForegroundTracker()
+        XCTAssertNil(tracker.bundleId)
+        XCTAssertFalse(tracker.didFallbackToSpringboard)
+
+        tracker.setApplication(nil, bundleId: "com.example.app", observe: true)
+        XCTAssertEqual(tracker.bundleId, "com.example.app")
+        XCTAssertTrue(tracker.observedBundleIds.contains("com.example.app"))
+
+        tracker.didFallbackToSpringboard = true
+        XCTAssertTrue(tracker.didFallbackToSpringboard)
+
+        // switchForeground returns the previous bundle id and resets the fallback flag.
+        let previous = tracker.switchForeground(
+            app: nil, bundleId: "com.example.other", observe: true, now: 123
+        )
+        XCTAssertEqual(previous, "com.example.app")
+        XCTAssertEqual(tracker.bundleId, "com.example.other")
+        XCTAssertEqual(tracker.lastSwitchTime, 123)
+        XCTAssertFalse(tracker.didFallbackToSpringboard)
+        XCTAssertEqual(tracker.observedBundleIds, ["com.example.app", "com.example.other"])
+    }
+
+    func testForegroundTrackerConcurrentAccessDoesNotCrash() {
+        let tracker = ForegroundTracker()
+        DispatchQueue.concurrentPerform(iterations: 2_000) { i in
+            tracker.trackObserved("com.app.\(i % 16)")
+            _ = tracker.observedBundleIds     // snapshot copy
+            _ = tracker.switchForeground(app: nil, bundleId: "com.app.\(i % 16)", observe: true, now: UInt64(i))
+            _ = tracker.bundleId
+            tracker.didFallbackToSpringboard = (i % 2 == 0)
+        }
+        XCTAssertNotNil(tracker.bundleId)
+    }
 }

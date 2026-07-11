@@ -17,6 +17,16 @@ PLATFORM="${2:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 
 RELEASE_TS="src/constants/release.ts"
 
+# sha256sum is GNU coreutils and absent on stock macOS; fall back to shasum
+# (matching verify-release-integrity.sh) so this works on any runner (#3658).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
 if [ ! -f "$ARTIFACT_PATH" ]; then
   echo "ERROR: Artifact not found at $ARTIFACT_PATH"
   exit 1
@@ -27,7 +37,7 @@ if [ ! -f "$RELEASE_TS" ]; then
   exit 1
 fi
 
-BUILT_SHA256=$(sha256sum "$ARTIFACT_PATH" | cut -d' ' -f1)
+BUILT_SHA256=$(sha256_of "$ARTIFACT_PATH")
 echo "Built artifact SHA256: $BUILT_SHA256"
 
 if [ "$PLATFORM" = "android" ]; then
@@ -39,7 +49,11 @@ else
   exit 1
 fi
 
-SOURCE_SHA256=$(grep "$FIELD" "$RELEASE_TS" | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
+# `sed -n ... p` only prints on a real 64-hex match, so an empty or malformed
+# value (e.g. `ipaSha256: ""`) yields an empty SOURCE_SHA256 and the guard
+# below fires. The old unanchored `s///` passed the whole line through on no
+# match, making SOURCE_SHA256 non-empty and defeating the -z check (#3658).
+SOURCE_SHA256=$(grep "$FIELD" "$RELEASE_TS" | head -1 | sed -n 's/.*"\([a-f0-9]\{64\}\)".*/\1/p')
 echo "Source SHA256:         $SOURCE_SHA256"
 
 if [ -z "$SOURCE_SHA256" ]; then

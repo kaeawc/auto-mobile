@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolveAutoMobileBaseDir, getTempDir, TEMP_SUBDIRS } from "../../src/utils/tempDir";
+import {
+  resolveAutoMobileBaseDir,
+  getTempDir,
+  ensureSecureTempDirSync,
+  TEMP_SUBDIRS,
+} from "../../src/utils/tempDir";
 
 describe("resolveAutoMobileBaseDir", () => {
   const home = "/home/tester";
@@ -61,5 +67,31 @@ describe("getTempDir", () => {
     const logs = getTempDir(TEMP_SUBDIRS.LOGS);
     const base = resolveAutoMobileBaseDir();
     expect(logs).toBe(path.join(base, TEMP_SUBDIRS.LOGS));
+  });
+});
+
+describe("ensureSecureTempDirSync", () => {
+  // POSIX-only: Windows does not honor Unix permission bits, so mkdir's `mode`
+  // is ignored and `fs.statSync().mode` does not report 0o700 there.
+  test.skipIf(process.platform === "win32")("creates the directory with restrictive 0o700 permissions", () => {
+    // The single-user isolation guarantee in the multi-agent filesystem contract
+    // rests on the base dir being mode 0o700; pin it.
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-mode-test-"));
+    const prev = process.env.AUTOMOBILE_DATA_DIR;
+    process.env.AUTOMOBILE_DATA_DIR = tmpBase;
+    try {
+      const dir = ensureSecureTempDirSync("mode-check");
+      // On POSIX, 0o700 survives a typical umask (022) because it sets no
+      // group/other bits; assert the created dir's permission bits are exactly 0o700.
+      const mode = fs.statSync(dir).mode & 0o777;
+      expect(mode).toBe(0o700);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+      } else {
+        process.env.AUTOMOBILE_DATA_DIR = prev;
+      }
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
   });
 });

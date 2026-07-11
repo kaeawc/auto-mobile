@@ -16,6 +16,12 @@ MCP Resources provide read-only access to:
 
 ## Available Resources
 
+> This page documents the primary resources. It is **not** an exhaustive list of
+> every registered resource — the server also registers observation, device
+> images, test runs, video recording, device snapshots, databases, failures,
+> storage, app files, feature flags, and network resources (see the
+> `register*Resources()` calls in `src/server/index.ts`).
+
 ### Navigation Graph
 
 **URI**: `automobile:navigation/graph`
@@ -40,7 +46,7 @@ Returns booted device inventory across Android and iOS, including:
 
 **URI Template**: `automobile:devices/booted/{platform}`
 
-This resource replaces the removed `listDevices` and `daemon_available_devices` tools.
+This resource supersedes the device data that the `listDevices` tool used to return. `listDevices` still exists as an MCP tool, but now returns **resource guidance** — a message pointing callers at these resource URIs — rather than device data (see `listDevicesHandler` in `src/server/deviceTools.ts`). The separate `daemon_available_devices` tool was removed.
 
 ### Installed Apps
 

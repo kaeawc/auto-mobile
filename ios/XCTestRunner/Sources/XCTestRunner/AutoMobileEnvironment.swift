@@ -664,6 +664,27 @@ public enum DaemonManager {
         )
     }
 
+    /// Copy a Unix socket path into `addr.sun_path` without overflowing the fixed
+    /// buffer. `sun_path` is a fixed C array (104 bytes on Darwin); the previous
+    /// unbounded `strcpy` overflowed the stack `sockaddr_un` for env-supplied
+    /// paths longer than the buffer (issue #3625). Returns `false` (leaving `addr`
+    /// unchanged) when the path plus its NUL terminator does not fit.
+    static func setSocketPath(_ path: String, into addr: inout sockaddr_un) -> Bool {
+        let capacity = MemoryLayout.size(ofValue: addr.sun_path)
+        let bytes = Array(path.utf8)
+        // Need room for the trailing NUL, so the path itself must be < capacity.
+        guard bytes.count < capacity else { return false }
+        withUnsafeMutablePointer(to: &addr.sun_path) { tuplePtr in
+            tuplePtr.withMemoryRebound(to: CChar.self, capacity: capacity) { dst in
+                for (i, byte) in bytes.enumerated() {
+                    dst[i] = CChar(bitPattern: byte)
+                }
+                dst[bytes.count] = 0
+            }
+        }
+        return true
+    }
+
     private static func sendDaemonRequest(_ request: String, timeoutSeconds: TimeInterval) -> [String: Any]? {
         let socketFd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFd >= 0 else {
@@ -674,10 +695,9 @@ public enum DaemonManager {
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        socketPath.withCString { cString in
-            _ = withUnsafeMutablePointer(to: &addr.sun_path.0) { ptr in
-                strcpy(ptr, cString)
-            }
+        guard Self.setSocketPath(socketPath, into: &addr) else {
+            print("[AutoMobile] Daemon socket path too long (\(socketPath.utf8.count) bytes): \(socketPath)")
+            return nil
         }
 
         let connectResult = withUnsafePointer(to: &addr) { ptr in

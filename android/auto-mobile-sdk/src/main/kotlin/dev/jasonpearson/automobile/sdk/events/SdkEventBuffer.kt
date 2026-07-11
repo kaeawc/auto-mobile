@@ -50,7 +50,10 @@ internal class SdkEventBuffer(
       if (flushTask == null && !isShutdown) {
         flushTask =
           executor.scheduleAtFixedRate(
-            { flush() },
+            // Backstop: any exception escaping the periodic task cancels all future
+            // runs (the scheduleAtFixedRate contract). Per-batch errors are already
+            // accounted inside deliverBatch; swallow here so the timer survives (#3605).
+            { runCatching { flush() } },
             flushIntervalMs,
             flushIntervalMs,
             TimeUnit.MILLISECONDS,
@@ -148,13 +151,17 @@ internal class SdkEventBuffer(
 
   private fun deliverBatch(events: List<SdkEvent>) {
     if (events.isEmpty()) return
-    val batchId = persistence?.persist(events) // persist to disk first
+    var batchId: String? = null
     try {
+      batchId = persistence?.persist(events) // persist to disk first
       onFlush(events)
       batchId?.let { persistence?.removeBatch(it) } // remove on success
     } catch (_: Exception) {
+      // A throwing custom EventPersistence.persist() must NOT escape here: this
+      // runs inside the scheduleAtFixedRate task, and an uncaught exception would
+      // silently cancel all future periodic flushes (#3605). Count the batch as a
+      // flush error; anything already persisted stays on disk for next-launch retry.
       repeat(events.size) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
-      // Keep on disk for retry on next launch
     }
   }
 }

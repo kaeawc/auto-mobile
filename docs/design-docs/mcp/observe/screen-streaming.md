@@ -155,8 +155,17 @@ When video streaming is unavailable:
 | macOS permissions | User handles permission prompts |
 | macOS entitlements | No special entitlements needed for iOS capture |
 
+## Related: browser/CI streaming over WebRTC
+
+This document covers **IDE** live mirroring over a Unix socket with a Klarity
+decoder. For pushing a device stream to a **browser** or a **CI dashboard** over
+standard WebRTC (WHIP ingest → WHEP egress), see
+[WebRTC Screen Streaming (WHIP egress)](./webrtc-streaming.md). Both paths reuse
+the same on-device H.264 capture; only the transport and consumer differ.
+
 ## References
 
+- [WebRTC Screen Streaming (WHIP egress)](./webrtc-streaming.md)
 - [Android Screen Streaming](../../plat/android/screen-streaming.md)
 - [iOS Screen Streaming](../../plat/ios/screen-streaming.md)
 - [Video Recording Design](./video-recording.md)

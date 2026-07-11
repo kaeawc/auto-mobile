@@ -72,3 +72,18 @@ here for discoverability; most are diagnostic or for advanced testing.
 | `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH` | Overrides the path to the iOS CtrlProxy bundle (for testing a locally-built runner). |
 | `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` | Skips Android and iOS CtrlProxy downloads/prefetches when set to `1` or `true`. |
 | `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` | Skips the accessibility service download when it is already installed. |
+
+## WebRTC screen streaming (`AUTOMOBILE_WEBRTC_*`)
+
+Defaults for pushing a device's screen to a coordination server over WebRTC/WHIP.
+See the [CI worker guide](../webrtc-streaming-ci-worker.md) and the
+[design doc](../design-docs/mcp/observe/webrtc-streaming.md). Any value can be
+overridden per request on the `webrtc-stream.sock` control socket.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL of the coordination server. Required to start a stream unless passed per request. | unset |
+| `AUTOMOBILE_WEBRTC_WHIP_TOKEN` | Bearer token sent as `Authorization: Bearer <token>` on WHIP ingest. | unset |
+| `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`. | `stun:stun.l.google.com:19302` |
+| `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target `screenrecord` encoder bitrate (kbps). | encoder default |
+| `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale as `WIDTHxHEIGHT` (e.g. `720x1280`). | native |

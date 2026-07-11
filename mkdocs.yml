@@ -79,6 +79,7 @@ nav:
       - 'Reproducing Bugs': using/reproducing-bugs.md
       - 'UI Tests': using/ui-tests.md
       - 'Hermetic CI Pinning': using/hermetic-ci-pinning.md
+      - 'WebRTC Screen Streaming': webrtc-streaming-ci-worker.md
       - 'Environment Variables': using/environment-variables.md
       - 'Performance Analysis':
           - 'Overview': using/perf-analysis/index.md
@@ -107,6 +108,7 @@ nav:
              - 'Overview': design-docs/mcp/observe/index.md
              - 'Appearance Sync': design-docs/mcp/observe/appearance.md
              - 'Screen Streaming': design-docs/mcp/observe/screen-streaming.md
+             - 'WebRTC Streaming (WHIP)': design-docs/mcp/observe/webrtc-streaming.md
              - 'Video Recording': design-docs/mcp/observe/video-recording.md
              - 'Vision Fallback': design-docs/mcp/observe/vision-fallback.md
              - 'Visual Highlighting': design-docs/mcp/observe/visual-highlighting.md

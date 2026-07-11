@@ -38,5 +38,6 @@ availability for automation workflows.
 ## See Also
 
 - [Video Recording](video-recording.md) for setting up screen recording for later analysis.
+- [WebRTC Streaming (WHIP)](webrtc-streaming.md) for pushing a live device stream to a coordination server / browser (e.g. from a CI worker).
 - [Vision Fallback](vision-fallback.md) for how we fall back to LLM vision analysis when view hierarchy observation fails.
 - [Visual Highlighting](visual-highlighting.md) for how we can draw on top of the observed app.

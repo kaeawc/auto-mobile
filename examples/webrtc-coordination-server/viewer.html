@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AutoMobile WebRTC Viewer</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem; }
+      h1 { font-size: 1.25rem; }
+      .layout { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+      .streams { min-width: 240px; }
+      .stream { padding: 0.5rem 0.75rem; border: 1px solid #8884; border-radius: 8px; margin-bottom: 0.5rem; cursor: pointer; }
+      .stream.active { border-color: #3b82f6; background: #3b82f622; }
+      .stream small { display: block; opacity: 0.7; }
+      video { width: min(720px, 90vw); background: #000; border-radius: 8px; aspect-ratio: 9/16; }
+      #status { margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.8; }
+      .badge { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 999px; background: #10b98133; }
+    </style>
+  </head>
+  <body>
+    <h1>AutoMobile WebRTC Viewer</h1>
+    <div class="layout">
+      <div class="streams">
+        <strong>Streams</strong>
+        <div id="stream-list"></div>
+      </div>
+      <div>
+        <video id="video" autoplay playsinline muted controls></video>
+        <div id="status">Select a stream to watch.</div>
+      </div>
+    </div>
+
+    <script>
+      const listEl = document.getElementById("stream-list");
+      const statusEl = document.getElementById("status");
+      const videoEl = document.getElementById("video");
+
+      let currentStreamId = null;
+      let pc = null;
+      let reconnectTimer = null;
+
+      async function fetchStreams() {
+        try {
+          const res = await fetch("/api/streams");
+          const { streams } = await res.json();
+          renderStreams(streams);
+        } catch (err) {
+          statusEl.textContent = "Failed to reach coordination API: " + err;
+        }
+      }
+
+      function renderStreams(streams) {
+        listEl.innerHTML = "";
+        if (!streams.length) {
+          listEl.innerHTML = "<em>No active streams.</em>";
+          return;
+        }
+        for (const s of streams) {
+          const el = document.createElement("div");
+          el.className = "stream" + (s.streamId === currentStreamId ? " active" : "");
+          el.innerHTML =
+            "<span>" + s.streamId + "</span> <span class='badge'>" + s.state + "</span>" +
+            "<small>" + s.subscriberCount + " viewer(s) · " + s.framesForwarded + " frames</small>";
+          el.onclick = () => watch(s.streamId);
+          listEl.appendChild(el);
+        }
+      }
+
+      // The reconnect API descriptor holds everything needed to (re)connect:
+      // the WHEP URL and the ICE servers to use.
+      async function watch(streamId) {
+        currentStreamId = streamId;
+        clearTimeout(reconnectTimer);
+        await teardown();
+
+        const res = await fetch("/api/streams/" + encodeURIComponent(streamId));
+        if (!res.ok) {
+          statusEl.textContent = "Stream not found; it may have ended.";
+          return;
+        }
+        const descriptor = await res.json();
+        statusEl.textContent = "Connecting to " + streamId + "…";
+
+        pc = new RTCPeerConnection({ iceServers: descriptor.iceServers || [] });
+        pc.addTransceiver("video", { direction: "recvonly" });
+        pc.ontrack = (event) => {
+          videoEl.srcObject = event.streams[0] || new MediaStream([event.track]);
+        };
+        pc.onconnectionstatechange = () => {
+          statusEl.textContent = "Connection: " + pc.connectionState;
+          if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
+            scheduleReconnect(streamId);
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitForIceGathering(pc);
+
+        const answerRes = await fetch(descriptor.whepUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: pc.localDescription.sdp,
+        });
+        if (!answerRes.ok) {
+          statusEl.textContent = "WHEP subscribe failed (" + answerRes.status + ")";
+          scheduleReconnect(streamId);
+          return;
+        }
+        const answer = await answerRes.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answer });
+        fetchStreams();
+      }
+
+      function scheduleReconnect(streamId) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+          if (currentStreamId === streamId) {
+            watch(streamId);
+          }
+        }, 2000);
+      }
+
+      async function teardown() {
+        if (pc) {
+          try { pc.close(); } catch {}
+          pc = null;
+        }
+      }
+
+      function waitForIceGathering(pc) {
+        if (pc.iceGatheringState === "complete") return Promise.resolve();
+        return new Promise((resolve) => {
+          const check = () => {
+            if (pc.iceGatheringState === "complete") {
+              pc.removeEventListener("icegatheringstatechange", check);
+              resolve();
+            }
+          };
+          pc.addEventListener("icegatheringstatechange", check);
+          setTimeout(resolve, 3000);
+        });
+      }
+
+      fetchStreams();
+      setInterval(fetchStreams, 3000);
+    </script>
+  </body>
+</html>

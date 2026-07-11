@@ -17,6 +17,12 @@ import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 internal object AutoMobileBroadcastInterceptor {
 
   /** Curated system broadcasts to intercept (avoids noise). */
+  // Package actions carry a `package:` data URI, so they must be matched by a
+  // filter that declares addDataScheme("package"). The other actions carry no
+  // data and must be matched by a scheme-less filter — a single filter with a
+  // data scheme fails the data test for them (#3597).
+  private val PACKAGE_ACTIONS = setOf(Intent.ACTION_PACKAGE_ADDED, Intent.ACTION_PACKAGE_REMOVED)
+
   private val MONITORED_ACTIONS =
     listOf(
       Intent.ACTION_LOCALE_CHANGED,
@@ -62,18 +68,37 @@ internal object AutoMobileBroadcastInterceptor {
 
     receiver = broadcastReceiver
 
-    val filter =
+    buildFilters().forEach { filter -> registerReceiver(context, broadcastReceiver, filter) }
+  }
+
+  /**
+   * Build the intent filters the interceptor registers. Two are needed: a scheme-less filter for
+   * the plain system actions and a `package`-scheme filter for the package add/remove actions,
+   * because a single filter declaring a data scheme fails the data test for scheme-less broadcasts
+   * (#3597).
+   */
+  internal fun buildFilters(): List<IntentFilter> {
+    val plainFilter =
       IntentFilter().apply {
-        MONITORED_ACTIONS.forEach { addAction(it) }
-        // Package events need data scheme
+        MONITORED_ACTIONS.filterNot { it in PACKAGE_ACTIONS }.forEach { addAction(it) }
+      }
+    val packageFilter =
+      IntentFilter().apply {
+        PACKAGE_ACTIONS.forEach { addAction(it) }
         addDataScheme("package")
       }
+    return listOf(plainFilter, packageFilter)
+  }
 
+  private fun registerReceiver(
+    context: Context,
+    receiver: BroadcastReceiver,
+    filter: IntentFilter,
+  ) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      context.registerReceiver(broadcastReceiver, filter, Context.RECEIVER_EXPORTED)
+      context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
     } else {
-      @Suppress("UnspecifiedRegisterReceiverFlag")
-      context.registerReceiver(broadcastReceiver, filter)
+      @Suppress("UnspecifiedRegisterReceiverFlag") context.registerReceiver(receiver, filter)
     }
   }
 

@@ -9,6 +9,7 @@ import android.os.Looper
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -36,12 +37,19 @@ class StorageSubscriptionManager(private val context: Context) {
   /** State for a package being observed. */
   private data class PackageObserverState(
     val observer: ContentObserver,
-    val subscriptions: MutableSet<String> = mutableSetOf(), // file names
+    // Thread-safe: mutated on IO (subscribe/unsubscribe) and read on the main
+    // looper (ContentObserver.onChange -> fetchChangesForPackage). See #3600.
+    val subscriptions: MutableSet<String> = ConcurrentHashMap.newKeySet(), // file names
   )
 
-  private val subscriptions = mutableMapOf<String, SubscriptionState>() // subscriptionId -> state
+  // Mutated from Dispatchers.IO (subscribe/unsubscribe) and the main looper
+  // (ContentObserver.onChange, destroy). ConcurrentHashMap avoids the
+  // resize-under-concurrent-put corruption / ConcurrentModificationException a
+  // plain HashMap would hit here (#3600).
+  private val subscriptions =
+    ConcurrentHashMap<String, SubscriptionState>() // subscriptionId -> state
   private val packageObservers =
-    mutableMapOf<String, PackageObserverState>() // packageName -> state
+    ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
   private val _changeEvents = MutableSharedFlow<PreferenceChangeEvent>(extraBufferCapacity = 64)
   val changeEvents: SharedFlow<PreferenceChangeEvent> = _changeEvents.asSharedFlow()
@@ -511,7 +519,11 @@ class StorageSubscriptionManager(private val context: Context) {
 
     try {
       context.contentResolver.registerContentObserver(changesUri, false, observer)
-      packageObservers[packageName] = PackageObserverState(observer, mutableSetOf(fileName))
+      packageObservers[packageName] =
+        PackageObserverState(
+          observer,
+          ConcurrentHashMap.newKeySet<String>().apply { add(fileName) },
+        )
       Log.d(TAG, "Registered ContentObserver for $packageName")
     } catch (e: Exception) {
       Log.e(TAG, "Failed to register ContentObserver for $packageName", e)

@@ -311,4 +311,51 @@ class StorageSubscriptionManagerTest {
 
     assertTrue(manager.getActiveSubscriptions().isEmpty())
   }
+
+  // ================= Concurrency (#3600) =================
+
+  @Test
+  fun `concurrent subscribe unsubscribe and iteration do not corrupt state`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"subscribed":true}""")
+      }
+    every { contentResolver.call(any<Uri>(), any(), any(), any()) } returns bundle
+
+    val threadCount = 8
+    val perThread = 200
+    val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+    val latch = java.util.concurrent.CountDownLatch(threadCount)
+
+    // All threads target the same package (shared packageObservers entry + nested
+    // file set) with unique file names, hammering the maps concurrently. Under a
+    // plain HashMap this trips ConcurrentModificationException / a corrupted map
+    // (#3600); with ConcurrentHashMap it stays consistent.
+    for (t in 0 until threadCount) {
+      Thread {
+        try {
+          for (i in 0 until perThread) {
+            val file = "file-$t-$i"
+            manager.subscribe("com.example.app", file)
+            manager.getActiveSubscriptions() // iterate while others mutate
+            manager.unsubscribe("com.example.app", file)
+          }
+        } catch (e: Throwable) {
+          errors.add(e)
+        } finally {
+          latch.countDown()
+        }
+      }
+        .start()
+    }
+
+    assertTrue(
+      "concurrent access timed out",
+      latch.await(30, java.util.concurrent.TimeUnit.SECONDS),
+    )
+    assertTrue("concurrent access threw: ${errors.firstOrNull()}", errors.isEmpty())
+    // Every subscribe (unique id) was matched by an unsubscribe.
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+  }
 }

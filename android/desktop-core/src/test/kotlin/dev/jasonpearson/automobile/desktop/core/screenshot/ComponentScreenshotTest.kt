@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.components.ErrorCard
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import dev.jasonpearson.automobile.desktop.core.shell.StatusBarBadge
+import org.junit.Ignore
 import org.junit.Test
 
 /**
@@ -20,11 +21,15 @@ import org.junit.Test
  * Material themes. This is a starter set that proves the [screenshotTest] pattern; extend it with
  * more components and dashboard states as coverage grows.
  *
- * Record the baselines (on the reference OS / CI) with:
+ * `@Ignore`d until the baseline PNGs are recorded and committed alongside these tests — the harness
+ * fails (does not skip) on a missing baseline, so these must not run until their baselines exist.
+ * To enable: record and commit the baselines, then remove the `@Ignore`.
+ *
  * ```
  * ./gradlew -p android :desktop-core:test --tests '*ComponentScreenshotTest' -Dscreenshot.record=true
  * ```
  */
+@Ignore("Enable once baseline PNGs are recorded and committed (see class KDoc).")
 class ComponentScreenshotTest {
 
   /** Wraps content in a themed, fixed-width surface so captures are deterministic. */

@@ -69,13 +69,14 @@ object ScreenshotEnvironment {
       ScreenshotComparator.Result.Match -> Unit
       ScreenshotComparator.Result.Recorded -> Unit
       is ScreenshotComparator.Result.MissingBaseline ->
-        // Treat a not-yet-recorded baseline as pending (skipped), not failed, so adding a
-        // screenshot test before its baseline exists doesn't break the build. Record with
-        // -Dscreenshot.record=true, then the test actively verifies.
-        Assume.assumeTrue(
-          "No screenshot baseline for '$name' yet at ${result.baseline.path}. " +
-            "Record it with: ./gradlew -p android :desktop-core:test -D$RECORD_PROPERTY=true",
-          false,
+        // A missing baseline is a failure, not a skip: verification must not silently pass when a
+        // baseline is absent or has been deleted. Commit baselines together with their tests
+        // (record them with -Dscreenshot.record=true). Tests whose baselines are not yet recorded
+        // should be @Ignore'd until they are, rather than relaxing this into a skip.
+        fail(
+          "No screenshot baseline for '$name' at ${result.baseline.path}. " +
+            "Record it with: ./gradlew -p android :desktop-core:test -D$RECORD_PROPERTY=true, " +
+            "then commit the PNG alongside the test."
         )
       is ScreenshotComparator.Result.SizeMismatch ->
         fail(

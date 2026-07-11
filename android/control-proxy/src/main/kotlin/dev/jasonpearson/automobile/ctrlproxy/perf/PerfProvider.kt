@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy.perf
 
 import android.util.Log
 import java.util.concurrent.ConcurrentLinkedDeque
-import java.util.concurrent.atomic.AtomicReference
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -75,31 +74,41 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
 
   private val json = Json { prettyPrint = false }
 
-  // Stack of active timing entries (for nested operations)
-  private val entryStack = ConcurrentLinkedDeque<MutablePerfEntry>()
+  // Per-thread active-entry state. The entry stack and current root are kept
+  // per-thread so an operation on one thread (e.g. hierarchy polling) never nests
+  // under an in-flight operation on another (e.g. command handling), and end()/
+  // flush()/independentRoot() can't close/steal another thread's open entries
+  // (issue #3709, the twin of iOS #3635). Completed roots are still moved into the
+  // shared completedEntries pool below, so flush() reports all threads' timings.
+  private class LocalState {
+    val entryStack = java.util.ArrayDeque<MutablePerfEntry>()
+    var currentRoot: MutablePerfEntry? = null
+  }
 
-  // Root entries that have been completed
+  private val threadState = ThreadLocal.withInitial { LocalState() }
+
+  private fun local(): LocalState = threadState.get()
+
+  // Root entries that have been completed. Shared across threads.
   private val completedEntries = ConcurrentLinkedDeque<MutablePerfEntry>()
 
-  // Current active root entry
-  private val currentRoot = AtomicReference<MutablePerfEntry?>(null)
-
-  // Debounce tracking
+  // Debounce tracking (shared)
   private var debounceCount = 0
   private var lastDebounceTime: Long? = null
 
   /** Start a serial block (operations run sequentially). */
   fun serial(name: String) {
+    val state = local()
     val now = timeProvider.currentTimeMillis()
     val entry = MutablePerfEntry(name = name, startTime = now, isParallel = false)
 
-    val parent = entryStack.peekLast()
+    val parent = state.entryStack.peekLast()
     if (parent != null) {
       parent.children.add(entry)
     } else {
-      currentRoot.set(entry)
+      state.currentRoot = entry
     }
-    entryStack.addLast(entry)
+    state.entryStack.addLast(entry)
 
     Log.d(TAG, "Started serial block: $name")
   }
@@ -113,8 +122,9 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
    * inclusion in the next flush().
    */
   fun independentRoot(name: String) {
-    // End all open entries - they become completed entries (parallel siblings)
-    while (entryStack.isNotEmpty()) {
+    // End all open entries on THIS thread - they become completed siblings
+    val state = local()
+    while (state.entryStack.isNotEmpty()) {
       end()
     }
 
@@ -124,33 +134,35 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
 
   /** Start a parallel block (operations run concurrently). */
   fun parallel(name: String) {
+    val state = local()
     val now = timeProvider.currentTimeMillis()
     val entry = MutablePerfEntry(name = name, startTime = now, isParallel = true)
 
-    val parent = entryStack.peekLast()
+    val parent = state.entryStack.peekLast()
     if (parent != null) {
       parent.children.add(entry)
     } else {
-      currentRoot.set(entry)
+      state.currentRoot = entry
     }
-    entryStack.addLast(entry)
+    state.entryStack.addLast(entry)
 
     Log.d(TAG, "Started parallel block: $name")
   }
 
   /** End the current block. */
   fun end() {
+    val state = local()
     val now = timeProvider.currentTimeMillis()
-    val entry = entryStack.pollLast()
+    val entry = state.entryStack.pollLast()
 
     if (entry != null) {
       entry.endTime = now
       Log.d(TAG, "Ended block: ${entry.name} (${now - entry.startTime}ms)")
 
-      // If this was the root entry, move it to completed
-      if (entryStack.isEmpty() && currentRoot.get() == entry) {
+      // If this was the root entry, move it to the shared completed pool
+      if (state.entryStack.isEmpty() && state.currentRoot == entry) {
         completedEntries.add(entry)
-        currentRoot.set(null)
+        state.currentRoot = null
       }
     } else {
       Log.w(TAG, "end() called with no active block")
@@ -179,17 +191,18 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
 
   /** Start tracking an operation manually. */
   fun startOperation(name: String) {
+    val state = local()
     val now = timeProvider.currentTimeMillis()
     val entry = MutablePerfEntry(name = name, startTime = now)
 
-    val parent = entryStack.peekLast()
+    val parent = state.entryStack.peekLast()
     if (parent != null) {
       parent.children.add(entry)
-      entryStack.addLast(entry)
+      state.entryStack.addLast(entry)
     } else {
       // No active block, this becomes a root entry
-      currentRoot.set(entry)
-      entryStack.addLast(entry)
+      state.currentRoot = entry
+      state.entryStack.addLast(entry)
     }
 
     Log.d(TAG, "Started operation: $name")
@@ -197,19 +210,20 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
 
   /** End tracking an operation manually. */
   fun endOperation(name: String) {
+    val state = local()
     val now = timeProvider.currentTimeMillis()
 
-    // Find the matching entry in the stack
-    val entry = entryStack.peekLast()
+    // Find the matching entry in this thread's stack
+    val entry = state.entryStack.peekLast()
     if (entry != null && entry.name == name) {
       entry.endTime = now
-      entryStack.pollLast()
+      state.entryStack.pollLast()
       Log.d(TAG, "Ended operation: $name (${now - entry.startTime}ms)")
 
-      // If this was the root entry, move it to completed
-      if (entryStack.isEmpty() && currentRoot.get() == entry) {
+      // If this was the root entry, move it to the shared completed pool
+      if (state.entryStack.isEmpty() && state.currentRoot == entry) {
         completedEntries.add(entry)
-        currentRoot.set(null)
+        state.currentRoot = null
       }
     } else {
       Log.w(TAG, "endOperation($name) called but current entry is ${entry?.name}")
@@ -228,8 +242,9 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
    * inclusion in WebSocket messages.
    */
   fun flush(): JsonElement? {
-    // End any incomplete entries
-    while (entryStack.isNotEmpty()) {
+    // End any incomplete entries on this thread (moves their roots into the pool)
+    val state = local()
+    while (state.entryStack.isNotEmpty()) {
       end()
     }
 
@@ -277,10 +292,10 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
   fun peek(): List<PerfTiming> {
     val entries = mutableListOf<PerfTiming>()
 
-    // Include current root if any
-    currentRoot.get()?.let { entries.add(it.toTiming()) }
+    // Include this thread's current root if any
+    local().currentRoot?.let { entries.add(it.toTiming()) }
 
-    // Include completed entries
+    // Include shared completed entries
     completedEntries.forEach { entries.add(it.toTiming()) }
 
     return entries
@@ -288,14 +303,15 @@ private constructor(private val timeProvider: TimeProvider = SystemTimeProvider(
 
   /** Check if there's any accumulated timing data. */
   fun hasData(): Boolean {
-    return completedEntries.isNotEmpty() || currentRoot.get() != null || debounceCount > 0
+    return completedEntries.isNotEmpty() || local().currentRoot != null || debounceCount > 0
   }
 
   /** Clear all timing data without returning it. */
   fun clear() {
-    entryStack.clear()
+    val state = local()
+    state.entryStack.clear()
+    state.currentRoot = null
     completedEntries.clear()
-    currentRoot.set(null)
     debounceCount = 0
     lastDebounceTime = null
   }

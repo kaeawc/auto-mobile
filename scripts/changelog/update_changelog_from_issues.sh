@@ -48,7 +48,7 @@ gh api \
   --paginate \
   --jq '.items[] | @json' > "$ISSUES_FILE"
 
-python - "$ISSUES_FILE" "$CHANGELOG_FILE" "$CURRENT_TAG" "$DATE" <<'PY'
+python3 - "$ISSUES_FILE" "$CHANGELOG_FILE" "$CURRENT_TAG" "$DATE" <<'PY'
 import json
 import re
 import sys

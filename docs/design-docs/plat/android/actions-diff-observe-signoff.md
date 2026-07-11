@@ -69,7 +69,9 @@ run through that serializer) carries the full `extras` objects. So the flood is
 real in both representations; stripping at serialize-time does not fix it.
 
 **Fix (this PR):** `DIFF_IGNORED_ATTRS = { "extras" }` — `extras` is excluded
-from **both** volatile-prone diff paths: the per-node *changed* comparison
+from **both** volatile-prone diff paths (a later follow-up, #3228, added `view-id`
+to this set; the current value in `ObserveResultOutput.ts` is
+`{ "extras", "view-id" }` — see the Follow-ups section): the per-node *changed* comparison
 (`diffAttributes`) and the Element mirror fields (`leanElementForDiff`, so a
 stable focus with only `extras` churn no longer emits a phantom
 `fields.focusedElement`). Phantom entries are never emitted at all (no empty
@@ -148,12 +150,17 @@ follow-up (**#3107**). Not a blocker for an off-by-default flag.
 
 ### 5. AC#4 (byte/token reduction) — PASS for localized, bounded for scroll
 
-Measured with the production `stringifyToolResponse` formatter + cl100k_base:
+Measured with the production `stringifyToolResponse` formatter + cl100k_base.
+These are the **pre-#3228 baseline** figures (captured when this sign-off landed);
+the capture-layer stable-identity work in #3228 shifted them slightly (scroll
+improved to roughly `26%`/`59%`). Treat them as the order-of-magnitude result —
+localized is a large win, scroll a smaller-but-real one — not exact current
+values, which drift as the diff/identity layers evolve:
 
 | Pair | diff / full (bytes) | diff / full (tokens) |
 |------|--------------------:|---------------------:|
-| Text entry (localized) | **1.8%** | **4.4%** |
-| Scroll (~250px) | 28.7% | 64.0% |
+| Text entry (localized) | **~1.8%** | **~4.4%** |
+| Scroll (~250px) | ~29% | ~64% |
 
 The localized case comfortably meets the fixture's `<10%` target (98% byte
 reduction), matching the synthetic `android-home.json` measurement. A **scroll is

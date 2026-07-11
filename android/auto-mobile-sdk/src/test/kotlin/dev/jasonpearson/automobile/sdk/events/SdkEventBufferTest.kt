@@ -381,4 +381,66 @@ class SdkEventBufferTest {
     val snapshot = counter.snapshot()
     assertEquals(1L, snapshot[DropReason.BUFFER_OVERFLOW])
   }
+
+  // ================= Throwing persistence (#3605) =================
+
+  private class ThrowingPersistence(val shouldThrow: java.util.concurrent.atomic.AtomicBoolean) :
+    dev.jasonpearson.automobile.sdk.persistence.EventPersistence {
+    override fun persist(events: List<SdkEvent>): String? {
+      if (shouldThrow.get()) throw RuntimeException("boom")
+      return "batch-id"
+    }
+
+    override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+
+    override fun removeBatch(batchId: String) {}
+
+    override fun cleanup(maxAgeDays: Int) {}
+  }
+
+  /**
+   * A throwing custom EventPersistence.persist() must not propagate out of flush() — it runs inside
+   * the scheduleAtFixedRate task, and an uncaught exception would cancel all future periodic
+   * flushes (#3605).
+   */
+  @Test
+  fun `flush does not propagate exception from throwing persistence`() {
+    val flushed = CopyOnWriteArrayList<List<SdkEvent>>()
+    val persistence = ThrowingPersistence(java.util.concurrent.atomic.AtomicBoolean(true))
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 1_000, // only flush() triggers delivery, never capacity
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        persistence = persistence,
+      )
+
+    buffer.add(makeEvent(1))
+    buffer.flush() // pre-fix: throws out of flush() (and would cancel the periodic task)
+
+    assertEquals(0, flushed.size) // batch dropped on persist failure, not delivered
+  }
+
+  @Test
+  fun `buffer keeps delivering after a persist failure`() {
+    val flushed = CopyOnWriteArrayList<List<SdkEvent>>()
+    val shouldThrow = java.util.concurrent.atomic.AtomicBoolean(true)
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 1_000,
+        flushIntervalMs = 60_000,
+        onFlush = { flushed.add(it) },
+        persistence = ThrowingPersistence(shouldThrow),
+      )
+
+    buffer.add(makeEvent(1))
+    buffer.flush() // persist throws, contained
+    assertEquals(0, flushed.size)
+
+    shouldThrow.set(false)
+    buffer.add(makeEvent(2))
+    buffer.flush() // persist succeeds, delivers
+    assertEquals(1, flushed.size)
+    assertEquals(2L, flushed[0][0].timestamp)
+  }
 }

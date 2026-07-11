@@ -63,12 +63,15 @@ the active backend executes.
 
 ```ts
 // src/utils/image/backend/ImageBackend.ts
+export type ImageOperation =
+  | { type: "resize"; width: number; height?: number; maintainAspectRatio: boolean; mode?: "nearest" }
+  | { type: "crop"; x: number; y: number; width: number; height: number };
+export interface ImageEncoding { mime: "image/png" | "image/webp"; options?: Record<string, unknown>; }
 export interface ImagePipeline {
-  resize?: { w: number; h?: number; mode: "cover" | "fill" | "width" };
-  crop?:   { x: number; y: number; w: number; h: number };
-  output:  { format: "png" | "webp"; quality?: number; lossless?: boolean; nearLossless?: boolean };
+  operations: ImageOperation[];
+  encoding: ImageEncoding | null; // null = re-encode in the decoded input format
 }
-export interface RawImage { width: number; height: number; data: Buffer; } // RGBA
+export interface RawImage { width: number; height: number; data: Buffer; } // RGBA, length === w*h*4
 
 export interface ImageBackend {
   execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer>;
@@ -92,10 +95,10 @@ Implementations:
 Selection (one injectable resolver, fake-able):
 
 ```ts
-resolveImageBackend(platform, env, executor, provisioner): ImageBackend
+resolveImageBackend(options?: { platform?: NodeJS.Platform; sharpLoader?: SharpLoader }): ImageBackend
 // win32 → JimpCliBackend
-// else  → SharpBackend, falling back to JimpBackend if sharp import throws
-// AUTOMOBILE_IMAGE_BACKEND=sharp|jimp|jimp-cli overrides (test any backend off-platform)
+// darwin/linux → SharpBackend, falling back to JimpBackend if sharp import throws
+// other → JimpBackend
 ```
 
 ## Seam — existing code changes
@@ -131,14 +134,14 @@ which we reject).
 - **Failure is a surfaced error, never PNG**: a cwebp/dwebp spawn/exit failure
   throws `ActionableError` (CLAUDE.md strategy 1) pointing at
   `AUTOMOBILE_CWEBP_PATH`. On-disk format stays uniformly `.webp` everywhere.
-- A macOS `cwebp` build for `AUTOMOBILE_IMAGE_BACKEND=jimp-cli` off-platform
-  testing stays download-on-demand (dev-only, no offline guarantee needed).
+- A macOS `cwebp` build for exercising the `JimpCliBackend` WebP path off-platform
+  (dev-only) stays download-on-demand — no offline guarantee needed there.
 
 ## Dependency & build management — the anti-treadmill work
 
 Freezing sharp is part of the deliverable (this is what #2920 lacked):
 
-- `package.json`: add `sharp@0.34.5` + the 25 `@img/*` optionalDependencies
+- `package.json`: add `sharp@0.34.5` + the 24 `@img/*` optionalDependencies
   pinned exactly to `0.34.5`/`1.2.4`. Keep `jimp`/`@jimp/core`. Remove
   `@jimp/wasm-webp`.
 - **Dependabot ignore** rules for `sharp` and every `@img/*` (comment linking
@@ -194,8 +197,7 @@ resolution (Windows).
    no code path uses jimp for WebP, so removing it can't leave any path without a
    codec. (The wasm removal and cwebp introduction must land together — never
    drop the plugin before cwebp exists.)
-4. **doctor check + docs** — cache-portability contract, backend override env,
-   close #2974.
+4. **doctor check + docs** — cache-portability contract, close #2974.
 
 ## Contribution track (non-blocking)
 

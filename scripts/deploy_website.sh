@@ -8,39 +8,33 @@
 
 if [[ "$1" = "--local" ]]; then local=true; fi
 
-if ! [[ ${local} ]]; then
+if [[ ${local} ]]; then
+  # Local preview: build and serve straight from the current working tree.
+  # Copy in special files that GitHub wants in the project root.
+  cp CHANGELOG.md docs/changelog.md
+  cp .github/CONTRIBUTING.md docs/contributing.md
+  mkdocs serve
+else
   set -ex
 
   export GIT_CLONE_PROTECTION_ACTIVE=false
   REPO="git@github.com:kaeawc/auto-mobile.git"
   DIR=temp-clone
 
-  # Delete any existing temporary website clone
+  # Deploy from a fresh clone so we never publish uncommitted local state.
+  # (Previously the clone was created then immediately deleted with nothing
+  # done inside it, so gh-deploy ran against the dirty working tree — #3656.)
   rm -rf "${DIR}"
-
-  # Clone the current repo into temp folder
   git clone "${REPO}" "${DIR}"
+  (
+    cd "${DIR}"
+    # Copy in special files that GitHub wants in the project root.
+    cp CHANGELOG.md docs/changelog.md
+    cp .github/CONTRIBUTING.md docs/contributing.md
+    # Build the site and push the new files up to GitHub.
+    mkdocs gh-deploy
+  )
 
-  # Move working directory into temp folder
-  cd "${DIR}"
-
-  cd ..
-  rm -rf "${DIR}"
-fi
-
-# Copy in special files that GitHub wants in the project root.
-cp CHANGELOG.md docs/changelog.md
-cp .github/CONTRIBUTING.md docs/contributing.md
-
-# Build the site and push the new files up to GitHub
-if ! [[ ${local} ]]; then
-  mkdocs gh-deploy
-else
-  mkdocs serve
-fi
-
-# Delete our temp folder
-if ! [[ ${local} ]]; then
-  cd ..
+  # Delete our temp folder.
   rm -rf "${DIR}"
 fi

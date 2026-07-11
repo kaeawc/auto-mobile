@@ -38,53 +38,59 @@ class ComponentScreenshotTest {
   }
 
   @Test
-  fun errorCardLight() = screenshotTest("error_card_light") {
-    ThemedSurface(dark = false) {
-      ErrorCard(title = "Something went wrong", message = "Please try again later.")
+  fun errorCardLight() =
+    screenshotTest("error_card_light") {
+      ThemedSurface(dark = false) {
+        ErrorCard(title = "Something went wrong", message = "Please try again later.")
+      }
     }
-  }
 
   @Test
-  fun errorCardDark() = screenshotTest("error_card_dark") {
-    ThemedSurface(dark = true) {
-      ErrorCard(title = "Something went wrong", message = "Please try again later.")
+  fun errorCardDark() =
+    screenshotTest("error_card_dark") {
+      ThemedSurface(dark = true) {
+        ErrorCard(title = "Something went wrong", message = "Please try again later.")
+      }
     }
-  }
 
   @Test
-  fun errorCardWithActions() = screenshotTest("error_card_with_actions") {
-    ThemedSurface(dark = true) {
-      ErrorCard(
-        title = "Connection lost",
-        message = "The daemon is unreachable.",
-        onRetry = {},
-        onDismiss = {},
-      )
+  fun errorCardWithActions() =
+    screenshotTest("error_card_with_actions") {
+      ThemedSurface(dark = true) {
+        ErrorCard(
+          title = "Connection lost",
+          message = "The daemon is unreachable.",
+          onRetry = {},
+          onDismiss = {},
+        )
+      }
     }
-  }
 
   @Test
-  fun searchBarEmpty() = screenshotTest("search_bar_empty") {
-    ThemedSurface(dark = true) { SearchBar(query = "", onQueryChange = {}) }
-  }
+  fun searchBarEmpty() =
+    screenshotTest("search_bar_empty") {
+      ThemedSurface(dark = true) { SearchBar(query = "", onQueryChange = {}) }
+    }
 
   @Test
-  fun searchBarWithQuery() = screenshotTest("search_bar_with_query") {
-    ThemedSurface(dark = true) {
-      SearchBar(
-        query = "MainActivity",
-        onQueryChange = {},
-        showRegexToggle = true,
-        isRegexEnabled = true,
-        onRegexToggle = {},
-      )
+  fun searchBarWithQuery() =
+    screenshotTest("search_bar_with_query") {
+      ThemedSurface(dark = true) {
+        SearchBar(
+          query = "MainActivity",
+          onQueryChange = {},
+          showRegexToggle = true,
+          isRegexEnabled = true,
+          onRegexToggle = {},
+        )
+      }
     }
-  }
 
   @Test
-  fun statusBarBadge() = screenshotTest("status_bar_badge") {
-    ThemedSurface(dark = true) {
-      StatusBarBadge(count = 12, label = "Crashes", color = Color(0xFFF28B82))
+  fun statusBarBadge() =
+    screenshotTest("status_bar_badge") {
+      ThemedSurface(dark = true) {
+        StatusBarBadge(count = 12, label = "Crashes", color = Color(0xFFF28B82))
+      }
     }
-  }
 }

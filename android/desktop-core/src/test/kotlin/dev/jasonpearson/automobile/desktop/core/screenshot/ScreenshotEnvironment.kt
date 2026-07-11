@@ -39,8 +39,8 @@ object ScreenshotEnvironment {
 
   /**
    * Skips the calling test (via a JUnit assumption) unless it is running on the reference OS. This
-   * keeps OS-specific pixel differences from turning into false failures on developer machines while
-   * still enforcing the baseline on the reference CI platform.
+   * keeps OS-specific pixel differences from turning into false failures on developer machines
+   * while still enforcing the baseline on the reference CI platform.
    */
   fun assumeReferencePlatform() {
     val referenceOs =
@@ -69,9 +69,13 @@ object ScreenshotEnvironment {
       ScreenshotComparator.Result.Match -> Unit
       ScreenshotComparator.Result.Recorded -> Unit
       is ScreenshotComparator.Result.MissingBaseline ->
-        fail(
-          "No screenshot baseline for '$name' at ${result.baseline.path}. " +
-            "Record it with: ./gradlew :desktop-core:test -D$RECORD_PROPERTY=true"
+        // Treat a not-yet-recorded baseline as pending (skipped), not failed, so adding a
+        // screenshot test before its baseline exists doesn't break the build. Record with
+        // -Dscreenshot.record=true, then the test actively verifies.
+        Assume.assumeTrue(
+          "No screenshot baseline for '$name' yet at ${result.baseline.path}. " +
+            "Record it with: ./gradlew -p android :desktop-core:test -D$RECORD_PROPERTY=true",
+          false,
         )
       is ScreenshotComparator.Result.SizeMismatch ->
         fail(

@@ -59,8 +59,10 @@ A normal test run compares against the baselines:
 ./gradlew -p android :desktop-core:test --tests '*ScreenshotTest'
 ```
 
-On a mismatch the test fails and writes the rejected image plus a red-highlighted diff to
-`build/reports/screenshots/`.
+On a mismatch the test **fails** and writes the rejected image plus a red-highlighted diff to
+`build/reports/screenshots/`. If a baseline has **not been recorded yet**, the test is reported as
+**skipped (pending)** rather than failed — so adding a screenshot test before recording its baseline
+never breaks the build. Record the baseline to turn the pending test into an active check.
 
 ## Cross-platform note (important)
 

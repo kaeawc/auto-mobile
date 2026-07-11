@@ -42,8 +42,7 @@ class ScreenshotComparatorTest {
   fun `identical images match`() {
     val baseline = File(tempDir, "match.png")
     ScreenshotComparator.record(baseline, solid(8, 8, Color.GREEN))
-    val result =
-      ScreenshotComparator.compare(baseline, solid(8, 8, Color.GREEN), tempDir, "match")
+    val result = ScreenshotComparator.compare(baseline, solid(8, 8, Color.GREEN), tempDir, "match")
     assertEquals(ScreenshotComparator.Result.Match, result)
   }
 
@@ -61,8 +60,7 @@ class ScreenshotComparatorTest {
   fun `large color change fails and writes diff plus rejected image`() {
     val baseline = File(tempDir, "diff.png")
     ScreenshotComparator.record(baseline, solid(8, 8, Color.WHITE))
-    val result =
-      ScreenshotComparator.compare(baseline, solid(8, 8, Color.BLACK), tempDir, "diff")
+    val result = ScreenshotComparator.compare(baseline, solid(8, 8, Color.BLACK), tempDir, "diff")
     assertTrue(result is ScreenshotComparator.Result.Mismatch, "expected a mismatch")
     result as ScreenshotComparator.Result.Mismatch
     assertEquals(1.0, result.differentPixelRatio, "all pixels differ")
@@ -86,8 +84,7 @@ class ScreenshotComparatorTest {
   fun `dimension change is reported as size mismatch`() {
     val baseline = File(tempDir, "size.png")
     ScreenshotComparator.record(baseline, solid(8, 8, Color.GRAY))
-    val result =
-      ScreenshotComparator.compare(baseline, solid(16, 8, Color.GRAY), tempDir, "size")
+    val result = ScreenshotComparator.compare(baseline, solid(16, 8, Color.GRAY), tempDir, "size")
     assertTrue(result is ScreenshotComparator.Result.SizeMismatch)
     result as ScreenshotComparator.Result.SizeMismatch
     assertEquals(8, result.expectedWidth)

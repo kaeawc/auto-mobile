@@ -154,6 +154,20 @@ describe("CriticalSectionCoordinator", () => {
     );
   });
 
+  test("timeout error reports arrived/expected count and the default 30000ms duration", async () => {
+    const lockName = "lock-timeout-body";
+    coordinator.registerExpectedDevices(lockName, 2);
+
+    // Only one of two devices arrives; use the default 30000ms barrier timeout so
+    // the documented message body (arrived count + duration + guidance) is pinned.
+    const promise = coordinator.enterCriticalSection(lockName, "device-1");
+    fakeTimer.advanceTime(30000);
+
+    await expect(promise).rejects.toThrow(
+      /Timeout waiting for critical section "lock-timeout-body"\. 1\/2 devices arrived after 30000ms\. Missing devices may have failed or not reached the critical section\./
+    );
+  });
+
   test("throws error if same device tries to enter twice before barrier passes", async () => {
     const lockName = "lock-5";
     coordinator.registerExpectedDevices(lockName, 2);

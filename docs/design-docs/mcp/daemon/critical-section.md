@@ -169,8 +169,25 @@ Error: Nested critical sections are not supported.
 Found criticalSection step inside critical section "outer-lock".
 ```
 
+A nested `barrier` step is rejected the same way (it would deadlock — the device
+holding the section's mutex would wait for peers that cannot enter):
+
+```yaml
+Error: Nested critical sections are not supported.
+Found barrier step inside critical section "outer-lock".
+```
+
+There is also a second, lock-level guard: if the *same* device arrives at the
+*same* lock again before the barrier has passed (e.g. re-entry via a wrapped
+call), the coordinator rejects it:
+
+```yaml
+Error: Device <deviceId> already arrived at barrier for lock "outer-lock".
+Nested critical sections with the same lock are not supported.
+```
+
 **Resolution**:
-- Remove nested critical sections
+- Remove nested critical sections (or `barrier` steps inside them)
 - Use different lock names for sequential synchronization points
 
 ### Step Execution Failure

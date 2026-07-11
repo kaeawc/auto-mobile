@@ -436,4 +436,41 @@ describe("criticalSection tool", () => {
     // Verify only first two steps executed
     expect(executionLog).toEqual(["step1", "failure"]);
   });
+
+  test("wraps a step failure with the documented device + step context", async () => {
+    const tool = ToolRegistry.getTool("criticalSection");
+    expect(tool).toBeDefined();
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "dev-wrap",
+      name: "Dev Wrap",
+    };
+
+    ToolRegistry.register("mockWrapOk", "ok", z.object({}), async () => ({
+      success: true,
+    }));
+    ToolRegistry.register("mockWrapBoom", "boom", z.object({}), async () => {
+      throw new Error("kaboom");
+    });
+
+    CriticalSectionCoordinator.getInstance().registerExpectedDevices("wrap-lock", 1);
+
+    const params = {
+      lock: "wrap-lock",
+      deviceCount: 1,
+      steps: [
+        { tool: "mockWrapOk", params: {} },
+        { tool: "mockWrapBoom", params: {} },
+      ],
+    };
+
+    // Both wrapper layers are documented verbatim: the outer "Critical section
+    // <lock> failed for device <id>" and the inner "Failed at step X/Y (<tool>)".
+    await expect(
+			tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+    ).rejects.toThrow(
+      /Critical section "wrap-lock" failed for device dev-wrap: Failed at step 2\/2 \(mockWrapBoom\): kaboom/
+    );
+  });
 });

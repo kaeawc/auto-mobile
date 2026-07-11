@@ -9,8 +9,11 @@ validate_xml() {
   fi
 }
 
-# Check for required XML tools
-if [[ $(! command -v xml &>/dev/null) && $(! command -v xmlstarlet &>/dev/null) ]]; then
+# Check for required XML tools.
+# Note: `$(! command -v xml &>/dev/null)` captures the command's *stdout*
+# (redirected to /dev/null → always empty), so the old `[[ "" && "" ]]` guard
+# was always false and never fired. Test the exit status directly instead.
+if ! command -v xml &>/dev/null && ! command -v xmlstarlet &>/dev/null; then
   echo "xmlstarlet missing, please install."
   if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "Try 'brew install xmlstarlet'"

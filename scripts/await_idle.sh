@@ -100,7 +100,11 @@ wait_for_rotation() {
         local rotation_output
         if rotation_output=$($ADB_CMD shell dumpsys window 2>/dev/null | grep -i "mRotation=" || true); then
             local current_rotation
-            if current_rotation=$(echo "$rotation_output" | sed -n 's/.*mRotation=\([0-9]\+\).*/\1/p'); then
+            # Use ERE (sed -E): the GNU BRE `\+` is a literal '+' on BSD/macOS
+            # sed, so `mRotation=0` never matched and wait_for_rotation always
+            # ran to timeout. This script targets macOS (gdate/bc), so it runs
+            # under BSD sed. (#3646)
+            if current_rotation=$(echo "$rotation_output" | sed -nE 's/.*mRotation=([0-9]+).*/\1/p'); then
                 if [[ -n "$current_rotation" ]]; then
                     log_info "Current rotation: $current_rotation, target: $target_rotation"
 

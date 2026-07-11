@@ -15,7 +15,7 @@ const parseResponse = (response: any): any =>
 
 describe("barrier tool", () => {
   beforeAll(() => {
-    if (!ToolRegistry.getTool("barrier")) {
+    if (!ToolRegistry.getToolForPlan("barrier")) {
       registerBarrierTools();
     }
   });
@@ -25,7 +25,7 @@ describe("barrier tool", () => {
   });
 
   test("tool is registered with correct schema", () => {
-    const tool = ToolRegistry.getTool("barrier");
+    const tool = ToolRegistry.getToolForPlan("barrier");
     expect(tool).toBeDefined();
     expect(tool?.name).toBe("barrier");
     expect(tool?.description).toContain("proceed concurrently");
@@ -33,7 +33,7 @@ describe("barrier tool", () => {
   });
 
   test("single device with deviceCount 1 passes the barrier", async () => {
-    const tool = ToolRegistry.getTool("barrier");
+    const tool = ToolRegistry.getToolForPlan("barrier");
     const response = await tool!.deviceAwareHandler!(
       makeDevice("device-1"),
       { lock: "solo", deviceCount: 1 },
@@ -48,7 +48,7 @@ describe("barrier tool", () => {
   });
 
   test("two devices synchronize and both pass concurrently", async () => {
-    const tool = ToolRegistry.getTool("barrier");
+    const tool = ToolRegistry.getToolForPlan("barrier");
 
     const results = await Promise.all([
       tool!.deviceAwareHandler!(
@@ -73,7 +73,7 @@ describe("barrier tool", () => {
   });
 
   test("rejects with an actionable error on barrier timeout", async () => {
-    const tool = ToolRegistry.getTool("barrier");
+    const tool = ToolRegistry.getToolForPlan("barrier");
     // deviceCount 2 but only one device arrives; short timeout so the test is fast.
     await expect(
       tool!.deviceAwareHandler!(

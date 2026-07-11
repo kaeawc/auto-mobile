@@ -887,4 +887,37 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
         let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
         XCTAssertFalse(encoded.isEmpty)
     }
+
+    // MARK: - typeOf NSNumber classification (#3628)
+
+    func testTypeOfDistinguishesBoolIntDoubleNSNumbers() {
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(NSNumber(value: true)), .bool)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(NSNumber(value: false)), .bool)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(NSNumber(value: 42)), .int)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(NSNumber(value: 3.0)), .double) // whole-number double
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(NSNumber(value: 3.5)), .double)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf("hello"), .string)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(Data([1, 2, 3])), .data)
+    }
+
+    /// Values round-tripped through a real UserDefaults suite are NSNumber-bridged;
+    /// the pre-fix `is Int`-first switch reported bool and whole-number double as
+    /// `.int` (issue #3628).
+    func testTypeOfClassifiesUserDefaultsBridgedValues() {
+        let suiteName = "dev.jasonpearson.automobile.tests.typeof-3628"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(true, forKey: "flag")
+        defaults.set(42, forKey: "count")
+        defaults.set(3.0, forKey: "whole")
+        defaults.set(3.5, forKey: "frac")
+        defaults.set("name", forKey: "label")
+
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "flag")!), .bool)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "count")!), .int)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "whole")!), .double)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "frac")!), .double)
+        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "label")!), .string)
+    }
 }

@@ -80,8 +80,20 @@ When either threshold is reached, the buffer drains into the broadcaster. The bu
 | Reason | Trigger |
 |--------|---------|
 | `DISABLED` | Event added while buffer is disabled |
-| `SHUTDOWN` | Event added after buffer shutdown (Android only) |
+| `SHUTDOWN` | Event dropped because the buffer was shut down (see note) |
 | `FLUSH_ERROR` | Delivery callback threw an exception |
+| `BUFFER_OVERFLOW` | Buffer at capacity when the event arrived |
+| `FILTERED` | Event removed by a filter/processor before delivery |
+| `DELIVERY_FAILED` | Delivery attempted but did not succeed |
+| `PROCESSOR_ERROR` | An event processor threw (Android only) |
+
+Android defines all seven reasons (`DropReason.kt`); iOS defines six — it has no
+`processorError` case (`DropCounter.swift`).
+
+**Note on `SHUTDOWN`:** the enum value exists on both platforms, but only Android
+*drops with* `SHUTDOWN` — its `SdkEventBuffer.add()` rejects post-shutdown events
+and records the drop. iOS `shutdown()` flushes instead of dropping, so the iOS
+`shutdown` case is defined but not emitted on that path.
 
 The counter provides `snapshot()` for diagnostics and `reset()` to clear counts. Android uses `ConcurrentHashMap<DropReason, AtomicLong>` for lock-free increments; iOS uses `NSLock` with a `[DropReason: Int]` dictionary.
 

@@ -115,12 +115,16 @@ printf '%s\n' "${files_to_process[@]}" > "$temp_file"
 echo -e "${YELLOW}Applying shfmt formatting...${NC}"
 
 if [[ -s "$temp_file" ]]; then
-  # Apply shfmt formatting and capture output
+  # Apply shfmt formatting and capture output + exit status.
   shfmt_output=$(xargs shfmt -i 2 -bn -ci -sr -w 2>&1 < "$temp_file")
+  shfmt_status=$?
 
-  # Check if the output contains actual errors
-  if echo "$shfmt_output" | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" > /dev/null 2>&1; then
-    errors="$shfmt_output"
+  # A non-zero shfmt exit (e.g. an unparseable file → "reached EOF without
+  # matching ...") is a failure even when the diagnostic lacks the keywords
+  # below. The old keyword-only check silently skipped such files and still
+  # git-added + reported success (#3643). Flag either signal.
+  if [[ $shfmt_status -ne 0 ]] || echo "$shfmt_output" | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" > /dev/null 2>&1; then
+    errors="${shfmt_output:-shfmt exited with status $shfmt_status}"
   fi
 fi
 

@@ -1,10 +1,12 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.reload.gradle.ComposeHotRun
 
 plugins {
   kotlin("jvm")
   alias(libs.plugins.kotlin.serialization)
   kotlin("plugin.compose")
   alias(libs.plugins.compose.multiplatform)
+  alias(libs.plugins.compose.hot.reload)
   alias(libs.plugins.metro)
 }
 
@@ -57,4 +59,11 @@ compose.desktop {
       windows { iconFile.set(project.file("src/main/resources/icons/app-icon.ico")) }
     }
   }
+}
+
+// Compose Hot Reload: `./gradlew :desktop-app:hotRun --autoReload` launches the desktop
+// dashboard with live UI reloading. Composables live in :desktop-core (an implementation
+// dependency), so edits there reload into the running window without a restart.
+tasks.withType<ComposeHotRun>().configureEach {
+  mainClass.set("dev.jasonpearson.automobile.desktop.MainKt")
 }

@@ -224,10 +224,16 @@ launch_and_collect_metrics() {
             break
         fi
 
-        # Get gfxinfo output
-        local gfx_output
-        gfx_output=$($ADB_CMD shell dumpsys gfxinfo "$PACKAGE_NAME" 2>&1)
-        local gfx_exit=$?
+        # Get gfxinfo output. Capture adb's exit status via an `if` so a
+        # non-zero result does not trip `set -e` and abort the whole run
+        # (this function is captured via result=$(...), and the retry/continue
+        # logic below depends on gfx_exit being reachable) — #3647.
+        local gfx_output gfx_exit
+        if gfx_output=$($ADB_CMD shell dumpsys gfxinfo "$PACKAGE_NAME" 2>&1); then
+            gfx_exit=0
+        else
+            gfx_exit=$?
+        fi
 
         if [[ $gfx_exit -ne 0 ]]; then
             log_debug "Poll $poll_count: gfxinfo failed (exit $gfx_exit): $gfx_output"

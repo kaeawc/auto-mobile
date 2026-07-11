@@ -201,6 +201,30 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertNil(result.hierarchy?.extras)
     }
 
+    /// The match-time neighborhood probe must handle tolerance applied to all four
+    /// edges at once (each within ±2), which the old per-node pre-expansion covered
+    /// via baked-in variants (issue #3634).
+    func testBoundsToleranceMatchOnAllFourEdges() {
+        let xcuiRoot = makeElement(
+            className: "UILabel",
+            bounds: ElementBounds(left: 10, top: 20, right: 100, bottom: 50)
+        )
+        // Each edge displaced by the full ±2 tolerance in mixed directions.
+        let sdkRoot = makeSdkNode(
+            className: "UILabel",
+            bounds: SdkBounds(left: 12, top: 18, right: 102, bottom: 48),
+            accessibilityTraits: ["staticText"],
+            backgroundColor: "#00FF00FF"
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        XCTAssertEqual(result.hierarchy?.extras?["sdk.backgroundColor"], "#00FF00FF")
+    }
+
     // MARK: - Class Name Mismatch (bounds-only fallback)
 
     func testClassNameMismatchMatchesByBounds() {

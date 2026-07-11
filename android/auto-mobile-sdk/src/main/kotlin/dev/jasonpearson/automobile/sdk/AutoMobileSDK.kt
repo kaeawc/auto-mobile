@@ -405,6 +405,8 @@ object AutoMobileSDK {
         AutoMobileOsEvents.shutdown(ctx)
         AutoMobileBroadcastInterceptor.shutdown(ctx)
         AutoMobileClickTracker.shutdown(ctx)
+        NetworkMockRuleStore.shutdown(ctx)
+        AutoMobileBiometrics.shutdown()
         sessionLifecycleObserver?.let {
           ProcessLifecycleOwner.get().lifecycle.removeObserver(it)
         }

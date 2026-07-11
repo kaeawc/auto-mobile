@@ -139,7 +139,9 @@ run **one daemon per user** (each gets its own `<uid>` paths automatically).
   one client wins the start, the rest `waitForReady`.
 - The daemon is spawned via the resolved entry script, falling back to
   `bunx -y @kaeawc/auto-mobile@<pinned-version>` (`resolveDaemonLaunchCommand`).
-  The version is **pinned**, not `@latest` (fixed in #2453), so parallel
+  The version is **pinned**, not `@latest` (see `resolveDaemonLaunchCommand` in
+  `src/daemon/manager.ts` — `@kaeawc/auto-mobile@<version>`; the comment there
+  notes `@latest` is not an installable npm tag, so `bunx` must pin), so parallel
   bunx-spawned starts resolve to the same package and the bun install cache is
   not raced across versions. The lock means at most one bunx spawn happens
   anyway. For fully deterministic prod, install the package globally / ship the

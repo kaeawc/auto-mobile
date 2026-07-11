@@ -71,7 +71,9 @@ describe("getTempDir", () => {
 });
 
 describe("ensureSecureTempDirSync", () => {
-  test("creates the directory with restrictive 0o700 permissions", () => {
+  // POSIX-only: Windows does not honor Unix permission bits, so mkdir's `mode`
+  // is ignored and `fs.statSync().mode` does not report 0o700 there.
+  test.skipIf(process.platform === "win32")("creates the directory with restrictive 0o700 permissions", () => {
     // The single-user isolation guarantee in the multi-agent filesystem contract
     // rests on the base dir being mode 0o700; pin it.
     const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "am-mode-test-"));

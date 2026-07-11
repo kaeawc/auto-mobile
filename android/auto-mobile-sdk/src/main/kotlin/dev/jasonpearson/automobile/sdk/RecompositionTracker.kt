@@ -11,6 +11,7 @@ import android.os.Looper
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,7 +19,18 @@ internal object RecompositionTracker {
   private const val WINDOW_MS = 1000L
   private const val BROADCAST_INTERVAL_MS = 1000L
 
+  // Upper bound on tracked entries. Apps may key tracking per instance (e.g.
+  // autoMobileRecomposition("row-$itemId") over a long/paginated feed), which
+  // would otherwise grow `entries` without bound for the life of the process
+  // (issue #3708, the twin of iOS #3624). When exceeded we evict the
+  // least-recently-touched entries in a batch to amortize the eviction scan.
+  private const val MAX_ENTRIES = 512
+  private const val EVICTION_BATCH = 64
+
   private val entries = ConcurrentHashMap<String, Entry>()
+
+  // Monotonic tick stamped on every record; used as the LRU key for eviction.
+  private val touchSequence = AtomicLong(0)
   private val enabled = AtomicBoolean(false)
   private val handler = Handler(Looper.getMainLooper())
   private var context: Context? = null
@@ -66,6 +78,7 @@ internal object RecompositionTracker {
       rememberedCount,
       likelyCause,
     )
+    enforceEntryCap()
   }
 
   fun recordDuration(id: String, durationMs: Double) {
@@ -74,6 +87,23 @@ internal object RecompositionTracker {
     }
     val entry = entries.computeIfAbsent(id) { Entry(id) }
     entry.recordDuration(durationMs)
+    enforceEntryCap()
+  }
+
+  /**
+   * Evict least-recently-touched entries once the cap is exceeded, down to a low-water mark so the
+   * O(n) scan runs at most once per [EVICTION_BATCH] inserts (issue #3708).
+   */
+  private fun enforceEntryCap() {
+    if (entries.size <= MAX_ENTRIES) return
+    synchronized(entries) {
+      if (entries.size <= MAX_ENTRIES) return
+      val removeCount = entries.size - (MAX_ENTRIES - EVICTION_BATCH)
+      entries.entries
+        .sortedBy { it.value.lastTouch }
+        .take(removeCount)
+        .forEach { entries.remove(it.key) }
+    }
   }
 
   internal fun isEnabled(): Boolean = enabled.get()
@@ -162,6 +192,9 @@ internal object RecompositionTracker {
     }
 
   private class Entry(val id: String) {
+    /** LRU tick of the last record; read during eviction without the entry lock. */
+    @Volatile var lastTouch: Long = 0
+
     private val rollingAverage = RollingAverage(WINDOW_MS)
     private var totalCount = 0
     private var skipCount = 0
@@ -186,6 +219,7 @@ internal object RecompositionTracker {
       likelyCause: String?,
     ) {
       totalCount += 1
+      lastTouch = touchSequence.incrementAndGet()
       rollingAverage.record()
       if (composableName != null) this.composableName = composableName
       if (resourceId != null) this.resourceId = resourceId
@@ -199,6 +233,7 @@ internal object RecompositionTracker {
     @Synchronized
     fun recordDuration(durationMs: Double) {
       if (durationMs <= 0) return
+      lastTouch = touchSequence.incrementAndGet()
       durationTotalMs += durationMs
       durationSamples += 1
     }

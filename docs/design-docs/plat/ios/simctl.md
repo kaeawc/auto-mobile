@@ -40,7 +40,7 @@ For `launchApp` specifically:
 For `terminateApp` specifically:
 
 - **Simulator** — `xcrun simctl terminate <udid> <bundle-id>`; a "found nothing to terminate" error is treated as `wasRunning: false` rather than a failure.
-- **Physical device** — `devicectl` has no terminate-by-bundle-id verb, so termination is a **two-step** operation (`DeviceAppManager.terminateApp`):
+- **Physical device** — `devicectl` has no terminate-by-bundle-id verb, so termination is a **three-step** operation (`DeviceAppManager.terminateApp`): resolve the bundle path, find the running PID, then kill it —
   1. Resolve the on-device bundle path via `xcrun devicectl device info apps --device <udid> --bundle-id <id> --json-output <file> --quiet`. No matching bundle → `{ wasInstalled: false, wasRunning: false }` (no terminate issued).
   2. Enumerate running processes via `xcrun devicectl device info processes --device <udid> --json-output <file> --quiet` and match the process whose executable path lives **inside** the resolved bundle directory (the app's own main binary, a direct child of `<bundle>.app/` — nested `PlugIns/*.appex/*` extensions are excluded). No match → `{ wasInstalled: true, wasRunning: false }`.
   3. Force-kill the matched PID with the dedicated verb: `xcrun devicectl device process terminate --device <udid> --pid <pid> --kill --quiet` → `{ wasInstalled: true, wasRunning: true }`. `--kill` sends SIGKILL (uncatchable), matching Android `am force-stop` semantics; the bare verb would send a catchable SIGTERM.
@@ -326,7 +326,10 @@ fresh-process readback.
 
 1. **Binary toggle** — the only lever the simulator exposes is the
    `com.apple.donotdisturb.enabled` Darwin notification, driven via
-   `xcrun simctl spawn <udid> notifyutil`:
+   `xcrun simctl spawn <udid> notifyutil`. All four flags are passed in a
+   **single combined invocation** — `notifyutil -1 <key> -s <key> <0|1> -g <key> -p <key>`
+   (`iosNotifyutilRegisteredSetReadPostCommand` in `src/utils/ios-cmdline-tools/notifyutil.ts`),
+   not four separate shell calls:
    - `notifyutil -1 com.apple.donotdisturb.enabled ...` creates a temporary
      registration so the state variable exists even if no other process already
      owns the key.

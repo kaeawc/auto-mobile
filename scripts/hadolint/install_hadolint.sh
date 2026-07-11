@@ -109,6 +109,14 @@ install_manual() {
             ;;
     esac
 
+    # hadolint publishes no Darwin-arm64 asset (v2.12.0 ships only Darwin-x86_64);
+    # Apple Silicon runs the x86_64 build under Rosetta 2. Without this remap the
+    # download URL 404s on Apple Silicon. (#3641)
+    if [[ "$os_name" == "Darwin" && "$arch_name" == "arm64" ]]; then
+        echo -e "${YELLOW}No native Darwin-arm64 hadolint build; using x86_64 (Rosetta 2).${NC}"
+        arch_name="x86_64"
+    fi
+
     # Create installation directory
     install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
@@ -126,7 +134,9 @@ install_manual() {
 
     # Download the binary
     if command_exists curl; then
-        if ! curl -sL -o "$temp_dir/hadolint" "$download_url"; then
+        # -f/--fail: treat HTTP errors (e.g. 404) as failures instead of
+        # silently saving the error page as the "binary". (#3641)
+        if ! curl -fsSL -o "$temp_dir/hadolint" "$download_url"; then
             echo -e "${RED}Failed to download hadolint binary${NC}"
             return 1
         fi

@@ -51,17 +51,29 @@
       }
 
       function renderStreams(streams) {
-        listEl.innerHTML = "";
+        // Build with text nodes only: streamId (and the API fields) are
+        // server-stored, publisher-supplied values and must never be injected as
+        // HTML, or a crafted stream name could execute script in the viewer.
+        listEl.replaceChildren();
         if (!streams.length) {
-          listEl.innerHTML = "<em>No active streams.</em>";
+          const empty = document.createElement("em");
+          empty.textContent = "No active streams.";
+          listEl.appendChild(empty);
           return;
         }
         for (const s of streams) {
           const el = document.createElement("div");
           el.className = "stream" + (s.streamId === currentStreamId ? " active" : "");
-          el.innerHTML =
-            "<span>" + s.streamId + "</span> <span class='badge'>" + s.state + "</span>" +
-            "<small>" + s.subscriberCount + " viewer(s) · " + s.framesForwarded + " frames</small>";
+
+          const name = document.createElement("span");
+          name.textContent = s.streamId;
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = s.state;
+          const meta = document.createElement("small");
+          meta.textContent = `${s.subscriberCount} viewer(s) · ${s.framesForwarded} frames`;
+
+          el.append(name, document.createTextNode(" "), badge, meta);
           el.onclick = () => watch(s.streamId);
           listEl.appendChild(el);
         }

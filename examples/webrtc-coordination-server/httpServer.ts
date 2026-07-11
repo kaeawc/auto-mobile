@@ -101,6 +101,12 @@ export class HttpCoordinationServer {
     }
     const whipDeleteMatch = /^\/whip\/([^/]+)$/.exec(path);
     if (method === "DELETE" && whipDeleteMatch) {
+      // Terminating an ingest is as privileged as creating one — gate on the
+      // same token so a guessed stream id can't kill a live stream.
+      if (!this.authorizeIngest(req)) {
+        res.writeHead(401).end("Unauthorized");
+        return;
+      }
       await this.coordinator.stopIngest(decodeURIComponent(whipDeleteMatch[1]));
       res.writeHead(200).end();
       return;

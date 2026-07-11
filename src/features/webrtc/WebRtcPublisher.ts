@@ -35,10 +35,16 @@ export interface WebRtcPublisherDeps {
   timer?: Timer;
   /**
    * Called at the start of each (re)establish, before the offer is built. The
-   * manager uses this to (re)start the capture source so a fresh SPS/PPS + IDR
-   * follows a reconnect and the receiver can decode immediately.
+   * manager uses this to STOP any existing capture source so the next session
+   * starts clean.
    */
   onBeforeEstablish?: () => Promise<void> | void;
+  /**
+   * Called once the peer connection reaches `connected`. The manager uses this
+   * to START the capture source, so the first SPS/PPS + IDR is emitted over a
+   * live connection instead of being dropped before DTLS is ready.
+   */
+  onConnected?: () => Promise<void> | void;
   onStateChange?: (state: ReconnectState) => void;
 }
 
@@ -67,6 +73,7 @@ export class WebRtcPublisher {
   private readonly whip: WhipClient;
   private readonly timer: Timer;
   private readonly onBeforeEstablish?: () => Promise<void> | void;
+  private readonly onConnected?: () => Promise<void> | void;
   private readonly controller: ReconnectController;
 
   private pc: RTCPeerConnection | null = null;
@@ -75,11 +82,13 @@ export class WebRtcPublisher {
   private state: ReconnectState = "idle";
   private closed = false;
   private establishing = false;
+  private connectedFired = false;
 
   constructor(config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps = {}) {
     this.config = config;
     this.timer = deps.timer ?? defaultTimer;
     this.onBeforeEstablish = deps.onBeforeEstablish;
+    this.onConnected = deps.onConnected;
     this.createPeerConnection =
       deps.createPeerConnection ??
       (iceServers =>
@@ -89,7 +98,10 @@ export class WebRtcPublisher {
         }));
     const createWhip = deps.createWhipClient ?? (options => new WhipClient(options));
     this.whip = createWhip({
-      endpoint: config.whipEndpoint,
+      // Pass the stream id to the ingest endpoint so a coordination server that
+      // keys streams by id (like the bundled reference server, which reads
+      // ?streamId=) uses the requested id rather than minting a random one.
+      endpoint: withStreamId(config.whipEndpoint, config.streamId),
       bearerToken: config.bearerToken,
     });
     this.controller = new ReconnectController({
@@ -115,6 +127,20 @@ export class WebRtcPublisher {
   /** Feed a chunk of the raw H.264 (Annex-B) elementary stream. */
   writeH264Chunk(chunk: Buffer): void {
     this.writer?.writeChunk(chunk);
+  }
+
+  /**
+   * Report that the capture source failed. Unlike a WebRTC connection drop this
+   * does not change the peer `connectionState`, so without this hook a dead
+   * source would leave the viewer on a frozen frame with no recovery. Triggers
+   * the reconnect loop, which tears down and re-establishes (restarting capture).
+   */
+  notifySourceFailed(): void {
+    if (this.closed) {
+      return;
+    }
+    logger.warn(`[WebRTC] stream ${this.config.streamId} capture source failed; reconnecting`);
+    this.controller.notifyConnectionLost();
   }
 
   getState(): ReconnectState {
@@ -146,7 +172,9 @@ export class WebRtcPublisher {
       throw new Error("Publisher closed.");
     }
     this.establishing = true;
-    // Discard any prior session before building a new one.
+    this.connectedFired = false;
+    // Discard any prior session (and stop the capture source) before building a
+    // new one.
     await this.teardownActiveSession();
 
     await this.onBeforeEstablish?.();
@@ -178,6 +206,11 @@ export class WebRtcPublisher {
 
     this.establishing = false;
     this.watchConnectionState(pc);
+    // The connection may already have completed while we were awaiting the WHIP
+    // round-trip; fire the connected hook now if so (the event won't re-fire).
+    if (pc.connectionState === "connected") {
+      this.fireConnected(pc);
+    }
     logger.info(
       `[WebRTC] stream ${this.config.streamId} published to ${this.config.whipEndpoint}` +
         (session.resourceUrl ? ` (resource ${session.resourceUrl})` : "")
@@ -186,13 +219,31 @@ export class WebRtcPublisher {
 
   private watchConnectionState(pc: RTCPeerConnection): void {
     pc.connectionStateChange.subscribe(state => {
-      if (this.closed || this.pc !== pc || this.establishing) {
+      if (this.closed || this.pc !== pc) {
+        return;
+      }
+      if (state === "connected") {
+        this.fireConnected(pc);
+        return;
+      }
+      if (this.establishing) {
         return;
       }
       if (state === "failed" || state === "disconnected") {
         logger.warn(`[WebRTC] stream ${this.config.streamId} connection ${state}; reconnecting`);
         this.controller.notifyConnectionLost();
       }
+    });
+  }
+
+  /** Start capture (once per session) now that media can actually flow. */
+  private fireConnected(pc: RTCPeerConnection): void {
+    if (this.connectedFired || this.pc !== pc || this.closed) {
+      return;
+    }
+    this.connectedFired = true;
+    void Promise.resolve(this.onConnected?.()).catch(error => {
+      logger.warn(`[WebRTC] onConnected hook failed for ${this.config.streamId}: ${error}`);
     });
   }
 
@@ -233,5 +284,22 @@ export class WebRtcPublisher {
         logger.debug(`[WebRTC] peer close failed during teardown: ${error}`);
       }
     }
+  }
+}
+
+/**
+ * Append a `streamId` query parameter to a WHIP endpoint. Servers that key
+ * streams by id (the bundled reference server) pick it up; standard WHIP servers
+ * that address streams by path ignore the extra query parameter.
+ */
+function withStreamId(endpoint: string, streamId: string): string {
+  try {
+    const url = new URL(endpoint);
+    if (!url.searchParams.has("streamId")) {
+      url.searchParams.set("streamId", streamId);
+    }
+    return url.toString();
+  } catch {
+    return endpoint;
   }
 }

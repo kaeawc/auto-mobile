@@ -23,21 +23,32 @@ const ENDPOINT = "https://coord.example.com/whip";
 class FakePublisher {
   started = false;
   stopped = false;
+  sourceFailedCount = 0;
   onBeforeEstablish?: () => Promise<void> | void;
+  onConnected?: () => Promise<void> | void;
   constructor(
     public readonly config: { streamId: string; whipEndpoint: string },
-    deps: { onBeforeEstablish?: () => Promise<void> | void }
+    deps: {
+      onBeforeEstablish?: () => Promise<void> | void;
+      onConnected?: () => Promise<void> | void;
+    }
   ) {
     this.onBeforeEstablish = deps.onBeforeEstablish;
+    this.onConnected = deps.onConnected;
   }
   async start(): Promise<void> {
+    // Simulate establish: stop any prior source, connect, then start capture.
     await this.onBeforeEstablish?.();
+    await this.onConnected?.();
     this.started = true;
   }
   async stop(): Promise<void> {
     this.stopped = true;
   }
   writeH264Chunk(): void {}
+  notifySourceFailed(): void {
+    this.sourceFailedCount++;
+  }
   getState() {
     return this.stopped ? "stopped" : this.started ? "connected" : "idle";
   }

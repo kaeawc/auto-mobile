@@ -67,24 +67,30 @@ function activeStreamForDevice(deviceId: string): WebRtcStreamRecord | undefined
   return undefined;
 }
 
-/**
- * (Re)start the capture source for a stream, routing its H.264 output into the
- * publisher. Called before each publish attempt so that a reconnect is followed
- * by a fresh SPS/PPS + keyframe the receiver can decode immediately.
- */
-async function restartSource(record: WebRtcStreamRecord): Promise<void> {
+/** Stop and clear the capture source for a stream (before each (re)establish). */
+async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   if (record.source) {
     await record.source.stop().catch(error => {
-      logger.debug(`[WebRtcStream] source stop during restart failed: ${error}`);
+      logger.debug(`[WebRtcStream] source stop failed: ${error}`);
     });
     record.source = null;
   }
+}
 
+/**
+ * Start the capture source once the peer connection is live, routing its H.264
+ * output into the publisher. Starting only after `connected` ensures the first
+ * SPS/PPS + keyframe is sent over an established connection rather than dropped.
+ * A capture failure is surfaced to the publisher so the reconnect loop runs
+ * instead of leaving the viewer on a frozen frame.
+ */
+async function startSource(record: WebRtcStreamRecord): Promise<void> {
+  await stopSource(record);
   const source = dependencies.createSource({
     device: record.device,
     onData: chunk => record.publisher.writeH264Chunk(chunk),
-    onError: error => {
-      logger.warn(`[WebRtcStream] capture source error for ${record.streamId}: ${error.message}`);
+    onError: () => {
+      record.publisher.notifySourceFailed();
     },
     bitrateBps: record.bitrateBps,
     size: record.size,
@@ -136,7 +142,8 @@ export async function startWebRtcStream(
       bitrateBps: record.bitrateBps,
     },
     {
-      onBeforeEstablish: () => restartSource(record),
+      onBeforeEstablish: () => stopSource(record),
+      onConnected: () => startSource(record),
     }
   );
   record.publisher = publisher;

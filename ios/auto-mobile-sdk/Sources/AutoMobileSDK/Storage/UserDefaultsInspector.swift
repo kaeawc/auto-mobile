@@ -429,7 +429,7 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
     func getValues(suiteName: String?) -> [KeyValuePair] {
         guard let defaults = resolveDefaults(suiteName: suiteName) else { return [] }
         return defaults.dictionaryRepresentation().map { key, value in
-            let type = typeOf(value)
+            let type = Self.typeOf(value)
             return KeyValuePair(key: key, value: Self.encode(value, as: type), type: type)
         }.sorted { $0.key < $1.key }
     }
@@ -437,7 +437,7 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
     func getValue(suiteName: String?, key: String) -> KeyValuePair? {
         guard let defaults = resolveDefaults(suiteName: suiteName) else { return nil }
         guard let value = defaults.object(forKey: key) else { return nil }
-        let type = typeOf(value)
+        let type = Self.typeOf(value)
         return KeyValuePair(key: key, value: Self.encode(value, as: type), type: type)
     }
 
@@ -513,12 +513,22 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
         }
     }
 
-    private func typeOf(_ value: Any) -> KeyValueType {
+    /// Classify a UserDefaults value.
+    ///
+    /// Values from `UserDefaults` are NSNumber-bridged, so a plain `is Int` check
+    /// (ordered before `is Bool`/`is Double`) misclassifies `Bool` (backed by
+    /// `__NSCFBoolean`) and whole-number `Double` (e.g. `3.0`) as `.int`
+    /// (issue #3628). Inspect the NSNumber's underlying representation instead:
+    /// detect CFBoolean explicitly, then use `CFNumberIsFloatType` to split
+    /// floating-point from integer.
+    static func typeOf(_ value: Any) -> KeyValueType {
         switch value {
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool
+            }
+            return CFNumberIsFloatType(number) ? .double : .int
         case is String: return .string
-        case is Int: return .int
-        case is Double, is Float: return .double
-        case is Bool: return .bool
         case is Data: return .data
         case is Date: return .date
         case is [Any]: return .array

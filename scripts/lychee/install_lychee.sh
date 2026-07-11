@@ -181,7 +181,7 @@ install_manual() {
 
     # Download the archive
     if command_exists curl; then
-        if ! curl -L -o "$temp_dir/$binary_name" "$download_url"; then
+        if ! curl -fL -o "$temp_dir/$binary_name" "$download_url"; then
             echo -e "${RED}Failed to download lychee binary${NC}"
             return 1
         fi

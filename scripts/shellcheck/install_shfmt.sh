@@ -105,7 +105,8 @@ install_binary() {
   fi
 
   if command_exists curl; then
-    curl -L -o "$target_file" "$download_url"
+    # -f: treat an HTTP error (e.g. 404) as a failure, not a saved error page.
+    curl -fL -o "$target_file" "$download_url"
   elif command_exists wget; then
     wget -O "$target_file" "$download_url"
   else

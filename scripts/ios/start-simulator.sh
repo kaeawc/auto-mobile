@@ -160,9 +160,34 @@ xcrun simctl boot "${UDID}"
 
 echo "Waiting for boot to complete (timeout: ${TIMEOUT_SECS}s)..." >&2
 
+# Run a command with a wall-clock timeout. Prefer GNU coreutils `timeout`,
+# then `gtimeout` (Homebrew coreutils on macOS); fall back to a pure-bash
+# implementation because stock macOS ships neither — without this, `timeout`
+# resolved to 127 (command not found) and the boot was falsely reported as
+# failed even when the simulator booted fine (#3644).
+run_with_timeout() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${secs}" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "${secs}" "$@"
+  else
+    "$@" &
+    local cmd_pid=$!
+    ( sleep "${secs}"; kill -0 "${cmd_pid}" 2>/dev/null && kill "${cmd_pid}" 2>/dev/null ) &
+    local watcher_pid=$!
+    local status=0
+    wait "${cmd_pid}" 2>/dev/null || status=$?
+    kill "${watcher_pid}" 2>/dev/null || true
+    wait "${watcher_pid}" 2>/dev/null || true
+    return "${status}"
+  fi
+}
+
 # bootstatus -b blocks until the device is fully booted.
 # It exits 0 on success, non-zero on failure/timeout.
-if ! timeout "${TIMEOUT_SECS}" xcrun simctl bootstatus "${UDID}" -b >&2; then
+if ! run_with_timeout "${TIMEOUT_SECS}" xcrun simctl bootstatus "${UDID}" -b >&2; then
   echo "error: simulator boot did not complete within ${TIMEOUT_SECS}s" >&2
   echo "Current state:" >&2
   xcrun simctl list devices --json | jq --arg udid "${UDID}" '

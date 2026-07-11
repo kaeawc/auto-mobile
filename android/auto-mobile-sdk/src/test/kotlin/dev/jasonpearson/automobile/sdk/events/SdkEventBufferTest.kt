@@ -2,11 +2,13 @@ package dev.jasonpearson.automobile.sdk.events
 
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
+import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import org.junit.Test
 
@@ -382,12 +384,25 @@ class SdkEventBufferTest {
     assertEquals(1L, snapshot[DropReason.BUFFER_OVERFLOW])
   }
 
-  // ================= Throwing persistence (#3605) =================
+  // ============ Delivery-failure persistence + churn (#3605, #3710) =========
 
-  private class ThrowingPersistence(val shouldThrow: java.util.concurrent.atomic.AtomicBoolean) :
-    dev.jasonpearson.automobile.sdk.persistence.EventPersistence {
+  /** Always throws from persist() — persist is best-effort on the failure path. */
+  private class ThrowingPersistence : EventPersistence {
+    override fun persist(events: List<SdkEvent>): String? = throw RuntimeException("boom")
+
+    override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
+
+    override fun removeBatch(batchId: String) {}
+
+    override fun cleanup(maxAgeDays: Int) {}
+  }
+
+  /** Counts persist() calls so we can assert the happy path never writes to disk. */
+  private class CountingPersistence : EventPersistence {
+    val persistCount = AtomicInteger(0)
+
     override fun persist(events: List<SdkEvent>): String? {
-      if (shouldThrow.get()) throw RuntimeException("boom")
+      persistCount.incrementAndGet()
       return "batch-id"
     }
 
@@ -399,48 +414,68 @@ class SdkEventBufferTest {
   }
 
   /**
-   * A throwing custom EventPersistence.persist() must not propagate out of flush() — it runs inside
-   * the scheduleAtFixedRate task, and an uncaught exception would cancel all future periodic
-   * flushes (#3605).
+   * When delivery fails AND the best-effort persistence.persist() also throws, neither must escape
+   * flush() — it runs inside scheduleAtFixedRate and an uncaught exception would cancel all future
+   * periodic flushes (#3605).
    */
   @Test
-  fun `flush does not propagate exception from throwing persistence`() {
-    val flushed = CopyOnWriteArrayList<List<SdkEvent>>()
-    val persistence = ThrowingPersistence(java.util.concurrent.atomic.AtomicBoolean(true))
-    val buffer =
-      SdkEventBuffer(
-        maxBufferSize = 1_000, // only flush() triggers delivery, never capacity
-        flushIntervalMs = 60_000,
-        onFlush = { flushed.add(it) },
-        persistence = persistence,
-      )
-
-    buffer.add(makeEvent(1))
-    buffer.flush() // pre-fix: throws out of flush() (and would cancel the periodic task)
-
-    assertEquals(0, flushed.size) // batch dropped on persist failure, not delivered
-  }
-
-  @Test
-  fun `buffer keeps delivering after a persist failure`() {
-    val flushed = CopyOnWriteArrayList<List<SdkEvent>>()
-    val shouldThrow = java.util.concurrent.atomic.AtomicBoolean(true)
+  fun `throwing persistence on a failed delivery does not propagate`() {
+    var deliveries = 0
     val buffer =
       SdkEventBuffer(
         maxBufferSize = 1_000,
         flushIntervalMs = 60_000,
-        onFlush = { flushed.add(it) },
-        persistence = ThrowingPersistence(shouldThrow),
+        onFlush = {
+          deliveries++
+          if (deliveries == 1) throw RuntimeException("delivery failed")
+        },
+        persistence = ThrowingPersistence(),
       )
 
     buffer.add(makeEvent(1))
-    buffer.flush() // persist throws, contained
-    assertEquals(0, flushed.size)
+    buffer.flush() // delivery throws -> best-effort persist throws -> both contained
 
-    shouldThrow.set(false)
+    // The buffer still works afterward (the loop was not broken).
     buffer.add(makeEvent(2))
-    buffer.flush() // persist succeeds, delivers
-    assertEquals(1, flushed.size)
-    assertEquals(2L, flushed[0][0].timestamp)
+    buffer.flush()
+    assertEquals(2, deliveries)
+  }
+
+  /**
+   * A successful delivery must NOT persist — avoids a write-then-immediate-delete churn (#3710).
+   */
+  @Test
+  fun `successful delivery does not persist`() {
+    val persistence = CountingPersistence()
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 1_000,
+        flushIntervalMs = 60_000,
+        onFlush = {}, // succeeds
+        persistence = persistence,
+      )
+
+    buffer.add(makeEvent(1))
+    buffer.flush()
+
+    assertEquals(0, persistence.persistCount.get())
+  }
+
+  /** A failed delivery persists the batch for next-launch replay (#3710). */
+  @Test
+  fun `failed delivery persists for retry`() {
+    val persistence = CountingPersistence()
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 1_000,
+        flushIntervalMs = 60_000,
+        onFlush = { throw RuntimeException("delivery failed") },
+        persistence = persistence,
+      )
+
+    buffer.add(makeEvent(1))
+    buffer.flush()
+
+    assertEquals(1, persistence.persistCount.get())
   }
 }

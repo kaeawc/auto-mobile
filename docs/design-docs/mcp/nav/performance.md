@@ -12,18 +12,22 @@
 
 ---
 
-### Success Rates by Scenario
+### Expected Reliability by Scenario
 
-| Scenario | Strategy | Success Rate | Notes |
-|----------|----------|--------------|-------|
-| SDK app, no keyboard | Navigation ID | **100%** | Perfect identifier |
-| SDK app, with keyboard | Cached Nav ID | **100%** | Keyboard occlusion handled |
-| Scrolling content | Shallow Scrollable | **100%** | Container stays stable |
-| Tab navigation | Shallow Scrollable | **100%** | Selected state preserved |
-| Non-SDK app | Shallow Scrollable | **75-85%** | Depends on hierarchy distinctiveness |
+These are the strategy's *design expectations*, not figures from a committed
+benchmark (no such dataset exists in the repo — see the note in
+[Fingerprinting](fingerprinting.md#design-foundation)):
 
-#### Overall Performance
+| Scenario | Strategy | Expected reliability | Notes |
+|----------|----------|----------------------|-------|
+| SDK app, no keyboard | Navigation ID | High | Explicit navigation identifier |
+| SDK app, with keyboard | Cached Nav ID | High | Keyboard occlusion handled via cache |
+| Scrolling content | Shallow Scrollable | High | Container metadata stays stable |
+| Tab navigation | Shallow Scrollable | High | Selected state preserved |
+| Non-SDK app | Shallow Scrollable | Moderate | Depends on hierarchy distinctiveness |
 
-- **Non-keyboard scenarios**: 100% success
-- **Keyboard scenarios**: Depends on cache availability
-- **No false positives**: Collision prevention through selected state
+#### Overall Design Expectations
+
+- **Non-keyboard scenarios**: high reliability by design (explicit or structural IDs)
+- **Keyboard scenarios**: depends on cache availability
+- **Collision avoidance**: selected-state disambiguation (unit-tested)

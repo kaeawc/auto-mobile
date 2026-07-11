@@ -202,4 +202,29 @@ final class WebSocketServerTests: XCTestCase {
         XCTAssertEqual(registry.count, 0)
         XCTAssertTrue(registry.values().isEmpty)
     }
+
+    // MARK: - WebSocket frame length bounds (#3626)
+
+    func testFrameReadLengthNormalUnmasked() {
+        XCTAssertEqual(WebSocketConnection.frameReadLength(payloadLength: 10, isMasked: false), 10)
+    }
+
+    func testFrameReadLengthAddsMaskBytes() {
+        XCTAssertEqual(WebSocketConnection.frameReadLength(payloadLength: 10, isMasked: true), 14)
+    }
+
+    func testFrameReadLengthAtMaxIsAccepted() {
+        let max = WebSocketConnection.maxFramePayloadLength
+        XCTAssertEqual(WebSocketConnection.frameReadLength(payloadLength: max, isMasked: false), Int(max))
+    }
+
+    /// A frame declaring a payload beyond the cap — including one > Int.max that
+    /// would trap `Int(length)` in the pre-fix code — is rejected (nil), so the
+    /// caller closes the connection instead of crashing the runner (#3626).
+    func testFrameReadLengthRejectsOversizedAndOverflowing() {
+        let overCap = WebSocketConnection.maxFramePayloadLength + 1
+        XCTAssertNil(WebSocketConnection.frameReadLength(payloadLength: overCap, isMasked: false))
+        XCTAssertNil(WebSocketConnection.frameReadLength(payloadLength: UInt64(Int.max) + 1, isMasked: false))
+        XCTAssertNil(WebSocketConnection.frameReadLength(payloadLength: .max, isMasked: true))
+    }
 }

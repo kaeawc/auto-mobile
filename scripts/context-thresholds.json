@@ -1,13 +1,13 @@
 {
   "version": "1.0.0",
   "metadata": {
-    "generatedAt": "2026-01-13",
+    "generatedAt": "2026-07-11",
     "description": "MCP context usage thresholds with manual headroom for resource/template growth",
     "baseline": {
-      "tools": 10382,
-      "resources": 431,
-      "resourceTemplates": 1412,
-      "total": 12225
+      "tools": 14910,
+      "resources": 440,
+      "resourceTemplates": 1885,
+      "total": 17235
     },
     "buffer": "custom"
   },

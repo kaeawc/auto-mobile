@@ -101,7 +101,7 @@ Invalid files: 0
 ```text
 ✗ test/resources/test-plans/my-plan.yaml
   root: Missing required property 'name'
-  steps[0].tool: Must be one of: observe, tapOn, swipeOn, launchApp, ...
+  steps[0]: Missing required property 'tool'
   steps[2]: Unknown property 'invalidField'. This might be a legacy field - check the migration guide.
 
 ❌ Validation failed - see errors above
@@ -111,11 +111,14 @@ Invalid files: 0
 
 YAML validation runs automatically in GitHub Actions on every pull request:
 
-- Job name: **Validate YAML Test Plans**
-- Workflow: `.github/workflows/pull_request.yml`
-- Runs alongside other validation steps (XML, shell scripts, MkDocs navigation)
+- Job: **Fast Validation** in `.github/workflows/pull_request.yml`, which runs
+  `scripts/all_fast_validate_checks.sh --only yaml,...`.
+- The `yaml` check invokes `bun scripts/validate-yaml.ts` ("Validate test plan
+  YAML files") alongside the other fast checks (XML, shell scripts, MkDocs
+  navigation) in the same aggregator.
+- Run it locally the same way with `bun run validate:yaml`.
 
-If validation fails, the PR check will fail and block merging.
+If validation fails, the Fast Validation check fails and blocks merging.
 
 ## Test Plan Schema
 
@@ -189,24 +192,18 @@ steps:
           testTag: welcome_message
 ```
 
-### Supported Tools
+### Tool names and per-tool constraints
 
-The schema validates the following tool names:
+The schema does **not** restrict which tool names are allowed: `tool` is any
+non-empty string (`{ "type": "string", "minLength": 1 }`) and steps use
+`additionalProperties: true`, so an unknown or misspelled tool name **passes**
+schema validation. It is caught later at execution time when the tool is not
+found in the registry.
 
-- `observe`
-- `tapOn`
-- `swipeOn`
-- `launchApp`
-- `terminateApp`
-- `installApp`
-- `inputText`
-- `clearText`
-- `pressButton`
-- `highlight`
-- `auditAccessibility`
-- `openLink`
-- `postNotification`
-- `criticalSection`
+What the schema *does* enforce is tool-specific **parameter** shapes via
+`if`/`then` blocks keyed on `tool` (e.g. `dragAndDrop`, `highlight`). Adding a
+new tool does not require a schema change unless it needs such a parameter
+constraint.
 
 ### Parameter Formats
 
@@ -385,8 +382,8 @@ Validation is automatic when using the `executePlan` MCP tool. If a plan fails v
 
 ```text
 Plan YAML validation failed:
-steps[0].tool: Must be one of: observe, tapOn, swipeOn, ... (line 5)
-steps[2]: Missing required property 'tool' (line 12)
+steps[0]: Missing required property 'tool' (line 5)
+steps[2].params: dragAndDrop requires 'startX', 'startY', 'endX', 'endY' (line 12)
 
 The plan does not conform to the AutoMobile test plan schema.
 Check the schema at schemas/test-plan.schema.json for details.
@@ -403,17 +400,16 @@ steps[0]: Unknown property 'auditType'. This might be a legacy field - check the
 
 This means the property should be inside the `params` object or is a tool-specific parameter. Since `additionalProperties: true` is set for steps, this shouldn't fail validation, but indicates the field might be better placed in `params`.
 
-### "Must be one of" tool name errors
+### Unknown tool names
 
-If you see:
-```text
-steps[0].tool: Must be one of: observe, tapOn, swipeOn, ...
-```
-
-The tool name is not recognized. Check:
+Note that the schema does **not** reject unknown tool names — any non-empty
+`tool` string passes validation (see [Tool names and per-tool
+constraints](#tool-names-and-per-tool-constraints)). A misspelled or
+nonexistent tool therefore surfaces later, at execution time, as a
+"tool not found in registry" error rather than a schema error. If a plan runs
+but a step fails with a registry error, check:
 1. Is the tool name spelled correctly?
-2. Is it a custom/legacy tool that needs to be added to the schema?
-3. Has the tool been deprecated or renamed?
+2. Has the tool been deprecated or renamed?
 
 ### YAML parsing errors
 

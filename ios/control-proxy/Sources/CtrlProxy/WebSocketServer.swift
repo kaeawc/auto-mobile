@@ -36,6 +36,59 @@ protocol WebSocketResponding: AnyObject {
     func send(_ data: Data)
 }
 
+/// Thread-safe registry of active connections keyed by connection id.
+///
+/// Connect/disconnect run on the server `DispatchQueue`, but broadcasts iterate
+/// the connections on the **main** thread (hierarchy debouncer + `CADisplayLink`
+/// FPS callbacks). A plain `Dictionary` mutated on one thread while iterated on
+/// another is undefined behavior, so every access is serialized by an internal
+/// lock and iteration is done over a copied snapshot taken under that lock
+/// (issue #3611).
+final class ConnectionRegistry<Value> {
+    private let lock = NSLock()
+    private var storage: [Int: Value] = [:]
+
+    func set(_ value: Value, forId id: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage[id] = value
+    }
+
+    func removeValue(forId id: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage[id] = nil
+    }
+
+    func value(forId id: Int) -> Value? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[id]
+    }
+
+    /// Snapshot copy of all current values, safe to iterate outside the lock.
+    func values() -> [Value] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(storage.values)
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage.count
+    }
+
+    /// Atomically clears the registry, returning the values that were removed.
+    func removeAll() -> [Value] {
+        lock.lock()
+        defer { lock.unlock() }
+        let all = Array(storage.values)
+        storage.removeAll()
+        return all
+    }
+}
+
 /// WebSocket server for CtrlProxy iOS
 /// Implements RFC 6455 WebSocket protocol over TCP
 public class WebSocketServer: WebSocketServing {
@@ -46,7 +99,7 @@ public class WebSocketServer: WebSocketServing {
     }
 
     private var listener: NWListener?
-    private var connections: [Int: WebSocketConnection] = [:]
+    private let connections = ConnectionRegistry<WebSocketConnection>()
     private var nextConnectionId = 1
     private let port: UInt16
     private let commandHandler: CommandHandler
@@ -108,8 +161,7 @@ public class WebSocketServer: WebSocketServing {
 
     /// Stops the server
     public func stop() {
-        connections.values.forEach { $0.close() }
-        connections.removeAll()
+        connections.removeAll().forEach { $0.close() }
         listener?.cancel()
         listener = nil
     }
@@ -129,15 +181,15 @@ public class WebSocketServer: WebSocketServing {
         ) { [weak self] message in
             self?.handleMessage(message, connectionId: connectionId)
         } onClose: { [weak self] in
-            self?.connections.removeValue(forKey: connectionId)
+            self?.connections.removeValue(forId: connectionId)
         }
 
-        connections[connectionId] = connection
+        connections.set(connection, forId: connectionId)
         connection.start()
     }
 
     private func handleMessage(_ data: Data, connectionId: Int) {
-        guard let connection = connections[connectionId] else { return }
+        guard let connection = connections.value(forId: connectionId) else { return }
         handleMessage(data, responder: connection)
     }
 
@@ -234,7 +286,7 @@ public class WebSocketServer: WebSocketServing {
 
     /// Broadcast a message to all connected clients
     public func broadcast(_ data: Data) {
-        for connection in connections.values {
+        for connection in connections.values() {
             connection.send(data)
         }
     }
@@ -260,7 +312,7 @@ public class WebSocketServer: WebSocketServing {
 
     /// Broadcast a performance update to all connected clients (push notification)
     public func broadcastPerformanceUpdate(_ snapshot: PerformanceSnapshot) {
-        guard !connections.isEmpty else { return }
+        guard connections.count > 0 else { return }
 
         let response = PerformanceUpdateResponse(data: snapshot)
 

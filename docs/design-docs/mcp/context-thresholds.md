@@ -32,33 +32,33 @@ The configuration file (`scripts/context-thresholds.json`) has the following str
 {
   "version": "1.0.0",
   "metadata": {
-    "generatedAt": "2026-01-13",
+    "generatedAt": "2026-07-11",
     "description": "MCP context usage thresholds with manual headroom for resource/template growth",
     "baseline": {
-      "tools": 10382,
-      "resources": 431,
-      "resourceTemplates": 1412,
-      "total": 12225
+      "tools": 14910,
+      "resources": 440,
+      "resourceTemplates": 1885,
+      "total": 17235
     },
     "buffer": "custom"
   },
   "thresholds": {
-    "tools": 14000,
+    "tools": 15000,
     "resources": 1000,
     "resourceTemplates": 2000,
-    "total": 17000
+    "total": 20000
   }
 }
 ```
 
-### Current Baselines (as of 2026-01-13)
+### Current Baselines (as of 2026-07-11)
 
 | Category | Baseline | Threshold (current) | Usage |
 |----------|----------|------------------------|-------|
-| Tools | 10,382 tokens | 14,000 tokens | 74% |
-| Resources | 431 tokens | 1,000 tokens | 43% |
-| Resource Templates | 1,412 tokens | 2,000 tokens | 71% |
-| **Total** | **12,225 tokens** | **17,000 tokens** | **72%** |
+| Tools | 14,910 tokens | 15,000 tokens | 99% |
+| Resources | 440 tokens | 1,000 tokens | 44% |
+| Resource Templates | 1,885 tokens | 2,000 tokens | 94% |
+| **Total** | **17,235 tokens** | **20,000 tokens** | **86%** |
 
 ## Benchmark Report Format
 
@@ -71,11 +71,11 @@ MCP CONTEXT THRESHOLD BENCHMARK REPORT
 
 Category                     Actual / Threshold       Usage  Status
 --------------------------------------------------------------------------------
-  Tools                        10382 / 14000    ( 74%)  ✓ PASS
-  Resources                      431 / 1000     ( 43%)  ✓ PASS
-  Resource Templates            1412 / 2000     ( 71%)  ✓ PASS
+  Tools                        14910 / 15000    ( 99%)  ✓ PASS
+  Resources                      440 / 1000     ( 44%)  ✓ PASS
+  Resource Templates            1885 / 2000     ( 94%)  ✓ PASS
 --------------------------------------------------------------------------------
-  TOTAL                        12225 / 17000    ( 72%)  ✓ PASS
+  TOTAL                        17235 / 20000    ( 86%)  ✓ PASS
 ================================================================================
 
 Overall Status: ✓ PASSED
@@ -85,39 +85,39 @@ Overall Status: ✓ PASSED
 
 ```json
 {
-  "timestamp": "2026-01-13T02:54:55.664Z",
+  "timestamp": "2026-07-11T00:00:00.000Z",
   "passed": true,
   "results": {
     "tools": {
-      "actual": 10382,
-      "threshold": 14000,
+      "actual": 14910,
+      "threshold": 15000,
       "passed": true,
-      "usage": 74
+      "usage": 99
     },
     "resources": {
-      "actual": 431,
+      "actual": 440,
       "threshold": 1000,
       "passed": true,
-      "usage": 43
+      "usage": 44
     },
     "resourceTemplates": {
-      "actual": 1412,
+      "actual": 1885,
       "threshold": 2000,
       "passed": true,
-      "usage": 71
+      "usage": 94
     },
     "total": {
-      "actual": 12225,
-      "threshold": 17000,
+      "actual": 17235,
+      "threshold": 20000,
       "passed": true,
-      "usage": 72
+      "usage": 86
     }
   },
   "thresholds": {
-    "tools": 14000,
+    "tools": 15000,
     "resources": 1000,
     "resourceTemplates": 2000,
-    "total": 17000
+    "total": 20000
   },
   "violations": []
 }
@@ -150,10 +150,10 @@ flowchart LR
 
 | Category | Actual | Threshold | Usage | Status |
 |----------|--------|-----------|-------|--------|
-| Tools | 10,382 | 14,000 | 74% | ✅ |
-| Resources | 431 | 1,000 | 43% | ✅ |
-| Resource Templates | 1,412 | 2,000 | 71% | ✅ |
-| **Total** | **12,225** | **17,000** | **72%** | ✅ |
+| Tools | 14,910 | 15,000 | 99% | ✅ |
+| Resources | 440 | 1,000 | 44% | ✅ |
+| Resource Templates | 1,885 | 2,000 | 94% | ✅ |
+| **Total** | **17,235** | **20,000** | **86%** | ✅ |
 
 
 ## Updating Thresholds

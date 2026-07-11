@@ -26,7 +26,8 @@ Plain `./gradlew -p android :desktop-core:test` compares against these baselines
 OS the screenshot tests are **skipped** (a JUnit assumption), so they never produce false failures
 on developer machines — override with `-Dscreenshot.reference.os=any` to force them locally. A
 **missing baseline fails** verification (it is never silently skipped), so commit baselines together
-with their tests and `@Ignore` any test whose baseline has not been recorded yet.
+with their tests; mark a test whose baseline is not recorded yet with `pending = true` (skipped in
+verify mode, still records) instead.
 
 On a mismatch, the rejected image and a red-highlighted diff are written under
 `build/reports/screenshots/` for inspection.

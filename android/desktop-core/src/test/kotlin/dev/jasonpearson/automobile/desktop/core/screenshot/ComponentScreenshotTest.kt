@@ -13,7 +13,6 @@ import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.components.ErrorCard
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import dev.jasonpearson.automobile.desktop.core.shell.StatusBarBadge
-import org.junit.Ignore
 import org.junit.Test
 
 /**
@@ -21,15 +20,13 @@ import org.junit.Test
  * Material themes. This is a starter set that proves the [screenshotTest] pattern; extend it with
  * more components and dashboard states as coverage grows.
  *
- * `@Ignore`d until the baseline PNGs are recorded and committed alongside these tests — the harness
- * fails (does not skip) on a missing baseline, so these must not run until their baselines exist.
- * To enable: record and commit the baselines, then remove the `@Ignore`.
- *
+ * Each case is marked `pending = true` because its baseline PNG is not committed yet: pending tests
+ * are skipped in verify mode (so CI can't fail on the missing baseline) but still run in record
+ * mode. To turn them into active checks, record and commit the baselines, then drop `pending`:
  * ```
  * ./gradlew -p android :desktop-core:test --tests '*ComponentScreenshotTest' -Dscreenshot.record=true
  * ```
  */
-@Ignore("Enable once baseline PNGs are recorded and committed (see class KDoc).")
 class ComponentScreenshotTest {
 
   /** Wraps content in a themed, fixed-width surface so captures are deterministic. */
@@ -44,7 +41,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun errorCardLight() =
-    screenshotTest("error_card_light") {
+    screenshotTest("error_card_light", pending = true) {
       ThemedSurface(dark = false) {
         ErrorCard(title = "Something went wrong", message = "Please try again later.")
       }
@@ -52,7 +49,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun errorCardDark() =
-    screenshotTest("error_card_dark") {
+    screenshotTest("error_card_dark", pending = true) {
       ThemedSurface(dark = true) {
         ErrorCard(title = "Something went wrong", message = "Please try again later.")
       }
@@ -60,7 +57,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun errorCardWithActions() =
-    screenshotTest("error_card_with_actions") {
+    screenshotTest("error_card_with_actions", pending = true) {
       ThemedSurface(dark = true) {
         ErrorCard(
           title = "Connection lost",
@@ -73,13 +70,13 @@ class ComponentScreenshotTest {
 
   @Test
   fun searchBarEmpty() =
-    screenshotTest("search_bar_empty") {
+    screenshotTest("search_bar_empty", pending = true) {
       ThemedSurface(dark = true) { SearchBar(query = "", onQueryChange = {}) }
     }
 
   @Test
   fun searchBarWithQuery() =
-    screenshotTest("search_bar_with_query") {
+    screenshotTest("search_bar_with_query", pending = true) {
       ThemedSurface(dark = true) {
         SearchBar(
           query = "MainActivity",
@@ -93,7 +90,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun statusBarBadge() =
-    screenshotTest("status_bar_badge") {
+    screenshotTest("status_bar_badge", pending = true) {
       ThemedSurface(dark = true) {
         StatusBarBadge(count = 12, label = "Crashes", color = Color(0xFFF28B82))
       }

@@ -62,8 +62,13 @@ A normal test run compares against the baselines:
 On a mismatch the test **fails** and writes the rejected image plus a red-highlighted diff to
 `build/reports/screenshots/`. A **missing baseline is also a failure** — verification never silently
 passes when a baseline is absent or has been deleted. Always commit a baseline together with its
-test. A test whose baseline is not recorded yet should be `@Ignore`d until it is (see
-`ComponentScreenshotTest` for the pattern), not left to fail.
+test.
+
+For a test whose baseline is not recorded yet, pass `pending = true` (see `ComponentScreenshotTest`
+for the pattern). A pending test is **skipped in verify mode** (so it can't fail on the missing
+baseline) but **still runs in record mode**, so `-Dscreenshot.record=true` produces its PNG. Once the
+baseline is committed, drop `pending` so the test actively verifies. Do not use `@Ignore` for this —
+`@Ignore` also blocks recording.
 
 ## Cross-platform note (important)
 

@@ -31,14 +31,20 @@ private const val ROOT_TAG = "automobile_screenshot_root"
  *
  * @param name Stable baseline name (also the PNG file name). Use lowercase_snake_case.
  * @param options Pixel-comparison tolerances; the defaults suit anti-aliased Compose UI.
+ * @param pending Set `true` for a test whose baseline has not been recorded and committed yet. A
+ *   pending test is skipped in verify mode (so it can't fail on a missing baseline) but still runs
+ *   in record mode (`-Dscreenshot.record=true`), so the documented recording path produces its PNG.
+ *   Once the baseline is committed, drop `pending` so the test actively verifies.
  */
 @OptIn(ExperimentalTestApi::class)
 fun screenshotTest(
   name: String,
   options: ScreenshotComparator.Options = ScreenshotComparator.Options(),
+  pending: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   ScreenshotEnvironment.assumeReferencePlatform()
+  ScreenshotEnvironment.skipIfPending(name, pending)
   runComposeUiTest {
     setContent { Box(Modifier.testTag(ROOT_TAG)) { content() } }
     waitForIdle()

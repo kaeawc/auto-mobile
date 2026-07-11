@@ -54,6 +54,21 @@ object ScreenshotEnvironment {
     )
   }
 
+  /**
+   * Skips a [pending] test (one whose baseline is not recorded yet) in verify mode, so it can't
+   * fail on a missing baseline — but lets it run in record mode so `-Dscreenshot.record=true` still
+   * produces the baseline. Non-pending tests are unaffected and fail on a missing baseline.
+   */
+  fun skipIfPending(name: String, pending: Boolean) {
+    if (pending && !recordEnabled) {
+      Assume.assumeTrue(
+        "Screenshot '$name' is pending — its baseline is not recorded yet. " +
+          "Record it with -D$RECORD_PROPERTY=true, commit the PNG, then drop pending = true.",
+        false,
+      )
+    }
+  }
+
   /** Records or verifies [image] for [name], failing the test with an actionable message. */
   fun handleResult(
     name: String,
@@ -71,8 +86,8 @@ object ScreenshotEnvironment {
       is ScreenshotComparator.Result.MissingBaseline ->
         // A missing baseline is a failure, not a skip: verification must not silently pass when a
         // baseline is absent or has been deleted. Commit baselines together with their tests
-        // (record them with -Dscreenshot.record=true). Tests whose baselines are not yet recorded
-        // should be @Ignore'd until they are, rather than relaxing this into a skip.
+        // (record them with -Dscreenshot.record=true). A test whose baseline is not recorded yet
+        // should pass pending = true (see skipIfPending) rather than relaxing this into a skip.
         fail(
           "No screenshot baseline for '$name' at ${result.baseline.path}. " +
             "Record it with: ./gradlew -p android :desktop-core:test -D$RECORD_PROPERTY=true, " +

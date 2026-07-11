@@ -787,9 +787,30 @@ class WebSocketConnection: WebSocketResponding {
         }
     }
 
+    /// Maximum accepted WebSocket frame payload (64 MiB). Frames declaring a
+    /// larger payload are rejected rather than trapping the `Int(length)`
+    /// conversion (which crashes for `length > Int.max`) or attempting an
+    /// enormous allocation (issue #3626).
+    static let maxFramePayloadLength: UInt64 = 64 * 1024 * 1024
+
+    /// Validate a frame payload length and compute the total bytes to read
+    /// (payload + mask). Returns `nil` when the payload exceeds `maxPayload`, so
+    /// the caller closes the connection instead of trapping/over-allocating.
+    static func frameReadLength(
+        payloadLength: UInt64,
+        isMasked: Bool,
+        maxPayload: UInt64 = maxFramePayloadLength
+    ) -> Int? {
+        guard payloadLength <= maxPayload else { return nil }
+        return Int(payloadLength) + (isMasked ? 4 : 0)
+    }
+
     private func readPayload(length: UInt64, isMasked: Bool, opcode: UInt8) {
-        let maskLength = isMasked ? 4 : 0
-        let totalLength = Int(length) + maskLength
+        guard let totalLength = Self.frameReadLength(payloadLength: length, isMasked: isMasked) else {
+            print("[WebSocketConnection] Frame payload too large (\(length) bytes), closing connection")
+            onClose()
+            return
+        }
 
         guard totalLength > 0 else {
             receiveWebSocketFrame()

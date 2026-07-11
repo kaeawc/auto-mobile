@@ -14,11 +14,15 @@ fi
 # Start the timer
 start_time=$(bash -c "$(pwd)/scripts/utils/get_timestamp.sh")
 
+# Portable CPU count: nproc (GNU) is absent on stock macOS, where an empty
+# `$(nproc)` made `xargs -P ""` fail. Fall back to sysctl/getconf (#3653).
+NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+
 # Find shell scripts and validate in parallel
 # shellcheck disable=SC2016
 errors=$(git ls-files --cached --others --exclude-standard -z |
   grep -z '\.sh$' |
-  xargs -0 -n 1 -P "$(nproc)" bash -c 'shellcheck "$0"' 2>&1)
+  xargs -0 -n 1 -P "$NPROC" bash -c 'shellcheck "$0"' 2>&1)
 
 # Calculate total elapsed time
 end_time=$(bash -c "$(pwd)/scripts/utils/get_timestamp.sh")

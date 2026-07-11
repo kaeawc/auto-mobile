@@ -297,7 +297,21 @@ jq --argjson allow "$ALLOWLIST_JSON" --argjson bashUsed "$BASH_USED_JSON" '
 # Generate report
 # ============================================================================
 
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+# %3N (milliseconds) is GNU-only; BSD/macOS `date` emits a literal "%3N",
+# producing a malformed timestamp. Use GNU date's %3N when supported, else
+# gdate (Homebrew coreutils), else fall back to second precision (#3653).
+iso_now_ms() {
+  # GNU date renders %3N as a 3-digit number; BSD date renders it as "3N"
+  # (garbage), so only trust %3N when it comes back all-digits.
+  if [[ "$(date -u +%3N 2>/dev/null)" =~ ^[0-9]{1,3}$ ]]; then
+    date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
+  elif command -v gdate >/dev/null 2>&1; then
+    gdate -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
+  else
+    date -u +"%Y-%m-%dT%H:%M:%S.000Z"
+  fi
+}
+TIMESTAMP=$(iso_now_ms)
 TOTAL_ISSUES=$(jq 'length' "$ISSUES_JSON")
 
 # Count by tool

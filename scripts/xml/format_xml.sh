@@ -27,10 +27,14 @@ echo "PROJECT_ROOT: $PROJECT_ROOT"
 # Cross-platform XML formatting using xmlstarlet or xml command
 format_xml() {
   local file="$1"
+  # Do NOT merge stderr into the formatted output (2>&1): if the formatter
+  # exits 0 while emitting a warning to stderr, that text would be written into
+  # $file.formatted and then mv'd over the original, corrupting the XML. Let
+  # stderr flow to the script's stderr instead (#3653).
   if [[ "$OSTYPE" == "darwin"* ]]; then
-    xml fo -s 2 "$file" > "$file.formatted" 2>&1
+    xml fo -s 2 "$file" > "$file.formatted"
   else
-    xmlstarlet fo -s 2 "$file" > "$file.formatted" 2>&1
+    xmlstarlet fo -s 2 "$file" > "$file.formatted"
   fi
 
   local exit_code=$?

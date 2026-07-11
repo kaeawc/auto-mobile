@@ -71,6 +71,16 @@ extract_nav_files() {
         uniq
 }
 
+# Same as extract_nav_files but WITHOUT deduping — needed for the duplicate
+# check, which was previously fed the already-deduped output (so `uniq -d`
+# could never report anything) (#3653).
+extract_nav_files_raw() {
+    awk '/^nav:$/,0' "$MKDOCS_YML" | \
+        grep -oE "['\"]?[a-zA-Z0-9/_-]+\.md['\"]?" | \
+        tr -d "'" | \
+        tr -d '"'
+}
+
 # List all .md files in docs/ directory relative to docs/
 list_actual_files() {
     (
@@ -196,7 +206,7 @@ fi
 # Check for duplicate entries in mkdocs.yml
 print_status "Checking for duplicate entries in mkdocs.yml..."
 DUPLICATES=$(mktemp)
-extract_nav_files | sort | uniq -d > "$DUPLICATES"
+extract_nav_files_raw | sort | uniq -d > "$DUPLICATES"
 if [[ -s "$DUPLICATES" ]]; then
     print_error "Duplicate entries found in mkdocs.yml:"
     while IFS= read -r file; do

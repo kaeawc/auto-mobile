@@ -2146,4 +2146,27 @@ final class DatabaseCommandHandlerTests: XCTestCase {
         XCTAssertTrue(response.error?.contains("does not match requested appId") ?? false)
         XCTAssertEqual(fakeDatabase.executeSqlCalls.count, 0)
     }
+
+    // MARK: - get_table_data offset sanitization (#3616)
+
+    func testSanitizedTableOffsetNormalValues() {
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(nil), 0)
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(0), 0)
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(42), 42)
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(42.9), 42) // truncates
+    }
+
+    func testSanitizedTableOffsetNegativeClampsToZero() {
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(-1), 0)
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(-1e18), 0)
+    }
+
+    /// These inputs would trap `Int(_:)` in the pre-fix code and crash the runner
+    /// (issue #3616): a magnitude beyond Int64, and the non-finite values.
+    func testSanitizedTableOffsetOutOfRangeAndNonFiniteDoNotTrap() {
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(1e19), Int.max)
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(.infinity), 0)
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(-.infinity), 0)
+        XCTAssertEqual(CommandHandler.sanitizedTableOffset(.nan), 0)
+    }
 }

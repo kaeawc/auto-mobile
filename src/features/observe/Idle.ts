@@ -125,7 +125,9 @@ export class Idle {
         shouldContinue
       };
     } catch (err) {
-      // Just continue polling on error
+      // Continue polling on error, but trace it — otherwise a real ADB failure
+      // is indistinguishable from a genuine "not idle" reading.
+      logger.debug(`Rotation idle check failed, treating as not-yet-idle: ${err}`);
       return {
         rotationComplete: false,
         currentRotation: null,

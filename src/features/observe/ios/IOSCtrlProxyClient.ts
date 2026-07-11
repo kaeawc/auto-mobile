@@ -913,11 +913,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
                 { type: envelope.eventType, timestamp, payload },
                 batch.bundleId ?? null,
               );
-            } catch { /* skip malformed */ }
+            } catch (error) {
+              // Malformed SDK envelope (bad base64/JSON) — skip it, but leave a trace.
+              logger.debug(`[IOSCtrlProxy] skipping malformed SDK event envelope: ${error}`);
+            }
           }
         }
-      } catch {
-        // Polling failure is non-fatal
+      } catch (error) {
+        // Polling failure is non-fatal (endpoint down, timeout) — trace at debug.
+        logger.debug(`[IOSCtrlProxy] SDK event poll failed: ${error}`);
       }
     }, 2000);
   }

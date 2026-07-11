@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Idle } from "../../../src/features/observe/Idle";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../src/models";
+import { logger } from "../../../src/utils/logger";
 
 describe("Idle - Unit Tests", function() {
   let idle: Idle;
@@ -573,6 +574,32 @@ describe("Idle - Unit Tests", function() {
         const result = (idle as any).isSystemLauncher(packageName);
         expect(result, `Expected ${packageName} to NOT be identified as system package`).toBe(false);
       });
+    });
+  });
+
+  describe("getRotationStatus error handling", function() {
+    // Regression for #3595: an ADB failure during the rotation check was
+    // swallowed with no trace, making it indistinguishable from a genuine
+    // "not yet idle" reading. It must now leave a debug trace.
+    test("logs a debug trace and returns not-idle when the ADB check throws", async function() {
+      const device: BootedDevice = { deviceId: "test-device", name: "Test Device", platform: "android" };
+      const throwingAdb = new FakeAdbExecutor();
+      throwingAdb.setDefaultError(new Error("adb: device offline"));
+      const throwingIdle = new Idle(device, new FakeAdbClientFactory(throwingAdb));
+
+      const debugSpy = spyOn(logger, "debug");
+
+      const result = await throwingIdle.getRotationStatus(90, 0, 10_000);
+
+      expect(result.rotationComplete).toBe(false);
+      expect(result.currentRotation).toBeNull();
+
+      const traced = debugSpy.mock.calls.some(
+        call => typeof call[0] === "string" && call[0].includes("Rotation idle check failed")
+      );
+      expect(traced).toBe(true);
+
+      debugSpy.mockRestore();
     });
   });
 });

@@ -218,7 +218,16 @@ const criticalSectionHandler = async (
  * Register the criticalSection tool.
  */
 export function registerCriticalSectionTools(): void {
-  ToolRegistry.registerDeviceAware("criticalSection", "Synchronize multiple devices at a barrier, then run steps serially.", criticalSectionSchema, criticalSectionHandler);
+  ToolRegistry.registerDeviceAware(
+    "criticalSection",
+    "Synchronize multiple devices at a barrier, then run steps serially.",
+    criticalSectionSchema,
+    criticalSectionHandler,
+    // Plan-only: a multi-device coordination primitive that only makes sense as
+    // a plan step (a single direct call would just block). Hidden from tools/list
+    // discovery, still runnable in plans via getToolForPlan.
+    { planOnly: true, planExecutable: true }
+  );
 
   logger.info("Critical section tools registered");
 }

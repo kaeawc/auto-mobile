@@ -65,6 +65,10 @@ interface DeviceAwareToolHandler<T = any> {
   (device: BootedDevice, args: T, progress?: ProgressCallback, signal?: AbortSignal): Promise<any>;
 }
 
+// Gate reason emitted for `planOnly` tools — hidden from discovery by design,
+// expected in plans (so getToolForPlan does not warn about it).
+const PLAN_ONLY_GATE_REASON = "plan-only tool";
+
 interface ToolRegistrationOptions {
   supportsProgress?: boolean;
   debugOnly?: boolean;
@@ -76,6 +80,10 @@ interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
   nonDeviceHandler?: ToolHandler<T>;
   embeddedSdkOnly?: boolean;
   planExecutable?: boolean;
+  // Hide from normal MCP discovery (tools/list) unconditionally, but keep the
+  // tool runnable inside plans (pair with planExecutable). For coordination
+  // primitives an interactive agent can never sensibly call directly.
+  planOnly?: boolean;
 }
 
 interface ToolListingOptions {
@@ -99,6 +107,7 @@ export interface RegisteredTool {
   debugOnly?: boolean;
   embeddedSdkOnly?: boolean;
   planExecutable?: boolean;
+  planOnly?: boolean;
   outputSchema?: any;
 }
 
@@ -744,6 +753,9 @@ class ToolRegistryClass {
     if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
       reasons.push("embedded SDK mode is disabled");
     }
+    if (tool.planOnly) {
+      reasons.push(PLAN_ONLY_GATE_REASON);
+    }
     return reasons;
   }
 
@@ -871,6 +883,7 @@ class ToolRegistryClass {
       debugOnly: options.debugOnly ?? false,
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,
+      planOnly: options.planOnly ?? false,
       outputSchema: options.outputSchema
     });
   }
@@ -959,9 +972,13 @@ class ToolRegistryClass {
     if (gateReasons.length > 0 && !tool.planExecutable) {
       return undefined;
     }
-    if (gateReasons.length > 0) {
+    // A `planOnly` tool is hidden from discovery by design and is expected in
+    // plans, so don't warn about that reason — only surface *other* gate reasons
+    // (e.g. a debug-only tool being used inside a plan), which are noteworthy.
+    const unexpectedReasons = gateReasons.filter(r => r !== PLAN_ONLY_GATE_REASON);
+    if (unexpectedReasons.length > 0) {
       logger.warn(
-        `[ToolRegistry] Plan execution is using gated tool "${name}" (${gateReasons.join(", ")}). Tool is hidden from normal MCP discovery but marked planExecutable.`
+        `[ToolRegistry] Plan execution is using gated tool "${name}" (${unexpectedReasons.join(", ")}). Tool is hidden from normal MCP discovery but marked planExecutable.`
       );
     }
     return tool;

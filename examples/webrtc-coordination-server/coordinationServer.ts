@@ -143,8 +143,6 @@ export class CoordinationServer {
     pc.addTransceiver(track, { direction: "sendonly" });
 
     const subscriberId = randomUUID();
-    const subscriber: Subscriber = { id: subscriberId, pc, track };
-    entry.subscribers.set(subscriberId, subscriber);
 
     pc.connectionStateChange.subscribe(state => {
       if (state === "failed" || state === "closed" || state === "disconnected") {
@@ -153,11 +151,20 @@ export class CoordinationServer {
       }
     });
 
-    await pc.setRemoteDescription({ type: "offer", sdp: offerSdp });
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await this.waitForIce(pc);
+    // Register the subscriber only after negotiation succeeds, so a malformed
+    // WHEP offer that rejects here doesn't leave a phantom viewer in the
+    // registry (with a live peer connection that RTP forwarding targets).
+    try {
+      await pc.setRemoteDescription({ type: "offer", sdp: offerSdp });
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await this.waitForIce(pc);
+    } catch (error) {
+      await pc.close().catch(() => {});
+      throw error;
+    }
 
+    entry.subscribers.set(subscriberId, { id: subscriberId, pc, track });
     return { subscriberId, answerSdp: pc.localDescription?.sdp ?? "" };
   }
 
@@ -204,7 +211,9 @@ export class CoordinationServer {
       state: entry.inboundTrack ? "live" : "connecting",
       subscriberCount: entry.subscribers.size,
       createdAt: entry.createdAt,
-      whepUrl: `/whep/${entry.streamId}`,
+      // Encode so an id with a path separator (e.g. a CI ref "feature/foo")
+      // stays a single URL path segment the WHEP route can match.
+      whepUrl: `/whep/${encodeURIComponent(entry.streamId)}`,
       iceServers: this.iceServers,
       framesForwarded: entry.framesForwarded,
     };

@@ -243,7 +243,11 @@ export class WebRtcPublisher {
     }
     this.connectedFired = true;
     void Promise.resolve(this.onConnected?.()).catch(error => {
-      logger.warn(`[WebRTC] onConnected hook failed for ${this.config.streamId}: ${error}`);
+      // Capture failed to start (e.g. adb/screenrecord spawn failed) even though
+      // the peer connected. Without this the stream would report connected with
+      // no media and never recover — route it through the reconnect path.
+      logger.warn(`[WebRTC] capture start failed for ${this.config.streamId}: ${error}; reconnecting`);
+      this.notifySourceFailed();
     });
   }
 

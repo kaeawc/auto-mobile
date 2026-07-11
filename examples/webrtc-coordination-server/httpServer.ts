@@ -94,7 +94,7 @@ export class HttpCoordinationServer {
       );
       res.writeHead(201, {
         "Content-Type": "application/sdp",
-        "Location": `/whip/${streamId}`,
+        "Location": `/whip/${encodeURIComponent(streamId)}`,
       });
       res.end(answerSdp);
       return;
@@ -121,7 +121,7 @@ export class HttpCoordinationServer {
         const { subscriberId, answerSdp } = await this.coordinator.subscribe(streamId, offer);
         res.writeHead(201, {
           "Content-Type": "application/sdp",
-          "Location": `/whep/${streamId}/${subscriberId}`,
+          "Location": `/whep/${encodeURIComponent(streamId)}/${encodeURIComponent(subscriberId)}`,
         });
         res.end(answerSdp);
       } catch (error) {

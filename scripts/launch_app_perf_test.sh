@@ -115,7 +115,7 @@ log_info() {
 log_debug() {
     local msg
     msg="[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $*"
-    echo "$msg" >> "$DEBUG_LOG" >&2
+    echo "$msg" >> "$DEBUG_LOG"
 }
 
 log_error() {

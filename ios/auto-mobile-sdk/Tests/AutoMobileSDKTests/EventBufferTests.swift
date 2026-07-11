@@ -100,6 +100,45 @@ final class SdkEventBufferTests: XCTestCase {
         buffer.shutdown()
         XCTAssertTrue(fakeTimer.isCancelled)
     }
+
+    // Regression guard for issue #3605 (and its Android twin #3710): a throw from a
+    // *timer-scheduled* flush must not tear down the repeating flush timer. The
+    // existing flush-error tests only drive the throw through a direct `flush()` /
+    // `shutdown()` call; this one drives it through the timer, then fires the timer
+    // again to prove it is still live and still flushing.
+    func testTimerSurvivesThrowingFlush() {
+        struct FlushError: Error {}
+        let fakeTimer = FakeTimer()
+        let dropCounter = FakeDropCounter()
+
+        let buffer = SdkEventBuffer(
+            maxBufferSize: 100,
+            flushIntervalMs: 500,
+            timerFactory: { fakeTimer },
+            dropCounter: dropCounter
+        ) { _ in
+            throw FlushError()
+        }
+
+        buffer.start()
+
+        // First scheduled flush throws — must be swallowed and counted, not crash.
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
+        fakeTimer.fire()
+        XCTAssertEqual(dropCounter.snapshot()[.flushError], 2)
+
+        // The throw must not have cancelled the repeating timer (the #3605 bug).
+        XCTAssertFalse(fakeTimer.isCancelled)
+
+        // A subsequent tick must still flush — proving the timer kept firing after
+        // the earlier throw. Cumulative flushError count reflects both rounds.
+        buffer.add(SdkInteractionEvent(interactionType: "e3"))
+        buffer.add(SdkInteractionEvent(interactionType: "e4"))
+        buffer.add(SdkInteractionEvent(interactionType: "e5"))
+        fakeTimer.fire()
+        XCTAssertEqual(dropCounter.snapshot()[.flushError], 5)
+    }
 }
 
 // MARK: - Event Processor Tests

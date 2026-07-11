@@ -67,6 +67,17 @@ function activeStreamForDevice(deviceId: string): WebRtcStreamRecord | undefined
   return undefined;
 }
 
+/** Run an action against the current record for a stream id, if it still exists. */
+async function withRecord(
+  streamId: string,
+  action: (record: WebRtcStreamRecord) => Promise<void>
+): Promise<void> {
+  const record = streams.get(streamId);
+  if (record) {
+    await action(record);
+  }
+}
+
 /** Stop and clear the capture source for a stream (before each (re)establish). */
 async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   if (record.source) {
@@ -123,30 +134,41 @@ export async function startWebRtcStream(
   const config = resolveWebRtcStreamingConfig(request.overrides);
   const streamId = request.streamId ?? `webrtc_${dependencies.idGenerator.next()}`;
 
-  const record: WebRtcStreamRecord = {
-    streamId,
-    device: request.device,
-    publisher: undefined as unknown as WebRtcPublisher,
-    source: null,
-    bitrateBps: config.bitrateKbps ? config.bitrateKbps * 1000 : undefined,
-    size: config.size,
-    startedAt: dependencies.now().toISOString(),
-  };
+  // An explicit id reused across devices would otherwise overwrite the existing
+  // record here, orphaning the first stream's publisher/source (leaking the
+  // screenrecord/WHIP session and hiding it from list/stop).
+  if (streams.has(streamId)) {
+    throw new ActionableError(`WebRTC stream ${streamId} already active. Stop it first.`);
+  }
 
+  const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
+
+  // The publisher's lifecycle hooks resolve the record by id (rather than
+  // closing over it) so the record can be constructed with the publisher in one
+  // shot. The hooks only run during publisher.start() (below), after the record
+  // is registered.
   const publisher = dependencies.createPublisher(
     {
       streamId,
       whipEndpoint: config.whipEndpoint,
       bearerToken: config.bearerToken,
       iceServers: config.iceServers,
-      bitrateBps: record.bitrateBps,
+      bitrateBps,
     },
     {
-      onBeforeEstablish: () => stopSource(record),
-      onConnected: () => startSource(record),
+      onBeforeEstablish: () => withRecord(streamId, stopSource),
+      onConnected: () => withRecord(streamId, startSource),
     }
   );
-  record.publisher = publisher;
+  const record: WebRtcStreamRecord = {
+    streamId,
+    device: request.device,
+    publisher,
+    source: null,
+    bitrateBps,
+    size: config.size,
+    startedAt: dependencies.now().toISOString(),
+  };
   streams.set(streamId, record);
 
   try {

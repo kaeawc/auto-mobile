@@ -133,6 +133,33 @@ describe("AndroidH264Source", () => {
     expect(source.isRunning).toBe(false);
   });
 
+  test("does not rotate when a segment exits with a non-zero code; surfaces onError", async () => {
+    let captured: Error | null = null;
+    const { source, processes } = makeSource({ onError: error => (captured = error) });
+    await source.start();
+    expect(processes).toHaveLength(1);
+
+    // screenrecord failed (e.g. unsupported --size): exit code 1, no signal.
+    processes[0].simulateExit(1, null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(processes).toHaveLength(1); // no restart / tight loop
+    expect(source.isRunning).toBe(false);
+    expect(captured).not.toBeNull();
+    expect((captured as unknown as Error).message).toContain("code 1");
+  });
+
+  test("still rotates on a clean time-limit exit (code 0)", async () => {
+    const { source, processes } = makeSource();
+    await source.start();
+    processes[0].simulateExit(0, null); // screenrecord hit --time-limit
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(processes.length).toBeGreaterThanOrEqual(2);
+    await source.stop();
+  });
+
   test("surfaces a fatal error when a segment process errors", async () => {
     let captured: Error | null = null;
     const { source, processes } = makeSource({ onError: error => (captured = error) });

@@ -125,6 +125,15 @@ describe("webrtcStreamManager", () => {
     ).rejects.toThrow(/already active/);
   });
 
+  test("rejects a duplicate explicit streamId (even on a different device)", async () => {
+    installFakes();
+    const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "b" } as BootedDevice;
+    await startWebRtcStream({ device: ANDROID, streamId: "dup", overrides: { whipEndpoint: ENDPOINT } });
+    await expect(
+      startWebRtcStream({ device: other, streamId: "dup", overrides: { whipEndpoint: ENDPOINT } })
+    ).rejects.toThrow(/already active/);
+  });
+
   test("rejects iOS devices", async () => {
     installFakes();
     await expect(

@@ -27,8 +27,11 @@ export interface SpawnedProcess {
 
 export type ProcessSpawner = (command: string, args: string[]) => SpawnedProcess;
 
-const defaultSpawner: ProcessSpawner = (command, args) =>
-  nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] }) as unknown as SpawnedProcess;
+const defaultSpawner: ProcessSpawner = (command, args) => {
+  const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+  // eslint-disable-next-line auto-mobile/no-unknown-cast -- node's ChildProcessByStdio differs from our minimal SpawnedProcess on stdin/once() variance; the members we use (stdout/stderr/kill/once) match.
+  return child as unknown as SpawnedProcess;
+};
 
 export interface AndroidH264SourceOptions {
   device: BootedDevice;
@@ -187,6 +190,20 @@ export class AndroidH264Source {
     this.clearRotateTimer();
 
     if (!this.running) {
+      return;
+    }
+
+    // Only rotate on an expected segment boundary: our own SIGINT (rotate timer)
+    // or a clean time-limit exit (code 0). A non-zero exit means screenrecord
+    // failed (e.g. unsupported --size, encoder error); surface it via onError so
+    // the publisher can reconnect/fail instead of tight-looping a broken command.
+    const isExpectedRotation = signal === "SIGINT" || code === 0;
+    if (!isExpectedRotation) {
+      logger.warn(
+        `[AndroidH264Source] screenrecord failed (code=${code}, signal=${signal}); not rotating`
+      );
+      this.running = false;
+      this.options.onError?.(new Error(`screenrecord exited with code ${code}`));
       return;
     }
 

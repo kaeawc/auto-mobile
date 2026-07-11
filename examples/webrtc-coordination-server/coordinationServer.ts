@@ -88,8 +88,6 @@ export class CoordinationServer {
       createdAt: new Date().toISOString(),
       framesForwarded: 0,
     };
-    this.streams.set(streamId, entry);
-
     pc.onTrack.subscribe(track => {
       entry.inboundTrack = track;
       track.onReceiveRtp.subscribe((rtp: RtpPacket) => {
@@ -110,11 +108,20 @@ export class CoordinationServer {
       }
     });
 
-    await pc.setRemoteDescription({ type: "offer", sdp: offerSdp });
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await this.waitForIce(pc);
+    // Negotiate before registering the stream, so a malformed/unsupported offer
+    // that rejects here doesn't leave a zombie "connecting" entry (with a live
+    // RTCPeerConnection) in /api/streams.
+    try {
+      await pc.setRemoteDescription({ type: "offer", sdp: offerSdp });
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await this.waitForIce(pc);
+    } catch (error) {
+      await pc.close().catch(() => {});
+      throw error;
+    }
 
+    this.streams.set(streamId, entry);
     return { streamId, answerSdp: pc.localDescription?.sdp ?? "" };
   }
 

@@ -80,7 +80,8 @@ export type DaemonSocketName =
   | "performance-stream"
   | "telemetry-push"
   | "test-recording"
-  | "video-recording";
+  | "video-recording"
+  | "webrtc-stream";
 
 export type DaemonSocketPaths = Record<DaemonSocketName, string>;
 

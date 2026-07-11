@@ -1,0 +1,237 @@
+/**
+ * H.264 elementary-stream helpers used by the WebRTC publisher.
+ *
+ * The Android capture path (`adb exec-out screenrecord --output-format=h264 -`)
+ * emits an Annex-B byte stream: a sequence of NAL units separated by
+ * `00 00 01` or `00 00 00 01` start codes. To send that stream over WebRTC we
+ * must (1) split it back into NAL units, (2) group NAL units into access units
+ * (one displayed frame) so every fragment of a frame shares an RTP timestamp,
+ * and (3) packetize each NAL unit into RTP payloads per RFC 6184.
+ *
+ * All functions here are pure / library-agnostic so they can be unit-tested
+ * without werift or a device. The publisher (`WebRtcPublisher`) owns RTP header
+ * assignment (sequence numbers, timestamps, SSRC, marker bit).
+ */
+
+/** NAL unit type for an Access Unit Delimiter (RFC / H.264 §7.4.1). */
+export const NAL_TYPE_AUD = 9;
+/** NAL unit type for a Sequence Parameter Set. */
+export const NAL_TYPE_SPS = 7;
+/** NAL unit type for a Picture Parameter Set. */
+export const NAL_TYPE_PPS = 8;
+/** NAL unit type for a coded slice of an IDR (key frame) picture. */
+export const NAL_TYPE_IDR = 5;
+/** RFC 6184 FU-A fragmentation unit NAL type. */
+export const FU_A_TYPE = 28;
+
+/**
+ * Default RTP payload MTU. 1200 bytes leaves headroom under a 1500-byte
+ * Ethernet MTU for IP/UDP/RTP/SRTP/DTLS overhead, matching common WebRTC stacks.
+ */
+export const DEFAULT_RTP_MTU = 1200;
+
+/** Return the NAL unit type (lower 5 bits of the first byte). */
+export function nalUnitType(nal: Buffer): number {
+  return nal.length > 0 ? nal[0] & 0x1f : 0;
+}
+
+/** True for VCL NAL types (coded slices: 1 non-IDR, 5 IDR). */
+export function isVclNal(nal: Buffer): boolean {
+  const type = nalUnitType(nal);
+  return type >= 1 && type <= 5;
+}
+
+/** True if the NAL unit is a key-frame (IDR) slice. */
+export function isKeyFrameNal(nal: Buffer): boolean {
+  return nalUnitType(nal) === NAL_TYPE_IDR;
+}
+
+/**
+ * Incremental Annex-B splitter. Feed arbitrary byte chunks via {@link push};
+ * complete NAL units (with the start code stripped) are returned as soon as the
+ * following start code is observed. Bytes for a not-yet-terminated NAL unit are
+ * retained across calls so chunk boundaries never corrupt a NAL unit.
+ */
+export class H264AnnexBParser {
+  private buffered: Buffer = Buffer.alloc(0);
+
+  /** Feed a chunk; returns any NAL units that became complete. */
+  push(chunk: Buffer): Buffer[] {
+    this.buffered = this.buffered.length === 0 ? chunk : Buffer.concat([this.buffered, chunk]);
+    return this.drain(false);
+  }
+
+  /** Emit any trailing NAL unit still buffered (call once the stream ends). */
+  flush(): Buffer[] {
+    return this.drain(true);
+  }
+
+  private drain(final: boolean): Buffer[] {
+    const nals: Buffer[] = [];
+    const startCodes = this.findStartCodes(this.buffered);
+
+    if (startCodes.length === 0) {
+      if (final) {
+        this.buffered = Buffer.alloc(0);
+      }
+      return nals;
+    }
+
+    // Emit the NAL unit between each start code and the next one.
+    for (let i = 0; i < startCodes.length - 1; i++) {
+      const nalStart = startCodes[i].offset + startCodes[i].length;
+      const nalEnd = startCodes[i + 1].offset;
+      const nal = this.buffered.subarray(nalStart, nalEnd);
+      if (nal.length > 0) {
+        nals.push(Buffer.from(nal));
+      }
+    }
+
+    const last = startCodes[startCodes.length - 1];
+    if (final) {
+      const nal = this.buffered.subarray(last.offset + last.length);
+      if (nal.length > 0) {
+        nals.push(Buffer.from(nal));
+      }
+      this.buffered = Buffer.alloc(0);
+    } else {
+      // Keep everything from the last start code onward; that NAL unit is not
+      // terminated until the next start code arrives.
+      this.buffered = Buffer.from(this.buffered.subarray(last.offset));
+    }
+
+    return nals;
+  }
+
+  private findStartCodes(data: Buffer): Array<{ offset: number; length: number }> {
+    const result: Array<{ offset: number; length: number }> = [];
+    for (let i = 0; i + 2 < data.length; i++) {
+      if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) {
+        const fourByte = i > 0 && data[i - 1] === 0;
+        result.push({ offset: fourByte ? i - 1 : i, length: fourByte ? 4 : 3 });
+      }
+    }
+    return result;
+  }
+}
+
+/**
+ * Groups NAL units into access units (a single coded picture plus its
+ * associated parameter sets / delimiters). A new access unit begins at an
+ * Access Unit Delimiter, or at a VCL NAL unit when the current access unit
+ * already contains one. This keeps SPS/PPS + IDR together and assigns one RTP
+ * timestamp per displayed frame.
+ */
+export class H264AccessUnitAssembler {
+  private current: Buffer[] = [];
+  private hasVcl = false;
+
+  /** Feed a NAL unit; returns access units that became complete. */
+  push(nal: Buffer): Buffer[][] {
+    const completed: Buffer[][] = [];
+    const type = nalUnitType(nal);
+    const startsNewAccessUnit =
+      (isVclNal(nal) && this.hasVcl) || (type === NAL_TYPE_AUD && this.current.length > 0);
+
+    if (startsNewAccessUnit) {
+      completed.push(this.current);
+      this.current = [];
+      this.hasVcl = false;
+    }
+
+    this.current.push(nal);
+    if (isVclNal(nal)) {
+      this.hasVcl = true;
+    }
+
+    return completed;
+  }
+
+  /** Emit the in-progress access unit, if any. */
+  flush(): Buffer[][] {
+    if (this.current.length === 0) {
+      return [];
+    }
+    const au = this.current;
+    this.current = [];
+    this.hasVcl = false;
+    return [au];
+  }
+}
+
+/**
+ * Packetize one NAL unit into RTP payloads per RFC 6184. NAL units that fit
+ * within `mtu` are sent as a Single NAL Unit packet; larger ones are split into
+ * FU-A fragments. Returns the ordered list of RTP payload buffers (RTP header
+ * assignment is the caller's responsibility).
+ */
+export function packetizeNalUnit(nal: Buffer, mtu: number = DEFAULT_RTP_MTU): Buffer[] {
+  if (nal.length === 0) {
+    return [];
+  }
+  if (nal.length <= mtu) {
+    return [Buffer.from(nal)];
+  }
+
+  const nalHeader = nal[0];
+  const forbiddenAndNri = nalHeader & 0xe0;
+  const nalType = nalHeader & 0x1f;
+  const fuIndicator = forbiddenAndNri | FU_A_TYPE;
+
+  const payload = nal.subarray(1);
+  const maxFragmentSize = mtu - 2; // 2 bytes: FU indicator + FU header
+  const packets: Buffer[] = [];
+
+  let offset = 0;
+  while (offset < payload.length) {
+    const fragmentSize = Math.min(maxFragmentSize, payload.length - offset);
+    const isFirst = offset === 0;
+    const isLast = offset + fragmentSize >= payload.length;
+
+    let fuHeader = nalType;
+    if (isFirst) {
+      fuHeader |= 0x80; // Start bit
+    }
+    if (isLast) {
+      fuHeader |= 0x40; // End bit
+    }
+
+    packets.push(
+      Buffer.concat([
+        Buffer.from([fuIndicator, fuHeader]),
+        payload.subarray(offset, offset + fragmentSize),
+      ])
+    );
+    offset += fragmentSize;
+  }
+
+  return packets;
+}
+
+/** An RTP payload plus whether it is the final packet of its access unit. */
+export interface RtpPayloadUnit {
+  payload: Buffer;
+  /** RTP marker bit — set on the last packet of an access unit (frame). */
+  marker: boolean;
+}
+
+/**
+ * Packetize a full access unit (list of NAL units) into ordered RTP payload
+ * units, setting the marker bit only on the very last packet of the frame.
+ */
+export function packetizeAccessUnit(
+  accessUnit: Buffer[],
+  mtu: number = DEFAULT_RTP_MTU
+): RtpPayloadUnit[] {
+  const payloads: Buffer[] = [];
+  for (const nal of accessUnit) {
+    for (const packet of packetizeNalUnit(nal, mtu)) {
+      payloads.push(packet);
+    }
+  }
+
+  return payloads.map((payload, index) => ({
+    payload,
+    marker: index === payloads.length - 1,
+  }));
+}

@@ -1,0 +1,156 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { Socket } from "node:net";
+import {
+  WebRtcStreamSocketServer,
+  type WebRtcStreamSocketServerDependencies,
+} from "../../src/daemon/webrtcStreamSocketServer";
+import type {
+  WebRtcStreamSocketRequest,
+  WebRtcStreamSocketResponse,
+} from "../../src/daemon/webrtcStreamSocketTypes";
+import type { BootedDevice } from "../../src/models";
+import type { WebRtcStreamDescriptor } from "../../src/features/webrtc";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeTimer } from "../fakes/FakeTimer";
+
+const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
+
+function descriptor(streamId: string, state: WebRtcStreamDescriptor["state"] = "connected"): WebRtcStreamDescriptor {
+  return {
+    streamId,
+    state,
+    whipEndpoint: "https://coord/whip",
+    resourceUrl: `https://coord/whip/r/${streamId}`,
+    iceServers: [],
+    framesSent: 0,
+    packetsSent: 0,
+  };
+}
+
+class TestableServer extends WebRtcStreamSocketServer {
+  constructor(deps: WebRtcStreamSocketServerDependencies) {
+    super("/fake/webrtc-stream.sock", new FakeTimer(), deps);
+  }
+  async simulate(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
+    await (this as any).processLine(socket as unknown as Socket, JSON.stringify(request));
+    const pending = (this as any).pendingBySocket.get(socket);
+    if (pending) {
+      await pending;
+    }
+  }
+}
+
+let started: Array<{ device: BootedDevice; streamId?: string }> = [];
+let stopped: string[] = [];
+
+function makeDeps(overrides: Partial<WebRtcStreamSocketServerDependencies> = {}): WebRtcStreamSocketServerDependencies {
+  const active = new Map<string, WebRtcStreamDescriptor>();
+  return {
+    resolveDevice: async () => ANDROID,
+    startStream: async request => {
+      const streamId = request.streamId ?? "webrtc_generated";
+      started.push({ device: request.device, streamId: request.streamId });
+      const d = descriptor(streamId);
+      active.set(streamId, d);
+      return d;
+    },
+    stopStream: async streamId => {
+      const id = streamId ?? "webrtc_generated";
+      stopped.push(id);
+      active.delete(id);
+      return descriptor(id, "stopped");
+    },
+    listStreams: () => Array.from(active.values()),
+    getStream: streamId => active.get(streamId) ?? null,
+    ...overrides,
+  };
+}
+
+afterEach(() => {
+  started = [];
+  stopped = [];
+});
+
+function lastResponse(socket: FakeSocket): WebRtcStreamSocketResponse {
+  const messages = socket.getWrittenMessages<WebRtcStreamSocketResponse>();
+  return messages[messages.length - 1];
+}
+
+describe("WebRtcStreamSocketServer", () => {
+  test("start resolves a device and returns the stream descriptor", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+
+    await server.simulate(socket, { id: "1", action: "start", whipEndpoint: "https://coord/whip" });
+
+    const response = lastResponse(socket);
+    expect(response.success).toBe(true);
+    expect(response.action).toBe("start");
+    expect(response.stream?.streamId).toBe("webrtc_generated");
+    expect(started).toHaveLength(1);
+    expect(started[0].device.deviceId).toBe("emulator-5554");
+  });
+
+  test("start honors an explicit streamId", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+    await server.simulate(socket, { id: "2", action: "start", streamId: "ci-42" });
+    expect(lastResponse(socket).stream?.streamId).toBe("ci-42");
+    expect(started[0].streamId).toBe("ci-42");
+  });
+
+  test("stop terminates a stream and reports stopped state", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+    await server.simulate(socket, { id: "3", action: "start", streamId: "s1" });
+    await server.simulate(socket, { id: "4", action: "stop", streamId: "s1" });
+    const response = lastResponse(socket);
+    expect(response.action).toBe("stop");
+    expect(response.stream?.state).toBe("stopped");
+    expect(stopped).toContain("s1");
+  });
+
+  test("list returns all active streams", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+    await server.simulate(socket, { id: "5", action: "start", streamId: "s1" });
+    await server.simulate(socket, { id: "6", action: "start", streamId: "s2" });
+    await server.simulate(socket, { id: "7", action: "list" });
+    const response = lastResponse(socket);
+    expect(response.action).toBe("list");
+    expect(response.streams?.map(s => s.streamId).sort()).toEqual(["s1", "s2"]);
+  });
+
+  test("status for an unknown stream returns an error response", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+    await server.simulate(socket, { id: "8", action: "status", streamId: "nope" });
+    const response = lastResponse(socket);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("nope");
+  });
+
+  test("device resolution failure surfaces as an error response", async () => {
+    const server = new TestableServer(
+      makeDeps({
+        resolveDevice: async () => {
+          throw new Error("No connected android devices found.");
+        },
+      })
+    );
+    const socket = new FakeSocket();
+    await server.simulate(socket, { id: "9", action: "start" });
+    const response = lastResponse(socket);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("No connected android devices");
+  });
+
+  test("invalid JSON yields an error response", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+    await (server as any).processLine(socket as unknown as Socket, "{not json");
+    const response = lastResponse(socket);
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Invalid JSON");
+  });
+});

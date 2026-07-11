@@ -1,0 +1,120 @@
+import { ActionableError } from "../../models";
+import type { RTCIceServer } from "werift";
+
+/**
+ * WebRTC streaming configuration. On a CI worker this is typically supplied
+ * once via environment variables so `webrtcStream` can be started with no
+ * per-call arguments; individual tool calls may override any field.
+ */
+export interface WebRtcStreamingConfig {
+  /** WHIP ingest endpoint on the coordination server. */
+  whipEndpoint: string;
+  /** Optional bearer token for the ingest endpoint. */
+  bearerToken?: string;
+  /** ICE servers (STUN/TURN) for NAT traversal. */
+  iceServers: RTCIceServer[];
+  /** Target encoder bitrate in kbps. */
+  bitrateKbps?: number;
+  /** Optional capture downscale. */
+  size?: { width: number; height: number };
+}
+
+export interface WebRtcStreamingOverrides {
+  whipEndpoint?: string;
+  bearerToken?: string;
+  iceServers?: RTCIceServer[];
+  bitrateKbps?: number;
+  size?: { width: number; height: number };
+}
+
+/** Environment variable names read for default configuration. */
+export const WEBRTC_ENV = {
+  WHIP_ENDPOINT: "AUTOMOBILE_WEBRTC_WHIP_ENDPOINT",
+  WHIP_TOKEN: "AUTOMOBILE_WEBRTC_WHIP_TOKEN",
+  ICE_SERVERS: "AUTOMOBILE_WEBRTC_ICE_SERVERS",
+  BITRATE_KBPS: "AUTOMOBILE_WEBRTC_BITRATE_KBPS",
+  MAX_SIZE: "AUTOMOBILE_WEBRTC_MAX_SIZE",
+} as const;
+
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+
+/**
+ * Parse ICE servers from an environment string. Accepts either a JSON array of
+ * `RTCIceServer` objects, or a comma-separated list of URLs
+ * (e.g. `stun:stun.l.google.com:19302,turn:turn.example.com:3478`).
+ */
+export function parseIceServers(raw: string | undefined): RTCIceServer[] | undefined {
+  if (!raw || !raw.trim()) {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed) as RTCIceServer[];
+      if (Array.isArray(parsed) && parsed.every(server => typeof server?.urls === "string")) {
+        return parsed;
+      }
+    } catch {
+      throw new ActionableError(`Invalid JSON in ${WEBRTC_ENV.ICE_SERVERS}.`);
+    }
+    throw new ActionableError(`${WEBRTC_ENV.ICE_SERVERS} JSON must be an array of { urls } objects.`);
+  }
+  return trimmed
+    .split(",")
+    .map(url => url.trim())
+    .filter(url => url.length > 0)
+    .map(url => ({ urls: url }));
+}
+
+/** Parse a `WIDTHxHEIGHT` string (e.g. `1280x720`). */
+export function parseSize(raw: string | undefined): { width: number; height: number } | undefined {
+  if (!raw || !raw.trim()) {
+    return undefined;
+  }
+  const match = /^(\d+)\s*x\s*(\d+)$/i.exec(raw.trim());
+  if (!match) {
+    throw new ActionableError(`Invalid size "${raw}"; expected WIDTHxHEIGHT (e.g. 1280x720).`);
+  }
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
+function parseBitrate(raw: string | undefined): number | undefined {
+  if (!raw || !raw.trim()) {
+    return undefined;
+  }
+  const value = Number(raw.trim());
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new ActionableError(`Invalid bitrate "${raw}"; expected a positive number of kbps.`);
+  }
+  return Math.round(value);
+}
+
+/**
+ * Resolve the effective streaming config by layering per-call overrides over
+ * environment defaults. Throws an {@link ActionableError} when no WHIP endpoint
+ * is configured, since the publisher cannot start without one.
+ */
+export function resolveWebRtcStreamingConfig(
+  overrides: WebRtcStreamingOverrides = {},
+  env: NodeJS.ProcessEnv = process.env
+): WebRtcStreamingConfig {
+  const whipEndpoint = overrides.whipEndpoint ?? env[WEBRTC_ENV.WHIP_ENDPOINT];
+  if (!whipEndpoint || !whipEndpoint.trim()) {
+    throw new ActionableError(
+      `No WHIP endpoint configured. Set ${WEBRTC_ENV.WHIP_ENDPOINT} or pass whipEndpoint.`
+    );
+  }
+
+  const iceServers =
+    overrides.iceServers ?? parseIceServers(env[WEBRTC_ENV.ICE_SERVERS]) ?? DEFAULT_ICE_SERVERS;
+  const bitrateKbps = overrides.bitrateKbps ?? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS]);
+  const size = overrides.size ?? parseSize(env[WEBRTC_ENV.MAX_SIZE]);
+
+  return {
+    whipEndpoint: whipEndpoint.trim(),
+    bearerToken: overrides.bearerToken ?? env[WEBRTC_ENV.WHIP_TOKEN] ?? undefined,
+    iceServers,
+    bitrateKbps,
+    size,
+  };
+}

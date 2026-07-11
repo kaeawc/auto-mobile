@@ -47,6 +47,10 @@ export const TELEMETRY_PUSH_SOCKET_CONFIG: SocketServerConfig = {
   defaultPath: path.join(os.homedir(), ".auto-mobile", "telemetry-push.sock"),
 };
 
+export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
+  defaultPath: path.join(os.homedir(), ".auto-mobile", "webrtc-stream.sock"),
+};
+
 const AUXILIARY_SOCKET_CONFIGS: SocketServerConfig[] = [
   VIDEO_RECORDING_SOCKET_CONFIG,
   TEST_RECORDING_SOCKET_CONFIG,
@@ -58,6 +62,7 @@ const AUXILIARY_SOCKET_CONFIGS: SocketServerConfig[] = [
   FAILURES_STREAM_SOCKET_CONFIG,
   FAILURES_PUSH_SOCKET_CONFIG,
   TELEMETRY_PUSH_SOCKET_CONFIG,
+  WEBRTC_STREAM_SOCKET_CONFIG,
 ];
 
 export interface DaemonFileCleanupOptions {

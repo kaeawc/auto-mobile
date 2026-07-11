@@ -1,0 +1,202 @@
+import { ActionableError, type BootedDevice } from "../models";
+import { logger } from "../utils/logger";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import {
+  AndroidH264Source,
+  WebRtcPublisher,
+  resolveWebRtcStreamingConfig,
+  type AndroidH264SourceOptions,
+  type WebRtcPublisherConfig,
+  type WebRtcPublisherDeps,
+  type WebRtcStreamDescriptor,
+  type WebRtcStreamingOverrides,
+} from "../features/webrtc";
+
+export interface StartWebRtcStreamRequest {
+  device: BootedDevice;
+  streamId?: string;
+  overrides?: WebRtcStreamingOverrides;
+}
+
+interface WebRtcStreamRecord {
+  streamId: string;
+  device: BootedDevice;
+  publisher: WebRtcPublisher;
+  source: AndroidH264Source | null;
+  bitrateBps?: number;
+  size?: { width: number; height: number };
+  startedAt: string;
+}
+
+export interface WebRtcStreamManagerDependencies {
+  idGenerator: IdGenerator;
+  createPublisher: (config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps) => WebRtcPublisher;
+  createSource: (options: AndroidH264SourceOptions) => AndroidH264Source;
+  now: () => Date;
+}
+
+const defaultDependencies: WebRtcStreamManagerDependencies = {
+  idGenerator: defaultIdGenerator,
+  createPublisher: (config, deps) => new WebRtcPublisher(config, deps),
+  createSource: options => new AndroidH264Source(options),
+  now: () => new Date(),
+};
+
+let dependencies: WebRtcStreamManagerDependencies = { ...defaultDependencies };
+const streams = new Map<string, WebRtcStreamRecord>();
+
+/** Override manager dependencies (tests). */
+export function setWebRtcStreamManagerDependencies(
+  overrides: Partial<WebRtcStreamManagerDependencies>
+): void {
+  dependencies = { ...dependencies, ...overrides };
+}
+
+/** Reset manager state and dependencies (tests). */
+export function resetWebRtcStreamManager(): void {
+  streams.clear();
+  dependencies = { ...defaultDependencies };
+}
+
+function activeStreamForDevice(deviceId: string): WebRtcStreamRecord | undefined {
+  for (const record of streams.values()) {
+    if (record.device.deviceId === deviceId) {
+      return record;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * (Re)start the capture source for a stream, routing its H.264 output into the
+ * publisher. Called before each publish attempt so that a reconnect is followed
+ * by a fresh SPS/PPS + keyframe the receiver can decode immediately.
+ */
+async function restartSource(record: WebRtcStreamRecord): Promise<void> {
+  if (record.source) {
+    await record.source.stop().catch(error => {
+      logger.debug(`[WebRtcStream] source stop during restart failed: ${error}`);
+    });
+    record.source = null;
+  }
+
+  const source = dependencies.createSource({
+    device: record.device,
+    onData: chunk => record.publisher.writeH264Chunk(chunk),
+    onError: error => {
+      logger.warn(`[WebRtcStream] capture source error for ${record.streamId}: ${error.message}`);
+    },
+    bitrateBps: record.bitrateBps,
+    size: record.size,
+  });
+  record.source = source;
+  await source.start();
+}
+
+/**
+ * Start publishing a device's screen to the configured coordination server over
+ * WHIP. Currently Android-only (uses `screenrecord` H.264). Returns the reconnect
+ * descriptor for the new stream.
+ */
+export async function startWebRtcStream(
+  request: StartWebRtcStreamRequest
+): Promise<WebRtcStreamDescriptor> {
+  if (request.device.platform !== "android") {
+    throw new ActionableError(
+      `WebRTC streaming currently supports Android only (got ${request.device.platform}).`
+    );
+  }
+
+  const existing = activeStreamForDevice(request.device.deviceId);
+  if (existing) {
+    throw new ActionableError(
+      `WebRTC stream already active for device ${request.device.deviceId} (streamId ${existing.streamId}). Stop it first.`
+    );
+  }
+
+  const config = resolveWebRtcStreamingConfig(request.overrides);
+  const streamId = request.streamId ?? `webrtc_${dependencies.idGenerator.next()}`;
+
+  const record: WebRtcStreamRecord = {
+    streamId,
+    device: request.device,
+    publisher: undefined as unknown as WebRtcPublisher,
+    source: null,
+    bitrateBps: config.bitrateKbps ? config.bitrateKbps * 1000 : undefined,
+    size: config.size,
+    startedAt: dependencies.now().toISOString(),
+  };
+
+  const publisher = dependencies.createPublisher(
+    {
+      streamId,
+      whipEndpoint: config.whipEndpoint,
+      bearerToken: config.bearerToken,
+      iceServers: config.iceServers,
+      bitrateBps: record.bitrateBps,
+    },
+    {
+      onBeforeEstablish: () => restartSource(record),
+    }
+  );
+  record.publisher = publisher;
+  streams.set(streamId, record);
+
+  try {
+    await publisher.start();
+  } catch (error) {
+    streams.delete(streamId);
+    await record.source?.stop().catch(() => {});
+    await publisher.stop().catch(() => {});
+    throw new ActionableError(
+      `Failed to start WebRTC stream: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  return publisher.getDescriptor();
+}
+
+/** Stop a stream by id, or the sole active stream when id is omitted. */
+export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamDescriptor> {
+  const record = resolveStreamRecord(streamId);
+  streams.delete(record.streamId);
+  const descriptor = record.publisher.getDescriptor();
+
+  await record.source?.stop().catch(error => {
+    logger.debug(`[WebRtcStream] source stop failed: ${error}`);
+  });
+  await record.publisher.stop().catch(error => {
+    logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
+  });
+
+  return { ...descriptor, state: "stopped" };
+}
+
+/** List reconnect descriptors for all active streams. */
+export function listWebRtcStreams(): WebRtcStreamDescriptor[] {
+  return Array.from(streams.values()).map(record => record.publisher.getDescriptor());
+}
+
+/** Get the reconnect descriptor for one stream (or null). */
+export function getWebRtcStreamDescriptor(streamId: string): WebRtcStreamDescriptor | null {
+  const record = streams.get(streamId);
+  return record ? record.publisher.getDescriptor() : null;
+}
+
+function resolveStreamRecord(streamId?: string): WebRtcStreamRecord {
+  if (streamId) {
+    const record = streams.get(streamId);
+    if (!record) {
+      throw new ActionableError(`No active WebRTC stream with id ${streamId}.`);
+    }
+    return record;
+  }
+
+  if (streams.size === 0) {
+    throw new ActionableError("No active WebRTC streams. Provide a streamId.");
+  }
+  if (streams.size > 1) {
+    throw new ActionableError("Multiple active WebRTC streams. Provide a streamId.");
+  }
+  return streams.values().next().value as WebRtcStreamRecord;
+}

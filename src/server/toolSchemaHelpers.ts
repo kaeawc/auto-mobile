@@ -45,6 +45,71 @@ export function applyJsonSchemaOverride(
   jsonSchemaOverrides.get(zodSchema)?.(jsonSchema);
 }
 
+/**
+ * Compacts advertised "exactly one of" selector properties. `z.union([...strict
+ * objects])` (the elementId/text/textAny selectors, `container`, etc.) expands to
+ * an `anyOf` where every branch re-inlines a full object schema — costly in
+ * `tools/list`. When a named property matches that pattern (each branch a strict
+ * object requiring exactly one key), rewrite it to a single flat object that
+ * lists all keys once with `oneOf: [{required:[k]}, ...]` — same accepted shape
+ * and the same "exactly one" hint at roughly half the tokens.
+ *
+ * Runtime validation is unaffected: this only mutates the advertised JSON schema
+ * (via `withJsonSchemaOverride`); the source-of-truth zod union is untouched.
+ * Non-matching properties are left as-is.
+ */
+export function compactExclusiveSelectorProperties(
+  jsonSchema: Record<string, unknown>,
+  propNames: readonly string[]
+): void {
+  const props = jsonSchema.properties as Record<string, any> | undefined;
+  if (!props) {
+    return;
+  }
+  for (const name of propNames) {
+    const prop = props[name];
+    const branches: unknown = prop?.anyOf ?? prop?.oneOf;
+    if (!Array.isArray(branches) || branches.length < 2) {
+      continue;
+    }
+    const merged: Record<string, unknown> = {};
+    const oneOf: Array<{ required: string[] }> = [];
+    let matchesPattern = true;
+    for (const branch of branches) {
+      const b = branch as Record<string, any>;
+      if (
+        b?.type !== "object" ||
+        typeof b.properties !== "object" ||
+        !Array.isArray(b.required) ||
+        b.required.length !== 1
+      ) {
+        matchesPattern = false;
+        break;
+      }
+      const key = b.required[0] as string;
+      if (!(key in b.properties)) {
+        matchesPattern = false;
+        break;
+      }
+      merged[key] = b.properties[key];
+      oneOf.push({ required: [key] });
+    }
+    if (!matchesPattern) {
+      continue;
+    }
+    const compact: Record<string, unknown> = {
+      type: "object",
+      additionalProperties: false,
+      properties: merged,
+      oneOf,
+    };
+    if (typeof prop.description === "string") {
+      compact.description = prop.description;
+    }
+    props[name] = compact;
+  }
+}
+
 export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: FieldAliasMap): T {
   return z.preprocess(input => normalizeFieldAliases(input, aliases), schema) as unknown as T;
 }

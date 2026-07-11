@@ -1034,63 +1034,55 @@
       "type": "object",
       "properties": {
         "source": {
-          "anyOf": [
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Source ID"
+            },
+            "text": {
+              "type": "string",
+              "description": "Source text"
+            }
+          },
+          "oneOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Source ID"
-                }
-              },
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Source text"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             }
           ],
           "description": "Source element"
         },
         "target": {
-          "anyOf": [
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Target ID"
+            },
+            "text": {
+              "type": "string",
+              "description": "Target text"
+            }
+          },
+          "oneOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Target ID"
-                }
-              },
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Target text"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             }
           ],
           "description": "Target element"
@@ -4900,35 +4892,31 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Scope search to a container",
-          "anyOf": [
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Container resource ID"
+            },
+            "text": {
+              "type": "string",
+              "description": "Container text"
+            }
+          },
+          "oneOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Container resource ID"
-                }
-              },
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Container text"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             }
-          ]
+          ],
+          "description": "Scope search to a container"
         },
         "autoTarget": {
           "description": "Auto-target pinchable containers",
@@ -6205,35 +6193,31 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Scope search to a container",
-          "anyOf": [
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Container resource ID"
+            },
+            "text": {
+              "type": "string",
+              "description": "Container text"
+            }
+          },
+          "oneOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Container resource ID"
-                }
-              },
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Container text"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             }
-          ]
+          ],
+          "description": "Scope search to a container"
         },
         "autoTarget": {
           "description": "Auto-target scrollable containers (default: true)",
@@ -6258,35 +6242,31 @@
           ]
         },
         "lookFor": {
-          "description": "Element to look for during swipe",
-          "anyOf": [
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "ID of the element to look for"
+            },
+            "text": {
+              "type": "string",
+              "description": "Text to look for"
+            }
+          },
+          "oneOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "ID of the element to look for"
-                }
-              },
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Text to look for"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             }
-          ]
+          ],
+          "description": "Element to look for during swipe"
         },
         "boomerang": {
           "description": "Return to start position after swipe apex",
@@ -6425,35 +6405,31 @@
       "type": "object",
       "properties": {
         "container": {
-          "description": "Scope search to a container",
-          "anyOf": [
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Container resource ID"
+            },
+            "text": {
+              "type": "string",
+              "description": "Container text"
+            }
+          },
+          "oneOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Container resource ID"
-                }
-              },
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Container text"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             }
-          ]
+          ],
+          "description": "Scope search to a container"
         },
         "selectionStrategy": {
           "description": "Element selection strategy: 'first' (default) or 'random'",
@@ -6531,52 +6507,44 @@
       "type": "object",
       "properties": {
         "selector": {
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Resource ID, e.g. com.app:id/btn_login"
-                }
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Resource ID, e.g. com.app:id/btn_login"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Text, content-desc, or placeholder"
+            },
+            "textAny": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
               },
+              "description": "Ordered text variants; first visible match wins"
+            }
+          },
+          "oneOf": [
+            {
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Text, content-desc, or placeholder"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "textAny": {
-                  "minItems": 1,
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "description": "Ordered text variants; first visible match wins"
-                }
-              },
               "required": [
                 "textAny"
-              ],
-              "additionalProperties": false
+              ]
             }
           ],
           "description": "Element to tap: elementId, text, or ordered text variants"
@@ -6586,35 +6554,31 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Scope search to a container",
-          "anyOf": [
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Container resource ID"
+            },
+            "text": {
+              "type": "string",
+              "description": "Container text"
+            }
+          },
+          "oneOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Container resource ID"
-                }
-              },
               "required": [
                 "elementId"
-              ],
-              "additionalProperties": false
+              ]
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Container text"
-                }
-              },
               "required": [
                 "text"
-              ],
-              "additionalProperties": false
+              ]
             }
-          ]
+          ],
+          "description": "Scope search to a container"
         },
         "action": {
           "default": "tap",

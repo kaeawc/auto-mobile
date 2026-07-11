@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** 4-tier fingerprinting strategy fully implemented and benchmarked. 100% success rate for non-keyboard scenarios. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** 4-tier fingerprinting strategy fully implemented and unit-tested. Designed to reliably identify non-keyboard screens; there is no committed end-to-end benchmark backing a specific success-rate figure. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Screen Fingerprinting
 
@@ -10,16 +10,19 @@ Screen fingerprinting generates stable identifiers for UI screens that remain co
 
 This strategy is critical for reliably identifying screens and building accurate navigation graphs across diverse scenarios.
 
-### Research Foundation
+### Design Foundation
 
-The implementation is based on extensive research testing multiple strategies across real-world scenarios:
+The tiered strategy came out of a design exploration over representative screen
+types (e.g. discover-tap, discover-swipe, discover-chat, discover-text) and
+several candidate fingerprinting approaches, from which the shallow-scrollable
+markers emerged as the most robust for non-keyboard scenarios.
 
-- **4 screen types** tested (discover-tap, discover-swipe, discover-chat, discover-text)
-- **11 observations** captured with varying states
-- **6 strategies** evaluated
-- **100% success rate** for non-keyboard scenarios achieved with shallow scrollable markers
-
-The tiered strategy was validated across 4 screen types and 11 observations with a 100% success rate for non-keyboard scenarios.
+> Note: the specific figures previously quoted here ("11 observations",
+> "6 strategies", "100% success rate") described that original exploration and
+> are **not** reproduced by a committed benchmark or dataset in this repo. The
+> mechanics are covered by unit tests (`test/features/navigation/ScreenFingerprint.test.ts`),
+> not a measured cross-scenario success rate. Treat the tiers below as design
+> intent rather than benchmarked results.
 
 ---
 
@@ -170,7 +173,8 @@ After scroll:  filter_chip_1, icon_button_delete, slider_control
 Both fingerprint to: hash(scrollable container metadata)
 ```
 
-**Impact**: 100% success for scrolling scenarios
+**Impact**: stable fingerprints across scrolling scenarios (the container
+metadata stays constant as content scrolls)
 
 ---
 

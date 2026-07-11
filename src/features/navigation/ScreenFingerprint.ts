@@ -49,8 +49,6 @@ export enum FingerprintConfidence {
   MEDIUM = 75,
   /** Keyboard detected, filtered hierarchy */
   LOW_MEDIUM = 60,
-  /** Package + structure only */
-  LOW = 50,
 }
 
 /**
@@ -61,7 +59,6 @@ export enum FingerprintMethod {
   CACHED_NAVIGATION_ID = "cached-navigation-id",
   SHALLOW_SCROLLABLE = "shallow-scrollable",
   SHALLOW_SCROLLABLE_WITH_KEYBOARD = "shallow-scrollable-keyboard",
-  PACKAGE_STRUCTURE = "package-structure",
 }
 
 /**
@@ -113,7 +110,6 @@ const PERCENT_PATTERN = /^\d+%$/;
  * 2. Cached Navigation ID (85% confidence) - Use cached ID when keyboard detected
  * 3. Shallow Scrollable (75% confidence) - Filtered hierarchy with shallow scrollable markers
  * 4. Shallow Scrollable + Keyboard (60% confidence) - Filtered hierarchy with keyboard detected
- * 5. Package + Structure (50% confidence) - Last resort fallback
  *
  * Key features:
  * - Shallow scrollable markers: Keep container, drop children (handles scrolling)

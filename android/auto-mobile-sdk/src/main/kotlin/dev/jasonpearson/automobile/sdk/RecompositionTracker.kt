@@ -115,7 +115,7 @@ internal object RecompositionTracker {
     ctx.sendBroadcast(intent)
   }
 
-  private fun buildSnapshotJson(applicationId: String): String {
+  internal fun buildSnapshotJson(applicationId: String): String {
     val entriesArray = JSONArray()
     for (entry in entries.values) {
       entriesArray.put(entry.toJson())
@@ -203,6 +203,10 @@ internal object RecompositionTracker {
       durationSamples += 1
     }
 
+    // Reads the same mutable counters that record()/recordDuration() write under
+    // @Synchronized; without it, a snapshot on the handler thread can observe torn
+    // or stale counters (e.g. durationTotalMs updated but durationSamples not, #3613).
+    @Synchronized
     fun toJson(): JSONObject {
       val json =
         JSONObject()

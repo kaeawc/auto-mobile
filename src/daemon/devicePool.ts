@@ -925,7 +925,12 @@ export class DevicePool {
     }
 
     childProcess.once("exit", (code, signal) => {
-      void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal);
+      void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal).catch(error => {
+        logger.warn(
+          `[DevicePool] Failed to evict ${device.deviceId} after emulator process exit: ${error}`,
+          error
+        );
+      });
     });
   }
 

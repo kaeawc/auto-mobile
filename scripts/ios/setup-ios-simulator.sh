@@ -249,12 +249,15 @@ find_simulator_device() {
     log_debug "Available devices for iOS ${ios_version}:"
     log_debug "$devices"
 
-    # Prefer iPhone 16, then iPhone 15, then any iPhone
+    # Prefer iPhone 16, then iPhone 15, then any iPhone.
+    # Require a non-alphanumeric after the number (or end of line) so
+    # "iPhone 16" does not also match "iPhone 16e" — the old `[^0-9]` matched
+    # the 'e' and could select the 16e, defeating the preference order (#3652).
     local device_name=""
-    if echo "$devices" | grep -q "iPhone 16[^0-9]"; then
-        device_name=$(echo "$devices" | grep "iPhone 16[^0-9]" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
-    elif echo "$devices" | grep -q "iPhone 15[^0-9]"; then
-        device_name=$(echo "$devices" | grep "iPhone 15[^0-9]" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
+    if echo "$devices" | grep -qE "iPhone 16([^0-9A-Za-z]|$)"; then
+        device_name=$(echo "$devices" | grep -E "iPhone 16([^0-9A-Za-z]|$)" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
+    elif echo "$devices" | grep -qE "iPhone 15([^0-9A-Za-z]|$)"; then
+        device_name=$(echo "$devices" | grep -E "iPhone 15([^0-9A-Za-z]|$)" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
     elif echo "$devices" | grep -q "iPhone"; then
         device_name=$(echo "$devices" | grep "iPhone" | head -1 | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
     fi

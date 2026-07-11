@@ -27,7 +27,7 @@ import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { createJSONToolResponse, createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
-import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases, withJsonSchemaOverride, compactExclusiveSelectorProperties } from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
 import {
   createElementIdTextSelectorSchema,
@@ -137,7 +137,7 @@ const tapOnSelectorSchema = z.union([
   z.object({ textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins") }).strict()
 ]).describe("Element to tap: elementId, text, or ordered text variants");
 
-export const tapOnSchema = addDeviceTargetingToSchema(z.object({
+export const tapOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   selector: tapOnSelectorSchema,
   sibling: z.boolean().optional().describe(
     "Tap a clickable sibling of the match, e.g. checkbox beside label"
@@ -168,9 +168,9 @@ export const tapOnSchema = addDeviceTargetingToSchema(z.object({
     "Enable preTapStability and retryIfNoChange"
   ),
   platform: platformSchema
-}).strict());
+}).strict()), js => compactExclusiveSelectorProperties(js, ["selector", "container"]));
 
-export const tapAnySchema = addDeviceTargetingToSchema(z.object({
+export const tapAnySchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   container: elementContainerSchema.optional().describe(
     "Scope search to a container"
   ),
@@ -186,7 +186,7 @@ export const tapAnySchema = addDeviceTargetingToSchema(z.object({
     duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
   }).optional().describe("Poll for clickable element before tapping"),
   platform: platformSchema
-}).strict());
+}).strict()), js => compactExclusiveSelectorProperties(js, ["container"]));
 
 const dragAndDropSelectorSchema = (label: "Source" | "Target") =>
   createElementIdTextSelectorSchema({
@@ -199,7 +199,7 @@ const swipeOnLookForSchema = createElementIdTextSelectorSchema({
   text: "Text to look for"
 });
 
-export const dragAndDropSchema = addDeviceTargetingToSchema(z.object({
+export const dragAndDropSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   source: dragAndDropSelectorSchema("Source"),
   target: dragAndDropSelectorSchema("Target"),
   pressDurationMs: z.number().min(600).max(3000).optional().describe(
@@ -212,9 +212,9 @@ export const dragAndDropSchema = addDeviceTargetingToSchema(z.object({
     "Hold duration ms (min: 100, max: 3000, default: 100)"
   ),
   platform: platformSchema
-}));
+})), js => compactExclusiveSelectorProperties(js, ["source", "target"]));
 
-export const swipeOnSchema = addDeviceTargetingToSchema(z.object({
+export const swipeOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   includeSystemInsets: z.boolean().optional().describe("Use full screen including status/nav bars"),
   container: elementContainerSchema.optional().describe(
     "Scope search to a container"
@@ -229,9 +229,9 @@ export const swipeOnSchema = addDeviceTargetingToSchema(z.object({
   returnSpeed: z.number().min(0.1).max(3.0).optional().describe("Speed multiplier for return swipe (0.1-3.0)"),
   speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
   platform: platformSchema
-}));
+})), js => compactExclusiveSelectorProperties(js, ["container", "lookFor"]));
 
-export const pinchOnSchema = addDeviceTargetingToSchema(z.object({
+export const pinchOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   direction: z.enum(["in", "out"]).describe("Pinch direction"),
   distanceStart: z.number().optional().describe("Initial finger distance (px, default: 400)"),
   distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
@@ -246,7 +246,7 @@ export const pinchOnSchema = addDeviceTargetingToSchema(z.object({
   ),
   autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
   platform: platformSchema
-}));
+})), js => compactExclusiveSelectorProperties(js, ["container"]));
 
 export const clearTextSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema

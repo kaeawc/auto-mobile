@@ -88,11 +88,13 @@ const criticalSectionHandler = async (
   // Check for abort before entering
   throwIfAborted(signal);
 
-  // Validate steps to prevent nesting
+  // Validate steps to prevent nesting. A nested criticalSection or barrier
+  // would deadlock: the device holding this section's mutex would wait for
+  // peers that cannot enter until it releases.
   for (const step of normalizedSteps) {
-    if (step.tool === "criticalSection") {
+    if (step.tool === "criticalSection" || step.tool === "barrier") {
       throw new ActionableError(
-        `Nested critical sections are not supported. Found criticalSection step inside critical section "${lock}".`
+        `Nested critical sections are not supported. Found ${step.tool} step inside critical section "${lock}".`
       );
     }
   }

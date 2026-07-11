@@ -158,6 +158,35 @@ describe("criticalSection tool", () => {
     ).rejects.toThrow(/Nested critical sections are not supported/);
   });
 
+  test("detects a barrier nested inside a critical section", async () => {
+    const tool = ToolRegistry.getTool("criticalSection");
+    expect(tool).toBeDefined();
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "test-device",
+      name: "Test Device",
+    };
+
+    const coordinator = CriticalSectionCoordinator.getInstance();
+    coordinator.registerExpectedDevices("outer-lock", 1);
+
+    const params = {
+      lock: "outer-lock",
+      deviceCount: 1,
+      steps: [
+        {
+          tool: "barrier", // Nested barrier would deadlock
+          params: { lock: "inner-barrier", deviceCount: 1 },
+        },
+      ],
+    };
+
+    await expect(
+			tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined)
+    ).rejects.toThrow(/Nested critical sections are not supported.*barrier/);
+  });
+
   test("executes steps in order for single device", async () => {
     const tool = ToolRegistry.getTool("criticalSection");
     expect(tool).toBeDefined();

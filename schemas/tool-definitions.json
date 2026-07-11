@@ -335,6 +335,37 @@
     }
   },
   {
+    "name": "barrier",
+    "description": "Synchronize multiple devices at a barrier, then let all proceed concurrently (no serialized section).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "lock": {
+          "type": "string",
+          "description": "Shared barrier name; all devices using the same name synchronize together"
+        },
+        "deviceCount": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Number of devices that must arrive before the barrier lifts"
+        },
+        "timeout": {
+          "description": "Barrier timeout ms (default 30000)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "lock",
+        "deviceCount"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "biometricAuth",
     "description": "Simulate biometric auth: Android emulator/SDK hook or iOS Simulator.",
     "inputSchema": {

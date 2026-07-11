@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** Fully implemented. Parallel device execution, `criticalSection` synchronization, per-device abort strategies, and YAML anchor support are all active. See the [Status Glossary](../status-glossary.md) for chip definitions.
+> **Current state:** Fully implemented. Parallel device execution, `criticalSection` synchronization, the `barrier` sync point, per-device abort strategies, and YAML anchor support are all active. See the [Status Glossary](../status-glossary.md) for chip definitions.
 
 ## Goal
 
@@ -103,14 +103,19 @@ Semantics:
 - Steps targeting different devices run concurrently by default.
 - `criticalSection` is a mutex; all devices must reach it, then steps execute
   one device at a time within the section. See [Critical Section](daemon/critical-section.md) for details.
-- Optional `barrier` tool can synchronize devices without serializing actions.
+- `barrier` synchronizes devices without serializing actions: every device
+  runs its own `barrier` step with a shared `lock` and `deviceCount`, blocks
+  until all `deviceCount` devices arrive, then all proceed concurrently (no
+  held section, no steps). Use it when tracks must line up at a point but
+  should then continue in parallel. Like `criticalSection`, `barrier` is
+  daemon-only and may not be nested inside a `criticalSection`.
 
 ## Implementation
 
 ### Plan Validation
 
 Plans are validated at parse time:
-- If `devices` field is present, all non-`criticalSection` steps must have a `device` parameter
+- If `devices` field is present, every step must have a `device` parameter — including `criticalSection` and `barrier` steps and each of their nested sub-steps (there is no device-agnostic exemption)
 - Device labels must be unique and non-empty strings
 - Steps cannot reference undeclared device labels
 - If any step uses device labels or criticalSection, the plan must declare `devices`
@@ -144,6 +149,6 @@ Debug mode or failures log per-device execution timing:
 
 ## Known Limitations
 
-- YAML anchors (`<<` merge keys) work but device labels must still be explicitly specified (not merged from anchors).
+- YAML anchors (`<<` merge keys) merge all keys, including `device`; a per-step `device` written after the merge simply overrides the merged value.
 - Parallel actions can cause ordering hazards without explicit locks - use critical sections to synchronize.
 - Each device's abort signal is checked between steps, not mid-step.

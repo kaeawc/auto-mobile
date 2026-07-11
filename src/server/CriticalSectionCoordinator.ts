@@ -101,6 +101,28 @@ export class CriticalSectionCoordinator {
   }
 
   /**
+	 * Wait at a barrier until all expected devices arrive, then proceed
+	 * concurrently. Unlike {@link enterCriticalSection}, this acquires no mutex
+	 * and returns no release function: once the barrier lifts, every device
+	 * continues in parallel with no serialized section.
+	 *
+	 * Registers the expected device count (idempotently) before waiting, so each
+	 * participating device may call this with the same lock and deviceCount.
+	 * Schedules resource cleanup once the barrier lifts; on timeout the caller
+	 * should {@link forceCleanup} to release any devices still waiting.
+	 */
+  public async awaitBarrier(
+    lock: string,
+    deviceId: string,
+    deviceCount: number,
+    timeout: number = this.BARRIER_TIMEOUT_MS
+  ): Promise<void> {
+    this.registerExpectedDevices(lock, deviceCount);
+    await this.waitAtBarrier(lock, deviceId, timeout);
+    this.scheduleCleanup(lock);
+  }
+
+  /**
 	 * Wait at the barrier until all expected devices have arrived.
 	 */
   private async waitAtBarrier(

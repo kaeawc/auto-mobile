@@ -20,6 +20,7 @@ import { registerNotificationTools } from "../src/server/notificationTools";
 import { registerPlanTools } from "../src/server/planTools";
 import { registerDoctorTools } from "../src/server/doctorTools";
 import { registerCriticalSectionTools } from "../src/server/criticalSectionTools";
+import { registerBarrierTools } from "../src/server/barrierTools";
 import { registerVideoRecordingTools } from "../src/server/videoRecordingTools";
 import { registerSnapshotTools } from "../src/server/snapshotTools";
 import { registerBiometricTools } from "../src/server/biometricTools";
@@ -49,6 +50,7 @@ function registerAllTools(): void {
   registerPlanTools();
   registerDoctorTools();
   registerCriticalSectionTools();
+  registerBarrierTools();
   registerVideoRecordingTools();
   registerSnapshotTools();
   registerBiometricTools();

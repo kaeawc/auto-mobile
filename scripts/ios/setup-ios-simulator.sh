@@ -31,24 +31,37 @@ SKIP_DOWNLOAD=false
 VERBOSE=false
 MIN_IOS_VERSION=""
 
-for arg in "$@"; do
-    case "$arg" in
+# A `while … shift` loop (not `for arg in "$@"`) so `--min-ios VERSION` (the
+# space-separated form documented in the help) is honored, not just
+# `--min-ios=VERSION`. The old for-loop dropped the space form silently (#3645).
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --dry-run)
             DRY_RUN=true
+            shift
             ;;
         --force-download)
             FORCE_DOWNLOAD=true
+            shift
             ;;
         --skip-download)
             SKIP_DOWNLOAD=true
+            shift
             ;;
         --verbose)
             VERBOSE=true
+            shift
             ;;
         --min-ios=*)
-            MIN_IOS_VERSION="${arg#*=}"
+            MIN_IOS_VERSION="${1#*=}"
+            shift
+            ;;
+        --min-ios)
+            MIN_IOS_VERSION="${2:?--min-ios requires a VERSION argument}"
+            shift 2
             ;;
         *)
+            shift
             ;;
     esac
 done

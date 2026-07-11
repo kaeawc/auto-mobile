@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NavigationEvent
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,8 +36,14 @@ data class TimestampedNavigationEvent(
  */
 class NavigationEventAccumulator {
   private val events = CopyOnWriteArrayList<TimestampedNavigationEvent>()
-  private var sequenceNumber = 0L
+  // Incremented from two paths (addEvent + the navigation listener callback);
+  // AtomicLong so concurrent events can't collide on a sequence number (#3604).
+  private val sequenceNumber = AtomicLong(0L)
   private val maxEvents = 100 // Keep last 100 events
+
+  // Guards the non-atomic add+trim compound and the size/subList read so the
+  // buffer can't be trimmed mid-read (IndexOutOfBoundsException, #3604).
+  private val bufferLock = Any()
 
   // StateFlow for reactive consumption - emits latest event
   private val _latestEvent = MutableStateFlow<TimestampedNavigationEvent?>(null)
@@ -60,7 +67,7 @@ class NavigationEventAccumulator {
     applicationId: String? = null,
   ) {
     val timestamp = System.currentTimeMillis()
-    val sequence = sequenceNumber++
+    val sequence = sequenceNumber.getAndIncrement()
 
     val timestampedEvent =
       TimestampedNavigationEvent(
@@ -73,19 +80,13 @@ class NavigationEventAccumulator {
         applicationId = applicationId,
       )
 
-    events.add(timestampedEvent)
-    if (events.size > maxEvents) {
-      events.removeAt(0)
-    }
-
-    _latestEvent.value = timestampedEvent
-    _eventCount.value = events.size
+    appendEvent(timestampedEvent)
   }
 
   /** Handle incoming navigation event from AutoMobileSDK. */
   private fun onNavigationEvent(event: NavigationEvent) {
     val timestamp = System.currentTimeMillis()
-    val sequence = sequenceNumber++
+    val sequence = sequenceNumber.getAndIncrement()
 
     // Convert NavigationEvent to TimestampedNavigationEvent
     // Convert arguments map to String-keyed map (serialize non-string values)
@@ -110,16 +111,18 @@ class NavigationEventAccumulator {
         sequenceNumber = sequence,
       )
 
-    // Add to events list
-    events.add(timestampedEvent)
+    appendEvent(timestampedEvent)
+  }
 
-    // Maintain circular buffer - remove oldest if exceeds max
-    if (events.size > maxEvents) {
-      events.removeAt(0)
+  /** Append an event and trim the circular buffer atomically, then emit updates. */
+  private fun appendEvent(event: TimestampedNavigationEvent) {
+    synchronized(bufferLock) {
+      events.add(event)
+      if (events.size > maxEvents) {
+        events.removeAt(0)
+      }
     }
-
-    // Emit latest event
-    _latestEvent.value = timestampedEvent
+    _latestEvent.value = event
     _eventCount.value = events.size
   }
 
@@ -140,11 +143,13 @@ class NavigationEventAccumulator {
 
   /** Get the most recent N events. */
   fun getRecentEvents(count: Int): List<TimestampedNavigationEvent> {
-    val size = events.size
-    return if (size <= count) {
-      events.toList()
-    } else {
-      events.subList(size - count, size).toList()
+    synchronized(bufferLock) {
+      val size = events.size
+      return if (size <= count) {
+        events.toList()
+      } else {
+        events.subList(size - count, size).toList()
+      }
     }
   }
 
@@ -161,7 +166,7 @@ class NavigationEventAccumulator {
       totalEvents = events.size,
       oldestTimestamp = events.firstOrNull()?.timestamp,
       newestTimestamp = events.lastOrNull()?.timestamp,
-      currentSequence = sequenceNumber,
+      currentSequence = sequenceNumber.get(),
     )
   }
 }

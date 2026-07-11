@@ -34,9 +34,12 @@ create_log="${scratch_dir}/avdmanager-create-${start_api}-${end_api}.log"
 echo "Listing system images..." | tee "$list_log"
 "$sdkmanager" --list | tee -a "$list_log"
 
-mapfile -t available_packages < <(
-  rg -o "system-images;android-[0-9]+;${tag};${abi}" "$list_log" | sort -u
-)
+# `mapfile` is a bash 4+ builtin absent from macOS's default bash 3.2; use a
+# portable while-read loop so this doesn't abort under `set -e` (#3654).
+available_packages=()
+while IFS= read -r pkg_line; do
+  available_packages+=("$pkg_line")
+done < <(rg -o "system-images;android-[0-9]+;${tag};${abi}" "$list_log" | sort -u)
 
 declare -a requested_packages=()
 for api in $(seq "$start_api" "$end_api"); do

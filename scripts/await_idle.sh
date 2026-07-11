@@ -266,11 +266,16 @@ wait_for_process_idle() {
             return 1
         fi
 
-        # Check if device is process idle
-        local idle_output
-        idle_output=$($ADB_CMD shell dumpsys activity | grep -cE "mSleeping=false|mBooted=true|mBooting=false")
+        # Check if device is process idle. Test each flag independently: a single
+        # `grep -c` counts matching LINES, not distinct conditions (all three flags
+        # can share one line -> 1, or repeat -> >3), and a zero-match `grep -c`
+        # exits 1 which aborts the script under `set -euo pipefail` (#3654).
+        local dumpsys_output
+        dumpsys_output=$($ADB_CMD shell dumpsys activity)
 
-        if [ "$idle_output" -eq 3 ]; then
+        if echo "$dumpsys_output" | grep -q "mSleeping=false" &&
+            echo "$dumpsys_output" | grep -q "mBooted=true" &&
+            echo "$dumpsys_output" | grep -q "mBooting=false"; then
             echo "Device is process idle"
             return 0
         fi

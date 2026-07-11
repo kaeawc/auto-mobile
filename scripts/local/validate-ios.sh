@@ -88,14 +88,28 @@ for component in "${SWIFT_COMPONENTS[@]}"; do
 
   echo "Building ${component}..."
 
-  if (cd "${component_path}" && swift build 2>&1 | grep -E "(error:|warning:|Compiling|Linking|Build complete)"); then
-    if (cd "${component_path}" && swift build >/dev/null 2>&1); then
-      echo "✓ ${component} build successful"
-      PASSED_BUILDS+=("${component}")
-    else
-      echo "❌ ${component} build failed"
-      FAILED_BUILDS+=("${component}")
-    fi
+  # Run the build once and classify by its exit status. Previously the result
+  # was inferred from a `swift build 2>&1 | grep ...` pipeline, but under
+  # `set -o pipefail` a failing build made the pipeline non-zero even when grep
+  # matched the error line — so the `if` was false and the component was added
+  # to NEITHER PASSED_BUILDS nor FAILED_BUILDS, and the script reported success
+  # despite a broken build (#3637).
+  if build_output=$(cd "${component_path}" && swift build 2>&1); then
+    build_ok=true
+  else
+    build_ok=false
+  fi
+
+  # Surface the interesting lines (errors/warnings/progress) without deciding
+  # pass/fail from grep's exit status.
+  echo "${build_output}" | grep -E "(error:|warning:|Compiling|Linking|Build complete)" || true
+
+  if [[ "${build_ok}" == true ]]; then
+    echo "✓ ${component} build successful"
+    PASSED_BUILDS+=("${component}")
+  else
+    echo "❌ ${component} build failed"
+    FAILED_BUILDS+=("${component}")
   fi
 
   echo ""

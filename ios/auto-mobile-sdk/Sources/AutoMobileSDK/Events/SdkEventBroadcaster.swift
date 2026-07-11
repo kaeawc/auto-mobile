@@ -76,10 +76,16 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
     func broadcastBatch(bundleId: String?, events: [any SdkEvent]) {
         guard !events.isEmpty else { return }
-        InternalLogger.debug("broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(ctrlProxyUrl?.absoluteString ?? "nil")")
+        let sink = ctrlProxyUrl
+        InternalLogger.debug("broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(sink?.absoluteString ?? "nil")")
 
-        // Persist to disk first for crash resilience
-        let batchId = persistence?.persist(events)
+        // Persist to disk only when there is an asynchronous delivery sink whose
+        // failure we must survive across a crash. Without a CtrlProxy URL the only
+        // delivery is the synchronous in-process NotificationCenter post below, so
+        // persisting would be a write-then-immediate-delete every flush — pure I/O
+        // churn (issue #3636). CtrlProxy forwarding is DEBUG-only, so release builds
+        // never persist.
+        let batchId = sink != nil ? persistence?.persist(events) : nil
 
         deliverBatch(bundleId: bundleId, events: events, batchId: batchId)
     }

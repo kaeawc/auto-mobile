@@ -22,4 +22,33 @@ final class SdkEventBroadcasterTests: XCTestCase {
         XCTAssertEqual(broadcaster.ctrlProxyUrl, url)
         #endif
     }
+
+    // MARK: - persist-only-when-a-sink-exists (#3636)
+
+    /// With no async delivery sink, the batch must NOT be written to disk (delivery
+    /// is a synchronous NotificationCenter post), avoiding a write-then-delete churn.
+    func testDoesNotPersistWhenNoSink() {
+        let broadcaster = SdkEventBroadcaster.makeTestInstance()
+        let persistence = FakeEventPersistence()
+        broadcaster.persistence = persistence
+        broadcaster.ctrlProxyUrl = nil
+
+        broadcaster.broadcastBatch(bundleId: "com.example", events: [SdkInteractionEvent(interactionType: "e1")])
+
+        XCTAssertEqual(persistence.persistCallCount, 0)
+        XCTAssertEqual(persistence.removeCallCount, 0)
+    }
+
+    /// With a sink configured, the batch is persisted (so an async-delivery failure
+    /// can be replayed after a crash).
+    func testPersistsWhenSinkConfigured() {
+        let broadcaster = SdkEventBroadcaster.makeTestInstance()
+        let persistence = FakeEventPersistence()
+        broadcaster.persistence = persistence
+        broadcaster.ctrlProxyUrl = URL(string: "http://localhost:1/sdk-events") // unused port; delivery fails fast
+
+        broadcaster.broadcastBatch(bundleId: "com.example", events: [SdkInteractionEvent(interactionType: "e1")])
+
+        XCTAssertEqual(persistence.persistCallCount, 1)
+    }
 }

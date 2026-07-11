@@ -16,7 +16,6 @@ JVM bytecode unchanged (Kotlin `internal` compiles to JVM `public`).
 | Type | Reason |
 |------|--------|
 | `RecompositionTracker` | Internal recomposition tracking, used only by Compose APIs and `AutoMobileSDK` |
-| `SdkEventBroadcaster` | Internal broadcast delivery mechanism |
 | `DefaultDropCounter` | Implementation of `DropCounter` interface |
 | `SdkContext` | Internal mutable context; only `SdkContextSnapshot` is consumer-facing |
 | `SessionTracker` / `SessionTracking` | Internal session lifecycle management |
@@ -33,11 +32,16 @@ JVM bytecode unchanged (Kotlin `internal` compiles to JVM `public`).
 | `FileSystemOperations` / `RealFileSystemOperations` | Internal file system abstraction |
 | `SharedPreferencesDriverImpl` | Internal `SharedPreferencesDriver` implementation |
 
-### Added `@RestrictTo(LIBRARY)`
+### Added `@RestrictTo`
 
-| Type | Reason |
-|------|--------|
-| `ConfigurationOverrideHelper` | Test-only utility in main source set; `@RestrictTo` warns consumers in IDE |
+These types stay JVM-public (they are used cross-process / cross-module), so
+they are annotated `@RestrictTo` rather than made `internal`. The annotation
+warns consumers in the IDE while leaving the symbol callable at runtime.
+
+| Type | Scope | Reason |
+|------|-------|--------|
+| `ConfigurationOverrideHelper` | `LIBRARY` | Test-only utility in main source set |
+| `SdkEventBroadcaster` | `LIBRARY_GROUP` | Public `object` used for cross-process broadcast delivery; needs to stay JVM-public, so restricted to the library group rather than made `internal` |
 
 ### Remaining Issues (Cannot Fix)
 
@@ -76,9 +80,15 @@ JVM bytecode unchanged (Kotlin `internal` compiles to JVM `public`).
 
 ### Android (classes/interfaces in API dump)
 
+These are as-of-audit snapshot figures — the committed
+`android/auto-mobile-sdk/api/auto-mobile-sdk.api` continues to drift as classes
+are added by later PRs (it currently holds ~135), so treat the delta, not the
+absolute, as the point:
+
 - Before: 129 classes
-- After: 134 classes (net +5 due to `BackPressureStrategy` and `SdkEventBuffer$WhenMappings` now
-  appearing in release build; `CompiledLogFilter` removed as stale)
+- After (at audit time): 134 classes (net +5 due to `BackPressureStrategy` and
+  `SdkEventBuffer$WhenMappings` now appearing in release build; `CompiledLogFilter`
+  removed as stale)
 
 Note: The Android API dump uses javap which reflects JVM bytecode. Kotlin `internal` types still
 appear as JVM `public` but are hidden from Kotlin consumers at the language level.

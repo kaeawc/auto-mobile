@@ -3176,447 +3176,182 @@
           ]
         },
         "waitFor": {
-          "description": "Wait for element to appear before returning observation",
-          "anyOf": [
-            {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Wait for a predicate before returning the observation. Provide at least one of: elementId, text, textAny, className, contentDescription, or activeWindow. textAny is mutually exclusive with the element predicates.",
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Element resource ID / accessibility identifier"
+            },
+            "text": {
+              "type": "string",
+              "description": "Element text"
+            },
+            "textAny": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered text variants; first visible match wins"
+            },
+            "className": {
+              "type": "string",
+              "description": "Element class name"
+            },
+            "contentDescription": {
+              "type": "string",
+              "description": "Element content description / accessibility label"
+            },
+            "matchType": {
+              "type": "string",
+              "enum": [
+                "all",
+                "any"
+              ],
+              "description": "Whether element predicates must all match one node, or any one may match"
+            },
+            "textMatch": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "contains",
+                "regex"
+              ],
+              "description": "How to match waitFor.text; does not affect contentDescription"
+            },
+            "activeWindow": {
               "type": "object",
+              "additionalProperties": false,
+              "description": "Foreground app/window predicates (provide an app id or activityName)",
               "properties": {
-                "textAny": {
-                  "minItems": 1,
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "description": "Ordered text variants; first visible match wins"
+                "appId": {
+                  "type": "string",
+                  "description": "Foreground app bundle ID / package name"
                 },
-                "elementId": {
-                  "not": {}
+                "packageName": {
+                  "type": "string",
+                  "description": "Alias for appId (Android package name)"
                 },
-                "text": {
-                  "not": {}
+                "bundleId": {
+                  "type": "string",
+                  "description": "Alias for appId (iOS bundle ID)"
                 },
-                "className": {
-                  "not": {}
-                },
-                "contentDescription": {
-                  "not": {}
-                },
-                "matchType": {
-                  "not": {}
-                },
-                "textMatch": {
-                  "not": {}
-                },
-                "activeWindow": {
-                  "description": "Foreground app/window predicates",
-                  "allOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "appId": {
-                          "description": "Foreground app bundle ID / package name",
-                          "type": "string"
-                        },
-                        "packageName": {
-                          "type": "string"
-                        },
-                        "bundleId": {
-                          "type": "string"
-                        },
-                        "activityName": {
-                          "description": "Foreground Android activity name",
-                          "type": "string"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "appId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "appId"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "packageName": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "packageName"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "bundleId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "bundleId"
-                          ],
-                          "additionalProperties": {}
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "activityName": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "activityName"
-                          ],
-                          "additionalProperties": {}
-                        }
-                      ]
-                    }
-                  ]
-                },
-                "timeout": {
-                  "description": "Wait timeout ms (default: 5000)",
-                  "type": "number"
-                },
-                "container": {
-                  "description": "Scope match to a container",
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "elementId": {
-                          "type": "string",
-                          "description": "Container resource ID"
-                        }
-                      },
-                      "required": [
-                        "elementId"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "text": {
-                          "type": "string",
-                          "description": "Container text"
-                        }
-                      },
-                      "required": [
-                        "text"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
+                "activityName": {
+                  "type": "string",
+                  "description": "Foreground Android activity name (Android-only)"
                 }
               },
+              "anyOf": [
+                {
+                  "required": [
+                    "appId"
+                  ]
+                },
+                {
+                  "required": [
+                    "packageName"
+                  ]
+                },
+                {
+                  "required": [
+                    "bundleId"
+                  ]
+                },
+                {
+                  "required": [
+                    "activityName"
+                  ]
+                }
+              ]
+            },
+            "container": {
+              "type": "object",
+              "description": "Scope the match to a container element (by elementId or text)",
+              "properties": {
+                "elementId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Wait timeout ms (default 5000)"
+            }
+          },
+          "anyOf": [
+            {
               "required": [
                 "textAny"
               ],
-              "additionalProperties": false
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "elementId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "className"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contentDescription"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "matchType"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "textMatch"
+                    ]
+                  }
+                ]
+              }
             },
             {
-              "allOf": [
+              "not": {
+                "required": [
+                  "textAny"
+                ]
+              },
+              "anyOf": [
                 {
-                  "type": "object",
-                  "properties": {
-                    "elementId": {
-                      "description": "Element resource ID / accessibility identifier",
-                      "type": "string"
-                    },
-                    "text": {
-                      "description": "Element text",
-                      "type": "string"
-                    },
-                    "textAny": {
-                      "not": {}
-                    },
-                    "className": {
-                      "description": "Element class name",
-                      "type": "string"
-                    },
-                    "contentDescription": {
-                      "description": "Element content description / accessibility label",
-                      "type": "string"
-                    },
-                    "matchType": {
-                      "description": "Whether element predicates must all match the same node or any one may match",
-                      "type": "string",
-                      "enum": [
-                        "all",
-                        "any"
-                      ]
-                    },
-                    "textMatch": {
-                      "description": "How to match waitFor.text; does not affect contentDescription",
-                      "type": "string",
-                      "enum": [
-                        "exact",
-                        "contains",
-                        "regex"
-                      ]
-                    },
-                    "activeWindow": {
-                      "description": "Foreground app/window predicates",
-                      "allOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "appId": {
-                              "description": "Foreground app bundle ID / package name",
-                              "type": "string"
-                            },
-                            "packageName": {
-                              "type": "string"
-                            },
-                            "bundleId": {
-                              "type": "string"
-                            },
-                            "activityName": {
-                              "description": "Foreground Android activity name",
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "appId": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "appId"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "packageName": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "packageName"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "bundleId": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "bundleId"
-                              ],
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "activityName": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "activityName"
-                              ],
-                              "additionalProperties": {}
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    "timeout": {
-                      "description": "Wait timeout ms (default: 5000)",
-                      "type": "number"
-                    },
-                    "container": {
-                      "description": "Scope match to a container",
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "elementId": {
-                              "type": "string",
-                              "description": "Container resource ID"
-                            }
-                          },
-                          "required": [
-                            "elementId"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "text": {
-                              "type": "string",
-                              "description": "Container text"
-                            }
-                          },
-                          "required": [
-                            "text"
-                          ],
-                          "additionalProperties": false
-                        }
-                      ]
-                    }
-                  },
-                  "additionalProperties": false
+                  "required": [
+                    "elementId"
+                  ]
                 },
                 {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "elementId": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "elementId"
-                      ],
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "text": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "text"
-                      ],
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "className": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "className"
-                      ],
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "contentDescription": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "contentDescription"
-                      ],
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "activeWindow": {
-                          "allOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "appId": {
-                                  "description": "Foreground app bundle ID / package name",
-                                  "type": "string"
-                                },
-                                "packageName": {
-                                  "type": "string"
-                                },
-                                "bundleId": {
-                                  "type": "string"
-                                },
-                                "activityName": {
-                                  "description": "Foreground Android activity name",
-                                  "type": "string"
-                                }
-                              },
-                              "additionalProperties": false
-                            },
-                            {
-                              "anyOf": [
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "appId": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "appId"
-                                  ],
-                                  "additionalProperties": {}
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "packageName": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "packageName"
-                                  ],
-                                  "additionalProperties": {}
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "bundleId": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "bundleId"
-                                  ],
-                                  "additionalProperties": {}
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "activityName": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "activityName"
-                                  ],
-                                  "additionalProperties": {}
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      },
-                      "required": [
-                        "activeWindow"
-                      ],
-                      "additionalProperties": {}
-                    }
+                  "required": [
+                    "text"
+                  ]
+                },
+                {
+                  "required": [
+                    "className"
+                  ]
+                },
+                {
+                  "required": [
+                    "contentDescription"
+                  ]
+                },
+                {
+                  "required": [
+                    "activeWindow"
                   ]
                 }
               ]

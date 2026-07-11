@@ -21,6 +21,8 @@
 
 # Image assets under 100KB are committed directly to git — no LFS budget needed in CI
 test/fixtures/**/*.png -filter -diff -merge -text
+# Desktop screenshot-test baselines: small, frequently reviewed, and diffed in PRs — keep in git
+android/desktop-core/src/test/resources/screenshots/**/*.png -filter -diff -merge -text
 android/control-proxy/src/**/*.png -filter -diff -merge -text
 android/playground/app/src/main/res/drawable/auto_mobile_big.png -filter -diff -merge -text
 android/playground/app/src/main/res/drawable/automobile_wordmark.png -filter -diff -merge -text

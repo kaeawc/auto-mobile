@@ -117,7 +117,10 @@ AutoMobileBiometrics.initialize(applicationContext)
 AutoMobileBiometrics.overrideResult(BiometricResult.Success, ttlMs = 5000L)
 AutoMobileBiometrics.overrideResult(BiometricResult.Failure)
 AutoMobileBiometrics.overrideResult(BiometricResult.Cancel)
+// Error carries an optional human-readable errorMessage (defaults to ""):
+//   data class Error(val errorCode: Int, val errorMessage: String = "")
 AutoMobileBiometrics.overrideResult(BiometricResult.Error(errorCode = 7))
+AutoMobileBiometrics.overrideResult(BiometricResult.Error(errorCode = 7, errorMessage = "Lockout"))
 
 // Clear a pending override (call in @Before test setup):
 AutoMobileBiometrics.clearOverride()

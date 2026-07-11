@@ -42,10 +42,14 @@ public enum FrameProtocol {
         guard data.count >= headerSize else { return nil }
         return data.withUnsafeBytes { ptr -> Header in
             let base = ptr.baseAddress!
-            let w = UInt32(littleEndian: base.load(as: UInt32.self))
-            let h = UInt32(littleEndian: base.advanced(by: 4).load(as: UInt32.self))
-            let r = UInt32(littleEndian: base.advanced(by: 8).load(as: UInt32.self))
-            let t = UInt32(littleEndian: base.advanced(by: 12).load(as: UInt32.self))
+            // `load(as:)` requires the address to be aligned to the loaded type;
+            // when `data` is a slice of a larger buffer, `base` may be unaligned,
+            // making the loads undefined behavior (traps in debug). `loadUnaligned`
+            // has no alignment requirement (issue #3627).
+            let w = UInt32(littleEndian: base.loadUnaligned(as: UInt32.self))
+            let h = UInt32(littleEndian: base.advanced(by: 4).loadUnaligned(as: UInt32.self))
+            let r = UInt32(littleEndian: base.advanced(by: 8).loadUnaligned(as: UInt32.self))
+            let t = UInt32(littleEndian: base.advanced(by: 12).loadUnaligned(as: UInt32.self))
             return Header(width: w, height: h, bytesPerRow: r, timestampMs: t)
         }
     }

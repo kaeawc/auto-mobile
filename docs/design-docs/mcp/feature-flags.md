@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd>
 
-> **Current state:** Feature flags are implemented as CLI args (e.g., `--debug`, `--accessibility-audit`, `--ui-perf-mode`). IDE integration for runtime flag toggling is described in linked docs but is `<kbd>🚧 Design Only</kbd>` for Android Studio and Xcode. See the [Status Glossary](../status-glossary.md) for chip definitions.
+> **Current state:** Feature flags are implemented as CLI args (e.g., `--debug`, `--accessibility-audit`, `--mem-perf-audit`). IDE integration for runtime flag toggling is described in linked docs but is `<kbd>🚧 Design Only</kbd>` for Android Studio and Xcode. See the [Status Glossary](../status-glossary.md) for chip definitions.
 
 Runtime configuration system for experimental features, performance tuning, and debugging AutoMobile. At
 present these flags can only be set on MCP startup as CLI args. The plan is to have them configurable via IDE integrations for
@@ -16,7 +16,7 @@ present these flags can only be set on MCP startup as CLI args. The plan is to h
 
 ### Performance Flags
 
-**`--ui-perf-mode`** - Enable UI performance monitoring
+**`--no-ui-perf-mode`** - Disable UI performance monitoring. UI perf mode is **on by default** (`uiPerfMode = !args.includes("--no-ui-perf-mode")` in `src/index.ts`); there is no `--ui-perf-mode` enable flag — passing it has no effect since the mode is already on. Use `--no-ui-perf-mode` to turn off selection-state visual capture on taps and UI perf auditing.
 
 **`--mem-perf-audit`** - Memory performance auditing
 

@@ -4,11 +4,13 @@ import { EventEmitter } from "node:events";
 import { promises as fsPromises } from "node:fs";
 import os, { platform } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import {
   containsIosRecordingStartMessage,
   FfmpegVideoProcessingBackend,
   IOS_RECORDING_FILE_READY_TIMEOUT_MS,
   IOS_RECORDING_STOP_TIMEOUT_MS,
+  pipeCaptureToEncoder,
   PROCESS_EXIT_TIMEOUT_MS,
   waitForExit,
   waitForRecordingFileReady,
@@ -742,5 +744,38 @@ describe("waitForRecordingFileReady - post-exit file finalization", function() {
   test("the readiness window is generous but not unbounded", function() {
     expect(IOS_RECORDING_FILE_READY_TIMEOUT_MS).toBeGreaterThanOrEqual(5000);
     expect(IOS_RECORDING_FILE_READY_TIMEOUT_MS).toBeLessThanOrEqual(IOS_RECORDING_STOP_TIMEOUT_MS);
+  });
+});
+
+describe("pipeCaptureToEncoder", function() {
+  test("registers an error handler on the encoder stdin so EPIPE is not unhandled", function() {
+    const source = new PassThrough();
+    const dest = new PassThrough();
+    pipeCaptureToEncoder(source, dest);
+
+    // A Node stream/EventEmitter with no 'error' listener rethrows on emit.
+    // The helper must have attached one, so the mid-recording encoder-death
+    // EPIPE is swallowed instead of crashing the daemon.
+    expect(() => dest.emit("error", new Error("EPIPE"))).not.toThrow();
+    expect(() => source.emit("error", new Error("EPIPE"))).not.toThrow();
+  });
+
+  test("throws a clear error when either stream is unavailable", function() {
+    expect(() => pipeCaptureToEncoder(null, new PassThrough())).toThrow(/unavailable/);
+    expect(() => pipeCaptureToEncoder(new PassThrough(), null)).toThrow(/unavailable/);
+  });
+
+  test("still forwards capture bytes into the encoder", async function() {
+    const source = new PassThrough();
+    const dest = new PassThrough();
+    pipeCaptureToEncoder(source, dest);
+
+    const chunks: Buffer[] = [];
+    dest.on("data", chunk => chunks.push(chunk as Buffer));
+    source.write("frame-data");
+    source.end();
+    await new Promise<void>(resolve => dest.on("end", () => resolve()));
+
+    expect(Buffer.concat(chunks).toString()).toBe("frame-data");
   });
 });

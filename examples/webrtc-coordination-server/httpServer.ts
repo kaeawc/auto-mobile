@@ -32,9 +32,9 @@ export class HttpCoordinationServer {
     this.ingestToken = options.ingestToken;
     this.server = createServer((req, res) => {
       this.handle(req, res).catch(error => {
-
+        // Log the detail server-side; never expose error/stack text to the client.
         console.error("[coordination-server] request error:", error);
-        this.sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        this.sendJson(res, 500, { error: "internal server error" });
       });
     });
   }
@@ -119,7 +119,10 @@ export class HttpCoordinationServer {
         });
         res.end(answerSdp);
       } catch (error) {
-        this.sendJson(res, 404, { error: error instanceof Error ? error.message : String(error) });
+        // Log the detail server-side; return a fixed message so no error/stack
+        // text (which may derive from a stack trace) reaches the client.
+        console.error(`[coordination-server] WHEP subscribe failed for ${streamId}:`, error);
+        this.sendJson(res, 404, { error: "stream not found or invalid offer" });
       }
       return;
     }

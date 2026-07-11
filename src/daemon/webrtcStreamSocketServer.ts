@@ -4,7 +4,7 @@ import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index
 import { WEBRTC_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ActionableError, type BootedDevice } from "../models";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import {
+import type {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
   startWebRtcStream,
@@ -23,6 +23,14 @@ export interface WebRtcStreamSocketServerDependencies {
   stopStream: typeof stopWebRtcStream;
   listStreams: typeof listWebRtcStreams;
   getStream: typeof getWebRtcStreamDescriptor;
+}
+
+/**
+ * Lazily import the stream manager (which pulls in werift) only when a request
+ * actually arrives, so the daemon does not load the heavy WebRTC stack at boot.
+ */
+function loadManager() {
+  return import("../server/webrtcStreamManager");
 }
 
 async function defaultResolveDevice(
@@ -53,54 +61,69 @@ async function defaultResolveDevice(
   return candidates[0];
 }
 
-const defaultDependencies: WebRtcStreamSocketServerDependencies = {
-  resolveDevice: defaultResolveDevice,
-  startStream: startWebRtcStream,
-  stopStream: stopWebRtcStream,
-  listStreams: listWebRtcStreams,
-  getStream: getWebRtcStreamDescriptor,
-};
-
 /**
  * Unix-socket control plane for WebRTC screen streaming. A CI worker (or IDE)
  * connects to `~/.auto-mobile/webrtc-stream.sock` and sends newline-delimited
  * JSON requests to start, stop, or inspect live WHIP streams. This keeps stream
  * control in the long-lived daemon rather than the per-call MCP surface.
+ *
+ * The stream manager (and its werift dependency) is imported lazily on the first
+ * request so the daemon does not load the WebRTC stack at boot.
  */
 export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse
 > {
-  private readonly deps: WebRtcStreamSocketServerDependencies;
+  private readonly injectedDeps?: WebRtcStreamSocketServerDependencies;
+  private resolvedDeps: WebRtcStreamSocketServerDependencies | null = null;
 
   constructor(
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    deps: WebRtcStreamSocketServerDependencies = defaultDependencies
+    deps?: WebRtcStreamSocketServerDependencies
   ) {
     super(socketPath, timer, "WebRtcStream");
-    this.deps = deps;
+    this.injectedDeps = deps;
+  }
+
+  /** Resolve dependencies, lazily loading the (werift-heavy) manager on first use. */
+  private async getDeps(): Promise<WebRtcStreamSocketServerDependencies> {
+    if (this.injectedDeps) {
+      return this.injectedDeps;
+    }
+    if (!this.resolvedDeps) {
+      const manager = await loadManager();
+      this.resolvedDeps = {
+        resolveDevice: defaultResolveDevice,
+        startStream: manager.startWebRtcStream,
+        stopStream: manager.stopWebRtcStream,
+        listStreams: manager.listWebRtcStreams,
+        getStream: manager.getWebRtcStreamDescriptor,
+      };
+    }
+    return this.resolvedDeps;
   }
 
   protected async handleRequest(
     request: WebRtcStreamSocketRequest
   ): Promise<WebRtcStreamSocketResponse> {
+    const deps = await this.getDeps();
     switch (request.action) {
       case "start":
-        return this.handleStart(request);
+        return this.handleStart(deps, request);
       case "stop": {
-        const stream = await this.deps.stopStream(request.streamId);
+        const stream = await deps.stopStream(request.streamId);
         return { id: request.id, success: true, type: "webrtc_stream_response", action: "stop", stream };
       }
       case "status":
-        return this.handleStatus(request);
+        return this.handleStatus(deps, request);
       case "list":
         return {
           id: request.id,
           success: true,
           type: "webrtc_stream_response",
           action: "list",
-          streams: this.deps.listStreams(),
+          streams: deps.listStreams(),
         };
       default:
         throw new ActionableError(`Unsupported webrtcStream action: ${request.action}`);
@@ -108,9 +131,10 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   }
 
   private async handleStart(
+    deps: WebRtcStreamSocketServerDependencies,
     request: WebRtcStreamSocketRequest
   ): Promise<WebRtcStreamSocketResponse> {
-    const device = await this.deps.resolveDevice(request.deviceId, request.platform ?? "android");
+    const device = await deps.resolveDevice(request.deviceId, request.platform ?? "android");
     const overrides: WebRtcStreamingOverrides = {};
     if (request.whipEndpoint) {
       overrides.whipEndpoint = request.whipEndpoint;
@@ -128,14 +152,17 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       overrides.size = request.size;
     }
 
-    const stream = await this.deps.startStream({ device, streamId: request.streamId, overrides });
+    const stream = await deps.startStream({ device, streamId: request.streamId, overrides });
     logger.info(`[WebRtcStream] started stream ${stream.streamId} for device ${device.deviceId}`);
     return { id: request.id, success: true, type: "webrtc_stream_response", action: "start", stream };
   }
 
-  private handleStatus(request: WebRtcStreamSocketRequest): WebRtcStreamSocketResponse {
+  private handleStatus(
+    deps: WebRtcStreamSocketServerDependencies,
+    request: WebRtcStreamSocketRequest
+  ): WebRtcStreamSocketResponse {
     if (request.streamId) {
-      const stream = this.deps.getStream(request.streamId);
+      const stream = deps.getStream(request.streamId);
       if (!stream) {
         throw new ActionableError(`No active WebRTC stream with id ${request.streamId}.`);
       }
@@ -146,7 +173,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       success: true,
       type: "webrtc_stream_response",
       action: "list",
-      streams: this.deps.listStreams(),
+      streams: deps.listStreams(),
     };
   }
 

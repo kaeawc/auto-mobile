@@ -3,6 +3,12 @@ import { ClaudeVisionClient } from "../../src/vision/ClaudeVisionClient";
 
 const makeClient = () => new ClaudeVisionClient("test-key-not-used");
 
+const callCalculateCost = (
+  client: ClaudeVisionClient,
+  inputTokens: number,
+  outputTokens: number
+): number => (client as any).calculateCost(inputTokens, outputTokens);
+
 const makeResponse = (text: string) =>
   ({ content: [{ type: "text", text }] } as any);
 
@@ -48,5 +54,21 @@ describe("ClaudeVisionClient.parseClaudeResponse", () => {
     expect(parsed.elementFound).toBe(true);
     expect(parsed.confidence).toBe(0.95);
     expect(parsed.reasoning).toBe("ok");
+  });
+});
+
+describe("ClaudeVisionClient.calculateCost", () => {
+  // Sonnet pricing: $3 / Mtok input, $15 / Mtok output.
+  test("prices input and output tokens at $3 and $15 per million", () => {
+    const client = makeClient();
+    // 1M input = $3, 1M output = $15 → $18 total.
+    expect(callCalculateCost(client, 1_000_000, 1_000_000)).toBeCloseTo(18.0, 6);
+  });
+
+  test("is zero for zero tokens and scales linearly", () => {
+    const client = makeClient();
+    expect(callCalculateCost(client, 0, 0)).toBe(0);
+    // 500k input ($1.50) + 100k output ($1.50) = $3.00.
+    expect(callCalculateCost(client, 500_000, 100_000)).toBeCloseTo(3.0, 6);
   });
 });

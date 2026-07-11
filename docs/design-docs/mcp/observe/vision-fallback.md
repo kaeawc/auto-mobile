@@ -15,7 +15,10 @@ Vision fallback is an **internal feature** that is:
 - **Disabled by default** to avoid unexpected API costs
 - Only available when constructing `TapOnElement` with custom vision configuration
 - Not exposed via MCP server or CLI by default
-- Currently integrated into `tapOn` only (invoked after polling times out)
+- Integrated into `tapOn`, `swipeOn`, `pinchOn`, and `dragAndDrop` — each
+  invokes vision fallback via the shared `getVisionEnrichedError` after its own
+  retries/timeout (gating conditions differ per tool: e.g. swipe requires
+  `lookFor`/`container`; pinch/drag require `container`)
 - Android screenshots only (iOS not yet implemented)
 
 ### How It Works
@@ -26,33 +29,37 @@ When element finding fails after retries, `TapOnElement` follows this flow:
 flowchart LR
     A["Element finding retries<br/>exhausted"] --> B["Screenshot capture<br/>(~100-200ms)"];
     B --> C["Claude vision analysis<br/>(~2-5s)"];
-    C --> D{"Confidence high?"};
-    D -->|"yes"| E["Return alternative selectors<br/>or navigation instructions"];
-    D -->|"no"| F["Return detailed error<br/>with screen context"];
+    C --> D{"High-confidence<br/>navigation steps?"};
+    D -->|"yes"| E["Return navigation<br/>instructions"];
+    D -->|"no"| F{"Alternative<br/>selectors?"};
+    F -->|"yes"| G["Return alternative selectors<br/>(any confidence)"];
+    F -->|"no"| H["Return detailed error<br/>with screen context"];
     classDef decision fill:#CC2200,stroke-width:0px,color:white;
     classDef logic fill:#525FE1,stroke-width:0px,color:white;
     classDef result stroke-width:0px;
-    class A,E,F result;
+    class A,E,G,H result;
     class B,C logic;
-    class D decision;
+    class D,F decision;
 ```
+
+Only navigation instructions are gated on high confidence; alternative
+selectors are returned regardless of confidence when present.
 
 ### Configuration
 
 ```typescript
-const tapTool = new TapOnElement(
-  device,
-  adb,
-  axe,
-  {
+// Vision config is passed via the third `options` argument (options.visionConfig),
+// not as a positional argument.
+const tapTool = new TapOnElement(device, adb, {
+  visionConfig: {
     enabled: true,              // Enable vision fallback
     provider: 'claude',         // Only Claude supported currently
     confidenceThreshold: 'high', // Reserved for future gating
     maxCostUsd: 1.0,            // Warning threshold (does not block)
     cacheResults: true,         // Cache to avoid repeated calls
     cacheTtlMinutes: 60         // Cache for 60 minutes
-  }
-);
+  },
+});
 ```
 
 **Note**: MCP server constructs `TapOnElement` with default config (enabled: false), so vision fallback is not available through MCP unless you modify the server code.
@@ -124,7 +131,7 @@ Get an API key at: https://console.anthropic.com/
 ### Limitations
 
 **Current Limitations**:
-1. **tapOn only**: Not integrated into other tools (swipeOn, scrollUntil, etc.)
+1. **Not universal**: Integrated into `tapOn`, `swipeOn`, `pinchOn`, and `dragAndDrop`, but not yet other tools (e.g. `scrollUntil`)
 2. **Android only**: iOS screenshot capture not implemented
 3. **No auto-retry**: Suggestions are informational - user must manually retry with suggested selectors
 4. **Not in MCP**: Requires custom TapOnElement construction, not available via MCP server by default
@@ -213,7 +220,7 @@ export interface VisionFallbackConfig {
 Planned improvements:
 
 1. **Auto-retry**: Automatically retry with suggested selectors
-2. **More tools**: Integrate into `swipeOn`, `scrollUntil`, etc.
+2. **More tools**: Integrate into remaining tools (e.g. `scrollUntil`) beyond the current `tapOn`/`swipeOn`/`pinchOn`/`dragAndDrop`
 3. **Set-of-Mark**: Enhanced spatial understanding with visual markers
 4. **Learning**: Track corrections to improve suggestions over time
 5. **Multi-screenshot analysis**: Compare before/after states

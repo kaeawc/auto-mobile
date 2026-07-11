@@ -22,7 +22,7 @@ if [[ "${status}" -eq 0 ]]; then
   exit 0
 fi
 
-if rg -q 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && rg -q '0 fail' "${log_file}"; then
+if rg -q 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && rg -q '(^|[^0-9])0 fail' "${log_file}"; then
   echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
   tail -n 80 "${log_file}"
   exit 0

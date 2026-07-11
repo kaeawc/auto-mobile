@@ -47,7 +47,7 @@ EOF
 
   run env HOME="$WORK_DIR" PATH="$STUB_DIR:$PATH" bash -c '
     eval "$(grep "^HADOLINT_VERSION=" "$1")"
-    eval "$(sed -n "/^install_manual() {/,/^}/p" "$1")"
+    eval "$(awk "/^install_manual\\(\\) \\{/{f=1} f{print} f&&/^\\}/{exit}" "$1")"
     detect_os() { echo "'"$os"'"; }
     detect_arch() { echo "'"$arch"'"; }
     command_exists() { [ "$1" = curl ]; }

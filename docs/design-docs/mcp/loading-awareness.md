@@ -51,6 +51,10 @@ bounds, because neither alone is correct — this was the key finding from adver
   8. The floor guarantees we never poll fewer times than the previous implementation, so the
   change is **never less patient** than before, in any fetch-speed regime.
 
+These are compile-time `private static readonly` fields on `TapOnElement` — they
+are **not** environment-tunable at runtime (there is no `process.env` override
+path; the `ANDROID_PRE_TAP_*` names are constant identifiers, not env vars).
+
 | | base | when loading detected |
 |---|---|---|
 | `ANDROID_PRE_TAP_REFIND_BUDGET_MS` | 2500 ms | 10000 ms |

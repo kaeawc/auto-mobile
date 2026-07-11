@@ -52,3 +52,20 @@ dependencies {
   testImplementation(compose.desktop.uiTestJUnit4)
   testImplementation(compose.desktop.currentOs)
 }
+
+// Forward screenshot-testing switches from the Gradle invocation to the forked test JVM so
+// `-Dscreenshot.record=true` (and friends) reach the tests. See
+// desktop-core/src/test/kotlin/.../screenshot/ScreenshotEnvironment.kt for the supported flags.
+val screenshotProperties =
+  listOf(
+    "screenshot.record",
+    "screenshot.reference.os",
+    "screenshot.golden.dir",
+    "screenshot.report.dir",
+  )
+
+tasks.withType<Test>().configureEach {
+  screenshotProperties.forEach { key ->
+    System.getProperty(key)?.let { value -> systemProperty(key, value) }
+  }
+}

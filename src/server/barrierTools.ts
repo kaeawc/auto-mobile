@@ -83,7 +83,11 @@ export function registerBarrierTools(): void {
     "barrier",
     "Synchronize multiple devices at a barrier, then let all proceed concurrently (no serialized section).",
     barrierSchema,
-    barrierHandler
+    barrierHandler,
+    // Plan-only: a multi-device coordination primitive that only makes sense as
+    // a plan step (a single direct call would just block). Hidden from tools/list
+    // discovery, still runnable in plans via getToolForPlan.
+    { planOnly: true, planExecutable: true }
   );
 
   logger.info("Barrier tools registered");

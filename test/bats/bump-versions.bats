@@ -129,3 +129,16 @@ run_bump() {
   [[ "$output" == *"Package/runtime version -> ${VERSION}"* ]]
   [[ "$output" == *"Android dev/Maven coordinate -> ${VERSION}-SNAPSHOT"* ]]
 }
+
+@test "rejects a semver whose pre-release/build has invalid characters (#3653)" {
+  # A '/' (or '\', '&') in the build segment would break the downstream
+  # sed/re.sub substitutions; the old `([-+].*)?` allowed it.
+  run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' --new-version '1.2.3+a/b'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid --new-version"* ]]
+}
+
+@test "accepts a valid semver pre-release (#3653)" {
+  run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' --new-version '1.2.3-beta.1' --dry-run"
+  [ "$status" -eq 0 ]
+}

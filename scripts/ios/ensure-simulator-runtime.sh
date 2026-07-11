@@ -26,7 +26,7 @@ CHECK_ONLY=false
 for arg in "$@"; do
   case "$arg" in
     --check-only) CHECK_ONLY=true ;;
-    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+    *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
 done
 

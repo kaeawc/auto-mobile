@@ -59,7 +59,9 @@ if [ -z "${SIMULATOR_ID}" ]; then
     exit 1
 fi
 
-SIMULATOR_NAME=$(xcrun simctl list devices booted | grep "${SIMULATOR_ID}" | sed 's/.*(\(.*\)) (.*/\1/' | head -1)
+# Extract the device name (everything before the first " (UDID)"). The old
+# greedy `s/.*(\(.*\)) (.*/\1/` captured the UDID, not the name (#3652).
+SIMULATOR_NAME=$(xcrun simctl list devices booted | grep "${SIMULATOR_ID}" | head -1 | sed 's/^[[:space:]]*//; s/ *(.*//')
 echo -e "${BLUE}Simulator:${NC} ${SIMULATOR_NAME:-${SIMULATOR_ID}}"
 echo -e "${BLUE}Port:${NC} ${PORT}"
 echo ""

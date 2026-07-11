@@ -11,7 +11,7 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 describe("criticalSection tool", () => {
   beforeAll(() => {
     // Register the tool if not already registered
-    if (!ToolRegistry.getTool("criticalSection")) {
+    if (!ToolRegistry.getToolForPlan("criticalSection")) {
       registerCriticalSectionTools();
     }
   });
@@ -24,7 +24,7 @@ describe("criticalSection tool", () => {
   });
 
   test("tool is registered with correct schema", () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
 
     expect(tool).toBeDefined();
     expect(tool?.name).toBe("criticalSection");
@@ -33,7 +33,7 @@ describe("criticalSection tool", () => {
   });
 
   test("validates schema with valid parameters", () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const validParams = {
@@ -55,7 +55,7 @@ describe("criticalSection tool", () => {
   });
 
   test("rejects invalid schema - missing required fields", () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const invalidParams = {
@@ -67,7 +67,7 @@ describe("criticalSection tool", () => {
   });
 
   test("rejects invalid schema - empty steps array", () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const invalidParams = {
@@ -80,7 +80,7 @@ describe("criticalSection tool", () => {
   });
 
   test("rejects schema when a sub-step is missing the device parameter", () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const invalidParams = {
@@ -98,7 +98,7 @@ describe("criticalSection tool", () => {
   });
 
   test("rejects schema when a sub-step's device is an empty string", () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const invalidParams = {
@@ -113,7 +113,7 @@ describe("criticalSection tool", () => {
   });
 
   test("rejects invalid schema - non-positive device count", () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const invalidParams = {
@@ -126,7 +126,7 @@ describe("criticalSection tool", () => {
   });
 
   test("detects nested critical sections", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {
@@ -159,7 +159,7 @@ describe("criticalSection tool", () => {
   });
 
   test("detects a barrier nested inside a critical section", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {
@@ -188,7 +188,7 @@ describe("criticalSection tool", () => {
   });
 
   test("executes steps in order for single device", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {
@@ -240,7 +240,7 @@ describe("criticalSection tool", () => {
   });
 
   test("executes plan-executable debug-only steps hidden from MCP discovery", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {
@@ -297,7 +297,7 @@ describe("criticalSection tool", () => {
   });
 
   test("rejects debug-only steps that are not plan-executable", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {
@@ -328,7 +328,7 @@ describe("criticalSection tool", () => {
   });
 
   test("executes plan-executable steps gated by non-debug feature flags with a warning", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {
@@ -385,7 +385,7 @@ describe("criticalSection tool", () => {
 
 
   test("fails fast when a step fails", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {
@@ -438,7 +438,7 @@ describe("criticalSection tool", () => {
   });
 
   test("wraps a step failure with the documented device + step context", async () => {
-    const tool = ToolRegistry.getTool("criticalSection");
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
 
     const fakeDevice: BootedDevice = {

@@ -39,7 +39,7 @@ if ! command -v hadolint &>/dev/null; then
   TMP_DIR=$(mktemp -d)
   trap 'rm -rf "${TMP_DIR}"' EXIT
 
-  if curl -sL "${DOWNLOAD_URL}" -o "${TMP_DIR}/hadolint"; then
+  if curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/hadolint"; then
     # Install to user bin
     mkdir -p "${HOME}/bin"
     mv "${TMP_DIR}/hadolint" "${HOME}/bin/hadolint"

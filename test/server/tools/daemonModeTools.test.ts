@@ -23,12 +23,20 @@ describe("Daemon-only MCP tools", () => {
     expect(toolNames).not.toContain("criticalSection");
   });
 
-  test("registers criticalSection in daemon mode", () => {
+  test("registers criticalSection/barrier plan-only in daemon mode (hidden from discovery, usable in plans)", () => {
     createMcpServer({ daemonMode: true });
 
     const toolNames = ToolRegistry.getToolDefinitions().map(tool => tool.name);
     expect(toolNames).toContain("executePlan");
-    expect(toolNames).toContain("criticalSection");
+    // Plan-only coordination primitives are registered in daemon mode but hidden
+    // from normal discovery — a single direct call would just block.
+    expect(toolNames).not.toContain("criticalSection");
+    expect(toolNames).not.toContain("barrier");
+    expect(ToolRegistry.getTool("criticalSection")).toBeUndefined();
+    expect(ToolRegistry.getTool("barrier")).toBeUndefined();
+    // ...but resolvable for plan execution.
+    expect(ToolRegistry.getToolForPlan("criticalSection")).toBeDefined();
+    expect(ToolRegistry.getToolForPlan("barrier")).toBeDefined();
   });
 
   test("hides debug-only tools unless debug mode is enabled", () => {

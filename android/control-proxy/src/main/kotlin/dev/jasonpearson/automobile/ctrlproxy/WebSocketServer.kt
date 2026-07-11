@@ -48,6 +48,14 @@ class WebSocketServer(
   companion object {
     private const val TAG = "WebSocketServer"
 
+    /**
+     * Maximum accepted inbound WebSocket frame (64 MiB). ktor caps frame size by default;
+     * `Long.MAX_VALUE` removed the ceiling so a single hostile frame advertising a multi-GB length
+     * would be buffered into memory -> OutOfMemoryError, downing the runner. Cap it above any
+     * legitimate command/hierarchy payload (issue #3711, the twin of iOS #3626).
+     */
+    internal const val MAX_FRAME_SIZE_BYTES: Long = 64L * 1024 * 1024
+
     /** Lenient parser for best-effort field extraction from a raw (possibly malformed) payload. */
     private val lenientJson = Json {
       ignoreUnknownKeys = true
@@ -146,7 +154,7 @@ class WebSocketServer(
             install(WebSockets) {
               pingPeriod = 15.seconds
               timeout = 60.seconds
-              maxFrameSize = Long.MAX_VALUE
+              maxFrameSize = MAX_FRAME_SIZE_BYTES
               masking = false
             }
 

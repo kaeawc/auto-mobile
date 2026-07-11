@@ -53,8 +53,10 @@ fi
 echo "✓ Bun version: $(bun --version)"
 echo ""
 
-# Check for simctl
-if ! command -v xcrun simctl &>/dev/null; then
+# Check for simctl. `command -v xcrun simctl` treats `simctl` as a second
+# command name (not a PATH binary), so it always failed regardless of whether
+# `xcrun simctl` actually works — probe the subcommand directly instead (#3652).
+if ! xcrun simctl help &>/dev/null; then
   echo "⚠️  Warning: simctl not found"
   echo "   Some functionality may not work"
 else

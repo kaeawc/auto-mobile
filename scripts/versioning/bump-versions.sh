@@ -30,7 +30,10 @@ fi
 # Validate the version shape up front, before any file is written. The iOS
 # generator (invoked late, below) rejects non-semver; validating here avoids
 # aborting mid-bump with a half-updated tree on operator error.
-if ! [[ "$new_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+# Restrict the optional pre-release/build segment to valid semver characters
+# ([0-9A-Za-z.-]); the old `([-+].*)?` allowed `/`, `\`, `&` etc. which then
+# broke the downstream sed/re.sub substitutions (#3653).
+if ! [[ "$new_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
   echo "Invalid --new-version '${new_version}': expected MAJOR.MINOR.PATCH semver." >&2
   exit 1
 fi

@@ -645,11 +645,16 @@ open class AutoMobileAgent(
           if (args.elementId != null && observeResult.contains(args.elementId)) {
             return "Element with ID '${args.elementId}' found"
           }
-
-          Thread.sleep(500) // Wait 500ms before checking again
         } catch (e: Exception) {
-          // Continue waiting if there's an error
+          // Log instead of swallowing; keep polling after a transient observe failure.
+          println("Warning: waitFor observe failed, will retry: ${e.message}")
         }
+
+        // Pace between attempts on BOTH the no-match and error paths. Previously the
+        // sleep sat inside the try above the throw, so a throwing observe skipped it
+        // and the loop busy-spun the daemon for the whole timeout window (#3606).
+        // A successful match returns from inside the try and never reaches here.
+        Thread.sleep(500)
       }
 
       val target = args.text ?: args.elementId ?: "unknown"

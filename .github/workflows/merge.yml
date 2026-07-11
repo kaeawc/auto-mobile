@@ -626,7 +626,7 @@ jobs:
       matrix:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26", runner: "macos-26", xcode: "26.3" }
+          - { name: "Xcode 26", runner: "macos-26", xcode: "26.5" }
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

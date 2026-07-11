@@ -71,11 +71,17 @@ public class AutoMobileTestObserver: NSObject, XCTestObservation {
             passed: testCase.testRun?.totalFailureCount == 0
         )
 
+        recordTiming(timing)
+
+        print("Test case finished: \(testCase.name) - Duration: \(duration)s - Passed: \(timing.passed)")
+    }
+
+    /// Append a timing entry under the lock. Single write path so all mutations
+    /// of `timingData` stay synchronized (issue #3629).
+    func recordTiming(_ timing: TimingData) {
         timingLock.lock()
         timingData.append(timing)
         timingLock.unlock()
-
-        print("Test case finished: \(testCase.name) - Duration: \(duration)s - Passed: \(timing.passed)")
     }
 
     /// Called when a test suite starts
@@ -99,29 +105,34 @@ public class AutoMobileTestObserver: NSObject, XCTestObservation {
 
     /// Exports timing data to JSON
     public func exportTimingData(to path: String) throws {
-        let jsonData = try JSONEncoder().encode(timingData)
+        // Snapshot under the lock; testCaseDidFinish may append concurrently under
+        // parallel testing (issue #3629).
+        let data = getTimingData()
+        let jsonData = try JSONEncoder().encode(data)
         try jsonData.write(to: URL(fileURLWithPath: path))
     }
 
     /// Prints a summary of timing data
     private func printSummary() {
-        guard !timingData.isEmpty else {
+        // Snapshot under the lock before reading repeatedly (issue #3629).
+        let data = getTimingData()
+        guard !data.isEmpty else {
             return
         }
 
         print("\n=== Test Timing Summary ===")
-        print("Total tests: \(timingData.count)")
-        print("Passed: \(timingData.filter { $0.passed }.count)")
-        print("Failed: \(timingData.filter { !$0.passed }.count)")
+        print("Total tests: \(data.count)")
+        print("Passed: \(data.filter { $0.passed }.count)")
+        print("Failed: \(data.filter { !$0.passed }.count)")
 
-        let totalDuration = timingData.reduce(0) { $0 + $1.duration }
+        let totalDuration = data.reduce(0) { $0 + $1.duration }
         print("Total duration: \(String(format: "%.2f", totalDuration))s")
 
-        if let slowest = timingData.max(by: { $0.duration < $1.duration }) {
+        if let slowest = data.max(by: { $0.duration < $1.duration }) {
             print("Slowest test: \(slowest.testName) (\(String(format: "%.2f", slowest.duration))s)")
         }
 
-        if let fastest = timingData.min(by: { $0.duration < $1.duration }) {
+        if let fastest = data.min(by: { $0.duration < $1.duration }) {
             print("Fastest test: \(fastest.testName) (\(String(format: "%.2f", fastest.duration))s)")
         }
 

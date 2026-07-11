@@ -1105,4 +1105,34 @@ describe("Offscreen Node Filtering", function() {
       expect(result?.["accessibility-focused"]).toBe(true);
     });
   });
+
+  describe("error-result shape (#3594)", function() {
+    const device: BootedDevice = { deviceId: "test-device", name: "Test Device", platform: "android" };
+
+    test("populates updatedAt when the accessibility service returns null", async function() {
+      const nullClient = {
+        getAccessibilityHierarchy: async () => null
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), nullClient);
+
+      const result = await vh.getAndroidViewHierarchy();
+
+      expect(result.hierarchy.error).toBeDefined();
+      expect(typeof result.updatedAt).toBe("number");
+    });
+
+    test("populates updatedAt when the accessibility service throws", async function() {
+      const throwingClient = {
+        getAccessibilityHierarchy: async () => {
+          throw new Error("ctrlproxy offline");
+        }
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), throwingClient);
+
+      const result = await vh.getAndroidViewHierarchy();
+
+      expect(result.hierarchy.error).toBeDefined();
+      expect(typeof result.updatedAt).toBe("number");
+    });
+  });
 });

@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.0.44] - 2026-07-11
+### Other
+- junit-runner >= 0.0.36 forces kotlin-stdlib 2.4.0 on consumers, locking out projects on older Kotlin ([#3558](https://github.com/kaeawc/auto-mobile/issues/3558))
+- Daemon remains healthy after observation-stream socket disappears ([#3556](https://github.com/kaeawc/auto-mobile/issues/3556))
+- DevicePool should validate iOS simulator liveness before assigning idle pooled UDIDs ([#3553](https://github.com/kaeawc/auto-mobile/issues/3553))
+- Evict Android Emulator From Pool When Process Exits or ADB Disappears ([#3552](https://github.com/kaeawc/auto-mobile/issues/3552))
+- CI: resolve Homebrew tap-trust warning in iOS IPA build ([#3548](https://github.com/kaeawc/auto-mobile/issues/3548)) (ci)
+- CI: bump gradle-task-run actions off deprecated Node.js 20 ([#3547](https://github.com/kaeawc/auto-mobile/issues/3547)) (ci)
+
 ## [v0.0.43] - 2026-07-10
 ### Other
 - Invalid observe outputSchema breaks strict MCP tools/list clients ([#3542](https://github.com/kaeawc/auto-mobile/issues/3542))

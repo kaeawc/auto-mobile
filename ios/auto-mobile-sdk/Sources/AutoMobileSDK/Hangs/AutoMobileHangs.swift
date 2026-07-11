@@ -13,13 +13,42 @@ public final class AutoMobileHangs: @unchecked Sendable {
     private var _isMonitoring = false
     private var monitorGeneration: UInt64 = 0
 
+    private var _hangThresholdMs: Double = 2000
+    private var _pollIntervalMs: Double = 500
+
     /// Threshold in milliseconds before a hang is reported. Default: 2000ms.
-    public var hangThresholdMs: Double = 2000
+    public var hangThresholdMs: Double {
+        get { lock.lock(); defer { lock.unlock() }; return _hangThresholdMs }
+        set { lock.lock(); defer { lock.unlock() }; _hangThresholdMs = newValue }
+    }
 
     /// Polling interval in milliseconds. Default: 500ms.
-    public var pollIntervalMs: Double = 500
+    public var pollIntervalMs: Double {
+        get { lock.lock(); defer { lock.unlock() }; return _pollIntervalMs }
+        set { lock.lock(); defer { lock.unlock() }; _pollIntervalMs = newValue }
+    }
+
+    // MARK: - Injectable seams (deterministic testing, #3622)
+
+    /// Monotonic clock in milliseconds. Overridden in tests.
+    var monotonicNowMs: () -> Double = { CFAbsoluteTimeGetCurrent() * 1000 }
+
+    /// Probe the monitored thread: dispatch to it and return `true` if it services
+    /// the probe within `timeoutMs`, `false` if it is blocked. Overridden in tests.
+    var probeMainThread: (_ timeoutMs: Double) -> Bool = { timeoutMs in
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async { semaphore.signal() }
+        return semaphore.wait(timeout: .now() + .milliseconds(Int(timeoutMs))) == .success
+    }
+
+    /// Sleep for the given milliseconds. Overridden in tests.
+    var sleepMs: (Double) -> Void = { Thread.sleep(forTimeInterval: $0 / 1000.0) }
 
     private init() {}
+
+    /// Test-only instance so the watchdog logic can be exercised in isolation
+    /// without touching the shared singleton.
+    static func makeTestInstance() -> AutoMobileHangs { AutoMobileHangs() }
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
         lock.lock()
@@ -68,6 +97,12 @@ public final class AutoMobileHangs: @unchecked Sendable {
         return _isMonitoring
     }
 
+    private func isMonitoring(generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isMonitoring && monitorGeneration == generation
+    }
+
     /// Enable or disable hang detection.
     /// When disabled, the watchdog thread is stopped. When re-enabled, it restarts.
     public func setEnabled(_ enabled: Bool) {
@@ -79,31 +114,38 @@ public final class AutoMobileHangs: @unchecked Sendable {
     }
 
     private func watchdogLoop(generation: UInt64) {
-        while true {
-            lock.lock()
-            let monitoring = _isMonitoring && monitorGeneration == generation
-            lock.unlock()
-            guard monitoring else { break }
-
-            let semaphore = DispatchSemaphore(value: 0)
-            let checkStart = CFAbsoluteTimeGetCurrent()
-
-            DispatchQueue.main.async {
-                semaphore.signal()
+        while isMonitoring(generation: generation) {
+            if let durationMs = runWatchdogCycle(shouldContinue: { [weak self] in
+                self?.isMonitoring(generation: generation) ?? false
+            }) {
+                reportHang(durationMs: durationMs, stackTrace: captureMainThreadStack())
             }
-
-            let timeoutMs = hangThresholdMs
-            let result = semaphore.wait(timeout: .now() + .milliseconds(Int(timeoutMs)))
-
-            if result == .timedOut {
-                // Main thread is still blocked — measure actual duration
-                let actualDurationMs = (CFAbsoluteTimeGetCurrent() - checkStart) * 1000
-                let mainThreadStack = captureMainThreadStack()
-                reportHang(durationMs: actualDurationMs, stackTrace: mainThreadStack)
-            }
-
-            Thread.sleep(forTimeInterval: pollIntervalMs / 1000.0)
+            sleepMs(pollIntervalMs)
         }
+    }
+
+    /// Run a single watchdog cycle: probe the monitored thread once, and if it is
+    /// hung, wait for it to recover and return the duration of the **whole** hang.
+    ///
+    /// This is the latch that fixes #3622: a single cycle consumes an entire hang
+    /// episode (probe → wait-for-recovery → one report), so a sustained hang yields
+    /// exactly one event whose duration spans first detection to recovery — instead
+    /// of one event per poll interval, each mis-reporting only ~`hangThresholdMs`.
+    /// Returns `nil` when the thread is responsive, or when `shouldContinue` goes
+    /// false before recovery (e.g. monitoring stopped / permanent hang until crash).
+    func runWatchdogCycle(shouldContinue: () -> Bool) -> Double? {
+        let threshold = hangThresholdMs
+        let probeStart = monotonicNowMs()
+        guard !probeMainThread(threshold) else {
+            return nil // responsive within threshold — no hang
+        }
+        // Hang in progress. Keep probing until the thread recovers, then report once.
+        while shouldContinue() {
+            if probeMainThread(threshold) {
+                return monotonicNowMs() - probeStart
+            }
+        }
+        return nil
     }
 
     /// Capture stack trace context during a hang.

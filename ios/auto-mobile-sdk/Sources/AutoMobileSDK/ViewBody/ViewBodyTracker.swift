@@ -14,6 +14,14 @@ public final class ViewBodyTracker: @unchecked Sendable {
     private let snapshotIntervalMs: Int = 1000
     private var dateProvider: DateProvider = SystemDateProvider()
 
+    /// Upper bound on tracked entries. Apps may use per-instance ids (e.g.
+    /// `trackViewBody(id: item.uuid)` over a long/paginated feed), which would
+    /// otherwise grow `entries` without bound for the life of the process
+    /// (issue #3624). When the cap is exceeded we evict the least-recently-updated
+    /// entries in a batch so the O(n) eviction scan is amortized across inserts.
+    private let maxEntries = 512
+    private let evictionBatch = 64
+
     private init() {}
 
     func initialize(buffer: SdkEventBuffer, dateProvider: DateProvider = SystemDateProvider()) {
@@ -68,12 +76,30 @@ public final class ViewBodyTracker: @unchecked Sendable {
         var updated = entry
         updated.totalCount += 1
         let now = dateProvider.now().timeIntervalSince1970
+        updated.lastUpdated = now
         updated.recentTimestamps.append(now)
         // Keep only timestamps from the last second for rolling average
         let cutoff = now - 1.0
         updated.recentTimestamps.removeAll { $0 < cutoff }
         entries[id] = updated
+        enforceEntryCapLocked()
         lock.unlock()
+    }
+
+    /// Evict least-recently-updated entries once the cap is exceeded, down to a
+    /// low-water mark so this scan runs at most once per `evictionBatch` inserts.
+    /// Must be called with `lock` held.
+    private func enforceEntryCapLocked() {
+        guard entries.count > maxEntries else { return }
+        let target = maxEntries - evictionBatch
+        let removeCount = entries.count - target
+        let oldestKeys = entries
+            .sorted { $0.value.lastUpdated < $1.value.lastUpdated }
+            .prefix(removeCount)
+            .map { $0.key }
+        for key in oldestKeys {
+            entries.removeValue(forKey: key)
+        }
     }
 
     /// Record composition duration for a view.
@@ -151,6 +177,8 @@ extension ViewBodyTracker {
         var recentTimestamps: [TimeInterval] = []
         var totalDurationMs: Double = 0
         var durationCount: Int = 0
+        /// Timestamp of the most recent body evaluation, used for LRU eviction.
+        var lastUpdated: TimeInterval = 0
     }
 }
 

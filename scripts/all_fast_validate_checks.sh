@@ -310,8 +310,16 @@ prune_finished_jobs() {
       wait "$pid" || true
     fi
   done
-  pids=("${new_pids[@]}")
-  pid_names=("${new_names[@]}")
+  # Guard the reassignment: on bash < 4.4 (macOS default 3.2), expanding an
+  # empty `"${new_pids[@]}"` under `set -u` throws "unbound variable" once all
+  # in-flight jobs drain (#3650).
+  if [[ ${#new_pids[@]} -gt 0 ]]; then
+    pids=("${new_pids[@]}")
+    pid_names=("${new_names[@]}")
+  else
+    pids=()
+    pid_names=()
+  fi
 }
 
 wait_for_slot() {

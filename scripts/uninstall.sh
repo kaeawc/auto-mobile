@@ -319,12 +319,18 @@ remove_from_json_config() {
     local backup="${path}.bak"
     cp "${path}" "${backup}"
 
-    # Remove lines containing auto-mobile (case insensitive)
-    # and clean up any resulting empty objects or trailing commas
-    sed -i.tmp -E '/"[^"]*[aA]uto-?[mM]obile[^"]*"/d' "${path}" 2>/dev/null || \
-    sed -E '/"[^"]*[aA]uto-?[mM]obile[^"]*"/d' "${path}" > "${tmp_file}" && mv "${tmp_file}" "${path}"
+    # Remove lines containing auto-mobile (case insensitive).
+    # Prefer an in-place edit; fall back to a temp-file rewrite only when the
+    # platform's sed lacks `-i` support. `${tmp_file}` is `${path}.tmp`, which
+    # is also the backup suffix `sed -i.tmp` writes — so the in-place branch
+    # must NOT then `mv` that backup back over the edited file, which reverted
+    # the edit and left auto-mobile entries in place on jq-less machines (#3638).
+    if sed -i.tmp -E '/"[^"]*[aA]uto-?[mM]obile[^"]*"/d' "${path}" 2>/dev/null; then
+        rm -f "${path}.tmp" 2>/dev/null || true
+    else
+        sed -E '/"[^"]*[aA]uto-?[mM]obile[^"]*"/d' "${path}" > "${tmp_file}" && mv "${tmp_file}" "${path}"
+    fi
 
-    rm -f "${path}.tmp" 2>/dev/null || true
     return 0
 }
 

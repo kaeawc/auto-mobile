@@ -194,6 +194,13 @@ private val ANDROID_LAUNCHERS =
 private const val IOS_SPRINGBOARD = "com.apple.springboard"
 private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000
 
+// Live observation cadence requested by the desktop app while a device is connected. The desktop
+// mirrors the device screen and hierarchy in near real time, so it asks the daemon for a faster
+// screenshot cadence than the daemon's low-cost keepalive default. The daemon clamps these values
+// and resolves the fastest cadence across all subscribers. See issue #3333 / #3382.
+private const val LIVE_SCREENSHOT_INTERVAL_MS = 1_000L
+private const val LIVE_HIERARCHY_INTERVAL_MS = 1_000L
+
 /**
  * Select the default app to show in the navigation graph. Priority: foreground app >
  * launcher/springboard > first app in list
@@ -747,7 +754,11 @@ fun AutoMobileContent(
       LOG.info(
         "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})"
       )
-      obsClient.connect(deviceId)
+      obsClient.connect(
+        deviceId = deviceId,
+        screenshotIntervalMs = LIVE_SCREENSHOT_INTERVAL_MS,
+        hierarchyIntervalMs = LIVE_HIERARCHY_INTERVAL_MS,
+      )
       observationStreamClient = obsClient
 
       if (dataSourceMode == DataSourceMode.Real) {
@@ -793,7 +804,11 @@ fun AutoMobileContent(
           LOG.info("Observation stream socket missing, daemon appears down - skipping reconnect")
         } else {
           LOG.info("Observation stream disconnected, attempting reconnect for device: $deviceId")
-          client.connect(deviceId)
+          client.connect(
+            deviceId = deviceId,
+            screenshotIntervalMs = LIVE_SCREENSHOT_INTERVAL_MS,
+            hierarchyIntervalMs = LIVE_HIERARCHY_INTERVAL_MS,
+          )
         }
       }
     }

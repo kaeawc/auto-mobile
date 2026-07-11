@@ -89,8 +89,17 @@ class ObservationStreamClient {
    * Connect to the observation stream socket and subscribe to updates.
    *
    * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
+   * @param screenshotIntervalMs Optional requested screenshot cadence in milliseconds. When null,
+   *   the daemon applies its default low-cost keepalive cadence. The daemon clamps the value to its
+   *   supported range and resolves the fastest cadence across all subscribers for the device.
+   * @param hierarchyIntervalMs Optional requested view-hierarchy polling cadence in milliseconds.
+   *   When null, the daemon applies its default cadence.
    */
-  fun connect(deviceId: String? = null) {
+  fun connect(
+    deviceId: String? = null,
+    screenshotIntervalMs: Long? = null,
+    hierarchyIntervalMs: Long? = null,
+  ) {
     if (_connectionState.value.isConnected) {
       log.info("Already connected to observation stream")
       return
@@ -124,7 +133,7 @@ class ObservationStreamClient {
       log.info("Connected to observation stream")
 
       // Send subscribe request
-      subscribe(deviceId)
+      subscribe(deviceId, screenshotIntervalMs, hierarchyIntervalMs)
 
       // Start reading messages
       scope.launch {
@@ -174,12 +183,18 @@ class ObservationStreamClient {
     scope.coroutineContext[Job]?.cancel()
   }
 
-  private fun subscribe(deviceId: String?) {
+  private fun subscribe(
+    deviceId: String?,
+    screenshotIntervalMs: Long? = null,
+    hierarchyIntervalMs: Long? = null,
+  ) {
     val request =
       StreamRequest(
         id = UUID.randomUUID().toString(),
         command = "subscribe",
         deviceId = deviceId,
+        screenshotIntervalMs = screenshotIntervalMs,
+        hierarchyIntervalMs = hierarchyIntervalMs,
       )
 
     if (sendRequest(request)) {
@@ -422,6 +437,8 @@ data class StreamRequest(
   val command: String,
   val deviceId: String? = null,
   val appId: String? = null,
+  val screenshotIntervalMs: Long? = null,
+  val hierarchyIntervalMs: Long? = null,
 )
 
 @Serializable

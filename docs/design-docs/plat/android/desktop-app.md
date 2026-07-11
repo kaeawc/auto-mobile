@@ -146,7 +146,7 @@ Real-time data flows over Unix domain sockets, separate from the request/respons
 
 ### ObservationStreamClient
 
-Maintains a persistent connection with subscribe/unsubscribe semantics. Exposes Kotlin `SharedFlow` instances:
+Maintains a persistent connection with subscribe/unsubscribe semantics. `connect()` accepts optional `screenshotIntervalMs` / `hierarchyIntervalMs` cadence hints that are sent on the `subscribe` request; the desktop app requests a faster live cadence than the daemon's low-cost keepalive default while a device is connected. Omitting them (older daemons) falls back to the daemon default. Exposes Kotlin `SharedFlow` instances:
 
 - `hierarchyUpdates: SharedFlow<HierarchyStreamUpdate>`
 - `screenshotUpdates: SharedFlow<ScreenshotStreamUpdate>`

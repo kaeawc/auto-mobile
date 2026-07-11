@@ -1,0 +1,87 @@
+{
+  "src/daemon/telemetryPushSocketServer.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 2
+    }
+  },
+  "src/db/eventRetention.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/db/layoutEventRepository.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/db/logEventRepository.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/db/navigationEventRepository.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/db/networkEventRepository.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/db/osEventRepository.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/db/storageEventRepository.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/features/accessibility/WcagAudit.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/features/action/swipeon/SwipeOn.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/features/observe/ios/CtrlProxyHierarchy.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/features/observe/ios/IosScreenIdentity.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 2
+    }
+  },
+  "src/features/observe/output/ObserveResultOutput.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 8
+    }
+  },
+  "src/features/record/android/DualTrackRecorder.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
+  "src/server/finalizeToolResponse.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 3
+    }
+  },
+  "src/server/toolSchemaHelpers.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 2
+    }
+  },
+  "src/utils/image/loadSharp.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  }
+}

@@ -134,9 +134,35 @@ function catchConventionRule() {
 	};
 }
 
+function noUnknownCastRule() {
+	return {
+		meta: {
+			type: "problem",
+			messages: {
+				unknownCast: "Avoid `as unknown as T`: it silences the type checker and can mask a real shape mismatch (e.g. a dropped required field). Use a proper type, a type guard, or a narrow assertion. If a library genuinely forces it, add an eslint-disable-next-line with a one-line justification.",
+			},
+		},
+		create(context) {
+			return {
+				// Match the double assertion `X as unknown as T`: an outer `as T`
+				// whose operand is itself `X as unknown`.
+				TSAsExpression(node) {
+					if (
+						node.expression?.type === "TSAsExpression" &&
+						node.expression.typeAnnotation?.type === "TSUnknownKeyword"
+					) {
+						context.report({ node, messageId: "unknownCast" });
+					}
+				},
+			};
+		},
+	};
+}
+
 const catchConventionPlugin = {
 	rules: {
 		"catch-convention": catchConventionRule(),
+		"no-unknown-cast": noUnknownCastRule(),
 	},
 };
 
@@ -359,6 +385,7 @@ export default [
 		languageOptions,
 		rules: {
 			"auto-mobile/catch-convention": 2,
+			"auto-mobile/no-unknown-cast": 2,
 		},
 	},
 	{

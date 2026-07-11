@@ -13,11 +13,35 @@ set -uo pipefail
 export PATH="${HOME}/.bun/bin:${PATH}"
 mkdir -p ci-logs
 
-bun dist/src/index.js --daemon start  2>&1 | tee ci-logs/daemon-start.log
-bun dist/src/index.js --daemon health 2>&1 | tee ci-logs/daemon-health.log
+# Run a daemon command, tee its output to a log, and return the *bun* exit
+# status rather than tee's. Without this (and with no `set -e`), a failing
+# `start`/`health` was silently ignored and the script's exit status only
+# reflected the final `stop` — so the lifecycle step passed green even when
+# the daemon never started (#3640).
+run_step() {
+  local log="$1"
+  shift
+  bun dist/src/index.js "$@" 2>&1 | tee "${log}"
+  return "${PIPESTATUS[0]}"
+}
+
+if ! run_step ci-logs/daemon-start.log --daemon start; then
+  echo "error: daemon start failed" >&2
+  exit 1
+fi
+
+if ! run_step ci-logs/daemon-health.log --daemon health; then
+  echo "error: daemon health check failed" >&2
+  # Best-effort stop so we don't leak a daemon on the runner.
+  run_step ci-logs/daemon-stop.log --daemon stop || true
+  exit 1
+fi
 
 # Doctor exits non-zero when checks fail (expected on CI without devices).
 # We just verify the daemon responds to the request.
-bun dist/src/index.js --cli doctor --json 2>&1 | tee ci-logs/daemon-doctor.log || true
+run_step ci-logs/daemon-doctor.log --cli doctor --json || true
 
-bun dist/src/index.js --daemon stop   2>&1 | tee ci-logs/daemon-stop.log
+if ! run_step ci-logs/daemon-stop.log --daemon stop; then
+  echo "error: daemon stop failed" >&2
+  exit 1
+fi

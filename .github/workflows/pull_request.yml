@@ -1487,6 +1487,34 @@ jobs:
           path: heap-dump
           if-no-files-found: ignore
 
+  junit-runner-kotlin-consumer-compatibility:
+    name: "JUnit Runner Kotlin Consumer Compatibility"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.android_should_run == 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Install JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: "Validate Kotlin 2.2 consumer compatibility"
+        run: bash scripts/android/validate-junit-runner-kotlin-consumer.sh
+
+      - name: "Upload Compatibility Logs"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: junit-runner-kotlin-consumer-compatibility-logs
+          path: scratch/junit-runner-kotlin-consumer/logs/
+          if-no-files-found: ignore
+
   # Test isolation issue resolved in #107 and #109
   # Re-enabled in #110
   junit-runner-emulator-tests:
@@ -2249,6 +2277,7 @@ jobs:
       - build-android-control-proxy
       - build-junit-runner-library
       - build-playground-app
+      - junit-runner-kotlin-consumer-compatibility
       - junit-runner-unit-tests
       - junit-runner-emulator-tests
       - junit-runner-emulator-wtf-tests
@@ -2263,6 +2292,7 @@ jobs:
             "${{ needs.build-android-control-proxy.result }}" \
             "${{ needs.build-junit-runner-library.result }}" \
             "${{ needs.build-playground-app.result }}" \
+            "${{ needs.junit-runner-kotlin-consumer-compatibility.result }}" \
             "${{ needs.junit-runner-unit-tests.result }}" \
             "${{ needs.junit-runner-emulator-tests.result }}" \
             "${{ needs.junit-runner-emulator-wtf-tests.result }}" \

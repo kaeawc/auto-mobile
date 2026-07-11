@@ -13,6 +13,8 @@ build-android-agp = "9.2.1"
 # Kotlin versions
 build-kotlin = "2.4.0"
 build-kotlin-language = "2.3"              # Used in all Kotlin modules
+build-kotlin-consumer = "2.2.21"           # Published runner/test-plan consumer floor
+build-kotlin-consumer-api = "2.2"          # API surface supported by older Kotlin consumers
 build-kotlin-coroutines = "1.11.0"
 
 # Java versions
@@ -88,6 +90,7 @@ junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api", version.re
 junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit-jupiter-api" }
 junit-vintage-engine = { module = "org.junit.vintage:junit-vintage-engine", version.ref = "junit-vintage-engine" }
 kgp = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "build-kotlin" }
+kotlin-stdlib-consumer = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "build-kotlin-consumer" }
 agp = { module = "com.android.tools.build:gradle", version.ref = "build-android-agp" }
 
 koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog-agents" }

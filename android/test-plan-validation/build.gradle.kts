@@ -13,6 +13,8 @@ java {
 }
 
 dependencies {
+  api(libs.kotlin.stdlib.consumer)
+
   // YAML processing and schema validation
   implementation(libs.snakeyaml)
   implementation(libs.json.schema.validator)
@@ -69,5 +71,6 @@ tasks.withType<KotlinCompile>().configureEach {
     languageVersion.set(
       KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
     )
+    apiVersion.set(KotlinVersion.fromVersion(libs.versions.build.kotlin.consumer.api.get()))
   }
 }

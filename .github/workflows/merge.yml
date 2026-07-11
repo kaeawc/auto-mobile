@@ -681,6 +681,32 @@ jobs:
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+  junit-runner-kotlin-consumer-compatibility:
+    name: "JUnit Runner Kotlin Consumer Compatibility"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Install JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: "Validate Kotlin 2.2 consumer compatibility"
+        run: bash scripts/android/validate-junit-runner-kotlin-consumer.sh
+
+      - name: "Upload Compatibility Logs"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: junit-runner-kotlin-consumer-compatibility-logs
+          path: scratch/junit-runner-kotlin-consumer/logs/
+          if-no-files-found: ignore
+
   # Test isolation issue resolved in #107 and #109
   # Re-enabled in #110
   junit-runner-emulator-tests:
@@ -919,6 +945,7 @@ jobs:
       - validate-mkdocs-nav
       - validate-documentation-links
       - mcp-build-and-test
+      - junit-runner-kotlin-consumer-compatibility
       - junit-runner-unit-tests
       - benchmark-context-thresholds
     env:
@@ -974,7 +1001,7 @@ jobs:
       - uses: ./.github/actions/gradle-task-run
         if: ${{ endsWith(steps.library-version.outputs.version, '-SNAPSHOT') }}
         with:
-          gradle-tasks: ":junit-runner:publish :auto-mobile-sdk:publish"
+          gradle-tasks: ":test-plan-validation:publish :junit-runner:publish :auto-mobile-sdk:publish"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

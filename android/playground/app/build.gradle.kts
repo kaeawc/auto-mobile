@@ -2,6 +2,10 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  // Compose HotSwan: instant Compose UI hot reload on a running device. The plugin
+  // self-scopes to debug builds (adds its client library as debugImplementation only),
+  // so release builds carry zero overhead. See android/playground/README.md.
+  alias(libs.plugins.compose.hotswan)
 }
 
 // Signing configuration: reads from environment variables (CI) or gradle.properties (local)

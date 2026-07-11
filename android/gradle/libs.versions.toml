@@ -70,6 +70,7 @@ mavenpublish = "0.37.0"
 dokka = "2.2.0"
 compose-multiplatform = "1.11.1"
 compose-hot-reload = "1.2.0-rc01"
+compose-hotswan = "1.3.7"
 metro = "1.3.0"
 
 [plugins]
@@ -82,6 +83,7 @@ mavenPublish = { id = "com.vanniktech.maven.publish", version.ref = "mavenpublis
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 compose-hot-reload = { id = "org.jetbrains.compose.hot-reload", version.ref = "compose-hot-reload" }
+compose-hotswan = { id = "com.github.skydoves.compose.hotswan.compiler", version.ref = "compose-hotswan" }
 metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
 
 [libraries]

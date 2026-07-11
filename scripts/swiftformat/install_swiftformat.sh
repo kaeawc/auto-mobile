@@ -40,18 +40,34 @@ install_manual() {
 
         echo -e "${GREEN}Downloading SwiftFormat from GitHub...${NC}"
 
+        # -f/--fail: an HTTP error (e.g. 404) must fail, not save the error
+        # page as the "archive". Each install step is checked so a failed
+        # download/extract/move returns non-zero instead of reporting success
+        # from the unconditional `return 0` below (#3649).
         if command_exists curl; then
-            curl -L -o "$temp_dir/swiftformat.zip" "$download_url"
+            if ! curl -fL -o "$temp_dir/swiftformat.zip" "$download_url"; then
+                echo -e "${RED}Failed to download SwiftFormat${NC}"
+                return 1
+            fi
         elif command_exists wget; then
-            wget -O "$temp_dir/swiftformat.zip" "$download_url"
+            if ! wget -O "$temp_dir/swiftformat.zip" "$download_url"; then
+                echo -e "${RED}Failed to download SwiftFormat${NC}"
+                return 1
+            fi
         else
             echo -e "${RED}Neither curl nor wget found. Please install one of them.${NC}"
             return 1
         fi
 
         # Extract and install
-        unzip -o "$temp_dir/swiftformat.zip" -d "$temp_dir"
-        mv "$temp_dir/swiftformat" "$install_dir/swiftformat"
+        if ! unzip -o "$temp_dir/swiftformat.zip" -d "$temp_dir"; then
+            echo -e "${RED}Failed to extract SwiftFormat archive${NC}"
+            return 1
+        fi
+        if ! mv "$temp_dir/swiftformat" "$install_dir/swiftformat"; then
+            echo -e "${RED}Failed to install SwiftFormat binary${NC}"
+            return 1
+        fi
         chmod +x "$install_dir/swiftformat"
 
         echo -e "${GREEN}SwiftFormat installed successfully to $install_dir${NC}"

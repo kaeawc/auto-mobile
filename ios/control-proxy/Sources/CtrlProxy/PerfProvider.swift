@@ -292,20 +292,52 @@ public class PerfProvider {
     // MARK: - Properties
 
     private let timeProvider: TimeProvider
+
+    /// Guards the shared completed-entry pool and debounce counters below. The
+    /// active-entry stack and current root are thread-local (see `PerfLocalState`),
+    /// so they need no lock.
     private let lock = NSLock()
 
-    /// Stack of active timing entries (for nested operations)
-    private var entryStack: [MutablePerfEntry] = []
-
-    /// Root entries that have been completed
+    /// Root entries that have been completed. Shared across threads: `flush()`
+    /// drains the whole pool so timings from command handling and background
+    /// polling are reported together (this pooled-flush behavior is relied on).
     private var completedEntries: [MutablePerfEntry] = []
 
-    /// Current active root entry
-    private var currentRoot: MutablePerfEntry?
-
-    // Debounce tracking
+    // Debounce tracking (shared)
     private var debounceCount = 0
     private var lastDebounceTime: Int64?
+
+    /// Per-thread active-entry state.
+    ///
+    /// The entry stack and current root are kept per-thread so that operations on
+    /// one thread (e.g. background hierarchy polling on the main thread) never nest
+    /// under an in-flight operation on another (e.g. command handling on the server
+    /// queue). Sharing a single stack across threads mis-nested the timing tree and
+    /// let `end()` pop another thread's entry (issue #3635). Completed roots are
+    /// still moved into the shared `completedEntries` pool.
+    private final class PerfLocalState {
+        var entryStack: [MutablePerfEntry] = []
+        var currentRoot: MutablePerfEntry?
+    }
+
+    private lazy var localStateKey = "com.ctrlproxy.perf.\(UInt(bitPattern: ObjectIdentifier(self).hashValue))"
+
+    private func local() -> PerfLocalState {
+        let dict = Thread.current.threadDictionary
+        if let state = dict[localStateKey] as? PerfLocalState {
+            return state
+        }
+        let state = PerfLocalState()
+        dict[localStateKey] = state
+        return state
+    }
+
+    /// Move a completed root entry into the shared pool.
+    private func appendCompleted(_ entry: MutablePerfEntry) {
+        lock.lock()
+        completedEntries.append(entry)
+        lock.unlock()
+    }
 
     // MARK: - Init
 
@@ -317,80 +349,69 @@ public class PerfProvider {
 
     /// Start a serial block (operations run sequentially).
     public func serial(_ name: String) {
-        lock.lock()
-        defer { lock.unlock() }
-
+        let state = local()
         let now = timeProvider.currentTimeMillis()
         let entry = MutablePerfEntry(name: name, startTime: now, isParallel: false)
 
-        if let parent = entryStack.last {
+        if let parent = state.entryStack.last {
             parent.children.append(entry)
         } else {
-            currentRoot = entry
+            state.currentRoot = entry
         }
-        entryStack.append(entry)
-
+        state.entryStack.append(entry)
     }
 
     /// Start a new independent root block, ending any currently open blocks first.
     /// Use this for operations that may run concurrently and should be tracked as
     /// parallel/sibling entries rather than nested within each other.
     public func independentRoot(_ name: String) {
-        lock.lock()
-        defer { lock.unlock() }
+        let state = local()
 
-        // End all open entries - they become completed entries (parallel siblings)
-        while !entryStack.isEmpty {
-            endInternal()
+        // End all open entries on this thread - they become completed siblings
+        while !state.entryStack.isEmpty {
+            endInternal(state)
         }
 
         // Start fresh root
         let now = timeProvider.currentTimeMillis()
         let entry = MutablePerfEntry(name: name, startTime: now, isParallel: false)
-        currentRoot = entry
-        entryStack.append(entry)
-
+        state.currentRoot = entry
+        state.entryStack.append(entry)
     }
 
     /// Start a parallel block (operations run concurrently).
     public func parallel(_ name: String) {
-        lock.lock()
-        defer { lock.unlock() }
-
+        let state = local()
         let now = timeProvider.currentTimeMillis()
         let entry = MutablePerfEntry(name: name, startTime: now, isParallel: true)
 
-        if let parent = entryStack.last {
+        if let parent = state.entryStack.last {
             parent.children.append(entry)
         } else {
-            currentRoot = entry
+            state.currentRoot = entry
         }
-        entryStack.append(entry)
-
+        state.entryStack.append(entry)
     }
 
     /// End the current block.
     public func end() {
-        lock.lock()
-        defer { lock.unlock() }
-        endInternal()
+        endInternal(local())
     }
 
-    /// Internal end without locking (called by other locked methods).
-    private func endInternal() {
+    /// End the innermost open entry on the given thread-local state.
+    private func endInternal(_ state: PerfLocalState) {
         let now = timeProvider.currentTimeMillis()
 
-        guard let entry = entryStack.popLast() else {
+        guard let entry = state.entryStack.popLast() else {
             return
         }
 
         entry.endTime = now
 
-
-        // If this was the root entry, move it to completed
-        if entryStack.isEmpty, currentRoot === entry {
-            completedEntries.append(entry)
-            currentRoot = nil
+        // If this was the root entry, move it into the shared completed pool.
+        if state.entryStack.isEmpty, state.currentRoot === entry {
+            state.currentRoot = nil
+            appendCompleted(entry)
         }
     }
 
@@ -414,43 +435,37 @@ public class PerfProvider {
 
     /// Start tracking an operation manually.
     public func startOperation(_ name: String) {
-        lock.lock()
-        defer { lock.unlock() }
-
+        let state = local()
         let now = timeProvider.currentTimeMillis()
         let entry = MutablePerfEntry(name: name, startTime: now)
 
-        if let parent = entryStack.last {
+        if let parent = state.entryStack.last {
             parent.children.append(entry)
-            entryStack.append(entry)
+            state.entryStack.append(entry)
         } else {
             // No active block, this becomes a root entry
-            currentRoot = entry
-            entryStack.append(entry)
+            state.currentRoot = entry
+            state.entryStack.append(entry)
         }
-
     }
 
     /// End tracking an operation manually.
     public func endOperation(_ name: String) {
-        lock.lock()
-        defer { lock.unlock() }
-
+        let state = local()
         let now = timeProvider.currentTimeMillis()
 
-        // Find the matching entry in the stack
-        guard let entry = entryStack.last, entry.name == name else {
+        // Find the matching entry in this thread's stack
+        guard let entry = state.entryStack.last, entry.name == name else {
             return
         }
 
         entry.endTime = now
-        _ = entryStack.popLast()
+        _ = state.entryStack.popLast()
 
-
-        // If this was the root entry, move it to completed
-        if entryStack.isEmpty, currentRoot === entry {
-            completedEntries.append(entry)
-            currentRoot = nil
+        // If this was the root entry, move it into the shared completed pool.
+        if state.entryStack.isEmpty, state.currentRoot === entry {
+            state.currentRoot = nil
+            appendCompleted(entry)
         }
     }
 
@@ -471,13 +486,15 @@ public class PerfProvider {
     /// Flush all accumulated timing data and reset.
     /// Returns the timing data as an array for inclusion in WebSocket messages.
     public func flush() -> [PerfTiming]? {
+        // End any incomplete entries on this thread (moves their roots into the
+        // shared pool); done before taking the lock to avoid re-entrant locking.
+        let state = local()
+        while !state.entryStack.isEmpty {
+            endInternal(state)
+        }
+
         lock.lock()
         defer { lock.unlock() }
-
-        // End any incomplete entries
-        while !entryStack.isEmpty {
-            endInternal()
-        }
 
         // Collect all completed entries
         var entries: [PerfTiming] = []
@@ -506,40 +523,42 @@ public class PerfProvider {
 
     /// Get current timing data without clearing (for debugging).
     public func peek() -> [PerfTiming] {
-        lock.lock()
-        defer { lock.unlock() }
-
+        let state = local()
         var entries: [PerfTiming] = []
 
-        // Include current root if any
-        if let root = currentRoot {
+        // Include this thread's current root if any
+        if let root = state.currentRoot {
             entries.append(root.toTiming(timeProvider: timeProvider))
         }
 
-        // Include completed entries
+        // Include shared completed entries
+        lock.lock()
         for entry in completedEntries {
             entries.append(entry.toTiming(timeProvider: timeProvider))
         }
+        lock.unlock()
 
         return entries
     }
 
     /// Check if there's any accumulated timing data.
     public var hasData: Bool {
+        let hasLocalRoot = local().currentRoot != nil
         lock.lock()
         defer { lock.unlock() }
-        return !completedEntries.isEmpty || currentRoot != nil || debounceCount > 0
+        return !completedEntries.isEmpty || hasLocalRoot || debounceCount > 0
     }
 
     /// Clear all timing data without returning it.
     public func clear() {
-        lock.lock()
-        defer { lock.unlock() }
+        let state = local()
+        state.entryStack.removeAll()
+        state.currentRoot = nil
 
-        entryStack.removeAll()
+        lock.lock()
         completedEntries.removeAll()
-        currentRoot = nil
         debounceCount = 0
         lastDebounceTime = nil
+        lock.unlock()
     }
 }

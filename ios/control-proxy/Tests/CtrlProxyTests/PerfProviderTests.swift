@@ -230,6 +230,43 @@ final class PerfProviderTests: XCTestCase {
         let timings = perfProvider.flush()
         XCTAssertNotNil(timings)
     }
+
+    /// An operation open on another thread must NOT become the parent of an
+    /// operation started on this thread. Pre-fix the entry stack was shared, so
+    /// "B" nested under the still-open "A" (issue #3635). Now the stack is
+    /// per-thread, so "B" is its own top-level root.
+    func testEntriesFromDifferentThreadsDoNotNest() {
+        let aOpened = DispatchSemaphore(value: 0)
+        let releaseA = DispatchSemaphore(value: 0)
+
+        let threadA = Thread { [perfProvider] in
+            perfProvider!.serial("A") // leave "A" open on thread A
+            aOpened.signal()
+            releaseA.wait()
+            perfProvider!.end()
+        }
+        threadA.start()
+        aOpened.wait() // "A" is now open on thread A
+
+        // Start and finish "B" on this thread while "A" is still open elsewhere.
+        perfProvider.serial("B")
+        perfProvider.end()
+
+        // Flushing drains the shared completed pool; "B" completed on this thread.
+        let timings = perfProvider.flush() ?? []
+        let b = timings.first { $0.name == "B" }
+        XCTAssertNotNil(b, "B should be a top-level completed root")
+        // Under the old shared-stack code B would have been nested inside A and
+        // would not appear as a top-level entry here.
+        XCTAssertFalse(timings.contains { $0.name == "A" && ($0.children?.contains { $0.name == "B" } ?? false) },
+                       "B must not be nested under A")
+
+        releaseA.signal()
+        // Give thread A a moment to finish cleanly.
+        let done = DispatchSemaphore(value: 0)
+        Thread { done.signal() }.start()
+        _ = done.wait(timeout: .now() + 1)
+    }
 }
 
 // MARK: - FakeTimeProvider Tests

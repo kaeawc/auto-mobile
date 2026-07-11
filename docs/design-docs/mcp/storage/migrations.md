@@ -127,12 +127,12 @@ The migration directory is resolved in this order:
 
 ```mermaid
 flowchart LR
-    A["Resolve migrations directory"] --> B{"AUTOMOBILE_MIGRATIONS_DIR set?"};
-    B -->|"yes"| C["Use AUTOMOBILE_MIGRATIONS_DIR path"];
-    B -->|"no"| D{"dist/src/db/migrations exists?"};
-    D -->|"yes"| E["Use dist/src/db/migrations<br/>(bundled server)"];
-    D -->|"no"| F{"src/db/migrations exists?"};
-    F -->|"yes"| G["Use src/db/migrations<br/>(running from source)"];
+    A["Resolve migrations directory"] --> B{"AUTOMOBILE_MIGRATIONS_DIR<br/>(or legacy AUTO_MOBILE_MIGRATIONS_DIR) set?"};
+    B -->|"yes"| C["Use that path<br/>(resolved vs daemon launch cwd)"];
+    B -->|"no"| D{"&lt;moduleDir&gt;/migrations exists?"};
+    D -->|"yes"| E["Use &lt;moduleDir&gt;/migrations"];
+    D -->|"no"| F{"&lt;moduleDir&gt;/db/migrations exists?"};
+    F -->|"yes"| G["Use &lt;moduleDir&gt;/db/migrations"];
     F -->|"no"| H["Throw error with checked paths"];
     classDef decision fill:#CC2200,stroke-width:0px,color:white;
     classDef logic fill:#525FE1,stroke-width:0px,color:white;
@@ -142,7 +142,14 @@ flowchart LR
     class C,E,G logic;
 ```
 
-If no folder is found, the server throws an error describing the checked paths.
+The candidates are resolved **relative to the compiled module's directory**
+(`<moduleDir>` = `path.dirname(fileURLToPath(import.meta.url))`), not against the
+literal `dist/src/db/migrations` / `src/db/migrations` project paths — so the
+bundled `dist/src/index.js` finds its migrations via `<moduleDir>/db/migrations`.
+The env override accepts the current `AUTOMOBILE_MIGRATIONS_DIR` and the
+deprecated `AUTO_MOBILE_MIGRATIONS_DIR` alias. See `resolveMigrationFolder` in
+`src/db/migrator.ts`. If no folder is found, the server throws an error
+describing the checked paths.
 
 ## Docker notes
 

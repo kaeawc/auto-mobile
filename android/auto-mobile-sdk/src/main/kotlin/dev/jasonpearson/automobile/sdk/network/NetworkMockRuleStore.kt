@@ -43,7 +43,16 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     fun initialize(context: Context) {
       getInstance().registerReceiver(context)
     }
+
+    fun shutdown(context: Context) {
+      getInstance().unregisterReceiver(context)
+    }
   }
+
+  // Guards against double-registration on re-init and ensures unregister runs at
+  // most once — the receiver is a process singleton, so a leaked/duplicate
+  // registration would double-handle every broadcast (#3599).
+  private var receiverRegistered = false
 
   /** Interface for the interceptor to query rules without depending on the full store. */
   interface RuleMatcher {
@@ -195,7 +204,9 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
 
   fun getRuleCount(): Int = rules.size
 
+  @Synchronized
   fun registerReceiver(context: Context) {
+    if (receiverRegistered) return
     val filter =
       IntentFilter().apply {
         addAction(ACTION_NETWORK_MOCK_RULES)
@@ -212,15 +223,19 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     } else {
       context.registerReceiver(receiver, filter, PERMISSION_NETWORK_CONTROL, null)
     }
+    receiverRegistered = true
     AutoMobileSDK.logger.d(TAG) {
       "Registered broadcast receiver for network mock rules (permission-gated)"
     }
   }
 
+  @Synchronized
   fun unregisterReceiver(context: Context) {
+    if (!receiverRegistered) return
     try {
       context.unregisterReceiver(receiver)
     } catch (_: Exception) {}
+    receiverRegistered = false
   }
 
   private val receiver =

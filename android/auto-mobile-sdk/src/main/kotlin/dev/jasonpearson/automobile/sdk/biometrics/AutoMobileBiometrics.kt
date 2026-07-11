@@ -199,6 +199,18 @@ object AutoMobileBiometrics {
     }
   }
 
+  /** Unregister the override receiver so it doesn't leak across init/shutdown cycles (#3599). */
+  @Synchronized
+  fun shutdown() {
+    if (!receiverRegistered) return
+    context?.let {
+      try {
+        it.unregisterReceiver(broadcastReceiver)
+      } catch (_: Exception) {}
+    }
+    receiverRegistered = false
+  }
+
   /**
    * Process an incoming biometric override broadcast intent.
    *

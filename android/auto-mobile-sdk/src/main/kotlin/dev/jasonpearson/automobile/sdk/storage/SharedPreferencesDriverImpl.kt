@@ -29,11 +29,15 @@ internal class SharedPreferencesDriverImpl(
   }
 
   private val listeners = CopyOnWriteArrayList<OnPreferenceChangeListener>()
+  // ConcurrentHashMap: the SharedPreferences change listener fires on arbitrary
+  // threads and reads changeQueues/valueSnapshots while startListening/stopListening
+  // structurally modify these maps on other threads (#3601). The values were already
+  // concurrent; only the outer maps were plain HashMaps.
   private val sharedPrefsListeners =
-    mutableMapOf<String, SharedPreferences.OnSharedPreferenceChangeListener>()
+    ConcurrentHashMap<String, SharedPreferences.OnSharedPreferenceChangeListener>()
 
   /** Per-file change queues for push-based notifications. */
-  private val changeQueues = mutableMapOf<String, CopyOnWriteArrayList<PreferenceChange>>()
+  private val changeQueues = ConcurrentHashMap<String, CopyOnWriteArrayList<PreferenceChange>>()
 
   /**
    * Per-file snapshot of the last-known values, keyed by preference key. Seeded on [startListening]
@@ -42,7 +46,7 @@ internal class SharedPreferencesDriverImpl(
    * [ConcurrentHashMap] because the SharedPreferences listener may fire off arbitrary threads; it
    * cannot store null, so an absent key naturally means "no prior value".
    */
-  private val valueSnapshots = mutableMapOf<String, ConcurrentHashMap<String, Any?>>()
+  private val valueSnapshots = ConcurrentHashMap<String, ConcurrentHashMap<String, Any?>>()
 
   /** Monotonically increasing sequence counter for ordering changes. */
   private val sequenceCounter = AtomicLong(0)

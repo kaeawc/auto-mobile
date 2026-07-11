@@ -136,12 +136,26 @@ final class TestTimingCache {
             }
             let parsed = try jsonDecoder.decode(TestTimingSummary.self, from: data)
             summary = parsed
-            timingMap = Dictionary(
-                uniqueKeysWithValues: parsed.testTimings.map {
-                    (TestTimingKey(testClass: $0.testClass, testMethod: $0.testMethod), $0)
-                }
-            )
-        } catch {}
+            timingMap = Self.buildTimingMap(from: parsed.testTimings)
+        } catch {
+            // Best-effort prefetch: timing data is an optimization, so a failure here
+            // must not abort the test run. Log it so there is a trace (issue #3618).
+            print("[TestTimingCache] Failed to load timing data from daemon: \(error)")
+        }
+    }
+
+    /// Build the (class, method) → entry lookup from daemon rows.
+    ///
+    /// The daemon does not guarantee one row per (class, method) — aggregation
+    /// bugs, parametrized-variant collisions, or lookback overlap can yield
+    /// duplicates. `Dictionary(uniqueKeysWithValues:)` would `fatalError` (an
+    /// uncatchable trap) on a duplicate and take down the whole test run, so we
+    /// tolerate duplicates and keep the last occurrence instead (issue #3618).
+    static func buildTimingMap(from entries: [TestTimingEntry]) -> [TestTimingKey: TestTimingEntry] {
+        Dictionary(
+            entries.map { (TestTimingKey(testClass: $0.testClass, testMethod: $0.testMethod), $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
     }
 
     private func buildRequestUri() -> String {

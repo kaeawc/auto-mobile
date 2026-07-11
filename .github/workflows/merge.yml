@@ -1246,30 +1246,21 @@ jobs:
     name: "Update README Test Count Badges"
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Serialize badge pushes so two merges can't race to push a badge commit to
+    # main at once (issue #3590). cancel-in-progress:false lets a queued run wait
+    # rather than drop the update; the run recomputes counts from scratch anyway.
+    concurrency:
+      group: update-readme-badges
+      cancel-in-progress: false
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
-          fetch-depth: 0  # Full history so rebase-on-race works before pushing to main
+          fetch-depth: 0  # Full history so the badge commit push to main isn't rejected as a shallow update
           token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
 
-      - name: "Update badge counts"
-        shell: bash
-        run: bash scripts/update-readme-badges.sh
-
-      - name: "Check for changes"
-        id: changes
-        shell: bash
-        run: |
-          if git diff --quiet README.md; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: "Commit and push badge update to main"
-        if: steps.changes.outputs.changed == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -1277,22 +1268,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # "[skip ci]" stops this cosmetic commit from re-triggering the merge
-          # workflow (and any other push-triggered CI).
-          git add README.md
-          git commit -m "chore: update README test count badges [skip ci]"
-
           # AUTO_MOBILE_PR_TOKEN is an admin actor and bypasses the green-main
-          # ruleset, so this pushes straight to main with no PR or status checks.
-          # Rebase-and-retry guards against losing a race with a concurrent push.
-          for attempt in 1 2 3; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              echo "Pushed badge update to main"
-              exit 0
-            fi
-            echo "Push attempt ${attempt} failed; retrying..."
-            sleep 5
-          done
-
-          echo "Failed to push badge update to main after 3 attempts" >&2
-          exit 1
+          # ruleset, so the script pushes straight to main with no PR or status
+          # checks. It re-syncs to origin/main and regenerates the badge each
+          # attempt (exiting cleanly when counts are unchanged), so a concurrent
+          # push can never leave a conflicted rebase.
+          bash scripts/push-readme-badges.sh

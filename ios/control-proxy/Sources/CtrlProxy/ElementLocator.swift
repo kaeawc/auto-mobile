@@ -5,6 +5,117 @@ import Foundation
     import XCTest
 #endif
 
+/// Thread-safe string-keyed cache.
+///
+/// `ElementLocator` runs hierarchy extraction from two threads — command
+/// handling on the server `DispatchQueue` and background polling on the main
+/// thread (the hierarchy debouncer) — so its element cache must not be a bare
+/// `Dictionary` mutated concurrently (undefined behavior / crash, issue #3614).
+/// Every access is serialized by an internal lock. Each method is a brief,
+/// self-contained critical section, so the lock is never held across the
+/// `runOnMainThread` (`main.sync`) hops that the locator makes — avoiding any
+/// main-thread deadlock.
+final class ThreadSafeCache<Value> {
+    private let lock = NSLock()
+    private var storage: [String: Value] = [:]
+
+    func value(forKey key: String) -> Value? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[key]
+    }
+
+    func set(_ value: Value, forKey key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage[key] = value
+    }
+
+    func removeAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.removeAll()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage.count
+    }
+}
+
+/// Thread-safe holder for the locator's foreground-app tracking state.
+///
+/// The tracked app reference, its bundle id, the observed-bundle-id set, the
+/// SpringBoard-fallback flag, and the last-explicit-switch timestamp are read
+/// and written from both the server queue and the main thread. They are kept
+/// consistent (and free of `Set`/scalar tearing) under one lock (issue #3614).
+/// The app reference is stored as `AnyObject?` so this type stays free of the
+/// iOS-only `XCUIApplication`; the locator casts it back on use.
+final class ForegroundTracker {
+    private let lock = NSLock()
+    private var _app: AnyObject?
+    private var _bundleId: String?
+    private var _observed: Set<String> = []
+    private var _didFallbackToSpringboard = false
+    private var _lastSwitchTime: UInt64 = 0
+
+    private func locked<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
+    var bundleId: String? { locked { _bundleId } }
+
+    /// Consistent snapshot of the tracked app reference and its bundle id.
+    func appAndBundleId() -> (app: AnyObject?, bundleId: String?) {
+        locked { (_app, _bundleId) }
+    }
+
+    /// Snapshot copy of the observed bundle ids, safe to iterate outside the lock.
+    var observedBundleIds: Set<String> { locked { _observed } }
+
+    var didFallbackToSpringboard: Bool {
+        get { locked { _didFallbackToSpringboard } }
+        set { locked { _didFallbackToSpringboard = newValue } }
+    }
+
+    var lastSwitchTime: UInt64 { locked { _lastSwitchTime } }
+
+    func trackObserved(_ bundleId: String) {
+        locked { _ = _observed.insert(bundleId) }
+    }
+
+    /// Set the tracked app and bundle id together. Optionally records the bundle
+    /// id in the observed set.
+    func setApplication(_ app: AnyObject?, bundleId: String?, observe: Bool) {
+        locked {
+            _app = app
+            _bundleId = bundleId
+            if observe, let bundleId = bundleId {
+                _observed.insert(bundleId)
+            }
+        }
+    }
+
+    /// Atomically switch the tracked foreground app, returning the previous
+    /// bundle id. Resets the SpringBoard-fallback flag and stamps the switch time.
+    func switchForeground(app: AnyObject?, bundleId: String, observe: Bool, now: UInt64) -> String? {
+        locked {
+            let previous = _bundleId
+            _app = app
+            _bundleId = bundleId
+            _didFallbackToSpringboard = false
+            _lastSwitchTime = now
+            if observe {
+                _observed.insert(bundleId)
+            }
+            return previous
+        }
+    }
+}
+
 /// Locates elements using XCUITest APIs and returns Android-compatible format
 /// Applies filtering similar to Android's ViewHierarchyExtractor to reduce hierarchy size
 public class ElementLocator: ElementLocating {
@@ -46,22 +157,19 @@ public class ElementLocator: ElementLocating {
     }
 
     #if canImport(XCTest) && os(iOS)
-        /// The foreground app we're currently observing (not springboard)
-        /// At most one instance besides springboard should exist
-        private var foregroundApp: XCUIApplication?
-        public private(set) var foregroundBundleId: String?
+        /// Foreground-app tracking state (tracked app, bundle id, observed bundle
+        /// ids, SpringBoard-fallback flag, last-switch time), synchronized across
+        /// the server queue and the main-thread poll (issue #3614).
+        private let tracker = ForegroundTracker()
+
+        /// Bundle id of the app currently being observed.
+        public var foregroundBundleId: String? { tracker.bundleId }
 
         /// Springboard app for detecting foreground app - always kept
         private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
-        /// Cache of resource IDs to XCUIElements
-        private var elementCache: [String: XCUIElement] = [:]
-
-        /// Whether the last foreground detection fell back to SpringBoard
-        private var didFallbackToSpringboard: Bool = false
-
-        /// Timestamp of the last explicit switchForegroundApp call (monotonic clock, nanoseconds)
-        private var lastExplicitSwitchTime: UInt64 = 0
+        /// Thread-safe cache of resource IDs to XCUIElements
+        private let elementCache = ThreadSafeCache<XCUIElement>()
 
         /// Performance tracking provider
         private let perfProvider: PerfProvider
@@ -70,57 +178,38 @@ public class ElementLocator: ElementLocating {
             application: XCUIApplication? = nil,
             perfProvider: PerfProvider = PerfProvider.instance
         ) {
-            foregroundApp = application
+            tracker.setApplication(application, bundleId: nil, observe: false)
             self.perfProvider = perfProvider
         }
 
         public func setApplication(_ app: XCUIApplication) {
-            // Release old app reference before setting new one
-            foregroundApp = nil
-            foregroundBundleId = nil
-
-            foregroundApp = app
+            tracker.setApplication(app, bundleId: nil, observe: false)
             elementCache.removeAll()
         }
 
         public func trackObservedBundleId(_ bundleId: String) {
             guard bundleId != "com.apple.springboard" else { return }
-            observedBundleIds.insert(bundleId)
+            tracker.trackObserved(bundleId)
         }
 
         /// Set the application to observe with its bundle ID
         public func setApplication(_ app: XCUIApplication, bundleId: String) {
-            // Release old app reference before setting new one
-            foregroundApp = nil
-            foregroundBundleId = nil
-
-            foregroundApp = app
-            foregroundBundleId = bundleId
+            tracker.setApplication(app, bundleId: bundleId, observe: bundleId != "com.apple.springboard")
             elementCache.removeAll()
-
-            // Track this bundle ID for future detection
-            if bundleId != "com.apple.springboard" {
-                observedBundleIds.insert(bundleId)
-            }
         }
 
         /// Explicitly switch the tracked foreground app to the given bundle ID, clearing caches.
         /// Called by CommandHandler after state-changing operations (launch, terminate, home).
         public func switchForegroundApp(bundleId: String) {
-            let previousBundleId = foregroundBundleId
-            foregroundApp = nil
-            foregroundBundleId = nil
+            let isSpringboard = bundleId == "com.apple.springboard"
+            let app: XCUIApplication = isSpringboard ? springboard : XCUIApplication(bundleIdentifier: bundleId)
+            let previousBundleId = tracker.switchForeground(
+                app: app,
+                bundleId: bundleId,
+                observe: !isSpringboard,
+                now: DispatchTime.now().uptimeNanoseconds
+            )
             elementCache.removeAll()
-            didFallbackToSpringboard = false
-
-            if bundleId == "com.apple.springboard" {
-                foregroundApp = springboard
-            } else {
-                foregroundApp = XCUIApplication(bundleIdentifier: bundleId)
-                observedBundleIds.insert(bundleId)
-            }
-            foregroundBundleId = bundleId
-            lastExplicitSwitchTime = DispatchTime.now().uptimeNanoseconds
             if previousBundleId != bundleId {
                 print("[ElementLocator] Foreground app changed: \(previousBundleId ?? "nil") -> \(bundleId)")
             }
@@ -163,11 +252,15 @@ public class ElementLocator: ElementLocating {
         /// With explicit transitions via switchForegroundApp, this should rarely fire.
         private func ensureForegroundApp() {
             // If we recently did an explicit switch, trust it — the caller already set the right app
-            let nsSinceSwitch = DispatchTime.now().uptimeNanoseconds - lastExplicitSwitchTime
+            let nsSinceSwitch = DispatchTime.now().uptimeNanoseconds - tracker.lastSwitchTime
             let msSinceSwitch = nsSinceSwitch / 1_000_000
             if msSinceSwitch < 200 {
                 return
             }
+
+            // Snapshot the tracked bundle id once; the main.sync block below must
+            // not read the shared field directly (issue #3614).
+            let trackedBundleId = tracker.bundleId
 
             // IMPORTANT: Create fresh XCUIApplication instances to check state, because
             // cached instances may return stale state values
@@ -175,11 +268,11 @@ public class ElementLocator: ElementLocating {
                 perfProvider.track("checkState") {
                     runOnMainThreadNonThrowing({
                         let sbState = self.springboard.state.rawValue
-                        let freshAppState: UInt? = self.foregroundBundleId.map { bundleId in
+                        let freshAppState: UInt? = trackedBundleId.map { bundleId in
                             XCUIApplication(bundleIdentifier: bundleId).state.rawValue
                         }
-                        return (sbState, freshAppState, self.foregroundBundleId)
-                    }, fallback: (0, nil, self.foregroundBundleId))
+                        return (sbState, freshAppState, trackedBundleId)
+                    }, fallback: (0, nil, trackedBundleId))
                 }
 
             let isCurrentAppInForeground = (stateInfo.currentAppState ?? 0) >=
@@ -189,19 +282,19 @@ public class ElementLocator: ElementLocating {
             // Springboard reports as foreground even when another app is on top,
             // so we always re-detect unless a non-springboard app is confirmed foreground
             if isCurrentAppInForeground && !isCurrentAppSpringboard {
-                didFallbackToSpringboard = false
+                tracker.didFallbackToSpringboard = false
                 return
             }
 
             if let detectedBundleId = perfProvider.track("detectForeground", block: { detectForegroundAppBundleId() }) {
-                if detectedBundleId != foregroundBundleId {
+                if detectedBundleId != tracker.bundleId {
                     switchForegroundApp(bundleId: detectedBundleId)
                 }
-                didFallbackToSpringboard = false
+                tracker.didFallbackToSpringboard = false
             } else if !isCurrentAppInForeground {
-                if foregroundBundleId != "com.apple.springboard" {
+                if tracker.bundleId != "com.apple.springboard" {
                     switchForegroundApp(bundleId: "com.apple.springboard")
-                    didFallbackToSpringboard = true
+                    tracker.didFallbackToSpringboard = true
                 }
             }
         }
@@ -209,15 +302,17 @@ public class ElementLocator: ElementLocating {
         /// Get the current application to observe
         /// Returns foreground app if available and in foreground, otherwise springboard
         private var currentApplication: XCUIApplication {
+            // Consistent snapshot of the tracked app + bundle id (issue #3614).
+            let (appObject, trackedBundleId) = tracker.appAndBundleId()
+            let trackedApp = appObject as? XCUIApplication
             // Check state on main thread using fresh instance (cached instances return stale state)
-            let stateInfo: (state: UInt?, bundleId: String?) = runOnMainThreadNonThrowing({
-                let freshState: UInt? = self.foregroundBundleId.map { bundleId in
+            let freshState: UInt? = runOnMainThreadNonThrowing({
+                trackedBundleId.map { bundleId in
                     XCUIApplication(bundleIdentifier: bundleId).state.rawValue
                 }
-                return (freshState, self.foregroundBundleId)
-            }, fallback: (nil, self.foregroundBundleId))
-            let foregroundAppInForeground = (stateInfo.state ?? 0) >= 4 // .runningForeground only
-            if let app = foregroundApp, foregroundAppInForeground {
+            }, fallback: nil)
+            let foregroundAppInForeground = (freshState ?? 0) >= 4 // .runningForeground only
+            if let app = trackedApp, foregroundAppInForeground {
                 return app
             }
             return springboard
@@ -265,13 +360,15 @@ public class ElementLocator: ElementLocating {
             "dev.jasonpearson.automobile.Playground", // AutoMobile Playground app
         ]
 
-        /// Bundle IDs that have been observed during this session
-        /// Used to check for foreground app without requiring hardcoded list
-        private var observedBundleIds: Set<String> = []
-
         /// Detect the bundle ID of the foreground app
         /// Returns nil if detection fails or springboard is in front
         private func detectForegroundAppBundleId() -> String? {
+            // Snapshot the shared foreground/observed state once so the loops below
+            // iterate a stable copy and never touch the shared state concurrently
+            // with a mutation on another thread (issue #3614).
+            let currentBundleId = tracker.bundleId
+            let observedBundleIds = tracker.observedBundleIds
+
             // First, try to find bundle IDs from springboard's element tree
             // This can work when apps embed their bundle ID in element identifiers
             let snapshot: XCUIElementSnapshot? = perfProvider.track("springboardSnapshot") {
@@ -311,7 +408,7 @@ public class ElementLocator: ElementLocating {
             let observedResult: String? = perfProvider.track("checkObserved") {
                 for bundleId in observedBundleIds {
                     // Skip current app (we already know it's not in foreground)
-                    if bundleId == foregroundBundleId {
+                    if bundleId == currentBundleId {
                         continue
                     }
 
@@ -335,7 +432,7 @@ public class ElementLocator: ElementLocating {
             return perfProvider.track("checkSystemApps") {
                 for bundleId in Self.commonSystemApps {
                     // Skip current app (we already know it's not in foreground)
-                    if bundleId == foregroundBundleId {
+                    if bundleId == currentBundleId {
                         continue
                     }
                     // Skip already checked in observedBundleIds
@@ -540,7 +637,7 @@ public class ElementLocator: ElementLocating {
                 screenScale: screenScale,
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,
-                fallbackToSpringboard: didFallbackToSpringboard ? true : nil
+                fallbackToSpringboard: tracker.didFallbackToSpringboard ? true : nil
             )
         }
 
@@ -1071,7 +1168,7 @@ public class ElementLocator: ElementLocating {
         // MARK: - Element Finding
 
         public func findElement(byResourceId resourceId: String) -> Any? {
-            if let cached = elementCache[resourceId] {
+            if let cached = elementCache.value(forKey: resourceId) {
                 print("[ElementLocator] Element found by resourceId=\(resourceId) source=cache")
                 return cached
             }
@@ -1098,7 +1195,7 @@ public class ElementLocator: ElementLocating {
                 print("[ElementLocator] Element not found by resourceId=\(resourceId)")
                 return nil
             }
-            elementCache[resourceId] = element
+            elementCache.set(element, forKey: resourceId)
             print("[ElementLocator] Element found by resourceId=\(resourceId) source=query")
             return element
         }
@@ -1119,7 +1216,7 @@ public class ElementLocator: ElementLocating {
         }
 
         public func getCachedElement(_ resourceId: String) -> XCUIElement? {
-            return elementCache[resourceId]
+            return elementCache.value(forKey: resourceId)
         }
 
     #else

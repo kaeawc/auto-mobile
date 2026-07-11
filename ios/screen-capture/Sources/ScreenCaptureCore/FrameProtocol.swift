@@ -29,7 +29,9 @@ public enum FrameProtocol {
     public static func encodeHeader(_ header: Header) -> Data {
         var data = Data(count: headerSize)
         data.withUnsafeMutableBytes { ptr in
-            let base = ptr.baseAddress!
+            // `data` was allocated with `Data(count: headerSize)` (headerSize > 0), so
+            // the buffer is non-empty and baseAddress is non-nil.
+            let base = ptr.baseAddress!  // swiftlint:disable:this force_unwrapping
             base.storeBytes(of: header.width.littleEndian, as: UInt32.self)
             base.advanced(by: 4).storeBytes(of: header.height.littleEndian, as: UInt32.self)
             base.advanced(by: 8).storeBytes(of: header.bytesPerRow.littleEndian, as: UInt32.self)
@@ -41,7 +43,9 @@ public enum FrameProtocol {
     public static func decodeHeader(_ data: Data) -> Header? {
         guard data.count >= headerSize else { return nil }
         return data.withUnsafeBytes { ptr -> Header in
-            let base = ptr.baseAddress!
+            // Guarded above by `data.count >= headerSize` (headerSize > 0), so the
+            // buffer is non-empty and baseAddress is non-nil.
+            let base = ptr.baseAddress!  // swiftlint:disable:this force_unwrapping
             // `load(as:)` requires the address to be aligned to the loaded type;
             // when `data` is a slice of a larger buffer, `base` may be unaligned,
             // making the loads undefined behavior (traps in debug). `loadUnaligned`

@@ -61,6 +61,7 @@ opt_in_rules:
   - file_name_no_space
   - first_where
   - flatmap_over_map_reduce
+  - force_unwrapping
   - identical_operands
   - joined_default_parameter
   - last_where
@@ -84,6 +85,18 @@ opt_in_rules:
   - yoda_condition
 
 # Rule configurations
+
+# Force-unwrap (`!`) on a possibly-nil value is a whole bug class we burned down in
+# 2026-07 (e.g. the Kotlin `mcpResponse.result!!` NPE, #3607). CI runs SwiftLint
+# non-strict, so a default `warning` would be ignored — make it an error so a new
+# force-unwrap fails the SwiftLint job at author time. The handful of provably-safe
+# pre-existing unwraps (hardcoded URLs, ASCII UTF-8, just-inserted dictionary keys,
+# non-empty-buffer base addresses) carry a `// swiftlint:disable:this force_unwrapping`
+# with a one-line justification; test targets disable it file-wide (fail-fast on bad
+# fixtures is idiomatic there).
+force_unwrapping:
+  severity: error
+
 identifier_name:
   min_length:
     error: 1
@@ -127,3 +140,11 @@ large_tuple:
 
 # Reporter type (xcode, json, csv, checkstyle, codeclimate, junit, html, emoji, sonarqube, markdown, github-actions-logging)
 reporter: "xcode"
+
+# Test targets file-disable the fail-fast crash rules (force-unwrap/force-try are
+# idiomatic in fixtures). Allow those rules to be blanket-disabled without tripping
+# blanket_disable_command; every other rule still requires scoped this/next/previous.
+blanket_disable_command:
+  allowed_rules:
+    - force_unwrapping
+    - force_try

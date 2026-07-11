@@ -1,3 +1,6 @@
+// swiftlint:disable force_unwrapping
+// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
+
 import XCTest
 @testable import AutoMobileSDK
 

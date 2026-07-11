@@ -109,7 +109,7 @@ List archived device snapshots.
   "totalSizeBytes": 47448064,
   "maxArchiveSizeMb": 100
 }
-```bash
+```
 
 ## Configuration
 
@@ -126,6 +126,12 @@ Device snapshot defaults can be read or updated via the Unix socket at `~/.auto-
 - `maxArchiveSizeMb`: `100`
 
 ## Snapshot Types
+
+The response `snapshotType` field reflects how the snapshot was taken. The type
+union (`DeviceSnapshotType` in `src/models/DeviceSnapshot.ts`) is `vm` (emulator
+VM snapshot), `adb` (Android app-data via adb), `app_data` (iOS app-container
+copy), and `simctl` (reserved for a simulator-level type; not currently emitted
+by the capture paths).
 
 ### VM Snapshots (Emulators Only)
 
@@ -184,11 +190,12 @@ Device snapshot defaults can be read or updated via the Unix socket at `~/.auto-
 - Captures only the target app's container for focused reproduction
 
 **Cons:**
-- Does not include system settings, keychain, or other app state
+- Does not include the keychain or other apps' state (captures the target app's container, plus global/secure/system settings when `includeSettings` is set)
 - Requires explicit bundle IDs for the target app(s)
 
 **Technical Details:**
 - Uses `xcrun simctl get_app_container <udid> <bundleId> data`
+- Captures `iosSettings` (global/secure/system) into the manifest when `includeSettings` is enabled (`captureIosSettings` in `src/utils/ios-cmdline-tools/iosSettings.ts`)
 - Copies `Documents/`, `Library/`, and `tmp/` for each bundle ID
 - Snapshot type is `app_data`
 - Simulator-wide `simctl snapshot` is intentionally not used for portability
@@ -288,7 +295,7 @@ await deviceSnapshot({ action: "capture", snapshotName: "v1.1-baseline" });
 // Compare manifests programmatically
 const v1 = await loadManifest("v1.0-baseline");
 const v2 = await loadManifest("v1.1-baseline");
-```bash
+```
 
 ## App Data Backup Details
 

@@ -133,8 +133,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         return {
           hierarchy: {
             error: "Failed to retrieve iOS view hierarchy from CtrlProxy iOS"
-          }
-        } as unknown as ViewHierarchyResult;
+          },
+          updatedAt: this.timer.now()
+        };
       }
 
       // Convert XCTestHierarchy to ViewHierarchyResult format
@@ -207,8 +208,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       return {
         hierarchy: {
           error: "Failed to retrieve view hierarchy from accessibility service"
-        }
-      } as unknown as ViewHierarchyResult;
+        },
+        updatedAt: this.timer.now()
+      };
     } catch (err) {
       perf.end();
       const duration = this.timer.now() - startTime;
@@ -216,8 +218,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       return {
         hierarchy: {
           error: "Failed to retrieve view hierarchy"
-        }
-      } as unknown as ViewHierarchyResult;
+        },
+        updatedAt: this.timer.now()
+      };
     }
   }
 

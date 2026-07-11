@@ -106,9 +106,13 @@ if [[ -z "${EW_API_TOKEN:-}" ]]; then
   exit 1
 fi
 
-# Start session in background
+# Start session in background.
+# Use the `${arr[@]+"${arr[@]}"}` form so an empty device_args expands to
+# nothing under `set -u` on bash < 4.4 (macOS default 3.2), where a bare
+# "${device_args[@]}" would abort with "unbound variable" (#3651). The dry-run
+# path above is already guarded; this is the real invocation.
 log "Starting emulator.wtf session (max-time-limit: ${MAX_TIME_LIMIT})"
-ew-cli start-session --max-time-limit "$MAX_TIME_LIMIT" --adb "${device_args[@]}" \
+ew-cli start-session --max-time-limit "$MAX_TIME_LIMIT" --adb ${device_args[@]+"${device_args[@]}"} \
   >"$SESSION_LOG" 2>&1 &
 session_pid=$!
 

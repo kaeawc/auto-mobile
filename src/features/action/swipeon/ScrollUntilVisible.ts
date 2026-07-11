@@ -190,8 +190,8 @@ export class ScrollUntilVisible {
       reverseBounds = {
         left: Math.max(containerElement.bounds.left, insets.left),
         top: Math.max(containerElement.bounds.top, insets.top),
-        right: Math.min(containerElement.bounds.right, lastObservation.screenSize?.width ?? containerElement.bounds.right) - insets.right,
-        bottom: Math.min(containerElement.bounds.bottom, lastObservation.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom
+        right: Math.min(containerElement.bounds.right, (lastObservation.screenSize?.width ?? containerElement.bounds.right) - insets.right),
+        bottom: Math.min(containerElement.bounds.bottom, (lastObservation.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom)
       };
     }
     const reverseSwipeCoords = this.computeHalfScreenReverseCoords(reverseDirection, reverseBounds);

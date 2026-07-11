@@ -194,12 +194,16 @@ private val ANDROID_LAUNCHERS =
 private const val IOS_SPRINGBOARD = "com.apple.springboard"
 private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000
 
-// Live observation cadence requested by the desktop app while a device is connected. The desktop
-// mirrors the device screen and hierarchy in near real time, so it asks the daemon for a faster
-// screenshot cadence than the daemon's low-cost keepalive default. The daemon clamps these values
-// and resolves the fastest cadence across all subscribers. See issue #3333 / #3382.
+// Live screenshot cadence requested by the desktop app while a device is connected. The desktop
+// mirrors the device screen in near real time, so it asks the daemon for a faster screenshot
+// cadence than the daemon's 3s low-cost keepalive default (the daemon clamps and resolves the
+// fastest cadence across all subscribers). See issue #3333 / #3382.
+//
+// Hierarchy cadence is deliberately NOT requested here: the daemon already applies a fast
+// per-platform hierarchy default (Android CtrlProxy broadcasts at 250ms, iOS polls at 1000ms), and
+// the resolver takes the minimum of explicit requests. Sending a fixed 1000ms would slow Android's
+// live hierarchy 4x. Platform-/focus-aware hierarchy cadence is tracked in issue #3756.
 private const val LIVE_SCREENSHOT_INTERVAL_MS = 1_000L
-private const val LIVE_HIERARCHY_INTERVAL_MS = 1_000L
 
 /**
  * Select the default app to show in the navigation graph. Priority: foreground app >
@@ -757,7 +761,6 @@ fun AutoMobileContent(
       obsClient.connect(
         deviceId = deviceId,
         screenshotIntervalMs = LIVE_SCREENSHOT_INTERVAL_MS,
-        hierarchyIntervalMs = LIVE_HIERARCHY_INTERVAL_MS,
       )
       observationStreamClient = obsClient
 
@@ -807,7 +810,6 @@ fun AutoMobileContent(
           client.connect(
             deviceId = deviceId,
             screenshotIntervalMs = LIVE_SCREENSHOT_INTERVAL_MS,
-            hierarchyIntervalMs = LIVE_HIERARCHY_INTERVAL_MS,
           )
         }
       }

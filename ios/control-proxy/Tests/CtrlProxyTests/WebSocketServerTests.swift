@@ -157,4 +157,49 @@ final class WebSocketServerTests: XCTestCase {
         let id = WebSocketServer.extractRequestId(from: Data(#"{"type":"x","requestId":}"#.utf8))
         XCTAssertNil(id)
     }
+
+    // MARK: - ConnectionRegistry thread safety (#3611)
+
+    /// Basic set/get/remove/count/snapshot semantics.
+    func testConnectionRegistryBasicOperations() {
+        let registry = ConnectionRegistry<String>()
+        XCTAssertEqual(registry.count, 0)
+        XCTAssertNil(registry.value(forId: 1))
+
+        registry.set("a", forId: 1)
+        registry.set("b", forId: 2)
+        XCTAssertEqual(registry.count, 2)
+        XCTAssertEqual(registry.value(forId: 1), "a")
+        XCTAssertEqual(Set(registry.values()), ["a", "b"])
+
+        registry.removeValue(forId: 1)
+        XCTAssertNil(registry.value(forId: 1))
+        XCTAssertEqual(registry.count, 1)
+
+        let removed = registry.removeAll()
+        XCTAssertEqual(removed, ["b"])
+        XCTAssertEqual(registry.count, 0)
+    }
+
+    /// Hammer the registry from many threads while snapshotting concurrently —
+    /// mirrors the real hazard where connect/disconnect on the server queue races
+    /// broadcast iteration on the main thread. Under the pre-fix code (a bare
+    /// `Dictionary` mutated while `Array(storage.values)` is read) this trips the
+    /// Swift runtime / corrupts; with the lock it completes cleanly. The assertion
+    /// is that it does not crash and ends empty after a balanced add/remove.
+    func testConnectionRegistryConcurrentAccessDoesNotCrash() {
+        let registry = ConnectionRegistry<Int>()
+        let iterations = 2_000
+
+        DispatchQueue.concurrentPerform(iterations: iterations) { i in
+            registry.set(i, forId: i)
+            _ = registry.values()   // snapshot iteration, concurrent with mutation
+            _ = registry.count
+            registry.removeValue(forId: i)
+        }
+
+        // Every id added was also removed, so the registry must be empty and intact.
+        XCTAssertEqual(registry.count, 0)
+        XCTAssertTrue(registry.values().isEmpty)
+    }
 }

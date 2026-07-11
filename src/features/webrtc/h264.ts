@@ -21,6 +21,8 @@ export const NAL_TYPE_SPS = 7;
 export const NAL_TYPE_PPS = 8;
 /** NAL unit type for a coded slice of an IDR (key frame) picture. */
 export const NAL_TYPE_IDR = 5;
+/** NAL unit type for Supplemental Enhancement Information. */
+export const NAL_TYPE_SEI = 6;
 /** RFC 6184 FU-A fragmentation unit NAL type. */
 export const FU_A_TYPE = 28;
 
@@ -130,8 +132,16 @@ export class H264AccessUnitAssembler {
   push(nal: Buffer): Buffer[][] {
     const completed: Buffer[][] = [];
     const type = nalUnitType(nal);
+    // Parameter sets / SEI that arrive *after* the current AU already has a VCL
+    // slice belong to the NEXT access unit (H.264 §7.4.1.2.3). Handling this is
+    // what keeps a segment-restart's fresh SPS/PPS grouped with its following
+    // IDR (e.g. `P, SPS, PPS, IDR`) instead of being appended to the prior frame.
+    const beginsNextAuAfterVcl =
+      type === NAL_TYPE_SPS || type === NAL_TYPE_PPS || type === NAL_TYPE_SEI;
     const startsNewAccessUnit =
-      (isVclNal(nal) && this.hasVcl) || (type === NAL_TYPE_AUD && this.current.length > 0);
+      (isVclNal(nal) && this.hasVcl) ||
+      (type === NAL_TYPE_AUD && this.current.length > 0) ||
+      (beginsNextAuAfterVcl && this.hasVcl);
 
     if (startsNewAccessUnit) {
       completed.push(this.current);

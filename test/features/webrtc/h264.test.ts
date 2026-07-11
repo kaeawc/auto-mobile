@@ -112,6 +112,28 @@ describe("H264AccessUnitAssembler", () => {
     expect(completed[1]).toEqual([pFrame]);
   });
 
+  test("parameter sets after a VCL frame begin the next access unit (segment restart)", () => {
+    const assembler = new H264AccessUnitAssembler();
+    const pFrame = makeNal(1, 6);
+    const sps = makeNal(NAL_TYPE_SPS, 4);
+    const pps = makeNal(NAL_TYPE_PPS, 4);
+    const idr = makeNal(NAL_TYPE_IDR, 8);
+
+    const completed: Buffer[][] = [];
+    // Sequence a screenrecord segment boundary produces: trailing P frame, then
+    // the new segment's SPS/PPS/IDR keyframe.
+    completed.push(...assembler.push(pFrame));
+    completed.push(...assembler.push(sps));
+    completed.push(...assembler.push(pps));
+    completed.push(...assembler.push(idr));
+    completed.push(...assembler.flush());
+
+    // The P frame is its own AU; SPS+PPS+IDR stay together as the keyframe AU.
+    expect(completed).toHaveLength(2);
+    expect(completed[0]).toEqual([pFrame]);
+    expect(completed[1]).toEqual([sps, pps, idr]);
+  });
+
   test("access unit delimiter starts a new access unit", () => {
     const assembler = new H264AccessUnitAssembler();
     const aud1 = makeNal(NAL_TYPE_AUD, 2);

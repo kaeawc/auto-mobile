@@ -110,6 +110,92 @@ const waitForSchema = z.union([
   waitForElementSchema,
 ]);
 
+// Compact advertised JSON schema for `waitFor` (issue: observe input schema
+// bloat). The runtime zod `waitForSchema` above stays the source of truth for
+// validation — its union/intersection/presence machinery expands to ~2k tokens
+// in `tools/list`, which the agent does not need. This flat object advertises
+// the same fields + guidance at ~1/4 the token cost; it is swapped in via the
+// observe json-schema override below and never used for validation.
+// Presence options shared by the two branches below.
+const ELEMENT_PREDICATE_REQUIRED = [
+  { required: ["elementId"] },
+  { required: ["text"] },
+  { required: ["className"] },
+  { required: ["contentDescription"] },
+];
+const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  description:
+    "Wait for a predicate before returning the observation. Provide at least one of: " +
+    "elementId, text, textAny, className, contentDescription, or activeWindow. " +
+    "textAny is mutually exclusive with the element predicates.",
+  properties: {
+    elementId: { type: "string", description: "Element resource ID / accessibility identifier" },
+    text: { type: "string", description: "Element text" },
+    textAny: {
+      type: "array",
+      items: { type: "string" },
+      description: "Ordered text variants; first visible match wins",
+    },
+    className: { type: "string", description: "Element class name" },
+    contentDescription: {
+      type: "string",
+      description: "Element content description / accessibility label",
+    },
+    matchType: {
+      type: "string",
+      enum: ["all", "any"],
+      description: "Whether element predicates must all match one node, or any one may match",
+    },
+    textMatch: {
+      type: "string",
+      enum: ["exact", "contains", "regex"],
+      description: "How to match waitFor.text; does not affect contentDescription",
+    },
+    activeWindow: {
+      type: "object",
+      additionalProperties: false,
+      description: "Foreground app/window predicates (provide an app id or activityName)",
+      properties: {
+        appId: { type: "string", description: "Foreground app bundle ID / package name" },
+        packageName: { type: "string", description: "Alias for appId (Android package name)" },
+        bundleId: { type: "string", description: "Alias for appId (iOS bundle ID)" },
+        activityName: {
+          type: "string",
+          description: "Foreground Android activity name (Android-only)",
+        },
+      },
+      anyOf: [
+        { required: ["appId"] },
+        { required: ["packageName"] },
+        { required: ["bundleId"] },
+        { required: ["activityName"] },
+      ],
+    },
+    container: {
+      type: "object",
+      description: "Scope the match to a container element (by elementId or text)",
+      properties: { elementId: { type: "string" }, text: { type: "string" } },
+    },
+    timeout: { type: "number", description: "Wait timeout ms (default 5000)" },
+  },
+  // Enforce the same shape the runtime does: at least one predicate, and textAny
+  // mutually exclusive with the element predicates / matchType / textMatch.
+  anyOf: [
+    {
+      required: ["textAny"],
+      not: {
+        anyOf: [...ELEMENT_PREDICATE_REQUIRED, { required: ["matchType"] }, { required: ["textMatch"] }],
+      },
+    },
+    {
+      not: { required: ["textAny"] },
+      anyOf: [...ELEMENT_PREDICATE_REQUIRED, { required: ["activeWindow"] }],
+    },
+  ],
+};
+
 const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
@@ -151,6 +237,16 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
     }
   };
   jsonSchema.then = false;
+
+  // Replace the verbose generated `waitFor` schema with the compact advertised
+  // form. Runtime validation still uses the full zod `waitForSchema`; this only
+  // shrinks what `tools/list` carries (~2064 -> ~473 tokens). The `if`/`then`
+  // above evaluates against the request data, not this schema, so it is
+  // unaffected.
+  const props = jsonSchema.properties as Record<string, unknown> | undefined;
+  if (props && props.waitFor) {
+    props.waitFor = COMPACT_WAITFOR_ADVERTISED_SCHEMA;
+  }
 });
 
 export const observeSchema = withAppIdAliases(observeBaseSchema);

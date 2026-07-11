@@ -255,8 +255,8 @@ final class RemindersPlanContentTests: XCTestCase {
         )
         assertWorkflowWarmsTargetAppBeforeRemindersRun(
             workflow,
-            warmupStepName: "Warm up Reminders target app (Xcode 26.3)",
-            runStepName: "Run Reminders integration tests (Xcode 26.3)"
+            warmupStepName: "Warm up Reminders target app (Xcode 26.5)",
+            runStepName: "Run Reminders integration tests (Xcode 26.5)"
         )
     }
 
@@ -270,8 +270,8 @@ final class RemindersPlanContentTests: XCTestCase {
         )
         assertWorkflowWarmsTargetAppBeforeRemindersRun(
             workflow,
-            warmupStepName: "Warm up Reminders target app (Xcode 26.3)",
-            runStepName: "Run Reminders integration tests (Xcode 26.3)"
+            warmupStepName: "Warm up Reminders target app (Xcode 26.5)",
+            runStepName: "Run Reminders integration tests (Xcode 26.5)"
         )
     }
 

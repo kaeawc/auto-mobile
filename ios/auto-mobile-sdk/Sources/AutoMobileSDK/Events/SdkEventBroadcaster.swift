@@ -20,7 +20,26 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
     /// CtrlProxy HTTP endpoint for SDK event forwarding.
     /// Set by the SDK during initialization if CtrlProxy is detected.
-    private var ctrlProxyUrl: URL?
+    ///
+    /// Read on the event buffer's flush thread (`broadcastBatch`/`deliverBatch`)
+    /// and written from arbitrary threads (`setCtrlProxyUrl`), so all access is
+    /// serialized by a lock — Optional/reference assignment is not atomic in
+    /// Swift's memory model (issue #3632).
+    private let ctrlProxyUrlLock = NSLock()
+    private var _ctrlProxyUrl: URL?
+    var ctrlProxyUrl: URL? {
+        get {
+            ctrlProxyUrlLock.lock()
+            defer { ctrlProxyUrlLock.unlock() }
+            return _ctrlProxyUrl
+        }
+        set {
+            ctrlProxyUrlLock.lock()
+            defer { ctrlProxyUrlLock.unlock() }
+            _ctrlProxyUrl = newValue
+        }
+    }
+
     private let urlSession: URLSession
 
     /// Disk-first event persistence for reliable delivery.
@@ -38,11 +57,14 @@ final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
         #if DEBUG
         // Default CtrlProxy port — only in debug builds
-        self.ctrlProxyUrl = URL(string: "http://localhost:8765/sdk-events")
+        _ctrlProxyUrl = URL(string: "http://localhost:8765/sdk-events")
         #else
-        self.ctrlProxyUrl = nil
+        _ctrlProxyUrl = nil
         #endif
     }
+
+    /// Test-only instance to exercise the broadcaster in isolation.
+    static func makeTestInstance() -> SdkEventBroadcaster { SdkEventBroadcaster() }
 
     /// Configure the CtrlProxy endpoint URL. Pass nil to disable HTTP forwarding.
     /// No-op in release builds.

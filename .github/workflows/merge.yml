@@ -1239,53 +1239,6 @@ jobs:
           echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
 
   # =============================================================================
-  # Tag Release (triggers release.yml workflow)
-  # =============================================================================
-
-  tag-release:
-    name: "Create Release Tag"
-    runs-on: ubuntu-latest
-    if: |
-      github.ref == 'refs/heads/main' &&
-      github.event_name == 'push' &&
-      startsWith(github.event.head_commit.message, 'chore: bump versions to v')
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-          fetch-depth: 0
-
-      - name: "Extract version and create tag"
-        env:
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          # Extract version from commit message
-          VERSION=$(echo "$COMMIT_MESSAGE" | sed -n 's/chore: bump versions to v\([0-9.]*\).*/\1/p')
-
-          if [ -z "$VERSION" ]; then
-            echo "Could not extract version from commit message: $COMMIT_MESSAGE"
-            exit 1
-          fi
-
-          TAG="v${VERSION}"
-          echo "Creating tag: $TAG"
-
-          # Check if tag already exists
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists. Skipping."
-            exit 0
-          fi
-
-          # Create and push tag
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
-          git push origin "$TAG"
-
-          echo "Successfully created and pushed tag: $TAG"
-
-  # =============================================================================
   # Auto-update README Test Count Badges
   # =============================================================================
 

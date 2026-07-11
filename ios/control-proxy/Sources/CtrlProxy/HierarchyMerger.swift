@@ -95,30 +95,24 @@ public enum HierarchyMerger {
         allNodes: inout [SdkViewNode]
     ) {
         allNodes.append(node)
-        // Insert exact key + all tolerance variants so findMatch is O(1)
-        let tol = boundsTolerance
-        for dl in -tol...tol {
-            for dt in -tol...tol {
-                for dr in -tol...tol {
-                    for db in -tol...tol {
-                        let l = node.bounds.left + dl
-                        let t = node.bounds.top + dt
-                        let r = node.bounds.right + dr
-                        let b = node.bounds.bottom + db
-                        let key = LookupKey(
-                            className: node.className,
-                            left: l, top: t, right: r, bottom: b
-                        )
-                        if lookup[key] == nil {
-                            lookup[key] = node
-                        }
-                        let bKey = BoundsKey(left: l, top: t, right: r, bottom: b)
-                        if boundsLookup[bKey] == nil {
-                            boundsLookup[bKey] = node
-                        }
-                    }
-                }
-            }
+        // Index by exact bounds only (one insert per node). Tolerance matching is
+        // done at lookup time by probing the query's ±tol neighborhood (see
+        // findDirectMatch) instead of pre-expanding every node into (2*tol+1)^4
+        // dictionary entries, which was ~625 inserts per node at tol=2 (issue #3634).
+        let key = LookupKey(
+            className: node.className,
+            left: node.bounds.left, top: node.bounds.top,
+            right: node.bounds.right, bottom: node.bounds.bottom
+        )
+        if lookup[key] == nil {
+            lookup[key] = node
+        }
+        let bKey = BoundsKey(
+            left: node.bounds.left, top: node.bounds.top,
+            right: node.bounds.right, bottom: node.bounds.bottom
+        )
+        if boundsLookup[bKey] == nil {
+            boundsLookup[bKey] = node
         }
         // Index by accessibilityIdentifier for fallback when bounds don't match
         if let identifier = node.accessibilityIdentifier, !identifier.isEmpty {
@@ -194,7 +188,7 @@ public enum HierarchyMerger {
         identifierLookup: [String: SdkViewNode]
     ) -> SdkViewNode? {
         if let bounds = bounds {
-            // 1. Exact match: className + bounds
+            // 1. className + bounds, exact then within ±tolerance.
             if let className = className {
                 if let exact = lookup[LookupKey(
                     className: className,
@@ -203,19 +197,60 @@ public enum HierarchyMerger {
                 )] {
                     return exact
                 }
+                if let near = probeToleranceMatch(bounds: bounds, in: lookup, makeKey: { l, t, r, b in
+                    LookupKey(className: className, left: l, top: t, right: r, bottom: b)
+                }) {
+                    return near
+                }
             }
-            // 2. Bounds-only fallback: different class names at the same position
+            // 2. Bounds-only fallback: different class names at the same position,
+            //    exact then within ±tolerance.
             if let boundsMatch = boundsLookup[BoundsKey(
                 left: bounds.left, top: bounds.top,
                 right: bounds.right, bottom: bounds.bottom
             )] {
                 return boundsMatch
             }
+            if let near = probeToleranceMatch(bounds: bounds, in: boundsLookup, makeKey: { l, t, r, b in
+                BoundsKey(left: l, top: t, right: r, bottom: b)
+            }) {
+                return near
+            }
         }
         // 3. Identifier fallback: match by accessibilityIdentifier when bounds differ
         if let resourceId = resourceId, !resourceId.isEmpty {
             if let idMatch = identifierLookup[resourceId] {
                 return idMatch
+            }
+        }
+        return nil
+    }
+
+    /// Probe the ±`boundsTolerance` neighborhood of `bounds` against an exact-bounds
+    /// index, returning the first hit. Replaces the old per-node pre-expansion:
+    /// a node with exact bounds within ±tol of the query is found here because
+    /// `node.bounds == query + delta` for some `delta ∈ [-tol, tol]` (issue #3634).
+    /// The exact (all-zero) offset is skipped because callers check it first.
+    private static func probeToleranceMatch<Key: Hashable>(
+        bounds: ElementBounds,
+        in index: [Key: SdkViewNode],
+        makeKey: (_ left: Int, _ top: Int, _ right: Int, _ bottom: Int) -> Key
+    ) -> SdkViewNode? {
+        let tol = boundsTolerance
+        for dl in -tol...tol {
+            for dt in -tol...tol {
+                for dr in -tol...tol {
+                    for db in -tol...tol {
+                        if dl == 0, dt == 0, dr == 0, db == 0 { continue }
+                        let key = makeKey(
+                            bounds.left + dl, bounds.top + dt,
+                            bounds.right + dr, bounds.bottom + db
+                        )
+                        if let hit = index[key] {
+                            return hit
+                        }
+                    }
+                }
             }
         }
         return nil

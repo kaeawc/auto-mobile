@@ -204,13 +204,13 @@ kill_previous() {
   fi
 
   local pids
-  pids=$(pgrep -f "hot-reload.sh" 2>/dev/null | grep -v "$$" || true)
+  pids=$(pgrep -f "hot-reload.sh" 2>/dev/null | grep -vxF "$$" || true)
   if [[ -n "${pids}" ]]; then
     log_info "Killing orphaned hot-reload processes..."
     echo "${pids}" | xargs kill 2>/dev/null || true
     sleep 1
     # Force kill if still running
-    pids=$(pgrep -f "hot-reload.sh" 2>/dev/null | grep -v "$$" || true)
+    pids=$(pgrep -f "hot-reload.sh" 2>/dev/null | grep -vxF "$$" || true)
     if [[ -n "${pids}" ]]; then
       log_warn "Force killing orphaned hot-reload processes..."
       echo "${pids}" | xargs kill -9 2>/dev/null || true

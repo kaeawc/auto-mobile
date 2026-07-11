@@ -891,7 +891,10 @@ open class AutoMobileAgent(
     }
 
     override fun getMcpServerUrl(): String {
-      return System.getProperty("automobile:localhost:3000")
+      // The URL was mistakenly passed as the property NAME (1-arg getProperty),
+      // which is never set, so this returned null and AI recovery could never
+      // connect to the MCP server (#3596). Use the 2-arg form with the URL default.
+      return System.getProperty("automobile.mcp.server.url", "http://localhost:3000")
     }
   }
 

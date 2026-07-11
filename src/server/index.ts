@@ -31,6 +31,7 @@ import { registerNotificationTools } from "./notificationTools";
 import { registerPlanTools } from "./planTools";
 import { registerDoctorTools } from "./doctorTools";
 import { registerCriticalSectionTools } from "./criticalSectionTools";
+import { registerBarrierTools } from "./barrierTools";
 import { registerVideoRecordingTools } from "./videoRecordingTools";
 import { registerSnapshotTools } from "./snapshotTools";
 import { registerBiometricTools } from "./biometricTools";
@@ -181,6 +182,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerPlanTools();
   if (daemonMode) {
     registerCriticalSectionTools();
+    registerBarrierTools();
   }
   registerDoctorTools();
   registerVideoRecordingTools();

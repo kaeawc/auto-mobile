@@ -24,7 +24,7 @@ jobs:
         env:
           TAG: ${{ github.event.ref }}
         run: |
-          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+          if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
             echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
@@ -81,7 +81,7 @@ jobs:
         env:
           TAG: ${{ github.event.ref }}
         run: |
-          VERSION=${TAG#v}
+          VERSION="$TAG"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 

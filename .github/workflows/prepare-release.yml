@@ -168,7 +168,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="v${{ inputs.version }}"
+          TAG="${{ inputs.version }}"
 
           git fetch --tags origin
           if git rev-parse "$TAG" >/dev/null 2>&1; then

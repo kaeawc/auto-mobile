@@ -7,7 +7,8 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
     private let urlSession: URLSession
 
     public init(port: UInt16 = 8766) {
-        self.baseURL = URL(string: "http://localhost:\(port)")!
+        // Hardcoded localhost URL with an integer port always parses.
+        self.baseURL = URL(string: "http://localhost:\(port)")!  // swiftlint:disable:this force_unwrapping
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5

@@ -312,7 +312,7 @@ public class WebSocketServer: WebSocketServing {
 
     /// Broadcast a performance update to all connected clients (push notification)
     public func broadcastPerformanceUpdate(_ snapshot: PerformanceSnapshot) {
-        guard connections.count > 0 else { return }
+        guard !connections.isEmpty else { return }
 
         let response = PerformanceUpdateResponse(data: snapshot)
 
@@ -672,7 +672,8 @@ class WebSocketConnection: WebSocketResponding {
 
         // Calculate accept key
         let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-        let acceptKey = (key + magic).data(using: .utf8)!.sha1().base64EncodedString()
+        // A String always encodes to UTF-8, so .data(using: .utf8) is never nil.
+    let acceptKey = (key + magic).data(using: .utf8)!.sha1().base64EncodedString()  // swiftlint:disable:this force_unwrapping
 
         // Send upgrade response
         let response = """

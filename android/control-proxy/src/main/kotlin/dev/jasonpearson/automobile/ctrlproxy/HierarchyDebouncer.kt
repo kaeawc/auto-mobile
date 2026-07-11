@@ -302,55 +302,57 @@ class HierarchyDebouncer(
       perfProvider.endOperation("extractHierarchy")
 
       if (hierarchy == null) {
+        // Set the Error and fall through to the emit below. A `return` here would
+        // unwind through `finally` and exit the function, skipping the emit block
+        // so consumers never saw the Error (#3608).
         resultToEmit = HierarchyResult.Error("Failed to extract hierarchy")
-        return
-      }
-
-      val extractionTime = timeProvider.currentTimeMillis() - startTime
-
-      perfProvider.startOperation("computeHash")
-      val structuralHash = StructuralHasher.computeHash(hierarchy)
-      perfProvider.endOperation("computeHash")
-
-      if (structuralHash == lastStructuralHash) {
-        // Structure unchanged - likely animation
-        // Enter animation mode to skip subsequent events
-        inAnimationMode = true
-        animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
-
-        resultToEmit =
-          HierarchyResult.Unchanged(
-            hierarchy = hierarchy,
-            hash = structuralHash,
-            extractionTimeMs = extractionTime,
-            skippedEventCount = skippedEventCount,
-          )
-        hierarchyToCache = hierarchy
-
-        Log.d(
-          TAG,
-          "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
-        )
-
-        // Reset skipped count
-        skippedEventCount = 0
       } else {
-        // Structure changed - this is a real content change
-        val oldHash = lastStructuralHash
-        inAnimationMode = false
-        lastStructuralHash = structuralHash
+        val extractionTime = timeProvider.currentTimeMillis() - startTime
 
-        resultToEmit =
-          HierarchyResult.Changed(
-            hierarchy = hierarchy,
-            hash = structuralHash,
-            extractionTimeMs = extractionTime,
+        perfProvider.startOperation("computeHash")
+        val structuralHash = StructuralHasher.computeHash(hierarchy)
+        perfProvider.endOperation("computeHash")
+
+        if (structuralHash == lastStructuralHash) {
+          // Structure unchanged - likely animation
+          // Enter animation mode to skip subsequent events
+          inAnimationMode = true
+          animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
+
+          resultToEmit =
+            HierarchyResult.Unchanged(
+              hierarchy = hierarchy,
+              hash = structuralHash,
+              extractionTimeMs = extractionTime,
+              skippedEventCount = skippedEventCount,
+            )
+          hierarchyToCache = hierarchy
+
+          Log.d(
+            TAG,
+            "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
           )
-        hierarchyToCache = hierarchy
 
-        Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
+          // Reset skipped count
+          skippedEventCount = 0
+        } else {
+          // Structure changed - this is a real content change
+          val oldHash = lastStructuralHash
+          inAnimationMode = false
+          lastStructuralHash = structuralHash
 
-        skippedEventCount = 0
+          resultToEmit =
+            HierarchyResult.Changed(
+              hierarchy = hierarchy,
+              hash = structuralHash,
+              extractionTimeMs = extractionTime,
+            )
+          hierarchyToCache = hierarchy
+
+          Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
+
+          skippedEventCount = 0
+        }
       }
     } finally {
       // End perf block BEFORE emit to prevent nesting if emit suspends

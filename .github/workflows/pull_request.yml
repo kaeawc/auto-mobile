@@ -590,7 +590,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,xml,shellcheck,shell-portability,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
+            --only yaml,xml,shellcheck,shell-portability,shell-sete,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
             --max-parallel 4
 
       - name: "Run BATS Tests (Ubuntu)"
@@ -1116,6 +1116,33 @@ jobs:
           name: kotlin-coverage-badge
           path: coverage/kotlin-coverage-badge.json
           retention-days: 7
+
+  # =============================================================================
+  # SwiftLint
+  # =============================================================================
+
+  swiftlint:
+    name: "SwiftLint"
+    runs-on: macos-14
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      # Full-tree lint (validate_swiftlint.sh defaults: ONLY_TOUCHED_FILES=false,
+      # STRICT_MODE=false), so the whole ios/ tree must stay error-clean on every
+      # iOS-affecting PR. The script exits non-zero only on error-severity rules
+      # (force_unwrapping/force_try are configured as errors — the fail-fast crash
+      # class we burned down in 2026-07); warnings remain non-blocking. SwiftLint is
+      # installed on demand at the version pinned in install_swiftlint.sh.
+      - name: "Run SwiftLint (fail on error-severity rules)"
+        shell: bash
+        env:
+          INSTALL_SWIFTLINT_WHEN_MISSING: "true"
+        run: bash scripts/swiftlint/validate_swiftlint.sh
 
   # =============================================================================
   # Swift Code Coverage

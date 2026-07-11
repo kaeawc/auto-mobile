@@ -46,6 +46,24 @@ The entry point module is intentionally small:
 2. **`AutoMobileDesktopApp.kt`** -- wraps `AutoMobileContent` (from desktop-core) with an `AutoMobileTheme` and an `ObservableSettingsProvider` that bridges `SettingsProvider` changes into Compose snapshot state.
 3. **`AutoMobileTheme.kt`** -- Material 3 color scheme with light and dark variants. Resolves `themeMode` strings (`"dark"`, `"light"`, `"system"`) to the appropriate scheme. Defaults to dark to match the IDE plugin.
 
+## Hot Reload (Development)
+
+The `:desktop-app` module applies [JetBrains Compose Hot Reload](https://github.com/JetBrains/compose-hot-reload) (`org.jetbrains.compose.hot-reload`) so UI changes reflect on the running window without a full restart. This is the Compose-Desktop/JVM-native hot reload path -- distinct from Compose HotSwan, which targets on-device Android apps.
+
+Launch the dashboard in hot-reload mode:
+
+```bash
+./gradlew -p android :desktop-app:hotRun --autoReload
+```
+
+- The plugin auto-registers `hotRun` (blocking) and `hotDev` (async) tasks for this Kotlin/JVM module.
+- `ComposeHotRun.mainClass` is pinned to `dev.jasonpearson.automobile.desktop.MainKt` in `desktop-app/build.gradle.kts`.
+- Most composables live in `:desktop-core` (an `implementation` dependency of `:desktop-app`), so editing a dashboard panel there reloads into the running window.
+- Requires the JetBrains Runtime (JBR) for enhanced class redefinition; the foojay toolchain resolver in `settings.gradle.kts` provisions a compatible JDK. Java target stays at 21.
+- The single-instance file lock in `Main.kt` (`automobile-desktop.lock`) is released on process exit, so hot-reload relaunches do not deadlock.
+
+Normal `:desktop-app:run` and the packaged `nativeDistributions` builds are unaffected -- the plugin only adds the dev-time run tasks.
+
 ## DI System
 
 The app uses [Metro](https://github.com/ZacSweers/metro) for compile-time dependency injection.
@@ -146,7 +164,7 @@ Real-time data flows over Unix domain sockets, separate from the request/respons
 
 ### ObservationStreamClient
 
-Maintains a persistent connection with subscribe/unsubscribe semantics. Exposes Kotlin `SharedFlow` instances:
+Maintains a persistent connection with subscribe/unsubscribe semantics. `connect()` accepts optional `screenshotIntervalMs` / `hierarchyIntervalMs` cadence hints that are sent on the `subscribe` request. The desktop app requests a faster screenshot cadence than the daemon's 3s keepalive default while a device is connected; it deliberately leaves the hierarchy cadence unset so each platform keeps its faster hierarchy default (Android 250ms, iOS 1000ms) instead of being slowed to a fixed value. Omitting a field (or an older daemon) falls back to the daemon default. Exposes Kotlin `SharedFlow` instances:
 
 - `hierarchyUpdates: SharedFlow<HierarchyStreamUpdate>`
 - `screenshotUpdates: SharedFlow<ScreenshotStreamUpdate>`

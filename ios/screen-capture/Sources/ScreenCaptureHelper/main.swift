@@ -193,7 +193,8 @@ func runBlocking<T>(_ body: @escaping () async -> T) -> T {
         semaphore.signal()
     }
     semaphore.wait()
-    return box.value!
+    // box.value is set by the async body before semaphore.signal(); wait() blocks until then.
+    return box.value!  // swiftlint:disable:this force_unwrapping
 }
 
 // MARK: - Signal handling

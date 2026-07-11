@@ -3,9 +3,50 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import app.cash.turbine.test
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 
 class ObservationStreamClientTest {
+  // Mirrors the Json config used by ObservationStreamClient.sendRequest so the serialized subscribe
+  // payload asserted here matches what is written to the socket.
+  private val wireJson = Json { ignoreUnknownKeys = true }
+
+  @Test
+  fun `subscribe request carries requested cadence when provided`() {
+    val request =
+      StreamRequest(
+        id = "req-1",
+        command = "subscribe",
+        deviceId = "emulator-5554",
+        screenshotIntervalMs = 1000L,
+        hierarchyIntervalMs = 500L,
+      )
+
+    val encoded = wireJson.encodeToString(StreamRequest.serializer(), request)
+
+    assertTrue(encoded.contains("\"screenshotIntervalMs\":1000"), encoded)
+    assertTrue(encoded.contains("\"hierarchyIntervalMs\":500"), encoded)
+  }
+
+  @Test
+  fun `subscribe request omits cadence fields when not requested`() {
+    // Older daemons predate cadence support; omitting the keys keeps the request backward
+    // compatible and lets the daemon apply its default cadence.
+    val request =
+      StreamRequest(
+        id = "req-2",
+        command = "subscribe",
+        deviceId = "emulator-5554",
+      )
+
+    val encoded = wireJson.encodeToString(StreamRequest.serializer(), request)
+
+    assertFalse(encoded.contains("screenshotIntervalMs"), encoded)
+    assertFalse(encoded.contains("hierarchyIntervalMs"), encoded)
+  }
+
   @Test
   fun `emits screenshot metadata when provided by stream`() = runTest {
     val client = ObservationStreamClient()

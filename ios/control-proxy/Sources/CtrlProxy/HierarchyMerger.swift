@@ -426,7 +426,8 @@ public enum HierarchyMerger {
                 let childKey = exactKey(for: sdkChild)
                 localKeyCounts[childKey, default: 0] += 1
                 let matchedCount = matchedSdkKeyCounts[childKey] ?? 0
-                if localKeyCounts[childKey]! > matchedCount && isWorthInjecting(sdkChild) {
+                // childKey was inserted into localKeyCounts earlier in this same loop.
+                if localKeyCounts[childKey]! > matchedCount && isWorthInjecting(sdkChild) {  // swiftlint:disable:this force_unwrapping
                     injected.append(convertSdkNode(sdkChild))
                 }
             }

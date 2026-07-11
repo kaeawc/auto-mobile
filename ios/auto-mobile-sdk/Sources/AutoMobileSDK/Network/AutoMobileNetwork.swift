@@ -74,6 +74,8 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     private var _isEnabled = true
     private var _captureHeaders = false
     private var _captureBodies = false
+    // Leading-underscore backing field is internal (not private) for URLProtocol access.
+    // swiftlint:disable:next identifier_name
     var _maxBodyBytes: Int = AutoMobileNetwork.defaultMaxBodyBytes // 32KB default (internal for URLProtocol access)
 
     /// Thread-safe read of maxBodyBytes for URLProtocol callbacks.
@@ -460,12 +462,14 @@ public class AutoMobileURLProtocol: URLProtocol {
             let body = Data(match.responseBody.utf8)
             var headers = match.responseHeaders
             headers["Content-Type"] = match.contentType
+            // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
+            // is a valid request URL and any Int statusCode is accepted.
             let response = HTTPURLResponse(
                 url: url,
                 statusCode: match.statusCode,
                 httpVersion: "HTTP/1.1",
                 headerFields: headers
-            )!
+            )!  // swiftlint:disable:this force_unwrapping
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             if !body.isEmpty {
                 client?.urlProtocol(self, didLoad: body)
@@ -570,12 +574,14 @@ public class AutoMobileURLProtocol: URLProtocol {
         let requestBody = requestBodyData.flatMap { AutoMobileNetwork.utf8String(from: $0) }
 
         if simulation.errorType == "http500" {
+            // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
+            // is a valid request URL and 500 is a valid status code.
             let response = HTTPURLResponse(
                 url: url,
                 statusCode: 500,
                 httpVersion: "HTTP/1.1",
                 headerFields: nil
-            )!
+            )!  // swiftlint:disable:this force_unwrapping
             AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: url.absoluteString,
                 method: method,

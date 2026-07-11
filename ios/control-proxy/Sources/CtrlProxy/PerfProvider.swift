@@ -271,10 +271,12 @@ public class PerfProvider {
         instanceLock.lock()
         defer { instanceLock.unlock() }
 
-        if _instance == nil {
-            _instance = PerfProvider()
+        if let existing = _instance {
+            return existing
         }
-        return _instance!
+        let created = PerfProvider()
+        _instance = created
+        return created
     }
 
     /// For testing - allows injecting a custom TimeProvider.

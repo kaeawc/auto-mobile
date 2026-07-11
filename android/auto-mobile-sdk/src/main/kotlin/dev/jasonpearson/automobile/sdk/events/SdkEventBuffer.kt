@@ -151,16 +151,23 @@ internal class SdkEventBuffer(
 
   private fun deliverBatch(events: List<SdkEvent>) {
     if (events.isEmpty()) return
-    var batchId: String? = null
     try {
-      batchId = persistence?.persist(events) // persist to disk first
+      // Delivery (onFlush -> sendBroadcast) is a synchronous, fire-and-forget
+      // in-process post whose success/failure is known immediately, so there is no
+      // asynchronous sink whose failure would need a disk-backed retry. Persisting
+      // before delivery meant a write-then-immediate-delete on every flush — pure
+      // I/O churn — so only persist when delivery actually throws, for next-launch
+      // replay (#3710, the twin of iOS #3636).
       onFlush(events)
-      batchId?.let { persistence?.removeBatch(it) } // remove on success
     } catch (_: Exception) {
-      // A throwing custom EventPersistence.persist() must NOT escape here: this
-      // runs inside the scheduleAtFixedRate task, and an uncaught exception would
-      // silently cancel all future periodic flushes (#3605). Count the batch as a
-      // flush error; anything already persisted stays on disk for next-launch retry.
+      // A throwing custom EventPersistence.persist() must NOT escape this task: it
+      // runs inside scheduleAtFixedRate and an uncaught exception would silently
+      // cancel all future periodic flushes (#3605), so guard the persist too.
+      try {
+        persistence?.persist(events)
+      } catch (_: Exception) {
+        // best-effort persistence for retry; delivery already failed
+      }
       repeat(events.size) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
     }
   }

@@ -25,7 +25,7 @@ const result = await Bun.build({
   target: "bun",
   format: "esm",
   // Keep native/asset-backed image dependencies external so sharp's @img
-  // packages and @jimp/wasm-webp resolve their runtime assets from node_modules.
+  // packages and jimp resolve their runtime assets from node_modules.
   external: ["sharp", "@img/sharp-*", "jimp", "@jimp/*"],
   sourcemap: "external",
   minify: true,

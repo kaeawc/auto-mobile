@@ -15,6 +15,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.concurrent.thread
@@ -979,12 +980,7 @@ internal class DaemonSocketClient(
 
     sendRequest(request)
 
-    return try {
-      responseFuture.get(timeoutMs, TimeUnit.MILLISECONDS)
-    } catch (e: TimeoutException) {
-      pending.remove(requestId)
-      throw DaemonUnavailableException("Daemon request timeout after ${timeoutMs}ms")
-    }
+    return awaitResponse(requestId, responseFuture, timeoutMs)
   }
 
   override fun readResource(uri: String, timeoutMs: Long): DaemonResponse {
@@ -1010,12 +1006,7 @@ internal class DaemonSocketClient(
 
     sendRequest(request)
 
-    return try {
-      responseFuture.get(timeoutMs, TimeUnit.MILLISECONDS)
-    } catch (e: TimeoutException) {
-      pending.remove(requestId)
-      throw DaemonUnavailableException("Daemon request timeout after ${timeoutMs}ms")
-    }
+    return awaitResponse(requestId, responseFuture, timeoutMs)
   }
 
   fun callDaemonMethod(
@@ -1044,11 +1035,33 @@ internal class DaemonSocketClient(
 
     sendRequest(request)
 
+    return awaitResponse(requestId, responseFuture, timeoutMs)
+  }
+
+  /**
+   * Await a pending daemon response, translating failure modes into [DaemonUnavailableException] so
+   * callers' retry/fallback can catch them, and always removing the pending entry (#3598).
+   *
+   * `failPendingRequests` completes the future with a [DaemonUnavailableException] when the read
+   * loop dies; `future.get` then rethrows it wrapped in an [ExecutionException], so we unwrap it
+   * here.
+   */
+  private fun awaitResponse(
+    requestId: String,
+    responseFuture: CompletableFuture<DaemonResponse>,
+    timeoutMs: Long,
+  ): DaemonResponse {
     return try {
       responseFuture.get(timeoutMs, TimeUnit.MILLISECONDS)
     } catch (e: TimeoutException) {
+      throw mapAwaitFailure(e, timeoutMs)
+    } catch (e: ExecutionException) {
+      throw mapAwaitFailure(e, timeoutMs)
+    } catch (e: InterruptedException) {
+      Thread.currentThread().interrupt()
+      throw mapAwaitFailure(e, timeoutMs)
+    } finally {
       pending.remove(requestId)
-      throw DaemonUnavailableException("Daemon request timeout after ${timeoutMs}ms")
     }
   }
 
@@ -1132,6 +1145,28 @@ internal class DaemonSocketClient(
   }
 
   companion object {
+    /**
+     * Translate a [responseFuture.get] failure into a [DaemonUnavailableException] so callers'
+     * retry/fallback (which catch that type) work. A disconnect surfaces as an [ExecutionException]
+     * wrapping the [DaemonUnavailableException] that `failPendingRequests` set — unwrap it rather
+     * than leaking the opaque wrapper (#3598).
+     */
+    internal fun mapAwaitFailure(e: Throwable, timeoutMs: Long): DaemonUnavailableException =
+      when (e) {
+        is TimeoutException ->
+          DaemonUnavailableException("Daemon request timeout after ${timeoutMs}ms")
+        is ExecutionException -> {
+          val cause = e.cause
+          (cause as? DaemonUnavailableException)
+            ?: DaemonUnavailableException(
+              "Daemon request failed: ${cause?.message ?: e.message}",
+              cause,
+            )
+        }
+        is InterruptedException -> DaemonUnavailableException("Daemon request interrupted")
+        else -> DaemonUnavailableException("Daemon request failed: ${e.message}", e)
+      }
+
     fun isAvailable(socketPath: String): Boolean {
       return try {
         val client = DaemonSocketClient(socketPath)
@@ -1189,7 +1224,8 @@ internal interface DaemonToolClient {
   var sessionUuid: String
 }
 
-internal class DaemonUnavailableException(message: String) : Exception(message)
+internal class DaemonUnavailableException(message: String, cause: Throwable? = null) :
+  Exception(message, cause)
 
 /** Interface for checking daemon connectivity. Allows for easy testing with fakes. */
 internal interface DaemonConnectivityChecker {

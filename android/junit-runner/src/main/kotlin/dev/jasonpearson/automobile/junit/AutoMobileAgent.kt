@@ -420,17 +420,23 @@ open class AutoMobileAgent(
         }
 
         val mcpResponse = koogJson.decodeFromString<MCPResponse>(response.body())
-
-        if (mcpResponse.error != null) {
-          throw RuntimeException("MCP server error: ${mcpResponse.error}")
-        }
-
-        val listResponse =
-          koogJson.decodeFromString<MCPListToolsResponse>(mcpResponse.result!!.toString())
-        return listResponse.tools
+        return parseListToolsResponse(mcpResponse)
       } catch (e: Exception) {
         throw RuntimeException("Failed to list MCP tools: ${e.message}", e)
       }
+    }
+
+    /**
+     * Parse a tools/list MCP response. A well-formed response with no `error` but a null/absent
+     * `result` previously hit `result!!` and produced a misleading `... null` NPE; report an
+     * actionable message instead (#3607).
+     */
+    internal fun parseListToolsResponse(mcpResponse: MCPResponse): List<MCPToolDefinition> {
+      if (mcpResponse.error != null) {
+        throw RuntimeException("MCP server error: ${mcpResponse.error}")
+      }
+      val result = mcpResponse.result ?: throw RuntimeException("MCP tools/list returned no result")
+      return koogJson.decodeFromString<MCPListToolsResponse>(result.toString()).tools
     }
 
     private fun buildJsonParameters(parameters: Map<String, Any>): JsonObject = buildJsonObject {

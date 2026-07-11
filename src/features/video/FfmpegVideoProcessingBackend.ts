@@ -185,6 +185,37 @@ export function containsIosRecordingStartMessage(stderr: string): boolean {
   return IOS_RECORDING_START_MESSAGES.some(message => stderr.includes(message));
 }
 
+/**
+ * Pipe the capture process's stdout into the encoder's stdin, attaching an
+ * error handler to both streams first.
+ *
+ * `.pipe()` alone routes destination write errors nowhere. If the ffmpeg
+ * encoder exits or crashes mid-recording (bad codec args, OOM), its stdin
+ * closes while the still-running `screenrecord` capture keeps writing into it,
+ * producing an unhandled stream `'error'` (EPIPE / ERR_STREAM_WRITE_AFTER_END)
+ * that can crash the daemon. A broken encoder pipe is expected on abnormal
+ * encoder exit, so we log at debug and swallow (error-handling strategy 3).
+ */
+export function pipeCaptureToEncoder(
+  source: NodeJS.ReadableStream | null,
+  dest: NodeJS.WritableStream | null
+): void {
+  if (!source || !dest) {
+    throw new ActionableError(
+      "Cannot pipe screenrecord output to ffmpeg: capture stdout or encoder stdin stream is unavailable"
+    );
+  }
+  dest.on("error", (error: Error) => {
+    // Encoder stdin closing (EPIPE) is expected when ffmpeg exits before capture stops.
+    logger.debug(`[FfmpegVideo] encoder stdin stream error (expected on encoder exit): ${error}`);
+  });
+  source.on("error", (error: Error) => {
+    // Capture stdout erroring after the encoder pipe closed is likewise expected.
+    logger.debug(`[FfmpegVideo] capture stdout stream error: ${error}`);
+  });
+  source.pipe(dest);
+}
+
 export async function waitForStderrMessage(
   tracker: ProcessTracker,
   messages: string | string[],
@@ -365,7 +396,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    captureProcess.stdout.pipe(ffmpegProcess.stdin);
+    pipeCaptureToEncoder(captureProcess.stdout, ffmpegProcess.stdin);
     logger.info(`[FfmpegVideo] Piped screenrecord stdout to ffmpeg stdin`);
 
     try {

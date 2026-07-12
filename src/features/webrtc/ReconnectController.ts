@@ -34,6 +34,8 @@ export class ReconnectController {
   private cycleActive = false;
   private pendingHandle: NodeJS.Timeout | null = null;
   private attemptsThisCycle = 0;
+  /** A connection-lost report that arrived mid-cycle, to run once the cycle settles. */
+  private pendingReconnect = false;
 
   constructor(options: ReconnectControllerOptions) {
     this.attempt = options.attempt;
@@ -49,42 +51,69 @@ export class ReconnectController {
     return this.state;
   }
 
-  /** Begin the first connection cycle. Resolves once the first attempt settles. */
+  /**
+   * Begin the first connection. Unlike a reconnect, the initial attempt is NOT
+   * retried in the background: it rejects on failure so the caller can surface a
+   * real configuration error (bad token, refused endpoint) instead of silently
+   * entering a forever-retry loop and reporting success.
+   */
   async start(): Promise<void> {
     if (this.stopped) {
       throw new Error("ReconnectController already stopped.");
     }
-    await this.runCycle(false);
+    this.cycleActive = true;
+    this.attemptsThisCycle = 1;
+    this.setState("connecting");
+    try {
+      await this.attempt();
+    } catch (error) {
+      this.cycleActive = false;
+      this.setState("failed");
+      throw error;
+    }
+    this.cycleActive = false;
+    this.setState("connected");
+    this.drainPendingReconnect();
   }
 
   /**
-   * Report that the live connection was lost. Starts a reconnect cycle unless
-   * one is already in progress or the controller has been stopped.
+   * Report that the live connection (or capture source) was lost. Starts a
+   * reconnect cycle; if one is already in progress the request is queued and run
+   * when that cycle settles, so a failure that races the connect isn't dropped.
    */
   notifyConnectionLost(): void {
-    if (this.stopped || this.cycleActive || this.state === "reconnecting" || this.state === "connecting") {
+    if (this.stopped) {
       return;
     }
-    void this.runCycle(true);
+    if (this.cycleActive || this.state === "connecting" || this.state === "reconnecting") {
+      this.pendingReconnect = true;
+      return;
+    }
+    void this.runReconnectCycle();
   }
 
   /** Permanently stop; cancels any pending retry. */
   stop(): void {
     this.stopped = true;
+    this.pendingReconnect = false;
     this.clearPending();
     this.setState("stopped");
   }
 
-  private async runCycle(isReconnect: boolean): Promise<void> {
+  private drainPendingReconnect(): void {
+    if (this.pendingReconnect && !this.stopped) {
+      this.pendingReconnect = false;
+      void this.runReconnectCycle();
+    }
+  }
+
+  private async runReconnectCycle(): Promise<void> {
     if (this.stopped || this.cycleActive) {
       return;
     }
     this.cycleActive = true;
     this.attemptsThisCycle = 0;
-    this.setState(isReconnect ? "reconnecting" : "connecting");
-
-    // The first attempt of a fresh `start()` cycle should be awaited by the
-    // caller; subsequent retries proceed asynchronously via the timer.
+    this.setState("reconnecting");
     await this.tryOnce();
   }
 
@@ -98,9 +127,10 @@ export class ReconnectController {
       await this.attempt();
       this.cycleActive = false;
       this.setState("connected");
+      this.drainPendingReconnect();
     } catch (error) {
       logger.warn(
-        `[WebRTC] connection attempt ${this.attemptsThisCycle} failed: ${error instanceof Error ? error.message : String(error)}`
+        `[WebRTC] reconnect attempt ${this.attemptsThisCycle} failed: ${error instanceof Error ? error.message : String(error)}`
       );
       this.scheduleRetryOrFail();
     }

@@ -43,6 +43,17 @@ export function isVclNal(nal: Buffer): boolean {
   return type >= 1 && type <= 5;
 }
 
+/**
+ * True if a VCL NAL is the first slice of a new picture. `first_mb_in_slice` is
+ * the leading `ue(v)` of the slice header; value 0 encodes as a single `1` bit,
+ * so the MSB of the first RBSP byte (after the 1-byte NAL header) is set iff
+ * `first_mb_in_slice == 0`. Later slices of the same (multi-slice) picture have
+ * `first_mb_in_slice > 0` and must stay in the same access unit.
+ */
+export function isFirstSliceOfPicture(nal: Buffer): boolean {
+  return nal.length > 1 && (nal[1] & 0x80) !== 0;
+}
+
 /** True if the NAL unit is a key-frame (IDR) slice. */
 export function isKeyFrameNal(nal: Buffer): boolean {
   return nalUnitType(nal) === NAL_TYPE_IDR;
@@ -138,8 +149,12 @@ export class H264AccessUnitAssembler {
     // IDR (e.g. `P, SPS, PPS, IDR`) instead of being appended to the prior frame.
     const beginsNextAuAfterVcl =
       type === NAL_TYPE_SPS || type === NAL_TYPE_PPS || type === NAL_TYPE_SEI;
+    // A VCL NAL begins a new access unit only when it is the FIRST slice of a
+    // picture. Multi-slice encoders emit several VCL NALs per frame; the later
+    // slices (first_mb_in_slice > 0) must stay in the current access unit so the
+    // whole picture shares one RTP timestamp and a single marker bit.
     const startsNewAccessUnit =
-      (isVclNal(nal) && this.hasVcl) ||
+      (isVclNal(nal) && this.hasVcl && isFirstSliceOfPicture(nal)) ||
       (type === NAL_TYPE_AUD && this.current.length > 0) ||
       (beginsNextAuAfterVcl && this.hasVcl);
 

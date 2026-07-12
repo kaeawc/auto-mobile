@@ -18,6 +18,11 @@ class RecordingSink implements RtpPacketSink {
 function makeNal(type: number, size: number, fill = 0x5a): Buffer {
   const nal = Buffer.alloc(size, fill);
   nal[0] = type & 0x1f;
+  // VCL slices need first_mb_in_slice == 0 (MSB of the first RBSP byte) so the
+  // access-unit assembler treats each as the start of a new picture.
+  if (type >= 1 && type <= 5 && size > 1) {
+    nal[1] = 0x80;
+  }
   return nal;
 }
 

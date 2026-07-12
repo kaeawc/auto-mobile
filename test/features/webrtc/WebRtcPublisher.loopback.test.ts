@@ -22,6 +22,10 @@ const START = Buffer.from([0x00, 0x00, 0x00, 0x01]);
 function nal(type: number, size: number, fill: number): Buffer {
   const buffer = Buffer.alloc(size, fill);
   buffer[0] = 0x60 | (type & 0x1f); // nal_ref_idc=3
+  // VCL slices need first_mb_in_slice == 0 so each is a new-picture boundary.
+  if (type >= 1 && type <= 5 && size > 1) {
+    buffer[1] = 0x80;
+  }
   return buffer;
 }
 

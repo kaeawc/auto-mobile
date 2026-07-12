@@ -134,6 +134,25 @@ describe("H264AccessUnitAssembler", () => {
     expect(completed[1]).toEqual([sps, pps, idr]);
   });
 
+  test("keeps multiple slices of one picture in the same access unit", () => {
+    const assembler = new H264AccessUnitAssembler();
+    // fill 0x80 -> MSB set -> first_mb_in_slice == 0 (new picture);
+    // fill 0x00 -> MSB clear -> first_mb_in_slice > 0 (continuation slice).
+    const pic1Slice1 = makeNal(1, 6, 0x80);
+    const pic1Slice2 = makeNal(1, 6, 0x00);
+    const pic2Slice1 = makeNal(1, 6, 0x80);
+
+    const completed: Buffer[][] = [];
+    completed.push(...assembler.push(pic1Slice1));
+    completed.push(...assembler.push(pic1Slice2)); // same picture
+    completed.push(...assembler.push(pic2Slice1)); // next picture
+    completed.push(...assembler.flush());
+
+    expect(completed).toHaveLength(2);
+    expect(completed[0]).toEqual([pic1Slice1, pic1Slice2]);
+    expect(completed[1]).toEqual([pic2Slice1]);
+  });
+
   test("access unit delimiter starts a new access unit", () => {
     const assembler = new H264AccessUnitAssembler();
     const aud1 = makeNal(NAL_TYPE_AUD, 2);

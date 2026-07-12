@@ -90,6 +90,52 @@ export function probe(): boolean {
     expect(messages).toContain("Catch blocks that return a fallback must log the caught error before returning.");
   });
 
+  test("rejects comment-only catch bodies that core no-empty ignores (#3594)", async () => {
+    // no-empty skips blocks containing a comment, so this shape shipped
+    // undetected in IOSCtrlProxyClient. tracelessCatch must still flag it.
+    const messages = await lintSnippet(`
+export function poll(): void {
+  try {
+    throw new Error("boom");
+  } catch {
+    // non-fatal, skip
+  }
+}
+`);
+
+    expect(messages).toContain("Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).");
+  });
+
+  test("rejects an unused-error catch returning a non-fallback object (#3594 Idle case)", async () => {
+    const messages = await lintSnippet(`
+export function status(): { done: boolean; value: number | null } {
+  try {
+    return { done: true, value: 1 };
+  } catch (err) {
+    return { done: false, value: null };
+  }
+}
+`);
+
+    expect(messages).toContain("Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).");
+  });
+
+  test("allows catches that forward the error without logging", async () => {
+    // Forwarding the caught error to a handler/rejector references the binding,
+    // so it is not a silent swallow and must not be flagged.
+    const messages = await lintSnippet(`
+export function run(reject: (error: unknown) => void): void {
+  try {
+    throw new Error("boom");
+  } catch (error) {
+    reject(error);
+  }
+}
+`);
+
+    expect(messages).not.toContain("Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).");
+  });
+
   test("allows non-fallback recovery returns", async () => {
     const messages = await lintSnippet(`
 function recover(error: unknown): string {

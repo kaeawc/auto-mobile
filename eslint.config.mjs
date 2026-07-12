@@ -186,16 +186,19 @@ function catchConventionRule() {
 			return {
 				CatchClause(node) {
 					const statements = node.body.body;
-					// A catch that swallows the error with no trace at all — it does
-					// not log, does not throw, and never even references the caught
-					// binding — is the root cause of the #3594-class bugs (empty iOS
-					// SDK-event catches; the Idle rotation-check whose `err` was
-					// unused). Catches that forward the error elsewhere (e.g. reject(e),
-					// handleError(e)) reference the binding and are left alone.
-					if (!hasAnyLoggerCall(node.body) && !hasThrowStatement(node.body) && !referencesCaughtError(node)) {
-						context.report({ node, messageId: "tracelessCatch" });
-					} else if (statements.length === 1 && statements[0].type === "ReturnStatement" && isFallbackReturn(statements[0].argument) && !hasAnyLoggerCall(node.body)) {
+					if (statements.length === 1 && statements[0].type === "ReturnStatement" && isFallbackReturn(statements[0].argument) && !hasAnyLoggerCall(node.body)) {
+						// A single fallback return without logging keeps its specific
+						// message — checked precedence-first so it is not reclassified.
 						context.report({ node: statements[0], messageId: "fallbackReturn" });
+					} else if (!hasAnyLoggerCall(node.body) && !hasThrowStatement(node.body) && !referencesCaughtError(node)) {
+						// Otherwise, a catch that swallows the error with no trace at all
+						// — no log, no throw, and never even references the caught binding
+						// — is the root cause of the #3594-class bugs (comment-only iOS
+						// SDK-event catches that core no-empty ignores; the Idle
+						// rotation-check whose `err` was unused and returned a non-fallback
+						// object). Catches that forward the error (reject(e), handleError(e))
+						// reference the binding and are intentionally left alone.
+						context.report({ node, messageId: "tracelessCatch" });
 					}
 					reportStatusReturnsWithoutWarn(statements, false);
 				},

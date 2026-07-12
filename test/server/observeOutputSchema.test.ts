@@ -291,3 +291,43 @@ describe("observe tool registration advertises the schema (#3025)", () => {
     }
   });
 });
+
+describe("occlusionState/occludedBy/occludedByViewId: --no-occlusion (issue occlusion-flag)", () => {
+  // These node properties are always optional in the schema (see viewHierarchyNodeSchema tests
+  // above) — the APK only computes and sends them at all when occlusionEnabled is true, so the
+  // meaningful "present by default, absent when disabled" behavior lives in ServerConfig, which is
+  // what actually gets pushed to the device over the set_accessibility_flags message.
+  test("occlusion is enabled by default", () => {
+    const original = serverConfig.getAccessibilityFlagsConfig().occlusionEnabled;
+    try {
+      serverConfig.setOcclusionEnabled(true);
+      expect(serverConfig.getAccessibilityFlagsConfig().occlusionEnabled).toBe(true);
+    } finally {
+      serverConfig.setOcclusionEnabled(original);
+    }
+  });
+
+  test("--no-occlusion disables occlusion via ServerConfig", () => {
+    const original = serverConfig.getAccessibilityFlagsConfig().occlusionEnabled;
+    try {
+      serverConfig.setOcclusionEnabled(false);
+      expect(serverConfig.getAccessibilityFlagsConfig().occlusionEnabled).toBe(false);
+    } finally {
+      serverConfig.setOcclusionEnabled(original);
+    }
+  });
+
+  test("occlusion node properties remain optional in the schema regardless of the flag", () => {
+    // Schema shape doesn't change with the flag — a client observing an older daemon or a
+    // hierarchy captured before occlusion was disabled must still be able to parse these fields.
+    expect(() => viewHierarchyNodeSchema.parse({ bounds: { left: 0, top: 0, right: 1, bottom: 1 } })).not.toThrow();
+    expect(() =>
+      viewHierarchyNodeSchema.parse({
+        bounds: { left: 0, top: 0, right: 1, bottom: 1 },
+        occlusionState: "partial",
+        occludedBy: "unlabeled view",
+        occludedByViewId: "id/occluder",
+      })
+    ).not.toThrow();
+  });
+});

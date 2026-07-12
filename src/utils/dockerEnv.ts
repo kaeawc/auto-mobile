@@ -10,7 +10,7 @@ export function isRunningInDocker(): boolean {
     const cgroup = fs.readFileSync("/proc/1/cgroup", "utf8");
     return cgroup.includes("docker") || cgroup.includes("containerd");
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // /proc/1/cgroup is Linux-only and may not exist (e.g. macOS/Windows); assume non-Docker rather than fail.
     logger.debug(`src/utils/dockerEnv.ts fallback failed: ${error}`, error);
     return false;
   }

@@ -104,8 +104,9 @@ export abstract class BaseSocketServer {
       const stats = statSync(this.socketPath);
       return { dev: stats.dev, ino: stats.ino };
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts fallback failed: ${error}`, error);
+      // The socket file may already be gone (e.g. removed by another process);
+      // returning null lets ownership checks treat it as "not our socket".
+      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts stat failed: ${error}`, error);
       return null;
     }
   }
@@ -239,8 +240,9 @@ export abstract class BaseSocketServer {
     try {
       return JSON.parse(line) as T;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts fallback failed: ${error}`, error);
+      // A malformed or partial line (e.g. from a client disconnecting mid-write)
+      // is not actionable here; the caller drops it and waits for the next line.
+      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts line parse failed: ${error}`, error);
       return null;
     }
   }

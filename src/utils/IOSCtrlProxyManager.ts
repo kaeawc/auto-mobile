@@ -1379,7 +1379,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       await this.processExecutor.exec(`kill -0 ${pid} 2>/dev/null`);
       return true;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // `kill -0` exits non-zero (throwing) when the PID is gone or unreachable;
+      // treat that as "not running" rather than failing the liveness check.
       logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
     }
@@ -1409,7 +1410,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           (status.data?.running ?? false) &&
           status.data?.pid === this.xcTestProcessId;
       } catch (error) {
-        // This probe is best-effort; callers can safely use the fallback value.
+        // A failed remote status call (network/daemon error) is treated the same as
+        // "not our tracked runner": returning false here is safe because the caller
+        // falls back to local isProcessRunning/re-adoption rather than crashing.
         logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
@@ -1484,7 +1487,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           (status.data?.running ?? false) &&
           status.data?.pid === this.xcTestProcessId;
       } catch (error) {
-        // This probe is best-effort; callers can safely use the fallback value.
+        // Remote status call failed; report not-alive so the caller respawns rather
+        // than trusting a stale in-memory pid across a daemon error.
         logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
@@ -1557,7 +1561,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
       return null;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // pgrep exits non-zero (throwing) when no xcodebuild process matches; that
+      // just means there's no external runner to adopt, not a real failure.
       logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -1832,7 +1837,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         environment,
       };
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // `ps -p <pid>` exits non-zero (throwing) if the process exited between
+      // discovery and this lookup; treat it as "no info available", not an error.
       logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -1847,7 +1853,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const output = stdout.trim();
       return output.length > 0 ? output : undefined;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Same-pid race as getProcessInfo: the process may be gone by the time we
+      // read its full command line, so an absent environment string is expected.
       logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return undefined;
     }
@@ -2075,7 +2082,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       await processExecutor.exec(`kill -0 ${pid} 2>/dev/null`);
       return true;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // `kill -0` throws once the pid has exited, which is exactly the "not
+      // running" case the port-release / exit-wait callers are polling for.
       logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
     }
@@ -2095,7 +2103,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         const status = await this.remoteRunner.getIproxyStatus({ pid: this.iproxyProcessId });
         return status.success && (status.data?.running ?? false);
       } catch (error) {
-        // This probe is best-effort; callers can safely use the fallback value.
+        // Remote status call failed; the supervisor should treat iproxy as down
+        // and attempt a restart rather than assume the tunnel is still healthy.
         logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
@@ -2534,7 +2543,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         const { stdout } = await this.processExecutor.exec("xcrun simctl list devices");
         return stdout.includes(this.device.deviceId);
       } catch (error) {
-        // This probe is best-effort; callers can safely use the fallback value.
+        // `xcrun simctl list devices` failing (Xcode tooling missing/misconfigured)
+        // means we can't confirm the simulator is present; treat it as undetected.
         logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
@@ -2552,7 +2562,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const { stdout } = await this.processExecutor.exec("idevice_id -l");
       return stdout.split("\n").some(line => line.trim() === this.device.deviceId);
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // `idevice_id -l` failing (libimobiledevice missing, or no physical device
+      // attached) means we can't enumerate physical devices; report undetected.
       logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
     }

@@ -157,8 +157,9 @@ export async function getFileSize(filePath: string): Promise<number | undefined>
     const stats = await fsPromises.stat(filePath);
     return stats.size;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/utils/ChildProcessTracker.ts fallback failed: ${error}`, error);
+    // The file may have been removed or never created by the tracked process;
+    // undefined signals "size unknown" rather than treating it as fatal.
+    logger.debug(`src/utils/ChildProcessTracker.ts file size stat failed: ${error}`, error);
     return undefined;
   }
 }

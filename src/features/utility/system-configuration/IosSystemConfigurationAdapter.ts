@@ -291,8 +291,9 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       );
       return normalizeSettingValue(result.stdout);
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts fallback failed: ${error}`, error);
+      // `defaults read` fails when the domain/key has never been set on this
+      // simulator; null correctly signals "no value configured" to the caller.
+      logger.debug(`src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts defaults read failed: ${error}`, error);
       return null;
     }
   }

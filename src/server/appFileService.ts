@@ -776,8 +776,9 @@ function decodeUtf8Text(buffer: Buffer): string | undefined {
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer);
     return text.includes("\u0000") ? undefined : text;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/server/appFileService.ts fallback failed: ${error}`, error);
+    // Strict UTF-8 decoding throws on binary/invalid-encoding data; undefined
+    // tells the caller to treat the file as binary instead of as text.
+    logger.debug(`src/server/appFileService.ts utf8 decode failed: ${error}`, error);
     return undefined;
   }
 }

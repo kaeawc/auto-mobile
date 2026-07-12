@@ -63,7 +63,8 @@ export class DeviceSnapshotStore {
       await fs.access(this.getSnapshotPathWithOptions(snapshotName, options));
       return true;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // fs.access throws when the snapshot directory doesn't exist yet, which is a
+      // normal "no snapshot taken" state, not an error — report false.
       logger.debug(`src/utils/DeviceSnapshotStore.ts fallback failed: ${error}`, error);
       return false;
     }

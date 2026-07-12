@@ -343,8 +343,9 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
     try {
       return this.getNavigationScreenSource().getCurrentScreen() ?? undefined;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/features/observe/android/AndroidSdkEventIngestor.ts fallback failed: ${error}`, error);
+      // The navigation session may not be bound yet when an ANR/crash event
+      // arrives; omitting currentScreen is fine, it's supplementary context.
+      logger.debug(`src/features/observe/android/AndroidSdkEventIngestor.ts screen resolution failed: ${error}`, error);
       return undefined;
     }
   }

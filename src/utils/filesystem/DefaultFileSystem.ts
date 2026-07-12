@@ -8,7 +8,7 @@ export async function pathExists(filePath: string): Promise<boolean> {
     await fsPromises.access(filePath);
     return true;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // fs.access rejects for a missing path (and other stat errors); either way the path is not usable.
     logger.debug(`src/utils/filesystem/DefaultFileSystem.ts fallback failed: ${error}`, error);
     return false;
   }

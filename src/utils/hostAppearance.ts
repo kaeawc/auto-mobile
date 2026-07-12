@@ -18,7 +18,9 @@ async function runCommand(command: string, args: string[]): Promise<CommandResul
       stderr: result.stderr ? result.stderr.toString() : "",
     };
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // Command may not exist on this host, or the queried key/scheme may be unset
+    // (e.g. no AppleInterfaceStyle default in light mode); null just means "unknown",
+    // so callers fall through to the next detection method or a light-mode default.
     logger.debug(`src/utils/hostAppearance.ts fallback failed: ${error}`, error);
     return null;
   }

@@ -101,8 +101,9 @@ const defaultRecordingFileProbe: RecordingFileProbe = {
       const stats = await fsPromises.stat(filePath);
       return stats.size;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/features/video/FfmpegVideoProcessingBackend.ts fallback failed: ${error}`, error);
+      // ENOENT is expected while ffmpeg hasn't created the output file yet;
+      // null lets the readiness poll keep waiting instead of erroring out.
+      logger.debug(`src/features/video/FfmpegVideoProcessingBackend.ts recording file stat failed: ${error}`, error);
       return null;
     }
   },

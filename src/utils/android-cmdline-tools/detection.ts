@@ -203,7 +203,7 @@ export async function isToolInPath(toolName: string, systemDetection = createDef
     await systemDetection.exec(`${command} ${toolName}`);
     return true;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // which/where exits non-zero when the tool isn't on PATH; that's a normal "not found", not a fault.
     logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return false;
   }
@@ -219,7 +219,7 @@ export async function getToolPathFromPath(toolName: string, systemDetection = cr
     const path = result.stdout.trim().split("\n")[0]; // Take first result if multiple
     return path || null;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // which/where exits non-zero when the tool isn't on PATH; null tells the caller to keep searching.
     logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return null;
   }

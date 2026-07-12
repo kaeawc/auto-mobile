@@ -414,7 +414,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       await this.deps.exec("xcrun devicectl --version");
       return true;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // `devicectl --version` fails when Xcode 15+ isn't installed; that just means physical-device URL launch is unavailable.
       logger.debug(`src/utils/ios-cmdline-tools/DeviceAppManager.ts fallback failed: ${error}`, error);
       return false;
     }

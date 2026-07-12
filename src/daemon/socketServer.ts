@@ -1655,7 +1655,8 @@ export class UnixSocketServer {
       const stats = statSync(this.socketPath);
       return { dev: stats.dev, ino: stats.ino };
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // statSync fails if the socket file was removed/replaced concurrently; callers
+      // treat a null identity as "can't confirm ownership" rather than a hard error.
       logger.debug(`src/daemon/socketServer.ts fallback failed: ${error}`, error);
       return null;
     }

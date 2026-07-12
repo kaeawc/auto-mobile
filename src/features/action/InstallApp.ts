@@ -134,7 +134,8 @@ export class InstallApp {
           const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true, signal);
           return parseInt(isInstalledOutput.trim(), 10) > 0;
         } catch (error) {
-          // This probe is best-effort; callers can safely use the fallback value.
+          // Both the a11y check and this pm/grep fallback failed; treat the package as
+          // not installed rather than blocking the install flow on a query error.
           logger.debug(`src/features/action/InstallApp.ts fallback failed: ${error}`, error);
           return false;
         }

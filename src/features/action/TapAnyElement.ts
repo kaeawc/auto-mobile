@@ -135,7 +135,8 @@ export class TapAnyElement extends BaseVisualChange {
     try {
       return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy.hierarchy));
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Hashing is only used to key an optional cache lookup; if JSON.stringify or the
+      // hash fails on a malformed hierarchy, skip the cache instead of failing the tap.
       logger.debug(`src/features/action/TapAnyElement.ts fallback failed: ${error}`, error);
       return null;
     }

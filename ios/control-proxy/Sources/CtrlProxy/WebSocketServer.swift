@@ -79,6 +79,12 @@ final class ConnectionRegistry<Value> {
         return storage.count
     }
 
+    var isEmpty: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage.isEmpty
+    }
+
     /// Atomically clears the registry, returning the values that were removed.
     func removeAll() -> [Value] {
         lock.lock()

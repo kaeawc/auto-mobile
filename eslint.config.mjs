@@ -88,6 +88,67 @@ function isFallbackReturn(argument) {
 	return !argument || argument.type === "Literal" && argument.value === null || isUndefinedReturn(argument) || isBooleanReturn(argument) || isStatusObjectReturn(argument);
 }
 
+function hasThrowStatement(node, seen = new WeakSet()) {
+	if (!node || typeof node.type !== "string" || seen.has(node)) {
+		return false;
+	}
+	seen.add(node);
+	if (node.type === "ThrowStatement") {
+		return true;
+	}
+	// Do not descend into nested function bodies: a throw inside a callback
+	// defined in the catch does not satisfy the catch's own error contract.
+	if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression" || node.type === "ArrowFunctionExpression") {
+		return false;
+	}
+	for (const [key, value] of Object.entries(node)) {
+		if (key === "parent") {
+			continue;
+		}
+		if (Array.isArray(value)) {
+			if (value.some(child => hasThrowStatement(child, seen))) {
+				return true;
+			}
+		} else if (value && typeof value === "object" && typeof value.type === "string" && hasThrowStatement(value, seen)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function identifierIsReferenced(node, name, seen = new WeakSet()) {
+	if (!node || typeof node.type !== "string" || seen.has(node)) {
+		return false;
+	}
+	seen.add(node);
+	if (node.type === "Identifier" && node.name === name) {
+		return true;
+	}
+	for (const [key, value] of Object.entries(node)) {
+		if (key === "parent") {
+			continue;
+		}
+		if (Array.isArray(value)) {
+			if (value.some(child => identifierIsReferenced(child, name, seen))) {
+				return true;
+			}
+		} else if (value && typeof value === "object" && typeof value.type === "string" && identifierIsReferenced(value, name, seen)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// True if the catch body uses its caught error binding anywhere (forwarding it
+// to a helper, rejector, etc.). A catch with no binding (`catch { }`) or an
+// unused binding counts as NOT referencing it.
+function referencesCaughtError(catchNode) {
+	if (!catchNode.param || catchNode.param.type !== "Identifier") {
+		return false;
+	}
+	return identifierIsReferenced(catchNode.body, catchNode.param.name);
+}
+
 function catchConventionRule() {
 	return {
 		meta: {
@@ -95,6 +156,7 @@ function catchConventionRule() {
 			messages: {
 				fallbackReturn: "Catch blocks that return a fallback must log the caught error before returning.",
 				statusReturn: "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+				tracelessCatch: "Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).",
 			},
 		},
 		create(context) {
@@ -125,7 +187,18 @@ function catchConventionRule() {
 				CatchClause(node) {
 					const statements = node.body.body;
 					if (statements.length === 1 && statements[0].type === "ReturnStatement" && isFallbackReturn(statements[0].argument) && !hasAnyLoggerCall(node.body)) {
+						// A single fallback return without logging keeps its specific
+						// message — checked precedence-first so it is not reclassified.
 						context.report({ node: statements[0], messageId: "fallbackReturn" });
+					} else if (!hasAnyLoggerCall(node.body) && !hasThrowStatement(node.body) && !referencesCaughtError(node)) {
+						// Otherwise, a catch that swallows the error with no trace at all
+						// — no log, no throw, and never even references the caught binding
+						// — is the root cause of the #3594-class bugs (comment-only iOS
+						// SDK-event catches that core no-empty ignores; the Idle
+						// rotation-check whose `err` was unused and returned a non-fallback
+						// object). Catches that forward the error (reject(e), handleError(e))
+						// reference the binding and are intentionally left alone.
+						context.report({ node, messageId: "tracelessCatch" });
 					}
 					reportStatusReturnsWithoutWarn(statements, false);
 				},

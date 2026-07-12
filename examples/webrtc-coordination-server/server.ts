@@ -13,7 +13,29 @@ function parseIceServers(raw: string | undefined): RTCIceServer[] | undefined {
   if (!raw || !raw.trim()) {
     return undefined;
   }
-  return raw
+  const trimmed = raw.trim();
+  // Accept the same JSON shape the publisher config does, so credentialed TURN
+  // servers survive round-tripping to the browser viewer. werift's RTCIceServer
+  // takes a single `urls` string, so expand array `urls` into one server per URL.
+  if (trimmed.startsWith("[")) {
+    const parsed = JSON.parse(trimmed) as Array<{ urls?: unknown; username?: string; credential?: string }>;
+    const servers: RTCIceServer[] = [];
+    for (const entry of parsed) {
+      const { username, credential } = entry ?? {};
+      const urls = entry?.urls;
+      if (typeof urls === "string") {
+        servers.push({ urls, username, credential });
+      } else if (Array.isArray(urls)) {
+        for (const url of urls) {
+          if (typeof url === "string") {
+            servers.push({ urls: url, username, credential });
+          }
+        }
+      }
+    }
+    return servers;
+  }
+  return trimmed
     .split(",")
     .map(url => url.trim())
     .filter(Boolean)

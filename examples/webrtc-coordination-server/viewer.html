@@ -122,6 +122,7 @@
         }
         const answer = await answerRes.text();
         await pc.setRemoteDescription({ type: "answer", sdp: answer });
+        clearTimeout(reconnectTimer); // a prior drop's retry is now moot
         fetchStreams();
       }
 
@@ -136,6 +137,10 @@
 
       async function teardown() {
         if (pc) {
+          // Detach handlers first: a local close() must not be seen as a
+          // connection drop and schedule another reconnect (which would loop).
+          pc.onconnectionstatechange = null;
+          pc.ontrack = null;
           try { pc.close(); } catch {}
           pc = null;
         }

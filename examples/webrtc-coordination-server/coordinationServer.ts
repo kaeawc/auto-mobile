@@ -75,9 +75,6 @@ export class CoordinationServer {
     requestedStreamId?: string
   ): Promise<{ streamId: string; answerSdp: string }> {
     const streamId = requestedStreamId?.trim() || `stream-${randomUUID().slice(0, 8)}`;
-    if (this.streams.has(streamId)) {
-      await this.stopIngest(streamId);
-    }
 
     const pc = new RTCPeerConnection({ codecs: { video: [useH264()] } });
     const entry: StreamEntry = {
@@ -108,9 +105,10 @@ export class CoordinationServer {
       }
     });
 
-    // Negotiate before registering the stream, so a malformed/unsupported offer
-    // that rejects here doesn't leave a zombie "connecting" entry (with a live
-    // RTCPeerConnection) in /api/streams.
+    // Negotiate before registering the stream (or replacing an existing one), so
+    // a malformed/unsupported offer that rejects here neither leaves a zombie
+    // "connecting" entry in /api/streams nor tears down an already-healthy stream
+    // that happens to share this id.
     try {
       await pc.setRemoteDescription({ type: "offer", sdp: offerSdp });
       const answer = await pc.createAnswer();
@@ -121,6 +119,10 @@ export class CoordinationServer {
       throw error;
     }
 
+    // Only now swap out any existing stream with this id.
+    if (this.streams.has(streamId)) {
+      await this.stopIngest(streamId);
+    }
     this.streams.set(streamId, entry);
     return { streamId, answerSdp: pc.localDescription?.sdp ?? "" };
   }

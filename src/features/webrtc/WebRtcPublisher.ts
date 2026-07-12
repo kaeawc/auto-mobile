@@ -201,6 +201,19 @@ export class WebRtcPublisher {
     }
 
     const session = await this.whip.publish(localSdp);
+
+    // stop() may have run while we were awaiting ICE/WHIP. The WHIP session now
+    // exists on the server but teardown already happened (before resourceUrl was
+    // set), so tear this one down explicitly instead of accepting it — otherwise
+    // it leaks after the stream was reported stopped.
+    if (this.closed || this.pc !== pc) {
+      if (session.resourceUrl) {
+        await this.whip.delete(session.resourceUrl).catch(() => {});
+      }
+      await pc.close().catch(() => {});
+      throw new Error("Publisher closed during establish.");
+    }
+
     this.resourceUrl = session.resourceUrl;
     await pc.setRemoteDescription({ type: "answer", sdp: session.answerSdp });
 

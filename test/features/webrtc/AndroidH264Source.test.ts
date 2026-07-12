@@ -124,7 +124,8 @@ describe("AndroidH264Source", () => {
     await source.stop();
 
     expect(processes[0].killed).toContain("SIGINT");
-    expect(commands.some(command => command.includes("pkill -2 screenrecord"))).toBe(true);
+    // Must NOT device-wide pkill: that would also kill a concurrent videoRecording.
+    expect(commands.some(command => command.includes("pkill"))).toBe(false);
 
     // An exit after stop must not spawn another segment.
     processes[0].simulateExit(0, "SIGINT");

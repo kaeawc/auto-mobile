@@ -114,13 +114,11 @@ export class AndroidH264Source {
       return;
     }
 
-    // Stop screenrecord on the device so it flushes cleanly, then the host adb.
-    try {
-      const adb = this.adbFactory.create(this.options.device);
-      await adb.executeCommand("shell pkill -2 screenrecord", 5000);
-    } catch (error) {
-      logger.debug(`[AndroidH264Source] device pkill screenrecord failed: ${error}`);
-    }
+    // Terminate the host `adb exec-out` process; closing the exec stream stops
+    // the device-side screenrecord for THIS session. We deliberately do NOT run a
+    // device-wide `pkill screenrecord` (unlike the file-recording backend): it
+    // would also kill a concurrent `videoRecording` on the same device. Since a
+    // live stream writes no file, there is no moov atom to flush cleanly.
     process.kill("SIGINT");
   }
 

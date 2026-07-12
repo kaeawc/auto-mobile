@@ -135,8 +135,12 @@ export async function startWebRtcStream(
   request: StartWebRtcStreamRequest
 ): Promise<WebRtcStreamDescriptor> {
   if (request.device.platform !== "android") {
+    // iOS has no live H.264 elementary stream from simctl; a capture source must
+    // be built first (VideoToolbox in the CtrlProxy runner). See
+    // docs/design-docs/mcp/observe/ios-webrtc-streaming.md (#3777).
     throw new ActionableError(
-      `WebRTC streaming currently supports Android only (got ${request.device.platform}).`
+      `WebRTC streaming currently supports Android only (got ${request.device.platform}). ` +
+        `See docs/design-docs/mcp/observe/ios-webrtc-streaming.md for the iOS plan.`
     );
   }
 

@@ -433,4 +433,33 @@ describe("UnixSocketServer input/tap", () => {
     expect(nonNumeric.success).toBe(false);
     expect(nonNumeric.error).toBe("input/tap requires numeric x and y params");
   });
+
+  test("parseInputTapParams rejects non-finite x/y/duration, matching swipe (#3615)", () => {
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    // ±Infinity cannot survive a JSON round-trip (stringify -> null, parse rejects the
+    // literal), so it only reaches the parser from a non-JSON in-process caller. Exercise
+    // parseInputTapParams directly with the raw floats the parser is responsible for.
+    const parseTap = (args: Record<string, unknown>): unknown =>
+      (server as unknown as { parseInputTapParams(params: unknown): unknown }).parseInputTapParams(args);
+
+    for (const bad of [Infinity, -Infinity, NaN]) {
+      expect(() => parseTap({ platform: "android", x: bad, y: 10 })).toThrow(
+        "input/tap requires numeric x and y params"
+      );
+      expect(() => parseTap({ platform: "android", x: 5, y: bad })).toThrow(
+        "input/tap requires numeric x and y params"
+      );
+    }
+    expect(() => parseTap({ platform: "android", x: 5, y: 10, duration: Infinity })).toThrow(
+      "input/tap duration must be numeric when provided"
+    );
+
+    // Finite values still parse successfully (no over-rejection regression).
+    expect(parseTap({ platform: "android", x: 5, y: 10, duration: 200 })).toMatchObject({
+      platform: "android",
+      x: 5,
+      y: 10,
+      duration: 200,
+    });
+  });
 });

@@ -66,6 +66,23 @@ describe("resolveWebRtcStreamingConfig", () => {
     expect(config.iceServers).toEqual([{ urls: "stun:s:1" }]);
     expect(config.bitrateKbps).toBe(4000);
     expect(config.size).toEqual({ width: 1280, height: 720 });
+    expect(config.trickleIce).toBe(false);
+  });
+
+  test("enables trickle ICE from the environment flag", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.TRICKLE_ICE]: "true",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({}, env).trickleIce).toBe(true);
+  });
+
+  test("trickle ICE override takes precedence over the environment", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.TRICKLE_ICE]: "1",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({ trickleIce: false }, env).trickleIce).toBe(false);
   });
 
   test("overrides take precedence over environment", () => {

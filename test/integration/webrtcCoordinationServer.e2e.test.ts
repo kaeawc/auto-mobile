@@ -141,4 +141,62 @@ describe("WebRTC coordination server e2e", () => {
     },
     30000
   );
+
+  test(
+    "trickle ICE: publisher PATCHes candidates and frames still forward end-to-end",
+    async () => {
+      const http = new HttpCoordinationServer({ iceServers: [] });
+      const port = await http.listen(0, "127.0.0.1");
+      const base = `http://127.0.0.1:${port}`;
+
+      // trickleIce: publish the offer immediately and PATCH candidates as they
+      // gather; the reference server applies them via addIngestCandidates.
+      const publisher = new WebRtcPublisher({
+        streamId: "e2e-trickle",
+        whipEndpoint: `${base}/whip?streamId=e2e-trickle`,
+        trickleIce: true,
+      });
+
+      const viewer = new RTCPeerConnection({ codecs: { video: [useH264()] } });
+      const received: RtpPacket[] = [];
+      viewer.onTrack.subscribe((track: MediaStreamTrack) => {
+        track.onReceiveRtp.subscribe((rtp: RtpPacket) => received.push(rtp));
+      });
+
+      try {
+        await publisher.start();
+        expect(publisher.getState()).toBe("connected");
+
+        viewer.addTransceiver("video", { direction: "recvonly" });
+        const offer = await viewer.createOffer();
+        await viewer.setLocalDescription(offer);
+        await waitForIce(viewer);
+        const whepRes = await fetch(`${base}/whep/e2e-trickle`, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: viewer.localDescription?.sdp ?? "",
+        });
+        expect(whepRes.status).toBe(201);
+        await viewer.setRemoteDescription({ type: "answer", sdp: await whepRes.text() });
+        await waitFor(() => viewer.connectionState === "connected", 8000);
+
+        publisher.writeH264Chunk(keyframe());
+        for (let i = 0; i < 40; i++) {
+          publisher.writeH264Chunk(pFrame(0x40 + (i % 32)));
+          await sleep(20);
+          if (received.length > 5) {
+            break;
+          }
+        }
+
+        await waitFor(() => received.length > 5, 5000);
+        expect(received.length).toBeGreaterThan(5);
+      } finally {
+        await publisher.stop();
+        await viewer.close();
+        await http.close();
+      }
+    },
+    30000
+  );
 });

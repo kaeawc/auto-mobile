@@ -180,11 +180,18 @@ fresh keyframe.
   segment-rotation seam and is preferred when present, but is not yet shipped in
   the released package — until it is bundled/downloaded (like the CtrlProxy
   runner), production installs resolve no jar and fall back to `screenrecord`.
-- **No audio.** Video only.
+- **No audio.** Video only; a device-audio capture source would be required to
+  add an audio track (#3778).
 - **Reference server is single-process/in-memory.** Use a hardened WHIP/WHEP SFU
   (MediaMTX, LiveKit, Janus, Cloudflare) in production; the publisher is unchanged.
-- **Trickle ICE not used.** The publisher gathers candidates before POSTing the
-  WHIP offer (non-trickle), which is simplest and widely compatible.
+- **Trickle ICE is opt-in.** By default the publisher gathers candidates before
+  POSTing the WHIP offer (non-trickle), which is simplest and widely compatible.
+  Set `AUTOMOBILE_WEBRTC_TRICKLE_ICE=1` (or `trickleIce: true`) to publish the
+  offer immediately and PATCH candidates incrementally
+  (`application/trickle-ice-sdpfrag`) so setup doesn't stall on the gathering
+  timeout — requires an ingest server that supports the WHIP trickle extension
+  (the bundled reference server does; see `trickleIce.ts` /
+  `WhipClient.patchCandidate`).
 
 ## References
 

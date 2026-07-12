@@ -99,6 +99,22 @@ export class HttpCoordinationServer {
       res.end(answerSdp);
       return;
     }
+    // WHIP trickle ICE: incremental candidates from the publisher --------------
+    const whipPatchMatch = /^\/whip\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && whipPatchMatch) {
+      if (!this.authorizeIngest(req)) {
+        res.writeHead(401).end("Unauthorized");
+        return;
+      }
+      const fragment = await readBody(req);
+      const applied = await this.coordinator.addIngestCandidates(
+        decodeURIComponent(whipPatchMatch[1]),
+        fragment
+      );
+      // 204 on success; 404 if the stream id is unknown (stale resource).
+      res.writeHead(applied ? 204 : 404).end();
+      return;
+    }
     const whipDeleteMatch = /^\/whip\/([^/]+)$/.exec(path);
     if (method === "DELETE" && whipDeleteMatch) {
       // Terminating an ingest is as privileged as creating one — gate on the

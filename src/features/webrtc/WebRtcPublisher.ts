@@ -10,6 +10,7 @@ import type { BackoffInput } from "../../utils/Backoff";
 import { DEFAULT_RTP_MTU } from "./h264";
 import { ReconnectController, type ReconnectState } from "./ReconnectController";
 import { RtpH264TrackWriter } from "./RtpH264TrackWriter";
+import { TrickleIceForwarder } from "./trickleIce";
 import { WhipClient, type WhipClientOptions } from "./WhipClient";
 
 /** How long to wait for ICE gathering before publishing the offer. */
@@ -25,6 +26,12 @@ export interface WebRtcPublisherConfig {
   mtu?: number;
   maxReconnectAttempts?: number;
   reconnectBackoff?: BackoffInput;
+  /**
+   * Use trickle ICE: publish the offer immediately and PATCH local candidates
+   * as they gather, instead of blocking on ICE gathering. Requires an ingest
+   * server that supports the WHIP trickle extension. Defaults to false.
+   */
+  trickleIce?: boolean;
 }
 
 export interface WebRtcPublisherDeps {
@@ -76,6 +83,8 @@ export class WebRtcPublisher {
   private readonly onConnected?: () => Promise<void> | void;
   private readonly controller: ReconnectController;
 
+  private readonly trickleIce: boolean;
+
   private pc: RTCPeerConnection | null = null;
   private writer: RtpH264TrackWriter | null = null;
   private resourceUrl: string | null = null;
@@ -83,9 +92,12 @@ export class WebRtcPublisher {
   private closed = false;
   private establishing = false;
   private connectedFired = false;
+  private trickle: TrickleIceForwarder | null = null;
+  private candidateSub: { unSubscribe: () => void } | null = null;
 
   constructor(config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps = {}) {
     this.config = config;
+    this.trickleIce = config.trickleIce ?? false;
     this.timer = deps.timer ?? defaultTimer;
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
@@ -194,7 +206,15 @@ export class WebRtcPublisher {
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await this.waitForIceGathering(pc);
+
+      // Trickle ICE: start forwarding candidates (buffered until the resource URL
+      // is known) and publish the offer immediately instead of blocking on ICE
+      // gathering. Non-trickle: gather (bounded) before publishing.
+      if (this.trickleIce) {
+        this.startTrickle(pc);
+      } else {
+        await this.waitForIceGathering(pc);
+      }
 
       const localSdp = pc.localDescription?.sdp;
       if (!localSdp) {
@@ -216,6 +236,8 @@ export class WebRtcPublisher {
       }
 
       this.resourceUrl = session.resourceUrl;
+      // Flush candidates gathered during the WHIP round-trip and stream the rest.
+      this.trickle?.setResource(session.resourceUrl);
       await pc.setRemoteDescription({ type: "answer", sdp: session.answerSdp });
 
       this.establishing = false;
@@ -237,6 +259,10 @@ export class WebRtcPublisher {
       if (this.pc === pc) {
         this.pc = null;
         this.writer = null;
+        this.trickle?.stop();
+        this.trickle = null;
+        this.candidateSub?.unSubscribe();
+        this.candidateSub = null;
         await pc.close().catch(() => {});
       }
       throw error;
@@ -277,6 +303,31 @@ export class WebRtcPublisher {
     });
   }
 
+  /**
+   * Begin trickling local ICE candidates for this session. Candidates are
+   * buffered by the forwarder until the WHIP resource URL is known (set right
+   * after publish), then PATCHed as `application/trickle-ice-sdpfrag`.
+   */
+  private startTrickle(pc: RTCPeerConnection): void {
+    const forwarder = new TrickleIceForwarder((resourceUrl, fragment) => {
+      void this.whip.patchCandidate(resourceUrl, fragment).catch(error => {
+        logger.debug(`[WebRTC] trickle candidate PATCH failed: ${error}`);
+      });
+    });
+    this.trickle = forwarder;
+    this.candidateSub = pc.onIceCandidate.subscribe(candidate => {
+      // Ignore the end-of-candidates signal (undefined) and any candidate from a
+      // peer connection a concurrent teardown/establish already replaced.
+      if (candidate && this.pc === pc) {
+        forwarder.addCandidate({
+          candidate: candidate.candidate,
+          sdpMid: candidate.sdpMid,
+          sdpMLineIndex: candidate.sdpMLineIndex,
+        });
+      }
+    });
+  }
+
   private async waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
     if (pc.iceGatheringState === "complete") {
       return;
@@ -299,6 +350,12 @@ export class WebRtcPublisher {
     this.pc = null;
     this.writer = null;
     this.resourceUrl = null;
+
+    // Stop forwarding candidates and detach the listener before the pc closes.
+    this.trickle?.stop();
+    this.trickle = null;
+    this.candidateSub?.unSubscribe();
+    this.candidateSub = null;
 
     if (resourceUrl) {
       try {

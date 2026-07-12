@@ -197,6 +197,33 @@ export class CoordinationServer {
     await entry.ingestPc.close().catch(() => {});
   }
 
+  /**
+   * Apply trickle-ICE candidates (WHIP PATCH, `application/trickle-ice-sdpfrag`)
+   * from the publisher to the ingest peer connection. Returns false when the
+   * stream id is unknown so the HTTP layer can answer 404. Parses leniently: the
+   * `a=mid:` line (if any) applies to the following `a=candidate:` lines.
+   */
+  async addIngestCandidates(streamId: string, fragment: string): Promise<boolean> {
+    const entry = this.streams.get(streamId);
+    if (!entry) {
+      return false;
+    }
+    let sdpMid: string | undefined;
+    for (const rawLine of fragment.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (line.startsWith("a=mid:")) {
+        sdpMid = line.slice("a=mid:".length).trim() || undefined;
+      } else if (line.startsWith("a=candidate:")) {
+        await entry.ingestPc
+          .addIceCandidate({ candidate: line.slice("a=".length), sdpMid })
+          .catch(() => {
+            // A malformed or duplicate candidate is non-fatal; keep the stream up.
+          });
+      }
+    }
+    return true;
+  }
+
   async stopSubscriber(streamId: string, subscriberId: string): Promise<void> {
     const entry = this.streams.get(streamId);
     const subscriber = entry?.subscribers.get(subscriberId);

@@ -88,3 +88,4 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale as `WIDTHxHEIGHT` (e.g. `720x1280`). | native |
 | `AUTOMOBILE_VIDEO_SERVER_JAR` | Path to the built `automobile-video.jar` (persistent on-device encoder). When resolvable, capture prefers the persistent encoder over `screenrecord`. | Gradle build output, else `screenrecord` |
+| `AUTOMOBILE_WEBRTC_TRICKLE_ICE` | Enable trickle ICE: publish the WHIP offer immediately and PATCH candidates incrementally instead of blocking on ICE gathering. Requires an ingest server supporting the WHIP trickle extension. | `false` |

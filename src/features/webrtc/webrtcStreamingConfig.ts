@@ -17,6 +17,12 @@ export interface WebRtcStreamingConfig {
   bitrateKbps?: number;
   /** Optional capture downscale. */
   size?: { width: number; height: number };
+  /**
+   * Use trickle ICE: publish the WHIP offer immediately and send local
+   * candidates incrementally (HTTP PATCH) instead of blocking on ICE gathering.
+   * Opt-in — the ingest server must support the WHIP PATCH trickle extension.
+   */
+  trickleIce: boolean;
 }
 
 export interface WebRtcStreamingOverrides {
@@ -25,6 +31,7 @@ export interface WebRtcStreamingOverrides {
   iceServers?: RTCIceServer[];
   bitrateKbps?: number;
   size?: { width: number; height: number };
+  trickleIce?: boolean;
 }
 
 /** Environment variable names read for default configuration. */
@@ -34,6 +41,7 @@ export const WEBRTC_ENV = {
   ICE_SERVERS: "AUTOMOBILE_WEBRTC_ICE_SERVERS",
   BITRATE_KBPS: "AUTOMOBILE_WEBRTC_BITRATE_KBPS",
   MAX_SIZE: "AUTOMOBILE_WEBRTC_MAX_SIZE",
+  TRICKLE_ICE: "AUTOMOBILE_WEBRTC_TRICKLE_ICE",
 } as const;
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -98,6 +106,14 @@ export function parseSize(raw: string | undefined): { width: number; height: num
   return { width: Number(match[1]), height: Number(match[2]) };
 }
 
+/** Parse a boolean env flag (`1/true/yes/on`, case-insensitive). */
+export function parseBooleanFlag(raw: string | undefined): boolean {
+  if (!raw) {
+    return false;
+  }
+  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+
 function parseBitrate(raw: string | undefined): number | undefined {
   if (!raw || !raw.trim()) {
     return undefined;
@@ -129,6 +145,7 @@ export function resolveWebRtcStreamingConfig(
     overrides.iceServers ?? parseIceServers(env[WEBRTC_ENV.ICE_SERVERS]) ?? DEFAULT_ICE_SERVERS;
   const bitrateKbps = overrides.bitrateKbps ?? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS]);
   const size = overrides.size ?? parseSize(env[WEBRTC_ENV.MAX_SIZE]);
+  const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
 
   return {
     whipEndpoint: whipEndpoint.trim(),
@@ -136,5 +153,6 @@ export function resolveWebRtcStreamingConfig(
     iceServers,
     bitrateKbps,
     size,
+    trickleIce,
   };
 }

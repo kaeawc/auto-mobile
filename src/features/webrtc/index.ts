@@ -8,6 +8,7 @@ export * from "./PersistentEncoderH264Source";
 export * from "./videoServerJar";
 export * from "./androidH264CaptureSourceFactory";
 export * from "./WhipClient";
+export * from "./trickleIce";
 export * from "./ReconnectController";
 export * from "./WebRtcPublisher";
 export * from "./webrtcStreamingConfig";

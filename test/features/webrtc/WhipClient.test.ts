@@ -109,6 +109,31 @@ describe("WhipClient.delete", () => {
   });
 });
 
+describe("WhipClient.patchCandidate", () => {
+  test("PATCHes the trickle fragment as application/trickle-ice-sdpfrag", async () => {
+    const { fetchImpl, calls } = fakeFetch(() => ({ status: 204 }));
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      bearerToken: "tok",
+      fetchImpl,
+    });
+    await client.patchCandidate("https://coord.example.com/whip/s", "a=candidate:1 1 udp ...\r\n");
+    expect(calls[0].method).toBe("PATCH");
+    expect(calls[0].url).toBe("https://coord.example.com/whip/s");
+    expect(calls[0].headers["Content-Type"]).toBe("application/trickle-ice-sdpfrag");
+    expect(calls[0].headers["Authorization"]).toBe("Bearer tok");
+    expect(calls[0].body).toContain("a=candidate:1 1 udp");
+  });
+
+  test("does not throw when the server does not support trickle (405)", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ status: 405 }));
+    const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
+    await expect(
+      client.patchCandidate("https://coord.example.com/whip/s", "a=candidate:...")
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("WhipClient construction", () => {
   test("requires an endpoint", () => {
     expect(() => new WhipClient({ endpoint: "", fetchImpl: (async () => ({})) as unknown as FetchLike })).toThrow(

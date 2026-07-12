@@ -4,16 +4,6 @@
       "count": 4
     }
   },
-  "src/daemon/SocketServerRegistry.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
-  "src/daemon/appearanceSocketServer.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
   "src/daemon/buildIdentity.ts": {
     "auto-mobile/catch-convention": {
       "count": 1
@@ -61,9 +51,6 @@
     }
   },
   "src/daemon/telemetryPushSocketServer.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 3
-    },
     "auto-mobile/catch-convention": {
       "count": 2
     },
@@ -71,30 +58,14 @@
       "count": 2
     }
   },
-  "src/db/dbWriteBarrier.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
   "src/db/eventRetention.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
-    }
-  },
-  "src/db/failureAnalyticsRepository.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 4
     }
   },
   "src/db/layoutEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 2
-    },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
     },
     "auto-mobile/no-unknown-cast": {
       "count": 1
@@ -103,9 +74,6 @@
   "src/db/logEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 2
-    },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
     },
     "auto-mobile/no-unknown-cast": {
       "count": 1
@@ -120,18 +88,12 @@
     "@typescript-eslint/no-floating-promises": {
       "count": 2
     },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
   },
   "src/db/networkEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
       "count": 1
     },
     "auto-mobile/no-unknown-cast": {
@@ -142,9 +104,6 @@
     "@typescript-eslint/no-floating-promises": {
       "count": 2
     },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
@@ -153,20 +112,7 @@
     "@typescript-eslint/no-floating-promises": {
       "count": 1
     },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
-      "count": 1
-    }
-  },
-  "src/db/testExecutionRepository.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 3
-    }
-  },
-  "src/db/videoRecordingRepository.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
       "count": 1
     }
   },
@@ -176,9 +122,6 @@
     }
   },
   "src/features/accessibility/WcagAudit.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
@@ -189,9 +132,6 @@
     }
   },
   "src/features/action/BaseVisualChange.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/catch-convention": {
       "count": 1
     }
@@ -217,9 +157,6 @@
     }
   },
   "src/features/action/LaunchApp.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/catch-convention": {
       "count": 2
     }
@@ -234,30 +171,12 @@
       "count": 1
     }
   },
-  "src/features/action/TapAnyElement.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 2
-    }
-  },
-  "src/features/action/TapOnElement.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 4
-    }
-  },
   "src/features/action/TerminateApp.ts": {
     "auto-mobile/catch-convention": {
       "count": 1
     }
   },
-  "src/features/action/swipeon/ScrollUntilVisible.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 4
-    }
-  },
   "src/features/action/swipeon/SwipeOn.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
@@ -270,11 +189,6 @@
   "src/features/navigation/Explore.ts": {
     "auto-mobile/catch-convention": {
       "count": 2
-    }
-  },
-  "src/features/navigation/ExploreElementScoring.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
     }
   },
   "src/features/navigation/NavigateTo.ts": {
@@ -313,22 +227,9 @@
       "count": 1
     }
   },
-  "src/features/observe/ViewHierarchy.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
   "src/features/observe/android/AndroidCtrlProxyClient.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 2
-    }
-  },
-  "src/features/observe/android/CtrlProxyHierarchy.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 3
     }
   },
   "src/features/observe/ios/CtrlProxyHierarchy.ts": {
@@ -345,9 +246,6 @@
     }
   },
   "src/features/observe/ios/IosScreenIdentity.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
       "count": 2
     }
@@ -358,9 +256,6 @@
     }
   },
   "src/features/observe/output/ObserveResultOutput.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/no-unknown-cast": {
       "count": 8
     }
@@ -378,21 +273,6 @@
   "src/features/record/android/DualTrackRecorder.ts": {
     "auto-mobile/no-unknown-cast": {
       "count": 1
-    }
-  },
-  "src/features/screen-stream/IOSScreenCaptureHelper.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
-  "src/features/talkback/TalkBackTapStrategy.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 5
-    }
-  },
-  "src/features/utility/ElementFinder.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 2
     }
   },
   "src/features/utility/SystemConfigurationManager.ts": {
@@ -423,29 +303,11 @@
   "src/index.ts": {
     "@typescript-eslint/no-misused-promises": {
       "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
     }
   },
   "src/server/appFileContract.ts": {
     "auto-mobile/catch-convention": {
       "count": 1
-    }
-  },
-  "src/server/bootedDeviceResources.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
-  "src/server/criticalSectionTools.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
-  "src/server/deviceImageResources.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 2
     }
   },
   "src/server/deviceLabelMapping.ts": {
@@ -454,9 +316,6 @@
     }
   },
   "src/server/finalizeToolResponse.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 5
-    },
     "auto-mobile/catch-convention": {
       "count": 1
     },
@@ -464,20 +323,7 @@
       "count": 3
     }
   },
-  "src/server/highlightTools.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 3
-    }
-  },
-  "src/server/index.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
   "src/server/networkGraph.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 3
-    },
     "auto-mobile/catch-convention": {
       "count": 1
     }
@@ -508,11 +354,6 @@
       "count": 2
     }
   },
-  "src/utils/Backoff.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
   "src/utils/DebugContextBuilder.ts": {
     "auto-mobile/catch-convention": {
       "count": 1
@@ -523,15 +364,7 @@
       "count": 1
     }
   },
-  "src/utils/DeviceSessionManager.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 7
-    }
-  },
   "src/utils/IOSCtrlProxyBuilder.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    },
     "auto-mobile/catch-convention": {
       "count": 4
     }
@@ -541,28 +374,8 @@
       "count": 10
     }
   },
-  "src/utils/PerformanceTracker.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 3
-    }
-  },
-  "src/utils/Random.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 2
-    }
-  },
-  "src/utils/RequestManager.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
   "src/utils/ScreenshotJobTracker.ts": {
     "@typescript-eslint/no-floating-promises": {
-      "count": 1
-    }
-  },
-  "src/utils/android-cmdline-tools/AdbClient.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
       "count": 1
     }
   },
@@ -571,15 +384,7 @@
       "count": 1
     }
   },
-  "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 1
-    }
-  },
   "src/utils/describeUnknownError.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 2
-    },
     "auto-mobile/catch-convention": {
       "count": 1
     }
@@ -610,20 +415,12 @@
     }
   },
   "src/utils/ios-cmdline-tools/SimCtlClient.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
-      "count": 3
-    },
     "auto-mobile/catch-convention": {
       "count": 1
     }
   },
   "src/utils/ios-cmdline-tools/XcodeSigning.ts": {
     "auto-mobile/catch-convention": {
-      "count": 1
-    }
-  },
-  "src/utils/ios-cmdline-tools/XctestrunPlist.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
       "count": 1
     }
   },
@@ -644,11 +441,6 @@
   },
   "src/utils/requireBootedDevice.ts": {
     "auto-mobile/catch-convention": {
-      "count": 1
-    }
-  },
-  "src/utils/system/SystemDetection.ts": {
-    "@typescript-eslint/no-unnecessary-type-assertion": {
       "count": 1
     }
   },

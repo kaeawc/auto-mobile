@@ -478,9 +478,14 @@ export default [
 			},
 		},
 		rules: {
+			// Only non-auto-fixable rules here: the repo lint command is
+			// `eslint . --fix`, and an auto-fixable type-aware rule (e.g.
+			// no-unnecessary-type-assertion) would MUTATE src on every CI run —
+			// suppressions gate reporting, not fixing — orphaning imports. The
+			// #3595 unnecessary-cast class is already covered syntactically by
+			// auto-mobile/no-unknown-cast.
 			"@typescript-eslint/no-floating-promises": "error",
 			"@typescript-eslint/no-misused-promises": "error",
-			"@typescript-eslint/no-unnecessary-type-assertion": "error",
 		},
 	},
 	{

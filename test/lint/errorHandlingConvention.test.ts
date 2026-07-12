@@ -5,6 +5,19 @@ async function lintSnippet(code: string, filePath = "src/errorHandlingConvention
   const eslint = new ESLint({
     cwd: process.cwd(),
     overrideConfigFile: "eslint.config.mjs",
+    // This backstop exercises only syntactic rules (catch-convention,
+    // no-unknown-cast) on in-memory snippets whose src/ file paths do not exist
+    // on disk. The src-scoped type-aware config would make projectService reject
+    // those virtual paths, so opt this instance out of type-aware parsing and
+    // its rules — they are covered by the src lint run, not here.
+    overrideConfig: {
+      languageOptions: { parserOptions: { projectService: false, project: null } },
+      rules: {
+        "@typescript-eslint/no-floating-promises": "off",
+        "@typescript-eslint/no-misused-promises": "off",
+        "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      },
+    },
     fix: false,
   });
   const [result] = await eslint.lintText(code, {

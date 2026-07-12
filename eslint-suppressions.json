@@ -10,6 +10,9 @@
     }
   },
   "src/daemon/daemon.ts": {
+    "@typescript-eslint/no-misused-promises": {
+      "count": 5
+    },
     "auto-mobile/catch-convention": {
       "count": 2
     }
@@ -27,6 +30,19 @@
   "src/daemon/directModeGuard.ts": {
     "auto-mobile/catch-convention": {
       "count": 2
+    }
+  },
+  "src/daemon/manager.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    }
+  },
+  "src/daemon/socketServer.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
     }
   },
   "src/daemon/socketServer/PushSubscriptionSocketServer.ts": {
@@ -48,11 +64,17 @@
     }
   },
   "src/db/layoutEventRepository.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
   },
   "src/db/logEventRepository.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
@@ -63,21 +85,33 @@
     }
   },
   "src/db/navigationEventRepository.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
   },
   "src/db/networkEventRepository.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
   },
   "src/db/osEventRepository.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
   },
   "src/db/storageEventRepository.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
     "auto-mobile/no-unknown-cast": {
       "count": 1
     }
@@ -162,6 +196,14 @@
       "count": 1
     }
   },
+  "src/features/navigation/NavigationGraphManager.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    },
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    }
+  },
   "src/features/navigation/NavigationScreenshotManager.ts": {
     "auto-mobile/catch-convention": {
       "count": 3
@@ -172,8 +214,21 @@
       "count": 1
     }
   },
+  "src/features/observe/ScreenshotBackoffScheduler.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    }
+  },
   "src/features/observe/TakeScreenshot.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
     "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/features/observe/android/AndroidCtrlProxyClient.ts": {
+    "@typescript-eslint/no-floating-promises": {
       "count": 1
     }
   },
@@ -183,6 +238,9 @@
     }
   },
   "src/features/observe/ios/IOSCtrlProxyClient.ts": {
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    },
     "auto-mobile/catch-convention": {
       "count": 1
     }
@@ -200,6 +258,11 @@
   "src/features/observe/output/ObserveResultOutput.ts": {
     "auto-mobile/no-unknown-cast": {
       "count": 8
+    }
+  },
+  "src/features/performance/RecompositionTracker.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
     }
   },
   "src/features/record/android/AxisRanges.ts": {
@@ -237,8 +300,18 @@
       "count": 1
     }
   },
+  "src/index.ts": {
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    }
+  },
   "src/server/appFileContract.ts": {
     "auto-mobile/catch-convention": {
+      "count": 1
+    }
+  },
+  "src/server/deviceLabelMapping.ts": {
+    "@typescript-eslint/no-floating-promises": {
       "count": 1
     }
   },
@@ -256,17 +329,28 @@
     }
   },
   "src/server/observeTools.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
     "auto-mobile/catch-convention": {
       "count": 1
     }
   },
   "src/server/toolRegistry.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
     "auto-mobile/catch-convention": {
       "count": 1
     }
   },
   "src/server/toolSchemaHelpers.ts": {
     "auto-mobile/no-unknown-cast": {
+      "count": 2
+    }
+  },
+  "src/utils/AppLifecycleMonitor.ts": {
+    "@typescript-eslint/no-misused-promises": {
       "count": 2
     }
   },
@@ -288,6 +372,11 @@
   "src/utils/IOSCtrlProxyManager.ts": {
     "auto-mobile/catch-convention": {
       "count": 10
+    }
+  },
+  "src/utils/ScreenshotJobTracker.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
     }
   },
   "src/utils/android-cmdline-tools/AndroidBuildToolsLocator.ts": {

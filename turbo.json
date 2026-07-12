@@ -30,7 +30,8 @@
         "test/**",
         "scripts/**/*.ts",
         "eslint.config.mjs",
-        "eslint-suppressions.json"
+        "eslint-suppressions.json",
+        "tsconfig.json"
       ],
       "outputs": [],
       "outputLogs": "new-only",

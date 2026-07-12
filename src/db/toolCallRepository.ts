@@ -42,6 +42,14 @@ export class ToolCallRepository {
     }
   }
 
+  /**
+   * List the distinct tool names invoked in [startTime, endTime], ordered by
+   * first appearance (earliest timestamp, then id).
+   *
+   * The dedup, ordering, and exclusion are pushed into SQL (#3438): the database
+   * returns only the handful of distinct names rather than every tool-call row
+   * in the window, which the caller would otherwise transfer and dedup in JS.
+   */
   async listToolNamesBetween(
     startTime: string,
     endTime: string,
@@ -49,30 +57,23 @@ export class ToolCallRepository {
   ): Promise<string[]> {
     try {
       const db = this.getDb();
-      const rows = await db
+      let query = db
         .selectFrom("tool_calls")
-        .select(["tool_name", "timestamp"])
+        .select("tool_name")
         .where("timestamp", ">=", startTime)
         .where("timestamp", "<=", endTime)
-        .orderBy("timestamp", "asc")
-        .orderBy("id", "asc")
-        .execute();
+        .groupBy("tool_name")
+        // First-appearance order: earliest occurrence of each name, ties broken
+        // on the monotonic id (matches the prior JS timestamp-asc, id-asc dedup).
+        .orderBy(db.fn.min("timestamp"), "asc")
+        .orderBy(db.fn.min("id"), "asc");
 
-      const seen = new Set<string>();
-      const results: string[] = [];
-      const excludeSet = new Set(excludeTools);
-
-      for (const row of rows) {
-        if (excludeSet.has(row.tool_name)) {
-          continue;
-        }
-        if (!seen.has(row.tool_name)) {
-          results.push(row.tool_name);
-          seen.add(row.tool_name);
-        }
+      if (excludeTools.length > 0) {
+        query = query.where("tool_name", "not in", excludeTools);
       }
 
-      return results;
+      const rows = await query.execute();
+      return rows.map(row => row.tool_name);
     } catch (error) {
       logger.warn(`[ToolCallRepository] Failed to list tool calls: ${error}`);
       return [];

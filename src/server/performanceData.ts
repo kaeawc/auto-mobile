@@ -25,6 +25,11 @@ interface PerformanceAuditResponse {
 const auditRepository = new PerformanceAuditRepository();
 const toolCallRepository = new ToolCallRepository();
 
+export interface PerformanceAuditRepositories {
+  auditRepository: PerformanceAuditRepository;
+  toolCallRepository: ToolCallRepository;
+}
+
 function normalizeTimestamp(value?: string | number): string | undefined {
   if (value === undefined || value === null) {
     return undefined;
@@ -54,14 +59,15 @@ function getTimestampRange(timestamps: string[]): { start: string; end: string }
 }
 
 export async function buildPerformanceAuditResponse(
-  args: PerformanceAuditQueryArgs
+  args: PerformanceAuditQueryArgs,
+  repositories: PerformanceAuditRepositories = { auditRepository, toolCallRepository }
 ): Promise<PerformanceAuditResponse> {
   const startTime = normalizeTimestamp(args.startTime);
   const endTime = normalizeTimestamp(args.endTime);
   const limit = args.limit ?? DEFAULT_PERFORMANCE_RESULTS_LIMIT;
   const offset = args.offset ?? DEFAULT_PERFORMANCE_RESULTS_OFFSET;
 
-  const page = await auditRepository.listResults({
+  const page = await repositories.auditRepository.listResults({
     startTime,
     endTime,
     limit,
@@ -71,7 +77,7 @@ export async function buildPerformanceAuditResponse(
 
   const range = getTimestampRange(page.results.map(result => result.timestamp));
   const toolCalls = range
-    ? await toolCallRepository.listToolNamesBetween(range.start, range.end)
+    ? await repositories.toolCallRepository.listToolNamesBetween(range.start, range.end)
     : [];
 
   return {

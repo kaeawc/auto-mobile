@@ -66,7 +66,10 @@ interface TestTimingResponse {
 
 const testExecutionRepository = new TestExecutionRepository();
 
-export async function buildTestTimingResponse(args: TestTimingQueryArgs): Promise<TestTimingResponse> {
+export async function buildTestTimingResponse(
+  args: TestTimingQueryArgs,
+  repository: TestExecutionRepository = testExecutionRepository
+): Promise<TestTimingResponse> {
   const lookbackDays = args.lookbackDays ?? DEFAULT_TEST_TIMING_LOOKBACK_DAYS;
   const limit = args.limit ?? DEFAULT_TEST_TIMING_LIMIT;
   const minSamples = args.minSamples ?? DEFAULT_TEST_TIMING_MIN_SAMPLES;
@@ -93,7 +96,7 @@ export async function buildTestTimingResponse(args: TestTimingQueryArgs): Promis
     sessionUuid: args.sessionUuid,
   };
 
-  const timings = await testExecutionRepository.getTimingStats(options);
+  const timings = await repository.getTimingStats(options);
   const totalSamples = timings.reduce((total, entry) => total + entry.sampleSize, 0);
 
   const filters: Record<string, unknown> = {};

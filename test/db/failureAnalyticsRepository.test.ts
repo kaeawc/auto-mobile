@@ -921,3 +921,79 @@ async function seedFailureOccurrence(
     })
     .execute();
 }
+
+describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
+  let db: Kysely<Database>;
+  let timer: FakeTimer;
+  let repo: FailureAnalyticsRepository;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    timer = new FakeTimer();
+    timer.setCurrentTime(1000);
+    repo = new FailureAnalyticsRepository(timer, db);
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  function input(signature: string): RecordFailureInput {
+    return {
+      type: "crash",
+      signature,
+      title: `title ${signature}`,
+      message: "m",
+      severity: "critical",
+      occurrence: { deviceModel: "Pixel 7", os: "Android 14", appVersion: "1.0.0", sessionId: "s" },
+    };
+  }
+
+  test("pruneToRowCap trims to the cap and sweeps groups left with no occurrences", async () => {
+    // Group "old" gets the two earliest occurrences; group "new" the two latest.
+    timer.setCurrentTime(1000); await repo.recordFailure(input("old"));
+    timer.setCurrentTime(2000); await repo.recordFailure(input("old"));
+    timer.setCurrentTime(3000); await repo.recordFailure(input("new"));
+    timer.setCurrentTime(4000); await repo.recordFailure(input("new"));
+
+    expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(4);
+    expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);
+
+    // Keep only the 2 newest occurrences -> both belong to "new".
+    await (repo as any).pruneToRowCap(2);
+
+    const occurrences = await db
+      .selectFrom("failure_occurrences")
+      .select("timestamp")
+      .orderBy("timestamp", "asc")
+      .execute();
+    expect(occurrences.map(o => Number(o.timestamp))).toEqual([3000, 4000]);
+
+    // "old" is now orphaned and swept; "new" still has occurrences and survives.
+    const groups = await db.selectFrom("failure_groups").select("signature").execute();
+    expect(groups.map(g => g.signature)).toEqual(["new"]);
+  });
+
+  test("a group that keeps at least one occurrence is NOT swept", async () => {
+    timer.setCurrentTime(1000); await repo.recordFailure(input("keep"));
+    timer.setCurrentTime(2000); await repo.recordFailure(input("keep"));
+    timer.setCurrentTime(3000); await repo.recordFailure(input("keep"));
+
+    // Cap of 2 prunes the single oldest occurrence but the group retains two.
+    await (repo as any).pruneToRowCap(2);
+
+    expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(2);
+    const groups = await db.selectFrom("failure_groups").select("signature").execute();
+    expect(groups.map(g => g.signature)).toEqual(["keep"]);
+  });
+
+  test("under the cap, pruneToRowCap deletes nothing and sweeps no groups", async () => {
+    timer.setCurrentTime(1000); await repo.recordFailure(input("a"));
+    timer.setCurrentTime(2000); await repo.recordFailure(input("b"));
+
+    await (repo as any).pruneToRowCap(10);
+
+    expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(2);
+    expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);
+  });
+});

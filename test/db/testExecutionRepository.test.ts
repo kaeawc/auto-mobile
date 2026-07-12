@@ -705,3 +705,70 @@ function chunkArray<T>(values: readonly T[], size: number): T[][] {
   }
   return chunks;
 }
+
+describe("TestExecutionRepository retention (#3440)", () => {
+  let db: Kysely<Database>;
+  let repo: TestExecutionRepository;
+  let timer: FakeTimer;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    timer = new FakeTimer();
+    timer.setCurrentTime(10_000_000_000);
+    repo = new TestExecutionRepository(timer, db);
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  test("pruneToRowCap trims to exactly the cap, keeping the newest rows", async () => {
+    const base = timer.now();
+    for (let i = 1; i <= 12; i++) {
+      await repo.recordExecution(makeExecution({ timestamp: base + i }));
+    }
+
+    await (repo as any).pruneToRowCap(5);
+
+    const rows = await db
+      .selectFrom("test_executions")
+      .select("timestamp")
+      .orderBy("timestamp", "asc")
+      .execute();
+    expect(rows.map(r => Number(r.timestamp))).toEqual([base + 8, base + 9, base + 10, base + 11, base + 12]);
+  });
+
+  test("pruneToRowCap under the cap deletes nothing (count(*) gate short-circuits)", async () => {
+    const base = timer.now();
+    for (let i = 1; i <= 3; i++) {
+      await repo.recordExecution(makeExecution({ timestamp: base + i }));
+    }
+
+    await (repo as any).pruneToRowCap(10);
+
+    const rows = await db.selectFrom("test_executions").selectAll().execute();
+    expect(rows).toHaveLength(3);
+  });
+
+  test("cleanupRetention still runs the age-based delete on every insert", async () => {
+    // A row older than the retention window must be pruned by the cheap,
+    // sargable age-delete that fires on every insert, independent of the
+    // amortized row-cap probe (#3440). Seed the stale row directly so it isn't
+    // removed by the age-delete on its own insert.
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const stale = timer.now() - 200 * MS_PER_DAY;
+    await db
+      .insertInto("test_executions")
+      .values({ test_class: "C", test_method: "m", duration_ms: 1, status: "passed", timestamp: stale })
+      .execute();
+    expect(await db.selectFrom("test_executions").selectAll().execute()).toHaveLength(1);
+
+    // A fresh insert triggers cleanupRetention, whose age-delete removes the
+    // stale row even though the row-cap probe is amortized away.
+    const fresh = timer.now();
+    await repo.recordExecution(makeExecution({ timestamp: fresh }));
+
+    const rows = await db.selectFrom("test_executions").select("timestamp").execute();
+    expect(rows.map(r => Number(r.timestamp))).toEqual([fresh]);
+  });
+});

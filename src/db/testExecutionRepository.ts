@@ -6,12 +6,13 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
+import { createRowCapRetentionState, pruneTableByRowCap, runAmortizedRetention } from "./rowCapRetention";
 
 const TEST_EXECUTION_RETENTION_MAX_ROWS = 10_000;
 export const TEST_EXECUTION_RETENTION_MAX_DAYS = 90;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-let cleanupInProgress = false;
+const retentionState = createRowCapRetentionState();
 
 export type TestExecutionStatus = "passed" | "failed" | "skipped";
 
@@ -356,11 +357,9 @@ export class TestExecutionRepository {
   }
 
   private async cleanupRetention(): Promise<void> {
-    if (cleanupInProgress) {
-      return;
-    }
-
-    cleanupInProgress = true;
+    // The age-based delete is a cheap indexed/sargable range delete, so it runs
+    // on every insert. The row-cap offset probe (LIMIT 1 OFFSET 9999) is the
+    // expensive index walk, so it is amortized behind a count(*) gate (#3440).
     try {
       const db = this.getDb();
       const cutoff = this.timer.now() - TEST_EXECUTION_RETENTION_MAX_DAYS * MS_PER_DAY;
@@ -369,34 +368,20 @@ export class TestExecutionRepository {
         .deleteFrom("test_executions")
         .where("timestamp", "<", cutoff)
         .execute();
-
-      const threshold = await db
-        .selectFrom("test_executions")
-        .select(["id", "timestamp"])
-        .orderBy("timestamp", "desc")
-        .orderBy("id", "desc")
-        .limit(1)
-        .offset(TEST_EXECUTION_RETENTION_MAX_ROWS - 1)
-        .executeTakeFirst();
-
-      if (!threshold) {
-        return;
-      }
-
-      await db
-        .deleteFrom("test_executions")
-        .where(eb => eb.or([
-          eb("timestamp", "<", threshold.timestamp),
-          eb.and([
-            eb("timestamp", "=", threshold.timestamp),
-            eb("id", "<", threshold.id),
-          ]),
-        ]))
-        .execute();
     } catch (error) {
-      logger.warn(`[TestExecutionRepository] Retention cleanup failed: ${error}`);
-    } finally {
-      cleanupInProgress = false;
+      logger.warn(`[TestExecutionRepository] Age-based retention cleanup failed: ${error}`);
+    }
+
+    await runAmortizedRetention(retentionState, () => this.pruneToRowCap());
+  }
+
+  // `maxRows` is injectable so tests can exercise trimming at a small cap without
+  // inserting 10k rows.
+  private async pruneToRowCap(maxRows: number = TEST_EXECUTION_RETENTION_MAX_ROWS): Promise<void> {
+    try {
+      await pruneTableByRowCap(this.getDb(), "test_executions", maxRows);
+    } catch (error) {
+      logger.warn(`[TestExecutionRepository] Row-cap retention cleanup failed: ${error}`);
     }
   }
 

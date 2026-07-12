@@ -13,6 +13,7 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
 import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
+import { createRowCapRetentionState, pruneTableByRowCap, runAmortizedRetention } from "./rowCapRetention";
 import type {
   FailureType,
   FailureSeverity,
@@ -29,7 +30,7 @@ import type {
 } from "../server/failuresResources";
 
 const RETENTION_MAX_ROWS = 10_000;
-let cleanupInProgress = false;
+const retentionState = createRowCapRetentionState();
 
 interface FailureScreenCountRow {
   screenName: string;
@@ -1126,54 +1127,42 @@ export class FailureAnalyticsRepository {
   }
 
   private async cleanupRetention(): Promise<void> {
-    if (cleanupInProgress) {
-      return;
-    }
+    // Amortize the offset probe and orphan sweep: fire at most once per
+    // CLEANUP_CHECK_INTERVAL failures and gate the index walk on a cheap
+    // count(*), instead of running both full-table operations on every ingest
+    // (#3436).
+    await runAmortizedRetention(retentionState, () => this.pruneToRowCap());
+  }
 
-    cleanupInProgress = true;
+  // `maxRows` is injectable so tests can exercise trimming at a small cap without
+  // inserting 10k rows.
+  private async pruneToRowCap(maxRows: number = RETENTION_MAX_ROWS): Promise<void> {
     try {
       const db = this.getDb();
 
-      // Find threshold occurrence
-      const threshold = await db
-        .selectFrom("failure_occurrences")
-        .select(["id", "timestamp"])
-        .orderBy("timestamp", "desc")
-        .limit(1)
-        .offset(RETENTION_MAX_ROWS - 1)
-        .executeTakeFirst();
+      // Delete old occurrences (cascades to screens, captures, notifications).
+      const deleted = await pruneTableByRowCap(db, "failure_occurrences", maxRows);
 
-      if (!threshold) {
-        return;
+      // Only sweep orphan groups when occurrences were actually removed, and
+      // use a correlated NOT EXISTS (index-served, early-exit) rather than
+      // materializing the full DISTINCT set for a NOT IN scan.
+      if (deleted > 0) {
+        await db
+          .deleteFrom("failure_groups")
+          .where(eb =>
+            eb.not(
+              eb.exists(
+                eb
+                  .selectFrom("failure_occurrences")
+                  .select(sql`1`.as("one"))
+                  .whereRef("failure_occurrences.group_id", "=", "failure_groups.id")
+              )
+            )
+          )
+          .execute();
       }
-
-      // Delete old occurrences (cascades to screens, captures, notifications)
-      await db
-        .deleteFrom("failure_occurrences")
-        .where(eb =>
-          eb.or([
-            eb("timestamp", "<", threshold.timestamp),
-            eb.and([
-              eb("timestamp", "=", threshold.timestamp),
-              eb("id", "<", threshold.id),
-            ]),
-          ])
-        )
-        .execute();
-
-      // Clean up groups with no occurrences
-      await db
-        .deleteFrom("failure_groups")
-        .where(
-          "id",
-          "not in",
-          db.selectFrom("failure_occurrences").select("group_id").distinct()
-        )
-        .execute();
     } catch (error) {
       logger.warn(`[FailureAnalyticsRepository] Retention cleanup failed: ${error}`);
-    } finally {
-      cleanupInProgress = false;
     }
   }
 }

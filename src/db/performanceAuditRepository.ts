@@ -4,11 +4,12 @@ import type { Database, NewPerformanceAuditResult } from "./types";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { createRowCapRetentionState, pruneTableByRowCap, runAmortizedRetention } from "./rowCapRetention";
 
 const RETENTION_MAX_ROWS = 10_000;
 const RETENTION_MAX_AGE_HOURS = 24;
 const PRUNING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-let cleanupInProgress = false;
+const retentionState = createRowCapRetentionState();
 let pruningTimer: NodeJS.Timeout | null = null;
 
 export interface PerformanceAuditMetricsRecord {
@@ -302,41 +303,19 @@ export class PerformanceAuditRepository {
   }
 
   private async cleanupRetention(): Promise<void> {
-    if (cleanupInProgress) {
-      return;
-    }
+    // Amortize the offset-probe: fire at most once per CLEANUP_CHECK_INTERVAL
+    // inserts and only walk the index when a cheap count(*) confirms we're over
+    // cap, instead of running LIMIT 1 OFFSET 9999 on every insert (#3435).
+    await runAmortizedRetention(retentionState, () => this.pruneToRowCap());
+  }
 
-    cleanupInProgress = true;
+  // `maxRows` is injectable so tests can exercise trimming at a small cap without
+  // inserting 10k rows.
+  private async pruneToRowCap(maxRows: number = RETENTION_MAX_ROWS): Promise<void> {
     try {
-      const db = this.getDb();
-
-      const threshold = await db
-        .selectFrom("performance_audit_results")
-        .select(["id", "timestamp"])
-        .orderBy("timestamp", "desc")
-        .orderBy("id", "desc")
-        .limit(1)
-        .offset(RETENTION_MAX_ROWS - 1)
-        .executeTakeFirst();
-
-      if (!threshold) {
-        return;
-      }
-
-      await db
-        .deleteFrom("performance_audit_results")
-        .where(eb => eb.or([
-          eb("timestamp", "<", threshold.timestamp),
-          eb.and([
-            eb("timestamp", "=", threshold.timestamp),
-            eb("id", "<", threshold.id),
-          ]),
-        ]))
-        .execute();
+      await pruneTableByRowCap(this.getDb(), "performance_audit_results", maxRows);
     } catch (error) {
       logger.warn(`[PerformanceAuditRepository] Retention cleanup failed: ${error}`);
-    } finally {
-      cleanupInProgress = false;
     }
   }
 

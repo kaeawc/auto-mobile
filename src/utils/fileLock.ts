@@ -2,6 +2,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, w
 import { dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "../daemon/daemonFiles";
 import { logger } from "./logger";
+import { toActionableError } from "../models/ActionableError";
 
 /**
  * The canonical cross-process file-lock primitive (issue #2794).
@@ -256,9 +257,17 @@ function writeExclusiveLockFile(lockFilePath: string, pid: number, ownerToken?: 
     closeSync(fd);
     return true;
   } catch (error) {
-    // `wx` create fails when the lock file already exists (another holder got there
-    // first); false tells the caller to fall through to the read/reclaim path.
-    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
-    return false;
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      // Expected contention: `wx` create fails when the lock file already exists
+      // (another holder got there first). false tells the caller to fall through to
+      // the read/reclaim path.
+      logger.debug(`src/utils/fileLock.ts: lock already held at ${lockFilePath}: ${error}`);
+      return false;
+    }
+    // A genuine IO error (EACCES/ENOSPC/EROFS/ENOTDIR/…) is NOT lock contention.
+    // Returning false would disguise a permissions/disk failure as "another process
+    // holds the lock" and let the caller busy-wait to a misleading migration-lock
+    // timeout. Surface the real cause instead (#3623).
+    throw toActionableError(error, `Failed to create exclusive lock file at ${lockFilePath}`);
   }
 }

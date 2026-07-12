@@ -1,0 +1,13 @@
+{
+  "name": "automobile-webrtc-coordination-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference WHIP ingest / WHEP egress coordination server for AutoMobile WebRTC screen streaming",
+  "type": "module",
+  "scripts": {
+    "start": "bun run server.ts"
+  },
+  "dependencies": {
+    "werift": "^0.23.0"
+  }
+}

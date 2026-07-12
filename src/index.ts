@@ -408,6 +408,7 @@ async function main() {
   const testRecordingSocketServer = await import("./daemon/testRecordingSocketServer");
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
   const appearanceSocketServer = await import("./daemon/appearanceSocketServer");
+  const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
   const appearanceSyncScheduler = await import("./utils/appearance/AppearanceSyncScheduler");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
@@ -421,6 +422,7 @@ async function main() {
   const { startTestRecordingSocketServer, stopTestRecordingSocketServer } = testRecordingSocketServer;
   const { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } = deviceSnapshotSocketServer;
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
+  const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
   setProcessShutdownHandler(async signal => {
     logger.info(`Received ${signal} signal, shutting down`);
@@ -428,6 +430,7 @@ async function main() {
     await stopTestRecordingSocketServer();
     await stopDeviceSnapshotSocketServer();
     await stopAppearanceSocketServer();
+    await stopWebRtcStreamSocketServer();
     stopAppearanceSyncScheduler();
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
     logger.close();
@@ -709,6 +712,7 @@ async function main() {
         await startTestRecordingSocketServer();
         await startDeviceSnapshotSocketServer();
         await startAppearanceSocketServer();
+        await startWebRtcStreamSocketServer();
         startAppearanceSyncScheduler();
       }
 

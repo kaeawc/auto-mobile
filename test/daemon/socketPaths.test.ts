@@ -18,6 +18,7 @@ describe("daemon socket paths", () => {
       "telemetry-push": path.join(os.homedir(), ".auto-mobile", "telemetry-push.sock"),
       "test-recording": path.join(os.homedir(), ".auto-mobile", "test-recording.sock"),
       "video-recording": path.join(os.homedir(), ".auto-mobile", "video-recording.sock"),
+      "webrtc-stream": path.join(os.homedir(), ".auto-mobile", "webrtc-stream.sock"),
     });
   });
 });

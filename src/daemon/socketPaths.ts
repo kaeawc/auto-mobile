@@ -9,6 +9,7 @@ import { getPerformanceStreamSocketPath } from "./performanceStreamSocketServer"
 import { getTelemetryPushSocketPath } from "./telemetryPushSocketServer";
 import { getTestRecordingSocketPath } from "./testRecordingSocketServer";
 import { getVideoRecordingSocketPath } from "./videoRecordingSocketServer";
+import { getWebRtcStreamSocketPath } from "./webrtcStreamSocketServer";
 import type { DaemonSocketPaths } from "./types";
 
 export function getDaemonSocketPaths(): DaemonSocketPaths {
@@ -24,5 +25,6 @@ export function getDaemonSocketPaths(): DaemonSocketPaths {
     "telemetry-push": getTelemetryPushSocketPath(),
     "test-recording": getTestRecordingSocketPath(),
     "video-recording": getVideoRecordingSocketPath(),
+    "webrtc-stream": getWebRtcStreamSocketPath(),
   };
 }

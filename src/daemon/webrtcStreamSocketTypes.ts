@@ -1,0 +1,38 @@
+import type { SocketRequest, SocketResponse } from "./socketServer/index";
+import type { WebRtcStreamDescriptor } from "../features/webrtc";
+
+export type WebRtcStreamAction = "start" | "stop" | "status" | "list";
+
+export interface WebRtcIceServerInput {
+  urls: string;
+  username?: string;
+  credential?: string;
+}
+
+/**
+ * Request to the WebRTC stream socket server. `start` publishes a device's
+ * screen to the coordination server over WHIP; `stop`/`status`/`list` manage and
+ * inspect active streams. All override fields are optional — defaults come from
+ * the `AUTOMOBILE_WEBRTC_*` environment variables.
+ */
+export interface WebRtcStreamSocketRequest extends SocketRequest {
+  action: WebRtcStreamAction;
+  /** Target device id (defaults to the sole connected Android device). */
+  deviceId?: string;
+  platform?: "android" | "ios";
+  streamId?: string;
+  whipEndpoint?: string;
+  whipToken?: string;
+  iceServers?: WebRtcIceServerInput[];
+  bitrateKbps?: number;
+  size?: { width: number; height: number };
+}
+
+export interface WebRtcStreamSocketResponse extends SocketResponse {
+  type: "webrtc_stream_response";
+  action?: WebRtcStreamAction;
+  /** Reconnect descriptor for a single stream (start/stop/status). */
+  stream?: WebRtcStreamDescriptor;
+  /** Reconnect descriptors for all active streams (list). */
+  streams?: WebRtcStreamDescriptor[];
+}

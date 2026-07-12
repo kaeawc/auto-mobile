@@ -55,6 +55,20 @@ class LayoutInspectorState {
   var lastScreenshotTimestamp by mutableStateOf(0L)
     private set
 
+  // Screenshot capture metadata (from the observation stream's screenshot_update message). Absent
+  // (null/false) when the daemon predates this metadata or a field wasn't reported.
+  var screenshotFallback by mutableStateOf(false)
+    private set
+
+  var screenshotFallbackReason by mutableStateOf<String?>(null)
+    private set
+
+  var screenshotFormat by mutableStateOf<String?>(null)
+    private set
+
+  var screenshotCaptureSource by mutableStateOf<String?>(null)
+    private set
+
   // Hierarchy state — stores the full parsed hierarchy with prebuilt indexes
   private var currentParsedHierarchy by mutableStateOf<ParsedHierarchy?>(null)
 
@@ -151,11 +165,24 @@ class LayoutInspectorState {
   }
 
   /** Update screenshot data. Called when receiving screenshot frames from device. */
-  fun updateScreenshot(data: ByteArray, width: Int, height: Int, timestamp: Long) {
+  fun updateScreenshot(
+    data: ByteArray,
+    width: Int,
+    height: Int,
+    timestamp: Long,
+    fallback: Boolean = false,
+    fallbackReason: String? = null,
+    format: String? = null,
+    captureSource: String? = null,
+  ) {
     screenshotData = data
     screenWidth = width
     screenHeight = height
     lastScreenshotTimestamp = timestamp
+    screenshotFallback = fallback
+    screenshotFallbackReason = fallbackReason
+    screenshotFormat = format
+    screenshotCaptureSource = captureSource
   }
 
   /**
@@ -269,6 +296,10 @@ class LayoutInspectorState {
     connectionStatus = ConnectionStatus.Disconnected
     streamingMode = StreamingMode.Paused
     screenshotData = null
+    screenshotFallback = false
+    screenshotFallbackReason = null
+    screenshotFormat = null
+    screenshotCaptureSource = null
     currentParsedHierarchy = null
     rotation = 0
     selectedElementId = null

@@ -152,7 +152,12 @@ export class AndroidH264Source {
     this.segmentCount++;
 
     process.stdout.on("data", (chunk: Buffer) => {
-      this.options.onData(chunk);
+      // Ignore residual output from a superseded/stopped segment: stop()/rotation
+      // clears `current` before the old process finishes exiting, and stale frames
+      // must not be written into a freshly reconnected WHIP session.
+      if (this.current === process) {
+        this.options.onData(chunk);
+      }
     });
     process.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();

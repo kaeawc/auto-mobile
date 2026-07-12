@@ -100,7 +100,13 @@ export class CoordinationServer {
     });
 
     pc.connectionStateChange.subscribe(state => {
-      if (state === "failed" || state === "closed" || state === "disconnected") {
+      // Only tear down the stream if THIS entry is the registered one. Guards a
+      // pre-registration close (e.g. a failed replacement offer for an active id)
+      // from stopping the existing healthy stream that still holds the id.
+      if (
+        (state === "failed" || state === "closed" || state === "disconnected") &&
+        this.streams.get(streamId) === entry
+      ) {
         void this.stopIngest(streamId);
       }
     });

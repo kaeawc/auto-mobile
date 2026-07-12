@@ -134,6 +134,18 @@ describe("AndroidH264Source", () => {
     expect(source.isRunning).toBe(false);
   });
 
+  test("ignores residual stdout from a stopped/superseded segment", async () => {
+    const { source, chunks, processes } = makeSource();
+    await source.start();
+    processes[0].stdout.write(Buffer.from([1, 2, 3]));
+    expect(chunks).toHaveLength(1);
+
+    await source.stop(); // clears `current`
+    // Residual data emitted by the killed process before it finishes exiting.
+    processes[0].stdout.write(Buffer.from([4, 5, 6]));
+    expect(chunks).toHaveLength(1); // not forwarded into a new session
+  });
+
   test("does not rotate when a segment exits with a non-zero code; surfaces onError", async () => {
     let captured: Error | null = null;
     const { source, processes } = makeSource({ onError: error => (captured = error) });

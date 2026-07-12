@@ -23,9 +23,11 @@ export interface DeviceMatcher {
  * Compare two version strings using semver-like logic.
  * Returns negative if a < b, 0 if equal, positive if a > b.
  */
-export function compareVersions(a: string, b: string): number {
-  const partsA = a.split(".").map(Number);
-  const partsB = b.split(".").map(Number);
+function parseVersion(version: string): number[] {
+  return version.split(".").map(Number);
+}
+
+function compareParsedVersions(partsA: number[], partsB: number[]): number {
   const len = Math.max(partsA.length, partsB.length);
   for (let i = 0; i < len; i++) {
     const va = partsA[i] ?? 0;
@@ -33,6 +35,10 @@ export function compareVersions(a: string, b: string): number {
     if (va !== vb) {return va - vb;}
   }
   return 0;
+}
+
+export function compareVersions(a: string, b: string): number {
+  return compareParsedVersions(parseVersion(a), parseVersion(b));
 }
 
 function matchesPlatform<T extends { platform: Platform }>(item: T, platform: Platform): boolean {
@@ -93,13 +99,24 @@ function applyStrategy<T extends { osVersion?: string }>(
 
   switch (strategy) {
     case "LATEST":
-      return [...candidates].sort((a, b) =>
-        compareVersions(b.osVersion ?? "0", a.osVersion ?? "0")
-      )[0];
-    case "MINIMUM":
-      return [...candidates].sort((a, b) =>
-        compareVersions(a.osVersion ?? "0", b.osVersion ?? "0")
-      )[0];
+    case "MINIMUM": {
+      // Parse each candidate's version once (the old comparator re-split every
+      // version on every comparison), then pick the extreme in a single pass.
+      const wantLatest = strategy === "LATEST";
+      const parsed = candidates.map(candidate => ({
+        candidate,
+        version: parseVersion(candidate.osVersion ?? "0")
+      }));
+      let best = parsed[0];
+      for (let i = 1; i < parsed.length; i++) {
+        const cmp = compareParsedVersions(parsed[i].version, best.version);
+        // Keep the first candidate on ties, matching the previous stable sort.
+        if (wantLatest ? cmp > 0 : cmp < 0) {
+          best = parsed[i];
+        }
+      }
+      return best.candidate;
+    }
     case "RANDOM":
       return random.pick(candidates);
   }

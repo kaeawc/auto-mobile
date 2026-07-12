@@ -69,6 +69,24 @@ export function estimateCoverageGain(element: Element): number {
 }
 
 /**
+ * Return the first item with the maximum score in a single pass, computing each
+ * item's score exactly once. Equivalent to a stable descending sort followed by
+ * `[0]`, but O(n) instead of O(n log n) and without mutating the input.
+ */
+function maxByScore<T>(items: T[], score: (item: T) => number): T {
+  let best = items[0];
+  let bestScore = score(best);
+  for (let i = 1; i < items.length; i++) {
+    const itemScore = score(items[i]);
+    if (itemScore > bestScore) {
+      bestScore = itemScore;
+      best = items[i];
+    }
+  }
+  return best;
+}
+
+/**
  * Breadth-first selection: prefer unexplored elements on current screen
  */
 export function selectBreadthFirst(elements: Element[]): Element | null {
@@ -76,12 +94,8 @@ export function selectBreadthFirst(elements: Element[]): Element | null {
     return null;
   }
 
-  // Sort by navigation score
-  const sorted = elements.sort((a, b) => {
-    return calculateNavigationScore(b) - calculateNavigationScore(a);
-  });
-
-  return sorted[0];
+  // Highest navigation score wins; only O(n) scores, no full sort.
+  return maxByScore(elements, calculateNavigationScore);
 }
 
 /**
@@ -95,22 +109,25 @@ export function selectDepthFirst(
     return null;
   }
 
-  // Prefer elements we haven't tried yet, then by score
-  const sorted = elements.sort((a, b) => {
-    const aNever = !exploredElements.has(getElementKey(a));
-    const bNever = !exploredElements.has(getElementKey(b));
-
-    if (aNever && !bNever) {
-      return -1;
+  // Prefer elements we haven't tried yet, then by score. Single pass with each
+  // element's explored-status and score computed once (the old comparator
+  // recomputed getElementKey + calculateNavigationScore O(n log n) times).
+  let best = elements[0];
+  let bestNever = !exploredElements.has(getElementKey(best));
+  let bestScore = calculateNavigationScore(best);
+  for (let i = 1; i < elements.length; i++) {
+    const element = elements[i];
+    const never = !exploredElements.has(getElementKey(element));
+    const score = calculateNavigationScore(element);
+    // Unexplored beats explored; within the same status, higher score wins.
+    if ((never && !bestNever) || (never === bestNever && score > bestScore)) {
+      best = element;
+      bestNever = never;
+      bestScore = score;
     }
-    if (!aNever && bNever) {
-      return 1;
-    }
+  }
 
-    return calculateNavigationScore(b) - calculateNavigationScore(a);
-  });
-
-  return sorted[0];
+  return best;
 }
 
 /**
@@ -161,11 +178,8 @@ export function selectWeighted(
     };
   });
 
-  // Sort by final score
-  scored.sort((a, b) => b.finalScore - a.finalScore);
-
-  // Return selection with stats
-  const selected = scored[0];
+  // Highest final score wins; single pass instead of a full sort for [0].
+  const selected = maxByScore(scored, s => s.finalScore);
   return {
     element: selected.element,
     stats: {

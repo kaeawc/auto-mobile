@@ -570,5 +570,54 @@ describe("FailureEventRepository", () => {
       expect(counts.crashes).toBe(1);
       expect(counts.toolCallFailures).toBe(0);
     });
+
+    // Regression for #3437: the count must reflect the full matching set. The
+    // old implementation fetched rows via the getters (which honor `limit`) and
+    // returned `.length`, so `limit` silently capped the count. A real COUNT(*)
+    // ignores `limit`.
+    test("limit does not cap the count", async () => {
+      for (let i = 0; i < 5; i++) {
+        await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
+      }
+      for (let i = 0; i < 3; i++) {
+        await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
+      }
+      for (let i = 0; i < 4; i++) {
+        await repo.saveToolCall(`tool-${i}`, { status: "failure", errorMessage: "e" });
+      }
+
+      const counts = await repo.getFailureCounts({ limit: 2 });
+      expect(counts).toEqual({ crashes: 5, anrs: 3, toolCallFailures: 4 });
+    });
+
+    // The counts share their filter predicates with the row getters, so they
+    // must agree under the same options (guards against filter drift between the
+    // COUNT(*) queries and getCrashes/getAnrs/getToolCallFailures).
+    test("counts match the filtered row getters under the same options", async () => {
+      await repo.saveCrash(makeCrashEvent({ deviceId: "d-1", packageName: "com.a", timestamp: 1000 }));
+      await repo.saveCrash(makeCrashEvent({ deviceId: "d-1", packageName: "com.b", timestamp: 2000 }));
+      await repo.saveCrash(makeCrashEvent({ deviceId: "d-2", packageName: "com.a", timestamp: 3000 }));
+      await repo.saveAnr(makeAnrEvent({ deviceId: "d-1", timestamp: 1500 }));
+      await repo.saveToolCall("tapOn", { status: "failure", deviceId: "d-1", packageName: "com.a" });
+      await repo.saveToolCall("observe", { status: "failure", deviceId: "d-2", packageName: "com.a" });
+
+      const opts = { deviceId: "d-1", packageName: "com.a" };
+      const counts = await repo.getFailureCounts(opts);
+      const crashes = await repo.getCrashes(opts);
+      const anrs = await repo.getAnrs(opts);
+      const toolCallFailures = await repo.getToolCallFailures(opts);
+
+      expect(counts.crashes).toBe(crashes.length);
+      expect(counts.anrs).toBe(anrs.length);
+      expect(counts.toolCallFailures).toBe(toolCallFailures.length);
+    });
+
+    test("applies tool-call-only filters (packageName) to the tool-call count", async () => {
+      await repo.saveToolCall("tapOn", { status: "failure", packageName: "com.a" });
+      await repo.saveToolCall("observe", { status: "failure", packageName: "com.b" });
+
+      const counts = await repo.getFailureCounts({ packageName: "com.a" });
+      expect(counts.toolCallFailures).toBe(1);
+    });
   });
 });

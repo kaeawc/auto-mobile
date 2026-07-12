@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import type { Kysely, SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
 import type {
   Database,
@@ -207,37 +207,94 @@ export class FailureEventRepository {
     return result.id;
   }
 
+  // Crash and ANR filters. The two tables carry identical filterable columns,
+  // but Kysely's table type parameter is invariant, so a single generic helper
+  // would need `as unknown as` casts (which the repo lints against). Two
+  // concrete helpers keep the row getters and the COUNT(*) queries filtering on
+  // exactly the same predicates without casts. `limit`/`orderBy` are applied by
+  // the caller (a count must not be capped by `limit`).
+  private applyCrashFilters<O>(
+    query: SelectQueryBuilder<Database, "crashes", O>,
+    options: FailureQueryOptions
+  ): SelectQueryBuilder<Database, "crashes", O> {
+    if (options.deviceId) {
+      query = query.where("device_id", "=", options.deviceId);
+    }
+    if (options.packageName) {
+      query = query.where("package_name", "=", options.packageName);
+    }
+    if (options.sessionUuid) {
+      query = query.where("session_uuid", "=", options.sessionUuid);
+    }
+    if (options.navigationNodeId) {
+      query = query.where("navigation_node_id", "=", options.navigationNodeId);
+    }
+    if (options.testExecutionId) {
+      query = query.where("test_execution_id", "=", options.testExecutionId);
+    }
+    if (options.since) {
+      query = query.where("timestamp", ">=", options.since);
+    }
+    return query;
+  }
+
+  private applyAnrFilters<O>(
+    query: SelectQueryBuilder<Database, "anrs", O>,
+    options: FailureQueryOptions
+  ): SelectQueryBuilder<Database, "anrs", O> {
+    if (options.deviceId) {
+      query = query.where("device_id", "=", options.deviceId);
+    }
+    if (options.packageName) {
+      query = query.where("package_name", "=", options.packageName);
+    }
+    if (options.sessionUuid) {
+      query = query.where("session_uuid", "=", options.sessionUuid);
+    }
+    if (options.navigationNodeId) {
+      query = query.where("navigation_node_id", "=", options.navigationNodeId);
+    }
+    if (options.testExecutionId) {
+      query = query.where("test_execution_id", "=", options.testExecutionId);
+    }
+    if (options.since) {
+      query = query.where("timestamp", ">=", options.since);
+    }
+    return query;
+  }
+
+  // Tool-call filters differ from crash/ANR: no navigation/test-execution
+  // columns, and `timestamp` is an ISO string. The `status = 'failure'` gate is
+  // applied by the caller so this helper can serve both selects and counts.
+  private applyToolCallFilters<O>(
+    query: SelectQueryBuilder<Database, "tool_calls", O>,
+    options: FailureQueryOptions
+  ): SelectQueryBuilder<Database, "tool_calls", O> {
+    if (options.deviceId) {
+      query = query.where("device_id", "=", options.deviceId);
+    }
+    if (options.packageName) {
+      query = query.where("package_name", "=", options.packageName);
+    }
+    if (options.sessionUuid) {
+      query = query.where("session_uuid", "=", options.sessionUuid);
+    }
+    if (options.since) {
+      query = query.where("timestamp", ">=", new Date(options.since).toISOString());
+    }
+    return query;
+  }
+
   /**
    * Get crashes matching the query options
    */
   async getCrashes(options: FailureQueryOptions = {}): Promise<Crash[]> {
     const db = this.getDb();
 
-    let query = db.selectFrom("crashes").selectAll().orderBy("timestamp", "desc");
-
-    if (options.deviceId) {
-      query = query.where("device_id", "=", options.deviceId);
-    }
-
-    if (options.packageName) {
-      query = query.where("package_name", "=", options.packageName);
-    }
-
-    if (options.sessionUuid) {
-      query = query.where("session_uuid", "=", options.sessionUuid);
-    }
-
-    if (options.navigationNodeId) {
-      query = query.where("navigation_node_id", "=", options.navigationNodeId);
-    }
-
-    if (options.testExecutionId) {
-      query = query.where("test_execution_id", "=", options.testExecutionId);
-    }
-
-    if (options.since) {
-      query = query.where("timestamp", ">=", options.since);
-    }
+    let query = this.applyCrashFilters(
+      db.selectFrom("crashes").selectAll().orderBy("timestamp", "desc"),
+      options
+    );
 
     if (options.limit) {
       query = query.limit(options.limit);
@@ -252,31 +309,10 @@ export class FailureEventRepository {
   async getAnrs(options: FailureQueryOptions = {}): Promise<Anr[]> {
     const db = this.getDb();
 
-    let query = db.selectFrom("anrs").selectAll().orderBy("timestamp", "desc");
-
-    if (options.deviceId) {
-      query = query.where("device_id", "=", options.deviceId);
-    }
-
-    if (options.packageName) {
-      query = query.where("package_name", "=", options.packageName);
-    }
-
-    if (options.sessionUuid) {
-      query = query.where("session_uuid", "=", options.sessionUuid);
-    }
-
-    if (options.navigationNodeId) {
-      query = query.where("navigation_node_id", "=", options.navigationNodeId);
-    }
-
-    if (options.testExecutionId) {
-      query = query.where("test_execution_id", "=", options.testExecutionId);
-    }
-
-    if (options.since) {
-      query = query.where("timestamp", ">=", options.since);
-    }
+    let query = this.applyAnrFilters(
+      db.selectFrom("anrs").selectAll().orderBy("timestamp", "desc"),
+      options
+    );
 
     if (options.limit) {
       query = query.limit(options.limit);
@@ -291,27 +327,14 @@ export class FailureEventRepository {
   async getToolCallFailures(options: FailureQueryOptions = {}): Promise<ToolCall[]> {
     const db = this.getDb();
 
-    let query = db
-      .selectFrom("tool_calls")
-      .selectAll()
-      .where("status", "=", "failure")
-      .orderBy("timestamp", "desc");
-
-    if (options.deviceId) {
-      query = query.where("device_id", "=", options.deviceId);
-    }
-
-    if (options.packageName) {
-      query = query.where("package_name", "=", options.packageName);
-    }
-
-    if (options.sessionUuid) {
-      query = query.where("session_uuid", "=", options.sessionUuid);
-    }
-
-    if (options.since) {
-      query = query.where("timestamp", ">=", new Date(options.since).toISOString());
-    }
+    let query = this.applyToolCallFilters(
+      db
+        .selectFrom("tool_calls")
+        .selectAll()
+        .where("status", "=", "failure")
+        .orderBy("timestamp", "desc"),
+      options
+    );
 
     if (options.limit) {
       query = query.limit(options.limit);
@@ -460,22 +483,44 @@ export class FailureEventRepository {
   }
 
   /**
-   * Get failure counts by type for a given query
+   * Get failure counts by type for a given query.
+   *
+   * Uses `COUNT(*)` rather than fetching every matching row (with its large
+   * stacktrace/raw_log columns) just to read `.length` (#3437). Counts the full
+   * matching set: `limit` intentionally does not apply here — it would silently
+   * cap the count.
    */
   async getFailureCounts(
     options: FailureQueryOptions = {}
   ): Promise<{ crashes: number; anrs: number; toolCallFailures: number }> {
-    const crashes = await this.getCrashes(options);
-    const anrs = await this.getAnrs(options);
-    const toolCallFailures =
-      options.includeToolCallFailures !== false
-        ? await this.getToolCallFailures(options)
-        : [];
+    const db = this.getDb();
+
+    const crashes = await this.applyCrashFilters(
+      db.selectFrom("crashes").select(db.fn.countAll<number>().as("count")),
+      options
+    ).executeTakeFirstOrThrow();
+
+    const anrs = await this.applyAnrFilters(
+      db.selectFrom("anrs").select(db.fn.countAll<number>().as("count")),
+      options
+    ).executeTakeFirstOrThrow();
+
+    let toolCallFailures = 0;
+    if (options.includeToolCallFailures !== false) {
+      const row = await this.applyToolCallFilters(
+        db
+          .selectFrom("tool_calls")
+          .select(db.fn.countAll<number>().as("count"))
+          .where("status", "=", "failure"),
+        options
+      ).executeTakeFirstOrThrow();
+      toolCallFailures = Number(row.count);
+    }
 
     return {
-      crashes: crashes.length,
-      anrs: anrs.length,
-      toolCallFailures: toolCallFailures.length,
+      crashes: Number(crashes.count),
+      anrs: Number(anrs.count),
+      toolCallFailures,
     };
   }
 }

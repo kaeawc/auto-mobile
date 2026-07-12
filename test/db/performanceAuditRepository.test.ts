@@ -409,3 +409,53 @@ describe("PerformanceAuditRepository", () => {
     });
   });
 });
+
+describe("PerformanceAuditRepository row-cap retention (#3435)", () => {
+  let db: Kysely<Database>;
+  let repo: PerformanceAuditRepository;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    repo = new PerformanceAuditRepository(new FakeTimer(), db);
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  const at = (n: number): string => new Date(Date.UTC(2024, 5, 1, 0, 0, 0, n)).toISOString();
+
+  test("pruneToRowCap trims to exactly the cap, keeping the newest rows", async () => {
+    for (let i = 1; i <= 12; i++) {
+      await repo.recordAudit(makeRecord({ timestamp: at(i) }));
+    }
+
+    await (repo as any).pruneToRowCap(5);
+
+    const rows = await db
+      .selectFrom("performance_audit_results")
+      .select("timestamp")
+      .orderBy("timestamp", "asc")
+      .execute();
+    expect(rows.map(r => r.timestamp)).toEqual([at(8), at(9), at(10), at(11), at(12)]);
+  });
+
+  test("pruneToRowCap under the cap deletes nothing (count(*) gate short-circuits)", async () => {
+    for (let i = 1; i <= 3; i++) {
+      await repo.recordAudit(makeRecord({ timestamp: at(i) }));
+    }
+
+    await (repo as any).pruneToRowCap(10);
+
+    const rows = await db.selectFrom("performance_audit_results").selectAll().execute();
+    expect(rows).toHaveLength(3);
+  });
+
+  test("a single recordAudit does not trip the amortized offset probe", async () => {
+    // One insert must not trigger a trim (the gate fires only every N inserts);
+    // the public path stays output-preserving under the cap.
+    await repo.recordAudit(makeRecord({ timestamp: at(1) }));
+    const rows = await db.selectFrom("performance_audit_results").selectAll().execute();
+    expect(rows).toHaveLength(1);
+  });
+});

@@ -7,8 +7,8 @@ src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 src/daemon/performanceStreamSocketServer.ts: error TS2559: Type 'PerformanceStreamSocketRequest' has no properties in common with type 'SocketRequest'.
 src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
 src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
-src/daemon/telemetryPushSocketServer.ts: error TS2339: Property 'sessionId' does not exist on type '{ type: "crash" | "anr" | "tool_failure"; title: string; severity: "critical" | "high" | "medium" | "low"; stack_trace_json: string | null; timestamp: number; occurrenceId: string; groupId: string; deviceId: string | null; screen: string | null; }'.
-src/daemon/telemetryPushSocketServer.ts: error TS2345: Argument of type '"crash" | "anr" | "nonfatal"' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups" | "failure_occurrences", "failure_groups.type">'.
+src/daemon/telemetryPushSocketServer.ts: error TS2339: Property 'sessionId' does not exist on type '{ timestamp: number; type: "crash" | "anr" | "tool_failure"; title: string; severity: "critical" | "high" | "medium" | "low"; stack_trace_json: string | null; occurrenceId: string; groupId: string; deviceId: string | null; screen: string | null; }'.
+src/daemon/telemetryPushSocketServer.ts: error TS2345: Argument of type '"crash" | "anr" | "nonfatal"' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_occurrences" | "failure_groups", "failure_groups.type">'.
 src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
 src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
 src/daemon/testRecordingSocketServer.ts: error TS2559: Type 'TestRecordingCommand' has no properties in common with type 'SocketRequest'.
@@ -278,7 +278,7 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 24,28,49 :: src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 # swap-fp: 25 :: src/daemon/client.ts: error TS2345: Argument of type 'string | NonSharedBuffer' is not assignable to parameter of type 'Buffer<ArrayBufferLike>'.
 # swap-fp: 25,27 :: src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
-# swap-fp: 26 :: src/daemon/telemetryPushSocketServer.ts: error TS2339: Property 'sessionId' does not exist on type '{ type: "crash" | "anr" | "tool_failure"; title: string; severity: "critical" | "high" | "medium" | "low"; stack_trace_json: string | null; timestamp: number; occurrenceId: string; groupId: string; deviceId: string | null; screen: string | null; }'.
+# swap-fp: 26 :: src/daemon/telemetryPushSocketServer.ts: error TS2339: Property 'sessionId' does not exist on type '{ timestamp: number; type: "crash" | "anr" | "tool_failure"; title: string; severity: "critical" | "high" | "medium" | "low"; stack_trace_json: string | null; occurrenceId: string; groupId: string; deviceId: string | null; screen: string | null; }'.
 # swap-fp: 27 :: src/db/migrator.ts: error TS7006: Parameter 'index' implicitly has an 'any' type.
 # swap-fp: 27,45 :: src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 28 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'DataTypeExpression'.
@@ -330,7 +330,7 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 45,46,46 :: src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 # swap-fp: 45,47 :: src/features/video/PlatformVideoCaptureBackend.ts: error TS2339: Property 'getBaseCommandParts' does not exist on type 'AdbExecutor'.
 # swap-fp: 45,47,53 :: src/features/observe/GetScreenSize.ts: error TS2345: Argument of type 'import("src/models/ScreenSize").ScreenSize' is not assignable to parameter of type 'import("src/features/observe/interfaces/ScreenSize").ScreenSize'.
-# swap-fp: 46 :: src/daemon/telemetryPushSocketServer.ts: error TS2345: Argument of type '"crash" | "anr" | "nonfatal"' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups" | "failure_occurrences", "failure_groups.type">'.
+# swap-fp: 46 :: src/daemon/telemetryPushSocketServer.ts: error TS2345: Argument of type '"crash" | "anr" | "nonfatal"' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_occurrences" | "failure_groups", "failure_groups.type">'.
 # swap-fp: 46 :: src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 46 :: src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
 # swap-fp: 46,63 :: src/features/action/InstallApp.ts: error TS2554: Expected 0 arguments, but got 1.

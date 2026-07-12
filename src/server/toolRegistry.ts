@@ -521,17 +521,19 @@ export class DefaultAuditRunner implements AuditRunner {
   }
 }
 
+// UI interaction tools that may cause navigation. Excludes app lifecycle tools
+// (launchApp, terminateApp, homeScreen, etc.) because they don't represent
+// replayable in-app navigation paths. Module-level Set so record() does O(1)
+// membership checks without re-allocating the list on every tool call.
+export const NAVIGATION_RELEVANT_TOOLS = new Set([
+  "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
+  "pressButton", "inputText", "clearText", "imeAction"
+]);
+
 class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   record(name: string, args: any, device: BootedDevice | undefined, sessionUuid: string | undefined): void {
     // Record tool call for navigation graph correlation before the handler mutates UI state.
-    // Only record UI interaction tools that may cause navigation. Excludes app lifecycle
-    // tools (launchApp, terminateApp, homeScreen, etc.) because they don't represent
-    // replayable in-app navigation paths.
-    const navigationRelevantTools = [
-      "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
-      "pressButton", "inputText", "clearText", "imeAction"
-    ];
-    if (!navigationRelevantTools.includes(name)) {
+    if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
       return;
     }
 

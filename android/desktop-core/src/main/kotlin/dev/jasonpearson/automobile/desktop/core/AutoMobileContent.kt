@@ -806,7 +806,8 @@ fun AutoMobileContent(
           LOG.info("Observation stream socket missing, daemon appears down - skipping reconnect")
         } else {
           LOG.info("Observation stream disconnected, attempting reconnect for device: $deviceId")
-          // connect() re-applies the cadence last set via setCadence, preserving it across reconnects.
+          // connect() re-applies the cadence last set via setCadence, preserving it across
+          // reconnects.
           client.connect(deviceId = deviceId)
         }
       }

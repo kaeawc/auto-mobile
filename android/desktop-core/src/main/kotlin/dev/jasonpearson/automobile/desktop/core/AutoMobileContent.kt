@@ -83,6 +83,7 @@ import dev.jasonpearson.automobile.desktop.core.failures.StreamingFailuresDataSo
 import dev.jasonpearson.automobile.desktop.core.failures.TimeAggregation
 import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
+import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotMetadataOverlay
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
 import dev.jasonpearson.automobile.desktop.core.layout.rememberLayoutInspectorState
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -680,6 +681,10 @@ fun AutoMobileContent(
           width = update.screenWidth,
           height = update.screenHeight,
           timestamp = update.timestamp,
+          fallback = update.screenshotFallback ?: false,
+          fallbackReason = update.screenshotFallbackReason,
+          format = update.screenshotFormat,
+          captureSource = update.screenshotCaptureSource,
         )
       }
     }
@@ -1292,6 +1297,14 @@ fun AutoMobileContent(
               socketExists = true,
               elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
               modifier = Modifier.fillMaxSize(),
+            )
+
+            ScreenshotMetadataOverlay(
+              fallback = layoutInspectorState.screenshotFallback,
+              fallbackReason = layoutInspectorState.screenshotFallbackReason,
+              format = layoutInspectorState.screenshotFormat,
+              captureSource = layoutInspectorState.screenshotCaptureSource,
+              modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
             )
           }
         } else {

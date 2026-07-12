@@ -124,10 +124,15 @@ fun findNonCompliantTapTargets(
  */
 fun getPathFromParentMap(parentMap: Map<String, String>, targetId: String): List<String> {
   val path = mutableListOf(targetId)
+  val visited = mutableSetOf(targetId)
   var current = targetId
-  while (parentMap.containsKey(current)) {
-    current = parentMap[current]!!
-    path.add(0, current)
+  while (true) {
+    val parent = parentMap[current] ?: break
+    // A malformed/corrupted hierarchy can contain a self-parent or a cycle; stop on the first
+    // revisit so this terminates instead of looping forever and growing path until OOM (#3610).
+    if (!visited.add(parent)) break
+    path.add(0, parent)
+    current = parent
   }
   return path
 }

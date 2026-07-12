@@ -109,6 +109,40 @@ class HierarchyPerformanceTest {
   }
 
   @Test
+  fun `getPathFromParentMap terminates on a self-parent entry`() {
+    // Malformed input: an element that is its own parent used to loop forever (#3610).
+    val parentMap = mapOf("a" to "a")
+
+    val path = getPathFromParentMap(parentMap, "a")
+
+    assertEquals(listOf("a"), path)
+  }
+
+  @Test
+  fun `getPathFromParentMap terminates on a two-node cycle`() {
+    // Malformed input: a -> b -> a used to loop forever and grow the path until OOM (#3610).
+    val parentMap = mapOf("a" to "b", "b" to "a")
+
+    val path = getPathFromParentMap(parentMap, "a")
+
+    // Stops on the first revisit; each id appears at most once and the target is included.
+    assertEquals(path.toSet().size, path.size, "no id should be repeated")
+    assertTrue(path.contains("a"), "the target should be present")
+    assertTrue(path.size <= parentMap.size + 1, "path is bounded by the number of distinct ids")
+  }
+
+  @Test
+  fun `getPathFromParentMap terminates on a longer cycle`() {
+    // a -> b -> c -> a: still a cycle, just longer.
+    val parentMap = mapOf("a" to "b", "b" to "c", "c" to "a")
+
+    val path = getPathFromParentMap(parentMap, "a")
+
+    assertEquals(path.toSet().size, path.size, "no id should be repeated")
+    assertEquals("a", path.last(), "target remains the last element")
+  }
+
+  @Test
   fun `computeChangedElements detects new elements`() {
     val state = LayoutInspectorState()
     val root1 = buildTree(depth = 2, branching = 2)

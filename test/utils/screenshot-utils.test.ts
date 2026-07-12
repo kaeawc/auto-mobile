@@ -149,18 +149,18 @@ describe("ScreenshotUtils", function() {
       expect(files).toHaveLength(0);
     });
 
-    test("should extract hash from filename correctly", function() {
-      const timestamp1 = ScreenshotUtils.extractHashFromFilename("/path/to/screenshot_1234567890.png");
-      const timestamp2 = ScreenshotUtils.extractHashFromFilename("hierarchy_9876543210.json");
-      const legacyHash = ScreenshotUtils.extractHashFromFilename("old_format_hash_789.webp");
+    test("should extract timestamp from filename correctly", function() {
+      const timestamp1 = ScreenshotUtils.extractTimestampFromFilename("/path/to/screenshot_1234567890.png");
+      const timestamp2 = ScreenshotUtils.extractTimestampFromFilename("hierarchy_9876543210.json");
+      const legacyTimestamp = ScreenshotUtils.extractTimestampFromFilename("old_format_hash_789.webp");
 
       expect(timestamp1).toBe("1234567890");
       expect(timestamp2).toBe("9876543210");
-      expect(legacyHash).toBe("789");
+      expect(legacyTimestamp).toBe("789");
 
       // Test invalid filename
       expect(() => {
-        ScreenshotUtils.extractHashFromFilename("notimestamp.png");
+        ScreenshotUtils.extractTimestampFromFilename("notimestamp.png");
       }).toThrow("Unable to extract timestamp from filename");
     });
 

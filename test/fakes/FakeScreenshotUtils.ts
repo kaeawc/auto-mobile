@@ -25,7 +25,7 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     similarity: 0,
     matchFound: false
   };
-  private extractHashResult: string = "1234567890";
+  private extractTimestampResult: string = "1234567890";
   private generateImageHashResult: string = "abcdef0123456789abcdef0123456789";
 
   // Call tracking
@@ -109,10 +109,10 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   }
 
   /**
-   * Configure extract hash result
+   * Configure extract timestamp result
    */
-  setExtractHashResult(hash: string): void {
-    this.extractHashResult = hash;
+  setExtractTimestampResult(timestamp: string): void {
+    this.extractTimestampResult = timestamp;
   }
 
   /**
@@ -303,9 +303,9 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     return this.findSimilarScreenshotsResult;
   }
 
-  extractHashFromFilename(filePath: string): string {
-    this.recordCall("extractHashFromFilename", { filePath });
-    return this.extractHashResult;
+  extractTimestampFromFilename(filePath: string): string {
+    this.recordCall("extractTimestampFromFilename", { filePath });
+    return this.extractTimestampResult;
   }
 
   generateImageHash(buffer: Buffer): string {

@@ -211,6 +211,35 @@ describe("WebpBinaryResolver", () => {
     expect(processExecutor.wasCommandExecuted("tar -xzf")).toBe(false);
   });
 
+  test("a failed provision is not cached — the .finally clears the in-flight map so a retry re-downloads (#3623)", async () => {
+    const root = await makeTempDir();
+    const cacheDir = path.join(root, "cache");
+    const downloader = new CountingFileDownloader();
+    const processExecutor = new FakeProcessExecutor();
+    // A mismatching checksum makes every provisionArchive attempt throw.
+    const checksumCalculator = fakeArchiveChecksumCalculator("0".repeat(64));
+
+    const resolver = new WebpBinaryResolver({
+      projectRoot: root,
+      cacheDir,
+      platform: "darwin",
+      arch: "arm64",
+      env: { PATH: "" },
+      fileDownloader: downloader,
+      processExecutor,
+      checksumCalculator,
+    });
+
+    await resolver.resolveCwebp().catch(() => undefined);
+    await resolver.resolveCwebp().catch(() => undefined);
+
+    // If provisionArchiveOnce's .finally didn't run after the rejection, the second
+    // attempt would await the cached rejected promise and skip the download. Two
+    // downloads proves the failed entry was cleared (removing the no-op .catch left
+    // that cleanup intact).
+    expect(downloader.downloadedUrls).toHaveLength(2);
+  });
+
   test("provisions the shared off-platform archive once when resolving both binaries", async () => {
     const root = await makeTempDir();
     const cacheDir = path.join(root, "cache");

@@ -38,6 +38,20 @@ describe("fileLock primitive", () => {
     expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(false);
   });
 
+  test("surfaces a genuine IO error instead of reporting contention (#3623)", () => {
+    // Make an intermediate path component a regular file so the lock's parent can't
+    // be created: mkdirSync fails with a non-EEXIST errno (ENOTDIR), i.e. a real IO
+    // error rather than lock contention. The old uniform catch swallowed this as
+    // `return false`, disguising it as "another holder owns the lock".
+    const filePath = join(dir, "not-a-dir");
+    writeFileSync(filePath, "x");
+    const badLockPath = join(filePath, "sub", "child.lock");
+
+    expect(() => tryAcquireExclusiveLock(badLockPath, { pid: 100, isProcessRunning: () => true })).toThrow(
+      /Failed to create exclusive lock file/
+    );
+  });
+
   test("treats an unreadable PID as held", () => {
     writeFileSync(lockPath, "not-a-pid");
     expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(false);

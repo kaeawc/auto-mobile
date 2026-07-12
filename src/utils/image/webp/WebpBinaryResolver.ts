@@ -163,9 +163,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       return;
     }
 
-    const provision = this.provisionArchive(archive).catch(error => {
-      throw error;
-    }).finally(() => {
+    const provision = this.provisionArchive(archive).finally(() => {
       archiveProvisioningByPath.delete(archivePath);
     });
     archiveProvisioningByPath.set(archivePath, provision);

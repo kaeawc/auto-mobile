@@ -173,6 +173,30 @@ describe("AndroidH264Source", () => {
     await source.stop();
   });
 
+  test("stop during adb setup aborts the spawn (no orphan process)", async () => {
+    let resolveAdb: (() => void) | undefined;
+    const adbFactory = {
+      create() {
+        return {
+          getAdbPathOnly: () =>
+            new Promise<string>(resolve => {
+              resolveAdb = () => resolve("adb");
+            }),
+          executeCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+        } as unknown as ReturnType<AdbClientFactory["create"]>;
+      },
+    } as unknown as AdbClientFactory;
+
+    const { source, processes } = makeSource({ adbFactory });
+    const startPromise = source.start(); // suspends on getAdbPathOnly
+    await source.stop(); // running=false while current is still null
+    resolveAdb!(); // startSegment resumes after setup
+    await startPromise;
+
+    expect(processes).toHaveLength(0); // no screenrecord spawned
+    expect(source.isRunning).toBe(false);
+  });
+
   test("surfaces a fatal error when a segment process errors", async () => {
     let captured: Error | null = null;
     const { source, processes } = makeSource({ onError: error => (captured = error) });

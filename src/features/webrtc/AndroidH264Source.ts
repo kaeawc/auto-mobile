@@ -125,6 +125,12 @@ export class AndroidH264Source {
   private async startSegment(): Promise<void> {
     const adb = this.adbFactory.create(this.options.device);
     const adbPath = await adb.getAdbPathOnly();
+    // stop() may have run while we awaited adb setup; it returns early when
+    // `current` is still null, so spawning now would leak a screenrecord process
+    // that no later stop() would kill.
+    if (!this.running) {
+      return;
+    }
     const baseArgs = this.options.device.deviceId ? ["-s", this.options.device.deviceId] : [];
 
     const args = [

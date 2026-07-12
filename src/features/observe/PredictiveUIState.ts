@@ -7,9 +7,9 @@ import {
   PredictionTarget,
   Predictions
 } from "../../models";
-import { NavigationEdge, NavigationGraphManager, UIState } from "../navigation/NavigationGraphManager";
+import { NavigationEdge, NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { PredictionHistoryRepository } from "../../db/predictionHistoryRepository";
-import { normalizeToolArgs } from "../../utils/predictionUtils";
+import { normalizeToolArgs, normalizeIdentifier } from "../../utils/predictionUtils";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
 interface InteractableElement {
@@ -19,6 +19,115 @@ interface InteractableElement {
   resourceId?: string;
   clickable: boolean;
   scrollable: boolean;
+}
+
+interface IndexedEdge {
+  edge: NavigationEdge;
+  index: number;
+}
+
+/**
+ * Pre-normalized lookup index over a screen's actionable edges (issue #3428).
+ *
+ * The old `findMatchingEdge` re-ran `.trim().toLowerCase()` on every edge's args
+ * for every interactable (O(interactables x edges) normalizations) and linearly
+ * scanned all edges per interactable. This normalizes each edge exactly once at
+ * construction and resolves each interactable via a constant number of Map
+ * lookups: O(I x E) -> O(I + E).
+ *
+ * `findMatch` returns the edge with the lowest original index among all matching
+ * paths, which is identical to the previous "first edge in edge order that
+ * matches by any path" behavior.
+ */
+export class EdgeMatchIndex {
+  // tapOn: keyed by normalized args.text / element id.
+  private readonly tapByText = new Map<string, IndexedEdge>();
+  private readonly tapById = new Map<string, IndexedEdge>();
+  // swipeOn: keyed by normalized container text / id / content-desc.
+  private readonly swipeByText = new Map<string, IndexedEdge>();
+  private readonly swipeById = new Map<string, IndexedEdge>();
+  private readonly swipeByDesc = new Map<string, IndexedEdge>();
+
+  constructor(edges: NavigationEdge[]) {
+    edges.forEach((edge, index) => {
+      const toolName = edge.interaction?.toolName;
+      if (toolName === "tapOn") {
+        this.indexTapEdge(edge, index);
+      } else if (toolName === "swipeOn") {
+        this.indexSwipeEdge(edge, index);
+      }
+    });
+  }
+
+  private indexTapEdge(edge: NavigationEdge, index: number): void {
+    const args = edge.interaction?.args;
+    this.addKey(this.tapByText, normalizeIdentifier(args?.text), edge, index);
+    this.addKey(this.tapById, normalizeIdentifier(args?.elementId ?? args?.id), edge, index);
+  }
+
+  private indexSwipeEdge(edge: NavigationEdge, index: number): void {
+    const args = edge.interaction?.args;
+    const container = args?.container || edge.interaction?.uiState?.scrollPosition?.container;
+    if (!container) {
+      return;
+    }
+    this.addKey(this.swipeByText, normalizeIdentifier(container.text), edge, index);
+    this.addKey(this.swipeById, normalizeIdentifier(container.elementId || container.resourceId), edge, index);
+    this.addKey(this.swipeByDesc, normalizeIdentifier(container.contentDesc), edge, index);
+  }
+
+  // First edge wins for a given key (preserves edge-order tie-breaking); empty
+  // keys are skipped, matching the old `if (!normalized) return false` guards.
+  private addKey(map: Map<string, IndexedEdge>, key: string | undefined, edge: NavigationEdge, index: number): void {
+    if (!key || map.has(key)) {
+      return;
+    }
+    map.set(key, { edge, index });
+  }
+
+  findMatch(interactable: InteractableElement): NavigationEdge | undefined {
+    const text = normalizeIdentifier(interactable.text);
+    const contentDesc = normalizeIdentifier(interactable.contentDesc);
+    const resourceId = normalizeIdentifier(interactable.resourceId);
+
+    let best: IndexedEdge | undefined;
+    const consider = (candidate?: IndexedEdge): void => {
+      if (candidate && (!best || candidate.index < best.index)) {
+        best = candidate;
+      }
+    };
+
+    if (interactable.clickable) {
+      // tapOn: args.text matches the interactable's text or content-desc; an
+      // element id matches its resource id.
+      if (text) {
+        consider(this.tapByText.get(text));
+      }
+      if (contentDesc) {
+        consider(this.tapByText.get(contentDesc));
+      }
+      if (resourceId) {
+        consider(this.tapById.get(resourceId));
+      }
+    }
+
+    if (interactable.scrollable) {
+      // swipeOn: container text matches text/content-desc; container id matches
+      // resource id; container content-desc matches content-desc.
+      if (text) {
+        consider(this.swipeByText.get(text));
+      }
+      if (contentDesc) {
+        consider(this.swipeByText.get(contentDesc));
+        consider(this.swipeByDesc.get(contentDesc));
+      }
+      if (resourceId) {
+        consider(this.swipeById.get(resourceId));
+      }
+    }
+
+    return best?.edge;
+  }
 }
 
 export class PredictiveUIState implements PredictiveUIStateInterface {
@@ -68,8 +177,10 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
       transitionStatsByKey.set(key, stat);
     }
 
+    const edgeIndex = new EdgeMatchIndex(actionableEdges);
+
     for (const interactable of interactables) {
-      const match = this.findMatchingEdge(interactable, actionableEdges);
+      const match = edgeIndex.findMatch(interactable);
       if (!match || !match.interaction) {
         continue;
       }
@@ -151,93 +262,6 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
     }
 
     return interactables;
-  }
-
-  private findMatchingEdge(
-    interactable: InteractableElement,
-    edges: NavigationEdge[]
-  ): NavigationEdge | undefined {
-    for (const edge of edges) {
-      const toolName = edge.interaction?.toolName;
-      const args = edge.interaction?.args;
-      const uiState = edge.interaction?.uiState;
-
-      if (toolName === "tapOn" && interactable.clickable) {
-        if (this.matchesTapOn(interactable, args)) {
-          return edge;
-        }
-      }
-
-      if (toolName === "swipeOn" && interactable.scrollable) {
-        if (this.matchesSwipeOn(interactable, args, uiState)) {
-          return edge;
-        }
-      }
-    }
-
-    return undefined;
-  }
-
-  private matchesTapOn(interactable: InteractableElement, args?: Record<string, any>): boolean {
-    if (!args) {
-      return false;
-    }
-
-    const hasTextMatch = this.matchesText(args.text, interactable);
-    const elementId = args.elementId ?? args.id;
-    const hasIdMatch = this.matchesResourceId(elementId, interactable);
-
-    return (args.text && hasTextMatch) || (elementId && hasIdMatch);
-  }
-
-  private matchesSwipeOn(
-    interactable: InteractableElement,
-    args?: Record<string, any>,
-    uiState?: UIState
-  ): boolean {
-    const container = args?.container || uiState?.scrollPosition?.container;
-    if (!container) {
-      return false;
-    }
-
-    const containerText = container.text;
-    const containerId = container.elementId || container.resourceId;
-    const containerDesc = container.contentDesc;
-
-    return (
-      this.matchesText(containerText, interactable) ||
-      this.matchesResourceId(containerId, interactable) ||
-      this.matchesContentDesc(containerDesc, interactable)
-    );
-  }
-
-  private matchesText(text: string | undefined, interactable: InteractableElement): boolean {
-    const normalized = this.normalizeValue(text);
-    if (!normalized) {
-      return false;
-    }
-    return normalized === this.normalizeValue(interactable.text)
-      || normalized === this.normalizeValue(interactable.contentDesc);
-  }
-
-  private matchesResourceId(resourceId: string | undefined, interactable: InteractableElement): boolean {
-    const normalized = this.normalizeValue(resourceId);
-    if (!normalized) {
-      return false;
-    }
-    return normalized === this.normalizeValue(interactable.resourceId);
-  }
-
-  private matchesContentDesc(contentDesc: string | undefined, interactable: InteractableElement): boolean {
-    const normalized = this.normalizeValue(contentDesc);
-    if (!normalized) {
-      return false;
-    }
-    return normalized === this.normalizeValue(interactable.contentDesc);
-  }
-
-  private normalizeValue(value: string | undefined): string | undefined {
-    return value?.trim().toLowerCase();
   }
 
   private buildTarget(edge: NavigationEdge, interactable: InteractableElement): PredictionTarget | null {

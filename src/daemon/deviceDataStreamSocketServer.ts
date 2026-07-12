@@ -455,7 +455,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Override processLine to handle additional commands and the onSubscriberConnected callback.
    */
   protected async processLine(socket: Socket, line: string): Promise<void> {
-    const request = this.parseJson<{ id?: string; command: string; deviceId?: string; appId?: string }>(line);
+    const request = this.parseJson<{
+      id?: string;
+      command: string;
+      deviceId?: string;
+      appId?: string;
+      screenshotIntervalMs?: unknown;
+      hierarchyIntervalMs?: unknown;
+    }>(line);
 
     if (!request) {
       const errorResponse: SubscriptionResponse = {
@@ -538,6 +545,29 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     if (request.command === "unsubscribe") {
       const filter = this.findFilterForSocket(socket);
       await super.processLine(socket, line);
+      if (filter) {
+        this.notifyScreenshotCadenceChanged(filter.deviceId);
+        this.notifyHierarchyCadenceChanged(filter.deviceId);
+      }
+      return;
+    }
+
+    // Update the requested cadence for an existing subscription in place, without a
+    // resubscribe (which would leak a duplicate subscriber and re-trigger backfill). Lets a
+    // subscriber raise the cadence while it is actively viewing the device and relax it when
+    // backgrounded. Unknown to older daemons, which reply with a benign "unknown command" error.
+    if (request.command === "update_cadence") {
+      const filter = this.findFilterForSocket(socket);
+      if (filter) {
+        filter.screenshotIntervalMs = this.parseScreenshotIntervalMs(request.screenshotIntervalMs);
+        filter.hierarchyIntervalMs = this.parseHierarchyIntervalMs(request.hierarchyIntervalMs);
+      }
+      const response: SubscriptionResponse = {
+        id: request.id,
+        type: "subscription_response",
+        success: true,
+      };
+      this.sendJson(socket, response);
       if (filter) {
         this.notifyScreenshotCadenceChanged(filter.deviceId);
         this.notifyHierarchyCadenceChanged(filter.deviceId);

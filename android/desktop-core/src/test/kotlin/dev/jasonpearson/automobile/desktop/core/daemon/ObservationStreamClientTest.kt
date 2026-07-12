@@ -48,6 +48,25 @@ class ObservationStreamClientTest {
   }
 
   @Test
+  fun `update_cadence request carries the changed cadence and omits unset fields`() {
+    // setCadence(screenshotIntervalMs = X) sends an update_cadence command; the hierarchy field is
+    // omitted so the daemon relaxes it back to its per-platform default.
+    val request =
+      StreamRequest(
+        id = "req-3",
+        command = "update_cadence",
+        deviceId = "emulator-5554",
+        screenshotIntervalMs = 500L,
+      )
+
+    val encoded = wireJson.encodeToString(StreamRequest.serializer(), request)
+
+    assertTrue(encoded.contains("\"command\":\"update_cadence\""), encoded)
+    assertTrue(encoded.contains("\"screenshotIntervalMs\":500"), encoded)
+    assertFalse(encoded.contains("hierarchyIntervalMs"), encoded)
+  }
+
+  @Test
   fun `emits screenshot metadata when provided by stream`() = runTest {
     val client = ObservationStreamClient()
 

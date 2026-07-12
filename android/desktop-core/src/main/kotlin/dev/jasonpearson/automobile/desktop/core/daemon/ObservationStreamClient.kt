@@ -85,21 +85,19 @@ class ObservationStreamClient {
   private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
   val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+  // Requested observation cadence, remembered so it is re-applied on every (re)subscribe (so the
+  // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
+  private var subscribedDeviceId: String? = null
+  private var requestedScreenshotIntervalMs: Long? = null
+  private var requestedHierarchyIntervalMs: Long? = null
+
   /**
-   * Connect to the observation stream socket and subscribe to updates.
+   * Connect to the observation stream socket and subscribe to updates. Any cadence configured via
+   * [setCadence] is sent on the subscribe request and re-applied automatically on reconnect.
    *
    * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
-   * @param screenshotIntervalMs Optional requested screenshot cadence in milliseconds. When null,
-   *   the daemon applies its default low-cost keepalive cadence. The daemon clamps the value to its
-   *   supported range and resolves the fastest cadence across all subscribers for the device.
-   * @param hierarchyIntervalMs Optional requested view-hierarchy polling cadence in milliseconds.
-   *   When null, the daemon applies its default cadence.
    */
-  fun connect(
-    deviceId: String? = null,
-    screenshotIntervalMs: Long? = null,
-    hierarchyIntervalMs: Long? = null,
-  ) {
+  fun connect(deviceId: String? = null) {
     if (_connectionState.value.isConnected) {
       log.info("Already connected to observation stream")
       return
@@ -132,8 +130,9 @@ class ObservationStreamClient {
       _connectionState.update { ConnectionState.Connected() }
       log.info("Connected to observation stream")
 
-      // Send subscribe request
-      subscribe(deviceId, screenshotIntervalMs, hierarchyIntervalMs)
+      // Send subscribe request (carries any cadence configured via setCadence)
+      subscribedDeviceId = deviceId
+      subscribe(deviceId)
 
       // Start reading messages
       scope.launch {
@@ -183,18 +182,14 @@ class ObservationStreamClient {
     scope.coroutineContext[Job]?.cancel()
   }
 
-  private fun subscribe(
-    deviceId: String?,
-    screenshotIntervalMs: Long? = null,
-    hierarchyIntervalMs: Long? = null,
-  ) {
+  private fun subscribe(deviceId: String?) {
     val request =
       StreamRequest(
         id = UUID.randomUUID().toString(),
         command = "subscribe",
         deviceId = deviceId,
-        screenshotIntervalMs = screenshotIntervalMs,
-        hierarchyIntervalMs = hierarchyIntervalMs,
+        screenshotIntervalMs = requestedScreenshotIntervalMs,
+        hierarchyIntervalMs = requestedHierarchyIntervalMs,
       )
 
     if (sendRequest(request)) {
@@ -206,6 +201,40 @@ class ObservationStreamClient {
         }
       }
       log.info("Subscribed to observation stream (device: ${deviceId ?: "all"})")
+    }
+  }
+
+  /**
+   * Update the requested observation cadence. When connected, sends an `update_cadence` command so
+   * the daemon reconfigures capture in place (no resubscribe, no backfill); the values are also
+   * remembered and re-applied on the next (re)subscribe, so the cadence survives reconnects. Pass
+   * null for a field to fall back to the daemon's per-platform default. No-op when the cadence is
+   * unchanged, so callers can invoke this on every focus change without spamming the socket.
+   */
+  fun setCadence(screenshotIntervalMs: Long? = null, hierarchyIntervalMs: Long? = null) {
+    if (
+      requestedScreenshotIntervalMs == screenshotIntervalMs &&
+        requestedHierarchyIntervalMs == hierarchyIntervalMs
+    ) {
+      return
+    }
+    requestedScreenshotIntervalMs = screenshotIntervalMs
+    requestedHierarchyIntervalMs = hierarchyIntervalMs
+
+    if (!_connectionState.value.isConnected) return
+
+    val request =
+      StreamRequest(
+        id = UUID.randomUUID().toString(),
+        command = "update_cadence",
+        deviceId = subscribedDeviceId,
+        screenshotIntervalMs = screenshotIntervalMs,
+        hierarchyIntervalMs = hierarchyIntervalMs,
+      )
+    if (sendRequest(request)) {
+      log.info(
+        "Requested observation cadence update (screenshot=$screenshotIntervalMs, hierarchy=$hierarchyIntervalMs)"
+      )
     }
   }
 

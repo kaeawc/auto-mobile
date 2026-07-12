@@ -243,6 +243,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   @Volatile private var isRecording: Boolean = false
 
+  // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
+  // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
+  @Volatile private var occlusionEnabled: Boolean = true
+
   // Debounce timestamps — @Volatile since interaction events may trigger coroutines
   @Volatile private var lastInputTextBroadcastMs: Long = 0
   private val inputTextDebounceMs: Long = 100
@@ -1149,11 +1153,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
+    occlusionEnabled: Boolean,
   ) =
     applyAccessibilityFlags(
       includeNotImportantViews = includeNotImportantViews,
       reportViewIds = reportViewIds,
       retrieveInteractiveWindows = retrieveInteractiveWindows,
+      occlusionEnabled = occlusionEnabled,
     )
 
   override fun setNetworkMockRules(rulesJson: String) = broadcastNetworkMockRules(rulesJson)
@@ -1256,7 +1262,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
+    occlusionEnabled: Boolean,
   ) {
+    // occlusionEnabled isn't an AccessibilityServiceInfo flag, so store it unconditionally —
+    // it must take effect even before serviceInfo is available (the early-return below).
+    this.occlusionEnabled = occlusionEnabled
+
     val info =
       serviceInfo
         ?: run {
@@ -1295,7 +1306,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       "Applied accessibility flags: " +
         "includeNotImportantViews=$includeNotImportantViews, " +
         "reportViewIds=$reportViewIds, " +
-        "retrieveInteractiveWindows=$retrieveInteractiveWindows",
+        "retrieveInteractiveWindows=$retrieveInteractiveWindows, " +
+        "occlusionEnabled=$occlusionEnabled",
     )
   }
 
@@ -1894,6 +1906,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           screenDimensions,
           true,
           disableAllFiltering,
+          occlusionEnabled,
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
@@ -2032,6 +2045,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         screenDimensions,
         true,
         disableAllFiltering,
+        occlusionEnabled,
       )
     } else {
       viewHierarchyExtractor.extractFromActiveWindow(

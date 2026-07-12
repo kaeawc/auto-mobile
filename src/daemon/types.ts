@@ -213,6 +213,8 @@ export interface DaemonOptions {
   noA11yReportViewIds?: boolean;
   /** Disable FLAG_RETRIEVE_INTERACTIVE_WINDOWS on the accessibility service */
   noA11yRetrieveInteractiveWindows?: boolean;
+  /** Disable the observe occlusion pass (occlusionState/occludedBy/occludedByViewId) */
+  noOcclusion?: boolean;
   /** Output reduction: drop the flattened elements array from observe results (issue #2756) */
   observeResultDropElements?: boolean;
   /** Output reduction: emit observe results in compact form (issue #2756) */

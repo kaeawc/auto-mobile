@@ -374,6 +374,50 @@ class ViewHierarchyExtractorTest {
   // MARK: - Occlusion Filtering Tests
 
   @Test
+  fun `occlusion filtering is active by default with multiple windows`() {
+    assertTrue(
+      extractor.isOcclusionFilteringActive(
+        disableAllFiltering = false,
+        occlusionEnabled = true,
+        windowCount = 2,
+      )
+    )
+  }
+
+  @Test
+  fun `occlusion filtering is skipped when occlusionEnabled is false (--no-occlusion)`() {
+    assertFalse(
+      extractor.isOcclusionFilteringActive(
+        disableAllFiltering = false,
+        occlusionEnabled = false,
+        windowCount = 2,
+      )
+    )
+  }
+
+  @Test
+  fun `occlusion filtering is skipped when disableAllFiltering is true regardless of occlusionEnabled`() {
+    assertFalse(
+      extractor.isOcclusionFilteringActive(
+        disableAllFiltering = true,
+        occlusionEnabled = true,
+        windowCount = 2,
+      )
+    )
+  }
+
+  @Test
+  fun `occlusion filtering is skipped with a single window regardless of occlusionEnabled`() {
+    assertFalse(
+      extractor.isOcclusionFilteringActive(
+        disableAllFiltering = false,
+        occlusionEnabled = true,
+        windowCount = 1,
+      )
+    )
+  }
+
+  @Test
   fun `same-window nodes never occlude each other even when fully overlapping`() {
     // Regression test for the channel-header disappearance bug.
     // Previously, an UNRELATED same-window node that fully covered another node would mark it

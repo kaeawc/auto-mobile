@@ -96,6 +96,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
+    occlusionEnabled: Boolean,
   ) {}
 
   override fun setNetworkMockRules(rulesJson: String) {}
@@ -305,12 +306,14 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
+    occlusionEnabled: Boolean,
   ) =
     record(
       "setAccessibilityFlags",
       includeNotImportantViews,
       reportViewIds,
       retrieveInteractiveWindows,
+      occlusionEnabled,
     )
 
   override fun setNetworkMockRules(rulesJson: String) = record("setNetworkMockRules", rulesJson)

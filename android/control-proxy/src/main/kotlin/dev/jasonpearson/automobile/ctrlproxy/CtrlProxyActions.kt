@@ -103,6 +103,7 @@ interface CtrlProxyActions {
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
+    occlusionEnabled: Boolean,
   )
 
   fun setNetworkMockRules(rulesJson: String)

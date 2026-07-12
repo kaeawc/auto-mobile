@@ -374,7 +374,7 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize set_accessibility_flags`() {
     val message =
-      """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false}"""
+      """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false,"occlusionEnabled":false}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<SetAccessibilityFlags>(request)
@@ -382,6 +382,7 @@ class WebSocketRequestTest {
     assertEquals(false, request.includeNotImportantViews)
     assertEquals(true, request.reportViewIds)
     assertEquals(false, request.retrieveInteractiveWindows)
+    assertEquals(false, request.occlusionEnabled)
   }
 
   @Test
@@ -393,6 +394,7 @@ class WebSocketRequestTest {
     assertEquals(true, request.includeNotImportantViews)
     assertEquals(true, request.reportViewIds)
     assertEquals(true, request.retrieveInteractiveWindows)
+    assertEquals(true, request.occlusionEnabled)
   }
 
   @Test

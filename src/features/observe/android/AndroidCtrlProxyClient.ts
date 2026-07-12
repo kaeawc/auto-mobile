@@ -1231,7 +1231,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const flags = serverConfig.getAccessibilityFlagsConfig();
       const allEnabled =
-          flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows;
+          flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows
+          && flags.occlusionEnabled;
       if (allEnabled) {
         return;
       }
@@ -1240,12 +1241,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         `[AndroidCtrlProxyClient] Sending accessibility flags config: ` +
         `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
         `reportViewIds=${flags.reportViewIds}, ` +
-        `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}`
+        `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}, ` +
+        `occlusionEnabled=${flags.occlusionEnabled}`
       );
       this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setAccessibilityFlags({
         includeNotImportantViews: flags.includeNotImportantViews,
         reportViewIds: flags.reportViewIds,
         retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
+        occlusionEnabled: flags.occlusionEnabled,
       })));
     } catch (e) {
       logger.debug(`[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`);

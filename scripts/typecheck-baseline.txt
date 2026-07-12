@@ -19,8 +19,6 @@ src/db/failureAnalyticsRepository.ts: error TS2322: Type 'FailureType' is not as
 src/db/failureAnalyticsRepository.ts: error TS2322: Type 'FailureType' is not assignable to type 'ValueExpression<Database, "failure_groups", "crash" | "anr" | "tool_failure">'.
 src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups", "type">'.
 src/db/failureAnalyticsRepository.ts: error TS2345: Argument of type 'FailureType' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_notifications", "type">'.
-src/db/failureAnalyticsRepository.ts: error TS2367: This comparison appears to be unintentional because the types '"crash" | "anr" | "tool_failure"' and '"nonfatal"' have no overlap.
-src/db/failureAnalyticsRepository.ts: error TS2678: Type '"nonfatal"' is not comparable to type '"crash" | "anr" | "tool_failure"'.
 src/db/logEventRepository.ts: error TS2322: Type '{ deviceId: string | null; timestamp: number; applicationId: string | null; sessionId: string | null; level: number; tag: string; message: string; filterName: string | null; }[]' is not assignable to type 'RecordLogEventInput[]'.
 src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
@@ -257,7 +255,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 13 :: src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2769: No overload matches this call.
 # swap-fp: 13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
 # swap-fp: 13,13,27 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
-# swap-fp: 14 :: src/db/failureAnalyticsRepository.ts: error TS2678: Type '"nonfatal"' is not comparable to type '"crash" | "anr" | "tool_failure"'.
 # swap-fp: 14 :: src/features/accessibility/WcagAudit.ts: error TS2352: Conversion of type 'ViewHierarchyNode[]' to type 'ViewHierarchyNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 # swap-fp: 14,32 :: src/features/accessibility/WcagAudit.ts: error TS2339: Property 'children' does not exist on type 'ViewHierarchyNode'.
 # swap-fp: 149 :: src/server/navigationTools.ts: error TS2339: Property 'coverage' does not exist on type 'ExploreExecutionResult'.
@@ -343,7 +340,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 5 :: src/server/bootedDeviceResources.ts: error TS2322: Type '"local" | "remote"' is not assignable to type '"local" | undefined'.
 # swap-fp: 5,21,76 :: src/db/migrator.ts: error TS7006: Parameter 'name' implicitly has an 'any' type.
 # swap-fp: 5,7,7 :: src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
-# swap-fp: 50 :: src/db/failureAnalyticsRepository.ts: error TS2367: This comparison appears to be unintentional because the types '"crash" | "anr" | "tool_failure"' and '"nonfatal"' have no overlap.
 # swap-fp: 51 :: src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
 # swap-fp: 52 :: src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
 # swap-fp: 52 :: src/features/performance/PerformanceMonitor.ts: error TS2345: Argument of type 'PerformanceDataPusher' is not assignable to parameter of type 'PerformancePushSocketServer'.

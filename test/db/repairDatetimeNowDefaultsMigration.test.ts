@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
@@ -236,4 +238,34 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
       await expect(repairDown()).resolves.toBeUndefined();
     });
   });
+});
+
+/**
+ * The under-load null-`dflt_value` quirk (#2922) is intermittent and not
+ * deterministically reproducible, so this guards the fix structurally: both
+ * repair migrations must read column defaults via an inlined `sql.lit(table)`,
+ * never a bound `pragma_table_info(${table})`. A bound parameter can
+ * intermittently return a null `dflt_value` under parallel-file load; because
+ * null is the very signal that a column is poisoned, a bound read would silently
+ * skip a genuinely-broken column and never rebuild it (#3612).
+ */
+describe("repair migrations read pragma_table_info consistently (#3612)", () => {
+  const migrationsDir = join(import.meta.dir, "../../src/db/migrations");
+  const sources = {
+    "07_03": readFileSync(
+      join(migrationsDir, "2026_07_03_000_repair_datetime_now_defaults.ts"),
+      "utf8"
+    ),
+    "07_05": readFileSync(
+      join(migrationsDir, "2026_07_05_000_repair_updated_at_defaults.ts"),
+      "utf8"
+    ),
+  };
+
+  for (const [label, source] of Object.entries(sources)) {
+    test(`${label} inlines the table name with sql.lit and never binds it`, () => {
+      expect(source).toContain("pragma_table_info(${sql.lit(table)})");
+      expect(source).not.toContain("pragma_table_info(${table})");
+    });
+  }
 });

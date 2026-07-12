@@ -219,20 +219,47 @@ class GitWorktreeLister : WorktreeLister {
           .directory(java.io.File(workingDir))
           .redirectErrorStream(true)
           .start()
-      val completed = process.waitFor(3, TimeUnit.SECONDS)
-      if (!completed) {
-        process.destroy()
-        return null
-      }
-      if (process.exitValue() != 0) {
-        return null
-      }
-      process.inputStream.bufferedReader().readText()
+      captureProcessOutput(process, 3, TimeUnit.SECONDS)
     } catch (_: Exception) {
       null
     }
   }
 }
+
+/**
+ * Runs [process] to completion, draining its (merged) output stream concurrently so a child that
+ * emits more than the OS pipe buffer (~64KB) can't block on write while the parent waits (#3602).
+ *
+ * Returns the fully captured output on a clean (exit 0) completion within [timeout], or null if the
+ * process times out (it is destroyed) or exits non-zero.
+ */
+internal fun captureProcessOutput(process: Process, timeout: Long, unit: TimeUnit): String? {
+  val output = StringBuilder()
+  val reader = Thread {
+    try {
+      process.inputStream.bufferedReader().use { output.append(it.readText()) }
+    } catch (_: Exception) {
+      // Stream closed early (e.g. the process was destroyed); a partial read is acceptable.
+    }
+  }
+    .apply {
+      isDaemon = true
+      start()
+    }
+  if (!process.waitFor(timeout, unit)) {
+    process.destroy()
+    reader.join(READER_JOIN_TIMEOUT_MS)
+    return null
+  }
+  // Process has exited; its stdout is closed, so the reader reaches EOF and finishes promptly.
+  reader.join()
+  if (process.exitValue() != 0) {
+    return null
+  }
+  return output.toString()
+}
+
+private const val READER_JOIN_TIMEOUT_MS = 500L
 
 interface PortCommandRunner {
   fun runCommand(command: List<String>): String?
@@ -242,15 +269,7 @@ class SystemPortCommandRunner : PortCommandRunner {
   override fun runCommand(command: List<String>): String? {
     return try {
       val process = ProcessBuilder(command).redirectErrorStream(true).start()
-      val completed = process.waitFor(2, TimeUnit.SECONDS)
-      if (!completed) {
-        process.destroy()
-        return null
-      }
-      if (process.exitValue() != 0) {
-        return null
-      }
-      process.inputStream.bufferedReader().readText()
+      captureProcessOutput(process, 2, TimeUnit.SECONDS)
     } catch (_: Exception) {
       null
     }

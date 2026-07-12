@@ -1345,9 +1345,12 @@ private fun highlightYaml(yaml: String): androidx.compose.ui.text.AnnotatedStrin
 private fun savePlanToFile(
   plan: ExportedPlan,
   fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver,
+  onError: (Throwable) -> Unit = {
+    LOG.warn("Failed to save plan '${plan.planName}': ${it.message}")
+  },
   onSuccess: (String) -> Unit,
 ) {
-  fileSaver.save("${plan.planName}.yaml", plan.planContent, onSuccess)
+  fileSaver.save("${plan.planName}.yaml", plan.planContent, onSuccess, onError)
 }
 
 private fun copyPlanToClipboard(content: String) {

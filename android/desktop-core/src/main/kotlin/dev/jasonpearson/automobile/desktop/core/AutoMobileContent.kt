@@ -1074,7 +1074,12 @@ fun AutoMobileContent(
               )
             }
           }
-          SwingFileSaver.save("telemetry_events.json", jsonArray.toString()) {}
+          SwingFileSaver.save(
+            "telemetry_events.json",
+            jsonArray.toString(),
+            onSuccess = {},
+            onError = { LOG.warn("Failed to export telemetry events: ${it.message}") },
+          )
         },
         onSwitchToDarkMode = { isDarkMode = true },
         onSwitchToLightMode = { isDarkMode = false },
@@ -1660,7 +1665,9 @@ fun AutoMobileContent(
                                       image.platform,
                                       image.deviceId,
                                     )
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {
+                                  LOG.warn("Failed to start device ${image.name}: ${e.message}")
+                                }
                               }
                             }
                             .pointerHoverIcon(PointerIcon.Hand)
@@ -1859,7 +1866,9 @@ fun AutoMobileContent(
                                         image.platform,
                                         image.deviceId,
                                       )
-                                  } catch (_: Exception) {}
+                                  } catch (e: Exception) {
+                                    LOG.warn("Failed to start device ${image.name}: ${e.message}")
+                                  }
                                 }
                               }
                               .pointerHoverIcon(PointerIcon.Hand)

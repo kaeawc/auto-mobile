@@ -125,7 +125,8 @@ export function tryAcquireExclusiveLock(
   try {
     content = readFileSync(lockFilePath, "utf-8").trim();
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // The lock file vanished between the failed `wx` create and this read (holder
+    // released it); treat as still-held so the caller retries rather than racing.
     logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return false;
   }
@@ -179,7 +180,8 @@ export function tryAcquireExclusiveLock(
   try {
     renameSync(lockFilePath, reclaimMarker);
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // A racing opener already renamed/claimed this exact stale lock instance (see
+    // comment above); losing the race means we don't own it, so report not-acquired.
     logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return false;
   }
@@ -214,7 +216,8 @@ export function releaseExclusiveLock(
   try {
     content = readFileSync(lockFilePath, "utf-8").trim();
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // Lock file is already gone (released concurrently, or never existed); there is
+    // nothing left to release, so returning is a no-op, not a failure.
     logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return;
   }
@@ -253,7 +256,8 @@ function writeExclusiveLockFile(lockFilePath: string, pid: number, ownerToken?: 
     closeSync(fd);
     return true;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // `wx` create fails when the lock file already exists (another holder got there
+    // first); false tells the caller to fall through to the read/reclaim path.
     logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return false;
   }

@@ -93,8 +93,9 @@ export class CommandLineLockdownLocaleClient implements LockdownLocaleClient {
         .filter(Boolean);
       return values.length > 0 ? values : undefined;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/features/utility/system-configuration/IosLockdownLocaleClient.ts fallback failed: ${error}`, error);
+      // ideviceinfo can fail transiently (device asleep, USB hiccup) for a
+      // list that's supplementary locale data; undefined lets the caller skip it.
+      logger.debug(`src/features/utility/system-configuration/IosLockdownLocaleClient.ts international list read failed: ${error}`, error);
       return undefined;
     }
   }

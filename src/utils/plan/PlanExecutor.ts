@@ -147,7 +147,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             return parsed as Record<string, unknown>;
           }
         } catch (error) {
-          // This probe is best-effort; callers can safely use the fallback value.
+          // Tool response text that isn't valid JSON has no structured payload to extract; null signals "no payload".
           logger.debug(`src/utils/plan/PlanExecutor.ts fallback failed: ${error}`, error);
           return null;
         }

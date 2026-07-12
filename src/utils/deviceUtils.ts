@@ -111,7 +111,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     try {
       return await this.simctl.isAvailable();
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // simctl.isAvailable() throws on non-macOS hosts/missing Xcode tools; treat as "no local iOS discovery".
       logger.debug(`src/utils/deviceUtils.ts fallback failed: ${error}`, error);
       return false;
     }

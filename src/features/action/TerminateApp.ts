@@ -108,8 +108,9 @@ export class TerminateApp extends BaseVisualChange {
           const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true);
           return parseInt(isInstalledOutput.trim(), 10) > 0;
         } catch (error) {
-          // This probe is best-effort; callers can safely use the fallback value.
-          logger.debug(`src/features/action/TerminateApp.ts fallback failed: ${error}`, error);
+          // Both the CtrlProxy call and this shell fallback failed; treating the
+          // app as not installed is the safe default for a terminate/uninstall flow.
+          logger.debug(`src/features/action/TerminateApp.ts install check failed: ${error}`, error);
           return false;
         }
       });

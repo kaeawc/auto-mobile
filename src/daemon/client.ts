@@ -147,7 +147,8 @@ export class DaemonClient {
           return false;
         }
       } catch (error) {
-        // This probe is best-effort; callers can safely use the fallback value.
+        // statSync throws when the path doesn't exist (or is unreadable); either way
+        // there's no live daemon socket to connect to, so report unavailable.
         logger.debug(`src/daemon/client.ts fallback failed: ${error}`, error);
         return false;
       }

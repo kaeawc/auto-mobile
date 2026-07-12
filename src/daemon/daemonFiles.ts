@@ -147,8 +147,9 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
   try {
     return JSON.parse(readFileSync(pidFilePath, "utf-8")) as PidFileData;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/daemon/daemonFiles.ts fallback failed: ${error}`, error);
+    // A missing/malformed pidfile is expected when the daemon is stale or hasn't
+    // written it yet; treating it as "no daemon" is the correct degraded behavior.
+    logger.debug(`src/daemon/daemonFiles.ts pidfile parse failed: ${error}`, error);
     return null;
   }
 }
@@ -158,8 +159,9 @@ export function isProcessRunning(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/daemon/daemonFiles.ts fallback failed: ${error}`, error);
+    // ESRCH (no such process) or EPERM both mean the pid is not a live process
+    // we own; reporting "not running" is the safe, correct answer here.
+    logger.debug(`src/daemon/daemonFiles.ts liveness check failed: ${error}`, error);
     return false;
   }
 }

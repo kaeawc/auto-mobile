@@ -66,7 +66,7 @@ export class IOSCtrlProxyHealthClient {
       const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown };
       return health.status === "ok" && health.deviceId === deviceId;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Malformed/non-JSON health body means we can't trust this runner's identity; treat it as not matching.
       logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return false;
     }
@@ -92,7 +92,7 @@ export class IOSCtrlProxyHealthClient {
       }
       return isValidCtrlProxyPort(health.port) ? health.port : null;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Malformed/non-JSON health body means we can't confirm the reported port belongs to this device; null it out.
       logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -128,7 +128,7 @@ export class IOSCtrlProxyHealthClient {
       );
       return stdout;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // No runner listening on this port (connection refused/timeout) is the expected case; null means "not up yet".
       logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return null;
     }

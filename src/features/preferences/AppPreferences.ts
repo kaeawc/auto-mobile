@@ -243,8 +243,9 @@ export class AppPreferences {
       ], IOS_DEFAULTS_TIMEOUT_MS);
       return parseIosDefaultsType(result.stdout);
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/features/preferences/AppPreferences.ts fallback failed: ${error}`, error);
+      // `defaults read-type` fails when the key doesn't exist yet, which is a
+      // normal "no preference set" state; undefined lets callers fall back.
+      logger.debug(`src/features/preferences/AppPreferences.ts defaults type parse failed: ${error}`, error);
       return undefined;
     }
   }

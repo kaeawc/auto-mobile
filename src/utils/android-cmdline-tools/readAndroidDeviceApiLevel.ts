@@ -19,7 +19,7 @@ export async function readAndroidDeviceApiLevel(adb: AdbExecutor): Promise<numbe
     const n = parseInt(r.stdout.trim(), 10);
     return Number.isFinite(n) ? n : null;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // getprop can fail if the device disconnects mid-command; null lets the caller fall back to another detection path.
     logger.debug(`src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts fallback failed: ${error}`, error);
     return null;
   }

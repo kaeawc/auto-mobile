@@ -256,7 +256,7 @@ async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Pr
     await fs.access(filePath, fsConstants.X_OK);
     return true;
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
+    // Missing file or lacking the execute bit both mean this binary can't be used; treat either as "not executable".
     logger.debug(`src/utils/image/webp/WebpBinaryResolver.ts fallback failed: ${error}`, error);
     return false;
   }

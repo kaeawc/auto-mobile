@@ -68,8 +68,9 @@ function resolvePackageRunner(): string | null {
     execSync("which bunx", { stdio: "ignore" });
     return "bunx";
   } catch (error) {
-    // This probe is best-effort; callers can safely use the fallback value.
-    logger.debug(`src/daemon/manager.ts fallback failed: ${error}`, error);
+    // `which bunx` throws when bunx isn't on PATH; that's a normal "not found"
+    // outcome, not a failure worth surfacing, so we report null and move on.
+    logger.debug(`src/daemon/manager.ts bunx lookup failed: ${error}`, error);
     return null;
   }
 }
@@ -1172,8 +1173,9 @@ export class DaemonManager implements DaemonManagerLike {
       const pidData: PidFileData = JSON.parse(pidFileContent);
       return pidData.pid;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
-      logger.debug(`src/daemon/manager.ts fallback failed: ${error}`, error);
+      // A stale or partially-written lock file fails JSON.parse; treating that
+      // as "no pid on record" lets callers fall back to re-detecting the daemon.
+      logger.debug(`src/daemon/manager.ts pidfile parse failed: ${error}`, error);
       return null;
     }
   }

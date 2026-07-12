@@ -205,7 +205,8 @@ export class IOSCtrlProxyBuilder {
       this.cachedBuildProductsPath.set(platform, buildDir);
       return buildDir;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Build products directory doesn't exist yet (no build has run); null tells the
+      // caller to trigger a build rather than treating this as a hard failure.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -266,7 +267,8 @@ export class IOSCtrlProxyBuilder {
       this.cachedXctestrunPath.set(cacheKey, fullPath);
       return fullPath;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Products directory listing/stat failed (e.g. not built yet); reporting no
+      // xctestrun path lets the caller fall back to triggering a build.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -568,7 +570,8 @@ export class IOSCtrlProxyBuilder {
       await IOSCtrlProxyBuilder.prefetchPromise;
       return IOSCtrlProxyBuilder.prefetchResult;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Background prefetch already failed and recorded its error via getPrefetchError();
+      // returning null here just means "no prefetched result", callers build on demand.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -620,7 +623,8 @@ export class IOSCtrlProxyBuilder {
       await fs.access(appPath);
       return appPath;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // App bundle isn't present in the build products dir; null signals "not built"
+      // so callers can decide to (re)build instead of treating this as fatal.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -640,7 +644,8 @@ export class IOSCtrlProxyBuilder {
       this.cachedAppBundleHash.set(platform, hash);
       return hash;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Hashing the app bundle failed (e.g. bundle missing/unreadable); hash is only
+      // used for compat checks, so null just skips that optimization.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -660,7 +665,8 @@ export class IOSCtrlProxyBuilder {
       await fs.access(runnerBinaryPath);
       return runnerBinaryPath;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Runner binary not present in the build products dir; null tells the caller
+      // the UI test runner hasn't been built yet rather than throwing.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
@@ -774,7 +780,8 @@ export class IOSCtrlProxyBuilder {
         return false;
       }
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // fs.stat failed because the cached bundle file doesn't exist (or isn't
+      // readable); treat it as invalid so the caller re-downloads it.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return false;
     }
@@ -862,7 +869,8 @@ export class IOSCtrlProxyBuilder {
       const raw = await fs.readFile(this.getMetadataPath(), "utf-8");
       return JSON.parse(raw) as IOSCtrlProxyBundleMetadata;
     } catch (error) {
-      // This probe is best-effort; callers can safely use the fallback value.
+      // Metadata file is missing or its JSON is malformed/stale; null just means
+      // "no cached metadata", so the caller recomputes it from the bundle.
       logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }

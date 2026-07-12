@@ -124,7 +124,8 @@ export class WhipClient {
   private async safeText(response: { text(): Promise<string> }): Promise<string> {
     try {
       return (await response.text()).slice(0, 300);
-    } catch {
+    } catch (error) {
+      logger.debug(`[WHIP] failed to read error response body: ${error}`);
       return "";
     }
   }

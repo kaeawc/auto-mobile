@@ -316,7 +316,8 @@ function withStreamId(endpoint: string, streamId: string): string {
       url.searchParams.set("streamId", streamId);
     }
     return url.toString();
-  } catch {
+  } catch (error) {
+    logger.debug(`[WebRTC] could not append streamId to WHIP endpoint ${endpoint}: ${error}`);
     return endpoint;
   }
 }

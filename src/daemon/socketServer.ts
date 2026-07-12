@@ -1158,10 +1158,17 @@ export class UnixSocketServer {
     if (args.platform !== "android" && args.platform !== "ios") {
       throw new Error("input/tap requires platform 'android' or 'ios'");
     }
-    if (typeof args.x !== "number" || Number.isNaN(args.x) || typeof args.y !== "number" || Number.isNaN(args.y)) {
+    // Reject NaN AND ±Infinity (finiteness), matching parseInputSwipeParams. Number.isNaN
+    // alone lets ±Infinity through, violating the "numeric x and y" contract (#3615).
+    if (
+      typeof args.x !== "number" ||
+      !Number.isFinite(args.x) ||
+      typeof args.y !== "number" ||
+      !Number.isFinite(args.y)
+    ) {
       throw new Error("input/tap requires numeric x and y params");
     }
-    if (args.duration !== undefined && (typeof args.duration !== "number" || Number.isNaN(args.duration))) {
+    if (args.duration !== undefined && (typeof args.duration !== "number" || !Number.isFinite(args.duration))) {
       throw new Error("input/tap duration must be numeric when provided");
     }
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {

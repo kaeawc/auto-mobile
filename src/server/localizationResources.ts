@@ -8,6 +8,10 @@ const LOCALIZATION_RESOURCE_TEMPLATES = {
   DEVICE_LOCALIZATION: "automobile:devices/{deviceId}/localization"
 } as const;
 
+export interface LocalizationSettingsProvider {
+  getLocalizationSettings(): Promise<LocalizationSettingsResult>;
+}
+
 interface LocalizationResourceContent {
   deviceId: string;
   platform: BootedDevice["platform"];
@@ -56,7 +60,11 @@ function toLocalizationResourceContent(
   };
 }
 
-async function getLocalizationResource(deviceId: string): Promise<ResourceContent> {
+export async function getLocalizationResource(
+  deviceId: string,
+  createSettingsProvider: (device: BootedDevice) => LocalizationSettingsProvider =
+  device => new SystemConfigurationManager(device)
+): Promise<ResourceContent> {
   const uri = `automobile:devices/${deviceId}/localization`;
   const device = await findBootedDevice(deviceId);
   if (!device) {
@@ -69,8 +77,8 @@ async function getLocalizationResource(deviceId: string): Promise<ResourceConten
     };
   }
 
-  const manager = new SystemConfigurationManager(device);
-  const settings = await manager.getLocalizationSettings();
+  const provider = createSettingsProvider(device);
+  const settings = await provider.getLocalizationSettings();
   const content = toLocalizationResourceContent(device, settings);
 
   return {

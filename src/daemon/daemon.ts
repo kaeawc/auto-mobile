@@ -33,6 +33,7 @@ import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseH
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "./daemonStartupGuard";
 import { runStartupPrologue } from "./startupPrologue";
+import { createDaemonFatalProcessHandler } from "./daemonFatalHandler";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } from "./videoRecordingSocketServer";
 import { startTestRecordingSocketServer, stopTestRecordingSocketServer } from "./testRecordingSocketServer";
@@ -1421,24 +1422,14 @@ export class Daemon {
       await this.stop();
     };
 
-    const cleanupAndExit = (label: string, error: unknown) => {
-      logger.error(`${label}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
-      cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
-      logger.close();
-      process.exit(1);
-    };
-
     setProcessShutdownHandler(shutdown);
     process.once("exit", () => {
       cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
     });
-    setFatalProcessHandler(event => {
-      if (event.type === "uncaughtException") {
-        cleanupAndExit("Uncaught exception in daemon", event.error);
-        return;
-      }
-      cleanupAndExit("Unhandled rejection in daemon", event.reason);
-    });
+    // Escaped throws in un-awaited callbacks/timers and floating rejections must
+    // NOT crash the shared singleton daemon and wedge every session (issue #3408).
+    // Log-then-continue; the offending tool call already failed on its own chain.
+    setFatalProcessHandler(createDaemonFatalProcessHandler(logger));
   }
 
   /**

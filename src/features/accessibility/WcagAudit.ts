@@ -324,12 +324,16 @@ export class WcagAudit {
         e.class?.includes("RadioButton")
     );
 
+    // Compute the candidate label TextViews once, not once per input
+    // (hasNearbyLabel was O(inputs * elements) just rebuilding this list).
+    const textViews = elements.filter(e => e.class?.includes("TextView") && e.text);
+
     for (const input of inputElements) {
       // Check if input has a label via text, content-desc, or nearby TextView
       const hasLabel =
         input.text ||
         input["content-desc"] ||
-        this.hasNearbyLabel(input, elements);
+        this.hasNearbyLabel(input, textViews);
 
       if (!hasLabel) {
         violations.push({
@@ -351,18 +355,20 @@ export class WcagAudit {
   }
 
   /**
-   * Check if an element has a nearby TextView that could serve as a label
+   * Check if an element has a nearby TextView that could serve as a label.
+   * `textViews` is precomputed by the caller (see checkFormInputLabels) so this
+   * is O(textViews) per input rather than re-filtering all elements each call.
    */
-  private hasNearbyLabel(input: Element, allElements: Element[]): boolean {
-    const textViews = allElements.filter(e => e.class?.includes("TextView") && e.text);
+  private hasNearbyLabel(input: Element, textViews: Element[]): boolean {
+    // Input centers are loop-invariant; compute them once.
+    const inputCenterY = (input.bounds.top + input.bounds.bottom) / 2;
+    const inputCenterX = (input.bounds.left + input.bounds.right) / 2;
 
     for (const textView of textViews) {
       // Check if TextView is close to the input (within 50dp vertically or horizontally)
-      const inputCenterY = (input.bounds.top + input.bounds.bottom) / 2;
       const textCenterY = (textView.bounds.top + textView.bounds.bottom) / 2;
       const verticalDistance = Math.abs(inputCenterY - textCenterY);
 
-      const inputCenterX = (input.bounds.left + input.bounds.right) / 2;
       const textCenterX = (textView.bounds.left + textView.bounds.right) / 2;
       const horizontalDistance = Math.abs(inputCenterX - textCenterX);
 

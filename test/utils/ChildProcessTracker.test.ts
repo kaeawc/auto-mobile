@@ -37,6 +37,14 @@ function createExitPromise(process: EventEmitter): Promise<void> {
   });
 }
 
+/** Mirrors createExitTracker: resolves on 'exit', rejects on the child 'error' event. */
+function createExitOrErrorPromise(process: EventEmitter): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    process.once("exit", () => resolve());
+    process.once("error", (error: Error) => reject(error));
+  });
+}
+
 describe("ChildProcessTracker", () => {
   describe("waitForExit", () => {
     test("sends SIGINT first and escalates to SIGKILL after the configured timeout", async () => {
@@ -84,6 +92,29 @@ describe("ChildProcessTracker", () => {
 
       expect(process.signals).toEqual([]);
       expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("clears the SIGKILL timer when exitPromise rejects, leaving no stray kill (#3617)", async () => {
+      const timer = new FakeTimer();
+      const process = new FakeStoppableProcess();
+      const waitPromise = waitForExit(process, createExitOrErrorPromise(process), {
+        timeoutMs: 5000,
+        timer,
+      });
+
+      expect(process.signals).toEqual(["SIGINT"]);
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+
+      // The child 'error' event rejects exitPromise and unwinds the race.
+      process.emit("error", new Error("spawn failed"));
+      await expect(waitPromise).rejects.toThrow("spawn failed");
+
+      // Regression (#3617): the timer must be cleared despite the reject path...
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+
+      // ...so advancing past the timeout fires no stray SIGKILL.
+      timer.advanceTime(5000);
+      expect(process.signals).toEqual(["SIGINT"]);
     });
   });
 

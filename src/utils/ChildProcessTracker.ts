@@ -136,10 +136,17 @@ export async function waitForExit(
     }, timeoutMs);
   });
 
-  await Promise.race([exitPromise, timeoutPromise]);
-
-  if (timeoutId) {
-    timer.clearTimeout(timeoutId);
+  // Clear the SIGKILL timer in `finally`: `exitPromise` rejects on the child's
+  // 'error' event (see createExitTracker), which makes the race throw. Clearing
+  // only on the resolve path leaked the timer, so it later fired process.kill
+  // ("SIGKILL") on the already-failed process and kept the event loop alive up to
+  // `timeoutMs` (#3617).
+  try {
+    await Promise.race([exitPromise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      timer.clearTimeout(timeoutId);
+    }
   }
 
   await exitPromise;

@@ -1,0 +1,77 @@
+name: "Spike: parallel-steps behavior (#3779) — extra grammar"
+
+# SECOND, isolated probe file for issue #3779. The `parallel`, `cancel`, and
+# `wait-all` keywords are documented by the changelog but I could not find
+# verbatim YAML for their exact grammar, so these are BEST-GUESS forms. They are
+# kept out of spike-parallel-steps-core.yml on purpose: a wrong guess here fails
+# only this file's validation, leaving the core Q1–Q5 answers intact. None of
+# these keywords are used by #3780 or #3781 — they inform only the future
+# standardization decision. NOT intended to merge.
+
+on:
+  push:
+    branches: ["spike/parallel-steps-behavior"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # `parallel` — "takes a group of steps and converts them to background steps
+  # with a wait after." Best guess: a step whose `parallel:` value is a list of
+  # child steps.
+  probe-parallel-block:
+    name: "probe — parallel block grammar"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "before parallel"
+        run: echo "before"
+      - parallel:
+          - name: "p1"
+            run: |
+              for i in $(seq 1 5); do echo "p1 $i"; sleep 1; done
+          - name: "p2"
+            run: |
+              for i in $(seq 1 5); do echo "p2 $i"; sleep 1; done
+      - name: "after parallel (implicit wait joined)"
+        run: echo "after — parallel block joined"
+
+  # `wait-all` — "pauses until all prior background steps complete." Best guess:
+  # a `wait-all` step taking a truthy value (no explicit ids).
+  probe-wait-all:
+    name: "probe — wait-all grammar"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "bg one"
+        id: one
+        background: true
+        run: |
+          for i in $(seq 1 4); do echo "one $i"; sleep 1; done
+      - name: "bg two"
+        id: two
+        background: true
+        run: |
+          for i in $(seq 1 6); do echo "two $i"; sleep 1; done
+      - wait-all: true
+      - name: "after wait-all"
+        run: echo "after — all background steps joined via wait-all"
+
+  # `cancel` — "gracefully terminates a background step you no longer need."
+  # Best guess: a `cancel` step naming the background step id.
+  probe-cancel:
+    name: "probe — cancel grammar"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "long-lived background step"
+        id: server
+        background: true
+        run: |
+          echo "server: starting"
+          for i in $(seq 1 60); do echo "server up $i"; sleep 1; done
+      - name: "short foreground work"
+        run: |
+          echo "fg: doing brief work then cancelling the server"
+          sleep 3
+      - cancel: server
+      - name: "after cancel"
+        run: echo "after — background step cancelled without waiting for its 60s"

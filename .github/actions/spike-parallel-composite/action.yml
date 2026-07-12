@@ -1,0 +1,25 @@
+name: "spike-parallel-composite"
+description: >-
+  Throwaway probe for issue #3779: does `background: true` + `- wait` work
+  inside a composite action's steps, or only at the job level? Delete with the
+  spike workflows once the standardization question is answered.
+
+outputs:
+  result:
+    description: "Marker written by a backgrounded composite step; empty if background/wait is unsupported here."
+    value: ${{ steps.bg.outputs.marker }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Background step inside a composite action"
+      id: bg
+      background: true
+      shell: bash
+      run: |
+        sleep 3
+        echo "marker=composite-bg-ok" >> "$GITHUB_OUTPUT"
+    - name: "Foreground step inside a composite action"
+      shell: bash
+      run: echo "composite: foreground work overlapping the background step"
+    - wait: bg

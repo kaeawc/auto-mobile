@@ -1,0 +1,204 @@
+name: "Spike: parallel-steps behavior (#3779) — core"
+
+# Throwaway diagnostic for issue #3779. Exercises the native parallel-steps
+# keywords (background / wait) to answer the behavior questions the changelog
+# leaves undocumented, BEFORE we adopt them on the critical-path iOS job
+# (#3780 install fan-out, #3781 boot/build overlap). This file uses ONLY the
+# well-attested `background: true` + `- wait: <id|[ids]>` syntax so an unknown
+# keyword can never fail whole-workflow validation and sink the observations.
+# The uncertain `parallel` / `cancel` / `wait-all` grammar is probed separately
+# in spike-parallel-steps-extra.yml. NOT intended to merge — run on the branch,
+# record the answers in #3779, then delete.
+
+on:
+  push:
+    branches: ["spike/parallel-steps-behavior"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Q1 — Do a background step's `outputs` survive a `wait`? Gates #3781, whose
+  # test reads steps.ctrlproxy-simulator.outputs.simulator_udid from a boot step
+  # that would run with background: true. PASS here means #3781 needs no file
+  # fallback; FAIL (job red) means we must write the UDID to disk and read back.
+  q1-outputs-survive-wait:
+    name: "Q1 — background outputs survive wait"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Background: set outputs after a delay"
+        id: bg
+        background: true
+        run: |
+          echo "bg: sleeping before writing outputs"
+          sleep 5
+          echo "udid=SIM-UDID-12345" >> "$GITHUB_OUTPUT"
+          echo "foo=hello-from-background" >> "$GITHUB_OUTPUT"
+          echo "bg: outputs written"
+      - name: "Foreground work overlapping the background step"
+        run: |
+          echo "fg: working while bg runs"
+          sleep 2
+      - wait: bg
+      - name: "Read background outputs after wait (asserts)"
+        run: |
+          echo "foo='${{ steps.bg.outputs.foo }}'"
+          echo "udid='${{ steps.bg.outputs.udid }}'"
+          if [ "${{ steps.bg.outputs.foo }}" = "hello-from-background" ] \
+             && [ "${{ steps.bg.outputs.udid }}" = "SIM-UDID-12345" ]; then
+            echo "RESULT Q1 = PASS — background outputs ARE readable after wait"
+          else
+            echo "RESULT Q1 = FAIL — background outputs NOT readable after wait (#3781 needs a file fallback)"
+            exit 1
+          fi
+
+  # Q2 — Do background + wait work INSIDE a composite action's steps, or only at
+  # the job level? Pivotal for the standardization decision: if composites
+  # support them we can fold the install fan-out into a reusable action.
+  q2-composite-action:
+    name: "Q2 — background/wait inside a composite action"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+      - name: "Call composite action that backgrounds a step internally"
+        id: comp
+        uses: ./.github/actions/spike-parallel-composite
+      - name: "Check composite output (asserts)"
+        run: |
+          echo "composite result='${{ steps.comp.outputs.result }}'"
+          if [ "${{ steps.comp.outputs.result }}" = "composite-bg-ok" ]; then
+            echo "RESULT Q2 = PASS — background/wait work inside composite steps"
+          else
+            echo "RESULT Q2 = FAIL — composite background/wait did not produce output"
+            exit 1
+          fi
+
+  # Q3a — Failure semantics: an un-guarded background step FAILS. Expect the job
+  # to fail at the `wait`. We mark the JOB continue-on-error so the workflow run
+  # stays green; the job's own conclusion + step conclusions (read via gh api)
+  # tell us whether after-wait steps are skipped and whether if:always() cleanup
+  # still runs.
+  q3a-bg-failure-fails-at-wait:
+    name: "Q3a — unguarded bg failure surfaces at wait"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: "Background step that fails"
+        id: bgfail
+        background: true
+        run: |
+          echo "bg: about to fail"
+          sleep 2
+          exit 1
+      - name: "Foreground work before the wait"
+        run: echo "fg: ran before wait"
+      - wait: bgfail
+      - name: "After-wait step (does it run after a failed bg?)"
+        run: echo "REACHED after-wait — a failed background step did NOT stop the job"
+      - name: "Cleanup (if: always)"
+        if: always()
+        run: echo "CLEANUP ran despite the background failure (if: always())"
+
+  # Q3b — Does step-level continue-on-error COMPOSE with background? If it does,
+  # the failed bg step is tolerated and the job stays green + after-wait runs.
+  q3b-continue-on-error-composes:
+    name: "Q3b — continue-on-error on a background step"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Background step, fails but continue-on-error"
+        id: bgfail
+        background: true
+        continue-on-error: true
+        run: |
+          echo "bg: failing under continue-on-error"
+          sleep 2
+          exit 1
+      - wait: bgfail
+      - name: "After-wait step"
+        run: echo "RESULT Q3b — after-wait ran; continue-on-error composed with background"
+
+  # Q4 — Timing & log interleaving. Three overlapping steps of known, distinct
+  # durations joined by a single `wait: [a, b]`. Total job time should track the
+  # longest branch (~8s), not the sum (~18s), and per-step durations (read via
+  # gh api) should still be reported individually.
+  q4-timing-and-interleaving:
+    name: "Q4 — timing + log interleaving"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "bg-A ticks for 8s"
+        id: a
+        background: true
+        run: |
+          for i in $(seq 1 8); do echo "A tick $i/8"; sleep 1; done
+      - name: "bg-B ticks for 6s"
+        id: b
+        background: true
+        run: |
+          for i in $(seq 1 6); do echo "B tick $i/6"; sleep 1; done
+      - name: "fg-C ticks for 4s (runs while A,B background)"
+        run: |
+          for i in $(seq 1 4); do echo "C tick $i/4"; sleep 1; done
+      - wait: [a, b]
+      - name: "Joined"
+        run: echo "all branches joined after wait"
+
+  # Q5 serial baseline — two all-core CPU bursts back-to-back. Compare this job's
+  # total duration to q5-cpu-contention-parallel to confirm the changelog's
+  # "true parallel on ~4 vCPU" caveat: two CPU-bound steps that each already
+  # saturate every core should NOT speed up when backgrounded (contention), so
+  # the parallel job should be ~equal-or-worse, not ~half.
+  q5-cpu-contention-serial:
+    name: "Q5 — CPU burn (serial baseline)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Report cores"
+        run: echo "nproc=$(nproc)"
+      - name: "Burn 1 (all cores)"
+        run: |
+          t0=$(date +%s)
+          for _ in $(seq 1 "$(nproc)"); do
+            (dd if=/dev/zero bs=1M count=1500 2>/dev/null | sha256sum >/dev/null) &
+          done
+          wait
+          echo "burn1 elapsed=$(( $(date +%s) - t0 ))s"
+      - name: "Burn 2 (all cores)"
+        run: |
+          t0=$(date +%s)
+          for _ in $(seq 1 "$(nproc)"); do
+            (dd if=/dev/zero bs=1M count=1500 2>/dev/null | sha256sum >/dev/null) &
+          done
+          wait
+          echo "burn2 elapsed=$(( $(date +%s) - t0 ))s"
+
+  q5-cpu-contention-parallel:
+    name: "Q5 — CPU burn (backgrounded, contends)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Report cores"
+        run: echo "nproc=$(nproc)"
+      - name: "Burn 1 (all cores, background)"
+        id: burn1
+        background: true
+        run: |
+          t0=$(date +%s)
+          for _ in $(seq 1 "$(nproc)"); do
+            (dd if=/dev/zero bs=1M count=1500 2>/dev/null | sha256sum >/dev/null) &
+          done
+          wait
+          echo "burn1 elapsed=$(( $(date +%s) - t0 ))s"
+      - name: "Burn 2 (all cores, background)"
+        id: burn2
+        background: true
+        run: |
+          t0=$(date +%s)
+          for _ in $(seq 1 "$(nproc)"); do
+            (dd if=/dev/zero bs=1M count=1500 2>/dev/null | sha256sum >/dev/null) &
+          done
+          wait
+          echo "burn2 elapsed=$(( $(date +%s) - t0 ))s"
+      - wait: [burn1, burn2]
+      - name: "Both burns joined"
+        run: echo "backgrounded burns joined"

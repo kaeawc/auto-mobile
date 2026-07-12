@@ -1341,6 +1341,18 @@ jobs:
       - name: "Check CtrlProxy XcodeGen Project Drift"
         run: ./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy
 
+      # Simulator boot is minutes of otherwise-idle wall-clock and needs neither
+      # xcodegen nor the build, so start it in the background here and let the
+      # CtrlProxy build (below) run concurrently. Boot is wait/I/O-bound, so it
+      # overlaps the CPU-bound xcodebuild cleanly (mild contention, per #3779).
+      # The #3779 spike confirmed a backgrounded step's outputs survive `wait`,
+      # so the UI test can still read steps.ctrlproxy-simulator.outputs.simulator_udid
+      # after the barrier — no file fallback needed.
+      - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)"
+        id: ctrlproxy-simulator
+        run: ./scripts/ios/boot-simulator.sh
+        background: true
+
       - name: "Build CtrlProxy iOS for Testing"
         run: ./scripts/ios/ctrl-proxy-build-for-testing.sh
 
@@ -1352,9 +1364,9 @@ jobs:
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           echo "xctestrun file: ${XCTESTRUN}"
 
-      - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)"
-        id: ctrlproxy-simulator
-        run: ./scripts/ios/boot-simulator.sh
+      # Re-sync before the test, which needs both the build artifacts and the
+      # booted sim's UDID.
+      - wait: ctrlproxy-simulator
 
       - name: "Run CtrlProxy privacy resource mapping UI test (Xcode 26.5)"
         timeout-minutes: 5

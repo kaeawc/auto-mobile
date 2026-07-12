@@ -20,6 +20,17 @@ describe("parseIceServers", () => {
     ).toEqual([{ urls: "turn:b:2", username: "u", credential: "c" }]);
   });
 
+  test("expands an array-valued urls into one server per URL, sharing creds", () => {
+    expect(
+      parseIceServers(
+        '[{"urls":["turn:t:3478","turns:t:5349"],"username":"u","credential":"p"}]'
+      )
+    ).toEqual([
+      { urls: "turn:t:3478", username: "u", credential: "p" },
+      { urls: "turns:t:5349", username: "u", credential: "p" },
+    ]);
+  });
+
   test("returns undefined for empty input", () => {
     expect(parseIceServers(undefined)).toBeUndefined();
     expect(parseIceServers("  ")).toBeUndefined();

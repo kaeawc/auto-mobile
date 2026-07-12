@@ -49,15 +49,35 @@ export function parseIceServers(raw: string | undefined): RTCIceServer[] | undef
   }
   const trimmed = raw.trim();
   if (trimmed.startsWith("[")) {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(trimmed) as RTCIceServer[];
-      if (Array.isArray(parsed) && parsed.every(server => typeof server?.urls === "string")) {
-        return parsed;
-      }
+      parsed = JSON.parse(trimmed);
     } catch {
       throw new ActionableError(`Invalid JSON in ${WEBRTC_ENV.ICE_SERVERS}.`);
     }
-    throw new ActionableError(`${WEBRTC_ENV.ICE_SERVERS} JSON must be an array of { urls } objects.`);
+    if (!Array.isArray(parsed)) {
+      throw new ActionableError(`${WEBRTC_ENV.ICE_SERVERS} JSON must be an array of { urls } objects.`);
+    }
+    // werift's RTCIceServer takes a single `urls` string, but the standard
+    // RTCIceServer allows `urls` to be a string OR an array of strings (common
+    // for TURN with UDP + TLS variants). Normalize each array entry into one
+    // werift server per URL, sharing username/credential.
+    const servers: RTCIceServer[] = [];
+    for (const entry of parsed as Array<{ urls?: unknown; username?: string; credential?: string }>) {
+      const { username, credential } = entry ?? {};
+      if (typeof entry?.urls === "string") {
+        servers.push({ urls: entry.urls, username, credential });
+      } else if (Array.isArray(entry?.urls) && entry.urls.every(url => typeof url === "string")) {
+        for (const url of entry.urls as string[]) {
+          servers.push({ urls: url, username, credential });
+        }
+      } else {
+        throw new ActionableError(
+          `${WEBRTC_ENV.ICE_SERVERS} JSON entries must have a string or string[] "urls".`
+        );
+      }
+    }
+    return servers;
   }
   return trimmed
     .split(",")

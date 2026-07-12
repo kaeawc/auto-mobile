@@ -18,8 +18,50 @@ import type { VideoRecordingConfigInput } from "../models";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
+import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
+import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
+import type { Timer } from "../utils/SystemTimer";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
+
+/**
+ * Timer-driven segmented Android recordings, keyed by the first segment's
+ * recordingId (the handle returned to the caller). Recordings whose duration
+ * fits within a single `screenrecord` are NOT registered here.
+ */
+const segmentedSessions = new Map<string, AndroidSegmentedPlanVideoSession>();
+
+/**
+ * Timer injected into segmented sessions. Undefined in production (the session
+ * falls back to its own {@link defaultTimer}); tests inject a FakeTimer so the
+ * rotation timer is controllable/inspectable.
+ */
+let segmentedSessionTimer: Timer | undefined;
+
+/** Test seam: inject the Timer used by segmented sessions. */
+export function setSegmentedSessionTimer(timer: Timer | undefined): void {
+  segmentedSessionTimer = timer;
+}
+
+/** Test seam: clear injected segmented-session state (timer + tracked sessions). */
+export function resetSegmentedSessions(): void {
+  segmentedSessionTimer = undefined;
+  segmentedSessions.clear();
+}
+
+/**
+ * Stop a tracked segmented session: clear its rotation timer, finalize, and
+ * remove it from the registry. Returns the ordered segment recordingId/filePath
+ * pairs.
+ */
+async function finalizeSegmentedSession(
+  handle: string,
+  session: AndroidSegmentedPlanVideoSession
+): Promise<Array<{ recordingId: string; filePath: string }>> {
+  segmentedSessions.delete(handle);
+  const { filePaths, recordingIds } = await session.stop();
+  return recordingIds.map((id, index) => ({ recordingId: id, filePath: filePaths[index] }));
+}
 
 export interface VideoRecordingArgs {
   action: "start" | "stop";
@@ -68,11 +110,16 @@ const videoRecordingSchema = addDeviceTargetingToSchema(z.object({
   fps: z.number().int().positive().optional().describe("FPS"),
   resolution: resolutionSchema.optional().describe("Resolution"),
   format: z.enum(["mp4"]).optional(),
+  // Raised from 300 so long Android recordings (segmented under the hood) are
+  // accepted. Note: non-Android recordings still can't exceed the manager's
+  // single-recording cap (300s) since they aren't segmented; such a request
+  // passes schema validation but is rejected at videoRecordingManager. Left
+  // as-is intentionally (out of scope for segmented Android capture).
   maxDuration: z
     .number()
     .int()
     .positive()
-    .max(300)
+    .max(3600)
     .optional()
     .describe("Max duration seconds"),
   outputName: z.string().optional().describe("Recording label"),
@@ -138,7 +185,37 @@ function selectLatestRecording(records: VideoRecordingRecord[]): VideoRecordingR
     })[0];
 }
 
+/**
+ * If `recordingId` is the handle for a timer-driven segmented session, stop it
+ * (clear the rotation timer + finalize) and return a response listing every
+ * segment file path/recordingId in order. Returns null otherwise so callers
+ * fall through to the single-recording stop path.
+ */
+async function tryStopSegmentedSession(recordingId: string) {
+  const session = segmentedSessions.get(recordingId);
+  if (!session) {
+    return null;
+  }
+
+  try {
+    const recordings = await finalizeSegmentedSession(recordingId, session);
+    return createJSONToolResponse({
+      action: "stop",
+      count: recordings.length,
+      recordings,
+      segmented: true,
+    });
+  } catch (error) {
+    throw new ActionableError(`Failed to stop segmented video recording: ${error}`);
+  }
+}
+
 async function stopRecordingById(recordingId: string) {
+  const segmented = await tryStopSegmentedSession(recordingId);
+  if (segmented) {
+    return segmented;
+  }
+
   const results: Array<Record<string, unknown>> = [];
   const evictedRecordingIds: string[] = [];
   const activeRecords = await listActiveVideoRecordings();
@@ -189,6 +266,39 @@ export function registerVideoRecordingTools(): void {
 
       for (const target of targetDevices) {
         try {
+          // Android `screenrecord` is hard-capped at 180s. For longer Android
+          // recordings, transparently produce ordered segments (<outputName>,
+          // <outputName>-seg1, ...) via a timer-driven segmented session.
+          if (
+            target.platform === "android" &&
+            maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS
+          ) {
+            const session = new AndroidSegmentedPlanVideoSession({
+              device: target,
+              outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
+              configOverrides: buildConfigOverrides(args),
+              timer: segmentedSessionTimer,
+            });
+            const active = await session.start();
+            segmentedSessions.set(active.recordingId, session);
+
+            recordings.push({
+              recordingId: active.recordingId,
+              outputPath: active.outputPath,
+              startedAt: active.startedAt,
+              outputName: active.outputName,
+              deviceId: target.deviceId,
+              platform: target.platform,
+              segmented: true,
+              settings: {
+                ...active.config,
+                resolution: active.config.resolution,
+                maxDurationSeconds,
+              },
+            });
+            continue;
+          }
+
           const active = await startVideoRecording({
             device: target,
             configOverrides: buildConfigOverrides(args),
@@ -242,10 +352,43 @@ export function registerVideoRecordingTools(): void {
       const results: Array<Record<string, unknown>> = [];
       const failures: Array<Record<string, unknown>> = [];
       const evictedRecordingIds: string[] = [];
+      let stoppedAnySegmented = false;
       const targetDevices = await resolveTargetDevices(device, args);
       const activeRecords = await listActiveVideoRecordings({ platform: device.platform });
 
       for (const target of targetDevices) {
+        // A bare (by-device) stop must also finalize any timer-driven segmented
+        // session for this device; otherwise its rotation timer leaks and keeps
+        // producing segments. The session owns its segments' recording lifecycle,
+        // so finalizing it replaces the single-recording stop for this device.
+        const deviceSessions = [...segmentedSessions.entries()].filter(
+          ([, session]) => session.deviceId === target.deviceId
+        );
+        if (deviceSessions.length > 0) {
+          stoppedAnySegmented = true;
+          for (const [handle, session] of deviceSessions) {
+            try {
+              const segments = await finalizeSegmentedSession(handle, session);
+              for (const segment of segments) {
+                results.push({
+                  recordingId: segment.recordingId,
+                  filePath: segment.filePath,
+                  deviceId: target.deviceId,
+                  platform: target.platform,
+                  segmented: true,
+                });
+              }
+            } catch (error) {
+              failures.push({
+                deviceId: target.deviceId,
+                platform: target.platform,
+                error: String(error),
+              });
+            }
+          }
+          continue;
+        }
+
         const matches = activeRecords.filter(record => record.deviceId === target.deviceId);
         if (matches.length === 0) {
           failures.push({
@@ -299,6 +442,7 @@ export function registerVideoRecordingTools(): void {
         action: "stop",
         count: results.length,
         recordings: results,
+        segmented: stoppedAnySegmented ? true : undefined,
         failures: failures.length > 0 ? failures : undefined,
         evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
       });

@@ -26,17 +26,69 @@ export async function initializeGraphTraversal(
   const state: GraphTraversalState = {
     visitedNodes: new Set<string>(),
     traversedEdges: new Set<string>(),
-    pendingEdges: [...allEdges],
+    pendingEdges: new Map<string, NavigationEdge>(),
+    pendingEdgesByFrom: new Map<string, NavigationEdge[]>(),
     edgeValidationResults: new Map<string, EdgeValidationResult>(),
     totalNodesInGraph: graph.nodes.length,
     totalEdgesInGraph: allEdges.length
   };
+
+  // Hash each edge key exactly once here; markEdgeTraversed then removes by key
+  // (O(1)) instead of re-hashing every pending edge on every traversal (O(E^2)).
+  for (const edge of allEdges) {
+    addPendingEdge(state, edge);
+  }
 
   logger.info(
     `[Explore] Initialized graph traversal: ${graph.nodes.length} nodes, ${allEdges.length} edges`
   );
 
   return state;
+}
+
+/**
+ * Add an edge to the pending set, keeping the key map and the `from` index in
+ * sync. The edge key is computed once here; deduplicates by key.
+ */
+export function addPendingEdge(
+  state: GraphTraversalState,
+  edge: NavigationEdge
+): void {
+  const edgeKey = getEdgeKey(edge);
+  if (state.pendingEdges.has(edgeKey)) {
+    return;
+  }
+  state.pendingEdges.set(edgeKey, edge);
+
+  const fromBucket = state.pendingEdgesByFrom.get(edge.from);
+  if (fromBucket) {
+    fromBucket.push(edge);
+  } else {
+    state.pendingEdgesByFrom.set(edge.from, [edge]);
+  }
+}
+
+/**
+ * Remove a pending edge by key from both the key map (O(1)) and the `from`
+ * index (O(deg), by object identity so no re-hashing).
+ */
+function removePendingEdge(state: GraphTraversalState, edgeKey: string): void {
+  const stored = state.pendingEdges.get(edgeKey);
+  if (!stored) {
+    return;
+  }
+  state.pendingEdges.delete(edgeKey);
+
+  const fromBucket = state.pendingEdgesByFrom.get(stored.from);
+  if (fromBucket) {
+    const idx = fromBucket.indexOf(stored);
+    if (idx !== -1) {
+      fromBucket.splice(idx, 1);
+    }
+    if (fromBucket.length === 0) {
+      state.pendingEdgesByFrom.delete(stored.from);
+    }
+  }
 }
 
 /**
@@ -120,10 +172,8 @@ export function markEdgeTraversed(
 
   state.edgeValidationResults.set(edgeKey, validationResult);
 
-  // Remove from pending edges
-  state.pendingEdges = state.pendingEdges.filter(
-    e => getEdgeKey(e) !== edgeKey
-  );
+  // Remove from pending edges (O(1) map delete + O(deg) index splice)
+  removePendingEdge(state, edgeKey);
 
   logger.info(
     `[Explore] Edge ${edgeKey} validation: ${success ? "SUCCESS" : "FAILED"}` +
@@ -140,17 +190,10 @@ export function selectNextEdgeToTraverse(
   currentScreen: string
 ): NavigationEdge | null {
   // Only select untraversed edges from current screen
-  // Do not attempt to navigate to other screens, as this causes false divergence
-  const untraversedFromCurrent = state.pendingEdges.filter(
-    edge => edge.from === currentScreen
-  );
-
-  if (untraversedFromCurrent.length > 0) {
-    return untraversedFromCurrent[0];
-  }
-
-  // No edges from current screen - exploration is complete or stuck
-  return null;
+  // Do not attempt to navigate to other screens, as this causes false divergence.
+  // Empty buckets are pruned on removal, so a present bucket always has an edge.
+  const untraversedFromCurrent = state.pendingEdgesByFrom.get(currentScreen);
+  return untraversedFromCurrent ? untraversedFromCurrent[0] : null;
 }
 
 /**

@@ -152,7 +152,10 @@ export interface TrackedElement {
 export interface GraphTraversalState {
   visitedNodes: Set<string>;
   traversedEdges: Set<string>;
-  pendingEdges: NavigationEdge[];
+  /** Pending (untraversed) edges keyed by their edge key for O(1) removal. */
+  pendingEdges: Map<string, NavigationEdge>;
+  /** Pending edges indexed by their `from` screen for O(1)+O(deg) selection. */
+  pendingEdgesByFrom: Map<string, NavigationEdge[]>;
   edgeValidationResults: Map<string, EdgeValidationResult>;
   totalNodesInGraph: number;
   totalEdgesInGraph: number;

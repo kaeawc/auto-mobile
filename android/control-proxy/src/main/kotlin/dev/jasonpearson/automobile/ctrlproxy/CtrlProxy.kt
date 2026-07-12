@@ -1897,7 +1897,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (!allWindows.isNullOrEmpty()) {
         Log.d(
           TAG,
-          "Extracting from ${allWindows.size} windows (disableAllFiltering: $disableAllFiltering)",
+          "Extracting from ${allWindows.size} windows " +
+            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
         )
         viewHierarchyExtractor.extractFromAllWindows(
           allWindows,
@@ -2038,6 +2039,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     return if (!allWindows.isNullOrEmpty()) {
+      Log.d(
+        TAG,
+        "extractHierarchy from ${allWindows.size} windows " +
+          "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
+      )
       viewHierarchyExtractor.extractFromAllWindows(
         allWindows,
         rootNode,

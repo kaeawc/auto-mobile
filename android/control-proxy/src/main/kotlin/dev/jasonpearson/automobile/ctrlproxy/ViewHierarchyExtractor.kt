@@ -376,7 +376,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // daemon flag), or when there's only one window (within-window "occlusion" between peer
     // subtrees like notification_panel and keyguard_message_area_container incorrectly strips
     // content in system UI)
-    if (isOcclusionFilteringActive(disableAllFiltering, occlusionEnabled, windowEntries.size)) {
+    val occlusionFilteringActive =
+      isOcclusionFilteringActive(disableAllFiltering, occlusionEnabled, windowEntries.size)
+    Log.d(
+      TAG,
+      "Occlusion filtering active: $occlusionFilteringActive " +
+        "(disableAllFiltering=$disableAllFiltering, occlusionEnabled=$occlusionEnabled, " +
+        "windowCount=${windowEntries.size})",
+    )
+    if (occlusionFilteringActive) {
       val occlusionInfo = buildOcclusionInfo(windowEntries)
       val filteredEntries = windowEntries.mapNotNull { windowEntry ->
         val hierarchy =

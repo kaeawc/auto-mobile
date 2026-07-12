@@ -127,6 +127,10 @@ export class DeviceSnapshotRepository {
       .insertInto("device_snapshots")
       .values(row)
       .onConflict(oc =>
+        // created_at is intentionally omitted: on overwrite the original creation
+        // time must survive (retention ordering / age display depend on it). The
+        // INSERT still sets it for new rows; last_accessed_at carries the "touched"
+        // time (#3498).
         oc.column("snapshot_name").doUpdateSet({
           device_id: row.device_id,
           device_name: row.device_name,
@@ -134,7 +138,6 @@ export class DeviceSnapshotRepository {
           snapshot_type: row.snapshot_type,
           include_app_data: row.include_app_data,
           include_settings: row.include_settings,
-          created_at: row.created_at,
           last_accessed_at: row.last_accessed_at,
           size_bytes: row.size_bytes,
           manifest_json: row.manifest_json,

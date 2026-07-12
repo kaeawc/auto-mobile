@@ -169,6 +169,10 @@ export class VideoRecordingRepository {
       .insertInto("video_recordings")
       .values(row)
       .onConflict(oc =>
+        // created_at is intentionally omitted: on overwrite the original creation
+        // time must survive (retention ordering / age display depend on it). The
+        // INSERT still sets it for new rows; last_accessed_at carries the "touched"
+        // time (#3498).
         oc.column("recording_id").doUpdateSet({
           device_id: row.device_id,
           platform: row.platform,
@@ -180,7 +184,6 @@ export class VideoRecordingRepository {
           size_bytes: row.size_bytes,
           duration_ms: row.duration_ms,
           codec: row.codec,
-          created_at: row.created_at,
           started_at: row.started_at,
           ended_at: row.ended_at,
           last_accessed_at: row.last_accessed_at,

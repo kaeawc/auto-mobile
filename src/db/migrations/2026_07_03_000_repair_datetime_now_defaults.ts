@@ -126,8 +126,15 @@ async function findTablesWithBrokenDefaults(db: Kysely<unknown>): Promise<string
 
   const broken: string[] = [];
   for (const { name: table } of tables.rows) {
+    // Inline the table name as a literal (sql.lit), not a bound parameter: a
+    // parameterized pragma_table_info(?) was observed to intermittently return a
+    // null dflt_value under parallel-file load (bun:sqlite quirk, see #2922's
+    // test). Here a spurious null on a genuinely-poisoned column would fail the
+    // `!== null` guard below, so the column would never be added to the broken set
+    // and its poisoned default would be silently skipped and never rebuilt (#3612).
+    // Matches 2026_07_05_000_repair_updated_at_defaults.ts.
     const columns = await sql<ColumnInfoRow>`
-      SELECT dflt_value FROM pragma_table_info(${table})
+      SELECT dflt_value FROM pragma_table_info(${sql.lit(table)})
     `.execute(db);
     if (columns.rows.some(column => column.dflt_value !== null && column.dflt_value in BROKEN_DEFAULTS)) {
       broken.push(table);
@@ -138,8 +145,10 @@ async function findTablesWithBrokenDefaults(db: Kysely<unknown>): Promise<string
 
 async function rebuildAndRepair(trx: Kysely<unknown>, tables: string[]): Promise<void> {
   for (const table of tables) {
+    // sql.lit (not a bound param) for the same bun:sqlite null-dflt_value quirk
+    // guarded in findTablesWithBrokenDefaults above (#2922 / #3612).
     const columns = await sql<ColumnInfoRow>`
-      SELECT name, dflt_value FROM pragma_table_info(${table})
+      SELECT name, dflt_value FROM pragma_table_info(${sql.lit(table)})
     `.execute(trx);
 
     const brokenColumns = columns.rows.filter(

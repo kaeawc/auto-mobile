@@ -1313,17 +1313,21 @@ jobs:
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
+      # These two installs are independent, network/I/O-bound, and neither the
+      # Bun setup nor the npm-package install below consumes them — so background
+      # them and let the Bun pair overlap. The `wait` barrier re-syncs before the
+      # first consumer (the drift check needs xcodegen; the build needs both).
+      # Validated by the #3779 spike: outputs unused here, `- wait: [ids]` list
+      # barrier works, and an install failure surfaces loudly at the wait.
       - name: "Install XcodeGen"
         run: brew install xcodegen
+        background: true
+        id: install-xcodegen
 
       - name: "Install xcpretty"
         run: gem install xcpretty
-
-      - name: "Check CtrlProxy XcodeGen Project Drift"
-        run: ./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy
-
-      - name: "Build CtrlProxy iOS for Testing"
-        run: ./scripts/ios/ctrl-proxy-build-for-testing.sh
+        background: true
+        id: install-xcpretty
 
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
@@ -1331,6 +1335,14 @@ jobs:
           bun-version: 1.3.9
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - wait: [install-xcodegen, install-xcpretty]
+
+      - name: "Check CtrlProxy XcodeGen Project Drift"
+        run: ./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy
+
+      - name: "Build CtrlProxy iOS for Testing"
+        run: ./scripts/ios/ctrl-proxy-build-for-testing.sh
 
       - name: "Verify CtrlProxy iOS Artifacts"
         run: |

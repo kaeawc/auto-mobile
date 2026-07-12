@@ -182,52 +182,65 @@ export class WebRtcPublisher {
     const pc = this.createPeerConnection(this.config.iceServers ?? []);
     this.pc = pc;
 
-    const track = new MediaStreamTrack({ kind: "video" });
-    const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
-    this.writer = new RtpH264TrackWriter({
-      sink: track,
-      ssrc: transceiver.sender.ssrc,
-      mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
-      timer: this.timer,
-    });
+    try {
+      const track = new MediaStreamTrack({ kind: "video" });
+      const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
+      this.writer = new RtpH264TrackWriter({
+        sink: track,
+        ssrc: transceiver.sender.ssrc,
+        mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
+        timer: this.timer,
+      });
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    await this.waitForIceGathering(pc);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await this.waitForIceGathering(pc);
 
-    const localSdp = pc.localDescription?.sdp;
-    if (!localSdp) {
-      throw new Error("Failed to produce a local SDP offer.");
-    }
-
-    const session = await this.whip.publish(localSdp);
-
-    // stop() may have run while we were awaiting ICE/WHIP. The WHIP session now
-    // exists on the server but teardown already happened (before resourceUrl was
-    // set), so tear this one down explicitly instead of accepting it — otherwise
-    // it leaks after the stream was reported stopped.
-    if (this.closed || this.pc !== pc) {
-      if (session.resourceUrl) {
-        await this.whip.delete(session.resourceUrl).catch(() => {});
+      const localSdp = pc.localDescription?.sdp;
+      if (!localSdp) {
+        throw new Error("Failed to produce a local SDP offer.");
       }
-      await pc.close().catch(() => {});
-      throw new Error("Publisher closed during establish.");
-    }
 
-    this.resourceUrl = session.resourceUrl;
-    await pc.setRemoteDescription({ type: "answer", sdp: session.answerSdp });
+      const session = await this.whip.publish(localSdp);
 
-    this.establishing = false;
-    this.watchConnectionState(pc);
-    // The connection may already have completed while we were awaiting the WHIP
-    // round-trip; fire the connected hook now if so (the event won't re-fire).
-    if (pc.connectionState === "connected") {
-      this.fireConnected(pc);
+      // stop() may have run while we were awaiting ICE/WHIP. The WHIP session now
+      // exists on the server but teardown already happened (before resourceUrl was
+      // set), so tear this one down explicitly instead of accepting it — otherwise
+      // it leaks after the stream was reported stopped.
+      if (this.closed || this.pc !== pc) {
+        if (session.resourceUrl) {
+          await this.whip.delete(session.resourceUrl).catch(() => {});
+        }
+        await pc.close().catch(() => {});
+        throw new Error("Publisher closed during establish.");
+      }
+
+      this.resourceUrl = session.resourceUrl;
+      await pc.setRemoteDescription({ type: "answer", sdp: session.answerSdp });
+
+      this.establishing = false;
+      this.watchConnectionState(pc);
+      // The connection may already have completed while we were awaiting the WHIP
+      // round-trip; fire the connected hook now if so (the event won't re-fire).
+      if (pc.connectionState === "connected") {
+        this.fireConnected(pc);
+      }
+      logger.info(
+        `[WebRTC] stream ${this.config.streamId} published to ${this.config.whipEndpoint}` +
+          (session.resourceUrl ? ` (resource ${session.resourceUrl})` : "")
+      );
+    } catch (error) {
+      // Any failure after the peer connection was created (offer, ICE, WHIP
+      // publish) leaves an open pc. On a terminal "failed" state there is no next
+      // reconnect attempt to tear it down, so close it here. Guard on identity so
+      // we never close a pc a concurrent teardown/establish already replaced.
+      if (this.pc === pc) {
+        this.pc = null;
+        this.writer = null;
+        await pc.close().catch(() => {});
+      }
+      throw error;
     }
-    logger.info(
-      `[WebRTC] stream ${this.config.streamId} published to ${this.config.whipEndpoint}` +
-        (session.resourceUrl ? ` (resource ${session.resourceUrl})` : "")
-    );
   }
 
   private watchConnectionState(pc: RTCPeerConnection): void {

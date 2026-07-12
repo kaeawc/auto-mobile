@@ -172,6 +172,15 @@ export class CoordinationServer {
       throw error;
     }
 
+    // The publisher may have stopped or replaced this stream while we were
+    // awaiting negotiation/ICE. Registering on a stale entry would attach the
+    // subscriber to a stream that stopIngest() already closed (so it never gets
+    // RTP and can't be reached via stopSubscriber), leaking the peer connection.
+    if (this.streams.get(streamId) !== entry) {
+      await pc.close().catch(() => {});
+      throw new Error(`Stream ${streamId} is no longer available`);
+    }
+
     entry.subscribers.set(subscriberId, { id: subscriberId, pc, track });
     return { subscriberId, answerSdp: pc.localDescription?.sdp ?? "" };
   }

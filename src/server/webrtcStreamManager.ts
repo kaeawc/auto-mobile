@@ -97,6 +97,13 @@ async function stopSource(record: WebRtcStreamRecord): Promise<void> {
  */
 async function startSource(record: WebRtcStreamRecord): Promise<void> {
   await stopSource(record);
+  // stopWebRtcStream() may have deleted (or replaced) this record while we were
+  // awaiting the source stop above. Starting capture now would spawn a
+  // screenrecord process attached to a record no later stop/list can reach,
+  // leaking it. Bail if we no longer own the stream.
+  if (streams.get(record.streamId) !== record) {
+    return;
+  }
   const source = dependencies.createSource({
     device: record.device,
     onData: chunk => record.publisher.writeH264Chunk(chunk),
@@ -108,6 +115,13 @@ async function startSource(record: WebRtcStreamRecord): Promise<void> {
   });
   record.source = source;
   await source.start();
+  // The stream may have been stopped while the source was starting. stop() only
+  // reaches record.source, which was still null when it ran, so stop the source
+  // we just spawned to avoid an orphaned screenrecord process.
+  if (streams.get(record.streamId) !== record) {
+    record.source = null;
+    await source.stop().catch(() => {});
+  }
 }
 
 /**

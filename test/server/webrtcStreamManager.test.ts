@@ -170,6 +170,34 @@ describe("webrtcStreamManager", () => {
     expect(stopped.state).toBe("stopped");
   });
 
+  test("does not leave an orphaned source when the stream is stopped mid-start", async () => {
+    // A source whose start() stops the stream (simulating stopWebRtcStream racing
+    // the async onConnected startup path). The manager must re-check ownership
+    // after the await and tear the just-started source down instead of leaking it.
+    const sources: FakeSource[] = [];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: () => {
+        const source = new FakeSource();
+        const originalStart = source.start.bind(source);
+        source.start = async () => {
+          await originalStart();
+          await stopWebRtcStream("race");
+        };
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({ device: ANDROID, streamId: "race", overrides: { whipEndpoint: ENDPOINT } });
+
+    expect(sources[0].started).toBe(true);
+    expect(sources[0].stopped).toBe(true);
+    expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
   test("uses an explicit streamId when provided", async () => {
     installFakes();
     const descriptor = await startWebRtcStream({

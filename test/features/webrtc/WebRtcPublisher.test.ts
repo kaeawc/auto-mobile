@@ -1,6 +1,28 @@
 import { describe, expect, test } from "bun:test";
+import type { RTCPeerConnection } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient, WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
+
+/** Minimal fake peer connection whose media/offer path succeeds up to publish. */
+class FakePeerConnection {
+  closed = false;
+  connectionState = "new";
+  iceGatheringState = "complete";
+  connectionStateChange = { subscribe: () => {} };
+  iceGatheringStateChange = { watch: async () => {} };
+  localDescription = { sdp: "v=0" };
+  addTransceiver() {
+    return { sender: { ssrc: 1 } };
+  }
+  async createOffer() {
+    return { type: "offer", sdp: "v=0" };
+  }
+  async setLocalDescription() {}
+  async setRemoteDescription() {}
+  async close() {
+    this.closed = true;
+  }
+}
 
 /**
  * Unit tests for publisher wiring that can be asserted without a real peer
@@ -39,6 +61,30 @@ describe("WebRtcPublisher WHIP endpoint", () => {
     const endpoint = captureEndpoint("https://coord.example.com/whip?region=us", "s1");
     expect(endpoint).toContain("region=us");
     expect(endpoint).toContain("streamId=s1");
+  });
+});
+
+describe("WebRtcPublisher establish failure", () => {
+  test("closes the peer connection when WHIP publish fails on the last attempt", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", maxReconnectAttempts: 1 },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => {
+              throw new Error("ingest rejected");
+            },
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+
+    // Terminal failure (single attempt) must not leak the open peer connection.
+    await expect(publisher.start()).rejects.toThrow();
+    expect(pc.closed).toBe(true);
+    expect(publisher.getDescriptor().resourceUrl).toBeNull();
   });
 });
 

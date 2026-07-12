@@ -195,9 +195,10 @@ export class ScreenshotUtils {
    * Extract timestamp from screenshot filename
    * Assumes filename format: screenshot_timestamp.extension or hierarchy_timestamp.json
    * @param filePath Path to screenshot file
-   * @returns Timestamp portion of filename or null if not extractable
+   * @returns Timestamp portion of filename
+   * @throws Error if no timestamp is extractable from the filename
    */
-  static extractHashFromFilename(filePath: string): string {
+  static extractTimestampFromFilename(filePath: string): string {
     const filename = path.basename(filePath, path.extname(filePath));
 
     // Handle screenshot_timestamp format

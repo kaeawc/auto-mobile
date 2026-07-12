@@ -285,4 +285,52 @@ describe("WcagAudit", function() {
       expect(contrastViolations).toHaveLength(0);
     });
   });
+
+  describe("Form Input Labels", function() {
+    const config: AccessibilityAuditConfig = {
+      level: "AA",
+      failureMode: "report",
+      useBaseline: false,
+    };
+    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+
+    async function formInputViolations(elements: Element[]) {
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      return result.violations.filter(v => v.type === "unlabeled-form-input");
+    }
+
+    it("flags an EditText with no text, content-desc, or nearby TextView", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 200, bottom: 60 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    it("does NOT flag an EditText with a TextView within 50dp", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+        // Horizontally aligned label just above the input (centers within 50dp on X).
+        { class: "android.widget.TextView", text: "Name", bounds: { left: 0, top: 40, right: 200, bottom: 80 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(0);
+    });
+
+    it("flags an EditText whose only TextView is far away on both axes", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
+        // Label >50dp away in both X and Y from the input center.
+        { class: "android.widget.TextView", text: "Far", bounds: { left: 500, top: 500, right: 600, bottom: 560 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    it("ignores TextViews with no text when resolving labels", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
+        // Empty-text TextView must not count as a label even though it is adjacent.
+        { class: "android.widget.TextView", bounds: { left: 0, top: 40, right: 200, bottom: 80 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+  });
 });

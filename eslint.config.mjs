@@ -462,6 +462,28 @@ export default [
 		},
 	},
 	{
+		// Type-aware rules for src only (tsconfig.json includes `src`). These
+		// catch the fire-and-forget promise class (#3588 ffmpeg pipe, #3593
+		// eviction) at the source — an un-awaited/un-caught promise — which no
+		// syntactic rule and no bun-test unhandledRejection trap can reliably do.
+		files: ["src/**/*.ts"],
+		plugins,
+		languageOptions: {
+			parser: tsParser,
+			ecmaVersion: 9,
+			sourceType: "module",
+			parserOptions: {
+				projectService: true,
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-floating-promises": "error",
+			"@typescript-eslint/no-misused-promises": "error",
+			"@typescript-eslint/no-unnecessary-type-assertion": "error",
+		},
+	},
+	{
 		// Navigation hierarchy logic is correctness-sensitive: screen
 		// fingerprinting drives navigation-graph dedup and element extraction
 		// drives Explore, so a wrong field name silently produces a wrong

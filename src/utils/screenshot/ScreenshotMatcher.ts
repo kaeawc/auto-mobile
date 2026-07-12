@@ -15,6 +15,50 @@ export interface SimilarScreenshotResult {
 }
 
 /**
+ * Select the `k` items with the largest `value`, returned in descending order,
+ * without fully sorting the input. Effectively O(n) for the common case (most
+ * items rejected by a single comparison against the current k-th largest) and
+ * O(n * k) worst case, versus O(n log n) for a full sort when only k << n items
+ * are needed (issue #3433).
+ *
+ * Ties preserve input order, matching a stable descending sort followed by
+ * `slice(0, k)`.
+ */
+export function topKByDescending<T>(items: T[], k: number, value: (item: T) => number): T[] {
+  if (k <= 0) {
+    return [];
+  }
+
+  // `top` is kept sorted by value, descending, with at most k entries.
+  const top: Array<{ item: T; value: number }> = [];
+  for (const item of items) {
+    const itemValue = value(item);
+    if (top.length >= k && itemValue <= top[top.length - 1].value) {
+      continue; // not large enough to enter the current top-k
+    }
+
+    // Binary search for the insertion point; `>=` skips past equal values so a
+    // new item lands after existing equals (stable ordering).
+    let lo = 0;
+    let hi = top.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (top[mid].value >= itemValue) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    top.splice(lo, 0, { item, value: itemValue });
+    if (top.length > k) {
+      top.pop();
+    }
+  }
+
+  return top.map(entry => entry.item);
+}
+
+/**
  * Assemble the final per-path results of the two-stage batch comparison:
  * precise pixel results for candidates, falling back to the stage-1 perceptual
  * similarity for everything else.
@@ -244,7 +288,8 @@ export class ScreenshotMatcher {
         };
       }
 
-      // Sort files by modification time (newest first) to check recent screenshots first
+      // Take the newest maxComparisons files. Only k << n are needed, so select
+      // the top-k by mtime in a single pass instead of a full O(n log n) sort.
       const filesWithStats = await Promise.all(
         screenshotFiles.map(async filePath => {
           const stats = await fsPromises.stat(filePath);
@@ -252,8 +297,7 @@ export class ScreenshotMatcher {
         })
       );
 
-      filesWithStats.sort((a, b) => b.mtime - a.mtime);
-      const filesToCheck = filesWithStats.slice(0, maxComparisons);
+      const filesToCheck = topKByDescending(filesWithStats, maxComparisons, f => f.mtime);
 
       logger.info(`Comparing against ${filesToCheck.length} most recent screenshots (max: ${maxComparisons})`);
 

@@ -7,7 +7,12 @@ export class FakeDeviceSnapshotRepository {
   private readonly records = new Map<string, DeviceSnapshotRecord>();
 
   async insertSnapshot(record: DeviceSnapshotRecord): Promise<void> {
-    this.records.set(record.snapshotName, { ...record });
+    // Mirror the real upsert: an overwrite preserves the original created_at (#3498).
+    const existing = this.records.get(record.snapshotName);
+    this.records.set(record.snapshotName, {
+      ...record,
+      createdAt: existing?.createdAt ?? record.createdAt,
+    });
   }
 
   async updateSnapshot(

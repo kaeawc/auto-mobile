@@ -7,7 +7,12 @@ export class FakeVideoRecordingRepository {
   private readonly records = new Map<string, VideoRecordingRecord>();
 
   async insertRecording(record: VideoRecordingRecord): Promise<void> {
-    this.records.set(record.recordingId, { ...record });
+    // Mirror the real upsert: an overwrite preserves the original created_at (#3498).
+    const existing = this.records.get(record.recordingId);
+    this.records.set(record.recordingId, {
+      ...record,
+      createdAt: existing?.createdAt ?? record.createdAt,
+    });
   }
 
   async updateRecording(

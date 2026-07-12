@@ -109,7 +109,8 @@ describe("VideoRecordingRepository", () => {
     expect(result!.sizeBytes).toBe(4096);
     expect(result!.durationMs).toBe(6000);
     expect(result!.codec).toBe("h265");
-    expect(result!.createdAt).toBe("2024-02-01T00:00:00.000Z");
+    // created_at is preserved from the original insert on overwrite (#3498).
+    expect(result!.createdAt).toBe("2024-01-01T00:00:00.000Z");
     expect(result!.startedAt).toBe("2024-02-01T00:00:01.000Z");
     expect(result!.endedAt).toBe("2024-02-01T00:00:07.000Z");
     expect(result!.lastAccessedAt).toBe("2024-02-02T00:00:00.000Z");
@@ -117,6 +118,24 @@ describe("VideoRecordingRepository", () => {
     expect(result!.config.fps).toBe(30);
     expect(result!.highlights).toHaveLength(1);
     expect(result!.highlights![0].description).toBe("second insert highlight");
+  });
+
+  test("insertRecording overwrite preserves the original created_at (#3498)", async () => {
+    await repo.insertRecording(makeRecord({ createdAt: "2024-01-01T00:00:00.000Z" }));
+
+    await repo.insertRecording(
+      makeRecord({
+        createdAt: "2025-05-05T00:00:00.000Z",
+        sizeBytes: 8192,
+        lastAccessedAt: "2025-05-05T00:00:00.000Z",
+      })
+    );
+
+    const result = await repo.getRecording("rec-1");
+    // Original creation time survives; other fields still update.
+    expect(result!.createdAt).toBe("2024-01-01T00:00:00.000Z");
+    expect(result!.sizeBytes).toBe(8192);
+    expect(result!.lastAccessedAt).toBe("2025-05-05T00:00:00.000Z");
   });
 
   test("insertRecording upsert clears stale optional fields", async () => {

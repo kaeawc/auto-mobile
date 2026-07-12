@@ -104,10 +104,30 @@ describe("DeviceSnapshotRepository", () => {
     expect(result!.snapshotType).toBe("adb");
     expect(result!.includeAppData).toBe(true);
     expect(result!.includeSettings).toBe(true);
-    expect(result!.createdAt).toBe("2024-02-01T00:00:00.000Z");
+    // created_at is preserved from the original insert on overwrite (#3498); the
+    // "touched" time is carried by last_accessed_at.
+    expect(result!.createdAt).toBe("2024-01-01T00:00:00.000Z");
     expect(result!.lastAccessedAt).toBe("2024-02-02T00:00:00.000Z");
     expect(result!.sizeBytes).toBe(2048);
     expect(result!.manifest.osVersion).toBe("17");
+  });
+
+  test("insertSnapshot overwrite preserves the original created_at (#3498)", async () => {
+    await repo.insertSnapshot(makeRecord({ createdAt: "2024-01-01T00:00:00.000Z" }));
+
+    await repo.insertSnapshot(
+      makeRecord({
+        createdAt: "2025-05-05T00:00:00.000Z",
+        lastAccessedAt: "2025-05-05T00:00:00.000Z",
+        sizeBytes: 4096,
+      })
+    );
+
+    const result = await repo.getSnapshot("snap-1");
+    // Original creation time survives; other fields still update.
+    expect(result!.createdAt).toBe("2024-01-01T00:00:00.000Z");
+    expect(result!.lastAccessedAt).toBe("2025-05-05T00:00:00.000Z");
+    expect(result!.sizeBytes).toBe(4096);
   });
 
   test("getSnapshot returns null for unknown snapshot", async () => {

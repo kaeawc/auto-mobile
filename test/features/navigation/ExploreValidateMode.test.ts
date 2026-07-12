@@ -10,7 +10,8 @@ import {
   markNodeVisited,
   markEdgeTraversed,
   selectNextEdgeToTraverse,
-  findElementMatchingEdge
+  findElementMatchingEdge,
+  addPendingEdge
 } from "../../../src/features/navigation/ExploreValidateMode";
 
 describe("ExploreValidateMode", () => {
@@ -59,7 +60,7 @@ describe("ExploreValidateMode", () => {
 
       expect(state.visitedNodes.size).toBe(0);
       expect(state.traversedEdges.size).toBe(0);
-      expect(state.pendingEdges.length).toBe(0);
+      expect(state.pendingEdges.size).toBe(0);
       expect(state.totalNodesInGraph).toBe(0);
       expect(state.totalEdgesInGraph).toBe(0);
     });
@@ -95,7 +96,7 @@ describe("ExploreValidateMode", () => {
 
       expect(state.totalNodesInGraph).toBeGreaterThan(0);
       expect(state.totalEdgesInGraph).toBeGreaterThan(0);
-      expect(state.pendingEdges.length).toBeGreaterThan(0);
+      expect(state.pendingEdges.size).toBeGreaterThan(0);
     });
   });
 
@@ -328,12 +329,14 @@ describe("ExploreValidateMode", () => {
         }
       });
 
-      state.pendingEdges.push(edge);
-      const initialLength = state.pendingEdges.length;
+      addPendingEdge(state, edge);
+      const initialLength = state.pendingEdges.size;
 
       markEdgeTraversed(state, edge, "B", true, fakeTimer);
 
-      expect(state.pendingEdges.length).toBeLessThan(initialLength);
+      expect(state.pendingEdges.size).toBeLessThan(initialLength);
+      // The `from` index must stay in sync with the key map.
+      expect(state.pendingEdgesByFrom.has("A")).toBe(false);
     });
   });
 
@@ -347,7 +350,7 @@ describe("ExploreValidateMode", () => {
           timestamp: 1000
         }
       });
-      state.pendingEdges.push(edge);
+      addPendingEdge(state, edge);
 
       const selected = selectNextEdgeToTraverse(state, "CurrentScreen");
 
@@ -357,7 +360,7 @@ describe("ExploreValidateMode", () => {
     test("should return null if no edges from current screen", async () => {
       const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
       const edge = createMockEdge("OtherScreen", "NextScreen");
-      state.pendingEdges.push(edge);
+      addPendingEdge(state, edge);
 
       const selected = selectNextEdgeToTraverse(state, "CurrentScreen");
 
@@ -376,11 +379,46 @@ describe("ExploreValidateMode", () => {
       const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
       const edge1 = createMockEdge("Current", "A");
       const edge2 = createMockEdge("Current", "B");
-      state.pendingEdges.push(edge1, edge2);
+      addPendingEdge(state, edge1);
+      addPendingEdge(state, edge2);
 
       const selected = selectNextEdgeToTraverse(state, "Current");
 
       expect(selected).toBe(edge1);
+    });
+
+    test("should keep the from-index in sync as edges are traversed", async () => {
+      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const edge1 = createMockEdge("Current", "A", {
+        interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 }
+      });
+      const edge2 = createMockEdge("Current", "B", {
+        interaction: { toolName: "tapOn", args: { text: "B" }, timestamp: 2 }
+      });
+      addPendingEdge(state, edge1);
+      addPendingEdge(state, edge2);
+
+      // Traversing edge1 leaves edge2 as the next selection from "Current".
+      markEdgeTraversed(state, edge1, "A", true, fakeTimer);
+      expect(selectNextEdgeToTraverse(state, "Current")).toBe(edge2);
+
+      // Traversing edge2 empties the bucket, which must be dropped entirely.
+      markEdgeTraversed(state, edge2, "B", true, fakeTimer);
+      expect(selectNextEdgeToTraverse(state, "Current")).toBeNull();
+      expect(state.pendingEdgesByFrom.has("Current")).toBe(false);
+      expect(state.pendingEdges.size).toBe(0);
+    });
+
+    test("addPendingEdge deduplicates by edge key", async () => {
+      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const edge = createMockEdge("Current", "A", {
+        interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 }
+      });
+      addPendingEdge(state, edge);
+      addPendingEdge(state, edge);
+
+      expect(state.pendingEdges.size).toBe(1);
+      expect(state.pendingEdgesByFrom.get("Current")?.length).toBe(1);
     });
   });
 

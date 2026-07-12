@@ -482,8 +482,8 @@ describe("Explore", () => {
       const state = await initializeGraphTraversal(fakeGraph);
 
       // If there are any pending edges, selectNextEdgeToTraverse should return one
-      if (state.pendingEdges.length > 0) {
-        const firstEdge = state.pendingEdges[0];
+      if (state.pendingEdges.size > 0) {
+        const firstEdge = state.pendingEdges.values().next().value!;
         const edge = selectNextEdgeToTraverse(state, firstEdge.from);
         expect(edge).toBeDefined();
         expect(edge).toBe(firstEdge);

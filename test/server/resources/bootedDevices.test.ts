@@ -685,4 +685,70 @@ describe("ResourceRegistry Template Matching", () => {
       mimeType: "application/json"
     });
   });
+
+  test("precompiles the template regex once at registration and reuses it across reads (#3427)", () => {
+    ResourceRegistry.registerTemplate(
+      "test://items/{id}",
+      "Test Item",
+      "Test item description",
+      "application/json",
+      async params => ({ uri: `test://items/${params.id}`, text: "{}" })
+    );
+
+    const first = ResourceRegistry.matchTemplate("test://items/1");
+    const second = ResourceRegistry.matchTemplate("test://items/2");
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+
+    // The compiled RegExp is stored on the template and the SAME instance is
+    // returned on every read — proof it is not recompiled per request.
+    const firstRegex = (first!.template as unknown as { regex: RegExp }).regex;
+    const secondRegex = (second!.template as unknown as { regex: RegExp }).regex;
+    expect(firstRegex).toBeInstanceOf(RegExp);
+    expect(firstRegex).toBe(secondRegex);
+  });
+
+  test("does not construct a new RegExp during matchTemplate (#3427)", () => {
+    ResourceRegistry.registerTemplate(
+      "test://items/{id}",
+      "Test Item",
+      "Test item description",
+      "application/json",
+      async params => ({ uri: `test://items/${params.id}`, text: "{}" })
+    );
+
+    // Count RegExp constructions while only reading, not registering.
+    const OriginalRegExp = globalThis.RegExp;
+    let constructions = 0;
+    class CountingRegExp extends OriginalRegExp {
+      constructor(...args: ConstructorParameters<typeof OriginalRegExp>) {
+        super(...args);
+        constructions++;
+      }
+    }
+    (globalThis as { RegExp: typeof RegExp }).RegExp = CountingRegExp as typeof RegExp;
+    try {
+      ResourceRegistry.matchTemplate("test://items/1");
+      ResourceRegistry.matchTemplate("test://items/2");
+      ResourceRegistry.matchTemplate("test://items/3");
+    } finally {
+      (globalThis as { RegExp: typeof RegExp }).RegExp = OriginalRegExp;
+    }
+
+    expect(constructions).toBe(0);
+  });
+
+  test("matches a trailing {path} param greedily across slashes", () => {
+    ResourceRegistry.registerTemplate(
+      "test://files/{id}/{path}",
+      "File",
+      "A nested file",
+      "application/json",
+      async params => ({ uri: `test://files/${params.id}/${params.path}`, text: "{}" })
+    );
+
+    const match = ResourceRegistry.matchTemplate("test://files/app1/dir/sub/file.txt");
+    expect(match).toBeDefined();
+    expect(match!.params).toEqual({ id: "app1", path: "dir/sub/file.txt" });
+  });
 });

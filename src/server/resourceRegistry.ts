@@ -37,6 +37,55 @@ interface RegisteredResourceTemplate {
   description?: string;
   mimeType?: string;
   handler: ResourceTemplateHandler;
+  // Precompiled at registration so matchTemplate never compiles a RegExp inside
+  // the per-request scan (issue #3427). Patterns are 100% static.
+  regex: RegExp;
+  paramNames: string[];
+}
+
+// Compile an RFC 6570 URI template into an anchored RegExp plus its ordered
+// parameter names. Pure and called once per template at registration.
+// E.g. "automobile:emulators/{id}" -> /^automobile:emulators\/([^/&]+)$/, ["id"]
+function compileUriTemplate(template: string): {
+  regex: RegExp;
+  paramNames: string[];
+} {
+  const paramNames: string[] = [];
+  const tokenizedTemplate = template.replace(/\{(\w+)\}/g, (_, paramName) => {
+    paramNames.push(paramName);
+    return `__PARAM_${paramNames.length - 1}__`;
+  });
+  const escapedTemplate = tokenizedTemplate.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+  // Use [^/&]+ so query-string params stop at the & delimiter; a trailing
+  // {path} param is greedy so it can capture nested slashes.
+  const regexPattern = escapedTemplate.replace(/__PARAM_(\d+)__/g, (_placeholder, indexText) => {
+    const index = Number(indexText);
+    const isTrailingPathParam =
+      paramNames[index] === "path" &&
+      escapedTemplate.endsWith(`__PARAM_${index}__`);
+    return isTrailingPathParam ? "(.+)" : "([^/&]+)";
+  });
+
+  return { regex: new RegExp(`^${regexPattern}$`), paramNames };
+}
+
+// Run a precompiled template's regex against a URI and, on a match, extract the
+// named parameters. Returns null when the URI does not match the template.
+function extractTemplateParams(
+  template: RegisteredResourceTemplate,
+  uri: string
+): Record<string, string> | null {
+  const match = uri.match(template.regex);
+  if (!match) {
+    return null;
+  }
+
+  const params: Record<string, string> = {};
+  template.paramNames.forEach((name, index) => {
+    params[name] = match[index + 1];
+  });
+
+  return params;
 }
 
 // The registry that holds all resources
@@ -70,7 +119,8 @@ class ResourceRegistryClass {
     mimeType: string,
     handler: ResourceTemplateHandler
   ): void {
-    this.templates.set(uriTemplate, { uriTemplate, name, description, mimeType, handler });
+    const { regex, paramNames } = compileUriTemplate(uriTemplate);
+    this.templates.set(uriTemplate, { uriTemplate, name, description, mimeType, handler, regex, paramNames });
   }
 
   // Get all registered templates
@@ -85,49 +135,13 @@ class ResourceRegistryClass {
 
   // Match a URI against registered templates and return the template and extracted parameters
   matchTemplate(uri: string): { template: RegisteredResourceTemplate; params: Record<string, string> } | undefined {
-    for (const [uriTemplate, registeredTemplate] of this.templates) {
-      const params = this.extractTemplateParams(uriTemplate, uri);
+    for (const registeredTemplate of this.templates.values()) {
+      const params = extractTemplateParams(registeredTemplate, uri);
       if (params) {
         return { template: registeredTemplate, params };
       }
     }
     return undefined;
-  }
-
-  // Extract parameters from a URI using a URI template pattern
-  private extractTemplateParams(template: string, uri: string): Record<string, string> | null {
-    // Convert URI template to regex pattern
-    // E.g., "automobile:emulators/([^/]+)"
-    // For query params, we need to stop at '&' as well as '/'
-    const paramNames: string[] = [];
-    const tokenizedTemplate = template.replace(/\{(\w+)\}/g, (_, paramName) => {
-      paramNames.push(paramName);
-      return `__PARAM_${paramNames.length - 1}__`;
-    });
-    const escapedTemplate = tokenizedTemplate.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
-    // Use [^/&]+ to properly handle query string parameters (stop at & delimiter)
-    const regexPattern = escapedTemplate.replace(/__PARAM_(\d+)__/g, (_placeholder, indexText) => {
-      const index = Number(indexText);
-      const isTrailingPathParam =
-        paramNames[index] === "path" &&
-        escapedTemplate.endsWith(`__PARAM_${index}__`);
-      return isTrailingPathParam ? "(.+)" : "([^/&]+)";
-    });
-
-    const regex = new RegExp(`^${regexPattern}$`);
-    const match = uri.match(regex);
-
-    if (!match) {
-      return null;
-    }
-
-    // Extract parameters from match groups
-    const params: Record<string, string> = {};
-    paramNames.forEach((name, index) => {
-      params[name] = match[index + 1];
-    });
-
-    return params;
   }
 
   // Get all registered resources

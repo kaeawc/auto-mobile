@@ -246,6 +246,79 @@ describe("runMigrations recovery", () => {
     expect(backupCalls).toBe(0);
   });
 
+  // Recovery disabled ({0,false,no,off}): rethrows the original kysely error
+  // untouched, never attempts the safe rebuild or destructive reset.
+  for (const disabledValue of ["0", "false", "no", "off"]) {
+    test(`recovery=${disabledValue} rethrows without attempting recovery`, async () => {
+      await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
+
+      const withBackport = { ...baseMigrations(), [BACKPORT]: createTableMigration("sprockets") };
+
+      let thrown: unknown;
+      try {
+        await runMigrations(db, {
+          provider: providerFor(withBackport),
+          env: { AUTOMOBILE_MIGRATION_RECOVERY: disabledValue },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown).not.toBeInstanceOf(ActionableError);
+      expect((thrown as Error).message).toContain("corrupted migrations");
+      // History untouched: no rebuild/prune was attempted.
+      expect(await migrationNames(db)).toEqual([WIDGETS, GADGETS].sort());
+    });
+  }
+
+  // Legacy AUTO_MOBILE_MIGRATION_RECOVERY alias behaves identically to the
+  // current AUTOMOBILE_MIGRATION_RECOVERY name.
+  test("legacy AUTO_MOBILE_MIGRATION_RECOVERY=1 alias opts into the destructive reset", async () => {
+    await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
+    await insertSentinel(db);
+
+    let backupCalls = 0;
+    const backup = async (): Promise<void> => {
+      backupCalls++;
+    };
+    const withBackport = { ...baseMigrations(), [BACKPORT]: createTableMigration("sprockets") };
+
+    await runMigrations(db, {
+      provider: providerFor(withBackport),
+      env: { AUTO_MOBILE_MIGRATION_RECOVERY: "1" },
+      backup,
+    });
+
+    expect(backupCalls).toBe(1);
+    expect(await sentinelSurvives(db)).toBe(false);
+    expect(await migrationNames(db)).toEqual([BACKPORT, WIDGETS, GADGETS].sort());
+  });
+
+  // Populated + explicitly opted-in (=1) but no backup mechanism configured:
+  // refuse rather than silently skip the safety net.
+  test("refuses the destructive reset when opted in but no backup is configured", async () => {
+    await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
+    await insertSentinel(db);
+
+    const withBackport = { ...baseMigrations(), [BACKPORT]: createTableMigration("sprockets") };
+
+    let thrown: unknown;
+    try {
+      await runMigrations(db, {
+        provider: providerFor(withBackport),
+        env: { AUTOMOBILE_MIGRATION_RECOVERY: "1" },
+        // no backup provided
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as ActionableError).message).toContain("no backup");
+    expect(await sentinelSurvives(db)).toBe(true);
+  });
+
   // (E) Safe removed-migration prune path heals and never invokes the backup guard,
   //     even on a populated DB. Also confirms =true keeps the rebuild path enabled.
   test("removed-migration prune path heals a populated DB without a backup", async () => {

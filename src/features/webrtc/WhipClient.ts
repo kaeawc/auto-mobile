@@ -92,6 +92,30 @@ export class WhipClient {
     return { answerSdp, resourceUrl };
   }
 
+  /**
+   * PATCH a trickle-ICE SDP fragment to the session resource (WHIP trickle
+   * extension, `application/trickle-ice-sdpfrag`). Best-effort: a server that
+   * does not support trickle answers 405/501 and the publisher keeps the
+   * candidates it already sent in the offer.
+   */
+  async patchCandidate(
+    resourceUrl: string,
+    sdpFragment: string,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const response = await this.fetchImpl(resourceUrl, {
+      method: "PATCH",
+      headers: this.headers({ "Content-Type": "application/trickle-ice-sdpfrag" }),
+      body: sdpFragment,
+      signal,
+    });
+    // 204 No Content is the success case; 200 is tolerated. Anything else is a
+    // server that does not implement trickle — log and move on.
+    if (response.status !== 204 && response.status !== 200) {
+      logger.debug(`[WHIP] trickle PATCH ${resourceUrl} returned ${response.status}`);
+    }
+  }
+
   /** DELETE the ingest resource to terminate the session (best-effort). */
   async delete(resourceUrl: string, signal?: AbortSignal): Promise<void> {
     const response = await this.fetchImpl(resourceUrl, {

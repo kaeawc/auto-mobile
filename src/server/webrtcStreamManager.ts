@@ -174,6 +174,7 @@ export async function startWebRtcStream(
       bearerToken: config.bearerToken,
       iceServers: config.iceServers,
       bitrateBps,
+      trickleIce: config.trickleIce,
     },
     {
       onBeforeEstablish: () => withRecord(streamId, stopSource),

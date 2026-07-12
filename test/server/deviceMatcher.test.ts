@@ -102,6 +102,27 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("3");
   });
 
+  it("LATEST returns the first candidate when versions tie", () => {
+    const devices = [
+      bootedDevice({ deviceId: "1", osVersion: "15" }),
+      bootedDevice({ deviceId: "2", osVersion: "15" }),
+    ];
+
+    const result = matcher.matchBootedDevice({ platform: "android" }, devices, "LATEST");
+    expect(result?.deviceId).toBe("1");
+  });
+
+  it("MINIMUM returns the lowest version, first candidate on ties", () => {
+    const devices = [
+      bootedDevice({ deviceId: "1", osVersion: "15" }),
+      bootedDevice({ deviceId: "2", osVersion: "13" }),
+      bootedDevice({ deviceId: "3", osVersion: "13" }),
+    ];
+
+    const result = matcher.matchBootedDevice({ platform: "android" }, devices, "MINIMUM");
+    expect(result?.deviceId).toBe("2");
+  });
+
   it("returns null when no osVersion matches range", () => {
     const devices = [
       bootedDevice({ deviceId: "1", osVersion: "12" }),

@@ -166,6 +166,25 @@ describe("ExploreElementScoring", () => {
 
       expect(selected?.text).toBe("High");
     });
+
+    test("returns the first element on a score tie", () => {
+      const first = createMockElement({ text: "First" });
+      const second = createMockElement({ text: "Second" });
+
+      expect(selectBreadthFirst([first, second])?.text).toBe("First");
+    });
+
+    test("does not mutate the input array order", () => {
+      const lowScore = createMockElement({ text: "Low" });
+      (lowScore as any).hierarchyDepth = 10;
+      const highScore = createMockElement({ text: "High" });
+      (highScore as any).hierarchyDepth = 1;
+
+      const input = [lowScore, highScore];
+      selectBreadthFirst(input);
+
+      expect(input.map(e => e.text)).toEqual(["Low", "High"]);
+    });
   });
 
   describe("selectDepthFirst", () => {
@@ -211,6 +230,32 @@ describe("ExploreElementScoring", () => {
       const selected = selectDepthFirst([lowScore, highScore], trackedElements);
 
       expect(selected?.text).toBe("High");
+    });
+
+    test("returns the first unexplored element on a score tie", () => {
+      const first = createMockElement({ text: "First" });
+      const second = createMockElement({ text: "Second" });
+
+      // Both unexplored, equal score -> first wins.
+      expect(selectDepthFirst([first, second], new Map())?.text).toBe("First");
+    });
+
+    test("does not mutate the input array order", () => {
+      const explored = createMockElement({ text: "Explored" });
+      (explored as any).hierarchyDepth = 0;
+      const unexplored = createMockElement({ text: "Unexplored" });
+      (unexplored as any).hierarchyDepth = 10;
+
+      const trackedElements = new Map<string, TrackedElement>();
+      trackedElements.set(getElementKey(explored), {
+        interactionCount: 1,
+        lastInteractionScreen: "Screen1"
+      });
+
+      const input = [explored, unexplored];
+      selectDepthFirst(input, trackedElements);
+
+      expect(input.map(e => e.text)).toEqual(["Explored", "Unexplored"]);
     });
   });
 

@@ -194,15 +194,15 @@ private val ANDROID_LAUNCHERS =
 private const val IOS_SPRINGBOARD = "com.apple.springboard"
 private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000
 
-// Live screenshot cadence requested by the desktop app while a device is connected. The desktop
-// mirrors the device screen in near real time, so it asks the daemon for a faster screenshot
-// cadence than the daemon's 3s low-cost keepalive default (the daemon clamps and resolves the
-// fastest cadence across all subscribers). See issue #3333 / #3382.
+// Screenshot cadence requested while the live layout inspector is active, so the device mirror
+// refreshes in near real time instead of at the daemon's 3s low-cost keepalive default (the daemon
+// clamps and resolves the fastest cadence across all subscribers). When the inspector is not active
+// the desktop relaxes back to the daemon default, avoiding frequent captures the user can't see.
+// See issue #3333 / #3382 / #3756.
 //
-// Hierarchy cadence is deliberately NOT requested here: the daemon already applies a fast
-// per-platform hierarchy default (Android CtrlProxy broadcasts at 250ms, iOS polls at 1000ms), and
-// the resolver takes the minimum of explicit requests. Sending a fixed 1000ms would slow Android's
-// live hierarchy 4x. Platform-/focus-aware hierarchy cadence is tracked in issue #3756.
+// Hierarchy cadence is deliberately left unset: the daemon already applies a fast per-platform
+// hierarchy default (Android CtrlProxy broadcasts at 250ms, iOS polls at 1000ms) and the resolver
+// takes the minimum of explicit requests, so requesting a fixed value would only risk slowing it.
 private const val LIVE_SCREENSHOT_INTERVAL_MS = 1_000L
 
 /**
@@ -758,10 +758,9 @@ fun AutoMobileContent(
       LOG.info(
         "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})"
       )
-      obsClient.connect(
-        deviceId = deviceId,
-        screenshotIntervalMs = LIVE_SCREENSHOT_INTERVAL_MS,
-      )
+      // Cadence starts at the daemon default; the focus-aware effect below raises it while the
+      // live layout inspector is active and relaxes it otherwise.
+      obsClient.connect(deviceId = deviceId)
       observationStreamClient = obsClient
 
       if (dataSourceMode == DataSourceMode.Real) {
@@ -807,13 +806,23 @@ fun AutoMobileContent(
           LOG.info("Observation stream socket missing, daemon appears down - skipping reconnect")
         } else {
           LOG.info("Observation stream disconnected, attempting reconnect for device: $deviceId")
-          client.connect(
-            deviceId = deviceId,
-            screenshotIntervalMs = LIVE_SCREENSHOT_INTERVAL_MS,
-          )
+          // connect() re-applies the cadence last set via setCadence, preserving it across
+          // reconnects.
+          client.connect(deviceId = deviceId)
         }
       }
     }
+  }
+
+  // Focus-aware observation cadence: request a fast screenshot cadence only while the live layout
+  // inspector is active, and relax to the daemon default otherwise, so the daemon isn't driving
+  // frequent screenshot captures when the mirror isn't on screen. setCadence is a no-op when the
+  // value is unchanged, so re-firing on unrelated recompositions is cheap.
+  LaunchedEffect(observationStreamClient, isLiveLayoutMode) {
+    val client = observationStreamClient ?: return@LaunchedEffect
+    client.setCadence(
+      screenshotIntervalMs = if (isLiveLayoutMode) LIVE_SCREENSHOT_INTERVAL_MS else null
+    )
   }
 
   // Periodic connection health check for failures push - reconnect if dropped

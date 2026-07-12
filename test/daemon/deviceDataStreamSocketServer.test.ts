@@ -863,6 +863,130 @@ describe("DeviceDataStreamSocketServer", () => {
     });
   });
 
+  describe("update_cadence", () => {
+    it("raises the screenshot cadence for an existing subscription in place", async () => {
+      const socket = new FakeSocket();
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub",
+        command: "subscribe",
+        deviceId: "device-1",
+      }));
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "upd",
+        command: "update_cadence",
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      }));
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
+    });
+
+    it("does not add a second subscriber when updating cadence", async () => {
+      const socket = new FakeSocket();
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub",
+        command: "subscribe",
+        deviceId: "device-1",
+      }));
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "upd",
+        command: "update_cadence",
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      }));
+
+      expect((server as any).subscribers.size).toBe(1);
+    });
+
+    it("relaxes cadence back to the default when the field is omitted", async () => {
+      const socket = new FakeSocket();
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub",
+        command: "subscribe",
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      }));
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(500);
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "upd",
+        command: "update_cadence",
+        deviceId: "device-1",
+      }));
+
+      expect(server.getScreenshotIntervalMsForDevice("device-1")).toBe(3000);
+    });
+
+    it("clamps the updated hierarchy cadence and notifies both cadence listeners", async () => {
+      const changedScreenshot: Array<string | null> = [];
+      const changedHierarchy: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged(deviceId => changedScreenshot.push(deviceId));
+      server.setOnHierarchyCadenceChanged(deviceId => changedHierarchy.push(deviceId));
+      const socket = new FakeSocket();
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub",
+        command: "subscribe",
+        deviceId: "device-1",
+      }));
+      changedScreenshot.length = 0;
+      changedHierarchy.length = 0;
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "upd",
+        command: "update_cadence",
+        deviceId: "device-1",
+        hierarchyIntervalMs: 50,
+      }));
+
+      expect(server.getHierarchyIntervalMsForDevice("device-1")).toBe(250);
+      expect(changedScreenshot).toEqual(["device-1"]);
+      expect(changedHierarchy).toEqual(["device-1"]);
+    });
+
+    it("acknowledges update_cadence with a subscription_response", async () => {
+      const socket = new FakeSocket();
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "sub",
+        command: "subscribe",
+        deviceId: "device-1",
+      }));
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "upd-ack",
+        command: "update_cadence",
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      }));
+
+      const ack = socket
+        .getWrittenMessages<{ id?: string; type: string; success?: boolean }>()
+        .find(message => message.id === "upd-ack");
+      expect(ack?.type).toBe("subscription_response");
+      expect(ack?.success).toBe(true);
+    });
+
+    it("acknowledges update_cadence even when the socket has no active subscription", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "upd-no-sub",
+        command: "update_cadence",
+        deviceId: "device-1",
+        screenshotIntervalMs: 500,
+      }));
+
+      const ack = socket
+        .getWrittenMessages<{ id?: string; type: string; success?: boolean }>()
+        .find(message => message.id === "upd-no-sub");
+      expect(ack?.type).toBe("subscription_response");
+      expect(ack?.success).toBe(true);
+      expect((server as any).subscribers.size).toBe(0);
+    });
+  });
+
   describe("onDeviceConnectionLost", () => {
     it("pushes a device-scoped error to subscribers for that device", () => {
       const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });

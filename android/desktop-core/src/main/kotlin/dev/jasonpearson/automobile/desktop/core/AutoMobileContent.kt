@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -482,22 +483,32 @@ fun AutoMobileContent(
       }
     }
 
-  // Register the screenshot callback on the shared MenuBarActions bridge so the
-  // native menu bar "Take Screenshot" item can trigger it.
-  DisposableEffect(clientProvider) {
-    actions.onTakeScreenshot = {
-      val provider = clientProvider
-      if (provider != null) {
-        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+  // Take-screenshot is driven from both the native menu bar and the in-app menu.
+  // Run it on a composition-scoped coroutine (not GlobalScope) so the call and its
+  // MCP client are cancelled when this composable leaves composition instead of
+  // leaking a hung coroutine + client if the daemon is unresponsive (#3603).
+  val screenshotScope = rememberCoroutineScope()
+  val takeScreenshot: () -> Unit =
+    remember(clientProvider, screenshotScope) {
+      takeScreenshot@{
+        val provider = clientProvider ?: return@takeScreenshot
+        screenshotScope.launch(Dispatchers.IO) {
           val client = provider()
           try {
             client.callTool("screenshot", buildJsonObject {})
-          } catch (_: Exception) {} finally {
+          } catch (e: Exception) {
+            LOG.warn("Screenshot request failed: ${e.message}")
+          } finally {
             client.close()
           }
         }
       }
     }
+
+  // Register the screenshot callback on the shared MenuBarActions bridge so the
+  // native menu bar "Take Screenshot" item can trigger it.
+  DisposableEffect(takeScreenshot) {
+    actions.onTakeScreenshot = takeScreenshot
     onDispose { actions.onTakeScreenshot = null }
   }
 
@@ -1068,19 +1079,7 @@ fun AutoMobileContent(
         onSwitchToDarkMode = { isDarkMode = true },
         onSwitchToLightMode = { isDarkMode = false },
         onOpenSettings = { showSettings = true },
-        onTakeScreenshot = {
-          val provider = clientProvider
-          if (provider != null) {
-            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-              val client = provider()
-              try {
-                client.callTool("screenshot", buildJsonObject {})
-              } catch (_: Exception) {} finally {
-                client.close()
-              }
-            }
-          }
-        },
+        onTakeScreenshot = takeScreenshot,
         onToggleLiveLayout = { showNavigationView = !showNavigationView },
       )
     )

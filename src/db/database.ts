@@ -12,7 +12,7 @@ import {
 } from "./migrationLock";
 import { logger } from "../utils/logger";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { BunSqliteDialect } from "./bunSqliteDialect";
+import { BunSqliteDialect, DEFAULT_OPTIMIZE_INTERVAL_MS } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
   createIncompleteExtractionError,
@@ -369,6 +369,9 @@ function createSqliteKysely<T>(
     dialect: new BunSqliteDialect({
       database: () => openConfiguredSqliteDatabase(dbPath),
       beforeQuery,
+      // Refresh planner statistics periodically over a long-lived daemon, not
+      // only at connection close (#3497).
+      optimizeIntervalMs: DEFAULT_OPTIMIZE_INTERVAL_MS,
     }),
   });
 }

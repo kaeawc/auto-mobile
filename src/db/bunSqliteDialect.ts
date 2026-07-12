@@ -36,6 +36,16 @@ const DEFAULT_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
   maxDelayMs: 50,
 });
 
+/**
+ * Low-frequency cadence for the periodic `PRAGMA optimize` (#3497). A long-lived
+ * daemon that rarely restarts otherwise only refreshes planner statistics at
+ * close, so index selection can drift as tables grow between restarts. `optimize`
+ * is cheap and no-ops when nothing needs updating, so a several-minute tick keeps
+ * stats fresh without meaningful overhead. Enabled only for the daemon's
+ * file-backed connection (see database.ts); in-memory connections leave it off.
+ */
+export const DEFAULT_OPTIMIZE_INTERVAL_MS = 5 * 60 * 1000;
+
 type BunStatement = ReturnType<BunDatabase["prepare"]>;
 type SchemaVersionRow = { schema_version?: number | bigint };
 
@@ -76,6 +86,12 @@ interface BunSqliteDialectConfig {
    * <100ms and non-flaky. Defaults are production-safe.
    */
   retry?: BunSqliteRetryConfig;
+  /**
+   * When set and > 0, run `PRAGMA optimize` on this connection every N ms (#3497)
+   * using the connection's injected timer. Left unset (disabled) for in-memory
+   * connections; the daemon's file-backed connection enables it.
+   */
+  optimizeIntervalMs?: number;
 }
 
 interface BunSqliteRetryConfig {
@@ -101,7 +117,8 @@ class BunSqliteDriver implements Driver {
     this.#connectionState = new BunSqliteConnectionState(
       this.#config.database,
       this.#config.beforeQuery,
-      this.#config.retry
+      this.#config.retry,
+      this.#config.optimizeIntervalMs
     );
   }
 
@@ -160,11 +177,13 @@ export class BunSqliteConnectionState {
   readonly #retryBackoff: BackoffPolicy;
   readonly #timer: Timer;
   readonly #random: Random;
+  #optimizeTimer: NodeJS.Timeout | null = null;
 
   constructor(
     database: BunDatabase | (() => BunDatabase),
     beforeQuery?: () => Promise<void>,
-    retry?: BunSqliteRetryConfig
+    retry?: BunSqliteRetryConfig,
+    optimizeIntervalMs?: number
   ) {
     this.#databaseSource = database;
     this.#db = typeof database === "function" ? null : database;
@@ -173,6 +192,37 @@ export class BunSqliteConnectionState {
     this.#retryBackoff = retry?.backoff ?? DEFAULT_RETRY_BACKOFF;
     this.#timer = retry?.timer ?? defaultTimer;
     this.#random = retry?.random ?? defaultRandom;
+
+    if (optimizeIntervalMs && optimizeIntervalMs > 0) {
+      this.#optimizeTimer = this.#timer.setInterval(
+        () => this.#runPeriodicOptimize(),
+        optimizeIntervalMs
+      );
+      // A background maintenance tick must never keep the process alive.
+      // FakeTimer handles have no unref, hence the optional call.
+      (this.#optimizeTimer as { unref?: () => void }).unref?.();
+    }
+  }
+
+  // Best-effort periodic refresh of the query-planner statistics (#3497). Skips
+  // when the connection is closed, not yet opened, or mid-query/transaction so it
+  // never runs inside another statement's transaction; the next tick retries.
+  #runPeriodicOptimize(): void {
+    if (
+      this.#closed ||
+      !this.#db ||
+      this.#transactionOwner !== null ||
+      this.#pendingTransactions > 0 ||
+      this.#activeQueries > 0
+    ) {
+      return;
+    }
+    try {
+      this.#db.exec("PRAGMA optimize;");
+    } catch (error) {
+      // Stale planner stats are preferable to a throwing background timer.
+      logger.debug(`periodic PRAGMA optimize failed: ${error}`);
+    }
   }
 
   async beginTransaction(owner: symbol): Promise<void> {
@@ -364,6 +414,10 @@ export class BunSqliteConnectionState {
     // observes the closed state and rejects instead of running against a dead
     // handle. Then wake waiters so queued queries settle promptly.
     this.#closed = true;
+    if (this.#optimizeTimer) {
+      this.#timer.clearInterval(this.#optimizeTimer);
+      this.#optimizeTimer = null;
+    }
     this.#clearStatementCache();
     if (this.#db) {
       try {

@@ -94,13 +94,13 @@ jobs:
           sleep 2
           exit 1
       - name: "Foreground work before the wait"
-        run: echo "fg: ran before wait"
+        run: echo "fg ran before wait"
       - wait: bgfail
       - name: "After-wait step (does it run after a failed bg?)"
         run: echo "REACHED after-wait — a failed background step did NOT stop the job"
       - name: "Cleanup (if: always)"
         if: always()
-        run: echo "CLEANUP ran despite the background failure (if: always())"
+        run: echo "CLEANUP ran despite the background failure (always guard)"
 
   # Q3b — Does step-level continue-on-error COMPOSE with background? If it does,
   # the failed bg step is tolerated and the job stays green + after-wait runs.

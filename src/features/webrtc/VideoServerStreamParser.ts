@@ -1,0 +1,99 @@
+/**
+ * Parser for the on-device `video-server` binary stream protocol.
+ *
+ * The persistent encoder (`android/video-server`, run via `app_process`) writes
+ * H.264 over a LocalSocket using a small binary framing:
+ *
+ * - Stream header (12 bytes, once): `codec_id (4) | width (4) | height (4)`,
+ *   all big-endian. `codec_id == 0x68323634` ("h264").
+ * - Packet header (12 bytes, per packet): `pts_and_flags (8) | size (4)`,
+ *   big-endian, followed by `size` bytes of encoded data.
+ *   - bit 63 of `pts_and_flags`: CONFIG (codec config / SPS+PPS)
+ *   - bit 62: KEY_FRAME (IDR)
+ *   - bits 0-61: presentation timestamp (microseconds)
+ *
+ * Each packet payload is already Annex-B (MediaCodec AVC byte-buffer output), so
+ * the concatenation of payloads is a valid Annex-B elementary stream — exactly
+ * what `WebRtcPublisher.writeH264Chunk` expects. This parser is pure and
+ * library-agnostic so it can be unit-tested without a device.
+ */
+
+/** "h264" as a big-endian int: 0x68323634. */
+export const VIDEO_SERVER_CODEC_ID_H264 = 0x68323634;
+
+const STREAM_HEADER_BYTES = 12;
+const PACKET_HEADER_BYTES = 12;
+const FLAG_CONFIG = 1n << 63n;
+const FLAG_KEY_FRAME = 1n << 62n;
+
+export interface VideoServerStreamHeader {
+  codecId: number;
+  width: number;
+  height: number;
+}
+
+export interface VideoServerPacket {
+  /** The encoded payload (Annex-B H.264). */
+  data: Buffer;
+  /** Codec configuration data (SPS/PPS), not a displayable frame. */
+  config: boolean;
+  /** Key frame (IDR). */
+  keyFrame: boolean;
+  /** Presentation timestamp in microseconds. */
+  ptsUs: number;
+}
+
+export interface VideoServerStreamParserCallbacks {
+  /** Fired once, when the 12-byte stream header has been read. */
+  onHeader?: (header: VideoServerStreamHeader) => void;
+  /** Fired for each complete packet. */
+  onPacket: (packet: VideoServerPacket) => void;
+}
+
+/**
+ * Incremental parser: feed arbitrary byte chunks via {@link push}; the header
+ * and complete packets are dispatched to the callbacks as soon as they are
+ * fully buffered. Bytes for a not-yet-complete packet are retained across calls.
+ */
+export class VideoServerStreamParser {
+  private buffered: Buffer = Buffer.alloc(0);
+  private header: VideoServerStreamHeader | null = null;
+
+  constructor(private readonly callbacks: VideoServerStreamParserCallbacks) {}
+
+  push(chunk: Buffer): void {
+    this.buffered =
+      this.buffered.length === 0 ? chunk : Buffer.concat([this.buffered, chunk]);
+
+    if (!this.header) {
+      if (this.buffered.length < STREAM_HEADER_BYTES) {
+        return;
+      }
+      this.header = {
+        codecId: this.buffered.readUInt32BE(0),
+        width: this.buffered.readUInt32BE(4),
+        height: this.buffered.readUInt32BE(8),
+      };
+      this.buffered = this.buffered.subarray(STREAM_HEADER_BYTES);
+      this.callbacks.onHeader?.(this.header);
+    }
+
+    while (this.buffered.length >= PACKET_HEADER_BYTES) {
+      const flags = this.buffered.readBigUInt64BE(0);
+      const size = this.buffered.readUInt32BE(8);
+      if (this.buffered.length < PACKET_HEADER_BYTES + size) {
+        break; // wait for the rest of the payload
+      }
+      const data = Buffer.from(
+        this.buffered.subarray(PACKET_HEADER_BYTES, PACKET_HEADER_BYTES + size)
+      );
+      this.buffered = this.buffered.subarray(PACKET_HEADER_BYTES + size);
+      this.callbacks.onPacket({
+        data,
+        config: (flags & FLAG_CONFIG) !== 0n,
+        keyFrame: (flags & FLAG_KEY_FRAME) !== 0n,
+        ptsUs: Number(flags & (FLAG_KEY_FRAME - 1n)),
+      });
+    }
+  }
+}

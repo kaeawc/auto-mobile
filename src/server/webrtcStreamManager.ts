@@ -2,10 +2,11 @@ import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
-  AndroidH264Source,
+  createAndroidH264CaptureSource,
   WebRtcPublisher,
   resolveWebRtcStreamingConfig,
   type AndroidH264SourceOptions,
+  type H264CaptureSource,
   type WebRtcPublisherConfig,
   type WebRtcPublisherDeps,
   type WebRtcStreamDescriptor,
@@ -22,7 +23,7 @@ interface WebRtcStreamRecord {
   streamId: string;
   device: BootedDevice;
   publisher: WebRtcPublisher;
-  source: AndroidH264Source | null;
+  source: H264CaptureSource | null;
   bitrateBps?: number;
   size?: { width: number; height: number };
   startedAt: string;
@@ -31,14 +32,14 @@ interface WebRtcStreamRecord {
 export interface WebRtcStreamManagerDependencies {
   idGenerator: IdGenerator;
   createPublisher: (config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps) => WebRtcPublisher;
-  createSource: (options: AndroidH264SourceOptions) => AndroidH264Source;
+  createSource: (options: AndroidH264SourceOptions) => H264CaptureSource;
   now: () => Date;
 }
 
 const defaultDependencies: WebRtcStreamManagerDependencies = {
   idGenerator: defaultIdGenerator,
   createPublisher: (config, deps) => new WebRtcPublisher(config, deps),
-  createSource: options => new AndroidH264Source(options),
+  createSource: options => createAndroidH264CaptureSource(options),
   now: () => new Date(),
 };
 
@@ -126,7 +127,8 @@ async function startSource(record: WebRtcStreamRecord): Promise<void> {
 
 /**
  * Start publishing a device's screen to the configured coordination server over
- * WHIP. Currently Android-only (uses `screenrecord` H.264). Returns the reconnect
+ * WHIP. Currently Android-only; capture prefers the persistent on-device encoder
+ * and falls back to segment-rotated `screenrecord`. Returns the reconnect
  * descriptor for the new stream.
  */
 export async function startWebRtcStream(

@@ -12,11 +12,12 @@ import dev.jasonpearson.automobile.video.wrappers.DisplayControl
  * ## Usage
  *
  * ```bash
- * # Push DEX to device
- * adb push android/video-server/build/libs/automobile-video.dex /data/local/tmp/
+ * # Build + push the DEX jar (includes the Kotlin stdlib)
+ * ./gradlew :video-server:d8Dex
+ * adb push android/video-server/build/libs/automobile-video.jar /data/local/tmp/
  *
  * # Run server
- * adb shell CLASSPATH=/data/local/tmp/automobile-video.dex \
+ * adb shell CLASSPATH=/data/local/tmp/automobile-video.jar \
  *     app_process / dev.jasonpearson.automobile.video.VideoServer --quality medium
  * ```
  *
@@ -36,8 +37,17 @@ object VideoServer {
 
   @JvmStatic
   fun main(args: Array<String>) {
+    // Running inside `app_process` there is no Application, so the main thread
+    // has no Looper. Framework internals reached during VirtualDisplay setup
+    // (ActivityThread.systemMain -> Handler) require one, so prepare it first.
+    if (android.os.Looper.myLooper() == null) {
+      android.os.Looper.prepareMainLooper()
+    }
+
     // Parse arguments
     val quality = parseQuality(args)
+    val bitrateOverride = parseIntFlag(args, "--bit-rate")
+    val sizeOverride = parseSizeFlag(args)
 
     println("AutoMobile Video Server")
     println("Quality preset: ${quality.name}")
@@ -46,10 +56,12 @@ object VideoServer {
     val displayInfo = DisplayControl.getDisplayInfo()
     println("Display: ${displayInfo.width}x${displayInfo.height} @ ${displayInfo.densityDpi}dpi")
 
-    // Calculate output dimensions based on quality preset
-    val (outputWidth, outputHeight) = calculateOutputDimensions(displayInfo, quality)
+    // Output dimensions: an explicit --size wins, otherwise scale by the preset.
+    val (outputWidth, outputHeight) =
+      sizeOverride ?: calculateOutputDimensions(displayInfo, quality)
+    val bitrate = bitrateOverride ?: quality.bitrate
     println(
-      "Output: ${outputWidth}x${outputHeight} @ ${quality.bitrate / 1_000_000}Mbps @ ${quality.fps}fps"
+      "Output: ${outputWidth}x${outputHeight} @ ${bitrate / 1_000_000}Mbps @ ${quality.fps}fps"
     )
 
     // Install shutdown hook for clean termination
@@ -63,7 +75,7 @@ object VideoServer {
       )
 
     try {
-      run(outputWidth, outputHeight, displayInfo.densityDpi, quality)
+      run(outputWidth, outputHeight, displayInfo.densityDpi, bitrate, quality.fps)
     } catch (e: Exception) {
       System.err.println("Error: ${e.message}")
       e.printStackTrace()
@@ -98,6 +110,31 @@ object VideoServer {
     return QualityPreset.MEDIUM
   }
 
+  /** Read the integer value following [flag], or null if absent/invalid. */
+  private fun parseIntFlag(args: Array<String>, flag: String): Int? {
+    val index = args.indexOf(flag)
+    if (index < 0 || index + 1 >= args.size) {
+      return null
+    }
+    return args[index + 1].toIntOrNull()?.takeIf { it > 0 }
+  }
+
+  /** Parse `--size WxH` into an even-rounded (width, height) pair, or null. */
+  private fun parseSizeFlag(args: Array<String>): Pair<Int, Int>? {
+    val index = args.indexOf("--size")
+    if (index < 0 || index + 1 >= args.size) {
+      return null
+    }
+    val parts = args[index + 1].split("x", "X")
+    if (parts.size != 2) {
+      return null
+    }
+    val width = parts[0].toIntOrNull()?.takeIf { it > 0 } ?: return null
+    val height = parts[1].toIntOrNull()?.takeIf { it > 0 } ?: return null
+    // MediaCodec requires even dimensions.
+    return (width and 0xFFFE) to (height and 0xFFFE)
+  }
+
   private fun printUsage() {
     println(
       """
@@ -105,6 +142,8 @@ object VideoServer {
 
       Options:
         --quality, -q <preset>  Quality preset: low, medium, high (default: medium)
+        --bit-rate <bps>        Override the preset bitrate (bits per second)
+        --size <WxH>            Override the output resolution (e.g. 720x1280)
         --help, -h              Show this help message
 
       Quality presets:
@@ -146,14 +185,14 @@ object VideoServer {
     }
   }
 
-  private fun run(width: Int, height: Int, densityDpi: Int, quality: QualityPreset) {
+  private fun run(width: Int, height: Int, densityDpi: Int, bitrate: Int, fps: Int) {
     // Create encoder
     encoder =
       VideoEncoder(
         width = width,
         height = height,
-        bitrate = quality.bitrate,
-        fps = quality.fps,
+        bitrate = bitrate,
+        fps = fps,
       )
     val surface = encoder!!.start()
 

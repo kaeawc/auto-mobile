@@ -65,6 +65,8 @@ by common media servers (MediaMTX, LiveKit, Janus, Cloudflare).
 | `h264.ts` | Annex-B NAL splitter, access-unit assembler, RFC 6184 RTP packetizer (single-NAL + FU-A) |
 | `RtpH264TrackWriter.ts` | Turns the elementary stream into werift `RtpPacket`s; wall-clock 90 kHz timestamps, marker bit on the last packet of a frame |
 | `AndroidH264Source.ts` | Runs `adb exec-out screenrecord --output-format=h264 -`; rotates segments before the 180 s `--time-limit` cap so the stream stays continuous |
+| `PersistentEncoderH264Source.ts` | Runs the long-lived `video-server` (VirtualDisplay + MediaCodec) via `app_process`; a single continuous encoder with no rotation seam. Parsed by `VideoServerStreamParser.ts` |
+| `androidH264CaptureSourceFactory.ts` | Prefers the persistent encoder when `automobile-video.jar` is resolvable (`videoServerJar.ts`), falling back to `screenrecord` on unavailability or start failure |
 | `WhipClient.ts` | WHIP `POST` (offer→answer) and `DELETE`; resolves the `Location` resource URL used to reconnect/tear down |
 | `ReconnectController.ts` | Connect / reconnect with injectable backoff (default exponential 1 s→30 s) |
 | `WebRtcPublisher.ts` | werift `RTCPeerConnection` (H.264 sendonly) + WHIP + auto-reconnect; exposes a reconnect descriptor |
@@ -155,19 +157,28 @@ Two independent reconnection layers:
 
 ## Quality / bitrate
 
-`screenrecord` encodes on-device H.264. Bitrate is controlled with
-`--bit-rate` (from `bitrateKbps`) and resolution with `--size` (from `size`).
-The 180 s `--time-limit` cap is worked around by segment rotation
-(`ANDROID_STREAM_SEGMENT_ROTATE_MS`); each new segment emits a fresh keyframe.
+Capture prefers the persistent on-device encoder (`video-server`): a single
+long-lived VirtualDisplay + MediaCodec pipeline with no ~175 s rotation seam and
+one continuous timestamp base. It honors `--bit-rate` (from `bitrateKbps`) and
+`--size` (from `size`). The jar is resolved via `AUTOMOBILE_VIDEO_SERVER_JAR` or
+the Gradle build output (`android/video-server/build/libs/automobile-video.jar`,
+built with `./gradlew :video-server:d8Dex`).
+
+When the jar is not resolvable — or the persistent encoder fails to start —
+capture falls back to `screenrecord`, which encodes on-device H.264 with the same
+`--bit-rate`/`--size` controls. Its 180 s `--time-limit` cap is worked around by
+segment rotation (`ANDROID_STREAM_SEGMENT_ROTATE_MS`); each new segment emits a
+fresh keyframe.
 
 ## Known limitations / future work
 
 - **Android only.** iOS `simctl` provides raw frames, not a live H.264 elementary
   stream; an on-Mac encoder (or the `video-server` VirtualDisplay path) would be
   required.
-- **Segment-rotation seam.** Rotating `screenrecord` produces a brief keyframe
-  boundary every ~175 s. A persistent encoder (the Android `video-server` JAR)
-  would remove this.
+- **Persistent-encoder distribution.** The `video-server` jar removes the
+  segment-rotation seam and is preferred when present, but is not yet shipped in
+  the released package — until it is bundled/downloaded (like the CtrlProxy
+  runner), production installs resolve no jar and fall back to `screenrecord`.
 - **No audio.** Video only.
 - **Reference server is single-process/in-memory.** Use a hardened WHIP/WHEP SFU
   (MediaMTX, LiveKit, Janus, Cloudflare) in production; the publisher is unchanged.

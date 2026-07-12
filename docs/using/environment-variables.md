@@ -85,5 +85,6 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL of the coordination server. Required to start a stream unless passed per request. | unset |
 | `AUTOMOBILE_WEBRTC_WHIP_TOKEN` | Bearer token sent as `Authorization: Bearer <token>` on WHIP ingest. | unset |
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`. | `stun:stun.l.google.com:19302` |
-| `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target `screenrecord` encoder bitrate (kbps). | encoder default |
+| `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale as `WIDTHxHEIGHT` (e.g. `720x1280`). | native |
+| `AUTOMOBILE_VIDEO_SERVER_JAR` | Path to the built `automobile-video.jar` (persistent on-device encoder). When resolvable, capture prefers the persistent encoder over `screenrecord`. | Gradle build output, else `screenrecord` |

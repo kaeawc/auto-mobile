@@ -453,17 +453,28 @@ export class FailureAnalyticsRepository {
     const bucketMs = this.getAggregationMs(aggregation);
     const periodDuration = endTime - startTime;
 
-    // Get occurrences in the time range
-    const occurrences = await db
+    // Aggregate occurrences per (bucket, type) in SQL rather than transferring
+    // every occurrence and bucketing/counting in JS (#3439). `bucketMs` is a
+    // constant here, so integer-dividing the timestamp yields the bucket index;
+    // CAST(... AS INTEGER) makes the truncation explicit regardless of how the
+    // bound value types. Only O(buckets * types) rows transfer.
+    const bucketIndex = sql<number>`cast(failure_occurrences.timestamp / ${bucketMs} as integer)`;
+    const bucketedCounts = await db
       .selectFrom("failure_occurrences")
       .innerJoin("failure_groups", "failure_occurrences.group_id", "failure_groups.id")
-      .select(["failure_occurrences.timestamp", "failure_groups.type"])
+      .select([
+        bucketIndex.as("bucket"),
+        "failure_groups.type",
+        db.fn.countAll<number>().as("count"),
+      ])
       .where("failure_occurrences.timestamp", ">=", startTime)
       .where("failure_occurrences.timestamp", "<=", endTime)
+      .groupBy([bucketIndex, "failure_groups.type"])
       .execute();
 
-    // Pre-create all buckets for the time range with zero values
-    const buckets = new Map<number, { crashes: number; anrs: number; toolFailures: number; nonfatals: number }>();
+    // Pre-create all buckets for the time range with zero values, then fill from
+    // the aggregate so empty buckets still appear as zeros.
+    const buckets = new Map<number, PeriodTotals>();
     const firstBucketStart = Math.floor(startTime / bucketMs) * bucketMs;
     const lastBucketStart = Math.floor(endTime / bucketMs) * bucketMs;
 
@@ -471,26 +482,11 @@ export class FailureAnalyticsRepository {
       buckets.set(bucketStart, { crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 });
     }
 
-    // Fill in data from occurrences
-    for (const occ of occurrences) {
-      const bucketStart = Math.floor(occ.timestamp / bucketMs) * bucketMs;
+    for (const row of bucketedCounts) {
+      const bucketStart = Number(row.bucket) * bucketMs;
       const bucket = buckets.get(bucketStart);
       if (!bucket) {continue;} // Should not happen, but guard against it
-
-      switch (occ.type) {
-        case "crash":
-          bucket.crashes++;
-          break;
-        case "anr":
-          bucket.anrs++;
-          break;
-        case "tool_failure":
-          bucket.toolFailures++;
-          break;
-        case "nonfatal":
-          bucket.nonfatals++;
-          break;
-      }
+      this.addTypeCount(bucket, row.type as FailureType, Number(row.count));
     }
 
     // Convert to sorted array
@@ -507,26 +503,46 @@ export class FailureAnalyticsRepository {
       });
     }
 
-    // Get previous period totals
+    // Previous period totals: one grouped COUNT(*) rather than fetching every
+    // occurrence and running four full `.filter().length` passes (#3439).
     const previousStart = startTime - periodDuration;
     const previousEnd = startTime;
 
-    const previousOccurrences = await db
+    const previousCounts = await db
       .selectFrom("failure_occurrences")
       .innerJoin("failure_groups", "failure_occurrences.group_id", "failure_groups.id")
-      .select(["failure_groups.type"])
+      .select(["failure_groups.type", db.fn.countAll<number>().as("count")])
       .where("failure_occurrences.timestamp", ">=", previousStart)
       .where("failure_occurrences.timestamp", "<", previousEnd)
+      .groupBy("failure_groups.type")
       .execute();
 
-    const previousPeriodTotals: PeriodTotals = {
-      crashes: previousOccurrences.filter(o => o.type === "crash").length,
-      anrs: previousOccurrences.filter(o => o.type === "anr").length,
-      toolFailures: previousOccurrences.filter(o => o.type === "tool_failure").length,
-      nonfatals: previousOccurrences.filter(o => o.type === "nonfatal").length,
-    };
+    const previousPeriodTotals: PeriodTotals = { crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 };
+    for (const row of previousCounts) {
+      this.addTypeCount(previousPeriodTotals, row.type as FailureType, Number(row.count));
+    }
 
     return { dataPoints, previousPeriodTotals };
+  }
+
+  // Add `count` to the field of `target` matching the failure `type`. Both the
+  // per-bucket tallies and the previous-period totals share the same four
+  // fields, so one accumulator serves both.
+  private addTypeCount(target: PeriodTotals, type: FailureType, count: number): void {
+    switch (type) {
+      case "crash":
+        target.crashes += count;
+        break;
+      case "anr":
+        target.anrs += count;
+        break;
+      case "tool_failure":
+        target.toolFailures += count;
+        break;
+      case "nonfatal":
+        target.nonfatals += count;
+        break;
+    }
   }
 
   /**

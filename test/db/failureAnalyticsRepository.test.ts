@@ -997,3 +997,105 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);
   });
 });
+
+describe("FailureAnalyticsRepository.getTimelineData (#3439)", () => {
+  let db: Kysely<Database>;
+  let timer: FakeTimer;
+  let repo: FailureAnalyticsRepository;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    timer = new FakeTimer();
+    repo = new FailureAnalyticsRepository(timer, db);
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  // Records one occurrence of `type` at `ts`. Distinct signatures per type keep
+  // each type in its own group; the occurrence timestamp is the timer's value.
+  async function record(type: "crash" | "anr" | "tool_failure" | "nonfatal", ts: number): Promise<void> {
+    timer.setCurrentTime(ts);
+    await repo.recordFailure({
+      type,
+      signature: `sig-${type}`,
+      title: `title ${type}`,
+      message: "m",
+      severity: "critical",
+      occurrence: { deviceModel: "Pixel 7", os: "Android 14", appVersion: "1.0.0", sessionId: "s" },
+    });
+  }
+
+  const MINUTE = 60_000;
+
+  test("buckets counts per type by minute and zero-fills empty buckets", async () => {
+    await record("crash", 30_000); // bucket 0
+    await record("nonfatal", 45_000); // bucket 0
+    await record("crash", 90_000); // bucket 60_000
+    await record("anr", 95_000); // bucket 60_000
+    await record("tool_failure", 150_000); // bucket 120_000
+    // bucket 180_000 stays empty
+
+    const { dataPoints } = await repo.getTimelineData({
+      startTime: 0,
+      endTime: 180_000,
+      aggregation: "minute",
+    });
+
+    // Buckets: 0, 60_000, 120_000, 180_000 (inclusive of the end bucket).
+    expect(dataPoints).toHaveLength(4);
+    expect(dataPoints[0]).toMatchObject({ crashes: 1, anrs: 0, toolFailures: 0, nonfatals: 1 });
+    expect(dataPoints[1]).toMatchObject({ crashes: 1, anrs: 1, toolFailures: 0, nonfatals: 0 });
+    expect(dataPoints[2]).toMatchObject({ crashes: 0, anrs: 0, toolFailures: 1, nonfatals: 0 });
+    expect(dataPoints[3]).toMatchObject({ crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 });
+  });
+
+  test("an occurrence on a bucket boundary lands in that bucket", async () => {
+    await record("crash", MINUTE); // exactly bucket 60_000, not bucket 0
+
+    const { dataPoints } = await repo.getTimelineData({
+      startTime: 0,
+      endTime: 2 * MINUTE,
+      aggregation: "minute",
+    });
+
+    expect(dataPoints).toHaveLength(3);
+    expect(dataPoints[0].crashes).toBe(0);
+    expect(dataPoints[1].crashes).toBe(1);
+    expect(dataPoints[2].crashes).toBe(0);
+  });
+
+  test("previousPeriodTotals counts the prior equal-length window by type", async () => {
+    // Current window [180_000, 360_000); previous window [0, 180_000).
+    await record("crash", 10_000);
+    await record("crash", 20_000);
+    await record("anr", 30_000);
+    await record("tool_failure", 40_000);
+    await record("nonfatal", 50_000);
+    // Exactly at startTime belongs to the CURRENT window (previousEnd is exclusive).
+    await record("crash", 180_000);
+
+    const { previousPeriodTotals } = await repo.getTimelineData({
+      startTime: 180_000,
+      endTime: 360_000,
+      aggregation: "minute",
+    });
+
+    expect(previousPeriodTotals).toEqual({ crashes: 2, anrs: 1, toolFailures: 1, nonfatals: 1 });
+  });
+
+  test("returns zeroed totals and buckets when the range is empty", async () => {
+    const { dataPoints, previousPeriodTotals } = await repo.getTimelineData({
+      startTime: 0,
+      endTime: 2 * MINUTE,
+      aggregation: "minute",
+    });
+
+    expect(previousPeriodTotals).toEqual({ crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 });
+    expect(dataPoints).toHaveLength(3);
+    for (const dp of dataPoints) {
+      expect(dp).toMatchObject({ crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 });
+    }
+  });
+});

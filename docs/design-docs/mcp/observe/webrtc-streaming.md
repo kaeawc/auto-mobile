@@ -172,9 +172,10 @@ fresh keyframe.
 
 ## Known limitations / future work
 
-- **Android only.** iOS `simctl` provides raw frames, not a live H.264 elementary
-  stream; an on-Mac encoder (or the `video-server` VirtualDisplay path) would be
-  required.
+- **Android only.** iOS `simctl` provides screenshots/finalized recordings, not a
+  live H.264 elementary stream; a VideoToolbox encoder in the CtrlProxy runner is
+  required. See [ios-webrtc-streaming.md](./ios-webrtc-streaming.md) (#3777) for
+  the spike and recommended path.
 - **Persistent-encoder distribution.** The `video-server` jar removes the
   segment-rotation seam and is preferred when present, but is not yet shipped in
   the released package — until it is bundled/downloaded (like the CtrlProxy

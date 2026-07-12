@@ -11,7 +11,7 @@ import {
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
-import type { VideoRecordingMetadata } from "../models";
+import type { VideoRecordingConfigInput, VideoRecordingMetadata } from "../models";
 
 export interface AndroidSegmentedPlanVideoSessionOptions {
   device: BootedDevice;
@@ -19,6 +19,8 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   timer?: Timer;
   /** Override for tests. */
   segmentRotateAfterMs?: number;
+  /** Quality/config overrides forwarded to every segment's recording. */
+  configOverrides?: VideoRecordingConfigInput;
   startVideoRecording?: (
     request: Parameters<typeof defaultStartVideoRecording>[0]
   ) => Promise<ActiveVideoRecording>;
@@ -46,7 +48,18 @@ export class AndroidSegmentedPlanVideoSession {
 
   private readonly segmentRotateAfterMs: number;
 
+  private readonly configOverrides: VideoRecordingConfigInput | undefined;
+
   private activeRecordingId: string | undefined;
+
+  /** Timer-driven rotation handle (set only when {@link start} is used). */
+  private rotationTimerHandle: NodeJS.Timeout | undefined;
+
+  /** True while a timer-driven session is running, so rotations keep rescheduling. */
+  private timerDriven = false;
+
+  /** Tracks the most recent in-flight rotation so {@link stop} can await it. */
+  private pendingRotation: Promise<void> = Promise.resolve();
 
   private segmentIndex = 0;
 
@@ -69,12 +82,63 @@ export class AndroidSegmentedPlanVideoSession {
     this.outputNamePrefix = options.outputNamePrefix;
     this.timer = options.timer ?? defaultTimer;
     this.segmentRotateAfterMs = options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
+    this.configOverrides = options.configOverrides;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
   }
 
-  async startFirstSegment(): Promise<void> {
-    await this.startSegment();
+  /** Device this session is recording, so callers can match sessions by device. */
+  get deviceId(): string {
+    return this.device.deviceId;
+  }
+
+  async startFirstSegment(): Promise<ActiveVideoRecording> {
+    return this.startSegment();
+  }
+
+  /**
+   * Timer-driven lifecycle (does NOT depend on plan steps). Starts the first
+   * segment, then schedules a self-rescheduling rotation via the injected
+   * {@link Timer} so each segment stays under {@link ANDROID_SCREENRECORD_MAX_SECONDS}.
+   * Returns the first segment's recording, whose recordingId is used as the
+   * session handle by callers.
+   */
+  async start(): Promise<ActiveVideoRecording> {
+    this.timerDriven = true;
+    const first = await this.startFirstSegment();
+    this.scheduleRotation();
+    return first;
+  }
+
+  private scheduleRotation(): void {
+    if (!this.timerDriven) {
+      return;
+    }
+    this.rotationTimerHandle = this.timer.setTimeout(() => {
+      this.pendingRotation = this.rotateToNextSegment()
+        .catch(error => {
+          logger.warn(
+            `[SegmentedTimerVideo] Rotation failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        })
+        .then(() => {
+          this.scheduleRotation();
+        });
+    }, this.segmentRotateAfterMs);
+  }
+
+  /**
+   * Stops the timer-driven session: clears the rotation timer, waits for any
+   * in-flight rotation, then finalizes and returns every segment.
+   */
+  async stop(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
+    this.timerDriven = false;
+    if (this.rotationTimerHandle !== undefined) {
+      this.timer.clearTimeout(this.rotationTimerHandle);
+      this.rotationTimerHandle = undefined;
+    }
+    await this.pendingRotation;
+    return this.finalize();
   }
 
   /**
@@ -98,11 +162,12 @@ export class AndroidSegmentedPlanVideoSession {
     return `${this.outputNamePrefix}${suffix}`;
   }
 
-  private async startSegment(): Promise<void> {
+  private async startSegment(): Promise<ActiveVideoRecording> {
     const recording = await this.startVideoRecordingFn({
       device: this.device,
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
+      configOverrides: this.configOverrides,
     });
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();
@@ -110,6 +175,7 @@ export class AndroidSegmentedPlanVideoSession {
     logger.info(
       `[SegmentedPlanVideo] Started segment ${this.segmentIndex} recordingId=${recording.recordingId}`
     );
+    return recording;
   }
 
   private async rotateToNextSegment(): Promise<void> {

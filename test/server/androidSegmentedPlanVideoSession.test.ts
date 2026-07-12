@@ -3,6 +3,10 @@ import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmen
 import type { BootedDevice } from "../../src/models";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { FakeTimer } from "../fakes/FakeTimer";
+
+/** Drain all pending microtasks (setImmediate runs after the microtask queue). */
+const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -116,5 +120,77 @@ describe("AndroidSegmentedPlanVideoSession", () => {
     expect(stop).toHaveBeenCalledTimes(2);
     expect(finalized.filePaths.length).toBe(2);
     expect(finalized.recordingIds.length).toBe(2);
+  });
+});
+
+describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
+  function makeSession(timer: FakeTimer) {
+    const outputNames: Array<string | undefined> = [];
+    const start = mock(async (req: { outputName?: string }) => {
+      outputNames.push(req.outputName);
+      return makeActiveRecording(`id-${req.outputName}`, `/tmp/${req.outputName}.mp4`);
+    });
+    const stop = mock(async (id: string | undefined) => {
+      const rid = id ?? "x";
+      return {
+        metadata: makeStopMetadata(rid, `/tmp/${rid}.mp4`),
+        evictedRecordingIds: [] as string[],
+      };
+    });
+
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: start,
+      stopVideoRecording: stop,
+    });
+
+    return { session, start, stop, outputNames };
+  }
+
+  test("start rotates segments on the timer; stop returns all in order", async () => {
+    const timer = new FakeTimer();
+    const { session, start, stop, outputNames } = makeSession(timer);
+
+    const first = await session.start();
+    expect(first.recordingId).toBe("id-vid");
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(outputNames).toEqual(["vid"]);
+
+    timer.advanceTime(1000);
+    await flush();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(outputNames[1]).toBe("vid-seg1");
+
+    timer.advanceTime(1000);
+    await flush();
+    expect(start).toHaveBeenCalledTimes(3);
+    expect(outputNames[2]).toBe("vid-seg2");
+
+    const out = await session.stop();
+    expect(out.recordingIds).toEqual(["id-vid", "id-vid-seg1", "id-vid-seg2"]);
+    expect(out.filePaths).toEqual([
+      "/tmp/id-vid.mp4",
+      "/tmp/id-vid-seg1.mp4",
+      "/tmp/id-vid-seg2.mp4",
+    ]);
+  });
+
+  test("stop clears the rotation timer so no further segments start", async () => {
+    const timer = new FakeTimer();
+    const { session, start } = makeSession(timer);
+
+    await session.start();
+    await session.stop();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+
+    // Advancing well past the rotation interval must not start a new segment.
+    timer.advanceTime(5000);
+    await flush();
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });

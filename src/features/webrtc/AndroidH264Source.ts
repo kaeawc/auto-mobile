@@ -1,5 +1,3 @@
-import { spawn as nodeSpawn } from "node:child_process";
-import type { Readable } from "node:stream";
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -8,6 +6,10 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
+import type { H264CaptureSource } from "./H264CaptureSource";
+import { defaultProcessSpawner, type ProcessSpawner, type SpawnedProcess } from "./processSpawner";
+
+export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
 
 /**
  * `screenrecord` enforces a 180s `--time-limit`. Start the next segment a few
@@ -15,23 +17,6 @@ import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
  * boundary. A fresh segment re-emits SPS/PPS + an IDR, which decoders handle.
  */
 export const ANDROID_STREAM_SEGMENT_ROTATE_MS = (ANDROID_SCREENRECORD_MAX_SECONDS - 5) * 1000;
-
-/** Minimal child-process surface the source needs, for injectable testing. */
-export interface SpawnedProcess {
-  stdout: Readable;
-  stderr: Readable;
-  kill(signal?: NodeJS.Signals): boolean;
-  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
-  once(event: "error", listener: (error: Error) => void): void;
-}
-
-export type ProcessSpawner = (command: string, args: string[]) => SpawnedProcess;
-
-const defaultSpawner: ProcessSpawner = (command, args) => {
-  const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-  // eslint-disable-next-line auto-mobile/no-unknown-cast -- node's ChildProcessByStdio differs from our minimal SpawnedProcess on stdin/once() variance; the members we use (stdout/stderr/kill/once) match.
-  return child as unknown as SpawnedProcess;
-};
 
 export interface AndroidH264SourceOptions {
   device: BootedDevice;
@@ -58,7 +43,7 @@ export interface AndroidH264SourceOptions {
  * downstream RTP writer keeps receiving frames. The source is device-facing but
  * fully injectable (adb factory, spawner, timer) for tests.
  */
-export class AndroidH264Source {
+export class AndroidH264Source implements H264CaptureSource {
   private readonly options: AndroidH264SourceOptions;
   private readonly adbFactory: AdbClientFactory;
   private readonly timer: Timer;
@@ -75,7 +60,7 @@ export class AndroidH264Source {
     this.options = options;
     this.adbFactory = options.adbFactory ?? defaultAdbClientFactory;
     this.timer = options.timer ?? defaultTimer;
-    this.spawner = options.spawner ?? defaultSpawner;
+    this.spawner = options.spawner ?? defaultProcessSpawner;
     this.segmentTimeLimitSeconds = Math.min(
       options.segmentTimeLimitSeconds ?? ANDROID_SCREENRECORD_MAX_SECONDS,
       ANDROID_SCREENRECORD_MAX_SECONDS

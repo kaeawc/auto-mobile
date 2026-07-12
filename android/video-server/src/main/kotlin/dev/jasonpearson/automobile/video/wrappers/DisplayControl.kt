@@ -1,8 +1,21 @@
 package dev.jasonpearson.automobile.video.wrappers
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.hardware.display.VirtualDisplay
 import android.view.Surface
 import java.lang.reflect.Method
+
+/**
+ * Wraps the framework system Context so it reports shell's package name. The modern
+ * `createVirtualDisplay` path validates that the Context's package is owned by the calling uid;
+ * running under `app_process` the caller is shell (uid 2000), whose package is `com.android.shell`.
+ */
+private class ShellPackageContext(base: Context) : ContextWrapper(base) {
+  override fun getPackageName(): String = "com.android.shell"
+
+  override fun getOpPackageName(): String = "com.android.shell"
+}
 
 /**
  * Reflection wrapper for accessing hidden Android display APIs.
@@ -24,23 +37,65 @@ object DisplayControl {
       ?: throw IllegalStateException("DisplayManagerGlobal.getInstance() returned null")
   }
 
-  private val createVirtualDisplayMethod: Method by lazy {
-    // Parameters: String name, int width, int height, int densityDpi,
-    //             Surface surface, int flags, VirtualDisplay.Callback callback,
-    //             Handler handler, String uniqueId, int displayIdToMirror
-    displayManagerGlobalClass.getMethod(
-      "createVirtualDisplay",
-      String::class.java, // name
-      Int::class.javaPrimitiveType, // width
-      Int::class.javaPrimitiveType, // height
-      Int::class.javaPrimitiveType, // densityDpi
-      Surface::class.java, // surface
-      Int::class.javaPrimitiveType, // flags
-      Class.forName("android.hardware.display.VirtualDisplay\$Callback"), // callback
-      android.os.Handler::class.java, // handler
-      String::class.java, // uniqueId
-      Int::class.javaPrimitiveType, // displayIdToMirror
-    )
+  private val legacyCreateVirtualDisplayMethod: Method? by lazy {
+    // Pre-API-34 hidden signature: String name, int width, int height,
+    // int densityDpi, Surface, int flags, VirtualDisplay.Callback, Handler,
+    // String uniqueId, int displayIdToMirror.
+    try {
+      displayManagerGlobalClass.getMethod(
+        "createVirtualDisplay",
+        String::class.java,
+        Int::class.javaPrimitiveType,
+        Int::class.javaPrimitiveType,
+        Int::class.javaPrimitiveType,
+        Surface::class.java,
+        Int::class.javaPrimitiveType,
+        Class.forName("android.hardware.display.VirtualDisplay\$Callback"),
+        android.os.Handler::class.java,
+        String::class.java,
+        Int::class.javaPrimitiveType,
+      )
+    } catch (_: NoSuchMethodException) {
+      null
+    }
+  }
+
+  private val virtualDisplayConfigBuilderClass: Class<*> by lazy {
+    Class.forName("android.hardware.display.VirtualDisplayConfig\$Builder")
+  }
+
+  private val virtualDisplayConfigClass: Class<*> by lazy {
+    Class.forName("android.hardware.display.VirtualDisplayConfig")
+  }
+
+  // API 34+ takes a VirtualDisplayConfig; the exact surrounding params vary by
+  // release (Android 15 is Context, MediaProjection, VirtualDisplayConfig,
+  // Callback, Executor), so resolve by scanning for the overload that accepts a
+  // VirtualDisplayConfig rather than hard-coding a signature.
+  private val configCreateVirtualDisplayMethod: Method by lazy {
+    displayManagerGlobalClass.methods.firstOrNull { method ->
+      method.name == "createVirtualDisplay" &&
+        method.parameterTypes.any { it == virtualDisplayConfigClass }
+    }
+      ?: throw NoSuchMethodException(
+        "No createVirtualDisplay overload accepts VirtualDisplayConfig"
+      )
+  }
+
+  // `createVirtualDisplay` dereferences `context.getPackageName()`, so a null
+  // Context is rejected. Inside `app_process` there is no Application, so obtain
+  // the framework's system Context via ActivityThread (the standard shell-tool
+  // bootstrap).
+  private val systemContext: android.content.Context by lazy {
+    val activityThreadClass = Class.forName("android.app.ActivityThread")
+    val activityThread = activityThreadClass.getMethod("systemMain").invoke(null)
+    val base =
+      activityThreadClass.getMethod("getSystemContext").invoke(activityThread)
+        as android.content.Context
+    // DisplayManagerService rejects the call unless the Context's package is owned
+    // by the calling uid ("packageName must match the calling uid"). The system
+    // context reports "android"; wrap it so it reports shell's package instead.
+    ShellPackageContext(base)
   }
 
   /** Get display information for the default display. */
@@ -48,19 +103,28 @@ object DisplayControl {
     val displayInfoClass = Class.forName("android.view.DisplayInfo")
     val displayInfo = displayInfoClass.getDeclaredConstructor().newInstance()
 
-    val getDisplayInfoMethod =
-      displayManagerGlobalClass.getMethod(
-        "getDisplayInfo",
-        Int::class.javaPrimitiveType,
-        displayInfoClass,
-      )
+    // Android 15 (API 35) exposes `getDisplayInfo(int): DisplayInfo`; older
+    // levels used the two-arg void form `getDisplayInfo(int, DisplayInfo)`.
+    val resolvedInfo =
+      try {
+        val singleArg =
+          displayManagerGlobalClass.getMethod("getDisplayInfo", Int::class.javaPrimitiveType)
+        singleArg.invoke(displayManagerGlobal, displayId) ?: displayInfo
+      } catch (_: NoSuchMethodException) {
+        val twoArg =
+          displayManagerGlobalClass.getMethod(
+            "getDisplayInfo",
+            Int::class.javaPrimitiveType,
+            displayInfoClass,
+          )
+        twoArg.invoke(displayManagerGlobal, displayId, displayInfo)
+        displayInfo
+      }
 
-    getDisplayInfoMethod.invoke(displayManagerGlobal, displayId, displayInfo)
-
-    val logicalWidth = displayInfoClass.getField("logicalWidth").getInt(displayInfo)
-    val logicalHeight = displayInfoClass.getField("logicalHeight").getInt(displayInfo)
-    val logicalDensityDpi = displayInfoClass.getField("logicalDensityDpi").getInt(displayInfo)
-    val rotation = displayInfoClass.getField("rotation").getInt(displayInfo)
+    val logicalWidth = displayInfoClass.getField("logicalWidth").getInt(resolvedInfo)
+    val logicalHeight = displayInfoClass.getField("logicalHeight").getInt(resolvedInfo)
+    val logicalDensityDpi = displayInfoClass.getField("logicalDensityDpi").getInt(resolvedInfo)
+    val rotation = displayInfoClass.getField("rotation").getInt(resolvedInfo)
 
     return DisplayInfo(
       width = logicalWidth,
@@ -92,18 +156,52 @@ object DisplayControl {
     // Flags for mirroring: VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR (1 << 4) = 16
     val flags = 1 shl 4
 
-    return createVirtualDisplayMethod.invoke(
+    legacyCreateVirtualDisplayMethod?.let { legacy ->
+      return legacy.invoke(
+        displayManagerGlobal,
+        name,
+        width,
+        height,
+        densityDpi,
+        surface,
+        flags,
+        null, // callback
+        null, // handler
+        null, // uniqueId
+        displayIdToMirror,
+      ) as VirtualDisplay
+    }
+
+    // API 34+ path: build a VirtualDisplayConfig carrying the surface, flags, and
+    // displayIdToMirror, then call the Context/MediaProjection/config overload
+    // with null projection (shell uid mirrors without MediaProjection).
+    val builder =
+      virtualDisplayConfigBuilderClass
+        .getConstructor(
+          String::class.java,
+          Int::class.javaPrimitiveType,
+          Int::class.javaPrimitiveType,
+          Int::class.javaPrimitiveType,
+        )
+        .newInstance(name, width, height, densityDpi)
+    virtualDisplayConfigBuilderClass
+      .getMethod("setFlags", Int::class.javaPrimitiveType)
+      .invoke(builder, flags)
+    virtualDisplayConfigBuilderClass
+      .getMethod("setSurface", Surface::class.java)
+      .invoke(builder, surface)
+    virtualDisplayConfigBuilderClass
+      .getMethod("setDisplayIdToMirror", Int::class.javaPrimitiveType)
+      .invoke(builder, displayIdToMirror)
+    val config = virtualDisplayConfigBuilderClass.getMethod("build").invoke(builder)
+
+    return configCreateVirtualDisplayMethod.invoke(
       displayManagerGlobal,
-      name,
-      width,
-      height,
-      densityDpi,
-      surface,
-      flags,
+      systemContext, // context (getPackageName() is dereferenced)
+      null, // MediaProjection — shell uid mirrors without one
+      config,
       null, // callback
-      null, // handler
-      null, // uniqueId
-      displayIdToMirror,
+      null, // Executor
     ) as VirtualDisplay
   }
 

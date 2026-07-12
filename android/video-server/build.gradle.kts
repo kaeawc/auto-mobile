@@ -41,13 +41,21 @@ tasks.withType<KotlinCompile>().configureEach {
   }
 }
 
-// Custom task to compile JAR to DEX using d8
+// Custom task to compile the module + its runtime classpath to a DEX jar using d8.
+//
+// d8 must dex EVERY runtime class the server touches, not just the module's own
+// jar: `app_process` provides only the Android framework, so omitting the Kotlin
+// stdlib made the server crash instantly with `NoClassDefFoundError:
+// kotlin.jvm.internal.Intrinsics` (issue #3776). We feed the full runtime
+// classpath and emit a `.jar` so d8 can spill into multiple dex files
+// (classes.dex, classes2.dex, ...) without silently dropping any — `app_process`
+// loads dex straight from the jar via CLASSPATH.
 abstract class D8DexTask @Inject constructor(private val execOperations: ExecOperations) :
   DefaultTask() {
 
-  @get:InputFile abstract val inputJar: RegularFileProperty
+  @get:InputFiles abstract val inputFiles: ConfigurableFileCollection
 
-  @get:OutputFile abstract val outputDex: RegularFileProperty
+  @get:OutputFile abstract val outputJar: RegularFileProperty
 
   @get:Input abstract val d8Path: Property<String>
 
@@ -55,38 +63,35 @@ abstract class D8DexTask @Inject constructor(private val execOperations: ExecOpe
 
   @TaskAction
   fun execute() {
-    val outputDir = outputDex.get().asFile.parentFile
-    outputDir.mkdirs()
+    outputJar.get().asFile.parentFile.mkdirs()
 
-    // Run d8
     execOperations.exec {
       commandLine(
-        d8Path.get(),
-        "--output",
-        outputDir.absolutePath,
-        "--min-api",
-        minSdkVersion.get(),
-        inputJar.get().asFile.absolutePath,
+        buildList {
+          add(d8Path.get())
+          add("--output")
+          add(outputJar.get().asFile.absolutePath)
+          add("--min-api")
+          add(minSdkVersion.get())
+          // Dex the module jar together with the whole runtime classpath
+          // (kotlin-stdlib, etc.). android.jar stays compileOnly, so it is not
+          // here and is not dexed — the framework provides it at runtime.
+          addAll(inputFiles.files.map { it.absolutePath })
+        }
       )
-    }
-
-    // d8 outputs classes.dex, rename to automobile-video.dex
-    val classesFile = File(outputDir, "classes.dex")
-    val targetFile = outputDex.get().asFile
-    if (classesFile.exists() && classesFile != targetFile) {
-      classesFile.renameTo(targetFile)
     }
   }
 }
 
 tasks.register<D8DexTask>("d8Dex") {
   group = "build"
-  description = "Compile JAR to DEX using d8"
+  description = "Compile the module and its runtime classpath to a DEX jar using d8"
 
   dependsOn(tasks.jar)
 
-  inputJar.set(tasks.jar.flatMap { it.archiveFile })
-  outputDex.set(layout.buildDirectory.file("libs/automobile-video.dex"))
+  inputFiles.from(tasks.jar.flatMap { it.archiveFile })
+  inputFiles.from(configurations.runtimeClasspath)
+  outputJar.set(layout.buildDirectory.file("libs/automobile-video.jar"))
   d8Path.set("$androidSdkPath/build-tools/$buildToolsVersion/d8")
   minSdkVersion.set(minSdk)
 }

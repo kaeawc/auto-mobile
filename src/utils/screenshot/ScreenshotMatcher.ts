@@ -14,6 +14,43 @@ export interface SimilarScreenshotResult {
   matchFound: boolean;
 }
 
+/**
+ * Assemble the final per-path results of the two-stage batch comparison:
+ * precise pixel results for candidates, falling back to the stage-1 perceptual
+ * similarity for everything else.
+ *
+ * The two result arrays are indexed by file path once (O(n)) instead of running
+ * a linear `.find()` per screenshot path, which made stitching O(n^2) in the
+ * number of cached screenshots (issue #3430).
+ */
+export function stitchBatchResults(
+  screenshotPaths: string[],
+  preciseResults: SimilarScreenshotResult[],
+  stage1Results: Array<{ filePath: string; perceptualSimilarity: number } | null>
+): SimilarScreenshotResult[] {
+  const preciseByPath = new Map(preciseResults.map(result => [result.filePath, result]));
+  const stage1ByPath = new Map<string, number>();
+  for (const result of stage1Results) {
+    if (result) {
+      stage1ByPath.set(result.filePath, result.perceptualSimilarity);
+    }
+  }
+
+  return screenshotPaths.map(filePath => {
+    const preciseResult = preciseByPath.get(filePath);
+    if (preciseResult) {
+      return preciseResult;
+    }
+
+    // For non-candidates, use perceptual similarity as approximate result
+    return {
+      filePath,
+      similarity: stage1ByPath.get(filePath) || 0,
+      matchFound: false
+    };
+  });
+}
+
 export class ScreenshotMatcher {
   /**
    * Batch compare multiple screenshots in parallel for better performance
@@ -157,21 +194,8 @@ export class ScreenshotMatcher {
         })
       );
 
-      // Fill in results for non-candidates
-      const finalResults = screenshotPaths.map(filePath => {
-        const preciseResult = preciseResults.find(r => r.filePath === filePath);
-        if (preciseResult) {
-          return preciseResult;
-        }
-
-        // For non-candidates, use perceptual similarity as approximate result
-        const stage1Result = stage1Results.find(r => r?.filePath === filePath);
-        return {
-          filePath,
-          similarity: stage1Result?.perceptualSimilarity || 0,
-          matchFound: false
-        };
-      });
+      // Fill in results for non-candidates (indexed lookup, not O(n^2) .find())
+      const finalResults = stitchBatchResults(screenshotPaths, preciseResults, stage1Results);
 
       const stage2Time = timer.now() - stage2Start;
       const totalTime = timer.now() - batchStart;

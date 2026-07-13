@@ -1151,7 +1151,7 @@ jobs:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
-          lfs: true
+          lfs: false
           fetch-depth: 0  # Fetch full history for git-revision-date-localized plugin
           token: ${{ secrets.GITHUB_TOKEN }}
 

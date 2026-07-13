@@ -19,6 +19,14 @@ deploy_docs_block() {
   ' "$WORKFLOW"
 }
 
+deploy_docs_checkout_block() {
+  deploy_docs_block | awk '
+    /^      - name: "Git Checkout"/ { capture=1 }
+    capture && /^      - name:/ && !/^      - name: "Git Checkout"/ { exit }
+    capture { print }
+  '
+}
+
 @test "deploy-docs job has a job-scoped concurrency block" {
   block="$(deploy_docs_block)"
   [ -n "$block" ]
@@ -33,6 +41,12 @@ deploy_docs_block() {
 @test "deploy-docs concurrency does not cancel in-progress deploys" {
   block="$(deploy_docs_block)"
   echo "$block" | grep -Fq 'cancel-in-progress: false'
+}
+
+@test "deploy-docs checkout does not fetch Git LFS objects" {
+  block="$(deploy_docs_checkout_block)"
+  echo "$block" | grep -Fq 'lfs: false'
+  ! echo "$block" | grep -Fq 'lfs: true'
 }
 
 @test "top-level workflow concurrency is untouched (only deploy-docs job is scoped)" {

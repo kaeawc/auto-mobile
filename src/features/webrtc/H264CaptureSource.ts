@@ -1,3 +1,15 @@
+import type { BootedDevice } from "../../models";
+
+export interface H264CaptureSourceOptions {
+  device: BootedDevice;
+  /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
+  onData: (chunk: Buffer) => void;
+  /** Called when the source fails fatally after it has started. */
+  onError?: (error: Error) => void;
+  bitrateBps?: number;
+  size?: { width: number; height: number };
+}
+
 /**
  * Common contract for a device H.264 capture source feeding the WebRTC
  * publisher. Both the segment-rotated `screenrecord` source

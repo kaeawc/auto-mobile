@@ -86,6 +86,19 @@ if (existsSync(vendorSource)) {
   console.log("✓ Copied bundled vendor tools");
 }
 
+// Copy the macOS iOS screen-capture helper source so published installs can
+// build the helper package-relative instead of requiring a repo checkout.
+const iosScreenCaptureSource = join(import.meta.dir, "ios", "screen-capture");
+const iosScreenCaptureDest = join(import.meta.dir, "dist", "ios", "screen-capture");
+if (existsSync(iosScreenCaptureSource)) {
+  mkdirSync(join(import.meta.dir, "dist", "ios"), { recursive: true });
+  cpSync(iosScreenCaptureSource, iosScreenCaptureDest, {
+    recursive: true,
+    filter: source => !source.includes(`${join("ios", "screen-capture", ".build")}`),
+  });
+  console.log("✓ Copied iOS screen-capture helper source");
+}
+
 // Copy schemas for runtime validation (PlanSchemaValidator reads from disk)
 const schemasSource = join(import.meta.dir, "schemas");
 const schemasDest = join(import.meta.dir, "dist", "schemas");

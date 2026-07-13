@@ -16,7 +16,11 @@ import type {
 } from "../../src/features/webrtc";
 
 const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
-const IOS: BootedDevice = { deviceId: "SIM-1", platform: "ios", name: "i" } as BootedDevice;
+const IOS: BootedDevice = {
+  deviceId: "4DA8AF35-C59B-43D3-A8FE-5640A7B0B8C1",
+  platform: "ios",
+  name: "iPhone 16",
+} as BootedDevice;
 
 const ENDPOINT = "https://coord.example.com/whip";
 
@@ -134,11 +138,16 @@ describe("webrtcStreamManager", () => {
     ).rejects.toThrow(/already active/);
   });
 
-  test("rejects iOS devices", async () => {
-    installFakes();
-    await expect(
-      startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } })
-    ).rejects.toThrow(/Android only/);
+  test("starts iOS devices when a capture source is available", async () => {
+    const { sources } = installFakes();
+    const descriptor = await startWebRtcStream({
+      device: IOS,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+
+    expect(descriptor.streamId).toBe("webrtc_id-1");
+    expect(sources[0].started).toBe(true);
+    expect(listWebRtcStreams()).toHaveLength(1);
   });
 
   test("requires a configured WHIP endpoint", async () => {

@@ -61,7 +61,7 @@ teardown() {
   run env SWIFT_STUB_MODE=zero_then_pass bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(sed -n '1p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests/testLaunchRemindersPlan" ]
-  [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter RemindersLaunchPlanTests" ]
+  [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests" ]
   [[ "$output" == *"retrying with class filter"* ]]
 }
 
@@ -70,7 +70,7 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"without executing testLaunchRemindersPlan"* ]]
   [ "$(sed -n '1p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests/testLaunchRemindersPlan" ]
-  [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter RemindersLaunchPlanTests" ]
+  [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests" ]
 }
 
 @test "preserves a real Reminders test failure status" {

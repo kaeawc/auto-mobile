@@ -26,7 +26,7 @@ set -e
 if [[ "$swift_status" -eq 0 ]] && ! grep -Eq "$TEST_CASE_PATTERN" "$LOG_FILE"; then
   echo "RemindersLaunchPlanTests method filter executed zero XCTest cases; retrying with class filter."
   set +e
-  run_swift_filter "RemindersLaunchPlanTests"
+  run_swift_filter "XCTestRunnerTests.RemindersLaunchPlanTests"
   swift_status="$?"
   set -e
 fi

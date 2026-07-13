@@ -32,6 +32,7 @@ export type FieldAliasMap = Record<string, readonly string[]>;
 export type JsonSchemaOverride = (jsonSchema: Record<string, unknown>) => void;
 
 const jsonSchemaOverrides = new WeakMap<object, JsonSchemaOverride>();
+const injectedDeviceIdSchemas = new WeakSet<object>();
 
 export function withJsonSchemaOverride<T extends z.ZodTypeAny>(schema: T, override: JsonSchemaOverride): T {
   jsonSchemaOverrides.set(schema, override);
@@ -43,6 +44,13 @@ export function applyJsonSchemaOverride(
   jsonSchema: Record<string, unknown>
 ): void {
   jsonSchemaOverrides.get(zodSchema)?.(jsonSchema);
+}
+
+export function isInjectedDeviceIdSchema(zodSchema: object): boolean {
+  if (injectedDeviceIdSchemas.has(zodSchema)) {
+    return true;
+  }
+  return zodSchema instanceof z.ZodObject && zodSchema.shape.deviceId === deviceTargetingShape.deviceId;
 }
 
 /**
@@ -111,7 +119,11 @@ export function compactExclusiveSelectorProperties(
 }
 
 export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: FieldAliasMap): T {
-  return z.preprocess(input => normalizeFieldAliases(input, aliases), schema) as unknown as T;
+  const aliased = z.preprocess(input => normalizeFieldAliases(input, aliases), schema) as unknown as T;
+  if (isInjectedDeviceIdSchema(schema)) {
+    injectedDeviceIdSchemas.add(aliased);
+  }
+  return aliased;
 }
 
 export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T): T {
@@ -222,5 +234,9 @@ export function addSessionUuidToSchema<T extends z.ZodObject<z.ZodRawShape>>(sch
  * Helper to add sessionUuid + device label + deviceId + platform fields to tool schemas.
  */
 export function addDeviceTargetingToSchema<T extends z.ZodObject<z.ZodRawShape>>(schema: T) {
-  return extendPreservingBase(schema, deviceTargetingShape);
+  const extended = extendPreservingBase(schema, deviceTargetingShape);
+  if (!("deviceId" in schema.shape)) {
+    injectedDeviceIdSchemas.add(extended);
+  }
+  return extended;
 }

@@ -29,7 +29,7 @@ import { finalizeToolResponse, type ObservationArtifactWriter, type ObservationB
 import { INTERNAL_NO_DIFF_PARAM, markInternalToolCall } from "./internalToolCall";
 import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { getStructuredField, StructuredToolResponse } from "../utils/toolUtils";
-import { applyJsonSchemaOverride } from "./toolSchemaHelpers";
+import { applyJsonSchemaOverride, isInjectedDeviceIdSchema } from "./toolSchemaHelpers";
 import {
   InternalToolName,
   InternalToolPayloads,
@@ -46,6 +46,12 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   return flattenTopLevelUnion(toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
       applyJsonSchemaOverride(zodSchema, jsonSchema);
+      if (isInjectedDeviceIdSchema(zodSchema)) {
+        const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+        if (properties) {
+          delete properties.deviceId;
+        }
+      }
     },
   }));
 }

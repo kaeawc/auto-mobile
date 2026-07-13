@@ -31,9 +31,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "additionalProperties": false
@@ -104,9 +101,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -420,9 +414,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -466,9 +457,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -543,9 +531,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -605,9 +590,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -644,9 +626,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "additionalProperties": false
@@ -675,9 +654,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -725,9 +701,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -895,9 +868,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -980,9 +950,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -1121,9 +1088,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -1458,9 +1422,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -1558,9 +1519,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -1595,9 +1553,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -1641,9 +1596,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "additionalProperties": false
@@ -1673,9 +1625,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -1724,9 +1673,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "additionalProperties": false
@@ -1759,9 +1705,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -1816,9 +1759,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -2515,9 +2455,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -2602,9 +2539,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -2648,9 +2582,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -2714,9 +2645,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -2753,9 +2681,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -2797,9 +2722,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -2883,9 +2805,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -3010,9 +2929,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -3050,9 +2966,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -3144,9 +3057,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -3367,9 +3277,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -4790,9 +4697,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -4840,9 +4744,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -4939,9 +4840,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5030,9 +4928,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5093,9 +4988,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -5162,9 +5054,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5198,9 +5087,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -5323,9 +5209,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5366,9 +5249,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5401,9 +5281,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -5444,9 +5321,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -5551,9 +5425,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5606,9 +5477,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -5683,9 +5551,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5728,9 +5593,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -5811,9 +5673,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -5893,9 +5752,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -6013,9 +5869,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -6058,9 +5911,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -6310,9 +6160,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -6384,9 +6231,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -6486,9 +6330,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -6650,9 +6491,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },
@@ -7959,9 +7797,6 @@
         "device": {
           "description": "Device label",
           "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
         }
       },
       "required": [
@@ -8000,9 +7835,6 @@
         },
         "device": {
           "description": "Device label",
-          "type": "string"
-        },
-        "deviceId": {
           "type": "string"
         }
       },

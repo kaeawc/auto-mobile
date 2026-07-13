@@ -9,6 +9,7 @@ import {
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
+  NIGHTLY_CHECKSUM_ENTRY,
   RELEASE_CHECKSUM_REGISTRY,
   isExplicitPin,
   isPinnedVersionKnown,
@@ -407,5 +408,46 @@ describe("iOS runner-binary checksum", function() {
 
   test("module-level runner checksum export resolves from registry[0]", function() {
     expect(IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM).toBe(RELEASE_CHECKSUM_REGISTRY[0].runnerSha256);
+  });
+
+  test("registry[0] (0.0.44) is a coherent triple after the #3784 runner-sha repair", function() {
+    const v0044 = RELEASE_CHECKSUM_REGISTRY[0];
+    expect(v0044.version).toBe("0.0.44");
+    // The runner inside the published 0.0.44 IPA, not the orphaned nightly sha.
+    expect(v0044.runnerSha256).toBe("b281f9fd516116164a76dc049a413d5123bfb7bf96c79c6ad654ba90c08ed982");
+    expect(v0044.runnerSha256).not.toBe(NIGHTLY_CHECKSUM_ENTRY.runnerSha256);
+  });
+});
+
+describe("NIGHTLY_CHECKSUM_ENTRY (dedicated mutable nightly slot)", function() {
+  test("is the 'nightly' sentinel with a well-formed, populated triple", function() {
+    expect(NIGHTLY_CHECKSUM_ENTRY.version).toBe("nightly");
+    for (const sha of [
+      NIGHTLY_CHECKSUM_ENTRY.apkSha256,
+      NIGHTLY_CHECKSUM_ENTRY.ipaSha256,
+      NIGHTLY_CHECKSUM_ENTRY.runnerSha256,
+    ]) {
+      expect(/^[a-f0-9]{64}$/.test(sha)).toBe(true);
+    }
+  });
+
+  test("is kept OUT of the release registry so resolvers never see it", function() {
+    // The whole point of the separate slot: nightly can overwrite it in place
+    // without ever corrupting a tagged release entry (the #3784 failure mode).
+    expect(RELEASE_CHECKSUM_REGISTRY.some(e => e.version === "nightly")).toBe(false);
+    expect(RELEASE_CHECKSUM_REGISTRY).not.toContain(NIGHTLY_CHECKSUM_ENTRY);
+  });
+
+  test("does not leak into 'latest' or pinned resolution", function() {
+    expect(resolveLatestVersion()).not.toBe("nightly");
+    expect(resolveChecksum("nightly", "android")).toBe("");
+    expect(resolveChecksum("nightly", "ios")).toBe("");
+    expect(resolveRunnerChecksum({ AUTOMOBILE_VERSION: "nightly" })).toBe("");
+  });
+
+  test("pinning AUTOMOBILE_VERSION=nightly is unknown and fails closed", function() {
+    // No published nightly asset exists to download/verify, so the pin must not
+    // be treated as a known, integrity-verifiable version.
+    expect(isPinnedVersionKnown({ AUTOMOBILE_VERSION: "nightly" })).toBe(false);
   });
 });

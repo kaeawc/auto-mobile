@@ -43,11 +43,24 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     runnerSha256: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
   },
 ];
+
+// The dedicated nightly slot is a standalone const AFTER the registry array, so
+// it closes with a column-0 `};` (not an indented `  },`).
+export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
+  version: "nightly",
+  apkSha256: "1111111111111111111111111111111111111111111111111111111111111111",
+  ipaSha256: "2222222222222222222222222222222222222222222222222222222222222222",
+  runnerSha256: "3333333333333333333333333333333333333333333333333333333333333333",
+};
 EOF
 }
 
 read_field() {
   bash "$ABS_HELPER" "$1" "$RELEASE_TS"
+}
+
+read_field_v() {
+  bash "$ABS_HELPER" "$1" "$RELEASE_TS" "$2"
 }
 
 @test "reads registry[0].apkSha256, not the interface type line" {
@@ -79,6 +92,29 @@ read_field() {
   run read_field runnerSha256
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "default (no version) still reads registry[0], not the nightly slot" {
+  write_release_ts
+  run read_field apkSha256
+  [ "$output" = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]
+}
+
+@test "version anchor reads the nightly slot (standalone const, column-0 close)" {
+  write_release_ts
+  run read_field_v apkSha256 nightly
+  [ "$status" -eq 0 ]
+  [ "$output" = "1111111111111111111111111111111111111111111111111111111111111111" ]
+  run read_field_v ipaSha256 nightly
+  [ "$output" = "2222222222222222222222222222222222222222222222222222222222222222" ]
+  run read_field_v runnerSha256 nightly
+  [ "$output" = "3333333333333333333333333333333333333333333333333333333333333333" ]
+}
+
+@test "version anchor reads a specific registry entry (0.0.43), not registry[0]" {
+  write_release_ts
+  run read_field_v apkSha256 0.0.43
+  [ "$output" = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" ]
 }
 
 @test "can be sourced and called as a function" {

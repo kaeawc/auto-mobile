@@ -59,6 +59,41 @@ teardown() {
   grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
+@test "updates registry[0].apkSha256 and ipaSha256 in checksum-only mode" {
+  # Regression for #3784: the nightly checksum-only path must move the APK/IPA
+  # shas on registry[0], not the `apkSha256: string;` interface declaration that
+  # precedes the registry. Capture the pre-update values so we assert they change
+  # (and that the update lands inside the first registry entry).
+  old_apk="$(awk '
+    /^[[:space:]]+version: "/ { in_first = 1 }
+    in_first && /^[[:space:]]+apkSha256: "/ { sub(/.*apkSha256: "/, ""); sub(/".*/, ""); print; exit }
+  ' "${TEST_ROOT}/src/constants/release.ts")"
+  [ -n "$old_apk" ]
+  [ "$old_apk" != "$APK_SHA" ]
+
+  run env \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  [ "$status" -eq 0 ]
+
+  # First registry entry now carries the new shas.
+  first_apk="$(awk '
+    /^[[:space:]]+version: "/ { in_first = 1 }
+    in_first && /^[[:space:]]+apkSha256: "/ { sub(/.*apkSha256: "/, ""); sub(/".*/, ""); print; exit }
+  ' "${TEST_ROOT}/src/constants/release.ts")"
+  first_ipa="$(awk '
+    /^[[:space:]]+version: "/ { in_first = 1 }
+    in_first && /^[[:space:]]+ipaSha256: "/ { sub(/.*ipaSha256: "/, ""); sub(/".*/, ""); print; exit }
+  ' "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$first_apk" = "$APK_SHA" ]
+  [ "$first_ipa" = "$IPA_SHA" ]
+
+  # The interface declaration must remain a type, never a checksum.
+  grep -q '^  apkSha256: string;$' "${TEST_ROOT}/src/constants/release.ts"
+  grep -q '^  ipaSha256: string;$' "${TEST_ROOT}/src/constants/release.ts"
+}
+
 @test "refreshes runner sha for an already-registered version (no duplicate entry)" {
   # First release adds the entry but with an empty runner sha (pre-wiring state).
   run env \

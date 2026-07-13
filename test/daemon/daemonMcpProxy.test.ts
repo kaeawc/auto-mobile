@@ -162,6 +162,7 @@ describe("DaemonMcpProxy", () => {
         autoStartDaemon?: boolean;
         waitForReadyResult?: boolean;
         daemonOptions?: { debug?: boolean; port?: number };
+        runningOptions?: Record<string, unknown>;
         statusAfterRestartVersion?: string;
         clientVersion?: string;
       } = {}) {
@@ -178,6 +179,7 @@ describe("DaemonMcpProxy", () => {
           socketPath: "/tmp/test.sock",
           ...(opts.runningVersion !== undefined ? { version: opts.runningVersion } : {}),
           ...(opts.startedAt !== undefined ? { startedAt: opts.startedAt } : {}),
+          ...(opts.runningOptions !== undefined ? { options: opts.runningOptions } : {}),
         };
         fakeManager.statusResult = initialStatus;
         fakeManager.statusResults = [
@@ -376,6 +378,27 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ debug: true, port: 4242 });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("preserves the RUNNING daemon's options on a version-mismatch restart, ignoring this client's own bare config (issue: am.py-style short-lived CLI clients silently stripped every daemon flag)", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          // This connecting client passes NO daemon options (e.g. am.py's bare
+          // per-tool-call invocation), while the running daemon was launched with
+          // real behavior flags. The restart must keep the daemon's flags, not
+          // silently reset them to this client's empty config.
+          daemonOptions: {},
+          runningOptions: { noUiPerfMode: true, dismissKeyboardAfterInput: true },
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ noUiPerfMode: true, dismissKeyboardAfterInput: true });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
@@ -1100,6 +1123,8 @@ describe("DaemonMcpProxy", () => {
       startedAt?: number;
       autoStartDaemon?: boolean;
       waitForReadyResult?: boolean;
+      runningOptions?: Record<string, unknown>;
+      clientDaemonOptions?: Record<string, unknown>;
     } = {}) {
       const timer = new FakeTimer();
       timer.advanceTime(100_000);
@@ -1117,6 +1142,7 @@ describe("DaemonMcpProxy", () => {
         startedAt: opts.startedAt ?? ANCIENT_TIMESTAMP,
         ...(opts.daemonBuildId === null ? {} : { buildId: opts.daemonBuildId ?? DAEMON_BUILD.buildId }),
         ...(opts.daemonEntryScript === null ? {} : { entryScript: opts.daemonEntryScript ?? DAEMON_BUILD.entryScript }),
+        ...(opts.runningOptions !== undefined ? { options: opts.runningOptions } : {}),
       };
       const restartedStatus = {
         ...mismatchStatus,
@@ -1141,6 +1167,7 @@ describe("DaemonMcpProxy", () => {
         autoStartDaemon: opts.autoStartDaemon ?? true,
         timer,
         buildIdentity: { ...CLIENT_BUILD },
+        daemonOptions: opts.clientDaemonOptions,
       });
       return { fakeClient, fakeManager, isAvailableSpy, proxy };
     }
@@ -1191,6 +1218,21 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.listTools();
         expect(fakeManager.restartCalled).toBe(false);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("preserves the RUNNING daemon's options on a build-mismatch restart, ignoring this client's own bare config", async () => {
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        runningOptions: { noUiPerfMode: true, dismissKeyboardAfterInput: true },
+        clientDaemonOptions: {},
+      });
+      try {
+        await proxy.listTools();
+        expect(fakeManager.restartCalled).toBe(true);
+        expect(fakeManager.restartOptions).toEqual({ noUiPerfMode: true, dismissKeyboardAfterInput: true });
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

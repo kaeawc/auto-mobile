@@ -913,12 +913,17 @@ jobs:
 
       - name: "Run Lint"
         if: env.RUN_MCP_BUILD_TEST == 'true'
+        shell: bash
         env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
           TURBO_TELEMETRY_DISABLED: "1"
           TURBO_NO_UPDATE_NOTIFIER: "1"
           DO_NOT_TRACK: "1"
           NO_COLOR: "1"
-        run: turbo run lint --output-logs=errors-only --log-order=grouped
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          turbo run lint --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-lint-${{ matrix.os }}.log"
 
       - name: "Run Build"
         if: env.RUN_MCP_BUILD_TEST == 'true'

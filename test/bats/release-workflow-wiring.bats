@@ -41,6 +41,14 @@
   [[ "$retry_count" -eq 3 ]]
 }
 
+@test "pull_request.yml runs cross-platform TypeScript lint with bash and larger heap" {
+  lint_block="$(sed -n '/name: "Run Lint"/,/name: "Run Build"/p' ".github/workflows/pull_request.yml")"
+
+  [[ "$lint_block" == *"shell: bash"* ]]
+  [[ "$lint_block" == *"NODE_OPTIONS: \"--max-old-space-size=4096\""* ]]
+  [[ "$lint_block" == *"ci-logs/bun-lint-\${{ matrix.os }}.log"* ]]
+}
+
 @test "release.yml runs the release-integrity gate" {
   grep -q "verify-release-integrity.sh" ".github/workflows/release.yml"
 }

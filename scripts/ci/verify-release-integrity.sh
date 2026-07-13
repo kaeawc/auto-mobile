@@ -22,6 +22,9 @@
 #              non-empty) floor is checked.
 set -euo pipefail
 
+# shellcheck source=scripts/lib/read-registry-field.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/read-registry-field.sh"
+
 RAW_VERSION="${1:?Usage: verify-release-integrity.sh <version> [ipa-path]}"
 EXPECTED="${RAW_VERSION#v}"
 IPA_PATH="${2:-}"
@@ -100,17 +103,9 @@ check "src/constants/release.ts registry[0].version" "$registry_version"
 
 # Runner-binary checksum must be populated on the newest registry entry. Empty
 # means integrity verification is silently skipped — exactly the gap this gate
-# exists to catch.
-runner_sha="$(awk '
-  /^[[:space:]]+version: "/ { in_first = 1 }
-  in_first && /^[[:space:]]+runnerSha256: "/ {
-    sub(/.*runnerSha256: "/, "")
-    sub(/".*/, "")
-    print
-    exit
-  }
-  in_first && /^[[:space:]]+}/ { exit }
-' "$RELEASE_TS")"
+# exists to catch. Read via the shared entry-anchored helper (single source of
+# truth with nightly.yml + verify-artifact-sha256.sh).
+runner_sha="$(read_registry_field runnerSha256 "$RELEASE_TS")"
 
 sha256_stdin() {
   if command -v sha256sum >/dev/null 2>&1; then

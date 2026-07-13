@@ -615,14 +615,6 @@ export interface StorageTelemetryInput {
 }
 
 /**
- * Build the telemetry `recordStorageEvent` input from a `storage_changed` wire
- * message. The runner-supplied `previousValue` is threaded through ONLY when the
- * wire message carries it (`!== undefined`), so the repository's
- * `previousValue !== undefined` guard falls through to the per-insert auto-lookup
- * for legacy runners that omit it (#3000). An explicit null ("no prior value")
- * is honored verbatim and also skips the lookup.
- */
-/**
  * WebSocket message types that carry an SDK telemetry event to be fanned out to
  * `TelemetryRecorder` via {@link AndroidSdkEventIngestor.recordSdkEvent} (#2764).
  * These are not part of the typed `WebSocketMessage` union.
@@ -636,6 +628,14 @@ const SDK_TELEMETRY_EVENT_TYPES: ReadonlySet<string> = new Set([
   "custom_event",
 ]);
 
+/**
+ * Build the telemetry `recordStorageEvent` input from a `storage_changed` wire
+ * message. The runner-supplied `previousValue` is threaded through ONLY when the
+ * wire message carries it (`!== undefined`), so the repository's
+ * `previousValue !== undefined` guard falls through to the per-insert auto-lookup
+ * for legacy runners that omit it (#3000). An explicit null ("no prior value")
+ * is honored verbatim and also skips the lookup.
+ */
 export function storageTelemetryInputFromWire(
   message: WsStorageChangedMessage,
   resolvedTimestamp: number

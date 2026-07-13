@@ -644,7 +644,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
           set: (uuid, observation) => DaemonState.getInstance().getSessionManager().setLastRenderedObservation(uuid, observation),
         }
         : undefined;
-    const configuredArtifactDirectory = serverConfig.getToolOutputArtifactDirectory();
+    const configuredArtifactDirectory = serverConfig.getToolOutputsDir();
     const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
     const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
     const artifactWriter = !internalCall

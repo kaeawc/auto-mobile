@@ -13,7 +13,7 @@ describe("ServerConfig output-reduction flags", () => {
     serverConfig.setActionsDiffObserveEnabled(false);
     serverConfig.setActionsNoObserveEnabled(false);
     serverConfig.setToolResultsCompactJsonEnabled(false);
-    serverConfig.setToolOutputArtifactDirectory(undefined);
+    serverConfig.setToolOutputsDir(undefined);
   });
 
   test("observe-result-drop-elements defaults off and toggles", () => {
@@ -54,11 +54,11 @@ describe("ServerConfig output-reduction flags", () => {
 
   test("tool-output artifact directory defaults off and toggles", () => {
     expect(serverConfig.isToolOutputArtifactModeEnabled()).toBe(false);
-    expect(serverConfig.getToolOutputArtifactDirectory()).toBeUndefined();
+    expect(serverConfig.getToolOutputsDir()).toBeUndefined();
 
-    serverConfig.setToolOutputArtifactDirectory("/tmp/artifacts");
+    serverConfig.setToolOutputsDir("/tmp/artifacts");
 
     expect(serverConfig.isToolOutputArtifactModeEnabled()).toBe(true);
-    expect(serverConfig.getToolOutputArtifactDirectory()).toBe("/tmp/artifacts");
+    expect(serverConfig.getToolOutputsDir()).toBe("/tmp/artifacts");
   });
 });

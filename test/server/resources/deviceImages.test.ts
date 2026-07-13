@@ -1,10 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
 import {
   createDeviceImageResourcesHandler,
-  setDeviceImageResourcesDependencies,
-  resetDeviceImageResourcesDependencies,
   DeviceImagesResourceContent
 } from "../../../src/server/deviceImageResources";
 import { DeviceInfo } from "../../../src/models";
@@ -17,14 +15,6 @@ describe("Device Image Resources with Fakes", () => {
   beforeEach(() => {
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeAvdManager = new FakeAvdManager();
-    setDeviceImageResourcesDependencies({
-      deviceManager: fakeDeviceUtils,
-      avdManager: fakeAvdManager
-    });
-  });
-
-  afterEach(() => {
-    resetDeviceImageResourcesDependencies();
   });
 
   describe("createDeviceImageResourcesHandler", () => {

@@ -432,7 +432,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    */
   async launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void> {
     const precondition = this.getLaunchPrecondition();
-    if (!precondition.ok && precondition.reason === "non-darwin") {
+    if (!precondition.ok) {
       throw new ActionableError("Opening URLs on a physical iOS device requires macOS");
     }
     const command = [
@@ -633,7 +633,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     options: { terminateExisting?: boolean } = {}
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
     const precondition = this.getLaunchPrecondition();
-    if (!precondition.ok && precondition.reason === "non-darwin") {
+    if (!precondition.ok) {
       return { success: false, error: "Physical device app launch requires macOS" };
     }
 

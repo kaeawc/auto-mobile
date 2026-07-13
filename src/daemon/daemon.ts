@@ -844,8 +844,6 @@ export class Daemon {
           }).catch(error => {
             logger.warn(`[Daemon] Failed to refresh iOS hierarchy cadence for ${device.id}: ${error}`);
           });
-        } else {
-          continue;
         }
       }
     });

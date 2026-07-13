@@ -264,7 +264,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           fromScreen: baseline ? observationScreenIdentity(baseline) : undefined,
           toScreen: observationScreenIdentity(sanitized),
         };
-      } else if (canDiff) {
+      } else {
+        // canDiff is provably true here: not internal, diffActive, session +
+        // baseline store present, and the hierarchy is renderable.
         // Emit a diff vs the baseline when it exists and the screen is unchanged;
         // otherwise fall back to the full observation (cross-screen diffs are
         // meaningless, and there is nothing to diff on the first action). Either

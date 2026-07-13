@@ -37,18 +37,16 @@ export class DefaultElementParser implements ElementParser {
   parseNodeBounds(node: ViewHierarchyNode): Element | null {
     if (!node) {return null;}
 
-    // Create a copy of the node properties. Drop the nested `node` children:
-    // an Element is a flat descriptor (id/text/bounds/etc.), not a subtree.
-    // Under the legacy xml2js format `extractNodeProperties` returned `node.$`
-    // (attributes only, no children), so elements were naturally flat. The
-    // current CtrlProxy JSON format has no `$` wrapper, so without this the
-    // whole child subtree gets copied into every element — a scrollable
-    // container then serializes its entire list (10s of KB per element),
-    // bloating `elements` 2-4x and blowing MCP client size limits. Callers
-    // that need the tree already have `viewHierarchy`.
-    // Copy properties but drop the nested `node` children so each element stays a
-    // flat descriptor (delete rather than a `_children` rest-omit, which the lint
-    // config rejects as an unused var).
+    // Copy the node properties but drop the nested `node` children so each element
+    // stays a flat descriptor (id/text/bounds/etc.), not a subtree. Under the
+    // legacy xml2js format `extractNodeProperties` returned `node.$` (attributes
+    // only, no children), so elements were naturally flat. The current CtrlProxy
+    // JSON format has no `$` wrapper, so without this the whole child subtree gets
+    // copied into every element — a scrollable container then serializes its
+    // entire list (10s of KB per element), bloating `elements` 2-4x and blowing
+    // MCP client size limits. Callers that need the tree already have
+    // `viewHierarchy`. (delete rather than a `_children` rest-omit, which the lint
+    // config rejects as an unused var.)
     const nodeProperties = { ...this.extractNodeProperties(node) };
     delete nodeProperties.node;
     const parsedNode: ViewHierarchyNode = { ...nodeProperties };

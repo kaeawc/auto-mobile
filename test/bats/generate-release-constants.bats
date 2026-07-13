@@ -89,7 +89,9 @@ teardown() {
   [ "$first_apk" = "$APK_SHA" ]
   [ "$first_ipa" = "$IPA_SHA" ]
 
-  # Only registry[0] moves: the second entry (0.0.43) keeps its original apkSha256.
+  # Only registry[0] moves: the second entry (0.0.43) keeps its original
+  # apkSha256. Coupled to the real release.ts the harness copies in setup(); if
+  # 0.0.43 ever ages out of the registry or its sha changes, update this literal.
   grep -q 'apkSha256: "7e4e2ce3c19b7473d171433186dbc7487df60ff6045dba66da7a320d31e63cd3"' \
     "${TEST_ROOT}/src/constants/release.ts"
 

@@ -81,13 +81,13 @@ teardown() {
   [[ "$output" == *"retrying with class filter"* ]]
 }
 
-@test "falls back to the regex method filter when qualified filters report zero XCTest cases" {
+@test "falls back to the broad method filter when qualified filters report zero XCTest cases" {
   run env SWIFT_STUB_MODE=zero_twice_then_pass bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(sed -n '1p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests/testLaunchRemindersPlan" ]
   [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests" ]
-  [ "$(sed -n '3p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter RemindersLaunchPlanTests.*testLaunchRemindersPlan" ]
-  [[ "$output" == *"retrying with regex method filter"* ]]
+  [ "$(sed -n '3p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter testLaunchRemindersPlan" ]
+  [[ "$output" == *"retrying with broad method filter"* ]]
 }
 
 @test "fails when both SwiftPM filters report zero XCTest cases" {
@@ -96,7 +96,7 @@ teardown() {
   [[ "$output" == *"without executing testLaunchRemindersPlan"* ]]
   [ "$(sed -n '1p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests/testLaunchRemindersPlan" ]
   [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests" ]
-  [ "$(sed -n '3p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter RemindersLaunchPlanTests.*testLaunchRemindersPlan" ]
+  [ "$(sed -n '3p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter testLaunchRemindersPlan" ]
 }
 
 @test "preserves a real Reminders test failure status" {

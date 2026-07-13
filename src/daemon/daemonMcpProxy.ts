@@ -209,11 +209,24 @@ export interface ProxiedResourceTemplate {
  * The daemon startup options that change its observable MCP behavior and so must
  * match before a running daemon can be reused: `embeddedSdk` plus every
  * output-reduction flag. A same-build MCP client that requests one of these
- * against an already-running daemon started without it (or vice versa) would
- * otherwise silently get the wrong tool-output contract until a manual restart
- * (issue #2759 — the `toolResultsNoStructuredContent` case). The output-reduction
- * fields are derived from `OUTPUT_REDUCTION_FLAG_SPECS` (whose `field` names map
- * 1:1 to `DaemonOptions`) so a new flag is covered automatically.
+ * against an already-running daemon started without it would otherwise silently
+ * get the wrong tool-output contract until a manual restart (issue #2759 — the
+ * `toolResultsNoStructuredContent` case). The output-reduction fields are derived
+ * from `OUTPUT_REDUCTION_FLAG_SPECS` (whose `field` names map 1:1 to
+ * `DaemonOptions`) so a new flag is covered automatically.
+ *
+ * INVARIANT — every key here must be a pure presence-only, enable-only flag
+ * (absence == off, no CLI/env negation exists, so `false` can ONLY ever mean
+ * "not requested", never "explicitly disabled"). `startupOptionMismatches()`
+ * relies on that to be safely one-directional: it restarts to GAIN a flag a
+ * client explicitly wants, but never to STRIP one the daemon already has, since
+ * a bare CLI client with no opinion (e.g. am.py's per-tool-call invocation,
+ * which never passes daemon flags at all) is indistinguishable from a client
+ * that "wants it off" once both read as `false`. Adding a genuinely tri-state
+ * flag (one where a caller can meaningfully request `false` to turn OFF a
+ * default-on behavior) to this list would silently break that guarantee — such
+ * a flag needs its own explicit-vs-absent representation (e.g. `boolean |
+ * undefined` threaded end-to-end), not a plain `boolean` alongside these.
  */
 const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "embeddedSdk",

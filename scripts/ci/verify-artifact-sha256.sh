@@ -12,6 +12,9 @@
 #   verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
 set -euo pipefail
 
+# shellcheck source=scripts/lib/read-registry-field.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/read-registry-field.sh"
+
 ARTIFACT_PATH="${1:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 PLATFORM="${2:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 
@@ -49,29 +52,17 @@ else
   exit 1
 fi
 
-# Read the field from the FIRST registry ENTRY (the block beginning with
-# `version: "`), mirroring verify-release-integrity.sh. A plain
-# `grep "$FIELD" | head -1` matches the `ReleaseChecksumEntry` interface
-# declaration (`ipaSha256: string;`) that precedes the registry and returns the
-# type line, not registry[0] — so a real release aborts with a misleading
-# "No SHA256 checksum found" even though the checksum is populated (same
-# interface-collision bug fixed in nightly.yml + generate-release-constants.sh).
-# `in_first` only arms after a quoted `version: "` line, which the interface
-# (`version: string;`, no quote) never trips.
-SOURCE_SHA256=$(awk -v field="$FIELD" '
-  /^[[:space:]]+version: "/ { in_first = 1 }
-  in_first && $0 ~ ("^[[:space:]]+" field ": \"") {
-    line = $0
-    sub(".*" field ": \"", "", line)
-    sub(/".*/, "", line)
-    print line
-    exit
-  }
-  in_first && /^[[:space:]]+}/ { exit }
-' "$RELEASE_TS")
-# Only a real 64-hex value counts; an empty or malformed registry value (e.g.
-# `ipaSha256: ""`) yields empty SOURCE_SHA256 so the `-z` guard below fires with
-# the actionable "No checksum" error rather than a spurious mismatch (#3658).
+# Read the checksum from registry[0] via the shared, entry-anchored helper. A
+# plain `grep "$FIELD" | head -1` would instead match the `ReleaseChecksumEntry`
+# interface declaration (`ipaSha256: string;`) that precedes the registry: the
+# whole pipeline then yields an empty value and a real release aborts with a
+# misleading "No SHA256 checksum found" even though the checksum is populated
+# (interface-collision bug, #3784).
+SOURCE_SHA256=$(read_registry_field "$FIELD" "$RELEASE_TS")
+# The helper does no format validation, so enforce the 64-hex floor here: an
+# empty or malformed registry value (e.g. `ipaSha256: ""`) yields empty
+# SOURCE_SHA256 so the `-z` guard below fires with the actionable "No checksum"
+# error rather than a spurious mismatch (#3658).
 if ! [[ "$SOURCE_SHA256" =~ ^[a-f0-9]{64}$ ]]; then
   SOURCE_SHA256=""
 fi

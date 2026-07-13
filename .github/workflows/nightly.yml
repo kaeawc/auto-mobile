@@ -55,27 +55,18 @@ jobs:
       - name: "Get current SHA256 values from source"
         id: current
         run: |
-          # Read a field from the FIRST registry entry (the block that starts at
-          # `version: "`). Anchoring on the entry avoids matching the
-          # `ReleaseChecksumEntry` interface declarations (`apkSha256: string;`)
-          # that precede the registry — a plain `grep | head -1` grabbed those and
-          # reported the TypeScript type line as the "current" checksum (#3784).
-          read_registry_field() {
-            awk -v field="$1" '
-              /^[[:space:]]+version: "/ { in_first = 1 }
-              in_first && $0 ~ ("^[[:space:]]+" field ": \"") {
-                line = $0
-                sub(".*" field ": \"", "", line)
-                sub(/".*/, "", line)
-                print line
-                exit
-              }
-              in_first && /^[[:space:]]+}/ { exit }
-            ' src/constants/release.ts
-          }
-          APK_CURRENT=$(read_registry_field apkSha256)
-          IPA_CURRENT=$(read_registry_field ipaSha256)
-          RUNNER_CURRENT=$(read_registry_field runnerSha256)
+          # Read each field from the FIRST registry entry via the shared helper
+          # (single source of truth with verify-artifact-sha256.sh +
+          # verify-release-integrity.sh). Anchoring on the entry's quoted
+          # `version: "` line avoids matching the `ReleaseChecksumEntry` interface
+          # declarations (`apkSha256: string;`) that precede the registry — a
+          # plain `grep | head -1` grabbed those and reported the TypeScript type
+          # line as the "current" checksum (#3784).
+          source scripts/lib/read-registry-field.sh
+          RELEASE_TS="src/constants/release.ts"
+          APK_CURRENT=$(read_registry_field apkSha256 "$RELEASE_TS")
+          IPA_CURRENT=$(read_registry_field ipaSha256 "$RELEASE_TS")
+          RUNNER_CURRENT=$(read_registry_field runnerSha256 "$RELEASE_TS")
           echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
           echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
           echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT

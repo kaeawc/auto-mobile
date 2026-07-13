@@ -448,19 +448,10 @@ jobs:
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           echo "xctestrun file: ${XCTESTRUN}"
 
-      - name: "Select Xcode 26.2"
-        uses: maxim-lobanov/setup-xcode@v1
+      - name: "iOS simulator bring-up (Xcode 26.2)"
+        uses: ./.github/actions/ios-simulator-bring-up
         with:
           xcode-version: "26.2"
-
-      - name: "Ensure iOS Simulator runtime (Xcode 26.2)"
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
-      - name: "Boot iOS Simulator (Xcode 26.2)"
-        run: ./scripts/ios/boot-simulator.sh
-
-      - name: "Ensure AutoMobile daemon ready"
-        run: ./scripts/ci/ensure-daemon-ready.sh
 
       - name: "Warm up iOS CtrlProxy"
         timeout-minutes: 12
@@ -481,23 +472,11 @@ jobs:
         if: always()
         run: xcrun simctl shutdown all || true
 
-      - name: "Select Xcode 26.5"
+      - name: "iOS simulator bring-up (Xcode 26.5)"
         if: ${{ !cancelled() }}
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: ./.github/actions/ios-simulator-bring-up
         with:
           xcode-version: "26.5"
-
-      - name: "Ensure iOS Simulator runtime (Xcode 26.5)"
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
-      - name: "Boot iOS Simulator (Xcode 26.5)"
-        if: ${{ !cancelled() }}
-        run: ./scripts/ios/boot-simulator.sh
-
-      - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
-        if: ${{ !cancelled() }}
-        run: ./scripts/ci/ensure-daemon-ready.sh
 
       - name: "Warm up iOS CtrlProxy (Xcode 26.5)"
         if: ${{ !cancelled() }}

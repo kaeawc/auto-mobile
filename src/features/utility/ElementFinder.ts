@@ -216,6 +216,14 @@ export class DefaultElementFinder implements ElementFinder {
     sortByArea: boolean = true
   ): Element[] {
     const matches: Element[] = [];
+    // Compose semantics (Modifier.testTag) surface via AccessibilityNodeInfo.viewIdResourceName
+    // WITHOUT a package qualifier, unlike traditional View resource IDs which are always
+    // reported as "pkg:id/name". A caller passing the fully-qualified form (the common case,
+    // since that's what every other resource ID in the hierarchy looks like) would otherwise
+    // never match a Compose-sourced node. This is not a fuzzy/partial match - the bare name is
+    // the node's real, exact reported ID - so it applies regardless of the partialMatch flag.
+    const idSeparatorIndex = resourceId.lastIndexOf("/");
+    const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
 
     for (const searchNode of rootNodes) {
       this.parser.traverseNode(searchNode, (node: any) => {
@@ -224,6 +232,7 @@ export class DefaultElementFinder implements ElementFinder {
           const nodeResourceId = nodeProperties["resource-id"];
           if (
             nodeResourceId === resourceId ||
+            (bareResourceId !== null && nodeResourceId === bareResourceId) ||
             (partialMatch && nodeResourceId.toLowerCase().includes(resourceId.toLowerCase()))
           ) {
             const parsedNode = this.parser.parseNodeBounds(node);
@@ -988,11 +997,18 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
+    // See collectResourceIdMatchesInRoots: Compose testTag nodes report a bare
+    // viewIdResourceName with no package qualifier, so a fully-qualified query must also
+    // match against the bare suffix - not just partialMatch/exact on the full string.
+    const idSeparatorIndex = resourceId.lastIndexOf("/");
+    const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
+
     const matchesId = (input?: string): boolean => {
       if (!input) {return false;}
-      return partialMatch
-        ? input.toLowerCase().includes(resourceId.toLowerCase())
-        : input === resourceId;
+      if (partialMatch) {
+        return input.toLowerCase().includes(resourceId.toLowerCase());
+      }
+      return input === resourceId || (bareResourceId !== null && input === bareResourceId);
     };
 
     const containerNode = container

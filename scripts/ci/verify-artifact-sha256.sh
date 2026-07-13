@@ -49,11 +49,32 @@ else
   exit 1
 fi
 
-# `sed -n ... p` only prints on a real 64-hex match, so an empty or malformed
-# value (e.g. `ipaSha256: ""`) yields an empty SOURCE_SHA256 and the guard
-# below fires. The old unanchored `s///` passed the whole line through on no
-# match, making SOURCE_SHA256 non-empty and defeating the -z check (#3658).
-SOURCE_SHA256=$(grep "$FIELD" "$RELEASE_TS" | head -1 | sed -n 's/.*"\([a-f0-9]\{64\}\)".*/\1/p')
+# Read the field from the FIRST registry ENTRY (the block beginning with
+# `version: "`), mirroring verify-release-integrity.sh. A plain
+# `grep "$FIELD" | head -1` matches the `ReleaseChecksumEntry` interface
+# declaration (`ipaSha256: string;`) that precedes the registry and returns the
+# type line, not registry[0] — so a real release aborts with a misleading
+# "No SHA256 checksum found" even though the checksum is populated (same
+# interface-collision bug fixed in nightly.yml + generate-release-constants.sh).
+# `in_first` only arms after a quoted `version: "` line, which the interface
+# (`version: string;`, no quote) never trips.
+SOURCE_SHA256=$(awk -v field="$FIELD" '
+  /^[[:space:]]+version: "/ { in_first = 1 }
+  in_first && $0 ~ ("^[[:space:]]+" field ": \"") {
+    line = $0
+    sub(".*" field ": \"", "", line)
+    sub(/".*/, "", line)
+    print line
+    exit
+  }
+  in_first && /^[[:space:]]+}/ { exit }
+' "$RELEASE_TS")
+# Only a real 64-hex value counts; an empty or malformed registry value (e.g.
+# `ipaSha256: ""`) yields empty SOURCE_SHA256 so the `-z` guard below fires with
+# the actionable "No checksum" error rather than a spurious mismatch (#3658).
+if ! [[ "$SOURCE_SHA256" =~ ^[a-f0-9]{64}$ ]]; then
+  SOURCE_SHA256=""
+fi
 echo "Source SHA256:         $SOURCE_SHA256"
 
 if [ -z "$SOURCE_SHA256" ]; then

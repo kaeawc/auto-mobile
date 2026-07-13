@@ -89,6 +89,10 @@ teardown() {
   [ "$first_apk" = "$APK_SHA" ]
   [ "$first_ipa" = "$IPA_SHA" ]
 
+  # Only registry[0] moves: the second entry (0.0.43) keeps its original apkSha256.
+  grep -q 'apkSha256: "7e4e2ce3c19b7473d171433186dbc7487df60ff6045dba66da7a320d31e63cd3"' \
+    "${TEST_ROOT}/src/constants/release.ts"
+
   # The interface declaration must remain a type, never a checksum.
   grep -q '^  apkSha256: string;$' "${TEST_ROOT}/src/constants/release.ts"
   grep -q '^  ipaSha256: string;$' "${TEST_ROOT}/src/constants/release.ts"

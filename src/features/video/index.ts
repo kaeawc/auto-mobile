@@ -16,7 +16,6 @@ export {
   DEFAULT_VIDEO_RECORDING_CONFIG,
   parseVideoRecordingConfig,
 } from "./VideoRecorderService";
-export { NoopVideoCaptureBackend } from "./NoopVideoCaptureBackend";
 export { PlatformVideoCaptureBackend } from "./PlatformVideoCaptureBackend";
 export { FfmpegVideoProcessingBackend } from "./FfmpegVideoProcessingBackend";
 export { HybridVideoCaptureBackend } from "./HybridVideoCaptureBackend";

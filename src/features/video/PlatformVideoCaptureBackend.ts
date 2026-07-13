@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
-import { createWriteStream, type WriteStream } from "node:fs";
 import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { ActionableError, BootedDevice } from "../../models";
@@ -29,7 +28,6 @@ import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 interface AndroidBackendHandle {
   kind: "android";
   process: ChildProcessWithoutNullStreams;
-  outputStream: WriteStream;
   exitState: ProcessExitState;
   exitPromise: Promise<void>;
   stderr: string[];
@@ -266,14 +264,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     const stderr: string[] = [];
     const { exitState, exitPromise } = createExitTracker(process, stderr);
 
-    // Create a placeholder for outputStream since AndroidBackendHandle expects it
-    const outputStream = createWriteStream(config.outputPath);
-    outputStream.end(); // Close it immediately since we'll write later
-
     const backendHandle: AndroidBackendHandle = {
       kind: "android",
       process,
-      outputStream,
       exitState,
       exitPromise,
       stderr,

@@ -36,7 +36,7 @@ describe("ToolRegistry device-aware pipeline", () => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
-    serverConfig.setToolOutputArtifactDirectory(undefined);
+    serverConfig.setToolOutputsDir(undefined);
     ToolRegistry.clearTools();
   });
 
@@ -266,7 +266,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   };
 
   afterEach(() => {
-    serverConfig.setToolOutputArtifactDirectory(undefined);
+    serverConfig.setToolOutputsDir(undefined);
     resetMcpRecordingState();
   });
 
@@ -281,7 +281,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     });
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
-    serverConfig.setToolOutputArtifactDirectory("/tmp/artifacts");
+    serverConfig.setToolOutputsDir("/tmp/artifacts");
 
     const result = await handler.handle({
       name: "observe",
@@ -326,7 +326,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     });
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
-    serverConfig.setToolOutputArtifactDirectory(undefined);
+    serverConfig.setToolOutputsDir(undefined);
     serverConfig.setObserveResultCompactEnabled(true);
     serverConfig.setToolResultsCompactJsonEnabled(true);
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
@@ -383,7 +383,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   test("small observe results remain inline when no artifact directory is configured", async () => {
     const writer = new FakeObservationArtifactWriter();
     const handler = new DefaultAfterToolCallHandler(() => writer);
-    serverConfig.setToolOutputArtifactDirectory(undefined);
+    serverConfig.setToolOutputsDir(undefined);
 
     const result = await handler.handle({
       name: "observe",
@@ -410,7 +410,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       requestedDirectories.push(outputDirectory);
       return writer;
     });
-    serverConfig.setToolOutputArtifactDirectory("/tmp/artifacts");
+    serverConfig.setToolOutputsDir("/tmp/artifacts");
 
     const result = await handler.handle({
       name: "observe",
@@ -442,7 +442,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
     startMcpRecording(timer);
-    serverConfig.setToolOutputArtifactDirectory("/tmp/artifacts");
+    serverConfig.setToolOutputsDir("/tmp/artifacts");
 
     try {
       const handler = new DefaultAfterToolCallHandler(() => writer);

@@ -49,46 +49,10 @@ interface DeviceImageResourcesDependencies {
   avdManager: AvdManager;
 }
 
-// Module-level dependencies with lazy initialization to real implementations
-let moduleDependencies: DeviceImageResourcesDependencies | null = null;
-
 /**
- * Get the current dependencies, creating defaults if not set
- */
-function getDependencies(): DeviceImageResourcesDependencies {
-  if (!moduleDependencies) {
-    moduleDependencies = {
-      deviceManager: new MultiPlatformDeviceManager(),
-      avdManager: new AvdManagerService()
-    };
-  }
-  return moduleDependencies;
-}
-
-/**
- * Set dependencies for testing
- * @param deps - The dependencies to use (partial, will use defaults for missing)
- */
-export function setDeviceImageResourcesDependencies(
-  deps: Partial<DeviceImageResourcesDependencies>
-): void {
-  const currentDeps = getDependencies();
-  moduleDependencies = {
-    deviceManager: deps.deviceManager ?? currentDeps.deviceManager,
-    avdManager: deps.avdManager ?? currentDeps.avdManager
-  };
-}
-
-/**
- * Reset dependencies to defaults (for testing cleanup)
- */
-export function resetDeviceImageResourcesDependencies(): void {
-  moduleDependencies = null;
-}
-
-/**
- * Create a DeviceImageResourcesHandler with injected dependencies
- * This is the preferred pattern for testing
+ * Create a DeviceImageResourcesHandler with injected dependencies.
+ * Constructor injection is the single DI seam for this resource handler:
+ * production wiring passes real implementations, tests pass fakes.
  */
 export function createDeviceImageResourcesHandler(
   deps?: Partial<DeviceImageResourcesDependencies>
@@ -97,9 +61,8 @@ export function createDeviceImageResourcesHandler(
   getDeviceImagesByPlatform: (params: Record<string, string>) => Promise<ResourceContent>;
   getDeviceImagesForPlatforms: (platforms: Platform[]) => Promise<DeviceImagesResourceContent>;
 } {
-  const fallbackDeps = getDependencies();
-  const deviceManager = deps?.deviceManager ?? fallbackDeps.deviceManager;
-  const avdManager = deps?.avdManager ?? fallbackDeps.avdManager;
+  const deviceManager = deps?.deviceManager ?? new MultiPlatformDeviceManager();
+  const avdManager = deps?.avdManager ?? new AvdManagerService();
 
   const getDeviceImagesForPlatformsImpl = async (platforms: Platform[]): Promise<DeviceImagesResourceContent> => {
     const images: DeviceImageInfo[] = [];
@@ -224,112 +187,18 @@ function toDeviceImageInfo(device: DeviceInfo, avdInfo?: AvdInfo): DeviceImageIn
   };
 }
 
-// Handler to get all device images (both platforms)
-async function getAllDeviceImages(): Promise<ResourceContent> {
-  const result = await getDeviceImagesForPlatforms(["android", "ios"]);
-  return {
-    uri: DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
-    mimeType: "application/json",
-    text: JSON.stringify(result, null, 2)
-  };
-}
-
-// Handler to get device images for a specific platform
-async function getDeviceImagesByPlatform(params: Record<string, string>): Promise<ResourceContent> {
-  const platform = params.platform;
-
-  // Validate platform parameter
-  if (platform !== "android" && platform !== "ios") {
-    return {
-      uri: `automobile:devices/images/${platform}`,
-      mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Invalid platform: ${platform}. Must be 'android' or 'ios'.`
-      }, null, 2)
-    };
-  }
-
-  const result = await getDeviceImagesForPlatforms([platform as Platform]);
-  return {
-    uri: `automobile:devices/images/${platform}`,
-    mimeType: "application/json",
-    text: JSON.stringify(result, null, 2)
-  };
-}
-
-// Core function to fetch device images for specified platforms
-async function getDeviceImagesForPlatforms(platforms: Platform[]): Promise<DeviceImagesResourceContent> {
-  const { deviceManager, avdManager } = getDependencies();
-
-  const images: DeviceImageInfo[] = [];
-  let androidCount = 0;
-  let iosCount = 0;
-
-  try {
-    // Fetch Android device images if requested
-    if (platforms.includes("android")) {
-      try {
-        const androidDevices = await deviceManager.listDeviceImages("android");
-        let avdInfoList: AvdInfo[] = [];
-
-        // Try to get extended AVD info
-        try {
-          avdInfoList = await avdManager.listDeviceImages();
-        } catch (error) {
-          logger.warn(`[DeviceImageResources] Failed to get extended AVD info: ${error}`);
-        }
-
-        // Create a map for quick lookup
-        const avdInfoMap = new Map<string, AvdInfo>();
-        for (const avd of avdInfoList) {
-          avdInfoMap.set(avd.name, avd);
-        }
-
-        // Merge device info with extended AVD info
-        for (const device of androidDevices) {
-          const avdInfo = avdInfoMap.get(device.name);
-          images.push(toDeviceImageInfo(device, avdInfo));
-          androidCount++;
-        }
-      } catch (error) {
-        logger.warn(`[DeviceImageResources] Failed to list Android device images: ${error}`);
-      }
-    }
-
-    // Fetch iOS simulator images if requested
-    if (platforms.includes("ios")) {
-      try {
-        const iosDevices = await deviceManager.listDeviceImages("ios");
-        for (const device of iosDevices) {
-          images.push(toDeviceImageInfo(device));
-          iosCount++;
-        }
-      } catch (error) {
-        logger.warn(`[DeviceImageResources] Failed to list iOS simulator images: ${error}`);
-      }
-    }
-  } catch (error) {
-    logger.error(`[DeviceImageResources] Error fetching device images: ${error}`);
-  }
-
-  return {
-    totalCount: images.length,
-    androidCount,
-    iosCount,
-    lastUpdated: new Date().toISOString(),
-    images
-  };
-}
-
 // Register all device image resources
 export function registerDeviceImageResources(): void {
+  // Construct the handler with production dependencies (the single DI seam)
+  const handler = createDeviceImageResourcesHandler();
+
   // Register the all-images resource
   ResourceRegistry.register(
     DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
     "Device Images",
     "List of all available device images (AVDs and simulators) that can be used to start devices.",
     "application/json",
-    getAllDeviceImages
+    handler.getAllDeviceImages
   );
 
   // Register the platform-specific template
@@ -338,7 +207,7 @@ export function registerDeviceImageResources(): void {
     "Platform-specific Device Images",
     "List of available device images for a specific platform (android or ios).",
     "application/json",
-    getDeviceImagesByPlatform
+    handler.getDeviceImagesByPlatform
   );
 
   logger.info("[DeviceImageResources] Registered device image resources");

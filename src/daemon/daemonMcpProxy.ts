@@ -236,18 +236,29 @@ function startupOptionMismatches(
   running: DaemonOptions | undefined
 ): string[] {
   const mismatches: string[] = [];
+  // One-directional by design: only restart to GAIN a flag the client explicitly
+  // asked for (the original #2759 case — client wants toolResultsNoStructuredContent,
+  // running daemon doesn't have it, client would silently get the wrong contract).
+  // Never restart to STRIP a flag the daemon already has just because this
+  // particular caller didn't ask for it — a lightweight CLI client (e.g. am.py's
+  // bare per-tool-call `--cli` invocation, which never passes ANY daemon flags on
+  // any call by design) has no way to express "no opinion" vs. "turn this off",
+  // and treating an absent flag as a request to disable it silently downgraded a
+  // correctly-configured daemon to bare defaults the moment such a client
+  // connected (confirmed in CI: 9/9 flags lost mid-suite, no crash, no restart
+  // banner — just quietly gone).
   for (const key of REUSE_CRITICAL_OPTION_KEYS) {
     const want = requested?.[key] === true;
     const have = running?.[key] === true;
-    if (want !== have) {
+    if (want && !have) {
       mismatches.push(`${key} (requested=${want}, running=${have})`);
     }
   }
   for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
     const want = typeof requested?.[key] === "string" ? requested[key] : undefined;
     const have = typeof running?.[key] === "string" ? running[key] : undefined;
-    if (want !== have) {
-      mismatches.push(`${key} (requested=${want ?? "unset"}, running=${have ?? "unset"})`);
+    if (want !== undefined && want !== have) {
+      mismatches.push(`${key} (requested=${want}, running=${have ?? "unset"})`);
     }
   }
   return mismatches;

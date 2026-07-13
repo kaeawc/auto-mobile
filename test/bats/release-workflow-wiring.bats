@@ -35,6 +35,12 @@
   grep -q "chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" ".github/workflows/pull_request.yml"
 }
 
+@test "pull_request.yml retries GitHub API-backed change classifiers" {
+  retry_count="$(sed -n '/name: "Detect Documentation-Only or SHA256-Only Changes"/,/name: "Check for Desktop Core module changes"/p' ".github/workflows/pull_request.yml" | grep -c "retries: 3")"
+
+  [[ "$retry_count" -eq 3 ]]
+}
+
 @test "release.yml runs the release-integrity gate" {
   grep -q "verify-release-integrity.sh" ".github/workflows/release.yml"
 }

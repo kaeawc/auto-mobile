@@ -54,6 +54,7 @@ jobs:
         id: filter
         uses: actions/github-script@v8
         with:
+          retries: 3
           script: |
             const prNumber = context.issue.number;
 
@@ -95,6 +96,7 @@ jobs:
         id: check-sha256
         uses: actions/github-script@v8
         with:
+          retries: 3
           script: |
             const prNumber = context.issue.number;
 
@@ -141,6 +143,7 @@ jobs:
         id: check-auto-chore
         uses: actions/github-script@v8
         with:
+          retries: 3
           script: |
             const prNumber = context.issue.number;
 

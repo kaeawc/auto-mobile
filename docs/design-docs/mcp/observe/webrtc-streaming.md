@@ -199,6 +199,6 @@ fresh keyframe.
 - [WHEP — draft-ietf-wish-whep](https://datatracker.ietf.org/doc/draft-ietf-wish-whep/)
 - [RFC 6184 — RTP Payload Format for H.264 Video](https://datatracker.ietf.org/doc/html/rfc6184)
 - [werift-webrtc](https://github.com/shinyoshiaki/werift-webrtc)
-- [CI worker setup guide](../../webrtc-streaming-ci-worker.md)
+- [CI worker setup guide](../../../webrtc-streaming-ci-worker.md)
 - [Reference coordination server](../../../../examples/webrtc-coordination-server/README.md)
 - [IDE live mirroring (Unix socket + Klarity)](./screen-streaming.md)

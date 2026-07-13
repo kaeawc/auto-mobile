@@ -478,40 +478,45 @@ jobs:
         timeout-minutes: 10
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
-        run: |
-          cd ios/XCTestRunner
-          swift test --filter RemindersLaunchPlanTests 2>&1
+          AUTOMOBILE_TEST_RETRY_COUNT: "1"
+        run: ./scripts/ci/run-reminders-launch-plan-tests.sh
 
       - name: "Shutdown iOS Simulators"
         if: always()
         run: xcrun simctl shutdown all || true
 
       - name: "Select Xcode 26.5"
+        if: ${{ !cancelled() }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.5"
 
       - name: "Ensure iOS Simulator runtime (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Boot iOS Simulator (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         run: ./scripts/ios/boot-simulator.sh
 
       - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       - name: "Warm up iOS CtrlProxy (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Warm up Reminders target app (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: ./scripts/ci/warm-reminders-target-app.sh
 
       - name: "Run Reminders integration tests (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         timeout-minutes: 10
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
-        run: |
-          cd ios/XCTestRunner
-          swift test --filter RemindersLaunchPlanTests 2>&1
+          AUTOMOBILE_TEST_RETRY_COUNT: "1"
+        run: ./scripts/ci/run-reminders-launch-plan-tests.sh

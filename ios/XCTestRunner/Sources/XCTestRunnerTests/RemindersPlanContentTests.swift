@@ -321,6 +321,32 @@ final class RemindersPlanContentTests: XCTestCase {
         )
     }
 
+    /// Xcode 26.5 can turn a filtered SwiftPM XCTest run into "Executed 0 tests" when the custom
+    /// `defaultTestSuite` override reads the suite's private `tests` storage even though timing
+    /// reordering is inactive. CI disables timing data, so the default suite must be returned
+    /// untouched in that path.
+    func testDefaultTestSuiteOnlyReadsTestsWhenTimingOrderingIsActive() throws {
+        let source = try loadRepositoryFile("ios/XCTestRunner/Sources/XCTestRunner/AutoMobileTestCase.swift")
+        let body = classBody(named: "AutoMobileTestCase", in: source)
+
+        guard let timingAvailableRange = body.range(of: "let timingAvailable = TestTimingCache.shared.hasTimings()")
+        else {
+            XCTFail("AutoMobileTestCase.defaultTestSuite should check timing availability")
+            return
+        }
+        guard let inactiveGuardRange = body.range(of: "guard timingOrderingActive else") else {
+            XCTFail("AutoMobileTestCase.defaultTestSuite should return before touching tests when ordering is inactive")
+            return
+        }
+        guard let testsReadRange = body.range(of: "let tests = baseSuite.tests") else {
+            XCTFail("AutoMobileTestCase.defaultTestSuite should only read tests in the active ordering path")
+            return
+        }
+
+        XCTAssertLessThan(timingAvailableRange.lowerBound, inactiveGuardRange.lowerBound)
+        XCTAssertLessThan(inactiveGuardRange.lowerBound, testsReadRange.lowerBound)
+    }
+
     func testNightlyWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
         let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
 

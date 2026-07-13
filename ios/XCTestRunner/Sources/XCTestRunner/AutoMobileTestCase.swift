@@ -41,19 +41,22 @@ open class AutoMobileTestCase: XCTestCase {
         PerfTimer.log("defaultTestSuite: registering observer")
         _ = AutoMobileTestObserver.registerIfNeeded()
 
-        PerfTimer.log("defaultTestSuite: calling super.defaultTestSuite")
-        let baseSuite = super.defaultTestSuite
-        let tests = baseSuite.tests
-        PerfTimer.log("defaultTestSuite: found \(tests.count) tests")
         let orderingSelection = resolveTimingOrderingSelection()
         let timingAvailable = TestTimingCache.shared.hasTimings()
         logTimingOrdering(selection: orderingSelection, timingAvailable: timingAvailable)
 
         let timingOrderingActive = orderingSelection.resolved != .none && timingAvailable
-        if timingOrderingActive {
-            let orderedTests = orderTestsByTiming(tests, strategy: orderingSelection.resolved)
-            baseSuite.setValue(orderedTests, forKey: "tests")
+        guard timingOrderingActive else {
+            PerfTimer.log("defaultTestSuite: timing ordering inactive; returning default suite")
+            return super.defaultTestSuite
         }
+
+        PerfTimer.log("defaultTestSuite: calling super.defaultTestSuite")
+        let baseSuite = super.defaultTestSuite
+        let tests = baseSuite.tests
+        PerfTimer.log("defaultTestSuite: found \(tests.count) tests")
+        let orderedTests = orderTestsByTiming(tests, strategy: orderingSelection.resolved)
+        baseSuite.setValue(orderedTests, forKey: "tests")
         PerfTimer.log("defaultTestSuite END for \(self)")
         return baseSuite
     }

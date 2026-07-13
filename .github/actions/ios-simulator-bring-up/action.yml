@@ -1,0 +1,39 @@
+name: "iOS Simulator Bring-up"
+description: >
+  Select an Xcode toolchain, ensure the iOS simulator runtime, boot a simulator,
+  and bring the AutoMobile daemon to ready. This is the contiguous, timeout-free
+  prelude shared by the iOS integration segments in pull_request.yml and
+  nightly.yml.
+
+  Scope note: the downstream warm/test steps (ensure-ctrl-proxy-ready,
+  warm-reminders-target-app, run-*-plan-tests) deliberately stay inline in the
+  callers because they carry per-step `timeout-minutes` budgets (#2730/#3028/#3110)
+  and GitHub composite-action steps do not support `timeout-minutes`. Folding them
+  in here would silently drop those load-bearing hang-diagnostic ceilings. The
+  parallelized CtrlProxy-UI segment (backgrounded boot + build overlap, #3779) and
+  the video-interleaved segment (a test runs between boot and daemon-ready) are
+  also left as-is — their bring-up is not contiguous.
+
+inputs:
+  xcode-version:
+    description: "Xcode version to select via maxim-lobanov/setup-xcode (e.g. 26.2, 26.5)."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Select Xcode ${{ inputs.xcode-version }}"
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: "${{ inputs.xcode-version }}"
+
+    - name: "Ensure iOS Simulator runtime"
+      uses: ./.github/actions/ensure-ios-simulator-runtime
+
+    - name: "Boot iOS Simulator (Xcode ${{ inputs.xcode-version }})"
+      shell: bash
+      run: ./scripts/ios/boot-simulator.sh
+
+    - name: "Ensure AutoMobile daemon ready"
+      shell: bash
+      run: ./scripts/ci/ensure-daemon-ready.sh

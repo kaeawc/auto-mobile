@@ -284,6 +284,12 @@ jobs:
               # The XCTestRunner job runs these readiness scripts directly, so
               # changes to them must exercise the job (they were skipped before).
               - 'scripts/ci/**'
+              # The XCTestRunner job composes its simulator bring-up (select Xcode,
+              # ensure runtime, boot, daemon-ready) from this composite action, so a
+              # change to it must exercise the job — otherwise a bring-up refactor
+              # would land unvalidated and only surface on nightly / the next
+              # native_integration PR.
+              - '.github/actions/ios-simulator-bring-up/**'
               # This job runs a bun-side integration test (iosVideoRecordingStartStop),
               # so the bun test config and any test-setup preload affect it. bunfig.toml
               # wires a [test].preload that runs before EVERY bun test the job invokes,
@@ -1381,22 +1387,14 @@ jobs:
         if: always()
         run: xcrun simctl shutdown all || true
 
-      - name: "Select Xcode 26.2"
-        uses: maxim-lobanov/setup-xcode@v1
+      # Select Xcode → ensure runtime → boot sim → pre-start the daemon and wait
+      # for readiness so a startup failure surfaces loudly here instead of
+      # silently skipping the test (#2730). `auto-mobile` (installed to ~/.bun/bin
+      # by `bun add -g .`) is thereby on PATH for the swift-test step.
+      - name: "iOS simulator bring-up (Xcode 26.2)"
+        uses: ./.github/actions/ios-simulator-bring-up
         with:
           xcode-version: "26.2"
-
-      - name: "Ensure iOS Simulator runtime (Xcode 26.2)"
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
-      - name: "Boot iOS Simulator (Xcode 26.2)"
-        run: ./scripts/ios/boot-simulator.sh
-
-      # Put `auto-mobile` (installed to ~/.bun/bin by `bun add -g .`) on PATH for
-      # the swift-test step, and pre-start + wait for the daemon so a startup
-      # failure surfaces loudly here instead of silently skipping the test (#2730).
-      - name: "Ensure AutoMobile daemon ready"
-        run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
       # so the test's first `observe` doesn't pay that cost inside its short

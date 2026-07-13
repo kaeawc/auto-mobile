@@ -55,18 +55,27 @@ jobs:
       - name: "Get current SHA256 values from source"
         id: current
         run: |
-          APK_CURRENT=$(grep 'apkSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
-          IPA_CURRENT=$(grep 'ipaSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
-          RUNNER_CURRENT=$(awk '
-            /^[[:space:]]+version: "/ { in_first = 1 }
-            in_first && /^[[:space:]]+runnerSha256: "/ {
-              sub(/.*runnerSha256: "/, "")
-              sub(/".*/, "")
-              print
-              exit
-            }
-            in_first && /^[[:space:]]+}/ { exit }
-          ' src/constants/release.ts)
+          # Read a field from the FIRST registry entry (the block that starts at
+          # `version: "`). Anchoring on the entry avoids matching the
+          # `ReleaseChecksumEntry` interface declarations (`apkSha256: string;`)
+          # that precede the registry — a plain `grep | head -1` grabbed those and
+          # reported the TypeScript type line as the "current" checksum (#3784).
+          read_registry_field() {
+            awk -v field="$1" '
+              /^[[:space:]]+version: "/ { in_first = 1 }
+              in_first && $0 ~ ("^[[:space:]]+" field ": \"") {
+                line = $0
+                sub(".*" field ": \"", "", line)
+                sub(/".*/, "", line)
+                print line
+                exit
+              }
+              in_first && /^[[:space:]]+}/ { exit }
+            ' src/constants/release.ts
+          }
+          APK_CURRENT=$(read_registry_field apkSha256)
+          IPA_CURRENT=$(read_registry_field ipaSha256)
+          RUNNER_CURRENT=$(read_registry_field runnerSha256)
           echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
           echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
           echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT

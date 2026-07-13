@@ -31,10 +31,28 @@ teardown() {
 }
 
 # $1 = ipaSha256 value (may be empty)
+#
+# Mirrors the production release.ts layout: a `ReleaseChecksumEntry` interface
+# (whose `ipaSha256: string;` line is the interface-collision trap) followed by a
+# multi-line registry entry. A fixture without the interface line silently masks
+# the `grep | head -1` collision bug — the extraction must be anchored to the
+# registry entry, not the type declaration.
 write_release_ts() {
   cat > "$PROJECT/src/constants/release.ts" <<EOF
-export const RELEASE_CHECKSUM_REGISTRY = [
-  { version: "1.0.0", apkSha256: "", ipaSha256: "$1" },
+export interface ReleaseChecksumEntry {
+  version: string;
+  apkSha256: string;
+  ipaSha256: string;
+  runnerSha256: string;
+}
+
+export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
+  {
+    version: "1.0.0",
+    apkSha256: "",
+    ipaSha256: "$1",
+    runnerSha256: "",
+  },
 ];
 EOF
 }

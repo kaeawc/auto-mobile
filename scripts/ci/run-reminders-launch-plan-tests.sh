@@ -18,6 +18,13 @@ run_swift_filter() {
   return "$swift_status"
 }
 
+run_swift_unfiltered_launch_only() {
+  : > "$LOG_FILE"
+  AUTOMOBILE_REMINDERS_LAUNCH_ONLY=1 swift test 2>&1 | tee "$LOG_FILE"
+  local swift_status="${PIPESTATUS[0]}"
+  return "$swift_status"
+}
+
 set +e
 run_swift_filter "XCTestRunnerTests.RemindersLaunchPlanTests/testLaunchRemindersPlan"
 swift_status="$?"
@@ -35,6 +42,14 @@ if [[ "$swift_status" -eq 0 ]] && ! grep -Eq "$TEST_CASE_PATTERN" "$LOG_FILE"; t
   echo "RemindersLaunchPlanTests class filter executed zero XCTest cases; retrying with broad method filter."
   set +e
   run_swift_filter "testLaunchRemindersPlan"
+  swift_status="$?"
+  set -e
+fi
+
+if [[ "$swift_status" -eq 0 ]] && ! grep -Eq "$TEST_CASE_PATTERN" "$LOG_FILE"; then
+  echo "RemindersLaunchPlanTests broad method filter executed zero XCTest cases; retrying unfiltered launch-only run."
+  set +e
+  run_swift_unfiltered_launch_only
   swift_status="$?"
   set -e
 fi

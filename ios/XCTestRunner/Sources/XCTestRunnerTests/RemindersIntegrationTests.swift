@@ -84,6 +84,9 @@ final class RemindersAddPlanTests: RemindersIntegrationBase {
     }
 
     func testAddReminderPlan() throws {
+        if ProcessInfo.processInfo.environment["AUTOMOBILE_REMINDERS_LAUNCH_ONLY"] == "1" {
+            throw XCTSkip("Skipping add-reminder plan during launch-only fallback run.")
+        }
         PerfTimer.log("testAddReminderPlan START - planPath: \(planPath)")
         let result = try executePlan()
         PerfTimer.log("testAddReminderPlan END - result: \(result)")

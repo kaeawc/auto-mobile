@@ -35,6 +35,22 @@ case "${SWIFT_STUB_MODE:-pass}" in
     echo "Test Case '-[XCTestRunnerTests.RemindersLaunchPlanTests testLaunchRemindersPlan]' passed (1.0 seconds)."
     exit 0
     ;;
+  zero_twice_then_pass)
+    calls_file="${SWIFT_STUB_CALLS_FILE:?}"
+    calls=0
+    if [[ -f "$calls_file" ]]; then
+      calls="$(cat "$calls_file")"
+    fi
+    calls=$((calls + 1))
+    printf '%s\n' "$calls" > "$calls_file"
+    if [[ "$calls" -lt 3 ]]; then
+      echo "Test Suite 'Selected tests' passed"
+      echo "Executed 0 tests, with 0 failures"
+      exit 0
+    fi
+    echo "Test Case '-[XCTestRunnerTests.RemindersLaunchPlanTests testLaunchRemindersPlan]' passed (1.0 seconds)."
+    exit 0
+    ;;
   fail)
     echo "Test Case '-[XCTestRunnerTests.RemindersLaunchPlanTests testLaunchRemindersPlan]' failed (1.0 seconds)."
     exit 1
@@ -65,12 +81,22 @@ teardown() {
   [[ "$output" == *"retrying with class filter"* ]]
 }
 
+@test "falls back to the regex method filter when qualified filters report zero XCTest cases" {
+  run env SWIFT_STUB_MODE=zero_twice_then_pass bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '1p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests/testLaunchRemindersPlan" ]
+  [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests" ]
+  [ "$(sed -n '3p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter RemindersLaunchPlanTests.*testLaunchRemindersPlan" ]
+  [[ "$output" == *"retrying with regex method filter"* ]]
+}
+
 @test "fails when both SwiftPM filters report zero XCTest cases" {
   run env SWIFT_STUB_MODE=zero bash "$SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"without executing testLaunchRemindersPlan"* ]]
   [ "$(sed -n '1p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests/testLaunchRemindersPlan" ]
   [ "$(sed -n '2p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter XCTestRunnerTests.RemindersLaunchPlanTests" ]
+  [ "$(sed -n '3p' "$SWIFT_STUB_ARGS_FILE")" = "test --filter RemindersLaunchPlanTests.*testLaunchRemindersPlan" ]
 }
 
 @test "preserves a real Reminders test failure status" {

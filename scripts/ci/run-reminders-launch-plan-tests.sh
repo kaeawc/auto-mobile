@@ -31,6 +31,14 @@ if [[ "$swift_status" -eq 0 ]] && ! grep -Eq "$TEST_CASE_PATTERN" "$LOG_FILE"; t
   set -e
 fi
 
+if [[ "$swift_status" -eq 0 ]] && ! grep -Eq "$TEST_CASE_PATTERN" "$LOG_FILE"; then
+  echo "RemindersLaunchPlanTests class filter executed zero XCTest cases; retrying with regex method filter."
+  set +e
+  run_swift_filter "RemindersLaunchPlanTests.*testLaunchRemindersPlan"
+  swift_status="$?"
+  set -e
+fi
+
 if ! grep -Eq "$TEST_CASE_PATTERN" "$LOG_FILE"; then
   echo "::error::RemindersLaunchPlanTests filter completed without executing testLaunchRemindersPlan"
   exit 1

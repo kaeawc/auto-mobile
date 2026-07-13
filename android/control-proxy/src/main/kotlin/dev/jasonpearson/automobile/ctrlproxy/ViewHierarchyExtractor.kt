@@ -157,9 +157,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
    * @param disableAllFiltering When true, disable all optimizations and filtering (for observe with
    *   raw:true)
-   * @param occlusionEnabled When false, skip the cross-window occlusion pass entirely — no
-   *   occluder loop, no occlusionState/occludedBy/occludedByViewId fields (daemon's
-   *   --no-occlusion flag, default true)
+   * @param occlusionEnabled When false, skip the cross-window occlusion pass entirely — no occluder
+   *   loop, no occlusionState/occludedBy/occludedByViewId fields (daemon's --no-occlusion flag,
+   *   default true)
    */
   fun extractFromAllWindows(
     windows: List<AccessibilityWindowInfo>,

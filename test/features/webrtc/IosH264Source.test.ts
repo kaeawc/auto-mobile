@@ -1,7 +1,9 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice } from "../../../src/models";
 import {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
@@ -25,6 +27,9 @@ const IOS_SIMULATOR: BootedDevice = {
   platform: "ios",
   name: "iPhone 16",
 } as BootedDevice;
+
+const FAKE_HELPER_PATH = "/fake/screen-capture-helper";
+const fakeHelperPathExists = (candidate: string): boolean => candidate === FAKE_HELPER_PATH;
 
 class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelper {
   started = false;
@@ -109,7 +114,8 @@ function createHarness(device: BootedDevice = IOS_DEVICE) {
 
   const source = new IosH264Source({
     device,
-    helperPath: "/bin/sh",
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
     onData: chunk => chunks.push(chunk),
     onError: error => errors.push(error),
     createHelper: options => {
@@ -133,7 +139,8 @@ function createHarnessWithOverrides(options: Partial<ConstructorParameters<typeo
   const encoderSpawns: Array<{ command: string; args: string[] }> = [];
   const source = new IosH264Source({
     device: IOS_DEVICE,
-    helperPath: "/bin/sh",
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
     onData: () => {},
     createHelper: () => helper,
     spawner: (command, args) => {
@@ -195,7 +202,8 @@ describe("IosH264Source", () => {
     const encoderSpawns: Array<{ command: string; args: string[] }> = [];
     const source = new IosH264Source({
       device: IOS_SIMULATOR,
-      helperPath: "/bin/sh",
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
       fps: 15,
       onData: () => {},
       createHelper: options => {
@@ -274,7 +282,8 @@ describe("IosH264Source", () => {
     const errors: Error[] = [];
     const source = new IosH264Source({
       device: IOS_DEVICE,
-      helperPath: "/bin/sh",
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
       onData: () => {},
       onError: error => errors.push(error),
       createHelper: () => helper,
@@ -308,7 +317,8 @@ describe("IosH264Source", () => {
     const chunks: Buffer[] = [];
     const source = new IosH264Source({
       device: IOS_DEVICE,
-      helperPath: "/bin/sh",
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
       onData: chunk => chunks.push(chunk),
       createHelper: () => helper,
       spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
@@ -335,6 +345,69 @@ describe("IosH264Source", () => {
 
     await expect(started).rejects.toThrow(/screen-capture-helper exited/);
     expect(errors).toEqual([]);
+  });
+
+  test("resolves startup quietly when stopped before the first frame", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const encoder = new FakeChildProcess();
+    const timer = new FakeTimer();
+    const errors: Error[] = [];
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      firstFrameTimeoutMs: 1,
+      timer,
+      onData: () => {},
+      onError: error => errors.push(error),
+      createHelper: () => helper,
+      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start();
+    await flush();
+    const stopped = source.stop();
+    await stopped;
+    await started;
+    timer.advanceTime(1);
+    await flush();
+
+    expect(helper.started).toBe(true);
+    expect(helper.stopped).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  test("reports helper exit emitted after first frame before start resumes", async () => {
+    const { source, helper, errors } = createHarness();
+
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    helper.emit("exit", { code: 1, signal: null });
+
+    await started;
+    await flush();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("screen-capture-helper exited");
+    expect(helper.stopped).toBe(true);
+  });
+
+  test("reports helper error emitted after first frame before start resumes", async () => {
+    const { source, helper, errors } = createHarness();
+
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    helper.emit("error", new Error("helper crashed"));
+
+    await started;
+    await flush();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe("helper crashed");
+    expect(helper.stopped).toBe(true);
   });
 
   test("fails when frame dimensions change after the encoder starts", async () => {
@@ -385,8 +458,16 @@ describe("IosH264Source", () => {
   });
 
   test("resolves helper paths relative to module roots, not process cwd", () => {
-    const moduleDir = "/repo/src/features/webrtc";
-    const sourceBuild = "/repo/ios/screen-capture/.build/debug/screen-capture-helper";
+    const repoRoot = path.resolve("repo");
+    const moduleDir = path.join(repoRoot, "src", "features", "webrtc");
+    const sourceBuild = path.join(
+      repoRoot,
+      "ios",
+      "screen-capture",
+      ".build",
+      "debug",
+      "screen-capture-helper"
+    );
     const found = resolveIosScreenCaptureHelperPath(undefined, {
       moduleDir,
       env: {},
@@ -397,10 +478,19 @@ describe("IosH264Source", () => {
   });
 
   test("resolves helper paths from packaged dist roots when bundled module dirs are stale", () => {
-    const packagedBuild = "/pkg/dist/ios/screen-capture/.build/release/screen-capture-helper";
+    const packageRoot = path.resolve("pkg");
+    const packagedBuild = path.join(
+      packageRoot,
+      "dist",
+      "ios",
+      "screen-capture",
+      ".build",
+      "release",
+      "screen-capture-helper"
+    );
     const found = resolveIosScreenCaptureHelperPath(undefined, {
-      moduleDir: "/build-host/repo/src/features/webrtc",
-      entryFile: "/pkg/dist/src/index.js",
+      moduleDir: path.join(path.resolve("build-host", "repo"), "src", "features", "webrtc"),
+      entryFile: path.join(packageRoot, "dist", "src", "index.js"),
       env: {},
       exists: candidate => candidate === packagedBuild,
     });
@@ -439,7 +529,8 @@ describe("IosH264Source", () => {
       const commands: string[] = [];
       const source = new IosH264Source({
         device: IOS_DEVICE,
-        helperPath: "/bin/sh",
+        helperPath: FAKE_HELPER_PATH,
+        helperPathExists: fakeHelperPathExists,
         onData: () => {},
         createHelper: () => helper,
         spawner: command => {
@@ -481,7 +572,8 @@ describe("IosH264Source", () => {
       const commands: string[] = [];
       const source = new IosH264Source({
         device: IOS_DEVICE,
-        helperPath: "/bin/sh",
+        helperPath: FAKE_HELPER_PATH,
+        helperPathExists: fakeHelperPathExists,
         onData: () => {},
         createHelper: () => helper,
         spawner: command => {

@@ -207,6 +207,36 @@ describe("webrtcStreamManager", () => {
     expect(listWebRtcStreams()).toHaveLength(0);
   });
 
+  test("routes source failures reported during start to the publisher", async () => {
+    const publishers: FakePublisher[] = [];
+    const sources: FakeSource[] = [];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: options => {
+        const source = new FakeSource();
+        source.start = async () => {
+          source.started = true;
+          options.onError?.(new Error("helper exited after first frame"));
+        };
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } });
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0].started).toBe(true);
+    expect(publishers[0].sourceFailedCount).toBe(1);
+    expect(listWebRtcStreams()).toHaveLength(1);
+  });
+
   test("uses an explicit streamId when provided", async () => {
     installFakes();
     const descriptor = await startWebRtcStream({

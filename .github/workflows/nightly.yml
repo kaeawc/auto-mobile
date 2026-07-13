@@ -55,21 +55,31 @@ jobs:
       - name: "Get current SHA256 values from source"
         id: current
         run: |
-          APK_CURRENT=$(grep 'apkSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
-          IPA_CURRENT=$(grep 'ipaSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
-          RUNNER_CURRENT=$(awk '
-            /^[[:space:]]+version: "/ { in_first = 1 }
-            in_first && /^[[:space:]]+runnerSha256: "/ {
-              sub(/.*runnerSha256: "/, "")
-              sub(/".*/, "")
-              print
-              exit
-            }
-            in_first && /^[[:space:]]+}/ { exit }
-          ' src/constants/release.ts)
-          echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
-          echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
-          echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT
+          read_first_registry_field() {
+            awk -v field="$1" '
+              /RELEASE_CHECKSUM_REGISTRY/ { in_registry = 1; next }
+              in_registry && /^[[:space:]]+version: "/ { in_first = 1; next }
+              in_first && $0 ~ "^[[:space:]]+" field ": \"" {
+                sub(".*" field ": \"", "")
+                sub("\".*", "")
+                print
+                exit
+              }
+              in_first && /^[[:space:]]+}/ { exit }
+            ' src/constants/release.ts
+          }
+
+          APK_CURRENT=$(read_first_registry_field apkSha256)
+          IPA_CURRENT=$(read_first_registry_field ipaSha256)
+          RUNNER_CURRENT=$(read_first_registry_field runnerSha256)
+          APK_CURRENT=$(printf '%s' "$APK_CURRENT" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
+          IPA_CURRENT=$(printf '%s' "$IPA_CURRENT" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
+          RUNNER_CURRENT=$(printf '%s' "$RUNNER_CURRENT" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
+          {
+            echo "apk_sha256=$APK_CURRENT"
+            echo "ipa_sha256=$IPA_CURRENT"
+            echo "runner_sha256=$RUNNER_CURRENT"
+          } >> "$GITHUB_OUTPUT"
           echo "Current APK SHA256: ${APK_CURRENT:-(empty)}"
           echo "Current IPA SHA256: ${IPA_CURRENT:-(empty)}"
           echo "Current iOS runner SHA256: ${RUNNER_CURRENT:-(empty)}"
@@ -119,15 +129,16 @@ jobs:
             echo "iOS runner SHA256 unchanged"
           fi
 
-          echo "apk_changed=$APK_CHANGED" >> $GITHUB_OUTPUT
-          echo "ipa_changed=$IPA_CHANGED" >> $GITHUB_OUTPUT
-          echo "runner_changed=$RUNNER_CHANGED" >> $GITHUB_OUTPUT
-
-          if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ] || [ "$RUNNER_CHANGED" = "true" ]; then
-            echo "needed=true" >> $GITHUB_OUTPUT
-          else
-            echo "needed=false" >> $GITHUB_OUTPUT
-          fi
+          {
+            echo "apk_changed=$APK_CHANGED"
+            echo "ipa_changed=$IPA_CHANGED"
+            echo "runner_changed=$RUNNER_CHANGED"
+            if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ] || [ "$RUNNER_CHANGED" = "true" ]; then
+              echo "needed=true"
+            else
+              echo "needed=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
 
       - name: "Update release constants"
         if: steps.check.outputs.needed == 'true'

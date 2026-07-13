@@ -27,6 +27,21 @@ sha256_of() {
   fi
 }
 
+read_first_registry_field() {
+  local field="$1"
+  awk -v field="$field" '
+    /RELEASE_CHECKSUM_REGISTRY/ { in_registry = 1; next }
+    in_registry && /^[[:space:]]+version: "/ { in_first = 1; next }
+    in_first && $0 ~ "^[[:space:]]+" field ": \"" {
+      sub(".*" field ": \"", "")
+      sub("\".*", "")
+      print
+      exit
+    }
+    in_first && /^[[:space:]]+}/ { exit }
+  ' "$RELEASE_TS"
+}
+
 if [ ! -f "$ARTIFACT_PATH" ]; then
   echo "ERROR: Artifact not found at $ARTIFACT_PATH"
   exit 1
@@ -49,11 +64,10 @@ else
   exit 1
 fi
 
-# `sed -n ... p` only prints on a real 64-hex match, so an empty or malformed
-# value (e.g. `ipaSha256: ""`) yields an empty SOURCE_SHA256 and the guard
-# below fires. The old unanchored `s///` passed the whole line through on no
-# match, making SOURCE_SHA256 non-empty and defeating the -z check (#3658).
-SOURCE_SHA256=$(grep "$FIELD" "$RELEASE_TS" | head -1 | sed -n 's/.*"\([a-f0-9]\{64\}\)".*/\1/p')
+# Only read fields from the first registry entry. The release interface declares
+# the same names before the registry values, so a plain grep can select the
+# wrong line and skip verification.
+SOURCE_SHA256=$(read_first_registry_field "$FIELD" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
 echo "Source SHA256:         $SOURCE_SHA256"
 
 if [ -z "$SOURCE_SHA256" ]; then

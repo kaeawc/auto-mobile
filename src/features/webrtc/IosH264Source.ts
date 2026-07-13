@@ -71,6 +71,7 @@ export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   spawner?: IosH264EncoderSpawner;
   simulatorWindowResolver?: IosSimulatorWindowResolver;
   commandRunner?: CommandRunner;
+  helperPathExists?: (candidate: string) => boolean;
   timer?: Timer;
   firstFrameTimeoutMs?: number;
 }
@@ -85,6 +86,8 @@ interface EncoderSize {
   width: number;
   height: number;
 }
+
+type IosH264SourcePhase = "idle" | "starting" | "running" | "stopping";
 
 const defaultEncoderSpawner: IosH264EncoderSpawner = (command, args) => {
   const child = nodeSpawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
@@ -115,6 +118,7 @@ export class IosH264Source implements H264CaptureSource {
   private readonly spawner: IosH264EncoderSpawner;
   private readonly simulatorWindowResolver: IosSimulatorWindowResolver;
   private readonly commandRunner: CommandRunner;
+  private readonly helperPathExists?: (candidate: string) => boolean;
   private readonly timer: Timer;
   private readonly firstFrameTimeoutMs: number;
 
@@ -122,7 +126,8 @@ export class IosH264Source implements H264CaptureSource {
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
   private teardownPromise: Promise<void> | null = null;
-  private running = false;
+  private cancelFirstFrameWait: (() => void) | null = null;
+  private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
     this.helperPath = options.helperPath;
@@ -134,6 +139,7 @@ export class IosH264Source implements H264CaptureSource {
     this.createHelper = options.createHelper ?? (helperOptions => new IOSScreenCaptureHelper(helperOptions));
     this.spawner = options.spawner ?? defaultEncoderSpawner;
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
+    this.helperPathExists = options.helperPathExists;
     this.timer = options.timer ?? defaultTimer;
     this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? DEFAULT_FIRST_FRAME_TIMEOUT_MS;
     this.simulatorWindowResolver =
@@ -143,17 +149,19 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   async start(): Promise<void> {
-    if (this.running) {
+    if (this.isActive()) {
       throw new ActionableError("iOS H.264 source already started.");
     }
     await this.teardownPromise;
-    this.running = true;
+    this.phase = "starting";
 
     try {
-      const helperPath = resolveIosScreenCaptureHelperPath(this.helperPath);
+      const helperPath = resolveIosScreenCaptureHelperPath(this.helperPath, {
+        exists: this.helperPathExists,
+      });
       await validateFfmpegAvailability(this.ffmpegPath, this.commandRunner);
       const target = await this.resolveCaptureTarget(helperPath);
-      if (!this.running) {
+      if (!this.isActive()) {
         return;
       }
 
@@ -163,22 +171,20 @@ export class IosH264Source implements H264CaptureSource {
       const firstFrame = this.waitForFirstFrame(helper, target);
       helper.start();
       await firstFrame;
-      if (this.running && this.helper === helper) {
-        this.wireHelperPostStartFailures(helper);
-      }
     } catch (error) {
-      this.running = false;
+      this.phase = "stopping";
       await this.beginTeardown();
       throw error;
     }
   }
 
   async stop(): Promise<void> {
-    if (!this.running) {
+    if (!this.isActive()) {
       await this.teardownPromise;
       return;
     }
-    this.running = false;
+    this.phase = "stopping";
+    this.cancelFirstFrameWait?.();
     await this.beginTeardown();
   }
 
@@ -196,29 +202,62 @@ export class IosH264Source implements H264CaptureSource {
   private waitForFirstFrame(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let firstFrameSeen = false;
       const finish = (callback: () => void): void => {
         if (settled) {
           return;
         }
         settled = true;
         this.timer.clearTimeout(timeout);
+        if (this.cancelFirstFrameWait === cancel) {
+          this.cancelFirstFrameWait = null;
+        }
         callback();
+      };
+      const cancel = (): void => {
+        finish(resolve);
       };
       const timeout = this.timer.setTimeout(() => {
         finish(() => reject(makeNoFramesError(target)));
       }, this.firstFrameTimeoutMs);
+      this.cancelFirstFrameWait = cancel;
 
-      helper.on("frame", () => finish(resolve));
+      helper.on("frame", () => {
+        if (this.helper !== helper || !this.isActive()) {
+          return;
+        }
+        firstFrameSeen = true;
+        this.phase = "running";
+        finish(resolve);
+      });
       helper.on("stderr", line => {
+        if (this.helper !== helper || !this.isActive()) {
+          return;
+        }
         if (isNoFramesPermissionWarning(line)) {
           finish(() => reject(makeNoFramesError(target)));
         }
       });
-      helper.on("error", error => finish(() => reject(error)));
+      helper.on("error", error => {
+        if (this.helper !== helper || !this.isActive()) {
+          return;
+        }
+        if (firstFrameSeen) {
+          this.failIfCurrentHelper(helper, error);
+          return;
+        }
+        finish(() => reject(error));
+      });
       helper.on("exit", info => {
-        finish(() =>
-          reject(new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})`))
-        );
+        if (this.helper !== helper || !this.isActive()) {
+          return;
+        }
+        const error = new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})`);
+        if (firstFrameSeen) {
+          this.failIfCurrentHelper(helper, error);
+          return;
+        }
+        finish(() => reject(error));
       });
     });
   }
@@ -235,17 +274,8 @@ export class IosH264Source implements H264CaptureSource {
     });
   }
 
-  private wireHelperPostStartFailures(helper: IosFrameCaptureHelper): void {
-    helper.on("error", error => this.failIfRunning(error));
-    helper.on("exit", info => {
-      this.failIfRunning(
-        new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})`)
-      );
-    });
-  }
-
   private handleFrame(frame: DecodedFrame): void {
-    if (!this.running) {
+    if (!this.isActive()) {
       return;
     }
     const size = { width: frame.header.width, height: frame.header.height };
@@ -274,7 +304,7 @@ export class IosH264Source implements H264CaptureSource {
     this.encoderSize = size;
 
     encoder.stdout.on("data", chunk => {
-      if (this.running && this.encoder === encoder) {
+      if (this.isActive() && this.encoder === encoder) {
         this.options.onData(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
     });
@@ -331,17 +361,31 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private failIfRunning(error: Error): void {
-    if (!this.running) {
+    if (this.phase !== "running") {
       return;
     }
-    this.running = false;
+    this.phase = "stopping";
     void this.beginTeardown();
     this.options.onError?.(error);
+  }
+
+  private failIfCurrentHelper(helper: IosFrameCaptureHelper, error: Error): void {
+    if (this.helper !== helper) {
+      return;
+    }
+    this.failIfRunning(error);
+  }
+
+  private isActive(): boolean {
+    return this.phase === "starting" || this.phase === "running";
   }
 
   private beginTeardown(): Promise<void> {
     this.teardownPromise ??= this.teardown().finally(() => {
       this.teardownPromise = null;
+      if (this.phase === "stopping") {
+        this.phase = "idle";
+      }
     });
     return this.teardownPromise;
   }

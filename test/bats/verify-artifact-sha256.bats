@@ -33,8 +33,18 @@ teardown() {
 # $1 = ipaSha256 value (may be empty)
 write_release_ts() {
   cat > "$PROJECT/src/constants/release.ts" <<EOF
-export const RELEASE_CHECKSUM_REGISTRY = [
-  { version: "1.0.0", apkSha256: "", ipaSha256: "$1" },
+interface ReleaseChecksumEntry {
+  version: string;
+  apkSha256: string;
+  ipaSha256: string;
+}
+
+export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
+  {
+    version: "1.0.0",
+    apkSha256: "",
+    ipaSha256: "$1",
+  },
 ];
 EOF
 }

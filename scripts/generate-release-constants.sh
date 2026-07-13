@@ -179,17 +179,11 @@ if [ -n "$release_version" ]; then
 else
   # Mode: update registry[0] checksums in place (nightly/checksum-only)
   if [ -n "$apk_checksum" ]; then
-    first_apk_line=$(grep -n 'apkSha256:' "$tmp_file" | head -1 | cut -d: -f1)
-    if [ -n "$first_apk_line" ]; then
-      sed_inplace_extended "${first_apk_line}s/apkSha256: \"[a-f0-9]{64}\"/apkSha256: \"${apk_checksum}\"/" "$tmp_file"
-    fi
+    update_registry_field "$tmp_file" "__FIRST__" "apkSha256" "$apk_checksum"
   fi
 
   if [ -n "$ios_checksum" ]; then
-    first_ipa_line=$(grep -n 'ipaSha256:' "$tmp_file" | head -1 | cut -d: -f1)
-    if [ -n "$first_ipa_line" ]; then
-      sed_inplace_extended "${first_ipa_line}s/ipaSha256: \"[a-f0-9]{64}\"/ipaSha256: \"${ios_checksum}\"/" "$tmp_file"
-    fi
+    update_registry_field "$tmp_file" "__FIRST__" "ipaSha256" "$ios_checksum"
   fi
 
   if [ -n "$ios_runner_sha256" ]; then

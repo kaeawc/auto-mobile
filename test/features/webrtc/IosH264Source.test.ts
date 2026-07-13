@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { Writable } from "node:stream";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
@@ -69,6 +70,21 @@ class DelayedStopFrameCaptureHelper extends FakeFrameCaptureHelper {
 
   finishStop(): void {
     this.resolveStop?.();
+  }
+}
+
+class BackpressuredWritable extends EventEmitter {
+  writes: Buffer[] = [];
+  ended = false;
+
+  write(chunk: Buffer | string): boolean {
+    this.writes.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return false;
+  }
+
+  end(): this {
+    this.ended = true;
+    return this;
   }
 }
 
@@ -432,6 +448,41 @@ describe("IosH264Source", () => {
     await expect(started).rejects.toThrow(/Screen Recording permission/);
   });
 
+  test("rejects startup when the only simulator window does not match the requested device", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          return {
+            stdout: JSON.stringify({
+              windows: [
+                {
+                  windowID: 99,
+                  title: "iPad Pro",
+                  applicationName: "Simulator",
+                  bundleIdentifier: "com.apple.iphonesimulator",
+                },
+              ],
+            }),
+            stderr: "",
+            exitCode: 0,
+            signal: null,
+          };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    await expect(source.start()).rejects.toThrow(/No visible iOS Simulator window matched iPhone 16/);
+    expect(helper.started).toBe(false);
+  });
+
   test("rejects startup when ffmpeg is missing", async () => {
     const { source, helper } = createHarnessWithOverrides({
       commandRunner: async () => {
@@ -441,6 +492,63 @@ describe("IosH264Source", () => {
 
     await expect(source.start()).rejects.toThrow(new RegExp(IOS_WEBRTC_FFMPEG_ENV));
     expect(helper.started).toBe(false);
+  });
+
+  test("drops frames while encoder stdin is backpressured and resumes on drain", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const encoder = new FakeChildProcess();
+    const stdin = new BackpressuredWritable();
+    encoder.stdin = stdin as unknown as Writable;
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    helper.emitFrame(frame(1, 1, 0x22));
+    stdin.emit("drain");
+    helper.emitFrame(frame(1, 1, 0x33));
+
+    expect(stdin.writes).toEqual([
+      Buffer.alloc(4, 0x11),
+      Buffer.alloc(4, 0x33),
+    ]);
+  });
+
+  test("ignores stale encoder errors after a restart creates a new encoder", async () => {
+    const helpers = [new FakeFrameCaptureHelper(), new FakeFrameCaptureHelper()];
+    const encoders = [new FakeChildProcess(), new FakeChildProcess()];
+    let helperIndex = 0;
+    let encoderIndex = 0;
+    const errors: Error[] = [];
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      onError: error => errors.push(error),
+      createHelper: () => helpers[helperIndex++],
+      spawner: () => encoders[encoderIndex++] as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const oldEncoder = encoders[0];
+    await startWithFrame(source, helpers[0], frame(1, 1, 0x11));
+    await source.stop();
+    const newEncoder = encoders[1];
+    await startWithFrame(source, helpers[1], frame(1, 1, 0x22));
+
+    oldEncoder.stdin.emit("error", new Error("old stdin failed"));
+    oldEncoder.emit("error", new Error("old encoder failed"));
+    newEncoder.stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
+    await flush();
+
+    expect(errors).toEqual([]);
   });
 
   test("rejects startup when ffmpeg lacks h264_videotoolbox", async () => {

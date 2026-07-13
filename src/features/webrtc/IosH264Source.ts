@@ -80,6 +80,7 @@ interface SimulatorWindowInfo {
   windowID: number;
   title?: string | null;
   applicationName?: string;
+  bundleIdentifier?: string;
 }
 
 interface EncoderSize {
@@ -125,6 +126,7 @@ export class IosH264Source implements H264CaptureSource {
   private helper: IosFrameCaptureHelper | null = null;
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
+  private encoderBackpressured = false;
   private teardownPromise: Promise<void> | null = null;
   private cancelFirstFrameWait: (() => void) | null = null;
   private phase: IosH264SourcePhase = "idle";
@@ -281,6 +283,8 @@ export class IosH264Source implements H264CaptureSource {
     const size = { width: frame.header.width, height: frame.header.height };
     if (!this.encoder) {
       this.startEncoder(size);
+    } else if (this.encoderBackpressured) {
+      return;
     } else if (
       this.encoderSize &&
       (this.encoderSize.width !== size.width || this.encoderSize.height !== size.height)
@@ -293,7 +297,10 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
 
-    this.encoder?.stdin.write(tightlyPackBgraFrame(frame));
+    const accepted = this.encoder?.stdin.write(tightlyPackBgraFrame(frame));
+    if (accepted === false) {
+      this.encoderBackpressured = true;
+    }
   }
 
   private startEncoder(size: EncoderSize): void {
@@ -302,6 +309,7 @@ export class IosH264Source implements H264CaptureSource {
     const encoder = this.spawner(this.ffmpegPath, args);
     this.encoder = encoder;
     this.encoderSize = size;
+    this.encoderBackpressured = false;
 
     encoder.stdout.on("data", chunk => {
       if (this.isActive() && this.encoder === encoder) {
@@ -314,10 +322,21 @@ export class IosH264Source implements H264CaptureSource {
         logger.debug(`[IosH264Source] ffmpeg stderr: ${text}`);
       }
     });
-    encoder.stdin.on("error", error => {
-      this.failIfRunning(error instanceof Error ? error : new Error(String(error)));
+    encoder.stdin.on("drain", () => {
+      if (this.encoder === encoder) {
+        this.encoderBackpressured = false;
+      }
     });
-    encoder.once("error", error => this.failIfRunning(error));
+    encoder.stdin.on("error", error => {
+      if (this.encoder === encoder) {
+        this.failIfRunning(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+    encoder.once("error", error => {
+      if (this.encoder === encoder) {
+        this.failIfRunning(error);
+      }
+    });
     encoder.once("exit", (code, signal) => {
       if (this.encoder === encoder) {
         this.failIfRunning(new Error(`ffmpeg exited (code=${code}, signal=${signal})`));
@@ -394,6 +413,7 @@ export class IosH264Source implements H264CaptureSource {
     const encoder = this.encoder;
     this.encoder = null;
     this.encoderSize = null;
+    this.encoderBackpressured = false;
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 
@@ -551,9 +571,6 @@ async function defaultResolveSimulatorWindowId(
   const matches = windows.filter(window => window.title?.toLowerCase().includes(deviceName));
   if (matches.length === 1) {
     return matches[0].windowID;
-  }
-  if (matches.length === 0 && windows.length === 1) {
-    return windows[0].windowID;
   }
   if (matches.length === 0) {
     throw new ActionableError(

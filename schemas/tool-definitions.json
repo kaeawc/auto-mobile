@@ -6446,6 +6446,12 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "instance": {
+          "description": "Alias for `index` (Android's UiAutomator uses this name — accepted here too so a reasonable guess doesn't hard-fail). If both are given, `index` wins.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "duration": {
           "description": "Long press duration (ms)",
           "type": "number"

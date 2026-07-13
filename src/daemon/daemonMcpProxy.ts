@@ -499,7 +499,15 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`
     );
-    await this.daemonManager.restart(this.config.daemonOptions ?? {});
+    // Preserve the RUNNING daemon's options, not this connecting client's own
+    // (often bare-default) config — this restart exists to fix which CODE is
+    // running, not to reconfigure behavior flags. A short-lived CLI client that
+    // never passes output-reduction/perf flags (e.g. am.py, which intentionally
+    // omits them on every call — see qa-agent/am.py run_cli) would otherwise
+    // silently strip every flag the daemon was actually launched with the moment
+    // any such client connects (issue: daemon silently loses all startup flags
+    // mid-suite once a version-mismatch restart fires).
+    await this.daemonManager.restart(status.options ?? this.config.daemonOptions ?? {});
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -597,7 +605,10 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] Daemon build ${daemonIdentity.buildId} (${daemonIdentity.entryScript || "unknown"}) differs from client build ${this.buildIdentity.buildId} (${this.buildIdentity.entryScript || "unknown"}), restarting daemon`
     );
-    await this.daemonManager.restart(this.config.daemonOptions ?? {});
+    // Preserve the RUNNING daemon's options — see the matching comment in
+    // ensureVersionMatches. A build-identity restart is about running the right
+    // code, not reconfiguring behavior flags.
+    await this.daemonManager.restart(status.options ?? this.config.daemonOptions ?? {});
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();

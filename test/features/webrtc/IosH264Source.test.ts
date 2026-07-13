@@ -5,7 +5,9 @@ import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import type { BootedDevice } from "../../../src/models";
 import {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
+  IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
   IOS_WEBRTC_FFMPEG_ENV,
+  IOS_WEBRTC_FFMPEG_ENV_ALIAS,
   IosH264Source,
   resolveIosScreenCaptureHelperPath,
   type IosFrameCaptureHelper,
@@ -43,6 +45,25 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
 
   emitStderr(line: string): void {
     this.emit("stderr", line);
+  }
+}
+
+class DelayedStopFrameCaptureHelper extends FakeFrameCaptureHelper {
+  private resolveStop: (() => void) | null = null;
+
+  stopFinished = false;
+
+  override async stop(): Promise<null> {
+    this.stopped = true;
+    await new Promise<void>(resolve => {
+      this.resolveStop = resolve;
+    });
+    this.stopFinished = true;
+    return null;
+  }
+
+  finishStop(): void {
+    this.resolveStop?.();
   }
 }
 
@@ -247,6 +268,75 @@ describe("IosH264Source", () => {
     expect(errors[0].message).toContain("ffmpeg exited");
   });
 
+  test("awaits in-flight teardown after post-start encoder failure", async () => {
+    const helper = new DelayedStopFrameCaptureHelper();
+    const encoder = new FakeChildProcess();
+    const errors: Error[] = [];
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: "/bin/sh",
+      onData: () => {},
+      onError: error => errors.push(error),
+      createHelper: () => helper,
+      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    encoder.emit("exit", 1, null);
+    await flush();
+
+    expect(errors[0].message).toContain("ffmpeg exited");
+    expect(helper.stopped).toBe(true);
+    expect(encoder.killed).toBe(true);
+
+    let stopResolved = false;
+    const stopped = source.stop().then(() => {
+      stopResolved = true;
+    });
+    await flush();
+
+    expect(stopResolved).toBe(false);
+    helper.finishStop();
+    await stopped;
+    expect(stopResolved).toBe(true);
+  });
+
+  test("drops encoder output after stop starts even when helper stop is pending", async () => {
+    const helper = new DelayedStopFrameCaptureHelper();
+    const encoder = new FakeChildProcess();
+    const chunks: Buffer[] = [];
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: "/bin/sh",
+      onData: chunk => chunks.push(chunk),
+      createHelper: () => helper,
+      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    const stopped = source.stop();
+    encoder.stdout.push(Buffer.from([0x09]));
+    await flush();
+
+    expect(chunks).toEqual([]);
+    expect(encoder.killed).toBe(true);
+    helper.finishStop();
+    await stopped;
+  });
+
+  test("does not report helper startup exits through post-start onError", async () => {
+    const { source, helper, errors } = createHarness();
+
+    const started = source.start();
+    await flush();
+    helper.emit("exit", { code: 1, signal: null });
+
+    await expect(started).rejects.toThrow(/screen-capture-helper exited/);
+    expect(errors).toEqual([]);
+  });
+
   test("fails when frame dimensions change after the encoder starts", async () => {
     const { source, helper, errors } = createHarness();
 
@@ -306,6 +396,18 @@ describe("IosH264Source", () => {
     expect(found).toBe(sourceBuild);
   });
 
+  test("resolves helper paths from packaged dist roots when bundled module dirs are stale", () => {
+    const packagedBuild = "/pkg/dist/ios/screen-capture/.build/release/screen-capture-helper";
+    const found = resolveIosScreenCaptureHelperPath(undefined, {
+      moduleDir: "/build-host/repo/src/features/webrtc",
+      entryFile: "/pkg/dist/src/index.js",
+      env: {},
+      exists: candidate => candidate === packagedBuild,
+    });
+
+    expect(found).toBe(packagedBuild);
+  });
+
   test("prefers the helper path environment override", () => {
     const found = resolveIosScreenCaptureHelperPath(undefined, {
       moduleDir: "/repo/src/features/webrtc",
@@ -314,5 +416,98 @@ describe("IosH264Source", () => {
     });
 
     expect(found).toBe("/custom/helper");
+  });
+
+  test("uses legacy helper path environment alias when preferred name is unset", () => {
+    const found = resolveIosScreenCaptureHelperPath(undefined, {
+      moduleDir: "/repo/src/features/webrtc",
+      env: { [IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS]: "/legacy/helper" },
+      exists: candidate => candidate === "/legacy/helper",
+    });
+
+    expect(found).toBe("/legacy/helper");
+  });
+
+  test("prefers the ffmpeg environment override over the legacy alias", async () => {
+    const originalPreferred = process.env[IOS_WEBRTC_FFMPEG_ENV];
+    const originalLegacy = process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS];
+    process.env[IOS_WEBRTC_FFMPEG_ENV] = "/preferred/ffmpeg";
+    process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS] = "/legacy/ffmpeg";
+    try {
+      const helper = new FakeFrameCaptureHelper();
+      const encoder = new FakeChildProcess();
+      const commands: string[] = [];
+      const source = new IosH264Source({
+        device: IOS_DEVICE,
+        helperPath: "/bin/sh",
+        onData: () => {},
+        createHelper: () => helper,
+        spawner: command => {
+          commands.push(command);
+          return encoder as unknown as ChildProcessWithoutNullStreams;
+        },
+        commandRunner: async (command, args) => {
+          commands.push(command);
+          return successfulCommandRunner(command, args);
+        },
+      });
+
+      await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+      expect(commands).toContain("/preferred/ffmpeg");
+      expect(commands).not.toContain("/legacy/ffmpeg");
+    } finally {
+      if (originalPreferred === undefined) {
+        delete process.env[IOS_WEBRTC_FFMPEG_ENV];
+      } else {
+        process.env[IOS_WEBRTC_FFMPEG_ENV] = originalPreferred;
+      }
+      if (originalLegacy === undefined) {
+        delete process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS];
+      } else {
+        process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS] = originalLegacy;
+      }
+    }
+  });
+
+  test("uses legacy ffmpeg environment alias when preferred name is unset", async () => {
+    const originalPreferred = process.env[IOS_WEBRTC_FFMPEG_ENV];
+    const originalLegacy = process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS];
+    delete process.env[IOS_WEBRTC_FFMPEG_ENV];
+    process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS] = "/legacy/ffmpeg";
+    try {
+      const helper = new FakeFrameCaptureHelper();
+      const encoder = new FakeChildProcess();
+      const commands: string[] = [];
+      const source = new IosH264Source({
+        device: IOS_DEVICE,
+        helperPath: "/bin/sh",
+        onData: () => {},
+        createHelper: () => helper,
+        spawner: command => {
+          commands.push(command);
+          return encoder as unknown as ChildProcessWithoutNullStreams;
+        },
+        commandRunner: async (command, args) => {
+          commands.push(command);
+          return successfulCommandRunner(command, args);
+        },
+      });
+
+      await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+      expect(commands).toContain("/legacy/ffmpeg");
+    } finally {
+      if (originalPreferred === undefined) {
+        delete process.env[IOS_WEBRTC_FFMPEG_ENV];
+      } else {
+        process.env[IOS_WEBRTC_FFMPEG_ENV] = originalPreferred;
+      }
+      if (originalLegacy === undefined) {
+        delete process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS];
+      } else {
+        process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS] = originalLegacy;
+      }
+    }
   });
 });

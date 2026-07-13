@@ -19,7 +19,9 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 
 export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
+export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER";
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
+export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 const DEFAULT_IOS_WEBRTC_FPS = SIMULATOR_FPS_DEFAULT;
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 5_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
@@ -119,11 +121,15 @@ export class IosH264Source implements H264CaptureSource {
   private helper: IosFrameCaptureHelper | null = null;
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
+  private teardownPromise: Promise<void> | null = null;
   private running = false;
 
   constructor(private readonly options: IosH264SourceOptions) {
     this.helperPath = options.helperPath;
-    this.ffmpegPath = options.ffmpegPath ?? process.env[IOS_WEBRTC_FFMPEG_ENV] ?? "ffmpeg";
+    this.ffmpegPath =
+      options.ffmpegPath ??
+      readEnvWithLegacy(process.env, IOS_WEBRTC_FFMPEG_ENV, IOS_WEBRTC_FFMPEG_ENV_ALIAS) ??
+      "ffmpeg";
     this.fps = options.fps ?? DEFAULT_IOS_WEBRTC_FPS;
     this.createHelper = options.createHelper ?? (helperOptions => new IOSScreenCaptureHelper(helperOptions));
     this.spawner = options.spawner ?? defaultEncoderSpawner;
@@ -140,6 +146,7 @@ export class IosH264Source implements H264CaptureSource {
     if (this.running) {
       throw new ActionableError("iOS H.264 source already started.");
     }
+    await this.teardownPromise;
     this.running = true;
 
     try {
@@ -152,23 +159,27 @@ export class IosH264Source implements H264CaptureSource {
 
       const helper = this.createHelper({ binaryPath: helperPath, target });
       this.helper = helper;
-      this.wireHelper(helper);
+      this.wireHelperFrames(helper);
       const firstFrame = this.waitForFirstFrame(helper, target);
       helper.start();
       await firstFrame;
+      if (this.running && this.helper === helper) {
+        this.wireHelperPostStartFailures(helper);
+      }
     } catch (error) {
       this.running = false;
-      await this.teardown();
+      await this.beginTeardown();
       throw error;
     }
   }
 
   async stop(): Promise<void> {
     if (!this.running) {
+      await this.teardownPromise;
       return;
     }
     this.running = false;
-    await this.teardown();
+    await this.beginTeardown();
   }
 
   private async resolveCaptureTarget(helperPath: string): Promise<CaptureTarget> {
@@ -212,7 +223,7 @@ export class IosH264Source implements H264CaptureSource {
     });
   }
 
-  private wireHelper(helper: IosFrameCaptureHelper): void {
+  private wireHelperFrames(helper: IosFrameCaptureHelper): void {
     helper.on("frame", frame => this.handleFrame(frame));
     helper.on("malformed", error => {
       logger.warn(`[IosH264Source] malformed frame from helper: ${error.reason}`);
@@ -222,6 +233,9 @@ export class IosH264Source implements H264CaptureSource {
         logger.debug(`[IosH264Source] screen-capture-helper stderr: ${line}`);
       }
     });
+  }
+
+  private wireHelperPostStartFailures(helper: IosFrameCaptureHelper): void {
     helper.on("error", error => this.failIfRunning(error));
     helper.on("exit", info => {
       this.failIfRunning(
@@ -260,7 +274,7 @@ export class IosH264Source implements H264CaptureSource {
     this.encoderSize = size;
 
     encoder.stdout.on("data", chunk => {
-      if (this.encoder === encoder) {
+      if (this.running && this.encoder === encoder) {
         this.options.onData(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
     });
@@ -321,22 +335,29 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     this.running = false;
-    void this.teardown();
+    void this.beginTeardown();
     this.options.onError?.(error);
   }
 
-  private async teardown(): Promise<void> {
-    const helper = this.helper;
-    this.helper = null;
-    await helper?.stop().catch(error => {
-      logger.debug(`[IosH264Source] helper stop failed: ${error}`);
+  private beginTeardown(): Promise<void> {
+    this.teardownPromise ??= this.teardown().finally(() => {
+      this.teardownPromise = null;
     });
+    return this.teardownPromise;
+  }
 
+  private async teardown(): Promise<void> {
     const encoder = this.encoder;
     this.encoder = null;
     this.encoderSize = null;
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
+
+    const helper = this.helper;
+    this.helper = null;
+    await helper?.stop().catch(error => {
+      logger.debug(`[IosH264Source] helper stop failed: ${error}`);
+    });
   }
 }
 
@@ -373,6 +394,7 @@ function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {
 export interface IosScreenCaptureHelperPathResolverOptions {
   env?: NodeJS.ProcessEnv;
   moduleDir?: string;
+  entryFile?: string;
   exists?: (candidate: string) => boolean;
 }
 
@@ -382,17 +404,20 @@ export function resolveIosScreenCaptureHelperPath(
 ): string {
   const env = options.env ?? process.env;
   const moduleDir = options.moduleDir ?? __dirname;
+  const entryFile = options.entryFile ?? process.argv[1];
   const exists = options.exists ?? existsSync;
-  const candidateRoots = [
-    path.resolve(moduleDir, ".."),
-    path.resolve(moduleDir, "..", "..", ".."),
-  ];
+  const candidateRoots = uniquePaths([
+    ...ancestorDirs(moduleDir),
+    ...(entryFile ? ancestorDirs(path.dirname(entryFile)) : []),
+  ]);
   const candidates = [
     explicitPath,
-    env[IOS_SCREEN_CAPTURE_HELPER_ENV],
+    readEnvWithLegacy(env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS),
     ...candidateRoots.flatMap(root => [
       path.join(root, "ios/screen-capture/.build/debug/screen-capture-helper"),
       path.join(root, "ios/screen-capture/.build/release/screen-capture-helper"),
+      path.join(root, "dist/ios/screen-capture/.build/debug/screen-capture-helper"),
+      path.join(root, "dist/ios/screen-capture/.build/release/screen-capture-helper"),
     ]),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
@@ -405,6 +430,31 @@ export function resolveIosScreenCaptureHelperPath(
   throw new ActionableError(
     `iOS WebRTC streaming requires a built screen-capture-helper. Set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to its absolute path or run swift build in ios/screen-capture.`
   );
+}
+
+function readEnvWithLegacy(
+  env: NodeJS.ProcessEnv,
+  primaryName: string,
+  legacyName: string
+): string | undefined {
+  return env[primaryName] ?? env[legacyName];
+}
+
+function ancestorDirs(startDir: string): string[] {
+  const dirs: string[] = [];
+  let current = path.resolve(startDir);
+  while (true) {
+    dirs.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return dirs;
+    }
+    current = parent;
+  }
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths)];
 }
 
 async function validateFfmpegAvailability(

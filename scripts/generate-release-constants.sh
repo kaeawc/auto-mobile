@@ -113,10 +113,14 @@ field = sys.argv[3]
 value = sys.argv[4]
 text = path.read_text()
 
+# The closing anchor is `\n\s*\}` (zero-or-more), not `\n\s+\}`: registry array
+# entries close with an indented `  },`, but the standalone NIGHTLY_CHECKSUM_ENTRY
+# const closes with a column-0 `};`. `\s*` matches both so `version: "nightly"`
+# can be targeted the same way as a registry entry.
 if version == "__FIRST__":
-    match = re.search(r'(\{\n\s+version: "[^"]+",\n.*?\n\s+\})', text, re.S)
+    match = re.search(r'(\{\n\s+version: "[^"]+",\n.*?\n\s*\})', text, re.S)
 else:
-    match = re.search(r'(\{\n\s+version: "' + re.escape(version) + r'",\n.*?\n\s+\})', text, re.S)
+    match = re.search(r'(\{\n\s+version: "' + re.escape(version) + r'",\n.*?\n\s*\})', text, re.S)
 
 if not match:
     sys.stderr.write(f"failed to locate release registry entry for {version}\n")
@@ -159,12 +163,15 @@ if [ -n "$release_version" ]; then
     # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
     prepend_registry_entry "$tmp_file" "$new_entry"
 
-    # Cap registry at max_registry_entries
-    entry_count=$(grep -c 'version: "' "$tmp_file" || true)
+    # Cap registry at max_registry_entries. Count/delete only semver release
+    # entries (version starts with a digit) so the trailing
+    # NIGHTLY_CHECKSUM_ENTRY const (version: "nightly") is never counted toward
+    # the cap nor selected as the oldest entry to prune.
+    entry_count=$(grep -cE 'version: "[0-9]' "$tmp_file" || true)
     if [ "$entry_count" -gt "$max_registry_entries" ]; then
       excess=$((entry_count - max_registry_entries))
       for ((i = 0; i < excess; i++)); do
-        last_version_line=$(grep -n 'version: "' "$tmp_file" | tail -1 | cut -d: -f1)
+        last_version_line=$(grep -nE 'version: "[0-9]' "$tmp_file" | tail -1 | cut -d: -f1)
         start_line=$((last_version_line - 1))
         end_line=$((last_version_line + 4))
         sed_inplace "${start_line},${end_line}d" "$tmp_file"
@@ -177,35 +184,35 @@ if [ -n "$release_version" ]; then
     echo "   iOS checksum: ${ios_checksum}"
   fi
 else
-  # Mode: update registry[0] checksums in place (nightly/checksum-only).
+  # Mode: update the dedicated NIGHTLY_CHECKSUM_ENTRY in place (nightly/
+  # checksum-only). Nightly builds from `main`, which is ahead of the last
+  # release tag; writing those checksums onto a tagged registry entry makes
+  # "latest" download the immutable tagged asset yet verify it against a
+  # main-built sha, which cannot match (nightly PR #3784). So nightly targets
+  # the separate `version: "nightly"` slot — never registry[0].
   #
-  # Scope every field update to the first registry ENTRY (the block beginning
-  # with `version: "`) via update_registry_field. A plain line-based match
-  # collides with the `ReleaseChecksumEntry` interface declarations
-  # (`apkSha256: string;` / `ipaSha256: string;`) that precede the registry:
-  # `grep 'apkSha256:' | head -1` returns the type line, and the follow-up sed
-  # (which only matches a 64-hex value) then silently updates nothing. That left
-  # APK/IPA registry[0] stale while only runnerSha256 moved — see nightly PR
-  # #3784, where the merged entry carried a fresh runner sha but original APK/IPA
-  # shas, breaking whole-bundle vs runner verification for a fresh install.
+  # Scope every field update to that entry via update_registry_field, anchored
+  # on the `version: "nightly"` block. A plain line-based match would collide
+  # with the `ReleaseChecksumEntry` interface declarations (`apkSha256: string;`)
+  # that precede the registry and silently update nothing (#3784).
   if [ -n "$apk_checksum" ]; then
-    update_registry_field "$tmp_file" "__FIRST__" "apkSha256" "$apk_checksum"
+    update_registry_field "$tmp_file" "nightly" "apkSha256" "$apk_checksum"
   fi
 
   if [ -n "$ios_checksum" ]; then
-    update_registry_field "$tmp_file" "__FIRST__" "ipaSha256" "$ios_checksum"
+    update_registry_field "$tmp_file" "nightly" "ipaSha256" "$ios_checksum"
   fi
 
   if [ -n "$ios_runner_sha256" ]; then
-    update_registry_field "$tmp_file" "__FIRST__" "runnerSha256" "$ios_runner_sha256"
+    update_registry_field "$tmp_file" "nightly" "runnerSha256" "$ios_runner_sha256"
   fi
 
   echo "Updated release constants:"
   if [ -n "$apk_checksum" ]; then
-    echo "   APK checksum (registry[0]): ${apk_checksum}"
+    echo "   APK checksum (nightly): ${apk_checksum}"
   fi
   if [ -n "$ios_checksum" ]; then
-    echo "   iOS checksum (registry[0]): ${ios_checksum}"
+    echo "   iOS checksum (nightly): ${ios_checksum}"
   fi
 fi
 

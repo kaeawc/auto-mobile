@@ -284,26 +284,7 @@ final class RemindersPlanContentTests: XCTestCase {
     func testPullRequestWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
         let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
 
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Select Xcode 26.5",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure iOS Simulator runtime (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Boot iOS Simulator (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
+        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(workflow)
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
             stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
@@ -386,26 +367,7 @@ final class RemindersPlanContentTests: XCTestCase {
     func testNightlyWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
         let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
 
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Select Xcode 26.5",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure iOS Simulator runtime (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Boot iOS Simulator (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
+        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(workflow)
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
             stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
@@ -912,6 +874,39 @@ private func assertWorkflowRunsGuardedRemindersTest(
     )
 }
 
+private func assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
+    _ workflow: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let afterStepName = "Run Reminders integration tests (Xcode 26.2)"
+    if workflowHasStep(workflow, stepName: "iOS simulator bring-up (Xcode 26.5)", afterStepName: afterStepName) {
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "iOS simulator bring-up (Xcode 26.5)",
+            afterStepName: afterStepName,
+            file: file,
+            line: line
+        )
+        return
+    }
+
+    for stepName in [
+        "Select Xcode 26.5",
+        "Ensure iOS Simulator runtime (Xcode 26.5)",
+        "Boot iOS Simulator (Xcode 26.5)",
+        "Ensure AutoMobile daemon ready (Xcode 26.5)",
+    ] {
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: stepName,
+            afterStepName: afterStepName,
+            file: file,
+            line: line
+        )
+    }
+}
+
 private func assertWorkflowStepRunsWhenNotCancelled(
     _ workflow: String,
     stepName: String,
@@ -932,6 +927,20 @@ private func assertWorkflowStepRunsWhenNotCancelled(
         file: file,
         line: line
     )
+}
+
+private func workflowHasStep(_ workflow: String, stepName: String, afterStepName: String? = nil) -> Bool {
+    let searchStart: String.Index
+    if let afterStepName {
+        guard let afterRange = workflow.range(of: #"name: "\#(afterStepName)""#) else {
+            return false
+        }
+        searchStart = afterRange.upperBound
+    } else {
+        searchStart = workflow.startIndex
+    }
+
+    return workflow[searchStart...].range(of: #"name: "\#(stepName)""#) != nil
 }
 
 private func workflowStepBlock(

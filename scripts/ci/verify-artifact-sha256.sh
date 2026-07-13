@@ -12,6 +12,9 @@
 #   verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
 set -euo pipefail
 
+# shellcheck source=scripts/lib/read-registry-field.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/read-registry-field.sh"
+
 ARTIFACT_PATH="${1:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 PLATFORM="${2:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 
@@ -25,21 +28,6 @@ sha256_of() {
   else
     shasum -a 256 "$1" | cut -d' ' -f1
   fi
-}
-
-read_first_registry_field() {
-  local field="$1"
-  awk -v field="$field" '
-    /RELEASE_CHECKSUM_REGISTRY/ { in_registry = 1; next }
-    in_registry && /^[[:space:]]+version: "/ { in_first = 1; next }
-    in_first && $0 ~ "^[[:space:]]+" field ": \"" {
-      sub(".*" field ": \"", "")
-      sub("\".*", "")
-      print
-      exit
-    }
-    in_first && /^[[:space:]]+}/ { exit }
-  ' "$RELEASE_TS"
 }
 
 if [ ! -f "$ARTIFACT_PATH" ]; then
@@ -64,10 +52,20 @@ else
   exit 1
 fi
 
-# Only read fields from the first registry entry. The release interface declares
-# the same names before the registry values, so a plain grep can select the
-# wrong line and skip verification.
-SOURCE_SHA256=$(read_first_registry_field "$FIELD" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
+# Read the checksum from registry[0] via the shared, entry-anchored helper. A
+# plain `grep "$FIELD" | head -1` would instead match the `ReleaseChecksumEntry`
+# interface declaration (`ipaSha256: string;`) that precedes the registry: the
+# whole pipeline then yields an empty value and a real release aborts with a
+# misleading "No SHA256 checksum found" even though the checksum is populated
+# (interface-collision bug, #3784).
+SOURCE_SHA256=$(read_registry_field "$FIELD" "$RELEASE_TS")
+# The helper does no format validation, so enforce the 64-hex floor here: an
+# empty or malformed registry value (e.g. `ipaSha256: ""`) yields empty
+# SOURCE_SHA256 so the `-z` guard below fires with the actionable "No checksum"
+# error rather than a spurious mismatch (#3658).
+if ! [[ "$SOURCE_SHA256" =~ ^[a-f0-9]{64}$ ]]; then
+  SOURCE_SHA256=""
+fi
 echo "Source SHA256:         $SOURCE_SHA256"
 
 if [ -z "$SOURCE_SHA256" ]; then

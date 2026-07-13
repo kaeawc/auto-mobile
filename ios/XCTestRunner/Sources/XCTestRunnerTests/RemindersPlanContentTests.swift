@@ -158,8 +158,8 @@ final class RemindersPlanContentTests: XCTestCase {
         XCTAssertTrue(guardStep.mentions("Title"), "The title input guard must target the Title field")
     }
 
-    /// The Reminders tests must run as single-attempt plans by default. CI warms the target app before
-    /// the timed plan step, so retrying here would hide the root-cause fix regressing.
+    /// Reminders tests default to single-attempt plans for local runs, but CI can opt into a bounded
+    /// retry for known cold-runner flakes through `AUTOMOBILE_TEST_RETRY_COUNT`.
     func testRemindersPlansDefaultToZeroRetries() {
         // An explicit env override legitimately wins, so only assert the default when unset.
         let env = ProcessInfo.processInfo.environment
@@ -225,8 +225,8 @@ final class RemindersPlanContentTests: XCTestCase {
         XCTAssertEqual(RemindersAddPlanTests().timeoutSeconds, 120)
     }
 
-    /// Retry is no longer the stabilization mechanism for Reminders. The integration base should only
-    /// own simulator/daemon readiness; retry behavior comes from `AutoMobileTestCase`.
+    /// CI enables Reminders retries through workflow env, not a test-class override. The integration
+    /// base should only own simulator/daemon readiness; retry behavior comes from `AutoMobileTestCase`.
     func testRemindersIntegrationBaseDoesNotOverrideRetryCount() throws {
         let source = try loadRemindersIntegrationTestSource()
 
@@ -260,6 +260,67 @@ final class RemindersPlanContentTests: XCTestCase {
         )
     }
 
+    func testPullRequestWorkflowRetriesRemindersRunsOnce() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
+
+        assertWorkflowRetriesRemindersRunOnce(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowRetriesRemindersRunOnce(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.5)"
+        )
+        assertWorkflowRunsGuardedRemindersTest(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowRunsGuardedRemindersTest(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.5)"
+        )
+    }
+
+    func testPullRequestWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
+
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Select Xcode 26.5",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Ensure iOS Simulator runtime (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Boot iOS Simulator (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Warm up Reminders target app (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Run Reminders integration tests (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+    }
+
     func testNightlyWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
         let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
 
@@ -272,6 +333,67 @@ final class RemindersPlanContentTests: XCTestCase {
             workflow,
             warmupStepName: "Warm up Reminders target app (Xcode 26.5)",
             runStepName: "Run Reminders integration tests (Xcode 26.5)"
+        )
+    }
+
+    func testNightlyWorkflowRetriesRemindersRunsOnce() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
+
+        assertWorkflowRetriesRemindersRunOnce(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowRetriesRemindersRunOnce(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.5)"
+        )
+        assertWorkflowRunsGuardedRemindersTest(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowRunsGuardedRemindersTest(
+            workflow,
+            runStepName: "Run Reminders integration tests (Xcode 26.5)"
+        )
+    }
+
+    func testNightlyWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
+
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Select Xcode 26.5",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Ensure iOS Simulator runtime (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Boot iOS Simulator (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Warm up Reminders target app (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+        )
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "Run Reminders integration tests (Xcode 26.5)",
+            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
         )
     }
 
@@ -728,4 +850,116 @@ private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
         file: file,
         line: line
     )
+}
+
+private func assertWorkflowRetriesRemindersRunOnce(
+    _ workflow: String,
+    runStepName: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let runBlock = workflowStepBlock(workflow, stepName: runStepName, file: file, line: line)
+    XCTAssertTrue(
+        stepBlockHasActiveEnvValue(runBlock, key: "AUTOMOBILE_TEST_RETRY_COUNT", value: "\"1\""),
+        "\(runStepName) must enable exactly one bounded retry for cold first-leg bring-up flakes",
+        file: file,
+        line: line
+    )
+}
+
+private func assertWorkflowRunsGuardedRemindersTest(
+    _ workflow: String,
+    runStepName: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let runBlock = workflowStepBlock(workflow, stepName: runStepName, file: file, line: line)
+    XCTAssertTrue(
+        stepBlockHasActiveTopLevelValue(
+            runBlock,
+            key: "run",
+            value: "./scripts/ci/run-reminders-launch-plan-tests.sh"
+        ),
+        "\(runStepName) must fail when the filtered Reminders test command executes zero XCTest cases",
+        file: file,
+        line: line
+    )
+}
+
+private func assertWorkflowStepRunsWhenNotCancelled(
+    _ workflow: String,
+    stepName: String,
+    afterStepName: String? = nil,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let stepBlock = workflowStepBlock(
+        workflow,
+        stepName: stepName,
+        afterStepName: afterStepName,
+        file: file,
+        line: line
+    )
+    XCTAssertTrue(
+        stepBlockHasActiveTopLevelValue(stepBlock, key: "if", value: "${{ !cancelled() }}"),
+        "\(stepName) must run after an earlier Reminders leg fails, but still respect cancellation",
+        file: file,
+        line: line
+    )
+}
+
+private func workflowStepBlock(
+    _ workflow: String,
+    stepName: String,
+    afterStepName: String? = nil,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) -> Substring {
+    let searchStart: String.Index
+    if let afterStepName {
+        guard let afterRange = workflow.range(of: #"name: "\#(afterStepName)""#) else {
+            XCTFail("Workflow is missing step named \(afterStepName)", file: file, line: line)
+            return ""
+        }
+        searchStart = afterRange.upperBound
+    } else {
+        searchStart = workflow.startIndex
+    }
+
+    guard let stepRange = workflow[searchStart...].range(of: #"name: "\#(stepName)""#) else {
+        XCTFail("Workflow is missing step named \(stepName)", file: file, line: line)
+        return ""
+    }
+
+    let nextStepRange = workflow[stepRange.upperBound...].range(of: "\n      - name:")
+    let stepBlockEnd = nextStepRange?.lowerBound ?? workflow.endIndex
+    return workflow[stepRange.lowerBound ..< stepBlockEnd]
+}
+
+private func stepBlockHasActiveTopLevelValue(_ stepBlock: Substring, key: String, value: String) -> Bool {
+    return stepBlockActiveLines(stepBlock).contains { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return line.hasPrefix("        \(key):") && trimmed == "\(key): \(value)"
+    }
+}
+
+private func stepBlockHasActiveEnvValue(_ stepBlock: Substring, key: String, value: String) -> Bool {
+    var inEnv = false
+    for line in stepBlockActiveLines(stepBlock) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if line.hasPrefix("        ") && !line.hasPrefix("          ") {
+            inEnv = trimmed == "env:"
+            continue
+        }
+        if inEnv, line.hasPrefix("          "), trimmed == "\(key): \(value)" {
+            return true
+        }
+    }
+    return false
+}
+
+private func stepBlockActiveLines(_ stepBlock: Substring) -> [String] {
+    return stepBlock.split(separator: "\n", omittingEmptySubsequences: false)
+        .map(String.init)
+        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
 }

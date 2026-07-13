@@ -55,31 +55,24 @@ jobs:
       - name: "Get current SHA256 values from source"
         id: current
         run: |
-          read_first_registry_field() {
-            awk -v field="$1" '
-              /RELEASE_CHECKSUM_REGISTRY/ { in_registry = 1; next }
-              in_registry && /^[[:space:]]+version: "/ { in_first = 1; next }
-              in_first && $0 ~ "^[[:space:]]+" field ": \"" {
-                sub(".*" field ": \"", "")
-                sub("\".*", "")
-                print
-                exit
-              }
-              in_first && /^[[:space:]]+}/ { exit }
-            ' src/constants/release.ts
-          }
-
-          APK_CURRENT=$(read_first_registry_field apkSha256)
-          IPA_CURRENT=$(read_first_registry_field ipaSha256)
-          RUNNER_CURRENT=$(read_first_registry_field runnerSha256)
-          APK_CURRENT=$(printf '%s' "$APK_CURRENT" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
-          IPA_CURRENT=$(printf '%s' "$IPA_CURRENT" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
-          RUNNER_CURRENT=$(printf '%s' "$RUNNER_CURRENT" | sed -n 's/^\([a-f0-9]\{64\}\)$/\1/p')
-          {
-            echo "apk_sha256=$APK_CURRENT"
-            echo "ipa_sha256=$IPA_CURRENT"
-            echo "runner_sha256=$RUNNER_CURRENT"
-          } >> "$GITHUB_OUTPUT"
+          # Read each field from the dedicated NIGHTLY_CHECKSUM_ENTRY (the block
+          # anchored on `version: "nightly"`) via the shared helper — the single
+          # source of truth also used by verify-artifact-sha256.sh +
+          # verify-release-integrity.sh (which read registry[0]). Nightly must
+          # compare against — and later overwrite — the nightly slot, NEVER a
+          # tagged registry entry: writing main-built shas onto a tagged entry
+          # makes "latest" verify the immutable published asset against a
+          # main-built sha (#3784). Anchoring on the quoted `version: "nightly"`
+          # line also skips the `ReleaseChecksumEntry` interface declarations
+          # (`apkSha256: string;`) that precede the registry (#3784).
+          source scripts/lib/read-registry-field.sh
+          RELEASE_TS="src/constants/release.ts"
+          APK_CURRENT=$(read_registry_field apkSha256 "$RELEASE_TS" nightly)
+          IPA_CURRENT=$(read_registry_field ipaSha256 "$RELEASE_TS" nightly)
+          RUNNER_CURRENT=$(read_registry_field runnerSha256 "$RELEASE_TS" nightly)
+          echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
+          echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
+          echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT
           echo "Current APK SHA256: ${APK_CURRENT:-(empty)}"
           echo "Current IPA SHA256: ${IPA_CURRENT:-(empty)}"
           echo "Current iOS runner SHA256: ${RUNNER_CURRENT:-(empty)}"
@@ -129,16 +122,15 @@ jobs:
             echo "iOS runner SHA256 unchanged"
           fi
 
-          {
-            echo "apk_changed=$APK_CHANGED"
-            echo "ipa_changed=$IPA_CHANGED"
-            echo "runner_changed=$RUNNER_CHANGED"
-            if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ] || [ "$RUNNER_CHANGED" = "true" ]; then
-              echo "needed=true"
-            else
-              echo "needed=false"
-            fi
-          } >> "$GITHUB_OUTPUT"
+          echo "apk_changed=$APK_CHANGED" >> $GITHUB_OUTPUT
+          echo "ipa_changed=$IPA_CHANGED" >> $GITHUB_OUTPUT
+          echo "runner_changed=$RUNNER_CHANGED" >> $GITHUB_OUTPUT
+
+          if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ] || [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "needed=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: "Update release constants"
         if: steps.check.outputs.needed == 'true'
@@ -480,40 +472,45 @@ jobs:
         timeout-minutes: 10
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
-        run: |
-          cd ios/XCTestRunner
-          swift test --filter RemindersLaunchPlanTests 2>&1
+          AUTOMOBILE_TEST_RETRY_COUNT: "1"
+        run: ./scripts/ci/run-reminders-launch-plan-tests.sh
 
       - name: "Shutdown iOS Simulators"
         if: always()
         run: xcrun simctl shutdown all || true
 
       - name: "Select Xcode 26.5"
+        if: ${{ !cancelled() }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.5"
 
       - name: "Ensure iOS Simulator runtime (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Boot iOS Simulator (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         run: ./scripts/ios/boot-simulator.sh
 
       - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       - name: "Warm up iOS CtrlProxy (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       - name: "Warm up Reminders target app (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: ./scripts/ci/warm-reminders-target-app.sh
 
       - name: "Run Reminders integration tests (Xcode 26.5)"
+        if: ${{ !cancelled() }}
         timeout-minutes: 10
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
-        run: |
-          cd ios/XCTestRunner
-          swift test --filter RemindersLaunchPlanTests 2>&1
+          AUTOMOBILE_TEST_RETRY_COUNT: "1"
+        run: ./scripts/ci/run-reminders-launch-plan-tests.sh

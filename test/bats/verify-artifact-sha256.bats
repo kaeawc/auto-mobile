@@ -31,12 +31,19 @@ teardown() {
 }
 
 # $1 = ipaSha256 value (may be empty)
+#
+# Mirrors the production release.ts layout: a `ReleaseChecksumEntry` interface
+# (whose `ipaSha256: string;` line is the interface-collision trap) followed by a
+# multi-line registry entry. A fixture without the interface line silently masks
+# the `grep | head -1` collision bug — the extraction must be anchored to the
+# registry entry, not the type declaration.
 write_release_ts() {
   cat > "$PROJECT/src/constants/release.ts" <<EOF
-interface ReleaseChecksumEntry {
+export interface ReleaseChecksumEntry {
   version: string;
   apkSha256: string;
   ipaSha256: string;
+  runnerSha256: string;
 }
 
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
@@ -44,6 +51,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
+    runnerSha256: "",
   },
 ];
 EOF
@@ -51,6 +59,19 @@ EOF
 
 @test "empty ipaSha256 reports 'no checksum', not a spurious mismatch" {
   write_release_ts ""
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" ios
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+  [[ "$output" != *"SHA256 mismatch"* ]]
+}
+
+@test "non-64-hex ipaSha256 reports 'no checksum', not a spurious mismatch" {
+  # The shared reader does no format validation, so verify-artifact-sha256.sh's
+  # own `^[a-f0-9]{64}$` guard is the only thing that blanks a non-empty but
+  # malformed registry value. Without it, this input would surface the wrong
+  # "SHA256 mismatch" error instead of the actionable "No checksum found".
+  write_release_ts "notahexvalue"
   cd "$PROJECT"
   run bash "$ABS_SCRIPT" "$ARTIFACT" ios
   [ "$status" -ne 0 ]

@@ -397,8 +397,15 @@ async function main() {
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");
-  const { logger } = await import("./utils/logger");
+  const { logger, parseAutomobileLogLevel } = await import("./utils/logger");
   fatalLogger = logger;
+  // AUTOMOBILE_LOG_LEVEL was parsed (parseAutomobileLogLevel) and unit-tested but
+  // never actually applied to the running process — set it as early as possible so
+  // startup logging respects it too.
+  const envLogLevel = parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL);
+  if (envLogLevel !== null) {
+    logger.setLogLevel(envLogLevel);
+  }
   const { runCliCommand } = await import("./cli");
   const { runDaemonCommand } = await import("./daemon/manager");
   const { startDaemon } = await import("./daemon/daemon");

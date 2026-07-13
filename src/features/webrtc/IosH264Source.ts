@@ -3,7 +3,10 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { ActionableError, type BootedDevice } from "../../models";
-import { IOSScreenCaptureHelper } from "../screen-stream/IOSScreenCaptureHelper";
+import {
+  IOSScreenCaptureHelper,
+  SIMULATOR_FPS_DEFAULT,
+} from "../screen-stream/IOSScreenCaptureHelper";
 import type {
   CaptureTarget,
   DecodedFrame,
@@ -17,7 +20,7 @@ import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureS
 
 export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
-const DEFAULT_IOS_WEBRTC_FPS = 30;
+const DEFAULT_IOS_WEBRTC_FPS = SIMULATOR_FPS_DEFAULT;
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 5_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 
@@ -173,6 +176,7 @@ export class IosH264Source implements H264CaptureSource {
       return {
         kind: "simulator",
         windowID: await this.simulatorWindowResolver(helperPath, this.options.device),
+        fps: this.fps,
       };
     }
     return { kind: "device", deviceId: this.options.device.deviceId };

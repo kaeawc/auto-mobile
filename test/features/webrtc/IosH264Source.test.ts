@@ -164,7 +164,36 @@ describe("IosH264Source", () => {
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
 
-    expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42 }]);
+    expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 5 }]);
+  });
+
+  test("passes explicit simulator fps to helper target and ffmpeg input", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const encoder = new FakeChildProcess();
+    const helperTargets: CaptureTarget[] = [];
+    const encoderSpawns: Array<{ command: string; args: string[] }> = [];
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: "/bin/sh",
+      fps: 15,
+      onData: () => {},
+      createHelper: options => {
+        helperTargets.push(options.target);
+        return helper;
+      },
+      spawner: (command, args) => {
+        encoderSpawns.push({ command, args });
+        return encoder as unknown as ChildProcessWithoutNullStreams;
+      },
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+    });
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 15 }]);
+    expect(encoderSpawns[0].args).toContain("-r");
+    expect(encoderSpawns[0].args).toContain("15");
   });
 
   test("passes bitrate and output size overrides to ffmpeg", async () => {

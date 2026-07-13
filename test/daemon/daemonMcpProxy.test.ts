@@ -493,6 +493,34 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("does NOT restart when the daemon already has a flag the client simply didn't ask for (issue: bare CLI clients silently downgrading a configured daemon)", async () => {
+        // A lightweight CLI client (e.g. am.py's per-tool-call bare `--cli`
+        // invocation) never passes daemonOptions at all — it has no opinion on
+        // these flags, not a request to turn them off. The running daemon
+        // already has embeddedSdk on; reconciliation must be one-directional
+        // and never strip a flag the daemon already has just because THIS
+        // caller didn't ask for it.
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResult = runningStatus({ embeddedSdk: true });
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: {},
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("restarts daemon when toolResultsNoStructuredContent differs (issue #2759)", async () => {
         const fakeClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),

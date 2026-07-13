@@ -138,15 +138,6 @@ describe("tapOn schema", () => {
       })
     ).toThrow();
   });
-
-  test("accepts instance (UiAutomator's name for index, kept as an alias)", () => {
-    const result = tapOnSchema.parse({
-      platform: "android",
-      selector: { elementId: "com.app:id/checkbox" },
-      instance: 1,
-    });
-    expect(result.instance).toBe(1);
-  });
 });
 
 describe("tapAny schema", () => {

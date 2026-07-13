@@ -154,10 +154,6 @@ export const tapOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.o
     + "for a vertical list) instead of applying "
     + "selectionStrategy — for repeated controls with no unique text. Out of range → no match."
   ),
-  instance: z.number().int().nonnegative().optional().describe(
-    "Alias for `index` (Android's UiAutomator uses this name — accepted here too so a "
-    + "reasonable guess doesn't hard-fail). If both are given, `index` wins."
-  ),
   duration: z.number().optional().describe("Long press duration (ms)"),
   searchUntil: z.object({
     duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
@@ -429,7 +425,7 @@ export function registerInteractionTools() {
       elementId: args.selector.elementId,
       sibling: args.sibling,
       selectionStrategy: args.selectionStrategy,
-      index: args.index ?? args.instance,
+      index: args.index,
       action: args.action,
       duration: args.duration,
       searchUntil: args.searchUntil,

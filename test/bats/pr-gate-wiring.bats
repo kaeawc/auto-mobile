@@ -54,7 +54,22 @@ job_block() {
 
 @test "ios-build-gate EXCLUDES the simulator-flaky job (keeps the required check deterministic)" {
   block="$(job_block ios-build-gate)"
+  # Guard against a vacuous pass: a renamed gate id would make job_block return
+  # "", and the `!=` below would pass on an empty string.
+  [[ -n "$block" ]]
   [[ "$block" != *"ios-xctest-runner-simulator-tests"* ]]
+}
+
+@test "required gates fail on a failing/cancelled dependency (not just declare membership)" {
+  # The whole point of the gate is to go red when a dependency fails; a gate that
+  # never `exit 1`s is a permanent false-green. Pin the failure semantics so
+  # weakening the loop (e.g. exit 1 -> exit 0) fails this guard.
+  for job in ios-build-gate codeql-gate shell-tests-gate; do
+    block="$(job_block "$job")"
+    [[ -n "$block" ]]
+    [[ "$block" == *'"$r" == "failure" || "$r" == "cancelled"'* ]]
+    [[ "$block" == *"exit 1"* ]]
+  done
 }
 
 @test "codeql-gate rolls up codeql-node" {
@@ -73,6 +88,7 @@ job_block() {
   # The broad non-required "iOS" gate must not re-list the build jobs (that would
   # double the drift surface); it depends on ios-build-gate instead.
   block="$(job_block ios-gate)"
+  [[ -n "$block" ]]
   [[ "$block" == *"- ios-build-gate"* ]]
   [[ "$block" == *"needs.ios-build-gate.result"* ]]
   [[ "$block" != *"- ios-swift-packages"* ]]

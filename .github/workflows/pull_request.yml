@@ -1210,6 +1210,10 @@ jobs:
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
+    # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
+    # infra-cancels the job (a cancelled terminal run blocks the required
+    # "iOS Build" gate). Generous backstop, not a tight bound.
+    timeout-minutes: 45
     env:
       IOS_SIGNING_ENABLED: ${{ secrets.IOS_CERTIFICATE_BASE64 != '' }}
       MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 != '' }}
@@ -1268,6 +1272,10 @@ jobs:
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
+    # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
+    # infra-cancels the job (a cancelled terminal run blocks the required
+    # "iOS Build" gate). Generous backstop, not a tight bound.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -2421,21 +2429,29 @@ jobs:
       - detect-changes
       - ios-swift-packages
       - ios-xcode-build
+    # Roll-up only reads needs.*.result — it needs no token scopes.
+    permissions: {}
     runs-on: ubuntu-latest
     steps:
       - name: "Check results"
         run: |
-          results=( \
-            "${{ needs.detect-changes.result }}" \
-            "${{ needs.ios-swift-packages.result }}" \
-            "${{ needs.ios-xcode-build.result }}" \
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [ios-swift-packages]="${{ needs.ios-swift-packages.result }}"
+            [ios-xcode-build]="${{ needs.ios-xcode-build.result }}"
           )
-          for r in "${results[@]}"; do
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "One or more jobs failed or were cancelled"
-              exit 1
+              echo "::error::iOS Build gate dependency ${name} = ${r}"
+              fail=1
             fi
           done
+          if [[ -n "${fail}" ]]; then
+            echo "One or more jobs failed or were cancelled"
+            exit 1
+          fi
 
   # Stable roll-up of the CodeQL matrix so it can be required. codeql-node is a
   # per-language matrix; when it is gated out (non-TypeScript PRs) the matrix
@@ -2447,20 +2463,28 @@ jobs:
     needs:
       - detect-changes
       - codeql-node
+    # Roll-up only reads needs.*.result — it needs no token scopes.
+    permissions: {}
     runs-on: ubuntu-latest
     steps:
       - name: "Check results"
         run: |
-          results=( \
-            "${{ needs.detect-changes.result }}" \
-            "${{ needs.codeql-node.result }}" \
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [codeql-node]="${{ needs.codeql-node.result }}"
           )
-          for r in "${results[@]}"; do
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "One or more jobs failed or were cancelled"
-              exit 1
+              echo "::error::CodeQL gate dependency ${name} = ${r}"
+              fail=1
             fi
           done
+          if [[ -n "${fail}" ]]; then
+            echo "One or more jobs failed or were cancelled"
+            exit 1
+          fi
 
   # Stable roll-up of the BATS shell tests so they can be required. bats-tests
   # is an OS matrix; when it is gated out (sha256-only / auto-chore PRs) it
@@ -2472,17 +2496,25 @@ jobs:
     needs:
       - detect-changes
       - bats-tests
+    # Roll-up only reads needs.*.result — it needs no token scopes.
+    permissions: {}
     runs-on: ubuntu-latest
     steps:
       - name: "Check results"
         run: |
-          results=( \
-            "${{ needs.detect-changes.result }}" \
-            "${{ needs.bats-tests.result }}" \
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [bats-tests]="${{ needs.bats-tests.result }}"
           )
-          for r in "${results[@]}"; do
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "One or more jobs failed or were cancelled"
-              exit 1
+              echo "::error::Shell Tests gate dependency ${name} = ${r}"
+              fail=1
             fi
           done
+          if [[ -n "${fail}" ]]; then
+            echo "One or more jobs failed or were cancelled"
+            exit 1
+          fi

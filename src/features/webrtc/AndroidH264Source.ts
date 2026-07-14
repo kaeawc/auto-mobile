@@ -1,4 +1,4 @@
-import { ActionableError, type BootedDevice } from "../../models";
+import { ActionableError } from "../../models";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
@@ -6,7 +6,7 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
-import type { H264CaptureSource } from "./H264CaptureSource";
+import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 import { defaultProcessSpawner, type ProcessSpawner, type SpawnedProcess } from "./processSpawner";
 
 export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
@@ -18,14 +18,7 @@ export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
  */
 export const ANDROID_STREAM_SEGMENT_ROTATE_MS = (ANDROID_SCREENRECORD_MAX_SECONDS - 5) * 1000;
 
-export interface AndroidH264SourceOptions {
-  device: BootedDevice;
-  /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
-  onData: (chunk: Buffer) => void;
-  /** Called when the source fails fatally (all segments stopped unexpectedly). */
-  onError?: (error: Error) => void;
-  bitrateBps?: number;
-  size?: { width: number; height: number };
+export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
   adbFactory?: AdbClientFactory;
   timer?: Timer;
   spawner?: ProcessSpawner;

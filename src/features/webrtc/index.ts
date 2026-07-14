@@ -7,6 +7,8 @@ export * from "./VideoServerStreamParser";
 export * from "./PersistentEncoderH264Source";
 export * from "./videoServerJar";
 export * from "./androidH264CaptureSourceFactory";
+export * from "./IosH264Source";
+export * from "./h264CaptureSourceFactory";
 export * from "./WhipClient";
 export * from "./trickleIce";
 export * from "./ReconnectController";

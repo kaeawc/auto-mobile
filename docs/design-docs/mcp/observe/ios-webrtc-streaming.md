@@ -1,12 +1,12 @@
 # iOS WebRTC (WHIP) Live Streaming
 
-<kbd>🚧 Design Only</kbd>
+<kbd>🚧 In Progress</kbd>
 
-> **Current state:** Spike / design. WebRTC streaming (`webrtc-stream.sock`,
-> [webrtc-streaming.md](./webrtc-streaming.md)) is **Android-only**;
-> `startWebRtcStream` rejects iOS. This document scopes what an iOS source needs
-> to satisfy the existing publisher, records the empirical findings that rule out
-> the "easy" on-Mac paths, and recommends the implementation path. See the
+> **Current state:** WebRTC streaming (`webrtc-stream.sock`,
+> [webrtc-streaming.md](./webrtc-streaming.md)) supports Android and has an iOS
+> capture source built from the macOS `screen-capture-helper` plus local `ffmpeg`
+> H.264 encoding. This document records the empirical findings that ruled out
+> raw `simctl` streaming and the remaining iOS delivery constraints. See the
 > [Status Glossary](../../status-glossary.md) for chip definitions.
 
 Follow-up to #3751; addresses #3777.
@@ -22,9 +22,8 @@ interface H264CaptureSource { start(): Promise<void>; stop(): Promise<void>; }
 // feeding: onData(chunk: Buffer /* Annex-B */) => void
 ```
 
-…then drop the Android-only guard in `webrtcStreamManager.startWebRtcStream`.
-The publisher / RTP packetizer / WHIP / reconnect stack stays untouched — this is
-purely a new source plus removing the guard once a source exists.
+The publisher / RTP packetizer / WHIP / reconnect stack stays untouched — the
+iOS integration is a capture source that feeds the same H.264 chunk callback.
 
 ## Why the guard exists: the blocker is real
 
@@ -44,7 +43,25 @@ stream — exactly the premise of #3777.
 
 ## Options
 
-### 1. VideoToolbox encoder in the CtrlProxy runner — recommended
+### 1. Mac helper capture + local ffmpeg encoder — current implementation
+
+The repo already has `ios/screen-capture`, a macOS Swift helper that emits
+continuous BGRA frames for:
+
+- **Physical devices** via AVFoundation USB capture.
+- **Simulators** via ScreenCaptureKit simulator-window capture.
+
+`IosH264Source` wraps that helper, pipes frames into `ffmpeg` with
+`h264_videotoolbox`, and forwards raw H.264 Annex-B stdout chunks into the
+existing `WebRtcPublisher`. The helper binary is resolved from
+`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` or repo/package-local Swift build outputs;
+the helper Swift package source is copied into `dist/ios/screen-capture` for
+published installs. ffmpeg is resolved from `AUTOMOBILE_IOS_WEBRTC_FFMPEG` or
+`PATH`, and startup fails fast if ffmpeg or `h264_videotoolbox` is unavailable
+or if simulator capture reports missing Screen Recording permission before the
+first frame.
+
+### 2. VideoToolbox encoder in the CtrlProxy runner
 
 Encode on the Mac inside the iOS CtrlProxy runner (`Sources/CtrlProxy`, see
 [ctrl-proxy-ios.md](../../plat/ios/ctrl-proxy-ios.md)), where frames are already
@@ -69,36 +86,26 @@ payloads to `onData`.
 release delivery gate** — `Sources/CtrlProxy` changes require re-cutting the
 runner bundle before they reach users (see [iOS runner release delivery gate]).
 
-### 2. On-Mac encoder outside the runner
+### 3. On-Mac encoder outside the existing helper
 
 A standalone Mac helper (Swift + VideoToolbox, or an `ffmpeg` pipeline) feeding
-the same `onData`. Rejected for simulators: there is no per-simulator AVFoundation
-device (see table above), so the helper would still need the CoreSimulator
-framebuffer — i.e. the same private-framework work as option 1, minus the runner's
-existing plumbing.
+the same `onData`. The current implementation uses the existing
+`screen-capture-helper` rather than adding another helper binary.
 
-### 3. Physical device only
+### 4. Physical device only
 
-The AVFoundation USB-capture path (option 1, physical branch) works without any
-private simulator APIs and is the smallest first increment. It does **not** cover
-simulators, which are the common CI/dev case, so it is a partial answer.
+The AVFoundation USB-capture path works without ScreenCaptureKit simulator
+window matching, but it does **not** cover simulators, which are the common
+CI/dev case, so it is only a partial answer.
 
 ## Recommended increment
 
-1. Add the `VTCompressionSession` encoder to the CtrlProxy runner, emitting
-   Annex-B over a stream socket using the existing `video-server` framing.
-2. Add a TS `IosH264Source implements H264CaptureSource` that connects to that
-   socket and forwards payloads to `onData` (mirrors
-   `PersistentEncoderH264Source`; unit-testable with fakes).
-3. Gate the platform check on **source availability**, not platform: replace the
-   hard `platform !== "android"` reject with a source-factory that returns an iOS
-   source when the runner supports the stream, else a clear "not available"
-   error. This keeps a working fallback story identical to the Android
-   persistent-vs-screenrecord selection.
-4. Re-cut the runner release so the encoder ships.
-
-Start with the physical-device branch (option 3) to validate the encoder + RTP
-path end-to-end, then add the simulator framebuffer source.
+1. Ship the helper + ffmpeg `IosH264Source` path for physical devices and
+   visible simulator windows.
+2. Add end-to-end manual coverage against a WHIP coordination server on a Mac
+   with Screen Recording permission granted.
+3. Consider moving H.264 encoding into Swift (`VTCompressionSession`) once the
+   helper path is proven, reducing the external `ffmpeg` dependency.
 
 ## Scope note
 

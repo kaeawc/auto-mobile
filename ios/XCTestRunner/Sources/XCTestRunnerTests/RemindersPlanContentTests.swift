@@ -284,26 +284,7 @@ final class RemindersPlanContentTests: XCTestCase {
     func testPullRequestWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
         let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
 
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Select Xcode 26.5",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure iOS Simulator runtime (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Boot iOS Simulator (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
+        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(workflow)
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
             stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
@@ -319,6 +300,32 @@ final class RemindersPlanContentTests: XCTestCase {
             stepName: "Run Reminders integration tests (Xcode 26.5)",
             afterStepName: "Run Reminders integration tests (Xcode 26.2)"
         )
+    }
+
+    /// Xcode 26.5 can turn a filtered SwiftPM XCTest run into "Executed 0 tests" when the custom
+    /// `defaultTestSuite` override reads the suite's private `tests` storage even though timing
+    /// reordering is inactive. CI disables timing data, so the default suite must be returned
+    /// untouched in that path.
+    func testDefaultTestSuiteOnlyReadsTestsWhenTimingOrderingIsActive() throws {
+        let source = try loadRepositoryFile("ios/XCTestRunner/Sources/XCTestRunner/AutoMobileTestCase.swift")
+        let body = classBody(named: "AutoMobileTestCase", in: source)
+
+        guard let timingAvailableRange = body.range(of: "let timingAvailable = TestTimingCache.shared.hasTimings()")
+        else {
+            XCTFail("AutoMobileTestCase.defaultTestSuite should check timing availability")
+            return
+        }
+        guard let inactiveGuardRange = body.range(of: "guard timingOrderingActive else") else {
+            XCTFail("AutoMobileTestCase.defaultTestSuite should return before touching tests when ordering is inactive")
+            return
+        }
+        guard let testsReadRange = body.range(of: "let tests = baseSuite.tests") else {
+            XCTFail("AutoMobileTestCase.defaultTestSuite should only read tests in the active ordering path")
+            return
+        }
+
+        XCTAssertLessThan(timingAvailableRange.lowerBound, inactiveGuardRange.lowerBound)
+        XCTAssertLessThan(inactiveGuardRange.lowerBound, testsReadRange.lowerBound)
     }
 
     func testNightlyWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
@@ -360,26 +367,7 @@ final class RemindersPlanContentTests: XCTestCase {
     func testNightlyWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
         let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
 
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Select Xcode 26.5",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure iOS Simulator runtime (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Boot iOS Simulator (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
+        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(workflow)
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
             stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
@@ -886,6 +874,39 @@ private func assertWorkflowRunsGuardedRemindersTest(
     )
 }
 
+private func assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
+    _ workflow: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    let afterStepName = "Run Reminders integration tests (Xcode 26.2)"
+    if workflowHasStep(workflow, stepName: "iOS simulator bring-up (Xcode 26.5)", afterStepName: afterStepName) {
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: "iOS simulator bring-up (Xcode 26.5)",
+            afterStepName: afterStepName,
+            file: file,
+            line: line
+        )
+        return
+    }
+
+    for stepName in [
+        "Select Xcode 26.5",
+        "Ensure iOS Simulator runtime (Xcode 26.5)",
+        "Boot iOS Simulator (Xcode 26.5)",
+        "Ensure AutoMobile daemon ready (Xcode 26.5)",
+    ] {
+        assertWorkflowStepRunsWhenNotCancelled(
+            workflow,
+            stepName: stepName,
+            afterStepName: afterStepName,
+            file: file,
+            line: line
+        )
+    }
+}
+
 private func assertWorkflowStepRunsWhenNotCancelled(
     _ workflow: String,
     stepName: String,
@@ -906,6 +927,20 @@ private func assertWorkflowStepRunsWhenNotCancelled(
         file: file,
         line: line
     )
+}
+
+private func workflowHasStep(_ workflow: String, stepName: String, afterStepName: String? = nil) -> Bool {
+    let searchStart: String.Index
+    if let afterStepName {
+        guard let afterRange = workflow.range(of: #"name: "\#(afterStepName)""#) else {
+            return false
+        }
+        searchStart = afterRange.upperBound
+    } else {
+        searchStart = workflow.startIndex
+    }
+
+    return workflow[searchStart...].range(of: #"name: "\#(stepName)""#) != nil
 }
 
 private func workflowStepBlock(

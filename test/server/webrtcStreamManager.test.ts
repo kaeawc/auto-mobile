@@ -16,7 +16,11 @@ import type {
 } from "../../src/features/webrtc";
 
 const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
-const IOS: BootedDevice = { deviceId: "SIM-1", platform: "ios", name: "i" } as BootedDevice;
+const IOS: BootedDevice = {
+  deviceId: "4DA8AF35-C59B-43D3-A8FE-5640A7B0B8C1",
+  platform: "ios",
+  name: "iPhone 16",
+} as BootedDevice;
 
 const ENDPOINT = "https://coord.example.com/whip";
 
@@ -134,11 +138,16 @@ describe("webrtcStreamManager", () => {
     ).rejects.toThrow(/already active/);
   });
 
-  test("rejects iOS devices", async () => {
-    installFakes();
-    await expect(
-      startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } })
-    ).rejects.toThrow(/Android only/);
+  test("starts iOS devices when a capture source is available", async () => {
+    const { sources } = installFakes();
+    const descriptor = await startWebRtcStream({
+      device: IOS,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+
+    expect(descriptor.streamId).toBe("webrtc_id-1");
+    expect(sources[0].started).toBe(true);
+    expect(listWebRtcStreams()).toHaveLength(1);
   });
 
   test("requires a configured WHIP endpoint", async () => {
@@ -196,6 +205,36 @@ describe("webrtcStreamManager", () => {
     expect(sources[0].started).toBe(true);
     expect(sources[0].stopped).toBe(true);
     expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("routes source failures reported during start to the publisher", async () => {
+    const publishers: FakePublisher[] = [];
+    const sources: FakeSource[] = [];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: options => {
+        const source = new FakeSource();
+        source.start = async () => {
+          source.started = true;
+          options.onError?.(new Error("helper exited after first frame"));
+        };
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } });
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0].started).toBe(true);
+    expect(publishers[0].sourceFailedCount).toBe(1);
+    expect(listWebRtcStreams()).toHaveLength(1);
   });
 
   test("uses an explicit streamId when provided", async () => {

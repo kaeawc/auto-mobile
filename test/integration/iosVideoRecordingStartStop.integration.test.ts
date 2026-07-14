@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
 const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
 const DEFAULT_WAIT_MS = 4000;
+const DEFAULT_TEST_TIMEOUT_MS = 420000;
 
 interface ToolTextResponse {
   content?: Array<{ type?: string; text?: string }>;
@@ -56,6 +57,14 @@ function getWaitMs(): number {
     return DEFAULT_WAIT_MS;
   }
   return Math.max(1000, Math.round(parsed));
+}
+
+function getTestTimeoutMs(): number {
+  const parsed = Number(process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_TEST_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_TEST_TIMEOUT_MS;
+  }
+  return Math.max(60000, Math.round(parsed));
 }
 
 function formatError(error: unknown): string {
@@ -191,5 +200,5 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       serverConfig.setSkipCtrlProxyDownload(false);
       resetVideoRecordingManagerDependencies();
     }
-  }, 180000);
+  }, getTestTimeoutMs());
 });

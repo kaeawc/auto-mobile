@@ -2,11 +2,11 @@ import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
-  createAndroidH264CaptureSource,
+  createH264CaptureSource,
   WebRtcPublisher,
   resolveWebRtcStreamingConfig,
-  type AndroidH264SourceOptions,
   type H264CaptureSource,
+  type H264CaptureSourceOptions,
   type WebRtcPublisherConfig,
   type WebRtcPublisherDeps,
   type WebRtcStreamDescriptor,
@@ -32,14 +32,14 @@ interface WebRtcStreamRecord {
 export interface WebRtcStreamManagerDependencies {
   idGenerator: IdGenerator;
   createPublisher: (config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps) => WebRtcPublisher;
-  createSource: (options: AndroidH264SourceOptions) => H264CaptureSource;
+  createSource: (options: H264CaptureSourceOptions) => H264CaptureSource;
   now: () => Date;
 }
 
 const defaultDependencies: WebRtcStreamManagerDependencies = {
   idGenerator: defaultIdGenerator,
   createPublisher: (config, deps) => new WebRtcPublisher(config, deps),
-  createSource: options => createAndroidH264CaptureSource(options),
+  createSource: options => createH264CaptureSource(options),
   now: () => new Date(),
 };
 
@@ -127,23 +127,14 @@ async function startSource(record: WebRtcStreamRecord): Promise<void> {
 
 /**
  * Start publishing a device's screen to the configured coordination server over
- * WHIP. Currently Android-only; capture prefers the persistent on-device encoder
- * and falls back to segment-rotated `screenrecord`. Returns the reconnect
- * descriptor for the new stream.
+ * WHIP. Android capture prefers the persistent on-device encoder and falls back
+ * to segment-rotated `screenrecord`; iOS capture uses the macOS screen-capture
+ * helper and a local H.264 encoder. Returns the reconnect descriptor for the new
+ * stream.
  */
 export async function startWebRtcStream(
   request: StartWebRtcStreamRequest
 ): Promise<WebRtcStreamDescriptor> {
-  if (request.device.platform !== "android") {
-    // iOS has no live H.264 elementary stream from simctl; a capture source must
-    // be built first (VideoToolbox in the CtrlProxy runner). See
-    // docs/design-docs/mcp/observe/ios-webrtc-streaming.md (#3777).
-    throw new ActionableError(
-      `WebRTC streaming currently supports Android only (got ${request.device.platform}). ` +
-        `See docs/design-docs/mcp/observe/ios-webrtc-streaming.md for the iOS plan.`
-    );
-  }
-
   const existing = activeStreamForDevice(request.device.deviceId);
   if (existing) {
     throw new ActionableError(

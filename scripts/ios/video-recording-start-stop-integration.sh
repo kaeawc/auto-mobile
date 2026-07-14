@@ -8,6 +8,7 @@
 # Environment:
 #   AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID  Use an already booted simulator UDID.
 #   AUTOMOBILE_IOS_VIDEO_RECORDING_WAIT_MS    Milliseconds to record before stop.
+#   AUTOMOBILE_IOS_VIDEO_RECORDING_TEST_TIMEOUT_MS  Bun test timeout in milliseconds.
 
 set -euo pipefail
 

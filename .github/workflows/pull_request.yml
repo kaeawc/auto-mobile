@@ -2305,13 +2305,18 @@ jobs:
   # of the individual conditional jobs, avoiding the GitHub Actions issue where
   # skipped matrix jobs produce uninterpolated check names that block merges.
 
+  # Full iOS roll-up (superset). This is the broad, NON-required signal: it
+  # includes the simulator-flaky ios-xctest-runner-simulator-tests, so it must
+  # not gate merges. The required, deterministic subset lives in ios-build-gate
+  # below ("iOS Build"), which this gate reuses so the build-leg membership is
+  # declared in exactly one place (add a new iOS *build* job to ios-build-gate,
+  # not here).
   ios-gate:
     name: "iOS"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
       - detect-changes
-      - ios-swift-packages
-      - ios-xcode-build
+      - ios-build-gate
       - ios-xctest-runner-simulator-tests
       - ios-spm-root-package-build
     runs-on: ubuntu-latest
@@ -2320,8 +2325,7 @@ jobs:
         run: |
           results=( \
             "${{ needs.detect-changes.result }}" \
-            "${{ needs.ios-swift-packages.result }}" \
-            "${{ needs.ios-xcode-build.result }}" \
+            "${{ needs.ios-build-gate.result }}" \
             "${{ needs.ios-xctest-runner-simulator-tests.result }}" \
             "${{ needs.ios-spm-root-package-build.result }}" \
           )
@@ -2384,6 +2388,85 @@ jobs:
             "${{ needs.detect-changes.result }}" \
             "${{ needs.build-ide-plugin.result }}" \
             "${{ needs.ide-plugin-unit-tests.result }}" \
+          )
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "One or more jobs failed or were cancelled"
+              exit 1
+            fi
+          done
+
+  # Deterministic-only roll-up of the iOS *build* legs (Swift packages + Xcode
+  # projects). Reports a stable context name so it can be a required status
+  # check without the matrix-skip footgun (a gated-out matrix job reports its
+  # literal "(${{ ... }})" name instead of the expanded one). Deliberately
+  # excludes ios-xctest-runner-simulator-tests, which is simulator-flaky and
+  # must not gate merges — that stays covered by the non-required "iOS" gate.
+  ios-build-gate:
+    name: "iOS Build"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - ios-swift-packages
+      - ios-xcode-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check results"
+        run: |
+          results=( \
+            "${{ needs.detect-changes.result }}" \
+            "${{ needs.ios-swift-packages.result }}" \
+            "${{ needs.ios-xcode-build.result }}" \
+          )
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "One or more jobs failed or were cancelled"
+              exit 1
+            fi
+          done
+
+  # Stable roll-up of the CodeQL matrix so it can be required. codeql-node is a
+  # per-language matrix; when it is gated out (non-TypeScript PRs) the matrix
+  # never expands and reports its literal name, so the expanded
+  # "... (typescript)" context would hang as a required check.
+  codeql-gate:
+    name: "CodeQL"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - codeql-node
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check results"
+        run: |
+          results=( \
+            "${{ needs.detect-changes.result }}" \
+            "${{ needs.codeql-node.result }}" \
+          )
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "One or more jobs failed or were cancelled"
+              exit 1
+            fi
+          done
+
+  # Stable roll-up of the BATS shell tests so they can be required. bats-tests
+  # is an OS matrix; when it is gated out (sha256-only / auto-chore PRs) it
+  # reports its literal "(${{ matrix.os }})" name, so requiring the expanded
+  # "(macos-latest)" context would hang those PRs.
+  shell-tests-gate:
+    name: "Shell Tests"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - bats-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check results"
+        run: |
+          results=( \
+            "${{ needs.detect-changes.result }}" \
+            "${{ needs.bats-tests.result }}" \
           )
           for r in "${results[@]}"; do
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then

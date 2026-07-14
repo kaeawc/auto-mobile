@@ -249,6 +249,7 @@ class CtrlProxyMessageHandler(
           request.includeNotImportantViews,
           request.reportViewIds,
           request.retrieveInteractiveWindows,
+          request.occlusionEnabled,
         )
       is SetNetworkMockRules ->
         actions.setNetworkMockRules(

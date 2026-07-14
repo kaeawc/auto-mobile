@@ -245,6 +245,9 @@ export class Daemon {
     if (options.noA11yRetrieveInteractiveWindows) {
       serverConfig.setA11yRetrieveInteractiveWindows(false);
     }
+    if (options.noOcclusion) {
+      serverConfig.setOcclusionEnabled(false);
+    }
     if (options.observeResultDropElements) {
       serverConfig.setObserveResultDropElementsEnabled(true);
     }

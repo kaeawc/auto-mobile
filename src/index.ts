@@ -115,6 +115,7 @@ function parseArgs(log: ParseLogger): {
   noA11yIncludeNotImportantViews: boolean;
   noA11yReportViewIds: boolean;
   noA11yRetrieveInteractiveWindows: boolean;
+  noOcclusion: boolean;
   outputReduction: OutputReductionFlags;
   toolOutputsDir: string | undefined;
   } {
@@ -179,6 +180,7 @@ function parseArgs(log: ParseLogger): {
   const noA11yIncludeNotImportantViews = args.includes("--no-include-not-important-views");
   const noA11yReportViewIds = args.includes("--no-report-view-ids");
   const noA11yRetrieveInteractiveWindows = args.includes("--no-retrieve-interactive-windows");
+  const noOcclusion = args.includes("--no-occlusion");
   // Output-size reduction flags (issue #2756): each parses from CLI OR its
   // AUTOMOBILE_* env var, CLI winning via ||.
   const outputReduction = parseOutputReductionFlags(args, process.env);
@@ -388,6 +390,7 @@ function parseArgs(log: ParseLogger): {
     noA11yIncludeNotImportantViews,
     noA11yReportViewIds,
     noA11yRetrieveInteractiveWindows,
+    noOcclusion,
     outputReduction,
     toolOutputsDir,
   };
@@ -471,6 +474,7 @@ async function main() {
       noA11yIncludeNotImportantViews,
       noA11yReportViewIds,
       noA11yRetrieveInteractiveWindows,
+      noOcclusion,
       outputReduction,
       toolOutputsDir,
     } = parseArgs(logger);
@@ -598,6 +602,7 @@ async function main() {
       [noA11yIncludeNotImportantViews, "Accessibility includeNotImportantViews disabled (--no-include-not-important-views)"],
       [noA11yReportViewIds, "Accessibility reportViewIds disabled (--no-report-view-ids)"],
       [noA11yRetrieveInteractiveWindows, "Accessibility retrieveInteractiveWindows disabled (--no-retrieve-interactive-windows)"],
+      [noOcclusion, "Observe occlusion pass disabled (--no-occlusion)"],
     ];
     for (const [active, message] of silentDaemonFlags) {
       if (active) {
@@ -638,6 +643,7 @@ async function main() {
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
+        noOcclusion,
         // OutputReductionFlags field names match these DaemonOptions fields 1:1.
         ...outputReduction,
       });
@@ -699,6 +705,7 @@ async function main() {
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
+        noOcclusion,
         // OutputReductionFlags field names match these DaemonOptions fields 1:1.
         ...outputReduction,
       };

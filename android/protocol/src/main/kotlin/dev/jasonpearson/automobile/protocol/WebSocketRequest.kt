@@ -401,6 +401,7 @@ data class SetAccessibilityFlags(
   val includeNotImportantViews: Boolean = true,
   val reportViewIds: Boolean = true,
   val retrieveInteractiveWindows: Boolean = true,
+  val occlusionEnabled: Boolean = true,
 ) : WebSocketRequest()
 
 @Serializable

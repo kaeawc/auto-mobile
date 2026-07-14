@@ -1191,6 +1191,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.handleWebSocketMessage(data);
   }
 
+  /**
+   * Defense in depth on top of onConnectionEstablished(): every caller that needs the
+   * device connected already routes through ensureConnected() (getLatestHierarchy,
+   * requestHierarchySync, etc.), so re-syncing accessibility flags here guarantees the
+   * device has the current config before any hierarchy request goes out — regardless of
+   * whether this call freshly opened the WebSocket (onConnectionEstablished fires) or
+   * reused an already-open one (connectWebSocket's early-return skips it). Cost: the
+   * allEnabled early-return in syncAccessibilityFlagsToDevice() skips the send entirely
+   * in the common case (all flags default). When a flag IS disabled (e.g. --no-occlusion)
+   * it re-sends the config on each call — a small, idempotent, order-preserved message,
+   * kept deliberately simple as defense-in-depth so a reused connection can't drift.
+   */
+  public override async ensureConnected(
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<boolean> {
+    const connected = await super.ensureConnected(perf);
+    if (connected) {
+      this.syncAccessibilityFlagsToDevice();
+    }
+    return connected;
+  }
+
   protected onConnectionEstablished(): void {
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
@@ -1231,7 +1253,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const flags = serverConfig.getAccessibilityFlagsConfig();
       const allEnabled =
-          flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows;
+          flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows
+          && flags.occlusionEnabled;
+      // Diagnostic: without this, "did the push ever get attempted" is unanswerable from
+      // logs alone — the only prior signal was the (info-level) send below, so a no-op
+      // skip and "never called" were indistinguishable (issue occlusion-flag).
+      logger.debug(
+        `[AndroidCtrlProxyClient] syncAccessibilityFlagsToDevice invoked: allEnabled=${allEnabled}, ` +
+        `occlusionEnabled=${flags.occlusionEnabled}`
+      );
       if (allEnabled) {
         return;
       }
@@ -1240,12 +1270,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         `[AndroidCtrlProxyClient] Sending accessibility flags config: ` +
         `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
         `reportViewIds=${flags.reportViewIds}, ` +
-        `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}`
+        `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}, ` +
+        `occlusionEnabled=${flags.occlusionEnabled}`
       );
       this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setAccessibilityFlags({
         includeNotImportantViews: flags.includeNotImportantViews,
         reportViewIds: flags.reportViewIds,
         retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
+        occlusionEnabled: flags.occlusionEnabled,
       })));
     } catch (e) {
       logger.debug(`[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`);

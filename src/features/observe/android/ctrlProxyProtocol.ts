@@ -425,6 +425,7 @@ export interface SetAccessibilityFlagsMessage {
   includeNotImportantViews: boolean;
   reportViewIds: boolean;
   retrieveInteractiveWindows: boolean;
+  occlusionEnabled: boolean;
 }
 
 /** `@SerialName("set_network_mock_rules")` → `SetNetworkMockRules` (sent without requestId) */
@@ -840,12 +841,14 @@ export const ctrlProxyRequests = {
     includeNotImportantViews: boolean;
     reportViewIds: boolean;
     retrieveInteractiveWindows: boolean;
+    occlusionEnabled: boolean;
   }): SetAccessibilityFlagsMessage {
     return {
       type: "set_accessibility_flags",
       includeNotImportantViews: args.includeNotImportantViews,
       reportViewIds: args.reportViewIds,
       retrieveInteractiveWindows: args.retrieveInteractiveWindows,
+      occlusionEnabled: args.occlusionEnabled,
     };
   },
 

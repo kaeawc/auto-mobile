@@ -118,6 +118,43 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     // Result broadcast actions
     const val ACTION_OPERATION_RESULT = "dev.jasonpearson.automobile.OPERATION_RESULT"
+
+    /**
+     * Pure bitmask computation for [applyAccessibilityFlags], extracted so the equality check that
+     * guards the disruptive `serviceInfo =` reassignment (see call site) is unit-testable without a
+     * live [AccessibilityService]/Robolectric harness.
+     */
+    internal fun computeAccessibilityServiceFlags(
+      currentFlags: Int,
+      includeNotImportantViews: Boolean,
+      reportViewIds: Boolean,
+      retrieveInteractiveWindows: Boolean,
+    ): Int {
+      var flags = currentFlags
+
+      flags =
+        if (includeNotImportantViews) {
+          flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+        } else {
+          flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
+        }
+
+      flags =
+        if (reportViewIds) {
+          flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        } else {
+          flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
+        }
+
+      flags =
+        if (retrieveInteractiveWindows) {
+          flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        } else {
+          flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS.inv()
+        }
+
+      return flags
+    }
   }
 
   /**
@@ -1275,28 +1312,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           return
         }
 
-    var flags = info.flags
+    val flags =
+      computeAccessibilityServiceFlags(
+        currentFlags = info.flags,
+        includeNotImportantViews = includeNotImportantViews,
+        reportViewIds = reportViewIds,
+        retrieveInteractiveWindows = retrieveInteractiveWindows,
+      )
 
-    flags =
-      if (includeNotImportantViews) {
-        flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-      } else {
-        flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
-      }
-
-    flags =
-      if (reportViewIds) {
-        flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-      } else {
-        flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
-      }
-
-    flags =
-      if (retrieveInteractiveWindows) {
-        flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-      } else {
-        flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS.inv()
-      }
+    // Skip the reassignment when the computed bitmask matches what's already applied.
+    // serviceInfo = info reconfigures a LIVE AccessibilityService on the system side, not a
+    // local no-op - the client now re-invokes this on every ensureConnected() (not just fresh
+    // connects), so without this guard every single tool call reconfigures the service even
+    // when nothing changed, which was observed to disrupt in-flight hierarchy capture
+    // (elements=0 on every observe for an entire run).
+    if (flags == info.flags) {
+      Log.d(TAG, "Accessibility flags unchanged (flags=$flags) - skipping serviceInfo reassignment")
+      return
+    }
 
     info.flags = flags
     serviceInfo = info

@@ -236,6 +236,7 @@ jobs:
             android:
               - 'android/**'
               - 'scripts/android/**'
+              - 'scripts/local-dev/hot-reload.sh'
               - '.github/workflows/android*.yml'
 
       - name: "Check for iOS-related changes"

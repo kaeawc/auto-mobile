@@ -402,20 +402,21 @@ describe("Device Image Resources with Fakes", () => {
 
   describe("Partial dependency injection", () => {
     test("should allow providing only deviceManager", async () => {
-      const androidDevices: DeviceInfo[] = [
-        { name: "Test_AVD", platform: "android", deviceId: "avd-test", source: "local" }
+      const iosDevices: DeviceInfo[] = [
+        { name: "Test iPhone", platform: "ios", deviceId: "sim-test", source: "local" }
       ];
-      fakeDeviceUtils.setDeviceImages("android", androidDevices);
+      fakeDeviceUtils.setDeviceImages("ios", iosDevices);
 
-      // Only provide deviceManager, avdManager will be defaulted
+      // Only provide deviceManager. Use the iOS path so the default Android AVD
+      // manager is not touched by this unit test.
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils
       });
 
-      const result = await handler.getDeviceImagesForPlatforms(["android"]);
+      const result = await handler.getDeviceImagesForPlatforms(["ios"]);
 
       expect(result.totalCount).toBe(1);
-      expect(result.images[0].name).toBe("Test_AVD");
+      expect(result.images[0].name).toBe("Test iPhone");
     });
 
     test("should allow providing only avdManager", async () => {

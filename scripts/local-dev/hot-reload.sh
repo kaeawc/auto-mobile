@@ -9,7 +9,7 @@
 #
 # Components watched (in order):
 #   1. Desktop app (Compose Desktop via desktop-core + desktop-app)
-#   2. Android AccessibilityService (with sha updates for TypeScript)
+#   2. Android AccessibilityService + video server (with sha updates for TypeScript)
 #   3. iOS CtrlProxy (with sha updates for TypeScript)
 #   4. MCP TypeScript daemon
 #
@@ -57,6 +57,9 @@ source "${SCRIPT_DIR}/lib/ctrl-proxy-ios.sh"
 ANDROID_DIR="${PROJECT_ROOT}/android"
 SERVICE_DIR="${ANDROID_DIR}/control-proxy"
 APK_PATH="${SERVICE_DIR}/build/outputs/apk/debug/control-proxy-debug.apk"
+VIDEO_SERVER_DIR="${ANDROID_DIR}/video-server"
+VIDEO_SERVER_JAR_PATH="${VIDEO_SERVER_DIR}/build/libs/automobile-video.jar"
+VIDEO_SERVER_REMOTE_JAR_PATH="/data/local/tmp/automobile-video.jar"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 DERIVED_DATA_PATH="/tmp/automobile-ctrl-proxy"
 PID_FILE="${PROJECT_ROOT}/.automobile-hot-reload.pid"
@@ -82,6 +85,7 @@ HAVE_DEVICE=false
 # Track last hashes for change detection
 LAST_IDE_PLUGIN_HASH=""
 LAST_APK_HASH=""
+LAST_VIDEO_SERVER_HASH=""
 LAST_IOS_HASH=""
 LAST_TS_HASH=""
 
@@ -90,6 +94,8 @@ LAST_ADB_DEVICES=""
 LAST_SIMULATOR=""
 CTRL_PROXY_SIMULATOR=""      # Simulator CtrlProxy is currently targeting
 APK_NEEDS_INSTALL=false
+VIDEO_SERVER_NEEDS_INSTALL=false
+ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 IOS_NEEDS_RESTART=false
 IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 
@@ -101,7 +107,7 @@ AutoMobile unified hot-reload development workflow.
 
 Watches all components in a single loop:
   1. Desktop app (Compose Desktop)
-  2. Android AccessibilityService (with sha updates)
+  2. Android AccessibilityService + video server (with sha updates)
   3. iOS CtrlProxy (with sha updates)
   4. MCP TypeScript daemon
 
@@ -231,10 +237,15 @@ kill_previous() {
 reload_mcp_daemon() {
   local skip_ios_build="${1:-auto}"
   local should_skip_ios_build=false
+  local daemon_env=()
 
   if [[ "${skip_ios_build}" == "true" ]] || \
     [[ "${skip_ios_build}" == "auto" && "${IOS_ENABLED}" == "true" && "${MANAGE_IOS_RUNNER}" != "true" ]]; then
     should_skip_ios_build=true
+  fi
+
+  if [[ -f "${VIDEO_SERVER_JAR_PATH}" ]]; then
+    daemon_env+=("AUTOMOBILE_VIDEO_SERVER_JAR=${VIDEO_SERVER_JAR_PATH}")
   fi
 
   log_info "Restarting MCP daemon..."
@@ -242,10 +253,11 @@ reload_mcp_daemon() {
     # Run daemon restart in background with timeout to prevent hanging
     local daemon_log="${PROJECT_ROOT}/scratch/daemon-restart.log"
     if [[ "${should_skip_ios_build}" == "true" ]]; then
-      AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true \
+      env AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true "${daemon_env[@]}" \
         auto-mobile --daemon restart --debug --debug-perf > "${daemon_log}" 2>&1 &
     else
-      auto-mobile --daemon restart --debug --debug-perf > "${daemon_log}" 2>&1 &
+      env "${daemon_env[@]}" \
+        auto-mobile --daemon restart --debug --debug-perf > "${daemon_log}" 2>&1 &
     fi
     local daemon_pid=$!
 
@@ -389,6 +401,105 @@ hash_apk_watch_state() {
   done | sort | hash_stream
 }
 
+# Android video-server-specific file list
+list_video_server_watch_files() {
+  local watch_dirs=(
+    "${VIDEO_SERVER_DIR}"
+  )
+  local extra_files=(
+    "${ANDROID_DIR}/build.gradle.kts"
+    "${ANDROID_DIR}/settings.gradle.kts"
+    "${ANDROID_DIR}/gradle.properties"
+  )
+
+  if command -v rg >/dev/null 2>&1; then
+    rg --files "${watch_dirs[@]}" -g '!**/build/**' 2>/dev/null || true
+  else
+    find "${watch_dirs[@]}" -type f ! -path "*/build/*" 2>/dev/null || true
+  fi
+
+  for file in "${extra_files[@]}"; do
+    if [[ -f "${file}" ]]; then
+      echo "${file}"
+    fi
+  done
+}
+
+# Android video-server-specific hash
+hash_video_server_watch_state() {
+  list_video_server_watch_files | while read -r file; do
+    if [[ -f "${file}" ]]; then
+      stat_entry "${file}" 2>/dev/null || true
+    fi
+  done | sort | hash_stream
+}
+
+# Build Android video server DEX jar used by the preferred WebRTC path
+build_video_server() {
+  log_info "Building Android video server..."
+  if ! (cd "${ANDROID_DIR}" && ./gradlew :video-server:d8Dex); then
+    log_error "Android video server build failed."
+    return 1
+  fi
+
+  if [[ ! -f "${VIDEO_SERVER_JAR_PATH}" ]]; then
+    log_error "Video server jar not found at ${VIDEO_SERVER_JAR_PATH}"
+    return 1
+  fi
+
+  return 0
+}
+
+# Push Android video server jar to a specific device
+install_video_server_to_device() {
+  local device="$1"
+  log_info "Pushing Android video server to ${device}..."
+  if ! "${ADB_BIN}" -s "${device}" push "${VIDEO_SERVER_JAR_PATH}" "${VIDEO_SERVER_REMOTE_JAR_PATH}"; then
+    log_warn "ADB push failed for Android video server on ${device}."
+    return 1
+  fi
+  log_info "Android video server pushed to ${device}."
+  return 0
+}
+
+# Push Android video server jar to target device(s)
+install_video_server() {
+  if [[ ! -f "${VIDEO_SERVER_JAR_PATH}" ]]; then
+    log_warn "Android video server jar missing. Skipping push."
+    return 1
+  fi
+
+  if [[ -n "${DEVICE_ID}" ]]; then
+    install_video_server_to_device "${DEVICE_ID}"
+    return $?
+  fi
+
+  local devices
+  devices=$(get_connected_devices)
+  if [[ -z "${devices}" ]]; then
+    log_warn "No devices connected. Skipping Android video server push."
+    return 1
+  fi
+
+  local success=0
+  local fail=0
+  local install_status=0
+  while IFS= read -r device; do
+    set +e
+    install_video_server_to_device "${device}"
+    install_status=$?
+    set -e
+    if [[ ${install_status} -eq 0 ]]; then
+      success=$((success + 1))
+    else
+      fail=$((fail + 1))
+    fi
+  done <<< "${devices}"
+
+  log_info "Android video server push complete: ${success} succeeded, ${fail} failed."
+  [[ ${fail} -eq 0 && ${success} -gt 0 ]]
+}
+
 # Setup desktop app
 setup_desktop_app() {
   log_info "Building desktop app (desktop-core + desktop-app)..."
@@ -423,6 +534,19 @@ setup_android() {
     return 1
   fi
 
+  local video_server_built=false
+  local video_server_status=0
+  set +e
+  build_video_server
+  video_server_status=$?
+  set -e
+  if [[ ${video_server_status} -eq 0 ]]; then
+    video_server_built=true
+    ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=true
+  else
+    log_warn "Initial Android video server build failed. Continuing with APK hot-reload; WebRTC will fall back to screenrecord until the jar builds."
+  fi
+
   # Update SHA after successful build (regardless of device availability)
   local checksum
   checksum="$(compute_checksum)"
@@ -435,8 +559,22 @@ setup_android() {
     if ! install_apk; then
       log_warn "Initial install failed. Will retry when devices connect."
     fi
+    if [[ "${video_server_built}" == "true" ]]; then
+      set +e
+      install_video_server
+      video_server_status=$?
+      set -e
+      if [[ ${video_server_status} -ne 0 ]]; then
+        VIDEO_SERVER_NEEDS_INSTALL=true
+        log_warn "Initial Android video server push failed. Will retry when devices connect."
+      fi
+    fi
   else
-    log_info "No devices connected. APK built and ready for install."
+    if [[ "${video_server_built}" == "true" ]]; then
+      log_info "No devices connected. APK and Android video server built and ready for install."
+    else
+      log_info "No devices connected. APK built and ready for install."
+    fi
   fi
 
   return 0
@@ -509,6 +647,7 @@ unified_watch_loop() {
   fi
   if [[ "${ANDROID_ENABLED}" == "true" ]]; then
     LAST_APK_HASH="$(hash_apk_watch_state)"
+    LAST_VIDEO_SERVER_HASH="$(hash_video_server_watch_state)"
   fi
   if [[ "${IOS_ENABLED}" == "true" ]]; then
     LAST_IOS_HASH="$(hash_ios_watch_state)"
@@ -575,15 +714,24 @@ unified_watch_loop() {
       # Check file changes
       local next_apk_hash
       next_apk_hash="$(hash_apk_watch_state)"
-      local files_changed=false
+      local apk_files_changed=false
 
       if [[ "${next_apk_hash}" != "${LAST_APK_HASH}" ]]; then
-        files_changed=true
+        apk_files_changed=true
         LAST_APK_HASH="${next_apk_hash}"
       fi
 
-      # Rebuild if files changed
-      if [[ "${files_changed}" == "true" ]]; then
+      local next_video_server_hash
+      next_video_server_hash="$(hash_video_server_watch_state)"
+      local video_server_files_changed=false
+
+      if [[ "${next_video_server_hash}" != "${LAST_VIDEO_SERVER_HASH}" ]]; then
+        video_server_files_changed=true
+        LAST_VIDEO_SERVER_HASH="${next_video_server_hash}"
+      fi
+
+      # Rebuild APK if files changed
+      if [[ "${apk_files_changed}" == "true" ]]; then
         log_info "[Android] Change detected. Rebuilding..."
         if build_apk; then
           APK_NEEDS_INSTALL=true
@@ -600,6 +748,23 @@ unified_watch_loop() {
         fi
       fi
 
+      # Rebuild video server if files changed
+      if [[ "${video_server_files_changed}" == "true" ]]; then
+        log_info "[Android Video] Change detected. Rebuilding..."
+        local video_server_status=0
+        set +e
+        build_video_server
+        video_server_status=$?
+        set -e
+        if [[ ${video_server_status} -eq 0 ]]; then
+          VIDEO_SERVER_NEEDS_INSTALL=true
+          LAST_VIDEO_SERVER_HASH="$(hash_video_server_watch_state)"
+          reload_mcp_daemon false
+        else
+          log_warn "[Android Video] Build failed; waiting for next change."
+        fi
+      fi
+
       # Install if pending and devices available
       if [[ "${APK_NEEDS_INSTALL}" == "true" ]] || [[ "${devices_changed}" == "true" ]]; then
         if [[ -n "${current_devices}" ]] && [[ -f "${APK_PATH}" ]]; then
@@ -608,6 +773,24 @@ unified_watch_loop() {
             log_info "[Android] APK installed to device(s)."
           else
             log_warn "[Android] Install failed; will retry."
+          fi
+        fi
+      fi
+
+      # Push video server if pending and devices available
+      if [[ "${VIDEO_SERVER_NEEDS_INSTALL}" == "true" ]] || [[ "${devices_changed}" == "true" ]]; then
+        if [[ -n "${current_devices}" ]] && [[ -f "${VIDEO_SERVER_JAR_PATH}" ]]; then
+          local video_server_status=0
+          set +e
+          install_video_server
+          video_server_status=$?
+          set -e
+          if [[ ${video_server_status} -eq 0 ]]; then
+            VIDEO_SERVER_NEEDS_INSTALL=false
+            log_info "[Android Video] Video server pushed to device(s)."
+          else
+            VIDEO_SERVER_NEEDS_INSTALL=true
+            log_warn "[Android Video] Push failed; will retry."
           fi
         fi
       fi
@@ -831,9 +1014,20 @@ fi
 # Kill previous background watchers
 kill_previous
 
-if [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
-  log_info "Initial iOS build complete; reloading daemon after previous watcher cleanup."
-  reload_mcp_daemon true
+if [[ "${ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]] || \
+  [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+  if [[ "${ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+    log_info "Initial Android video server build complete; reloading daemon after previous watcher cleanup."
+  fi
+  if [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+    log_info "Initial iOS build complete; reloading daemon after previous watcher cleanup."
+  fi
+  if [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+    reload_mcp_daemon true
+  else
+    reload_mcp_daemon false
+  fi
+  ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
   IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 fi
 

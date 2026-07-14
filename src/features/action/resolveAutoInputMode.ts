@@ -1,5 +1,3 @@
-import { InputTextMode } from "./InputText";
-
 /**
  * Decide whether an inputText call should be auto-promoted from the default
  * `a11y` mode to `eventAll` based on the presence of consumer-configured
@@ -11,7 +9,8 @@ import { InputTextMode } from "./InputText";
  * and never triggers those popups.
  *
  * The feature is opt-in: with an empty `markers` list this always returns
- * `undefined`, so callers fall back to their normal default.
+ * `undefined`, so callers fall back to their normal default. Promotion is
+ * one-directional — this only ever returns `"eventAll"` or `undefined`.
  *
  * @param text - The text about to be entered
  * @param markers - Consumer-supplied substrings that should force `eventAll`
@@ -19,13 +18,12 @@ import { InputTextMode } from "./InputText";
  */
 export function resolveAutoInputMode(
   text: string,
-  markers: string[]
-): InputTextMode | undefined {
-  if (markers.length === 0) {
-    return undefined;
-  }
-
+  markers: readonly string[]
+): "eventAll" | undefined {
   for (const marker of markers) {
+    // Guard against an empty marker: text.includes("") is always true, which
+    // would promote every input. splitMarkers strips these in the CLI/env
+    // path, but this keeps direct callers safe too.
     if (marker.length > 0 && text.includes(marker)) {
       return "eventAll";
     }

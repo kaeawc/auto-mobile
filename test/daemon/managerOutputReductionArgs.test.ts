@@ -85,6 +85,27 @@ describe("output-reduction daemon-arg round trip", () => {
   });
 });
 
+describe("event-all markers daemon arg relay", () => {
+  test("--event-all-markers parses a csv into DaemonOptions", () => {
+    expect(parseDaemonArgs(["--event-all-markers", "@,/,#"]).eventAllMarkers)
+      .toEqual(["@", "/", "#"]);
+  });
+
+  test("trims and drops empties on parse", () => {
+    expect(parseDaemonArgs(["--event-all-markers", " @ , / , "]).eventAllMarkers)
+      .toEqual(["@", "/"]);
+  });
+
+  test("ignores missing or flag-shaped values", () => {
+    expect(parseDaemonArgs(["--event-all-markers"]).eventAllMarkers).toBeUndefined();
+    expect(parseDaemonArgs(["--event-all-markers", "--debug"]).eventAllMarkers).toBeUndefined();
+  });
+
+  test("defaults to undefined when the flag is absent", () => {
+    expect(parseDaemonArgs([]).eventAllMarkers).toBeUndefined();
+  });
+});
+
 describe("tool outputs directory daemon arg relay", () => {
   test("--tool-outputs-dir parses into DaemonOptions", () => {
     expect(parseDaemonArgs(["--tool-outputs-dir", "/tmp/artifacts"]).toolOutputsDir)

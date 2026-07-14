@@ -4,6 +4,7 @@ import { ActionableError } from "../models";
 import type { FileSystem } from "./filesystem/DefaultFileSystem";
 import { serverConfig } from "./ServerConfig";
 import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
+import { firstFlagValue } from "./cliArgs";
 
 export const TOOL_OUTPUTS_DIR_FLAG = "--tool-outputs-dir";
 export const TOOL_OUTPUT_DIR_FLAG_ALIAS = "--tool-output-dir";
@@ -28,20 +29,6 @@ const nodeToolOutputsDirValidationDeps: ToolOutputsDirValidationDeps = {
     await fsPromises.access(dirPath, fsConstants.W_OK);
   },
 };
-
-function firstFlagValue(args: string[], flags: string[]): string | undefined {
-  for (let i = 0; i < args.length; i++) {
-    if (!flags.includes(args[i])) {
-      continue;
-    }
-    const value = args[i + 1];
-    if (!value || value.startsWith("--")) {
-      return undefined;
-    }
-    return value;
-  }
-  return undefined;
-}
 
 function normalizeConfiguredPath(value: string | undefined, launchCwd: string): string | undefined {
   const trimmed = value?.trim();

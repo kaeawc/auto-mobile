@@ -37,7 +37,7 @@ import {
   shouldSkipCtrlProxyDownload,
 } from "./utils/ctrlProxyDownloadControl";
 import { parseToolOutputsDirConfig } from "./utils/toolOutputArtifacts";
-import { parseEventAllMarkersConfig } from "./utils/eventAllMarkers";
+import { parseEventAllMarkersConfig, EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import {
   installProcessLifecycleHandlers,
   setFatalProcessHandler,
@@ -612,6 +612,8 @@ async function main() {
     }
     if (eventAllMarkers.length > 0) {
       logger.info(`inputText eventAll auto-promotion markers configured (--event-all-markers): ${JSON.stringify(eventAllMarkers)}`);
+    } else if (process.argv.slice(2).some(a => a === EVENT_ALL_MARKERS_FLAG || a.startsWith(`${EVENT_ALL_MARKERS_FLAG}=`))) {
+      logger.warn(`${EVENT_ALL_MARKERS_FLAG} was provided but resolved to no markers; inputText eventAll auto-promotion stays disabled`);
     }
 
     if (daemonMode) {

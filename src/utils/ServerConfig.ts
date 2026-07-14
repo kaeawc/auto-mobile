@@ -186,12 +186,12 @@ class ServerConfig {
    * the default `a11y` mode to `eventAll` (real per-character key events). An
    * empty list (the default) disables the behavior entirely.
    */
-  setEventAllMarkers(markers: string[]): void {
+  setEventAllMarkers(markers: readonly string[]): void {
     this._eventAllMarkers = [...markers];
   }
 
-  getEventAllMarkers(): string[] {
-    return [...this._eventAllMarkers];
+  getEventAllMarkers(): readonly string[] {
+    return this._eventAllMarkers;
   }
 
   setNavigationScreenshotsEnabled(enabled: boolean): void {

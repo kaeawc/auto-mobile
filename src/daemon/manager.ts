@@ -12,6 +12,7 @@ import {
 } from "../db/migrationDependencyIntegrity";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
+import { EVENT_ALL_MARKERS_FLAG, splitMarkers } from "../utils/eventAllMarkers";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import { ActionableError } from "../models";
 import {
@@ -740,6 +741,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.dismissKeyboardAfterInput) {
       args.push("--dismiss-keyboard-after-input");
     }
+    if (options.eventAllMarkers && options.eventAllMarkers.length > 0) {
+      args.push(EVENT_ALL_MARKERS_FLAG, options.eventAllMarkers.join(","));
+    }
     if (options.noUiPerfMode) {
       args.push("--no-ui-perf-mode");
     }
@@ -1240,6 +1244,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.embeddedSdk = true;
     } else if (args[i] === "--dismiss-keyboard-after-input") {
       options.dismissKeyboardAfterInput = true;
+    } else if (args[i] === EVENT_ALL_MARKERS_FLAG) {
+      const markers = args[i + 1];
+      if (markers && !markers.startsWith("--")) {
+        options.eventAllMarkers = splitMarkers(markers);
+      }
+      i++;
     } else if (args[i] === "--no-ui-perf-mode") {
       options.noUiPerfMode = true;
     } else if (args[i] === "--no-navigation-screenshots") {

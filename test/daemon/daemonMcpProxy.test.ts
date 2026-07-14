@@ -578,6 +578,113 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("does NOT restart (no downgrade) when a bare client connects to a configured daemon (issue #3846)", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        // Daemon is running with output-reduction + embedded-SDK flags on; the
+        // connecting client is bare (no daemonOptions) and must NOT trigger a
+        // restart that strips those flags.
+        fakeManager.statusResults = [
+          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // ensureVersionMatches
+          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // ensureBuildMatches
+          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // ensureStartupOptionsMatch
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          // Bare client: no daemonOptions at all.
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restart to gain a requested flag preserves the daemon's other flags (issue #3846)", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        // Daemon already has embeddedSdk; client additionally wants
+        // toolResultsNoStructuredContent. The restart must ADD the requested
+        // flag while PRESERVING the daemon's existing one, not reset to bare.
+        fakeManager.statusResults = [
+          runningStatus({ embeddedSdk: true }), // ensureVersionMatches
+          runningStatus({ embeddedSdk: true }), // ensureBuildMatches
+          runningStatus({ embeddedSdk: true }), // ensureStartupOptionsMatch (deficit)
+          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { toolResultsNoStructuredContent: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({
+            embeddedSdk: true,
+            toolResultsNoStructuredContent: true,
+          });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("version-mismatch restart preserves the running daemon's flags for a bare client (issue #3846)", async () => {
+        const timer = new FakeTimer();
+        timer.advanceTime(100_000);
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const configuredOld = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          options: { embeddedSdk: true, toolResultsNoStructuredContent: true },
+        };
+        fakeManager.statusResult = configuredOld;
+        fakeManager.statusResults = [
+          configuredOld, // ensureVersionMatches (older → restart)
+          { ...configuredOld, version: CLIENT_VERSION, startedAt: timer.now() }, // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          timer,
+          clientVersion: CLIENT_VERSION,
+          // Bare client: no daemonOptions.
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          // The bare client must NOT strip the daemon's flags on a version restart.
+          expect(fakeManager.restartOptions).toEqual({
+            embeddedSdk: true,
+            toolResultsNoStructuredContent: true,
+          });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("throws on embedded SDK mode mismatch when auto-start is disabled", async () => {
         const fakeClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),

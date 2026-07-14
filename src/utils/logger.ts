@@ -109,8 +109,14 @@ export function resolveProcessLogPrefix(argv: readonly string[], pid: number): s
   return argv.includes("--daemon-mode") ? "daemon" : `stdio-${pid}`;
 }
 
-// Default to INFO level in production, can be overridden
-let currentLogLevel: LogLevel = LogLevel.INFO;
+// Seed the level from AUTOMOBILE_LOG_LEVEL at process start (issue #3845) so a
+// user who exports the env var actually changes what the running process emits,
+// rather than silently staying at INFO. Applied here at module load — the single
+// point every process (daemon, stdio client, direct mode) passes through, and a
+// DaemonManager-spawned daemon inherits the var via its `{ ...process.env }`
+// child env. Falls back to INFO when unset/unrecognized; still overridable at
+// runtime via setLogLevel.
+let currentLogLevel: LogLevel = parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL) ?? LogLevel.INFO;
 
 // Flag to control whether to also log to STDOUT (in addition to files)
 let logToStdout = false;

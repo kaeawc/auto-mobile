@@ -28,6 +28,7 @@ make_mock_auto_mobile() {
   cat > "${MOCK_BIN}/auto-mobile" <<SCRIPT
 #!/usr/bin/env bash
 if [ "\$1" = "--daemon" ] && [ "\$2" = "start" ]; then
+  printf '%s\n' "\${AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS:-unset}" > "${MOCK_BIN}/startup-timeout"
   exit 0
 elif [ "\$1" = "--daemon" ] && [ "\$2" = "health" ]; then
   calls=0
@@ -102,4 +103,18 @@ SCRIPT
   run env DAEMON_READY_MAX_ATTEMPTS=2 DAEMON_READY_DELAY_SECONDS=0 bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"did not become ready after 2 attempts"* ]]
+}
+
+@test "gives the cold-runner daemon a 30s startup ceiling by default" {
+  make_mock_auto_mobile 0
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${MOCK_BIN}/startup-timeout")" = "30000" ]
+}
+
+@test "respects an explicit daemon startup timeout override" {
+  make_mock_auto_mobile 0
+  run env AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS=45000 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${MOCK_BIN}/startup-timeout")" = "45000" ]
 }

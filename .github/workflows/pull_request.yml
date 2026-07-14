@@ -1434,6 +1434,15 @@ jobs:
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
+      # Compile the XCTest bundle BEFORE the target-app warm-up. Otherwise `swift test`
+      # in the timed Reminders step spends tens of seconds compiling first, letting the
+      # freshly-warmed simulator/app go cold again and reintroducing the cold observe
+      # timeout (#3851 direction 4). Runs after the leg's Xcode is selected (by the
+      # bring-up above) so the build cache matches the `swift test` that follows.
+      - name: "Pre-build Reminders XCTest bundle (Xcode 26.2)"
+        timeout-minutes: 15
+        run: ./scripts/ci/prebuild-reminders-xctest-bundle.sh
+
       # Keep target-app cold bring-up outside the timed Reminders plan. CtrlProxy
       # is already warm above; this leaves Reminders foregrounded so the plan's
       # first launch/observe no longer pays the first app launch cost (#3028).
@@ -1482,6 +1491,13 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      # Pre-build the XCTest bundle before the second leg's warm-up too (same rationale
+      # as the 26.2 leg above); the freshly-booted 26.5 sim is cold again here.
+      - name: "Pre-build Reminders XCTest bundle (Xcode 26.5)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: ./scripts/ci/prebuild-reminders-xctest-bundle.sh
 
       - name: "Warm up Reminders target app (Xcode 26.5)"
         if: ${{ !cancelled() }}

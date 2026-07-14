@@ -260,6 +260,28 @@ final class RemindersPlanContentTests: XCTestCase {
         )
     }
 
+    /// The XCTest bundle must be compiled before the target-app warm-up (#3851 direction 4):
+    /// otherwise `swift test` in the timed Reminders step compiles first, re-cooling the
+    /// freshly-warmed simulator/app and reintroducing the cold observe timeout. The pre-build
+    /// must also follow the leg's CtrlProxy warm-up (which runs after the leg's Xcode is
+    /// selected) so the build cache matches the `swift test` that follows.
+    func testPullRequestWorkflowPreBuildsXCTestBundleBeforeWarmUp() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
+
+        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
+            workflow,
+            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.2)",
+            afterCtrlProxyStepName: "Warm up iOS CtrlProxy",
+            warmupStepName: "Warm up Reminders target app (Xcode 26.2)"
+        )
+        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
+            workflow,
+            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.5)",
+            afterCtrlProxyStepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
+            warmupStepName: "Warm up Reminders target app (Xcode 26.5)"
+        )
+    }
+
     func testPullRequestWorkflowRetriesRemindersRunsOnce() throws {
         let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
 
@@ -340,6 +362,25 @@ final class RemindersPlanContentTests: XCTestCase {
             workflow,
             warmupStepName: "Warm up Reminders target app (Xcode 26.5)",
             runStepName: "Run Reminders integration tests (Xcode 26.5)"
+        )
+    }
+
+    /// See `testPullRequestWorkflowPreBuildsXCTestBundleBeforeWarmUp` — same invariant for the
+    /// nightly workflow, whose second leg brings the sim up via the composite bring-up action.
+    func testNightlyWorkflowPreBuildsXCTestBundleBeforeWarmUp() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
+
+        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
+            workflow,
+            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.2)",
+            afterCtrlProxyStepName: "Warm up iOS CtrlProxy",
+            warmupStepName: "Warm up Reminders target app (Xcode 26.2)"
+        )
+        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
+            workflow,
+            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.5)",
+            afterCtrlProxyStepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
+            warmupStepName: "Warm up Reminders target app (Xcode 26.5)"
         )
     }
 
@@ -835,6 +876,53 @@ private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
     XCTAssertTrue(
         runBlock.contains("timeout-minutes: 10"),
         "\(runStepName) must keep the Reminders step cap aligned with the retry timeout guard",
+        file: file,
+        line: line
+    )
+}
+
+private func assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
+    _ workflow: String,
+    preBuildStepName: String,
+    afterCtrlProxyStepName: String,
+    warmupStepName: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    guard let ctrlProxyRange = workflow.range(of: #"name: "\#(afterCtrlProxyStepName)""#) else {
+        XCTFail("Workflow is missing step named \(afterCtrlProxyStepName)", file: file, line: line)
+        return
+    }
+    guard let preBuildRange = workflow.range(of: #"name: "\#(preBuildStepName)""#) else {
+        XCTFail("Workflow is missing step named \(preBuildStepName)", file: file, line: line)
+        return
+    }
+    guard let warmupRange = workflow.range(of: #"name: "\#(warmupStepName)""#) else {
+        XCTFail("Workflow is missing step named \(warmupStepName)", file: file, line: line)
+        return
+    }
+
+    XCTAssertLessThan(
+        ctrlProxyRange.lowerBound,
+        preBuildRange.lowerBound,
+        "\(preBuildStepName) must run after \(afterCtrlProxyStepName) so the leg's Xcode toolchain "
+            + "is already selected and the pre-build cache matches the swift test that follows",
+        file: file,
+        line: line
+    )
+    XCTAssertLessThan(
+        preBuildRange.lowerBound,
+        warmupRange.lowerBound,
+        "\(preBuildStepName) must run before \(warmupStepName) so the swift-test compile can't "
+            + "re-cool the freshly-warmed simulator/app",
+        file: file,
+        line: line
+    )
+
+    let preBuildBlock = workflow[preBuildRange.lowerBound ..< warmupRange.lowerBound]
+    XCTAssertTrue(
+        preBuildBlock.contains("./scripts/ci/prebuild-reminders-xctest-bundle.sh"),
+        "\(preBuildStepName) must invoke the XCTest-bundle pre-build helper",
         file: file,
         line: line
     )

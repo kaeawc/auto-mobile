@@ -224,33 +224,76 @@ const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "toolOutputsDir",
 ];
 
+/** The value of a startup option when it is a string, else undefined. */
+function stringOption(
+  options: DaemonOptions | undefined,
+  key: keyof DaemonOptions
+): string | undefined {
+  const value = options?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
 /**
- * Boolean-valued startup options that differ between the requested MCP config
- * and the running daemon. Each option is compared as a strict boolean
- * (`=== true`), so `undefined` and `false` are treated identically. Returns a
- * human-readable list (empty when everything matches) for logging and error
- * messages.
+ * Reuse-critical startup options the connecting client *explicitly requests*
+ * that the running daemon lacks. Reconciliation is **one-directional** (issue
+ * #3846): a client that does not ask for a flag has no opinion on it, so a flag
+ * the daemon already has is never reported as a deficit just because a
+ * particular caller (e.g. a bare short-lived CLI client) didn't request it.
+ * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
+ * read as "no opinion"; strings count only when the client supplies one that
+ * differs from the daemon's. Returns a human-readable list (empty when the
+ * daemon already satisfies every requested flag) for logging and error messages.
  */
-function startupOptionMismatches(
+function startupOptionDeficits(
   requested: DaemonOptions | undefined,
   running: DaemonOptions | undefined
 ): string[] {
-  const mismatches: string[] = [];
+  const deficits: string[] = [];
   for (const key of REUSE_CRITICAL_OPTION_KEYS) {
     const want = requested?.[key] === true;
     const have = running?.[key] === true;
-    if (want !== have) {
-      mismatches.push(`${key} (requested=${want}, running=${have})`);
+    if (want && !have) {
+      deficits.push(`${key} (requested=${want}, running=${have})`);
     }
   }
   for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
-    const want = typeof requested?.[key] === "string" ? requested[key] : undefined;
-    const have = typeof running?.[key] === "string" ? running[key] : undefined;
-    if (want !== have) {
-      mismatches.push(`${key} (requested=${want ?? "unset"}, running=${have ?? "unset"})`);
+    const want = stringOption(requested, key);
+    const have = stringOption(running, key);
+    if (want !== undefined && want !== have) {
+      deficits.push(`${key} (requested=${want}, running=${have ?? "unset"})`);
     }
   }
-  return mismatches;
+  return deficits;
+}
+
+/**
+ * Options to launch a replacement daemon with when a restart is unavoidable
+ * (version/build skew, or a genuine startup-option deficit). Preserves the
+ * *running* daemon's existing options as the base and overlays the connecting
+ * client's requested options, so a restart triggered for any reason can never
+ * silently strip a flag the daemon was already launched with (issue #3846) —
+ * it only ever adds flags the client explicitly asks for. Reuse-critical flags
+ * the running daemon already has are force-preserved so an explicit-`false`
+ * from the client cannot turn them back off.
+ */
+function mergeDaemonOptions(
+  running: DaemonOptions | undefined,
+  requested: DaemonOptions | undefined
+): DaemonOptions {
+  const merged: DaemonOptions = { ...(running ?? {}), ...(requested ?? {}) };
+  const mergedRecord = merged as Record<string, unknown>;
+  for (const key of REUSE_CRITICAL_OPTION_KEYS) {
+    if (running?.[key] === true) {
+      mergedRecord[key] = true;
+    }
+  }
+  for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
+    const runningString = stringOption(running, key);
+    if (stringOption(requested, key) === undefined && runningString !== undefined) {
+      mergedRecord[key] = runningString;
+    }
+  }
+  return merged;
 }
 
 /**
@@ -499,7 +542,10 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`
     );
-    await this.daemonManager.restart(this.config.daemonOptions ?? {});
+    // Preserve the running daemon's existing options across the restart rather
+    // than resetting to this client's config, which would strip flags the
+    // daemon was launched with when the connecting client is bare (issue #3846).
+    await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -597,7 +643,10 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] Daemon build ${daemonIdentity.buildId} (${daemonIdentity.entryScript || "unknown"}) differs from client build ${this.buildIdentity.buildId} (${this.buildIdentity.entryScript || "unknown"}), restarting daemon`
     );
-    await this.daemonManager.restart(this.config.daemonOptions ?? {});
+    // Preserve the running daemon's existing options across the restart rather
+    // than resetting to this client's config, which would strip flags the
+    // daemon was launched with when the connecting client is bare (issue #3846).
+    await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -641,21 +690,24 @@ export class DaemonMcpProxy {
     }
 
     const requested = this.config.daemonOptions;
-    const mismatches = startupOptionMismatches(requested, status.options);
-    if (mismatches.length === 0) {
+    const deficits = startupOptionDeficits(requested, status.options);
+    if (deficits.length === 0) {
       return;
     }
 
     if (!this.config.autoStartDaemon) {
       throw new DaemonUnavailableError(
-        `Daemon startup options differ from MCP server options (${mismatches.join(", ")}) and auto-start is disabled`
+        `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`
       );
     }
 
     logger.info(
-      `[DaemonMcpProxy] Daemon startup options differ (${mismatches.join(", ")}), restarting daemon`
+      `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`
     );
-    await this.daemonManager.restart(this.config.daemonOptions ?? {});
+    // Preserve the running daemon's existing options and add the requested ones
+    // so the restart gains the missing flag without stripping any the daemon
+    // already had (issue #3846).
+    await this.daemonManager.restart(mergeDaemonOptions(status.options, requested));
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
@@ -664,7 +716,7 @@ export class DaemonMcpProxy {
     }
 
     const restartedStatus = await this.daemonManager.status();
-    const remaining = startupOptionMismatches(requested, restartedStatus.options);
+    const remaining = startupOptionDeficits(requested, restartedStatus.options);
     if (!restartedStatus.running || remaining.length > 0) {
       throw new DaemonUnavailableError(
         `Daemon restart completed but startup options still differ (${remaining.join(", ")})`

@@ -29,6 +29,7 @@ class ServerConfig {
   private _networkMockableEnabled: boolean = false;
   private _mcpRecordingEnabled: boolean = false;
   private _dismissKeyboardAfterInputEnabled: boolean = false;
+  private _eventAllMarkers: string[] = [];
   private _navigationScreenshotsEnabled: boolean = true;
   private _waitForPollingOverheadEnabled: boolean = true;
   private _a11yIncludeNotImportantViews: boolean = true;
@@ -178,6 +179,19 @@ class ServerConfig {
 
   isDismissKeyboardAfterInputEnabled(): boolean {
     return this._dismissKeyboardAfterInputEnabled;
+  }
+
+  /**
+   * Markers that, when present in inputText's text, auto-promote the call from
+   * the default `a11y` mode to `eventAll` (real per-character key events). An
+   * empty list (the default) disables the behavior entirely.
+   */
+  setEventAllMarkers(markers: string[]): void {
+    this._eventAllMarkers = [...markers];
+  }
+
+  getEventAllMarkers(): string[] {
+    return [...this._eventAllMarkers];
   }
 
   setNavigationScreenshotsEnabled(enabled: boolean): void {

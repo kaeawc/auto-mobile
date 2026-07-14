@@ -212,6 +212,9 @@ export class Daemon {
     if (options.dismissKeyboardAfterInput) {
       serverConfig.setDismissKeyboardAfterInputEnabled(true);
     }
+    if (options.eventAllMarkers && options.eventAllMarkers.length > 0) {
+      serverConfig.setEventAllMarkers(options.eventAllMarkers);
+    }
     if (options.debugPerf) {
       setDebugPerfEnabled(true);
     }

@@ -181,6 +181,8 @@ export interface DaemonOptions {
   embeddedSdk?: boolean;
   /** Dismiss keyboard after text input (Android only) */
   dismissKeyboardAfterInput?: boolean;
+  /** Markers that auto-promote inputText from `a11y` to `eventAll` (Android only) */
+  eventAllMarkers?: string[];
   /** Disable UI performance mode */
   noUiPerfMode?: boolean;
   /** Enable memory performance audit */

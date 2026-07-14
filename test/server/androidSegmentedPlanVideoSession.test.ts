@@ -193,4 +193,54 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     await flush();
     expect(start).toHaveBeenCalledTimes(1);
   });
+
+  test("auto-stops at maxDurationSeconds, finalizing every segment recorded so far (review: PR #3847)", async () => {
+    // maxDurationSeconds=2.5 does not align with the 1000ms rotation cadence, matching
+    // the reported bug: without a session-level bound, rotation reschedules indefinitely
+    // and maxDuration is never enforced as an overall cap.
+    const timer = new FakeTimer();
+    const outputNames: Array<string | undefined> = [];
+    const start = mock(async (req: { outputName?: string }) => {
+      outputNames.push(req.outputName);
+      return makeActiveRecording(`id-${req.outputName}`, `/tmp/${req.outputName}.mp4`);
+    });
+    const stop = mock(async (id: string | undefined) => {
+      const rid = id ?? "x";
+      return {
+        metadata: makeStopMetadata(rid, `/tmp/${rid}.mp4`),
+        evictedRecordingIds: [] as string[],
+      };
+    });
+
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      maxDurationSeconds: 2.5,
+      startVideoRecording: start,
+      stopVideoRecording: stop,
+    });
+
+    await session.start();
+    timer.advanceTime(1000); // rotation -> seg1
+    await flush();
+    timer.advanceTime(1000); // rotation -> seg2 (2000ms elapsed)
+    await flush();
+    expect(start).toHaveBeenCalledTimes(3);
+
+    timer.advanceTime(500); // 2500ms elapsed -> maxDurationSeconds auto-stop fires
+    await flush();
+
+    expect(stop).toHaveBeenCalledTimes(3);
+    expect(outputNames).toEqual(["vid", "vid-seg1", "vid-seg2"]);
+    // Auto-stop must not leave the rotation timer armed.
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+
+    // A caller-issued stop() after auto-stop already ran must be a safe no-op, not
+    // double-finalize or throw.
+    const out = await session.stop();
+    expect(out.recordingIds).toEqual(["id-vid", "id-vid-seg1", "id-vid-seg2"]);
+    expect(stop).toHaveBeenCalledTimes(3);
+  });
 });

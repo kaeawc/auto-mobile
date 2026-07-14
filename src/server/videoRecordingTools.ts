@@ -300,6 +300,7 @@ export function registerVideoRecordingTools(): void {
               outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
               configOverrides: buildConfigOverrides(args),
               timer: segmentedSessions.timer,
+              maxDurationSeconds,
             });
             const active = await session.start();
             segmentedSessions.track(active.recordingId, session);

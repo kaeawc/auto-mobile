@@ -19,6 +19,13 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   timer?: Timer;
   /** Override for tests. */
   segmentRotateAfterMs?: number;
+  /**
+   * Overall session duration bound. When set, the session auto-stops (finalizing every
+   * completed segment) once this many seconds have elapsed since {@link start}, matching
+   * the non-segmented recording path's maxDuration-is-an-auto-stop-bound contract. Undefined
+   * means rotate indefinitely until an explicit {@link stop} call — no session-level cap.
+   */
+  maxDurationSeconds?: number;
   /** Quality/config overrides forwarded to every segment's recording. */
   configOverrides?: VideoRecordingConfigInput;
   startVideoRecording?: (
@@ -48,12 +55,17 @@ export class AndroidSegmentedPlanVideoSession {
 
   private readonly segmentRotateAfterMs: number;
 
+  private readonly maxDurationSeconds: number | undefined;
+
   private readonly configOverrides: VideoRecordingConfigInput | undefined;
 
   private activeRecordingId: string | undefined;
 
   /** Timer-driven rotation handle (set only when {@link start} is used). */
   private rotationTimerHandle: NodeJS.Timeout | undefined;
+
+  /** Session-level auto-stop handle (set only when {@link maxDurationSeconds} is provided). */
+  private maxDurationTimerHandle: NodeJS.Timeout | undefined;
 
   /** True while a timer-driven session is running, so rotations keep rescheduling. */
   private timerDriven = false;
@@ -82,6 +94,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.outputNamePrefix = options.outputNamePrefix;
     this.timer = options.timer ?? defaultTimer;
     this.segmentRotateAfterMs = options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
+    this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
@@ -100,13 +113,16 @@ export class AndroidSegmentedPlanVideoSession {
    * Timer-driven lifecycle (does NOT depend on plan steps). Starts the first
    * segment, then schedules a self-rescheduling rotation via the injected
    * {@link Timer} so each segment stays under {@link ANDROID_SCREENRECORD_MAX_SECONDS}.
-   * Returns the first segment's recording, whose recordingId is used as the
-   * session handle by callers.
+   * If {@link maxDurationSeconds} was provided, also arms a session-level auto-stop so
+   * overall duration is bounded the same way the non-segmented path bounds it - rotation
+   * alone never stops on its own. Returns the first segment's recording, whose
+   * recordingId is used as the session handle by callers.
    */
   async start(): Promise<ActiveVideoRecording> {
     this.timerDriven = true;
     const first = await this.startFirstSegment();
     this.scheduleRotation();
+    this.scheduleMaxDurationStop();
     return first;
   }
 
@@ -127,15 +143,35 @@ export class AndroidSegmentedPlanVideoSession {
     }, this.segmentRotateAfterMs);
   }
 
+  private scheduleMaxDurationStop(): void {
+    if (this.maxDurationSeconds === undefined) {
+      return;
+    }
+    this.maxDurationTimerHandle = this.timer.setTimeout(() => {
+      logger.info(
+        `[SegmentedPlanVideo] Session reached maxDurationSeconds=${this.maxDurationSeconds}, auto-stopping`
+      );
+      this.stop().catch(error => {
+        logger.warn(
+          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+    }, this.maxDurationSeconds * 1000);
+  }
+
   /**
-   * Stops the timer-driven session: clears the rotation timer, waits for any
-   * in-flight rotation, then finalizes and returns every segment.
+   * Stops the timer-driven session: clears both the rotation and max-duration timers,
+   * waits for any in-flight rotation, then finalizes and returns every segment.
    */
   async stop(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
     this.timerDriven = false;
     if (this.rotationTimerHandle !== undefined) {
       this.timer.clearTimeout(this.rotationTimerHandle);
       this.rotationTimerHandle = undefined;
+    }
+    if (this.maxDurationTimerHandle !== undefined) {
+      this.timer.clearTimeout(this.maxDurationTimerHandle);
+      this.maxDurationTimerHandle = undefined;
     }
     await this.pendingRotation;
     return this.finalize();

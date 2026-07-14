@@ -27,6 +27,12 @@ import type { WhipClientOptions } from "../../src/features/webrtc/WhipClient";
 import type { RTCPeerConnection } from "werift";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  createSuccessfulWhipFetch,
+  FakeConnectedPeerConnection,
+  FakeH264Source,
+  type RecordedWhipRequest,
+} from "../helpers/webrtcFakes";
 
 const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
 
@@ -52,37 +58,6 @@ class TestableServer extends WebRtcStreamSocketServer {
     if (pending) {
       await pending;
     }
-  }
-}
-
-class FakePeerConnection {
-  closed = false;
-  connectionState = "connected";
-  iceGatheringState = "complete";
-  connectionStateChange = { subscribe: () => {} };
-  iceGatheringStateChange = { watch: async () => {} };
-  localDescription = { sdp: "v=0" };
-  addTransceiver() {
-    return { sender: { ssrc: 1 } };
-  }
-  async createOffer() {
-    return { type: "offer", sdp: "v=0" };
-  }
-  async setLocalDescription() {}
-  async setRemoteDescription() {}
-  async close() {
-    this.closed = true;
-  }
-}
-
-class FakeSource {
-  started = false;
-  stopped = false;
-  async start(): Promise<void> {
-    this.started = true;
-  }
-  async stop(): Promise<void> {
-    this.stopped = true;
   }
 }
 
@@ -202,30 +177,22 @@ describe("WebRtcStreamSocketServer", () => {
   });
 
   test("start reaches the real manager, posts WHIP, and remains visible until stop", async () => {
-    const posts: Array<{ url: string; method: string }> = [];
-    const sources: FakeSource[] = [];
+    const posts: RecordedWhipRequest[] = [];
+    const sources: FakeH264Source[] = [];
     setWebRtcStreamManagerDependencies({
       createPublisher: (config, deps) =>
         new WebRtcPublisher(config, {
           ...deps,
-          createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+          createPeerConnection: () => new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
           createWhipClient: (options: WhipClientOptions) =>
             new WhipClient({
               ...options,
-              fetchImpl: async (url, init) => {
-                posts.push({ url, method: init.method });
-                return {
-                  status: 201,
-                  ok: true,
-                  headers: { get: name => (name.toLowerCase() === "location" ? "/whip/resource/debug-1" : null) },
-                  text: async () => "v=0",
-                };
-              },
+              fetchImpl: createSuccessfulWhipFetch(posts),
             }),
           timer: new FakeTimer(),
         }),
       createSource: () => {
-        const source = new FakeSource();
+        const source = new FakeH264Source();
         sources.push(source);
         return source as unknown as AndroidH264Source;
       },

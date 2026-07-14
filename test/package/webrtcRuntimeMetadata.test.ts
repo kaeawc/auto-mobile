@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 describe("packaged WebRTC runtime metadata", () => {
@@ -9,28 +9,33 @@ describe("packaged WebRTC runtime metadata", () => {
     expect(pkg.dependencies["reflect-metadata"]).toBeString();
   });
 
-  test("the packaged entrypoint initializes reflect metadata first", async () => {
+  test("the packaged entrypoint initializes runtime metadata first", async () => {
     const entrypoint = await Bun.file("src/index.ts").text();
-    const executableBody = entrypoint.replace(/^#!.*\n/, "");
+    const executableBody = entrypoint.replace(/^#!.*\r?\n/, "");
     const firstImportLine = executableBody
-      .split("\n")
+      .split(/\r?\n/)
       .find(line => line.startsWith("import "));
 
-    expect(firstImportLine).toBe('import "reflect-metadata";');
+    expect(firstImportLine).toBe('import "./runtime/reflectMetadata";');
+  });
+
+  test("runtime metadata initialization loads reflect-metadata", async () => {
+    const runtimeInit = await Bun.file("src/runtime/reflectMetadata.ts").text();
+
+    expect(runtimeInit.trim()).toBe('import "reflect-metadata";');
   });
 
   test("a bundled WebRTC startup path reaches WHIP publish", async () => {
     const workspaceScratch = join(import.meta.dir, "../../scratch");
+    await mkdir(workspaceScratch, { recursive: true });
     const dir = await mkdtemp(join(workspaceScratch, "webrtc-bundle-"));
     try {
       const entrypoint = join(dir, "entry.ts");
       await writeFile(
         entrypoint,
         `
-import "reflect-metadata";
-import { WebRtcPublisher, WhipClient } from ${JSON.stringify(
-    join(import.meta.dir, "../../src/features/webrtc/index.ts")
-  )};
+import "../../src/runtime/reflectMetadata.ts";
+import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc/index.ts";
 
 class FakePeerConnection {
   connectionState = "connected";

@@ -252,6 +252,18 @@ jobs:
               - 'scripts/ios/**'
               - '.swiftformat'
               - '.swiftlint.yml'
+              # RemindersPlanContentTests (in the ios-swift-packages job) asserts the
+              # structure of these workflow files via loadRepositoryFile(). Listing them
+              # here makes an edit to either file run the iOS macOS job set (swiftlint,
+              # swift-code-coverage, ios-swift-packages, ios-xcode-build,
+              # ios-spm-root-package-build — all gated on ios_should_run) so the
+              # assertions are validated pre-merge; otherwise the drift only surfaces on
+              # nightly (see #3862 — #3850 broke nightly this way). Trade-off: any edit
+              # to these files, even a comment, now triggers that macOS job set. The
+              # workflow-assertion-triggers fast-validation check enforces that every
+              # asserted .github path stays listed here.
+              - '.github/workflows/nightly.yml'
+              - '.github/workflows/pull_request.yml'
 
       # The MCP server (src/**) is what drives real devices end-to-end. A change to
       # the device discovery / observe / gesture-action / iOS-runner / schema surface

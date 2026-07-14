@@ -127,6 +127,24 @@ describe("DefaultElementFinder", () => {
       const results = finder.findElementsByResourceId(hierarchy, "btn_login", null, false);
       expect(results).toHaveLength(0);
     });
+
+    test("matches a bare (Compose testTag) node resource-id against a fully-qualified query", () => {
+      // Compose's Modifier.testTag surfaces via viewIdResourceName WITHOUT a package
+      // qualifier, unlike traditional View resource IDs. Callers always pass the
+      // fully-qualified form (it's what every other element in the hierarchy looks like),
+      // so this must match even with partialMatch disabled — it's the node's real ID, not
+      // a fuzzy substring hit.
+      const hierarchy = makeHierarchy({
+        $: { "resource-id": "personDetailsSpeedDial_Main", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
+      });
+      const results = finder.findElementsByResourceId(
+        hierarchy,
+        "com.followupboss.fubandroidstaging:id/personDetailsSpeedDial_Main",
+        null,
+        false
+      );
+      expect(results).toHaveLength(1);
+    });
   });
 
   describe("findElementByResourceId", () => {
@@ -373,6 +391,21 @@ describe("DefaultElementFinder", () => {
       ]);
       const results = finder.findClickableSiblingsOfResourceId(hierarchy, "com.app:id/label");
       expect(results).toEqual([]);
+    });
+
+    test("matches a bare (Compose testTag) sibling anchor against a fully-qualified query", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: { bounds: bounds(0, 0, 1080, 200) },
+          node: [
+            { $: { "resource-id": "label", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
+          ],
+        },
+      ]);
+      const results = finder.findClickableSiblingsOfResourceId(hierarchy, "com.app:id/label");
+      expect(results.length).toBe(1);
+      expect(results[0].bounds).toEqual({ left: 500, top: 0, right: 1080, bottom: 100 });
     });
   });
 });

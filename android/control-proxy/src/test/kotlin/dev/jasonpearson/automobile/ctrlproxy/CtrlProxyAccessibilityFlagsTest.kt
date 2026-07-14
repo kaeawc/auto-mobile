@@ -10,8 +10,8 @@ import org.robolectric.RobolectricTestRunner
  * Regression coverage for the bug where every ensureConnected() call reconfigured a live
  * AccessibilityService (serviceInfo = info) even when nothing changed, disrupting in-flight
  * hierarchy capture (observed as elements=0 on every observe() for an entire CI run). The fix is
- * the equality check at the applyAccessibilityFlags call site in CtrlProxy.kt; this test covers
- * the extracted pure bitmask computation it depends on.
+ * the equality check at the applyAccessibilityFlags call site in CtrlProxy.kt; this test covers the
+ * extracted pure bitmask computation it depends on.
  */
 @RunWith(RobolectricTestRunner::class)
 class CtrlProxyAccessibilityFlagsTest {

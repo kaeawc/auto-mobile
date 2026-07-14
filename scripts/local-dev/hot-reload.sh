@@ -759,7 +759,7 @@ unified_watch_loop() {
         if [[ ${video_server_status} -eq 0 ]]; then
           VIDEO_SERVER_NEEDS_INSTALL=true
           LAST_VIDEO_SERVER_HASH="$(hash_video_server_watch_state)"
-          reload_mcp_daemon true
+          reload_mcp_daemon false
         else
           log_warn "[Android Video] Build failed; waiting for next change."
         fi
@@ -1022,7 +1022,11 @@ if [[ "${ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]] |
   if [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
     log_info "Initial iOS build complete; reloading daemon after previous watcher cleanup."
   fi
-  reload_mcp_daemon true
+  if [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+    reload_mcp_daemon true
+  else
+    reload_mcp_daemon false
+  fi
   ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
   IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 fi

@@ -206,8 +206,10 @@ describe("videoRecording tool segmentation branch", () => {
     );
     const started = (startRes.recordings as Array<Record<string, unknown>>)[0];
     expect(started.segmented).toBe(true);
-    // The rotation timer is armed on the session's (injected) timer.
-    expect(segmentTimer.getPendingTimeoutCount()).toBe(1);
+    // Two timers are armed on the session's (injected) timer: the rotation timer, and
+    // the session-level maxDurationSeconds auto-stop (review: PR #3847 - maxDuration=300
+    // must actually bound total duration, not just gate whether segmentation kicks in).
+    expect(segmentTimer.getPendingTimeoutCount()).toBe(2);
 
     // Rotate once so the bare stop must return more than one segment, in order.
     segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);

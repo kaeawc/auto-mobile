@@ -95,6 +95,7 @@ LAST_SIMULATOR=""
 CTRL_PROXY_SIMULATOR=""      # Simulator CtrlProxy is currently targeting
 APK_NEEDS_INSTALL=false
 VIDEO_SERVER_NEEDS_INSTALL=false
+ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 IOS_NEEDS_RESTART=false
 IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 
@@ -482,8 +483,13 @@ install_video_server() {
 
   local success=0
   local fail=0
+  local install_status=0
   while IFS= read -r device; do
-    if install_video_server_to_device "${device}"; then
+    set +e
+    install_video_server_to_device "${device}"
+    install_status=$?
+    set -e
+    if [[ ${install_status} -eq 0 ]]; then
       success=$((success + 1))
     else
       fail=$((fail + 1))
@@ -491,7 +497,7 @@ install_video_server() {
   done <<< "${devices}"
 
   log_info "Android video server push complete: ${success} succeeded, ${fail} failed."
-  [[ ${success} -gt 0 ]]
+  [[ ${fail} -eq 0 && ${success} -gt 0 ]]
 }
 
 # Setup desktop app
@@ -528,9 +534,17 @@ setup_android() {
     return 1
   fi
 
-  if ! build_video_server; then
-    log_error "Initial Android video server build failed. Fix errors and retry."
-    return 1
+  local video_server_built=false
+  local video_server_status=0
+  set +e
+  build_video_server
+  video_server_status=$?
+  set -e
+  if [[ ${video_server_status} -eq 0 ]]; then
+    video_server_built=true
+    ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=true
+  else
+    log_warn "Initial Android video server build failed. Continuing with APK hot-reload; WebRTC will fall back to screenrecord until the jar builds."
   fi
 
   # Update SHA after successful build (regardless of device availability)
@@ -545,11 +559,22 @@ setup_android() {
     if ! install_apk; then
       log_warn "Initial install failed. Will retry when devices connect."
     fi
-    if ! install_video_server; then
-      log_warn "Initial Android video server push failed. Will retry when devices connect."
+    if [[ "${video_server_built}" == "true" ]]; then
+      set +e
+      install_video_server
+      video_server_status=$?
+      set -e
+      if [[ ${video_server_status} -ne 0 ]]; then
+        VIDEO_SERVER_NEEDS_INSTALL=true
+        log_warn "Initial Android video server push failed. Will retry when devices connect."
+      fi
     fi
   else
-    log_info "No devices connected. APK and Android video server built and ready for install."
+    if [[ "${video_server_built}" == "true" ]]; then
+      log_info "No devices connected. APK and Android video server built and ready for install."
+    else
+      log_info "No devices connected. APK built and ready for install."
+    fi
   fi
 
   return 0
@@ -726,9 +751,15 @@ unified_watch_loop() {
       # Rebuild video server if files changed
       if [[ "${video_server_files_changed}" == "true" ]]; then
         log_info "[Android Video] Change detected. Rebuilding..."
-        if build_video_server; then
+        local video_server_status=0
+        set +e
+        build_video_server
+        video_server_status=$?
+        set -e
+        if [[ ${video_server_status} -eq 0 ]]; then
           VIDEO_SERVER_NEEDS_INSTALL=true
           LAST_VIDEO_SERVER_HASH="$(hash_video_server_watch_state)"
+          reload_mcp_daemon true
         else
           log_warn "[Android Video] Build failed; waiting for next change."
         fi
@@ -749,10 +780,16 @@ unified_watch_loop() {
       # Push video server if pending and devices available
       if [[ "${VIDEO_SERVER_NEEDS_INSTALL}" == "true" ]] || [[ "${devices_changed}" == "true" ]]; then
         if [[ -n "${current_devices}" ]] && [[ -f "${VIDEO_SERVER_JAR_PATH}" ]]; then
-          if install_video_server; then
+          local video_server_status=0
+          set +e
+          install_video_server
+          video_server_status=$?
+          set -e
+          if [[ ${video_server_status} -eq 0 ]]; then
             VIDEO_SERVER_NEEDS_INSTALL=false
             log_info "[Android Video] Video server pushed to device(s)."
           else
+            VIDEO_SERVER_NEEDS_INSTALL=true
             log_warn "[Android Video] Push failed; will retry."
           fi
         fi
@@ -977,9 +1014,16 @@ fi
 # Kill previous background watchers
 kill_previous
 
-if [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
-  log_info "Initial iOS build complete; reloading daemon after previous watcher cleanup."
+if [[ "${ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]] || \
+  [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+  if [[ "${ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+    log_info "Initial Android video server build complete; reloading daemon after previous watcher cleanup."
+  fi
+  if [[ "${IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF}" == "true" ]]; then
+    log_info "Initial iOS build complete; reloading daemon after previous watcher cleanup."
+  fi
   reload_mcp_daemon true
+  ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
   IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 fi
 

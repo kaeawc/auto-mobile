@@ -196,13 +196,6 @@ export const systemInsetsSchema = z.object({
   left: z.number().int()
 });
 
-export const scrollableCandidateSchema = z.object({
-  elementId: z.string().optional(),
-  text: z.string().optional(),
-  contentDesc: z.string().optional(),
-  className: z.string().optional()
-}).passthrough();
-
 const predictionTargetSchema = z.object({
   text: z.string().optional(),
   elementId: z.string().optional(),

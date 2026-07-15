@@ -37,6 +37,7 @@ import {
   SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
   shouldSkipCtrlProxyDownload,
 } from "./utils/ctrlProxyDownloadControl";
+import { prefetchVideoServerJar } from "./features/webrtc/videoServerJar";
 import { parseToolOutputsDirConfig } from "./utils/toolOutputArtifacts";
 import {
   installProcessLifecycleHandlers,
@@ -505,6 +506,12 @@ async function main() {
         IOSCtrlProxyBuilder.prefetchBuild();
       }
     }
+
+    // Warm the persistent-encoder jar cache in the background, but only when
+    // WebRTC streaming is configured (AUTOMOBILE_WEBRTC_WHIP_ENDPOINT) — daemons
+    // that never stream pull nothing. Non-blocking; reuses the provider's
+    // single-flight so a first stream shares this download (#3835).
+    void prefetchVideoServerJar();
 
     const featureFlagService = FeatureFlagService.getInstance();
 

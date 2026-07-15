@@ -7,9 +7,11 @@ import {
   REQUIRE_VIDEO_SERVER_ENV,
   SKIP_VIDEO_SERVER_DOWNLOAD_ENV,
   VIDEO_SERVER_JAR_ENV,
+  prefetchVideoServerJar,
   resolveVideoServerJar,
   type VideoJarEnsurer,
 } from "../../../src/features/webrtc/videoServerJar";
+import { WEBRTC_ENV } from "../../../src/features/webrtc/webrtcStreamingConfig";
 
 /** Fake provider recording whether ensure() was consulted. */
 class FakeEnsurer implements VideoJarEnsurer {
@@ -154,5 +156,44 @@ describe("resolveVideoServerJar precedence + fail-modes (#3834)", function() {
     });
     expect(result).toBe(overridePath);
     expect(provider.calls).toBe(0);
+  });
+});
+
+describe("prefetchVideoServerJar gating (#3835)", function() {
+  const WHIP = { [WEBRTC_ENV.WHIP_ENDPOINT]: "https://whip.example/publish" };
+
+  test("with a WHIP endpoint configured, the jar is fetched in the background", async function() {
+    const provider = new FakeEnsurer("/cache/automobile-video.jar");
+    await prefetchVideoServerJar({ env: { ...WHIP }, provider });
+    expect(provider.calls).toBe(1);
+  });
+
+  test("without a WHIP endpoint, no prefetch occurs", async function() {
+    const provider = new FakeEnsurer("/cache/automobile-video.jar");
+    await prefetchVideoServerJar({ env: {}, provider });
+    expect(provider.calls).toBe(0);
+  });
+
+  test("SKIP disables the prefetch even with a WHIP endpoint", async function() {
+    const provider = new FakeEnsurer("/cache/automobile-video.jar");
+    await prefetchVideoServerJar({
+      env: { ...WHIP, [SKIP_VIDEO_SERVER_DOWNLOAD_ENV]: "1" },
+      provider,
+    });
+    expect(provider.calls).toBe(0);
+  });
+
+  test("an explicit override skips the prefetch (download unused)", async function() {
+    const provider = new FakeEnsurer("/cache/automobile-video.jar");
+    const overrideEnv: NodeJS.ProcessEnv = { ...WHIP, [VIDEO_SERVER_JAR_ENV]: __filename };
+    await prefetchVideoServerJar({ env: overrideEnv, provider });
+    expect(provider.calls).toBe(0);
+  });
+
+  test("a prefetch failure is swallowed (best-effort, does not throw)", async function() {
+    const provider = new FakeEnsurer(null, new Error("checksum verification failed"));
+    // Must resolve, not reject — startup must not crash on a prefetch failure.
+    await prefetchVideoServerJar({ env: { ...WHIP }, provider });
+    expect(provider.calls).toBe(1);
   });
 });

@@ -4,6 +4,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { logger } from "../../utils/logger";
 import { VideoServerJarProvider } from "./VideoServerJarProvider";
+import { WEBRTC_ENV } from "./webrtcStreamingConfig";
 
 /**
  * Env override pointing at an explicit, already-built `automobile-video.jar`.
@@ -130,4 +131,60 @@ export async function resolveVideoServerJar(deps: ResolveVideoServerJarDeps = {}
   }
   logger.info("[VIDEO_JAR] No verifiable jar available; degrading to screenrecord");
   return null;
+}
+
+export interface PrefetchVideoServerJarDeps {
+  env?: NodeJS.ProcessEnv;
+  /** Injectable for tests; defaults to the shared provider singleton. */
+  provider?: VideoJarEnsurer;
+}
+
+/**
+ * Warm the jar cache at daemon startup, but only when WebRTC streaming is
+ * actually configured (`AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` present) so daemons
+ * that never stream pull nothing (~2.5 MB saved). Best-effort and non-blocking:
+ * the caller invokes it as `void prefetchVideoServerJar()`; the returned promise
+ * exists only so tests can await completion. Reuses the provider's single-flight,
+ * so a concurrent first-stream `ensure()` shares this download rather than
+ * starting a second. Mirrors `AndroidCtrlProxyManager.prefetchApk`.
+ *
+ * Skips (no download) when downloads are disabled or an explicit override makes
+ * the download unnecessary. A fatal fail-mode (checksum mismatch) is swallowed
+ * here — the first real stream re-resolves via {@link resolveVideoServerJar} and
+ * surfaces it there.
+ */
+export async function prefetchVideoServerJar(deps: PrefetchVideoServerJarDeps = {}): Promise<void> {
+  const env = deps.env ?? process.env;
+
+  const whip = env[WEBRTC_ENV.WHIP_ENDPOINT]?.trim();
+  if (!whip) {
+    logger.debug("[VIDEO_JAR] No WHIP endpoint configured; skipping background jar prefetch");
+    return;
+  }
+  // Prefetch warms the DOWNLOAD cache specifically, so it re-derives the two
+  // download-relevant gates from resolveVideoServerJar's precedence: an override
+  // or SKIP means the download is never used, so there is nothing to warm.
+  if (isTruthyEnvValue(env[SKIP_VIDEO_SERVER_DOWNLOAD_ENV])) {
+    logger.debug(`[VIDEO_JAR] ${SKIP_VIDEO_SERVER_DOWNLOAD_ENV} set; skipping background jar prefetch`);
+    return;
+  }
+  if (resolveOverride(env)) {
+    logger.debug("[VIDEO_JAR] Local override present; skipping background jar prefetch (download unused)");
+    return;
+  }
+
+  const provider = deps.provider ?? VideoServerJarProvider.getInstance();
+  logger.info("[VIDEO_JAR] Prefetching video-server jar in the background (WebRTC streaming configured)");
+  try {
+    const jarPath = await provider.ensure();
+    if (jarPath) {
+      logger.info("[VIDEO_JAR] Background prefetch warmed the jar cache", { path: jarPath });
+    }
+  } catch (error) {
+    // Best-effort: the first stream re-resolves and surfaces any fatal error.
+    logger.warn(
+      `[VIDEO_JAR] Background jar prefetch failed: ${error instanceof Error ? error.message : String(error)}`,
+      error
+    );
+  }
 }

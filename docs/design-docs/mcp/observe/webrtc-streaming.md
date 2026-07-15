@@ -160,9 +160,7 @@ Two independent reconnection layers:
 Capture prefers the persistent on-device encoder (`video-server`): a single
 long-lived VirtualDisplay + MediaCodec pipeline with no ~175 s rotation seam and
 one continuous timestamp base. It honors `--bit-rate` (from `bitrateKbps`) and
-`--size` (from `size`). The jar is resolved via `AUTOMOBILE_VIDEO_SERVER_JAR` or
-the Gradle build output (`android/video-server/build/libs/automobile-video.jar`,
-built with `./gradlew :video-server:d8Dex`).
+`--size` (from `size`).
 
 When the jar is not resolvable — or the persistent encoder fails to start —
 capture falls back to `screenrecord`, which encodes on-device H.264 with the same
@@ -170,16 +168,58 @@ capture falls back to `screenrecord`, which encodes on-device H.264 with the sam
 segment rotation (`ANDROID_STREAM_SEGMENT_ROTATE_MS`); each new segment emits a
 fresh keyframe.
 
+## Persistent-encoder delivery (`automobile-video.jar`)
+
+The `video-server` jar ships as a GitHub release asset, mirroring the CtrlProxy
+APK/IPA delivery convention — so the persistent encoder is the production default
+rather than falling back to `screenrecord` because the jar wasn't distributed.
+
+**Resolution precedence** (resolved once at stream start, off the per-frame path,
+in `webrtcStreamManager`; the capture-source factory stays synchronous):
+
+1. `AUTOMOBILE_VIDEO_SERVER_JAR` — explicit local override (an already-built jar).
+2. A valid **cached download** at `~/.auto-mobile/video-server/automobile-video.jar`
+   (with a `video-server-jar.json` sidecar recording `{version, sha256, size,
+   downloadedAt}`).
+3. A **fresh download** from the release, sha256-verified against the pinned
+   release's `videoJarSha256` in the checksum registry.
+4. The local Gradle build output
+   (`android/video-server/build/libs/automobile-video.jar`, from
+   `./gradlew :video-server:d8Dex`) — for development.
+5. else **`null` → `screenrecord`**.
+
+`AUTOMOBILE_VERSION` (pin one coherent version) and `AUTOMOBILE_ASSET_BASE_URL`
+(offline mirror host) apply to the jar exactly as they do to the APK/IPA. The jar
+is warmed by a **background prefetch at daemon startup**, but only when WebRTC
+streaming is configured (`AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` is set) — daemons that
+never stream download nothing.
+
+**Fail-modes.** The jar is *optional* (the encoder already degrades to
+`screenrecord`), so unavailability degrades gracefully — but integrity is never
+compromised:
+
+| Situation | Behavior |
+| --- | --- |
+| Checksum known + **matches** | use the jar |
+| Checksum known + **mismatch** | **fatal** `ActionableError` from stream start, even in degrade mode — a corrupted/tampered download is never silently accepted |
+| Checksum **absent** (a pin predating jar delivery / unknown) | **degrade** to `screenrecord` |
+| `AUTOMOBILE_REQUIRE_VIDEO_SERVER=1` | any degrade case becomes a **hard error** — for CI that must not silently fall back |
+| `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD=1` | **local-only** (override / Gradle build); the network is never touched. A dedicated flag — it does **not** overload `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`, whose CtrlProxy APK is mandatory |
+
+See [Environment variables](../../../using/environment-variables.md) for the full
+flag reference.
+
 ## Known limitations / future work
 
 - **Android only.** iOS `simctl` provides screenshots/finalized recordings, not a
   live H.264 elementary stream; a VideoToolbox encoder in the CtrlProxy runner is
   required. See [ios-webrtc-streaming.md](./ios-webrtc-streaming.md) (#3777) for
   the spike and recommended path.
-- **Persistent-encoder distribution.** The `video-server` jar removes the
-  segment-rotation seam and is preferred when present, but is not yet shipped in
-  the released package — until it is bundled/downloaded (like the CtrlProxy
-  runner), production installs resolve no jar and fall back to `screenrecord`.
+- ~~**Persistent-encoder distribution.**~~ *Resolved:* the `video-server` jar now
+  ships as a checksum-verified GitHub release asset and is downloaded/cached on
+  demand, so production installs use the persistent encoder by default. See
+  [Persistent-encoder delivery](#persistent-encoder-delivery-automobile-videojar)
+  above.
 - **No audio.** Video only; a device-audio capture source would be required to
   add an audio track (#3778).
 - **Reference server is single-process/in-memory.** Use a hardened WHIP/WHEP SFU

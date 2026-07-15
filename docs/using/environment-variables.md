@@ -87,7 +87,21 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`. | `stun:stun.l.google.com:19302` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale as `WIDTHxHEIGHT` (e.g. `720x1280`). | native |
-| `AUTOMOBILE_VIDEO_SERVER_JAR` | Path to the built `automobile-video.jar` (persistent on-device encoder). When resolvable, capture prefers the persistent encoder over `screenrecord`. | Gradle build output, else `screenrecord` |
+| `AUTOMOBILE_VIDEO_SERVER_JAR` | Explicit path to a built `automobile-video.jar` (persistent on-device encoder). Highest resolution precedence: when set it is used directly, ahead of the cached/downloaded release jar and the Gradle build output. | (resolution precedence, see below) |
+| `AUTOMOBILE_REQUIRE_VIDEO_SERVER` | When `1`/`true`, a degrade-to-`screenrecord` case (no verifiable jar available) becomes a hard `ActionableError` instead. For CI that must run the persistent encoder. A checksum **mismatch** is always fatal regardless of this flag. | unset |
+| `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD` | When `1`/`true`, never fetch the jar from the network: resolve from the local override or Gradle build output only. Dedicated flag — **not** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` (the CtrlProxy APK is mandatory; the jar is optional and degrades). | unset |
 | `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` | Path to the built `screen-capture-helper` binary for iOS WebRTC capture. Build with `swift build` in `ios/screen-capture` from a repo checkout, or in `dist/ios/screen-capture` from a package install. | repo/package-local debug/release build output when present |
 | `AUTOMOBILE_IOS_WEBRTC_FFMPEG` | Path to the `ffmpeg` binary used to encode iOS helper BGRA frames into H.264 Annex-B. | `ffmpeg` on `PATH` |
 | `AUTOMOBILE_WEBRTC_TRICKLE_ICE` | Enable trickle ICE: publish the WHIP offer immediately and PATCH candidates incrementally instead of blocking on ICE gathering. Requires an ingest server supporting the WHIP trickle extension. | `false` |
+
+### `automobile-video.jar` resolution
+
+The persistent on-device encoder jar is resolved once at stream start, in this
+order: `AUTOMOBILE_VIDEO_SERVER_JAR` override → a valid cached download at
+`~/.auto-mobile/video-server/` → a fresh, sha256-verified download from the
+GitHub release → the local Gradle build output → else `screenrecord`. The jar is
+optional, so an unverifiable version degrades to `screenrecord`; a checksum
+**mismatch** is always fatal. `AUTOMOBILE_VERSION` (pin one coherent version) and
+`AUTOMOBILE_ASSET_BASE_URL` (offline mirror host) apply to the jar download just
+as they do to the CtrlProxy APK/IPA. See
+[WebRTC streaming — persistent-encoder delivery](../design-docs/mcp/observe/webrtc-streaming.md#persistent-encoder-delivery-automobile-videojar).

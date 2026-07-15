@@ -19,11 +19,19 @@ import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
-import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
+import {
+  AndroidSegmentedPlanVideoSession,
+  type AndroidSegmentedPlanVideoSessionOptions,
+} from "./androidSegmentedPlanVideoSession";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
+
+type SegmentedSessionRecordingDependencies = Pick<
+  AndroidSegmentedPlanVideoSessionOptions,
+  "startVideoRecording" | "stopVideoRecording"
+>;
 
 /**
  * Registry of timer-driven segmented Android recordings, keyed by the first
@@ -37,9 +45,13 @@ const segmentedSessions = (() => {
   // Undefined in production (sessions fall back to their own defaultTimer); tests
   // inject a FakeTimer so the rotation timer is controllable/inspectable.
   let injectedTimer: Timer | undefined;
+  let recordingDependencies: SegmentedSessionRecordingDependencies = {};
   return {
     get timer(): Timer | undefined {
       return injectedTimer;
+    },
+    get recordingDependencies(): SegmentedSessionRecordingDependencies {
+      return recordingDependencies;
     },
     track(handle: string, session: AndroidSegmentedPlanVideoSession): void {
       byHandle.set(handle, session);
@@ -67,9 +79,14 @@ const segmentedSessions = (() => {
     setTimer(timer: Timer | undefined): void {
       injectedTimer = timer;
     },
+    /** Test seam: inject the recording functions used by segmented sessions. */
+    setRecordingDependencies(deps: SegmentedSessionRecordingDependencies): void {
+      recordingDependencies = deps;
+    },
     /** Test seam: clear all tracked sessions + the injected timer. */
     reset(): void {
       injectedTimer = undefined;
+      recordingDependencies = {};
       byHandle.clear();
     },
   };
@@ -78,6 +95,13 @@ const segmentedSessions = (() => {
 /** Test seam: inject the Timer used by segmented sessions. */
 export function setSegmentedSessionTimer(timer: Timer | undefined): void {
   segmentedSessions.setTimer(timer);
+}
+
+/** Test seam: inject start/stop recording functions used by segmented sessions. */
+export function setSegmentedSessionRecordingDependencies(
+  deps: SegmentedSessionRecordingDependencies
+): void {
+  segmentedSessions.setRecordingDependencies(deps);
 }
 
 /** Test seam: clear injected segmented-session state (timer + tracked sessions). */
@@ -301,6 +325,7 @@ export function registerVideoRecordingTools(): void {
               configOverrides: buildConfigOverrides(args),
               timer: segmentedSessions.timer,
               maxDurationSeconds,
+              ...segmentedSessions.recordingDependencies,
             });
             const active = await session.start();
             segmentedSessions.track(active.recordingId, session);
@@ -376,7 +401,7 @@ export function registerVideoRecordingTools(): void {
       const evictedRecordingIds: string[] = [];
       let stoppedAnySegmented = false;
       const targetDevices = await resolveTargetDevices(device, args);
-      const activeRecords = await listActiveVideoRecordings({ platform: device.platform });
+      let activeRecords: VideoRecordingRecord[] | undefined;
 
       for (const target of targetDevices) {
         // A bare (by-device) stop must also finalize any timer-driven segmented
@@ -414,6 +439,7 @@ export function registerVideoRecordingTools(): void {
           continue;
         }
 
+        activeRecords ??= await listActiveVideoRecordings({ platform: device.platform });
         const matches = activeRecords.filter(record => record.deviceId === target.deviceId);
         if (matches.length === 0) {
           failures.push({

@@ -7,10 +7,15 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
-import { VideoRecorderService } from "../../src/features/video";
+import {
+  DEFAULT_VIDEO_RECORDING_CONFIG,
+  VideoRecorderService,
+  type ActiveVideoRecording,
+} from "../../src/features/video";
 import {
   registerVideoRecordingTools,
   resetSegmentedSessions,
+  setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
 } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -20,7 +25,7 @@ import {
 } from "../../src/server/videoRecordingManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 
 /** Drain all pending microtasks (setImmediate runs after the microtask queue). */
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -47,6 +52,32 @@ function parse(response: ToolResponse): Record<string, unknown> {
   return JSON.parse(response.content?.[0]?.text ?? "{}");
 }
 
+function makeSegmentRecording(id: string, outputName: string | undefined): ActiveVideoRecording {
+  return {
+    recordingId: id,
+    outputPath: `/tmp/${id}.mp4`,
+    fileName: `${id}.mp4`,
+    startedAt: new Date(0).toISOString(),
+    outputName,
+    config: DEFAULT_VIDEO_RECORDING_CONFIG,
+  };
+}
+
+function makeSegmentMetadata(id: string): VideoRecordingMetadata {
+  return {
+    recordingId: id,
+    fileName: `${id}.mp4`,
+    filePath: `/tmp/${id}.mp4`,
+    format: "mp4",
+    sizeBytes: 1,
+    codec: "h264",
+    createdAt: new Date(0).toISOString(),
+    startedAt: new Date(0).toISOString(),
+    lastAccessedAt: new Date(0).toISOString(),
+    config: DEFAULT_VIDEO_RECORDING_CONFIG,
+  };
+}
+
 const androidDevice: BootedDevice = {
   deviceId: "test-device",
   platform: "android",
@@ -65,6 +96,8 @@ describe("videoRecording tool segmentation branch", () => {
   let fakeBackend: FakeVideoCaptureBackend;
   let fakeRepository: FakeVideoRecordingRepository;
   let archiveRoot: string;
+  let segmentStarts: string[];
+  let segmentStops: string[];
 
   beforeAll(async () => {
     if (!ToolRegistry.getTool("videoRecording")) {
@@ -79,6 +112,8 @@ describe("videoRecording tool segmentation branch", () => {
     fakeBackend = new FakeVideoCaptureBackend();
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
     fakeRepository = new FakeVideoRecordingRepository();
+    segmentStarts = [];
+    segmentStops = [];
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
     await fsPromises.mkdir(archiveRoot, { recursive: true });
 
@@ -193,6 +228,23 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   test("bare (by-device) stop finalizes the segmented session and leaves no rotation timer", async () => {
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async request => {
+        const outputName = request.outputName;
+        const recordingId = outputName ?? `segment-${segmentStarts.length}`;
+        segmentStarts.push(recordingId);
+        return makeSegmentRecording(recordingId, outputName);
+      },
+      stopVideoRecording: async recordingId => {
+        const id = recordingId ?? `segment-${segmentStops.length}`;
+        segmentStops.push(id);
+        return {
+          metadata: makeSegmentMetadata(id),
+          evictedRecordingIds: [],
+        };
+      },
+    });
+
     // Mirrors the qa-agent's real usage: start with maxDuration=300 (> 180 so
     // it segments), then stop WITHOUT a recordingId.
     const startRes = parse(
@@ -211,12 +263,16 @@ describe("videoRecording tool segmentation branch", () => {
     // must actually bound total duration, not just gate whether segmentation kicks in).
     expect(segmentTimer.getPendingTimeoutCount()).toBe(2);
 
+    // From this point, the segmented session owns its lifecycle. A late async
+    // rotation or bare stop must not rebuild the real manager/database singleton.
+    resetVideoRecordingManagerDependencies();
+
     // Rotate once so the bare stop must return more than one segment, in order.
     segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
     await waitFor(
       async () =>
-        (await fakeRepository.listRecordings()).length === 2 &&
-        (await fakeRepository.listRecordings({ status: "recording" })).length === 1,
+        segmentStarts.length === 2 &&
+        segmentStops.length === 1,
       "segment 2 to start after rotation"
     );
 
@@ -239,12 +295,10 @@ describe("videoRecording tool segmentation branch", () => {
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
 
     // Advancing well past the rotation interval starts no new segment/recording.
-    const activeBefore = (await fakeRepository.listRecordings({ status: "recording" })).length;
+    const segmentStartsBefore = segmentStarts.length;
     segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS * 3);
     await flush();
-    const activeAfter = (await fakeRepository.listRecordings({ status: "recording" })).length;
-    expect(activeBefore).toBe(0);
-    expect(activeAfter).toBe(0);
+    expect(segmentStarts).toHaveLength(segmentStartsBefore);
   });
 
   test("by-handle stop still works after wiring the bare-stop path", async () => {

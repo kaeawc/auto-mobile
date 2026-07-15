@@ -209,12 +209,8 @@ src/server/systemTrayHelpers.ts: error TS2741: Property 'getDeviceTimestampMs' i
 src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"limit" | "testClass" | "testMethod" | "lookbackDays" | "orderDirection" | "latestOnly"'.
 src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"deviceId" | "limit" | "deviceType" | "sessionUuid" | "devicePlatform" | "testClass" | "testMethod" | "deviceName" | "appVersion" | "gitCommit" | "targetSdk" | "jdkVersion" | ... 6 more ... | "orderDirection"'.
 src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
-src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
-src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
-src/utils/CtrlProxyManager.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
-src/utils/IOSCtrlProxyBundleDownloader.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 src/utils/ProcessExecutor.ts: error TS2769: No overload matches this call.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
@@ -267,8 +263,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 19 :: src/server/networkGraph.ts: error TS2345: Argument of type 'EventGroup | undefined' is not assignable to parameter of type 'EventGroup'.
 # swap-fp: 19,19,19,19 :: src/doctor/checks/ios.ts: error TS18048: 'elements' is possibly 'undefined'.
 # swap-fp: 20 :: src/features/accessibility/WcagAudit.ts: error TS7053: Element implicitly has an 'any' type because expression of type '"resource-id"' can't be used to index type 'ViewHierarchyNode'.
-# swap-fp: 20 :: src/utils/CtrlProxyManager.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
-# swap-fp: 20 :: src/utils/IOSCtrlProxyBundleDownloader.ts: error TS7016: Could not find a declaration file for module 'adm-zip'. 'node_modules/adm-zip/adm-zip.js' implicitly has an 'any' type.
 # swap-fp: 21,28 :: src/db/migrator.ts: error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
 # swap-fp: 23 :: src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'Map<string, number>' is not assignable to parameter of type 'Map<string, { timestamp: number; }>'.
 # swap-fp: 24 :: src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string | undefined>' is not assignable to type 'Promise<void>'.
@@ -313,7 +307,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS2345: Argument of type 'import("n
 # swap-fp: 39 :: src/server/interactionTools.ts: error TS18048: 'freshness.requestedAfter' is possibly 'undefined'.
 # swap-fp: 39,45 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2345: Argument of type 'AccessibilityHierarchy' is not assignable to parameter of type 'ViewHierarchyResult'.
 # swap-fp: 40 :: src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?
-# swap-fp: 40,40 :: src/utils/CtrlProxyManager.ts: error TS7006: Parameter 'entry' implicitly has an 'any' type.
 # swap-fp: 40,58 :: src/db/migrator.ts: error TS7006: Parameter 'migration' implicitly has an 'any' type.
 # swap-fp: 40,74 :: src/db/migrator.ts: error TS2307: Cannot find module 'kysely/migration' or its corresponding type declarations.
 # swap-fp: 43 :: src/doctor/index.ts: error TS2367: This comparison appears to be unintentional because the types 'false | undefined' and 'true' have no overlap.

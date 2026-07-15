@@ -34,6 +34,15 @@ export interface ReleaseChecksumEntry {
   apkSha256: string;
   ipaSha256: string;
   runnerSha256: string;
+  /**
+   * SHA-256 of the persistent on-device H.264 encoder jar
+   * (`automobile-video.jar`, #3776/#3830). Optional so registry entries that
+   * predate the jar's release delivery tolerate an absent/empty value: an
+   * absent checksum means the jar is unknown for that version and the client
+   * degrades to `screenrecord` (see #3834). Populated by
+   * scripts/generate-release-constants.sh (#3833) for releases that ship it.
+   */
+  videoJarSha256?: string;
 }
 
 /**
@@ -407,6 +416,44 @@ export function resolveApkChecksum(env: EnvLike = process.env): string {
 /** Expected iOS IPA SHA-256 for the pinned version (empty string if unknown). */
 export function resolveIpaChecksum(env: EnvLike = process.env): string {
   return resolveChecksum(resolvePinnedVersion(env), "ios");
+}
+
+/**
+ * Fixed asset filename of the persistent on-device H.264 encoder jar.
+ * The same name is used as the CI artifact, the release asset, and the
+ * client-side cached file (#3830–#3835).
+ */
+export const VIDEO_SERVER_JAR_FILENAME = "automobile-video.jar";
+
+/**
+ * video-server jar download URL honoring `AUTOMOBILE_VERSION` +
+ * `AUTOMOBILE_ASSET_BASE_URL`, mirroring `resolveApkUrl`/`resolveIpaUrl`.
+ */
+export function resolveVideoJarUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  return buildReleaseAssetUrl(VIDEO_SERVER_JAR_FILENAME, resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+}
+
+/**
+ * Expected video-server jar SHA-256 for the pinned version. Returns an empty
+ * string when unknown — either the pin is absent from the registry, or the
+ * matched entry predates jar delivery (no `videoJarSha256`). Callers treat an
+ * empty checksum as "unknown → degrade to screenrecord" (#3834).
+ */
+export function resolveVideoJarChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  if (registry.length === 0) {
+    return "";
+  }
+  const pinned = resolvePinnedVersion(env);
+  const entry = pinned === LATEST_RELEASE_VERSION
+    ? registry[0]
+    : registry.find(e => e.version === pinned);
+  return entry?.videoJarSha256 ?? "";
 }
 
 /**

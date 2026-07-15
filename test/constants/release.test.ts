@@ -24,6 +24,9 @@ import {
   resolveLatestVersion,
   resolvePinnedVersion,
   resolveRunnerChecksum,
+  resolveVideoJarChecksum,
+  resolveVideoJarUrl,
+  VIDEO_SERVER_JAR_FILENAME,
   type ReleaseChecksumEntry,
 } from "../../src/constants/release";
 
@@ -289,6 +292,82 @@ describe("resolveRunnerChecksum", function() {
 
   test("unknown pinned version yields an empty checksum", function() {
     expect(resolveRunnerChecksum({ AUTOMOBILE_VERSION: "99.99.99" })).toBe("");
+  });
+});
+
+describe("resolveVideoJarUrl (video-server jar delivery, #3830)", function() {
+  const newest = RELEASE_CHECKSUM_REGISTRY[0];
+
+  test("unset env resolves to the concrete latest version on the default host", function() {
+    expect(resolveVideoJarUrl({})).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/${newest.version}/${VIDEO_SERVER_JAR_FILENAME}`
+    );
+    expect(VIDEO_SERVER_JAR_FILENAME).toBe("automobile-video.jar");
+  });
+
+  test("AUTOMOBILE_VERSION pins the URL version", function() {
+    expect(resolveVideoJarUrl({ AUTOMOBILE_VERSION: "0.0.18" })).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.18/${VIDEO_SERVER_JAR_FILENAME}`
+    );
+  });
+
+  test("AUTOMOBILE_ASSET_BASE_URL mirrors the download host", function() {
+    expect(resolveVideoJarUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am" })).toBe(
+      `https://mirror.test/am/${newest.version}/${VIDEO_SERVER_JAR_FILENAME}`
+    );
+  });
+
+  test("both knobs compose", function() {
+    expect(resolveVideoJarUrl({
+      AUTOMOBILE_VERSION: "0.0.18",
+      AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am/",
+    })).toBe(`https://mirror.test/am/0.0.18/${VIDEO_SERVER_JAR_FILENAME}`);
+  });
+
+  test("empty registry + mirror falls back to a conventional /latest/ path", function() {
+    expect(resolveVideoJarUrl({ AUTOMOBILE_ASSET_BASE_URL: "https://mirror.test/am" }, [])).toBe(
+      `https://mirror.test/am/latest/${VIDEO_SERVER_JAR_FILENAME}`
+    );
+  });
+});
+
+describe("resolveVideoJarChecksum (video-server jar delivery, #3830)", function() {
+  const registry: ReleaseChecksumEntry[] = [
+    { version: "0.0.46", apkSha256: "apk46", ipaSha256: "ipa46", runnerSha256: "runner46", videoJarSha256: "jar46" },
+    { version: "0.0.45", apkSha256: "apk45", ipaSha256: "ipa45", runnerSha256: "runner45" },
+  ];
+
+  test("latest/unset resolves to registry[0]'s videoJarSha256", function() {
+    expect(resolveVideoJarChecksum({}, registry)).toBe("jar46");
+  });
+
+  test("AUTOMOBILE_VERSION selects that version's videoJarSha256", function() {
+    expect(resolveVideoJarChecksum({ AUTOMOBILE_VERSION: "0.0.46" }, registry)).toBe("jar46");
+  });
+
+  test("an entry predating jar delivery (no videoJarSha256) resolves to empty", function() {
+    expect(resolveVideoJarChecksum({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe("");
+  });
+
+  test("an unknown pinned version yields an empty checksum", function() {
+    expect(resolveVideoJarChecksum({ AUTOMOBILE_VERSION: "99.99.99" }, registry)).toBe("");
+  });
+
+  test("empty registry yields an empty checksum", function() {
+    expect(resolveVideoJarChecksum({}, [])).toBe("");
+  });
+
+  test("current committed registry tolerates an absent videoJarSha256 (empty until delivery)", function() {
+    // The field is populated by the tooling in #3833; until then every entry
+    // resolves to "" without throwing.
+    expect(resolveVideoJarChecksum({})).toBe(RELEASE_CHECKSUM_REGISTRY[0].videoJarSha256 ?? "");
+  });
+
+  test("registry entries carry empty or well-formed 64-char videoJarSha256 values", function() {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const jar = entry.videoJarSha256 ?? "";
+      expect(jar === "" || /^[a-f0-9]{64}$/.test(jar)).toBe(true);
+    }
   });
 });
 

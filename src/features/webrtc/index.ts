@@ -6,6 +6,7 @@ export * from "./AndroidH264Source";
 export * from "./VideoServerStreamParser";
 export * from "./PersistentEncoderH264Source";
 export * from "./videoServerJar";
+export * from "./VideoServerJarProvider";
 export * from "./androidH264CaptureSourceFactory";
 export * from "./IosH264Source";
 export * from "./h264CaptureSourceFactory";

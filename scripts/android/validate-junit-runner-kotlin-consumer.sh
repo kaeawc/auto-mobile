@@ -9,6 +9,10 @@ CONSUMER_DIR="${SCRATCH_DIR}/consumer"
 LOG_DIR="${SCRATCH_DIR}/logs"
 
 KOTLIN_CONSUMER_VERSION="${KOTLIN_CONSUMER_VERSION:-2.2.21}"
+KOTLIN_CONSUMER_STDLIB_VERSION=$(
+  sed -n 's/^build-kotlin-consumer = "\([^"]*\)".*/\1/p' \
+    "${ANDROID_DIR}/gradle/libs.versions.toml" | head -n 1
+)
 RUNNER_VERSION=$(
   sed -n 's/^VERSION_NAME=//p' "${ANDROID_DIR}/gradle.properties" | head -n 1
 )
@@ -18,6 +22,17 @@ GROUP_ID=$(
 
 if [[ -z "${RUNNER_VERSION}" || -z "${GROUP_ID}" ]]; then
   echo "Could not read GROUP and VERSION_NAME from android/gradle.properties" >&2
+  exit 1
+fi
+
+if [[ -z "${KOTLIN_CONSUMER_STDLIB_VERSION}" ]]; then
+  echo "Could not read build-kotlin-consumer from android/gradle/libs.versions.toml" >&2
+  exit 1
+fi
+
+if [[ ! "${KOTLIN_CONSUMER_STDLIB_VERSION}" =~ ^2\.2\. ]]; then
+  echo "Published runner/test-plan Kotlin stdlib consumer floor must remain on 2.2.x." >&2
+  echo "Found build-kotlin-consumer=${KOTLIN_CONSUMER_STDLIB_VERSION} in android/gradle/libs.versions.toml." >&2
   exit 1
 fi
 

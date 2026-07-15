@@ -1,0 +1,258 @@
+import AdmZip from "adm-zip";
+import * as fs from "node:fs/promises";
+import path from "node:path";
+import {
+  resolvePinnedVersion,
+  resolveVideoJarChecksum,
+  resolveVideoJarUrl,
+} from "../../constants/release";
+import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/ChecksumCalculator";
+import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
+import { logger } from "../../utils/logger";
+import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { resolveAutoMobileBaseDir } from "../../utils/tempDir";
+
+/** Fixed on-disk name of the cached persistent-encoder jar. */
+export const VIDEO_SERVER_JAR_CACHE_FILENAME = "automobile-video.jar";
+
+/** Metadata sidecar describing the currently-cached jar. */
+export const VIDEO_SERVER_JAR_METADATA_FILENAME = "video-server-jar.json";
+
+/** The DEX entry every valid `automobile-video.jar` must contain. */
+const REQUIRED_DEX_ENTRY = "classes.dex";
+
+export interface VideoServerJarMetadata {
+  version: string;
+  sha256: string;
+  /** Byte size of the cached jar; a cheap tamper/truncation signal on cache hits. */
+  size: number;
+  downloadedAt: number;
+}
+
+export interface VideoServerJarProviderDeps {
+  downloader?: FileDownloader;
+  checksumCalculator?: ChecksumCalculator;
+  /** Persistent cache directory. Defaults to `~/.auto-mobile/video-server`. */
+  cacheDir?: string;
+  timer?: Timer;
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Client-side delivery of `automobile-video.jar` (the persistent on-device
+ * H.264 encoder, #3776). Fetches the jar from GitHub releases, sha256-verifies
+ * it, and caches it persistently at `~/.auto-mobile/video-server/` (hyphen —
+ * the daemon's primary dir) so repeat starts pay no download latency.
+ *
+ * Reuses the shared `DefaultFileDownloader` + `DefaultChecksumCalculator`
+ * primitives (same as the CtrlProxy APK path). Resolution precedence, env
+ * flags, and fail-mode policy (mismatch-fatal vs degrade) are layered on top of
+ * this provider in #3834; this class owns only the cached-or-download-and-verify
+ * mechanism and its single-flight guard.
+ */
+export class VideoServerJarProvider {
+  private static instance: VideoServerJarProvider | null = null;
+  private static expectedChecksumOverride: string | null = null;
+
+  private readonly downloader: FileDownloader;
+  private readonly checksumCalculator: ChecksumCalculator;
+  private readonly cacheDir: string;
+  private readonly timer: Timer;
+  private readonly env: NodeJS.ProcessEnv;
+
+  /** Single-flight guard: concurrent ensure() calls share one download. */
+  private inFlight: Promise<string | null> | null = null;
+
+  constructor(deps: VideoServerJarProviderDeps = {}) {
+    this.downloader = deps.downloader ?? new DefaultFileDownloader();
+    this.checksumCalculator = deps.checksumCalculator ?? new DefaultChecksumCalculator();
+    this.timer = deps.timer ?? defaultTimer;
+    this.env = deps.env ?? process.env;
+    // Anchor on the shared auto-mobile base-dir resolver so the AUTOMOBILE_DATA_DIR
+    // override (and the bunx-temp-dir avoidance, #2724) apply to the jar cache too.
+    this.cacheDir = deps.cacheDir ?? path.join(resolveAutoMobileBaseDir(this.env), "video-server");
+  }
+
+  public static getInstance(): VideoServerJarProvider {
+    if (VideoServerJarProvider.instance === null) {
+      VideoServerJarProvider.instance = new VideoServerJarProvider();
+    }
+    return VideoServerJarProvider.instance;
+  }
+
+  /** Reset the singleton + testing overrides (for unit tests). */
+  public static resetInstances(): void {
+    VideoServerJarProvider.instance = null;
+    VideoServerJarProvider.expectedChecksumOverride = null;
+  }
+
+  /**
+   * Force the expected sha256 for tests, bypassing the registry resolver.
+   * Mirrors `AndroidCtrlProxyManager.setExpectedChecksumForTesting`.
+   */
+  public static setExpectedChecksumForTesting(checksum: string | null): void {
+    VideoServerJarProvider.expectedChecksumOverride = checksum;
+  }
+
+  private get cachedJarPath(): string {
+    return path.join(this.cacheDir, VIDEO_SERVER_JAR_CACHE_FILENAME);
+  }
+
+  private get metadataPath(): string {
+    return path.join(this.cacheDir, VIDEO_SERVER_JAR_METADATA_FILENAME);
+  }
+
+  private expectedChecksum(): string {
+    return VideoServerJarProvider.expectedChecksumOverride ?? resolveVideoJarChecksum(this.env);
+  }
+
+  /**
+   * Resolve a verified jar path from the persistent cache or a fresh download.
+   *
+   * - Returns the cached/downloaded path when the expected checksum is known and
+   *   verification succeeds.
+   * - Returns `null` when the expected checksum is unknown (empty) — the jar
+   *   cannot be integrity-verified, so the caller degrades to `screenrecord`
+   *   (the network is never touched in this case). #3834 layers the
+   *   `REQUIRE`/`SKIP` env flags on top.
+   * - Throws when a downloaded jar fails sha256 or the structural zip check
+   *   (corruption/tampering must never be silently cached).
+   *
+   * Single-flight: concurrent callers share one in-flight download.
+   */
+  public async ensure(): Promise<string | null> {
+    if (this.inFlight !== null) {
+      return this.inFlight;
+    }
+    this.inFlight = this.doEnsure().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
+  }
+
+  private async doEnsure(): Promise<string | null> {
+    const expected = this.expectedChecksum();
+    if (expected.length === 0) {
+      logger.info(
+        "[VIDEO_JAR] Expected checksum unknown for the pinned version; returning null " +
+        "without touching the network (jar is integrity-unverifiable)"
+      );
+      return null;
+    }
+
+    const cached = await this.tryCache(expected);
+    if (cached) {
+      logger.info("[VIDEO_JAR] Reusing verified cached jar", { path: cached });
+      return cached;
+    }
+
+    return this.download(expected);
+  }
+
+  /**
+   * Return the cached jar path iff the sidecar's recorded sha matches the
+   * expected sha and the on-disk file still matches the recorded size.
+   *
+   * The jar was sha256- and structurally-verified before it was atomically
+   * renamed into place at download time, so a cache hit does not re-hash or
+   * re-parse the ~2.5 MB jar on the (hot) stream-start path — it trusts the
+   * sidecar and uses a cheap `stat` size compare as the truncation/tamper
+   * signal. A size mismatch (or missing file) falls through to a re-download,
+   * which re-verifies from scratch.
+   */
+  private async tryCache(expected: string): Promise<string | null> {
+    let metadata: VideoServerJarMetadata;
+    try {
+      metadata = JSON.parse(await fs.readFile(this.metadataPath, "utf8")) as VideoServerJarMetadata;
+    } catch (error) {
+      // No/invalid metadata sidecar is the normal cold-cache case, not an error.
+      logger.debug(`[VIDEO_JAR] No usable cache metadata (cache miss): ${error}`);
+      return null;
+    }
+
+    if (metadata.sha256.toLowerCase() !== expected.toLowerCase()) {
+      return null;
+    }
+
+    let stats: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+      stats = await fs.stat(this.cachedJarPath);
+    } catch (error) {
+      // Metadata present but the jar file is gone — treat as a cache miss.
+      logger.debug(`[VIDEO_JAR] Cached jar file missing despite metadata: ${error}`);
+      return null;
+    }
+
+    if (stats.size !== metadata.size) {
+      logger.warn("[VIDEO_JAR] Cached jar size differs from sidecar; will re-download", {
+        expected: metadata.size,
+        actual: stats.size,
+      });
+      return null;
+    }
+
+    return this.cachedJarPath;
+  }
+
+  /** Download to a temp file, verify, then atomically move into the cache. */
+  private async download(expected: string): Promise<string> {
+    const url = resolveVideoJarUrl(this.env);
+    await fs.mkdir(this.cacheDir, { recursive: true });
+    const tempPath = `${this.cachedJarPath}.download`;
+
+    logger.info("[VIDEO_JAR] Downloading persistent-encoder jar", { url, destination: tempPath });
+    try {
+      await this.downloader.download(url, tempPath);
+
+      const { checksum: actual } = await this.checksumCalculator.computeFileSha256(tempPath);
+      if (actual.toLowerCase() !== expected.toLowerCase()) {
+        throw new Error(
+          `video-server jar checksum verification failed. Expected: ${expected}, Got: ${actual}`
+        );
+      }
+
+      // Structural check catches a truncated file or an HTML error page saved
+      // with a .jar name before it is ever pushed to a device.
+      if (!this.hasClassesDex(tempPath)) {
+        throw new Error("video-server jar is not a valid zip containing classes.dex");
+      }
+
+      const { size } = await fs.stat(tempPath);
+      await fs.rename(tempPath, this.cachedJarPath);
+      await this.writeMetadata(actual, size);
+      logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", {
+        path: this.cachedJarPath,
+        sha256: actual,
+      });
+      return this.cachedJarPath;
+    } catch (error) {
+      await fs.rm(tempPath, { force: true }).catch(() => {});
+      throw error;
+    }
+  }
+
+  private async writeMetadata(sha256: string, size: number): Promise<void> {
+    const metadata: VideoServerJarMetadata = {
+      version: resolvePinnedVersion(this.env),
+      sha256,
+      size,
+      downloadedAt: this.timer.now(),
+    };
+    await fs.writeFile(this.metadataPath, JSON.stringify(metadata, null, 2), "utf8");
+  }
+
+  /** True iff `filePath` is a readable zip containing a `classes.dex` entry. */
+  private hasClassesDex(filePath: string): boolean {
+    try {
+      const zip = new AdmZip(filePath);
+      return zip.getEntries().some(entry => entry.entryName === REQUIRED_DEX_ENTRY);
+    } catch (error) {
+      // A truncated download / HTML error page is not a valid zip.
+      logger.warn("[VIDEO_JAR] Structural check failed (not a valid zip)", {
+        path: filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+}

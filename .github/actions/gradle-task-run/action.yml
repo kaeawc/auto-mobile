@@ -126,10 +126,10 @@ runs:
         if [ "${{ inputs.gradle-version }}" == "" ]; then
           echo "Reading Gradle version from Gradle wrapper properties file."
           grep "distributionUrl" gradle/wrapper/gradle-wrapper.properties | sed -E 's/.*gradle-([0-9.]+)-(all|bin).zip/\1/' > /tmp/gradle_version.txt
-          echo 'export version="$(cat /tmp/gradle_version.txt)' >> $GITHUB_OUTPUT
+          echo "version=$(cat /tmp/gradle_version.txt)" >> "$GITHUB_OUTPUT"
         else
           echo "Reading custom Gradle version provided to action."
-          echo 'export version="${{ inputs.gradle-version }}"' >> $GITHUB_OUTPUT
+          echo "version=${{ inputs.gradle-version }}" >> "$GITHUB_OUTPUT"
         fi
 
         # Note that we do not attempt to visually align JVM args - spaces included in kotlin.daemon.jvmargs causes the Kotlin compiler daemon to not run and fallback to Gradle in-process

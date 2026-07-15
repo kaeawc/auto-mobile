@@ -20,5 +20,7 @@ describe("gradle-task-run action", () => {
     expect(action).toContain("actions/cache/save@v5.1.0");
     expect(action).toContain("actions/upload-artifact@v7.0.1");
     expect(action).toContain('echo "digest=$digest" >> "$GITHUB_OUTPUT"');
+    expect(action).toContain('echo "version=$(cat /tmp/gradle_version.txt)" >> "$GITHUB_OUTPUT"');
+    expect(action).toContain('echo "version=${{ inputs.gradle-version }}" >> "$GITHUB_OUTPUT"');
   });
 });

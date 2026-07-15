@@ -28,5 +28,8 @@ if rg -q 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && rg
   exit 0
 fi
 
+echo "::group::Failing tests"
+rg -a '\(fail\)|^error:|^Ran [0-9]+ tests' "${log_file}" || true
+echo "::endgroup::"
 tail -n 200 "${log_file}"
 exit "${status}"

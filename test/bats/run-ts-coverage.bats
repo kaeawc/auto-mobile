@@ -47,3 +47,20 @@ EOF
   run env PATH="$STUB_DIR:$PATH" bash "$SCRIPT" "$WORK_DIR/out.log"
   [ "$status" -ne 0 ]
 }
+
+@test "prints failing test names before the coverage tail on failure" {
+  STUB_LOG="$WORK_DIR/coverage-failure.log"
+  {
+    printf '(fail) test/server/example.test.ts > identifies flaky behavior\n'
+    printf 'expect(received).toBe(expected)\n'
+    for i in $(seq 1 260); do
+      printf 'coverage/file-%03d.ts | 100.00 | 100.00 | 100.00 | 100.00\n' "$i"
+    done
+    printf ' 1 fail\n'
+  } > "$STUB_LOG"
+  make_bun_stub
+
+  run env PATH="$STUB_DIR:$PATH" bash "$SCRIPT" "$WORK_DIR/out.log"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"(fail) test/server/example.test.ts > identifies flaky behavior"* ]]
+}

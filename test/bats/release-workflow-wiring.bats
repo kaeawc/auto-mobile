@@ -28,11 +28,25 @@
   grep -Fq "| **iOS Runner** |" ".github/workflows/nightly.yml"
 }
 
+@test "nightly.yml includes video-server jar sha256 in generated PR metadata (#3833)" {
+  # The change detector exposes a video_jar_changed output consumed by the PR body.
+  grep -Fq "video_jar_changed=\$VIDEO_JAR_CHANGED" ".github/workflows/nightly.yml"
+  grep -Fq "steps.check.outputs.video_jar_changed" ".github/workflows/nightly.yml"
+  # Jar-only nightly PRs get their own title, registered in the pull_request.yml
+  # sha256-only classifier so heavy CI is still skipped.
+  grep -q "chore: update video-server jar SHA256" ".github/workflows/nightly.yml"
+  grep -Fq "| **video-server jar** |" ".github/workflows/nightly.yml"
+}
+
 @test "pull_request.yml treats iOS runner checksum PR titles as sha256-only" {
   grep -q "chore: update CtrlProxy iOS runner SHA256" ".github/workflows/pull_request.yml"
   grep -q "chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256" ".github/workflows/pull_request.yml"
   grep -q "chore: update CtrlProxy iOS IPA and iOS runner SHA256" ".github/workflows/pull_request.yml"
   grep -q "chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" ".github/workflows/pull_request.yml"
+}
+
+@test "pull_request.yml treats video-server jar checksum PR titles as sha256-only (#3833)" {
+  grep -q "chore: update video-server jar SHA256" ".github/workflows/pull_request.yml"
 }
 
 @test "pull_request.yml retries GitHub API-backed change classifiers" {

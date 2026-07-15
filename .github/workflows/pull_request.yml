@@ -111,6 +111,7 @@ jobs:
             const titleMatches = pr.title === 'chore: update CtrlProxy APK SHA256' ||
                                  pr.title === 'chore: update CtrlProxy iOS IPA SHA256' ||
                                  pr.title === 'chore: update CtrlProxy iOS runner SHA256' ||
+                                 pr.title === 'chore: update video-server jar SHA256' ||
                                  pr.title === 'chore: update CtrlProxy APK and CtrlProxy iOS IPA SHA256' ||
                                  pr.title === 'chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256' ||
                                  pr.title === 'chore: update CtrlProxy iOS IPA and iOS runner SHA256' ||

@@ -175,27 +175,33 @@ jobs:
         if: steps.check.outputs.needed == 'true'
         id: pr-title
         run: |
-          # Assemble the title from the list of changed artifacts. A list scales
-          # to N artifacts (the old nested elif chain was already 7 branches for
-          # 3 artifacts; a 4th would need 15) and never mis-titles a single-jar
-          # change as an IPA change.
-          changed=()
-          [ "${{ steps.check.outputs.apk_changed }}" = "true" ] && changed+=("CtrlProxy APK")
-          [ "${{ steps.check.outputs.ipa_changed }}" = "true" ] && changed+=("CtrlProxy iOS IPA")
-          [ "${{ steps.check.outputs.runner_changed }}" = "true" ] && changed+=("iOS runner")
-          [ "${{ steps.check.outputs.video_jar_changed }}" = "true" ] && changed+=("video-server jar")
+          APK_CHANGED="${{ steps.check.outputs.apk_changed }}"
+          IPA_CHANGED="${{ steps.check.outputs.ipa_changed }}"
+          RUNNER_CHANGED="${{ steps.check.outputs.runner_changed }}"
 
-          count=${#changed[@]}
-          if [ "$count" -eq 1 ]; then
-            list="${changed[0]}"
-          elif [ "$count" -eq 2 ]; then
-            list="${changed[0]} and ${changed[1]}"
+          # The CtrlProxy artifact titles are matched EXACTLY by the sha256-only PR
+          # classifier in pull_request.yml (which skips heavy CI for these). Keep
+          # these strings verbatim. When the video-server jar also changed it is
+          # reflected in the PR body table below; only the jar-ONLY case gets its
+          # own title (also registered in the pull_request.yml classifier).
+          if [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy APK and CtrlProxy iOS IPA SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$APK_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$IPA_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy iOS IPA and iOS runner SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$APK_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy APK SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$RUNNER_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy iOS runner SHA256" >> "$GITHUB_OUTPUT"
+          elif [ "$IPA_CHANGED" = "true" ]; then
+            echo "title=chore: update CtrlProxy iOS IPA SHA256" >> "$GITHUB_OUTPUT"
           else
-            # Oxford-comma join: "a, b, and c".
-            last="${changed[$((count - 1))]}"
-            list="$(IFS=, ; echo "${changed[*]:0:$((count - 1))}" | sed 's/,/, /g'), and ${last}"
+            # Only the video-server jar changed (no CtrlProxy artifact did).
+            echo "title=chore: update video-server jar SHA256" >> "$GITHUB_OUTPUT"
           fi
-          echo "title=chore: update ${list} SHA256" >> "$GITHUB_OUTPUT"
 
       - name: "Create PR for SHA256 update"
         if: steps.check.outputs.needed == 'true'

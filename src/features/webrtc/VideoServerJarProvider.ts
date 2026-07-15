@@ -6,6 +6,7 @@ import {
   resolveVideoJarChecksum,
   resolveVideoJarUrl,
 } from "../../constants/release";
+import { ActionableError } from "../../models/ActionableError";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/ChecksumCalculator";
 import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
 import { logger } from "../../utils/logger";
@@ -232,15 +233,23 @@ export class VideoServerJarProvider {
 
       const { checksum: actual } = await this.checksumCalculator.computeFileSha256(tempPath);
       if (actual.toLowerCase() !== expected.toLowerCase()) {
-        throw new Error(
-          `video-server jar checksum verification failed. Expected: ${expected}, Got: ${actual}`
+        // A downloaded jar that does not match its pinned checksum is corrupted
+        // or tampered — an actionable failure surfaced to the caller, never
+        // silently cached. (The caller decides degrade-vs-fatal for the *absent*
+        // checksum case; a mismatch is unconditional.)
+        throw new ActionableError(
+          `video-server jar checksum verification failed. Expected: ${expected}, Got: ${actual}. ` +
+          "The downloaded automobile-video.jar does not match the pinned release checksum; " +
+          "this indicates a corrupted or tampered download and is never silently accepted."
         );
       }
 
       // Structural check catches a truncated file or an HTML error page saved
       // with a .jar name before it is ever pushed to a device.
       if (!this.hasClassesDex(tempPath)) {
-        throw new Error("video-server jar is not a valid zip containing classes.dex");
+        throw new ActionableError(
+          "video-server jar is not a valid zip containing classes.dex (truncated or error-page download)."
+        );
       }
 
       const { size } = await fs.stat(tempPath);

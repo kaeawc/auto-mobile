@@ -56,6 +56,11 @@ updates:
       - "android"
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # The published JUnit runner/test-plan artifacts intentionally keep their
+      # Kotlin stdlib consumer floor on Kotlin 2.2.x.
+      - dependency-name: "org.jetbrains.kotlin:kotlin-stdlib"
+        versions: ["[2.3,)"]
   # iOS Swift Package Manager dependencies
   - package-ecosystem: "swift"
     directory: "/ios/XCTestService"

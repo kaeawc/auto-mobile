@@ -38,7 +38,21 @@ Guidelines:
 ## Recording baselines
 
 Baselines live in `desktop-core/src/test/resources/screenshots/` and are committed to git (excluded
-from Git LFS in `.gitattributes`). Record or update them with `-Dscreenshot.record=true`:
+from Git LFS in `.gitattributes`). They must be recorded on the **reference OS (Linux)** — a baseline
+recorded on macOS or Windows will not be pixel-identical to what CI verifies (see the cross-platform
+note below), so it would fail the `desktop-core-unit-tests` job even though it looks correct locally.
+
+### Recommended: record on CI (any developer, any OS)
+
+Run the **`Record Desktop Screenshot Baselines`** workflow from the Actions tab
+(`.github/workflows/record-screenshot-baselines.yml`). It records the baselines on `ubuntu-latest`
+with `-Dscreenshot.record=true`, un-pends the recorded tests
+(`scripts/screenshot/unpend_screenshot_tests.sh`), verifies they pass in normal mode, and opens a PR
+with the PNGs. **Review the images in that PR** before merging — they are the source of truth for
+future comparisons. Inputs: `test_filter` (default `*ComponentScreenshotTest`) and `unpend` (default
+true).
+
+### Local (only on a Linux machine)
 
 ```bash
 # All screenshot baselines

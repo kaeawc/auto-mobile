@@ -29,6 +29,7 @@ interface WebRtcStreamRecord {
   jarPath: string | null;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  audioEnabled: boolean;
   startedAt: string;
 }
 
@@ -121,11 +122,13 @@ async function startSource(record: WebRtcStreamRecord): Promise<void> {
     {
       device: record.device,
       onData: chunk => record.publisher.writeH264Chunk(chunk),
+      onAudioData: chunk => record.publisher.writePcmAudioChunk(chunk),
       onError: () => {
         record.publisher.notifySourceFailed();
       },
       bitrateBps: record.bitrateBps,
       size: record.size,
+      audioEnabled: record.audioEnabled,
     },
     record.jarPath
   );
@@ -189,6 +192,7 @@ export async function startWebRtcStream(
       iceServers: config.iceServers,
       bitrateBps,
       trickleIce: config.trickleIce,
+      audioEnabled: config.audioEnabled,
     },
     {
       onBeforeEstablish: () => withRecord(streamId, stopSource),
@@ -203,6 +207,7 @@ export async function startWebRtcStream(
     jarPath,
     bitrateBps,
     size: config.size,
+    audioEnabled: config.audioEnabled,
     startedAt: dependencies.now().toISOString(),
   };
   streams.set(streamId, record);

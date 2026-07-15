@@ -4,10 +4,13 @@ export interface H264CaptureSourceOptions {
   device: BootedDevice;
   /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
   onData: (chunk: Buffer) => void;
+  /** Called with each chunk of 8 kHz mono PCM16LE audio when audio is enabled. */
+  onAudioData?: (chunk: Buffer) => void;
   /** Called when the source fails fatally after it has started. */
   onError?: (error: Error) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  audioEnabled?: boolean;
 }
 
 /**

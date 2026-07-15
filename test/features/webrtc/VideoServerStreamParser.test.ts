@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  VIDEO_SERVER_CODEC_ID_AMUX,
   VIDEO_SERVER_CODEC_ID_H264,
+  VIDEO_SERVER_CODEC_ID_PCM16,
+  VIDEO_SERVER_TRACK_ID_AUDIO,
+  VIDEO_SERVER_TRACK_ID_VIDEO,
   VideoServerStreamParser,
   type VideoServerPacket,
   type VideoServerStreamHeader,
@@ -21,6 +25,30 @@ function packet(payload: Buffer, flags: bigint, ptsUs: number): Buffer {
   const header = Buffer.alloc(12);
   header.writeBigUInt64BE(flags | (BigInt(ptsUs) & (FLAG_KEY_FRAME - 1n)), 0);
   header.writeUInt32BE(payload.length, 8);
+  return Buffer.concat([header, payload]);
+}
+
+function muxHeader(): Buffer {
+  const header = Buffer.alloc(12 + 16 + 16);
+  header.writeUInt32BE(VIDEO_SERVER_CODEC_ID_AMUX, 0);
+  header.writeUInt32BE(1, 4);
+  header.writeUInt32BE(2, 8);
+  header.writeUInt32BE(VIDEO_SERVER_TRACK_ID_VIDEO, 12);
+  header.writeUInt32BE(VIDEO_SERVER_CODEC_ID_H264, 16);
+  header.writeUInt32BE(720, 20);
+  header.writeUInt32BE(1280, 24);
+  header.writeUInt32BE(VIDEO_SERVER_TRACK_ID_AUDIO, 28);
+  header.writeUInt32BE(VIDEO_SERVER_CODEC_ID_PCM16, 32);
+  header.writeUInt32BE(8000, 36);
+  header.writeUInt32BE(1, 40);
+  return header;
+}
+
+function muxPacket(trackId: number, payload: Buffer, flags: bigint, ptsUs: number): Buffer {
+  const header = Buffer.alloc(16);
+  header.writeUInt32BE(trackId, 0);
+  header.writeBigUInt64BE(flags | (BigInt(ptsUs) & (FLAG_KEY_FRAME - 1n)), 4);
+  header.writeUInt32BE(payload.length, 12);
   return Buffer.concat([header, payload]);
 }
 
@@ -48,12 +76,16 @@ describe("VideoServerStreamParser", () => {
     expect(headers).toEqual([{ codecId: VIDEO_SERVER_CODEC_ID_H264, width: 242, height: 540 }]);
     expect(packets).toHaveLength(2);
     expect(packets[0]).toEqual({
+      trackId: VIDEO_SERVER_TRACK_ID_VIDEO,
+      codecId: VIDEO_SERVER_CODEC_ID_H264,
       data: Buffer.from([0, 0, 0, 1, 0x67]),
       config: true,
       keyFrame: false,
       ptsUs: 0,
     });
     expect(packets[1]).toEqual({
+      trackId: VIDEO_SERVER_TRACK_ID_VIDEO,
+      codecId: VIDEO_SERVER_CODEC_ID_H264,
       data: Buffer.from([0, 0, 0, 1, 0x65]),
       config: false,
       keyFrame: true,
@@ -94,5 +126,20 @@ describe("VideoServerStreamParser", () => {
     ]);
     parser.push(combined);
     expect(packets.map(p => p.data[0])).toEqual([0xaa, 0xbb, 0xcc]);
+  });
+
+  test("parses muxed video and audio packets", () => {
+    const { parser, headers, packets } = collect();
+    parser.push(Buffer.concat([
+      muxHeader(),
+      muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([1, 2, 3, 4]), 0n, 10),
+      muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 20),
+    ]));
+
+    expect(headers).toEqual([{ codecId: VIDEO_SERVER_CODEC_ID_H264, width: 720, height: 1280 }]);
+    expect(packets.map(packet => [packet.trackId, packet.codecId, packet.ptsUs])).toEqual([
+      [VIDEO_SERVER_TRACK_ID_AUDIO, VIDEO_SERVER_CODEC_ID_PCM16, 10],
+      [VIDEO_SERVER_TRACK_ID_VIDEO, VIDEO_SERVER_CODEC_ID_H264, 20],
+    ]);
   });
 });

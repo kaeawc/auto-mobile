@@ -1,5 +1,6 @@
 export * from "./h264";
 export * from "./RtpH264TrackWriter";
+export * from "./RtpPcmuTrackWriter";
 export * from "./processSpawner";
 export * from "./H264CaptureSource";
 export * from "./AndroidH264Source";

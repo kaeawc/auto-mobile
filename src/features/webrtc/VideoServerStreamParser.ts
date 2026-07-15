@@ -20,9 +20,17 @@
 
 /** "h264" as a big-endian int: 0x68323634. */
 export const VIDEO_SERVER_CODEC_ID_H264 = 0x68323634;
+/** "amux" as a big-endian int: multiplexed audio/video protocol marker. */
+export const VIDEO_SERVER_CODEC_ID_AMUX = 0x616d7578;
+/** "s16l" as a big-endian int: signed 16-bit little-endian PCM. */
+export const VIDEO_SERVER_CODEC_ID_PCM16 = 0x7331366c;
+export const VIDEO_SERVER_TRACK_ID_VIDEO = 1;
+export const VIDEO_SERVER_TRACK_ID_AUDIO = 2;
 
 const STREAM_HEADER_BYTES = 12;
 const PACKET_HEADER_BYTES = 12;
+const MUX_TRACK_BYTES = 16;
+const MUX_PACKET_HEADER_BYTES = 16;
 const FLAG_CONFIG = 1n << 63n;
 const FLAG_KEY_FRAME = 1n << 62n;
 
@@ -33,6 +41,8 @@ export interface VideoServerStreamHeader {
 }
 
 export interface VideoServerPacket {
+  trackId: number;
+  codecId: number;
   /** The encoded payload (Annex-B H.264). */
   data: Buffer;
   /** Codec configuration data (SPS/PPS), not a displayable frame. */
@@ -58,6 +68,7 @@ export interface VideoServerStreamParserCallbacks {
 export class VideoServerStreamParser {
   private buffered: Buffer = Buffer.alloc(0);
   private header: VideoServerStreamHeader | null = null;
+  private muxTracks: Map<number, { codecId: number; param1: number; param2: number }> | null = null;
 
   constructor(private readonly callbacks: VideoServerStreamParserCallbacks) {}
 
@@ -65,17 +76,45 @@ export class VideoServerStreamParser {
     this.buffered =
       this.buffered.length === 0 ? chunk : Buffer.concat([this.buffered, chunk]);
 
-    if (!this.header) {
+    if (!this.header && !this.muxTracks) {
       if (this.buffered.length < STREAM_HEADER_BYTES) {
         return;
       }
-      this.header = {
-        codecId: this.buffered.readUInt32BE(0),
-        width: this.buffered.readUInt32BE(4),
-        height: this.buffered.readUInt32BE(8),
-      };
-      this.buffered = this.buffered.subarray(STREAM_HEADER_BYTES);
-      this.callbacks.onHeader?.(this.header);
+      const codecOrMagic = this.buffered.readUInt32BE(0);
+      if (codecOrMagic === VIDEO_SERVER_CODEC_ID_AMUX) {
+        const trackCount = this.buffered.readUInt32BE(8);
+        const headerBytes = STREAM_HEADER_BYTES + trackCount * MUX_TRACK_BYTES;
+        if (this.buffered.length < headerBytes) {
+          return;
+        }
+        this.muxTracks = new Map();
+        for (let i = 0; i < trackCount; i++) {
+          const offset = STREAM_HEADER_BYTES + i * MUX_TRACK_BYTES;
+          const trackId = this.buffered.readUInt32BE(offset);
+          const codecId = this.buffered.readUInt32BE(offset + 4);
+          const param1 = this.buffered.readUInt32BE(offset + 8);
+          const param2 = this.buffered.readUInt32BE(offset + 12);
+          this.muxTracks.set(trackId, { codecId, param1, param2 });
+          if (codecId === VIDEO_SERVER_CODEC_ID_H264) {
+            this.header = { codecId, width: param1, height: param2 };
+            this.callbacks.onHeader?.(this.header);
+          }
+        }
+        this.buffered = this.buffered.subarray(headerBytes);
+      } else {
+        this.header = {
+          codecId: codecOrMagic,
+          width: this.buffered.readUInt32BE(4),
+          height: this.buffered.readUInt32BE(8),
+        };
+        this.buffered = this.buffered.subarray(STREAM_HEADER_BYTES);
+        this.callbacks.onHeader?.(this.header);
+      }
+    }
+
+    if (this.muxTracks) {
+      this.drainMuxPackets();
+      return;
     }
 
     while (this.buffered.length >= PACKET_HEADER_BYTES) {
@@ -89,6 +128,35 @@ export class VideoServerStreamParser {
       );
       this.buffered = this.buffered.subarray(PACKET_HEADER_BYTES + size);
       this.callbacks.onPacket({
+        trackId: VIDEO_SERVER_TRACK_ID_VIDEO,
+        codecId: this.header?.codecId ?? VIDEO_SERVER_CODEC_ID_H264,
+        data,
+        config: (flags & FLAG_CONFIG) !== 0n,
+        keyFrame: (flags & FLAG_KEY_FRAME) !== 0n,
+        ptsUs: Number(flags & (FLAG_KEY_FRAME - 1n)),
+      });
+    }
+  }
+
+  private drainMuxPackets(): void {
+    while (this.buffered.length >= MUX_PACKET_HEADER_BYTES) {
+      const trackId = this.buffered.readUInt32BE(0);
+      const flags = this.buffered.readBigUInt64BE(4);
+      const size = this.buffered.readUInt32BE(12);
+      if (this.buffered.length < MUX_PACKET_HEADER_BYTES + size) {
+        break;
+      }
+      const data = Buffer.from(
+        this.buffered.subarray(MUX_PACKET_HEADER_BYTES, MUX_PACKET_HEADER_BYTES + size)
+      );
+      this.buffered = this.buffered.subarray(MUX_PACKET_HEADER_BYTES + size);
+      const track = this.muxTracks?.get(trackId);
+      if (!track) {
+        continue;
+      }
+      this.callbacks.onPacket({
+        trackId,
+        codecId: track.codecId,
         data,
         config: (flags & FLAG_CONFIG) !== 0n,
         keyFrame: (flags & FLAG_KEY_FRAME) !== 0n,

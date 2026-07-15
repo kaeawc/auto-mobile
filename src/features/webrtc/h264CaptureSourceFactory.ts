@@ -18,6 +18,9 @@ export const createH264CaptureSource: H264CaptureSourceFactory = (options, jarPa
     return createAndroidH264CaptureSource(options, jarPath);
   }
   if (options.device.platform === "ios") {
+    if (options.audioEnabled) {
+      throw new ActionableError("WebRTC audio capture is currently supported only on Android.");
+    }
     return new IosH264Source(options);
   }
   throw new ActionableError(`WebRTC streaming does not support ${options.device.platform} devices.`);

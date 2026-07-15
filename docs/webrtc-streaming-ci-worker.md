@@ -32,6 +32,8 @@ export AUTOMOBILE_WEBRTC_ICE_SERVERS="stun:stun.l.google.com:19302"
 # Optional tuning:
 export AUTOMOBILE_WEBRTC_BITRATE_KBPS="4000"
 export AUTOMOBILE_WEBRTC_MAX_SIZE="720x1280"
+# Optional Android audio (requires AUTOMOBILE_VIDEO_SERVER_JAR / built video-server):
+export AUTOMOBILE_WEBRTC_AUDIO="1"
 ```
 
 > **NAT/firewall:** CI workers are usually behind NAT. Add a **TURN** server to
@@ -65,6 +67,8 @@ Response:
 If multiple Android devices are attached, pass `"deviceId":"emulator-5554"`.
 You can also override any config per call, e.g.
 `{"action":"start","whipEndpoint":"https://other/whip","bitrateKbps":2000}`.
+For audio, pass `"audio":true`; it is Android-only and requires the persistent
+`video-server` jar because `screenrecord` is video-only.
 
 ### From Node / Bun
 
@@ -122,4 +126,5 @@ today.
 | `No connected android devices found` | Emulator/device not booted, or pass the right `deviceId`. |
 | `WHIP ingest failed: … 401` | Coordination server requires a token — set `AUTOMOBILE_WEBRTC_WHIP_TOKEN`. |
 | Stream shows `connected` but the browser video is black | ICE could not traverse NAT — add a TURN server. |
-| Brief hitch every ~3 minutes | Expected `screenrecord` segment rotation (180 s cap). |
+| Brief hitch every ~3 minutes | Expected `screenrecord` segment rotation (180 s cap). Build/provide `automobile-video.jar` to use the persistent encoder. |
+| Audio-enabled stream fails to start | The persistent `video-server` jar is missing, or the device build does not allow shell `REMOTE_SUBMIX` capture. Disable audio or use a compatible Android image. |

@@ -8,6 +8,8 @@ export interface SpawnedProcess {
   kill(signal?: NodeJS.Signals): boolean;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
   once(event: "error", listener: (error: Error) => void): void;
+  removeListener(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+  removeListener(event: "error", listener: (error: Error) => void): void;
 }
 
 export type ProcessSpawner = (command: string, args: string[]) => SpawnedProcess;

@@ -95,4 +95,26 @@ describe("createAndroidH264CaptureSource", () => {
     createAndroidH264CaptureSource(baseOptions(), "/custom/video.jar", deps);
     expect(capturedJar).toBe("/custom/video.jar");
   });
+
+  test("audio requires the persistent encoder jar", () => {
+    const { deps } = makeDeps({ resolveJarPath: () => null });
+    expect(() =>
+      createAndroidH264CaptureSource({ ...baseOptions(), audioEnabled: true }, deps)
+    ).toThrow(/persistent Android video-server jar/);
+  });
+
+  test("audio does not silently fall back to screenrecord when persistent startup fails", async () => {
+    const persistent = new FakeSource(() => Promise.reject(new Error("remote submix unavailable")));
+    const screenrecord = new FakeSource();
+    const deps: AndroidH264CaptureSourceDeps = {
+      resolveJarPath: () => "/tmp/automobile-video.jar",
+      createPersistent: () => persistent,
+      createScreenrecord: () => screenrecord,
+    };
+    const source = createAndroidH264CaptureSource({ ...baseOptions(), audioEnabled: true }, deps);
+
+    await expect(source.start()).rejects.toThrow(/remote submix/);
+    expect(persistent.started).toBe(1);
+    expect(screenrecord.started).toBe(0);
+  });
 });

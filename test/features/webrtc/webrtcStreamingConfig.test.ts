@@ -67,6 +67,7 @@ describe("resolveWebRtcStreamingConfig", () => {
     expect(config.bitrateKbps).toBe(4000);
     expect(config.size).toEqual({ width: 1280, height: 720 });
     expect(config.trickleIce).toBe(false);
+    expect(config.audioEnabled).toBe(false);
   });
 
   test("enables trickle ICE from the environment flag", () => {
@@ -83,6 +84,22 @@ describe("resolveWebRtcStreamingConfig", () => {
       [WEBRTC_ENV.TRICKLE_ICE]: "1",
     } as NodeJS.ProcessEnv;
     expect(resolveWebRtcStreamingConfig({ trickleIce: false }, env).trickleIce).toBe(false);
+  });
+
+  test("enables audio from the environment flag", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.AUDIO]: "on",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({}, env).audioEnabled).toBe(true);
+  });
+
+  test("audio override takes precedence over the environment", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.AUDIO]: "1",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({ audioEnabled: false }, env).audioEnabled).toBe(false);
   });
 
   test("overrides take precedence over environment", () => {

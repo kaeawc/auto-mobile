@@ -4,6 +4,7 @@ import {
   RTCPeerConnection,
   RtpPacket,
   useH264,
+  usePCMU,
   type RTCIceServer,
 } from "werift";
 
@@ -37,21 +38,26 @@ export interface StreamDescriptor {
   iceServers: RTCIceServer[];
   /** Frames forwarded from the publisher so far. */
   framesForwarded: number;
+  /** Whether the publisher negotiated an audio track. */
+  audio: boolean;
+  /** Audio RTP packets forwarded from the publisher so far. */
+  audioPacketsForwarded: number;
 }
 
 interface Subscriber {
   id: string;
   pc: RTCPeerConnection;
-  track: MediaStreamTrack;
+  tracks: Map<"audio" | "video", MediaStreamTrack>;
 }
 
 interface StreamEntry {
   streamId: string;
   ingestPc: RTCPeerConnection;
-  inboundTrack: MediaStreamTrack | null;
+  inboundTracks: Map<"audio" | "video", MediaStreamTrack>;
   subscribers: Map<string, Subscriber>;
   createdAt: string;
   framesForwarded: number;
+  audioPacketsForwarded: number;
 }
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -76,22 +82,34 @@ export class CoordinationServer {
   ): Promise<{ streamId: string; answerSdp: string }> {
     const streamId = requestedStreamId?.trim() || `stream-${randomUUID().slice(0, 8)}`;
 
-    const pc = new RTCPeerConnection({ codecs: { video: [useH264()] } });
+    const pc = new RTCPeerConnection({ codecs: { video: [useH264()], audio: [usePCMU()] } });
     const entry: StreamEntry = {
       streamId,
       ingestPc: pc,
-      inboundTrack: null,
+      inboundTracks: new Map(),
       subscribers: new Map(),
       createdAt: new Date().toISOString(),
       framesForwarded: 0,
+      audioPacketsForwarded: 0,
     };
     pc.onTrack.subscribe(track => {
-      entry.inboundTrack = track;
+      if (track.kind !== "audio" && track.kind !== "video") {
+        return;
+      }
+      entry.inboundTracks.set(track.kind, track);
       track.onReceiveRtp.subscribe((rtp: RtpPacket) => {
-        entry.framesForwarded += rtp.header.marker ? 1 : 0;
+        if (track.kind === "video") {
+          entry.framesForwarded += rtp.header.marker ? 1 : 0;
+        } else {
+          entry.audioPacketsForwarded++;
+        }
         for (const subscriber of entry.subscribers.values()) {
+          const outbound = subscriber.tracks.get(track.kind);
+          if (!outbound) {
+            continue;
+          }
           try {
-            subscriber.track.writeRtp(rtp);
+            outbound.writeRtp(rtp);
           } catch {
             // A dead subscriber is reaped on its connection-state change.
           }
@@ -146,9 +164,16 @@ export class CoordinationServer {
       throw new Error(`No such stream: ${streamId}`);
     }
 
-    const pc = new RTCPeerConnection({ codecs: { video: [useH264()] } });
-    const track = new MediaStreamTrack({ kind: "video" });
-    pc.addTransceiver(track, { direction: "sendonly" });
+    const pc = new RTCPeerConnection({ codecs: { video: [useH264()], audio: [usePCMU()] } });
+    const tracks = new Map<"audio" | "video", MediaStreamTrack>();
+    const videoTrack = new MediaStreamTrack({ kind: "video" });
+    tracks.set("video", videoTrack);
+    pc.addTransceiver(videoTrack, { direction: "sendonly" });
+    if (entry.inboundTracks.has("audio")) {
+      const audioTrack = new MediaStreamTrack({ kind: "audio" });
+      tracks.set("audio", audioTrack);
+      pc.addTransceiver(audioTrack, { direction: "sendonly" });
+    }
 
     const subscriberId = randomUUID();
 
@@ -181,7 +206,7 @@ export class CoordinationServer {
       throw new Error(`Stream ${streamId} is no longer available`);
     }
 
-    entry.subscribers.set(subscriberId, { id: subscriberId, pc, track });
+    entry.subscribers.set(subscriberId, { id: subscriberId, pc, tracks });
     return { subscriberId, answerSdp: pc.localDescription?.sdp ?? "" };
   }
 
@@ -252,7 +277,7 @@ export class CoordinationServer {
   private describe(entry: StreamEntry): StreamDescriptor {
     return {
       streamId: entry.streamId,
-      state: entry.inboundTrack ? "live" : "connecting",
+      state: entry.inboundTracks.has("video") ? "live" : "connecting",
       subscriberCount: entry.subscribers.size,
       createdAt: entry.createdAt,
       // Encode so an id with a path separator (e.g. a CI ref "feature/foo")
@@ -260,6 +285,8 @@ export class CoordinationServer {
       whepUrl: `/whep/${encodeURIComponent(entry.streamId)}`,
       iceServers: this.iceServers,
       framesForwarded: entry.framesForwarded,
+      audio: entry.inboundTracks.has("audio"),
+      audioPacketsForwarded: entry.audioPacketsForwarded,
     };
   }
 

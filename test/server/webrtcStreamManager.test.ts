@@ -50,6 +50,10 @@ class FakePublisher {
     this.stopped = true;
   }
   writeH264Chunk(): void {}
+  pcmAudioChunks: Buffer[] = [];
+  writePcmAudioChunk(chunk: Buffer): void {
+    this.pcmAudioChunks.push(chunk);
+  }
   notifySourceFailed(): void {
     this.sourceFailedCount++;
   }
@@ -315,5 +319,40 @@ describe("webrtcStreamManager", () => {
     ).rejects.toThrow(/checksum verification failed/);
     expect(publisherCreated).toBe(0);
     expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("passes audio config to publisher/source and routes PCM audio chunks", async () => {
+    const publishers: FakePublisher[] = [];
+    let capturedSourceOptions:
+      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | undefined;
+    let capturedJarPath: string | null | undefined;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: (options, jarPath) => {
+        capturedSourceOptions = options;
+        capturedJarPath = jarPath;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => "/verified/automobile-video.jar",
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+
+    expect((publishers[0].config as { audioEnabled?: boolean }).audioEnabled).toBe(true);
+    expect(capturedSourceOptions?.audioEnabled).toBe(true);
+    expect(capturedJarPath).toBe("/verified/automobile-video.jar");
+
+    capturedSourceOptions?.onAudioData?.(Buffer.from([1, 2, 3, 4]));
+    expect(publishers[0].pcmAudioChunks).toEqual([Buffer.from([1, 2, 3, 4])]);
   });
 });

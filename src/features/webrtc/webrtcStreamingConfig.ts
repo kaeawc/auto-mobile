@@ -23,6 +23,8 @@ export interface WebRtcStreamingConfig {
    * Opt-in — the ingest server must support the WHIP PATCH trickle extension.
    */
   trickleIce: boolean;
+  /** Add an optional audio track alongside video. Defaults to false. */
+  audioEnabled: boolean;
 }
 
 export interface WebRtcStreamingOverrides {
@@ -32,6 +34,7 @@ export interface WebRtcStreamingOverrides {
   bitrateKbps?: number;
   size?: { width: number; height: number };
   trickleIce?: boolean;
+  audioEnabled?: boolean;
 }
 
 /** Environment variable names read for default configuration. */
@@ -42,6 +45,7 @@ export const WEBRTC_ENV = {
   BITRATE_KBPS: "AUTOMOBILE_WEBRTC_BITRATE_KBPS",
   MAX_SIZE: "AUTOMOBILE_WEBRTC_MAX_SIZE",
   TRICKLE_ICE: "AUTOMOBILE_WEBRTC_TRICKLE_ICE",
+  AUDIO: "AUTOMOBILE_WEBRTC_AUDIO",
 } as const;
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -146,6 +150,7 @@ export function resolveWebRtcStreamingConfig(
   const bitrateKbps = overrides.bitrateKbps ?? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS]);
   const size = overrides.size ?? parseSize(env[WEBRTC_ENV.MAX_SIZE]);
   const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
+  const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
 
   return {
     whipEndpoint: whipEndpoint.trim(),
@@ -154,5 +159,6 @@ export function resolveWebRtcStreamingConfig(
     bitrateKbps,
     size,
     trickleIce,
+    audioEnabled,
   };
 }

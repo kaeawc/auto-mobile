@@ -72,15 +72,35 @@ export function createAndroidH264CaptureSource(
   deps: AndroidH264CaptureSourceDeps = defaultDeps
 ): H264CaptureSource {
   if (!jarPath) {
+    if (options.audioEnabled) {
+      throw new Error("WebRTC audio requires the persistent Android video-server jar.");
+    }
     return deps.createScreenrecord(options);
+  }
+
+  if (options.audioEnabled) {
+    return deps.createPersistent({
+      device: options.device,
+      onData: options.onData,
+      onAudioData: options.onAudioData,
+      onError: options.onError,
+      bitrateBps: options.bitrateBps,
+      size: options.size,
+      audioEnabled: true,
+      adbFactory: options.adbFactory,
+      timer: options.timer,
+      jarPath,
+    });
   }
 
   const persistent = deps.createPersistent({
     device: options.device,
     onData: options.onData,
+    onAudioData: options.onAudioData,
     onError: options.onError,
     bitrateBps: options.bitrateBps,
     size: options.size,
+    audioEnabled: options.audioEnabled,
     adbFactory: options.adbFactory,
     timer: options.timer,
     jarPath,

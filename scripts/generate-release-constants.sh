@@ -8,6 +8,7 @@ apk_checksum="${APK_SHA256_CHECKSUM:-}"
 ios_checksum="${IOS_CTRL_PROXY_SHA256_CHECKSUM:-}"
 ios_app_hash="${IOS_CTRL_PROXY_APP_HASH:-}"
 ios_runner_sha256="${IOS_CTRL_PROXY_RUNNER_SHA256:-}"
+video_jar_checksum="${VIDEO_JAR_SHA256:-}"
 
 max_registry_entries=100
 
@@ -16,7 +17,7 @@ max_registry_entries=100
 #   - Checksums only (no version): update registry[0] checksums in place
 #   - Nothing set: no-op
 has_checksums=false
-if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ]; then
+if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ] || [ -n "$video_jar_checksum" ]; then
   has_checksums=true
 fi
 
@@ -47,6 +48,12 @@ fi
 if [ -n "$ios_runner_sha256" ] && ! [[ "$ios_runner_sha256" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: IOS_CTRL_PROXY_RUNNER_SHA256 must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${ios_runner_sha256}"
+  exit 1
+fi
+
+if [ -n "$video_jar_checksum" ] && ! [[ "$video_jar_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "ERROR: VIDEO_JAR_SHA256 must be a valid SHA256 hash (64 hex characters)"
+  echo "   Got: ${video_jar_checksum}"
   exit 1
 fi
 
@@ -158,6 +165,7 @@ if [ -n "$release_version" ]; then
     apkSha256: \"${apk_checksum}\",
     ipaSha256: \"${ios_checksum}\",
     runnerSha256: \"${ios_runner_sha256}\",
+    videoJarSha256: \"${video_jar_checksum}\",
   },"
 
     # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
@@ -173,7 +181,14 @@ if [ -n "$release_version" ]; then
       for ((i = 0; i < excess; i++)); do
         last_version_line=$(grep -nE 'version: "[0-9]' "$tmp_file" | tail -1 | cut -d: -f1)
         start_line=$((last_version_line - 1))
-        end_line=$((last_version_line + 4))
+        # Delete from the entry's opening `{` through its closing `},`. The
+        # entry line count is NOT fixed — it grew from apk/ipa/runner to include
+        # an optional videoJarSha256 (#3833) — so anchor the end on the first
+        # `  },` at/after the version line instead of a hardcoded offset, or the
+        # cap orphans a dangling `},` for a longer entry.
+        rel_close=$(awk 'NR>=start && /^[[:space:]]*},[[:space:]]*$/ {print NR; exit}' \
+          start="$last_version_line" "$tmp_file")
+        end_line="${rel_close:-$((last_version_line + 4))}"
         sed_inplace "${start_line},${end_line}d" "$tmp_file"
       done
     fi
@@ -207,12 +222,19 @@ else
     update_registry_field "$tmp_file" "nightly" "runnerSha256" "$ios_runner_sha256"
   fi
 
+  if [ -n "$video_jar_checksum" ]; then
+    update_registry_field "$tmp_file" "nightly" "videoJarSha256" "$video_jar_checksum"
+  fi
+
   echo "Updated release constants:"
   if [ -n "$apk_checksum" ]; then
     echo "   APK checksum (nightly): ${apk_checksum}"
   fi
   if [ -n "$ios_checksum" ]; then
     echo "   iOS checksum (nightly): ${ios_checksum}"
+  fi
+  if [ -n "$video_jar_checksum" ]; then
+    echo "   video-server jar checksum (nightly): ${video_jar_checksum}"
   fi
 fi
 
@@ -227,6 +249,18 @@ if [ -n "$ios_runner_sha256" ]; then
     update_registry_field "$tmp_file" "$release_version" "runnerSha256" "$ios_runner_sha256"
   fi
   echo "   iOS runner SHA256: ${ios_runner_sha256}"
+fi
+
+if [ -n "$video_jar_checksum" ]; then
+  # In new-entry release mode the template above already carries videoJarSha256;
+  # this refreshes it for the already-registered-version path (prepare-release
+  # added the entry first) — mirroring how runnerSha256 is refreshed. The
+  # update_registry_field fallback inserts the field for older entries that
+  # predate videoJarSha256.
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "videoJarSha256" "$video_jar_checksum"
+  fi
+  echo "   video-server jar SHA256: ${video_jar_checksum}"
 fi
 
 if cmp -s "$constants_path" "$tmp_file"; then

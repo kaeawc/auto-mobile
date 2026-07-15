@@ -24,10 +24,15 @@ jobs:
   build-ctrl-proxy-ios-ipa:
     uses: ./.github/workflows/build-ctrl-proxy-ios-ipa.yml
 
+  build-video-server-jar:
+    uses: ./.github/workflows/build-video-server-jar.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   update-sha256:
     name: "Update SHA256 Checksums"
     runs-on: ubuntu-latest
-    needs: [build-control-proxy-apk, build-ctrl-proxy-ios-ipa]
+    needs: [build-control-proxy-apk, build-ctrl-proxy-ios-ipa, build-video-server-jar]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -46,11 +51,20 @@ jobs:
           name: ctrl-proxy-ios-ipa
           path: /tmp
 
+      - name: "Download video-server jar artifact"
+        uses: actions/download-artifact@v7
+        with:
+          name: video-server-jar
+          path: /tmp
+
       - name: "Verify APK SHA256"
         run: bash scripts/ci/verify-transit-sha256.sh /tmp/control-proxy-debug.apk "${{ needs.build-control-proxy-apk.outputs.sha256 }}"
 
       - name: "Verify IPA SHA256"
         run: bash scripts/ci/verify-transit-sha256.sh /tmp/control-proxy.ipa "${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}"
+
+      - name: "Verify video-server jar SHA256"
+        run: bash scripts/ci/verify-transit-sha256.sh /tmp/automobile-video.jar "${{ needs.build-video-server-jar.outputs.sha256 }}"
 
       - name: "Get current SHA256 values from source"
         id: current
@@ -70,12 +84,15 @@ jobs:
           APK_CURRENT=$(read_registry_field apkSha256 "$RELEASE_TS" nightly)
           IPA_CURRENT=$(read_registry_field ipaSha256 "$RELEASE_TS" nightly)
           RUNNER_CURRENT=$(read_registry_field runnerSha256 "$RELEASE_TS" nightly)
+          VIDEO_JAR_CURRENT=$(read_registry_field videoJarSha256 "$RELEASE_TS" nightly)
           echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
           echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
           echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT
+          echo "video_jar_sha256=$VIDEO_JAR_CURRENT" >> $GITHUB_OUTPUT
           echo "Current APK SHA256: ${APK_CURRENT:-(empty)}"
           echo "Current IPA SHA256: ${IPA_CURRENT:-(empty)}"
           echo "Current iOS runner SHA256: ${RUNNER_CURRENT:-(empty)}"
+          echo "Current video-server jar SHA256: ${VIDEO_JAR_CURRENT:-(empty)}"
 
       - name: "Check if updates needed"
         id: check
@@ -86,10 +103,13 @@ jobs:
           OLD_IPA="${{ steps.current.outputs.ipa_sha256 }}"
           NEW_RUNNER="${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}"
           OLD_RUNNER="${{ steps.current.outputs.runner_sha256 }}"
+          NEW_VIDEO_JAR="${{ needs.build-video-server-jar.outputs.sha256 }}"
+          OLD_VIDEO_JAR="${{ steps.current.outputs.video_jar_sha256 }}"
 
           APK_CHANGED="false"
           IPA_CHANGED="false"
           RUNNER_CHANGED="false"
+          VIDEO_JAR_CHANGED="false"
 
           if [ "$NEW_APK" != "$OLD_APK" ]; then
             APK_CHANGED="true"
@@ -122,11 +142,21 @@ jobs:
             echo "iOS runner SHA256 unchanged"
           fi
 
+          if [ "$NEW_VIDEO_JAR" != "$OLD_VIDEO_JAR" ]; then
+            VIDEO_JAR_CHANGED="true"
+            echo "video-server jar SHA256 changed"
+            echo "  Previous: ${OLD_VIDEO_JAR:-(empty)}"
+            echo "  New:      $NEW_VIDEO_JAR"
+          else
+            echo "video-server jar SHA256 unchanged"
+          fi
+
           echo "apk_changed=$APK_CHANGED" >> $GITHUB_OUTPUT
           echo "ipa_changed=$IPA_CHANGED" >> $GITHUB_OUTPUT
           echo "runner_changed=$RUNNER_CHANGED" >> $GITHUB_OUTPUT
+          echo "video_jar_changed=$VIDEO_JAR_CHANGED" >> $GITHUB_OUTPUT
 
-          if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ] || [ "$RUNNER_CHANGED" = "true" ]; then
+          if [ "$APK_CHANGED" = "true" ] || [ "$IPA_CHANGED" = "true" ] || [ "$RUNNER_CHANGED" = "true" ] || [ "$VIDEO_JAR_CHANGED" = "true" ]; then
             echo "needed=true" >> $GITHUB_OUTPUT
           else
             echo "needed=false" >> $GITHUB_OUTPUT
@@ -138,31 +168,34 @@ jobs:
           APK_SHA256_CHECKSUM: ${{ needs.build-control-proxy-apk.outputs.sha256 }}
           IOS_CTRL_PROXY_SHA256_CHECKSUM: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}
           IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
+          VIDEO_JAR_SHA256: ${{ needs.build-video-server-jar.outputs.sha256 }}
         run: bash scripts/generate-release-constants.sh
 
       - name: "Build PR title"
         if: steps.check.outputs.needed == 'true'
         id: pr-title
         run: |
-          APK_CHANGED="${{ steps.check.outputs.apk_changed }}"
-          IPA_CHANGED="${{ steps.check.outputs.ipa_changed }}"
-          RUNNER_CHANGED="${{ steps.check.outputs.runner_changed }}"
+          # Assemble the title from the list of changed artifacts. A list scales
+          # to N artifacts (the old nested elif chain was already 7 branches for
+          # 3 artifacts; a 4th would need 15) and never mis-titles a single-jar
+          # change as an IPA change.
+          changed=()
+          [ "${{ steps.check.outputs.apk_changed }}" = "true" ] && changed+=("CtrlProxy APK")
+          [ "${{ steps.check.outputs.ipa_changed }}" = "true" ] && changed+=("CtrlProxy iOS IPA")
+          [ "${{ steps.check.outputs.runner_changed }}" = "true" ] && changed+=("iOS runner")
+          [ "${{ steps.check.outputs.video_jar_changed }}" = "true" ] && changed+=("video-server jar")
 
-          if [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" >> "$GITHUB_OUTPUT"
-          elif [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy APK and CtrlProxy iOS IPA SHA256" >> "$GITHUB_OUTPUT"
-          elif [ "$APK_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy APK and CtrlProxy iOS runner SHA256" >> "$GITHUB_OUTPUT"
-          elif [ "$IPA_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy iOS IPA and iOS runner SHA256" >> "$GITHUB_OUTPUT"
-          elif [ "$APK_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy APK SHA256" >> "$GITHUB_OUTPUT"
-          elif [ "$RUNNER_CHANGED" = "true" ]; then
-            echo "title=chore: update CtrlProxy iOS runner SHA256" >> "$GITHUB_OUTPUT"
+          count=${#changed[@]}
+          if [ "$count" -eq 1 ]; then
+            list="${changed[0]}"
+          elif [ "$count" -eq 2 ]; then
+            list="${changed[0]} and ${changed[1]}"
           else
-            echo "title=chore: update CtrlProxy iOS IPA SHA256" >> "$GITHUB_OUTPUT"
+            # Oxford-comma join: "a, b, and c".
+            last="${changed[$((count - 1))]}"
+            list="$(IFS=, ; echo "${changed[*]:0:$((count - 1))}" | sed 's/,/, /g'), and ${last}"
           fi
+          echo "title=chore: update ${list} SHA256" >> "$GITHUB_OUTPUT"
 
       - name: "Create PR for SHA256 update"
         if: steps.check.outputs.needed == 'true'
@@ -176,6 +209,7 @@ jobs:
             APK: ${{ steps.current.outputs.apk_sha256 || '(empty)' }} -> ${{ needs.build-control-proxy-apk.outputs.sha256 }}${{ steps.check.outputs.apk_changed == 'true' && ' (changed)' || ' (unchanged)' }}
             IPA: ${{ steps.current.outputs.ipa_sha256 || '(empty)' }} -> ${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}${{ steps.check.outputs.ipa_changed == 'true' && ' (changed)' || ' (unchanged)' }}
             iOS Runner: ${{ steps.current.outputs.runner_sha256 || '(empty)' }} -> ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}${{ steps.check.outputs.runner_changed == 'true' && ' (changed)' || ' (unchanged)' }}
+            video-server jar: ${{ steps.current.outputs.video_jar_sha256 || '(empty)' }} -> ${{ needs.build-video-server-jar.outputs.sha256 }}${{ steps.check.outputs.video_jar_changed == 'true' && ' (changed)' || ' (unchanged)' }}
           title: ${{ steps.pr-title.outputs.title }}
           body: |
             ## Automated Checksum Update
@@ -187,11 +221,12 @@ jobs:
             | **APK** | `${{ steps.current.outputs.apk_sha256 || '(empty)' }}` | `${{ needs.build-control-proxy-apk.outputs.sha256 }}` | ${{ steps.check.outputs.apk_changed == 'true' && '✅ Yes' || 'No' }} |
             | **IPA** | `${{ steps.current.outputs.ipa_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}` | ${{ steps.check.outputs.ipa_changed == 'true' && '✅ Yes' || 'No' }} |
             | **iOS Runner** | `${{ steps.current.outputs.runner_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}` | ${{ steps.check.outputs.runner_changed == 'true' && '✅ Yes' || 'No' }} |
+            | **video-server jar** | `${{ steps.current.outputs.video_jar_sha256 || '(empty)' }}` | `${{ needs.build-video-server-jar.outputs.sha256 }}` | ${{ steps.check.outputs.video_jar_changed == 'true' && '✅ Yes' || 'No' }} |
 
             ### Why did this happen?
 
             SHA256 checksums change when any of these change:
-            - Source code in `android/control-proxy/src/` or `ios/control-proxy/`
+            - Source code in `android/control-proxy/src/`, `android/video-server/src/`, or `ios/control-proxy/`
             - Build configuration (`build.gradle.kts` or `project.yml`)
             - Dependencies or SDK versions
 

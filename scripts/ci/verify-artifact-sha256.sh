@@ -4,12 +4,13 @@
 #
 # Usage: verify-artifact-sha256.sh <artifact-path> <platform>
 #
-# Platform is "android" or "ios", which selects apkSha256 or ipaSha256
-# from the first (newest) registry entry.
+# Platform is "android", "ios", or "videojar", which selects apkSha256,
+# ipaSha256, or videoJarSha256 from the first (newest) registry entry.
 #
 # Example:
 #   verify-artifact-sha256.sh /tmp/control-proxy-debug.apk android
 #   verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
+#   verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
 set -euo pipefail
 
 # shellcheck source=scripts/lib/read-registry-field.sh disable=SC1091
@@ -47,8 +48,10 @@ if [ "$PLATFORM" = "android" ]; then
   FIELD="apkSha256"
 elif [ "$PLATFORM" = "ios" ]; then
   FIELD="ipaSha256"
+elif [ "$PLATFORM" = "videojar" ]; then
+  FIELD="videoJarSha256"
 else
-  echo "ERROR: Platform must be 'android' or 'ios', got '$PLATFORM'"
+  echo "ERROR: Platform must be 'android', 'ios', or 'videojar', got '$PLATFORM'"
   exit 1
 fi
 

@@ -12,7 +12,7 @@ import {
 } from "../db/migrationDependencyIntegrity";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
-import { EVENT_ALL_MARKERS_FLAG, splitMarkers } from "../utils/eventAllMarkers";
+import { EVENT_ALL_MARKERS_FLAG, parseEventAllMarkersConfig } from "../utils/eventAllMarkers";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import { ActionableError } from "../models";
 import {
@@ -1194,6 +1194,10 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
     env,
     resolveDaemonLaunchWorkingDirectory()
   );
+  const eventAllMarkers = parseEventAllMarkersConfig(args, env);
+  if (eventAllMarkers.length > 0) {
+    options.eventAllMarkers = eventAllMarkers;
+  }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
       options.port = parseInt(args[i + 1], 10);
@@ -1244,12 +1248,6 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.embeddedSdk = true;
     } else if (args[i] === "--dismiss-keyboard-after-input") {
       options.dismissKeyboardAfterInput = true;
-    } else if (args[i] === EVENT_ALL_MARKERS_FLAG) {
-      const markers = args[i + 1];
-      if (markers && !markers.startsWith("--")) {
-        options.eventAllMarkers = splitMarkers(markers);
-      }
-      i++;
     } else if (args[i] === "--no-ui-perf-mode") {
       options.noUiPerfMode = true;
     } else if (args[i] === "--no-navigation-screenshots") {

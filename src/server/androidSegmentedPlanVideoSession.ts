@@ -11,7 +11,7 @@ import {
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
-import type { VideoRecordingMetadata } from "../models";
+import type { VideoRecordingConfigInput, VideoRecordingMetadata } from "../models";
 
 export interface AndroidSegmentedPlanVideoSessionOptions {
   device: BootedDevice;
@@ -19,6 +19,23 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   timer?: Timer;
   /** Override for tests. */
   segmentRotateAfterMs?: number;
+  /**
+   * Overall session duration bound. When set, the session auto-stops (finalizing every
+   * completed segment) once this many seconds have elapsed since {@link start}, matching
+   * the non-segmented recording path's maxDuration-is-an-auto-stop-bound contract. Undefined
+   * means rotate indefinitely until an explicit {@link stop} call — no session-level cap.
+   */
+  maxDurationSeconds?: number;
+  /** Quality/config overrides forwarded to every segment's recording. */
+  configOverrides?: VideoRecordingConfigInput;
+  /**
+   * Invoked exactly once when the session finalizes (via {@link stop}), whether that
+   * stop was caller-driven or the {@link maxDurationSeconds} auto-stop. Lets the owning
+   * registry drop the session so an auto-stopped, never-caller-stopped recording does
+   * not leak a tracked entry. The session does not know its own registry handle, so the
+   * hook removes by session identity.
+   */
+  onFinalized?: () => void;
   startVideoRecording?: (
     request: Parameters<typeof defaultStartVideoRecording>[0]
   ) => Promise<ActiveVideoRecording>;
@@ -46,7 +63,28 @@ export class AndroidSegmentedPlanVideoSession {
 
   private readonly segmentRotateAfterMs: number;
 
+  private readonly maxDurationSeconds: number | undefined;
+
+  private readonly configOverrides: VideoRecordingConfigInput | undefined;
+
   private activeRecordingId: string | undefined;
+
+  /** Timer-driven rotation handle (set only when {@link start} is used). */
+  private rotationTimerHandle: NodeJS.Timeout | undefined;
+
+  /** Session-level auto-stop handle (set only when {@link maxDurationSeconds} is provided). */
+  private maxDurationTimerHandle: NodeJS.Timeout | undefined;
+
+  /** True while a timer-driven session is running, so rotations keep rescheduling. */
+  private timerDriven = false;
+
+  private readonly onFinalized: (() => void) | undefined;
+
+  /** Guards {@link onFinalized} so a second (no-op) {@link stop} does not re-notify. */
+  private finalizedNotified = false;
+
+  /** Tracks the most recent in-flight rotation so {@link stop} can await it. */
+  private pendingRotation: Promise<void> = Promise.resolve();
 
   private segmentIndex = 0;
 
@@ -69,12 +107,99 @@ export class AndroidSegmentedPlanVideoSession {
     this.outputNamePrefix = options.outputNamePrefix;
     this.timer = options.timer ?? defaultTimer;
     this.segmentRotateAfterMs = options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
+    this.maxDurationSeconds = options.maxDurationSeconds;
+    this.configOverrides = options.configOverrides;
+    this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
   }
 
-  async startFirstSegment(): Promise<void> {
-    await this.startSegment();
+  /** Device this session is recording, so callers can match sessions by device. */
+  get deviceId(): string {
+    return this.device.deviceId;
+  }
+
+  async startFirstSegment(): Promise<ActiveVideoRecording> {
+    return this.startSegment();
+  }
+
+  /**
+   * Timer-driven lifecycle (does NOT depend on plan steps). Starts the first
+   * segment, then schedules a self-rescheduling rotation via the injected
+   * {@link Timer} so each segment stays under {@link ANDROID_SCREENRECORD_MAX_SECONDS}.
+   * If {@link maxDurationSeconds} was provided, also arms a session-level auto-stop so
+   * overall duration is bounded the same way the non-segmented path bounds it - rotation
+   * alone never stops on its own. Returns the first segment's recording, whose
+   * recordingId is used as the session handle by callers.
+   */
+  async start(): Promise<ActiveVideoRecording> {
+    this.timerDriven = true;
+    const first = await this.startFirstSegment();
+    this.scheduleRotation();
+    this.scheduleMaxDurationStop();
+    return first;
+  }
+
+  private scheduleRotation(): void {
+    if (!this.timerDriven) {
+      return;
+    }
+    this.rotationTimerHandle = this.timer.setTimeout(() => {
+      this.pendingRotation = this.rotateToNextSegment()
+        .catch(error => {
+          logger.warn(
+            `[SegmentedTimerVideo] Rotation failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        })
+        .then(() => {
+          this.scheduleRotation();
+        });
+    }, this.segmentRotateAfterMs);
+  }
+
+  private scheduleMaxDurationStop(): void {
+    if (this.maxDurationSeconds === undefined) {
+      return;
+    }
+    this.maxDurationTimerHandle = this.timer.setTimeout(() => {
+      logger.info(
+        `[SegmentedPlanVideo] Session reached maxDurationSeconds=${this.maxDurationSeconds}, auto-stopping`
+      );
+      this.stop().catch(error => {
+        logger.warn(
+          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+    }, this.maxDurationSeconds * 1000);
+  }
+
+  /**
+   * Stops the timer-driven session: clears both the rotation and max-duration timers,
+   * waits for any in-flight rotation, then finalizes and returns every segment.
+   */
+  async stop(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
+    this.timerDriven = false;
+    if (this.rotationTimerHandle !== undefined) {
+      this.timer.clearTimeout(this.rotationTimerHandle);
+      this.rotationTimerHandle = undefined;
+    }
+    if (this.maxDurationTimerHandle !== undefined) {
+      this.timer.clearTimeout(this.maxDurationTimerHandle);
+      this.maxDurationTimerHandle = undefined;
+    }
+    await this.pendingRotation;
+    const result = await this.finalize();
+    this.notifyFinalized();
+    return result;
+  }
+
+  /** Fires {@link onFinalized} at most once, so callers can drop the session from any registry. */
+  private notifyFinalized(): void {
+    if (this.finalizedNotified) {
+      return;
+    }
+    this.finalizedNotified = true;
+    this.onFinalized?.();
   }
 
   /**
@@ -98,11 +223,12 @@ export class AndroidSegmentedPlanVideoSession {
     return `${this.outputNamePrefix}${suffix}`;
   }
 
-  private async startSegment(): Promise<void> {
+  private async startSegment(): Promise<ActiveVideoRecording> {
     const recording = await this.startVideoRecordingFn({
       device: this.device,
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
+      configOverrides: this.configOverrides,
     });
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();
@@ -110,6 +236,7 @@ export class AndroidSegmentedPlanVideoSession {
     logger.info(
       `[SegmentedPlanVideo] Started segment ${this.segmentIndex} recordingId=${recording.recordingId}`
     );
+    return recording;
   }
 
   private async rotateToNextSegment(): Promise<void> {

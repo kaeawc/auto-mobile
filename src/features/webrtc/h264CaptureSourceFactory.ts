@@ -3,11 +3,19 @@ import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureS
 import { createAndroidH264CaptureSource } from "./androidH264CaptureSourceFactory";
 import { IosH264Source } from "./IosH264Source";
 
-export type H264CaptureSourceFactory = (options: H264CaptureSourceOptions) => H264CaptureSource;
+/**
+ * Build a capture source for a device. `jarPath` is the pre-resolved Android
+ * persistent-encoder jar (or `null` to force `screenrecord`); it is resolved
+ * once at stream start, off the frame path, and ignored for non-Android devices.
+ */
+export type H264CaptureSourceFactory = (
+  options: H264CaptureSourceOptions,
+  jarPath: string | null
+) => H264CaptureSource;
 
-export const createH264CaptureSource: H264CaptureSourceFactory = options => {
+export const createH264CaptureSource: H264CaptureSourceFactory = (options, jarPath) => {
   if (options.device.platform === "android") {
-    return createAndroidH264CaptureSource(options);
+    return createAndroidH264CaptureSource(options, jarPath);
   }
   if (options.device.platform === "ios") {
     return new IosH264Source(options);

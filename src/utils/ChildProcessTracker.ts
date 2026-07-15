@@ -44,7 +44,7 @@ export interface TrackedChildProcess extends StoppableProcess {
   stderr: {
     on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
     off(event: "data", listener: (chunk: Buffer | string) => void): unknown;
-  };
+  } | null;
   once(event: "spawn", listener: () => void): unknown;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
   once(event: "error", listener: (error: Error) => void): unknown;
@@ -76,7 +76,7 @@ export function createExitTracker(
     resolvePromise();
   });
 
-  process.stderr.on("data", chunk => {
+  process.stderr?.on("data", chunk => {
     stderr.push(chunk.toString());
   });
 

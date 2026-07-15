@@ -61,23 +61,22 @@ class VideoStreamWriter(
 
   companion object {
     /** "h264" as big-endian int: 0x68323634 */
-    const val CODEC_ID_H264 = 0x68323634
+    const val CODEC_ID_H264 = VideoStreamProtocol.CODEC_ID_H264
     /** "amux" as big-endian int: 0x616d7578 */
-    const val CODEC_ID_AMUX = 0x616d7578
+    const val CODEC_ID_AMUX = VideoStreamProtocol.CODEC_ID_AMUX
     /** "s16l" as big-endian int: 0x7331366c */
-    const val CODEC_ID_PCM16 = 0x7331366c
-    const val TRACK_ID_VIDEO = 1
-    const val TRACK_ID_AUDIO = 2
-    private const val MUX_VERSION = 1
+    const val CODEC_ID_PCM16 = VideoStreamProtocol.CODEC_ID_PCM16
+    const val TRACK_ID_VIDEO = VideoStreamProtocol.TRACK_ID_VIDEO
+    const val TRACK_ID_AUDIO = VideoStreamProtocol.TRACK_ID_AUDIO
 
     /** Bit 63: codec configuration data */
-    const val PACKET_FLAG_CONFIG = 1L shl 63
+    const val PACKET_FLAG_CONFIG = VideoStreamProtocol.PACKET_FLAG_CONFIG
 
     /** Bit 62: key frame (I-frame) */
-    const val PACKET_FLAG_KEY_FRAME = 1L shl 62
+    const val PACKET_FLAG_KEY_FRAME = VideoStreamProtocol.PACKET_FLAG_KEY_FRAME
 
     /** Mask for PTS (bits 0-61) */
-    const val PTS_MASK = (1L shl 62) - 1
+    const val PTS_MASK = VideoStreamProtocol.PTS_MASK
   }
 
   /**
@@ -108,28 +107,19 @@ class VideoStreamWriter(
   }
 
   private fun writeLegacyHeader() {
-    val header = ByteBuffer.allocate(12)
-    header.putInt(CODEC_ID_H264)
-    header.putInt(width)
-    header.putInt(height)
-    outputStream!!.write(header.array())
+    outputStream!!.write(VideoStreamProtocol.legacyHeader(width, height))
     outputStream!!.flush()
   }
 
   private fun writeMuxHeader() {
-    val header = ByteBuffer.allocate(12 + 16 + 16)
-    header.putInt(CODEC_ID_AMUX)
-    header.putInt(MUX_VERSION)
-    header.putInt(2)
-    header.putInt(TRACK_ID_VIDEO)
-    header.putInt(CODEC_ID_H264)
-    header.putInt(width)
-    header.putInt(height)
-    header.putInt(TRACK_ID_AUDIO)
-    header.putInt(CODEC_ID_PCM16)
-    header.putInt(AudioCapture.SAMPLE_RATE_HZ)
-    header.putInt(AudioCapture.CHANNELS)
-    outputStream!!.write(header.array())
+    outputStream!!.write(
+      VideoStreamProtocol.muxHeader(
+        width,
+        height,
+        AudioCapture.SAMPLE_RATE_HZ,
+        AudioCapture.CHANNELS,
+      )
+    )
     outputStream!!.flush()
   }
 
@@ -144,15 +134,12 @@ class VideoStreamWriter(
     val data = ByteArray(bufferInfo.size)
     buffer.position(bufferInfo.offset)
     buffer.get(data, 0, bufferInfo.size)
-    var ptsAndFlags = bufferInfo.presentationTimeUs and PTS_MASK
-
-    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-      ptsAndFlags = ptsAndFlags or PACKET_FLAG_CONFIG
-    }
-
-    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
-      ptsAndFlags = ptsAndFlags or PACKET_FLAG_KEY_FRAME
-    }
+    val ptsAndFlags =
+      VideoStreamProtocol.ptsAndFlags(
+        bufferInfo.presentationTimeUs,
+        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0,
+        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
+      )
 
     return writePacketData(TRACK_ID_VIDEO, ptsAndFlags, data)
   }
@@ -168,20 +155,7 @@ class VideoStreamWriter(
     val output = outputStream ?: return false
 
     try {
-      val packetHeader =
-        if (audioEnabled) {
-          ByteBuffer.allocate(16).also {
-            it.putInt(trackId)
-            it.putLong(ptsAndFlags)
-            it.putInt(data.size)
-          }
-        } else {
-          ByteBuffer.allocate(12).also {
-            it.putLong(ptsAndFlags)
-            it.putInt(data.size)
-          }
-        }
-      output.write(packetHeader.array())
+      output.write(VideoStreamProtocol.packetHeader(audioEnabled, trackId, ptsAndFlags, data.size))
       output.write(data)
 
       return true

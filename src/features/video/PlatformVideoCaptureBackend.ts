@@ -16,6 +16,7 @@ import {
   waitForExit,
   waitForSpawn,
   type ProcessExitState,
+  type TrackedChildProcess,
 } from "../../utils/ChildProcessTracker";
 import type {
   RecordingHandle,
@@ -37,7 +38,7 @@ interface AndroidBackendHandle {
 
 interface IosBackendHandle {
   kind: "ios";
-  process: ChildProcessWithoutNullStreams;
+  process: TrackedChildProcess;
   exitState: ProcessExitState;
   exitPromise: Promise<void>;
   stderr: string[];
@@ -307,7 +308,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       rawOutputPath,
     ];
 
-    const process = spawn("xcrun", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const process = spawn("xcrun", args, { stdio: ["ignore", "ignore", "ignore"] });
 
     try {
       await waitForSpawn(process);

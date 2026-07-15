@@ -4,9 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  createExitTracker,
   getFileSize,
   waitForExit,
   waitForSpawn,
+  type TrackedChildProcess,
   type StoppableProcess,
 } from "../../src/utils/ChildProcessTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -46,6 +48,27 @@ function createExitOrErrorPromise(process: EventEmitter): Promise<void> {
 }
 
 describe("ChildProcessTracker", () => {
+  describe("createExitTracker", () => {
+    test("tracks ignored-stdio processes without a stderr stream", async () => {
+      const process = new EventEmitter() as TrackedChildProcess;
+      process.exitCode = null;
+      process.signalCode = null;
+      process.killed = false;
+      process.stderr = null;
+      process.kill = () => true;
+
+      const stderr: string[] = [];
+      const { exitState, exitPromise } = createExitTracker(process, stderr);
+
+      process.emit("exit", 0, null);
+      await exitPromise;
+
+      expect(stderr).toEqual([]);
+      expect(exitState.exitCode).toBe(0);
+      expect(exitState.signal).toBeNull();
+    });
+  });
+
   describe("waitForExit", () => {
     test("sends SIGINT first and escalates to SIGKILL after the configured timeout", async () => {
       const timer = new FakeTimer();

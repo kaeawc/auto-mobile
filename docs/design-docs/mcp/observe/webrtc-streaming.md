@@ -1,19 +1,19 @@
 # WebRTC Screen Streaming (WHIP egress)
 
-<kbd>⚠️ Partial</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android Only</kbd>
+<kbd>⚠️ Partial</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android + iOS Video</kbd>
 
 > **Current state:** The AutoMobile publish path is implemented and tested — an
-> Android device's screen is captured as H.264, packetized to RTP, and pushed to
+> Android or iOS device screen video is captured as H.264, packetized to RTP, and pushed to
 > a coordination server over **WHIP** using [werift](https://github.com/shinyoshiaki/werift-webrtc)
 > (pure-TypeScript WebRTC). Control is via the daemon `webrtc-stream.sock` Unix
 > socket. A reference coordination server + browser viewer ships under
 > [`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/).
 >
-> Live device capture depends on `adb screenrecord` on a real Android device/emulator
-> (not exercised in unit tests); everything up to and including the WebRTC media
-> transport is covered by a real werift↔werift loopback and a full
-> publisher→server→subscriber end-to-end test. iOS is not yet supported (no live
-> H.264 source — see [iOS Screen Streaming](../../plat/ios/screen-streaming.md)).
+> Live Android capture depends on `adb screenrecord` or the persistent
+> `video-server` jar on a real device/emulator; iOS capture depends on the
+> CtrlProxy screen streaming helper plus local `ffmpeg` H.264 encoding. Everything
+> up to and including the WebRTC media transport is covered by a real
+> werift↔werift loopback and a full publisher→server→subscriber end-to-end test.
 >
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
@@ -231,10 +231,10 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 
 ## Known limitations / future work
 
-- **Android only.** iOS `simctl` provides screenshots/finalized recordings, not a
-  live H.264 elementary stream; a VideoToolbox encoder in the CtrlProxy runner is
-  required. See [ios-webrtc-streaming.md](./ios-webrtc-streaming.md) (#3777) for
-  the spike and recommended path.
+- **Platform capture differs.** Android capture prefers the persistent
+  `video-server` jar and falls back to `screenrecord`; iOS capture uses the
+  CtrlProxy helper and local `ffmpeg` H.264 encoding. Keep both helper binaries
+  available on workers that may stream either platform.
 - ~~**Persistent-encoder distribution.**~~ *Resolved:* the `video-server` jar now
   ships as a checksum-verified GitHub release asset and is downloaded/cached on
   demand, so production installs use the persistent encoder by default. See

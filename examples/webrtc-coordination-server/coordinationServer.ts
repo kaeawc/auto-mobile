@@ -60,6 +60,32 @@ interface StreamEntry {
   audioPacketsForwarded: number;
 }
 
+export interface RtpOutboundTrack {
+  writeRtp(rtp: RtpPacket): void;
+}
+
+export function forwardRtpToOutboundTracks(outboundTracks: Iterable<RtpOutboundTrack>, rtp: RtpPacket): void {
+  for (const outbound of outboundTracks) {
+    try {
+      outbound.writeRtp(rtp.clone());
+    } catch {
+      // A dead subscriber is reaped on its connection-state change.
+    }
+  }
+}
+
+function* outboundTracksFor(
+  subscribers: Iterable<Subscriber>,
+  kind: "audio" | "video"
+): Iterable<RtpOutboundTrack> {
+  for (const subscriber of subscribers) {
+    const outbound = subscriber.tracks.get(kind);
+    if (outbound) {
+      yield outbound;
+    }
+  }
+}
+
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 
 export class CoordinationServer {
@@ -103,17 +129,7 @@ export class CoordinationServer {
         } else {
           entry.audioPacketsForwarded++;
         }
-        for (const subscriber of entry.subscribers.values()) {
-          const outbound = subscriber.tracks.get(track.kind);
-          if (!outbound) {
-            continue;
-          }
-          try {
-            outbound.writeRtp(rtp);
-          } catch {
-            // A dead subscriber is reaped on its connection-state change.
-          }
-        }
+        forwardRtpToOutboundTracks(outboundTracksFor(entry.subscribers.values(), track.kind), rtp);
       });
     });
 

@@ -1,8 +1,8 @@
 # Streaming a device's screen from a CI worker (WebRTC / WHIP)
 
 This guide shows how to make an AutoMobile daemon running on a CI worker **push**
-the screen of the Android device it is driving to a coordination server over
-WebRTC, so the stream can be watched live in a browser.
+the screen of the Android or iOS device it is driving to a coordination server
+over WebRTC, so the stream can be watched live in a browser.
 
 For the full design, see
 [WebRTC Screen Streaming](./design-docs/mcp/observe/webrtc-streaming.md).
@@ -15,7 +15,9 @@ CI worker (AutoMobile daemon) ──WHIP──▶ coordination server ──WHEP
 
 - An AutoMobile daemon running on the CI worker (the streaming control socket is
   started with the daemon).
-- A connected/booted **Android** emulator or device (`adb devices` lists it).
+- A connected/booted **Android** emulator or device (`adb devices` lists it), or
+  a booted **iOS** simulator with the CtrlProxy screen streaming helper and
+  local `ffmpeg` available.
 - A reachable **coordination server** that accepts WHIP ingest. Use the bundled
   [reference server](../examples/webrtc-coordination-server/README.md) to try it
   out, or a production SFU such as MediaMTX / LiveKit / Janus / Cloudflare.
@@ -64,8 +66,8 @@ Response:
            "resourceUrl":"https://coord.example.com/whip/ci-run-42", ...}}
 ```
 
-If multiple Android devices are attached, pass `"deviceId":"emulator-5554"`.
-You can also override any config per call, e.g.
+If multiple devices are attached, pass `"deviceId":"emulator-5554"` or the iOS
+simulator UDID. You can also override any config per call, e.g.
 `{"action":"start","whipEndpoint":"https://other/whip","bitrateKbps":2000}`.
 For audio, pass `"audio":true`; it is Android-only and requires the persistent
 `video-server` jar because `screenrecord` is video-only.
@@ -106,7 +108,7 @@ echo '{"action":"status","streamId":"ci-run-42"}' | nc -U ~/.auto-mobile/webrtc-
 ## Typical CI shape
 
 ```bash
-# 1. boot emulator + start daemon (project-specific)
+# 1. boot emulator/simulator + start daemon (project-specific)
 # 2. begin streaming so humans can watch the run live
 echo '{"action":"start","streamId":"'"$CI_JOB_ID"'"}' | nc -U ~/.auto-mobile/webrtc-stream.sock
 # 3. run your AutoMobile test plan ...
@@ -115,8 +117,8 @@ echo '{"action":"stop","streamId":"'"$CI_JOB_ID"'"}'  | nc -U ~/.auto-mobile/web
 ```
 
 The publisher reconnects automatically if the network blips; the browser viewer
-reconnects via the coordination server's reconnect API. Streaming is Android-only
-today.
+reconnects via the coordination server's reconnect API. Video streaming supports
+Android and iOS; optional audio is Android-only today.
 
 ## Troubleshooting
 

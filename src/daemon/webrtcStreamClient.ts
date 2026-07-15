@@ -7,7 +7,7 @@ import type {
   WebRtcStreamSocketResponse,
 } from "./webrtcStreamSocketTypes";
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+export const DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS = 45_000;
 
 /**
  * Minimal client for the WebRTC stream control socket. Connects, sends one
@@ -19,7 +19,7 @@ export async function sendWebRtcStreamRequest(
   options: { socketPath?: string; timeoutMs?: number } = {}
 ): Promise<WebRtcStreamSocketResponse> {
   const socketPath = options.socketPath ?? getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG);
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS;
 
   return new Promise<WebRtcStreamSocketResponse>((resolve, reject) => {
     const socket = new Socket();

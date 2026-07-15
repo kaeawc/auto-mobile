@@ -1,7 +1,7 @@
 name: "Build video-server jar"
 
 # Builds the persistent on-device H.264 encoder DEX (`automobile-video.jar`,
-# #3776) via `./gradlew :video-server:d8Dex` and uploads it as a CI artifact.
+# #3776) via `./gradlew :video-server:test :video-server:d8Dex` and uploads it as a CI artifact.
 # Shared by nightly.yml (drift detection → checksum PR) and release.yml (attach
 # to the GitHub release), so both compute the sha256 from the SAME build — a
 # divergent build would record a nightly sha the release cannot reproduce (the
@@ -42,7 +42,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":video-server:d8Dex"
+          gradle-tasks: ":video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/build-video-server-jar"
           reuse-configuration-cache: true

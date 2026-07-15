@@ -129,6 +129,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   const connector: SocketConnector = async () => {
     const socket = new FakeSocket();
     sockets.push(socket);
+    (overrides.connectorHook as ((socket: FakeSocket) => void) | undefined)?.(socket);
     return socket;
   };
 
@@ -166,10 +167,15 @@ async function startReady(ctx: ReturnType<typeof makeSource>): Promise<void> {
   ctx.processes[0].ready();
   await tick(); // ready resolves, forward + connect
   if (ctx.audioEnabled) {
+    ctx.sockets[0].feed(muxHeader());
     ctx.processes[0].streamingStarted();
-    await tick(); // audio-ready marker resolves
+    ctx.sockets[0].feed(muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([0x7f])));
+    await tick(); // audio-ready marker + first PCM packet resolve
   }
   await startPromise;
+  if (ctx.audioEnabled) {
+    ctx.audioChunks.length = 0;
+  }
 }
 
 describe("PersistentEncoderH264Source", () => {
@@ -201,12 +207,33 @@ describe("PersistentEncoderH264Source", () => {
 
     expect(ctx.spawnArgs[0]).toContain("--audio");
 
-    ctx.sockets[0].feed(muxHeader());
     ctx.sockets[0].feed(muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([1, 2, 3, 4])));
     ctx.sockets[0].feed(muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65])));
 
     expect(ctx.audioChunks).toEqual([Buffer.from([1, 2, 3, 4])]);
     expect(ctx.chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x65])]);
+
+    await ctx.source.stop();
+  });
+
+  test("audio startup does not miss the streaming marker emitted during socket connect", async () => {
+    const ctx = makeSource({
+      audioEnabled: true,
+      connectorHook: (socket: FakeSocket) => {
+        ctx.processes[0].streamingStarted();
+      },
+    });
+
+    const startPromise = ctx.source.start();
+    await tick(); // push + spawn
+    ctx.processes[0].ready();
+    await tick(); // ready resolves, forward + connect, socket listeners are wired
+    ctx.sockets[0].feed(muxHeader());
+    ctx.sockets[0].feed(muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([0x7f])));
+
+    await startPromise;
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.audioChunks).toEqual([Buffer.from([0x7f])]);
 
     await ctx.source.stop();
   });
@@ -222,6 +249,70 @@ describe("PersistentEncoderH264Source", () => {
     await expect(startPromise).rejects.toThrow(/before streaming started/);
     expect(ctx.errors).toEqual([]);
     expect(ctx.source.isRunning).toBe(false);
+  });
+
+  test("audio startup rejects when a stale video-server jar streams the legacy H.264 header", async () => {
+    const ctx = makeSource({ audioEnabled: true });
+    const startPromise = ctx.source.start();
+    await tick(); // push + spawn
+    ctx.processes[0].ready();
+    await tick(); // ready resolves, forward + connect, now waiting for Streaming started + mux header
+    ctx.sockets[0].feed(streamHeader(480, 1040));
+    ctx.processes[0].streamingStarted();
+
+    await expect(startPromise).rejects.toThrow(/did not advertise muxed PCM audio/);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
+    expect(ctx.sockets[0].destroyed).toBe(true);
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+  });
+
+  test("audio startup rejects when the muxed server never produces PCM audio", async () => {
+    const ctx = makeSource({ audioEnabled: true, readyTimeoutMs: 5000 });
+    const startPromise = ctx.source.start();
+    await tick(); // push + spawn
+    ctx.processes[0].ready();
+    await tick(); // ready resolves, forward + connect, now waiting for Streaming started + first PCM packet
+    ctx.sockets[0].feed(muxHeader());
+    ctx.processes[0].streamingStarted();
+    await tick(); // streaming marker resolves; PCM packet is still missing
+    ctx.timer.advanceTime(5000);
+
+    await expect(startPromise).rejects.toThrow(/did not produce PCM audio/);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
+    expect(ctx.sockets[0].destroyed).toBe(true);
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+  });
+
+  test("audio startup rejects when the socket closes before the post-audio-ready marker", async () => {
+    const ctx = makeSource({ audioEnabled: true });
+    const startPromise = ctx.source.start();
+    await tick(); // push + spawn
+    ctx.processes[0].ready();
+    await tick(); // ready resolves, forward + connect, now waiting for Streaming started
+    ctx.sockets[0].emit("close");
+
+    await expect(startPromise).rejects.toThrow(/socket closed/);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
+    expect(ctx.sockets[0].destroyed).toBe(true);
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+  });
+
+  test("audio startup rejects when the socket errors before the post-audio-ready marker", async () => {
+    const ctx = makeSource({ audioEnabled: true });
+    const startPromise = ctx.source.start();
+    await tick(); // push + spawn
+    ctx.processes[0].ready();
+    await tick(); // ready resolves, forward + connect, now waiting for Streaming started
+    ctx.sockets[0].emit("error", new Error("REMOTE_SUBMIX socket failed"));
+
+    await expect(startPromise).rejects.toThrow(/REMOTE_SUBMIX socket failed/);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
+    expect(ctx.sockets[0].destroyed).toBe(true);
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
   });
 
   test("stop terminates the server, destroys the socket, and removes the forward", async () => {

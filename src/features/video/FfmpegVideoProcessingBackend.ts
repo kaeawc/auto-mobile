@@ -228,12 +228,16 @@ export async function waitForStderrMessage(
   if (hasStderrMessage(tracker, expected)) {
     return;
   }
+  const stderrStream = tracker.process.stderr;
+  if (!stderrStream) {
+    throw new Error(`Cannot wait for ${expectedDescription}: process stderr is not captured`);
+  }
 
   let timeoutId: NodeJS.Timeout | undefined;
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     const cleanup = () => {
-      tracker.process.stderr.off("data", onData);
+      stderrStream.off("data", onData);
       tracker.process.off("exit", onExit);
       tracker.process.off("error", onError);
       if (timeoutId) {
@@ -260,7 +264,7 @@ export async function waitForStderrMessage(
       complete(() => reject(error));
     };
 
-    tracker.process.stderr.on("data", onData);
+    stderrStream.on("data", onData);
     tracker.process.once("exit", onExit);
     tracker.process.once("error", onError);
     onData();
@@ -451,7 +455,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       capturePath,
     ];
 
-    const captureProcess = spawn("xcrun", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const captureProcess = spawn("xcrun", args, { stdio: ["ignore", "ignore", "pipe"] });
 
     try {
       await waitForSpawn(captureProcess);

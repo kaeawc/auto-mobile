@@ -136,7 +136,15 @@ describe("VideoServerStreamParser", () => {
       muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 20),
     ]));
 
-    expect(headers).toEqual([{ codecId: VIDEO_SERVER_CODEC_ID_H264, width: 720, height: 1280 }]);
+    expect(headers).toEqual([
+      {
+        codecId: VIDEO_SERVER_CODEC_ID_H264,
+        width: 720,
+        height: 1280,
+        muxed: true,
+        audio: true,
+      },
+    ]);
     expect(packets.map(packet => [packet.trackId, packet.codecId, packet.ptsUs])).toEqual([
       [VIDEO_SERVER_TRACK_ID_AUDIO, VIDEO_SERVER_CODEC_ID_PCM16, 10],
       [VIDEO_SERVER_TRACK_ID_VIDEO, VIDEO_SERVER_CODEC_ID_H264, 20],

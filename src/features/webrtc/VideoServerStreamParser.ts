@@ -38,6 +38,8 @@ export interface VideoServerStreamHeader {
   codecId: number;
   width: number;
   height: number;
+  muxed?: boolean;
+  audio?: boolean;
 }
 
 export interface VideoServerPacket {
@@ -88,6 +90,8 @@ export class VideoServerStreamParser {
           return;
         }
         this.muxTracks = new Map();
+        let videoHeader: Pick<VideoServerStreamHeader, "codecId" | "width" | "height"> | null = null;
+        let hasPcmAudioTrack = false;
         for (let i = 0; i < trackCount; i++) {
           const offset = STREAM_HEADER_BYTES + i * MUX_TRACK_BYTES;
           const trackId = this.buffered.readUInt32BE(offset);
@@ -96,9 +100,14 @@ export class VideoServerStreamParser {
           const param2 = this.buffered.readUInt32BE(offset + 12);
           this.muxTracks.set(trackId, { codecId, param1, param2 });
           if (codecId === VIDEO_SERVER_CODEC_ID_H264) {
-            this.header = { codecId, width: param1, height: param2 };
-            this.callbacks.onHeader?.(this.header);
+            videoHeader = { codecId, width: param1, height: param2 };
+          } else if (trackId === VIDEO_SERVER_TRACK_ID_AUDIO && codecId === VIDEO_SERVER_CODEC_ID_PCM16) {
+            hasPcmAudioTrack = true;
           }
+        }
+        if (videoHeader) {
+          this.header = { ...videoHeader, muxed: true, audio: hasPcmAudioTrack };
+          this.callbacks.onHeader?.(this.header);
         }
         this.buffered = this.buffered.subarray(headerBytes);
       } else {

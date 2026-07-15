@@ -49,6 +49,31 @@
   grep -q "chore: update video-server jar SHA256" ".github/workflows/pull_request.yml"
 }
 
+@test "release.yml builds, verifies, and attaches the video-server jar (#3832)" {
+  workflow=".github/workflows/release.yml"
+  grep -Fq "uses: ./.github/workflows/build-video-server-jar.yml" "$workflow"
+  # Verified against the registry via the videojar platform token, then written.
+  grep -Fq "/tmp/automobile-video.jar videojar" "$workflow"
+  grep -Fq "VIDEO_JAR_SHA256:" "$workflow"
+  # Attached to the GitHub release assets.
+  grep -Fq "/tmp/automobile-video.jar" "$workflow"
+}
+
+@test "prepare-release.yml records the video-server jar checksum (#3832)" {
+  workflow=".github/workflows/prepare-release.yml"
+  grep -Fq "uses: ./.github/workflows/build-video-server-jar.yml" "$workflow"
+  grep -Fq "VIDEO_JAR_SHA256:" "$workflow"
+}
+
+@test "build-video-server-jar.yml can verify a reproducible build (#3832)" {
+  workflow=".github/workflows/build-video-server-jar.yml"
+  grep -Fq "verify-reproducible" "$workflow"
+  # The double-build runs once at mint time (prepare-release); release relies on
+  # the cross-run registry checksum verification instead, so it does NOT opt in.
+  grep -Fq "verify-reproducible: true" ".github/workflows/prepare-release.yml"
+  ! grep -Fq "verify-reproducible: true" ".github/workflows/release.yml"
+}
+
 @test "pull_request.yml retries GitHub API-backed change classifiers" {
   retry_count="$(sed -n '/name: "Detect Documentation-Only or SHA256-Only Changes"/,/name: "Check for Desktop Core module changes"/p' ".github/workflows/pull_request.yml" | grep -c "retries: 3")"
 

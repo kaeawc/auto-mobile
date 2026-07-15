@@ -10,6 +10,16 @@ name: "Build video-server jar"
 # libs.versions, exactly as the CtrlProxy APK build.
 on:
   workflow_call:
+    inputs:
+      verify-reproducible:
+        description: >-
+          When true, rebuild the jar from a clean tree and fail if the second
+          build's sha256 differs from the first. Release/prepare set this to
+          guarantee the recorded checksum is reproducible; nightly leaves it off
+          to save a build.
+        required: false
+        type: boolean
+        default: false
     secrets:
       GRADLE_ENCRYPTION_KEY:
         required: true
@@ -45,6 +55,27 @@ jobs:
           SHA256=$(sha256sum "$JAR_PATH" | cut -d' ' -f1)
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
           echo "video-server jar SHA256: $SHA256"
+
+      - name: "Verify reproducible build"
+        if: ${{ inputs.verify-reproducible }}
+        run: |
+          JAR_PATH="android/video-server/build/libs/automobile-video.jar"
+          FIRST_SHA="${{ steps.checksum.outputs.sha256 }}"
+          # Clean the module output and rebuild from scratch. A byte-identical
+          # sha across two independent d8 runs is what lets a nightly-recorded
+          # checksum be verified against the release-built jar (#3784 class).
+          ./android/gradlew -p android :video-server:clean
+          rm -f "$JAR_PATH"
+          ./android/gradlew -p android :video-server:d8Dex
+          SECOND_SHA=$(sha256sum "$JAR_PATH" | cut -d' ' -f1)
+          echo "First build:  $FIRST_SHA"
+          echo "Second build: $SECOND_SHA"
+          if [ "$FIRST_SHA" != "$SECOND_SHA" ]; then
+            echo "ERROR: video-server jar build is not reproducible."
+            echo "Two clean builds of the same commit produced different sha256."
+            exit 1
+          fi
+          echo "Reproducible: two clean builds produced an identical sha256."
 
       - name: "Copy jar to /tmp"
         run: cp android/video-server/build/libs/automobile-video.jar /tmp/automobile-video.jar

@@ -1,0 +1,57 @@
+name: "Build video-server jar"
+
+# Builds the persistent on-device H.264 encoder DEX (`automobile-video.jar`,
+# #3776) via `./gradlew :video-server:d8Dex` and uploads it as a CI artifact.
+# Shared by nightly.yml (drift detection → checksum PR) and release.yml (attach
+# to the GitHub release), so both compute the sha256 from the SAME build — a
+# divergent build would record a nightly sha the release cannot reproduce (the
+# #3784 failure class). Reproducibility rests on the pinned toolchain: JDK 21
+# (installed by the gradle-task-run composite) + buildToolsVersion from
+# libs.versions, exactly as the CtrlProxy APK build.
+on:
+  workflow_call:
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: true
+    outputs:
+      sha256:
+        description: "SHA256 checksum of the built automobile-video.jar"
+        value: ${{ jobs.build.outputs.sha256 }}
+
+jobs:
+  build:
+    name: "Build video-server jar"
+    runs-on: ubuntu-latest
+    outputs:
+      sha256: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":video-server:d8Dex"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/build-video-server-jar"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Calculate jar SHA256"
+        id: checksum
+        run: |
+          JAR_PATH="android/video-server/build/libs/automobile-video.jar"
+          SHA256=$(sha256sum "$JAR_PATH" | cut -d' ' -f1)
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "video-server jar SHA256: $SHA256"
+
+      - name: "Copy jar to /tmp"
+        run: cp android/video-server/build/libs/automobile-video.jar /tmp/automobile-video.jar
+
+      - name: "Upload video-server jar"
+        uses: actions/upload-artifact@v6
+        with:
+          name: video-server-jar
+          path: /tmp/automobile-video.jar
+          retention-days: 7

@@ -37,13 +37,22 @@ teardown() {
 # multi-line registry entry. A fixture without the interface line silently masks
 # the `grep | head -1` collision bug — the extraction must be anchored to the
 # registry entry, not the type declaration.
+# $1 = ipaSha256 value (may be empty)
+# $2 = videoJarSha256 value (optional; the field is omitted when unset, matching
+#      real registry entries that predate jar delivery)
 write_release_ts() {
+  local video_line=""
+  if [ "$#" -ge 2 ]; then
+    video_line="
+    videoJarSha256: \"$2\","
+  fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
   version: string;
   apkSha256: string;
   ipaSha256: string;
   runnerSha256: string;
+  videoJarSha256?: string;
 }
 
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
@@ -51,7 +60,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",
+    runnerSha256: "",$video_line
   },
 ];
 EOF
@@ -85,6 +94,41 @@ EOF
   run bash "$ABS_SCRIPT" "$ARTIFACT" ios
   [ "$status" -eq 0 ]
   [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "matching videoJarSha256 verifies successfully (videojar platform)" {
+  write_release_ts "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" videojar
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "absent videoJarSha256 (entry predates jar) reports 'no checksum', not a mismatch" {
+  # A registry entry without a videoJarSha256 field must hard-fail with the
+  # actionable 'No checksum' error (same as apk/ios), never a spurious mismatch.
+  write_release_ts "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" videojar
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+  [[ "$output" != *"SHA256 mismatch"* ]]
+}
+
+@test "mismatched videoJarSha256 reports a mismatch" {
+  write_release_ts "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" videojar
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
+}
+
+@test "unknown platform token is rejected" {
+  write_release_ts "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Platform must be"* ]]
 }
 
 @test "sha256_of falls back to shasum when sha256sum is absent" {

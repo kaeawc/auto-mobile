@@ -6,6 +6,7 @@ SCRIPT="scripts/generate-release-constants.sh"
 APK_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 IPA_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RUNNER_SHA="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+VIDEO_JAR_SHA="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 
 setup() {
   TEST_ROOT="$(mktemp -d)"
@@ -201,4 +202,93 @@ PY
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"IOS_CTRL_PROXY_RUNNER_SHA256 must be a valid SHA256"* ]]
+}
+
+# --- video-server jar (#3833) ---
+
+@test "writes videoJarSha256 into the new registry entry in release mode" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  # registry[0] (the new entry) carries the videoJarSha256.
+  first_video="$(read_field_for_version 99.99.99 videoJarSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$first_video" = "$VIDEO_JAR_SHA" ]
+}
+
+@test "writes NIGHTLY_CHECKSUM_ENTRY videoJarSha256 (not registry[0]) in checksum-only mode" {
+  run env \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  # The dedicated nightly slot carries the jar sha; registry[0] is untouched.
+  nightly_video="$(read_field_for_version nightly videoJarSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$nightly_video" = "$VIDEO_JAR_SHA" ]
+}
+
+@test "rejects a malformed VIDEO_JAR_SHA256" {
+  run env \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    VIDEO_JAR_SHA256="not-a-sha" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"VIDEO_JAR_SHA256 must be a valid SHA256"* ]]
+}
+
+@test "caps registry without orphan braces when entries include videoJarSha256" {
+  # Guards the dynamic cap-deletion range: entries with a videoJarSha256 line are
+  # 7 lines, not 6, so a hardcoded +4 offset would orphan a trailing `},` when
+  # such an entry is pruned. The end anchor must follow the entry's `},`.
+  python3 - "${TEST_ROOT}/src/constants/release.ts" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+entries = []
+for i in range(100):
+    entries.append(f'''  {{
+    version: "1.0.{i}",
+    apkSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ipaSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    runnerSha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    videoJarSha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  }},''')
+
+text = path.read_text()
+replacement = "export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [\n" + "\n".join(entries) + "\n];"
+text = re.sub(
+    r'export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry\[\] = \[\n.*?\n\];',
+    replacement,
+    text,
+    count=1,
+    flags=re.S,
+)
+path.write_text(text)
+PY
+
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  version_count="$(grep -cE 'version: "[0-9]' "${TEST_ROOT}/src/constants/release.ts")"
+  open_count="$(grep -c '^  {$' "${TEST_ROOT}/src/constants/release.ts")"
+  close_count="$(grep -c '^  },$' "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$version_count" -eq 100 ]
+  [ "$open_count" -eq "$close_count" ]
+  grep -q '^  version: "nightly",$' "${TEST_ROOT}/src/constants/release.ts"
 }

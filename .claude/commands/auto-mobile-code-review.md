@@ -54,13 +54,21 @@ When reviewing a PR, post findings as **inline review comments** anchored to the
 
 ### Write the comment so a busy author acts on it
 
-The finding can be correct and still land badly if it's a wall of text. Word each inline comment so the author sees the severity, the ask, and the repro without decoding a paragraph:
+The finding can be correct and still land badly if it's a wall of text. Word each inline comment so the author sees the finding, the ask, and the repro without decoding a paragraph:
 
-- **Lead with severity and the ask in the first sentence.** Open with whether it blocks (`Not a blocker, but —` / `Blocking: —`) and what you want changed, *then* trace the evidence. Don't bury the finding under the mechanism.
-- **One-line lede, then the trace.** Keep the opening sentence short; put the `file:line` walk in the sentences that follow. A 60-word sentence with three subordinate clauses is a wall, not a finding.
-- **Cut self-certifying parentheticals.** Drop `(verified by reading code)`, "a concern I checked and dropped", and similar filler — the `file:line` citation *is* your evidence, and these read as defensive. State the conclusion, not that you did the checking.
-- **Put a reproduction recipe on its own line, labeled `Repro:`.** A concrete repro is the most valuable thing in a bug comment — make it visually separable so the author can run it without re-deriving your claim.
+- **Open with a question when it earns its place — otherwise state the finding flat.** A question is right when you genuinely don't understand the code, or when walking the author down your reasoning before you answer it reads better than asserting. When the finding is clear, just say what the bug is in one plain sentence — no `Found a bug`, no severity label. `Nit:` is the only label; reserve it for the genuinely minor.
+- **State the mechanism as the finding, not under it.** One plain sentence — `X does A, so B never happens` — every symbol, file, and flag in backticks, an em-dash for the consequence. Don't bury the finding beneath a paragraph of trace; the mechanism *is* the lede.
+- **Offer a `Suggested change for <reason>` with a ```suggestion block when the fix is a concrete line edit.** Let the author accept or reject it inline instead of re-typing your prose into code.
+- **Keep how-you-verified in the `Evidence` line, not the prose.** Drop `(verified by reading code)`, "a concern I checked and dropped", and similar parentheticals from the comment body — the `file:line` citation is your evidence there, and these read as defensive.
+- **Put a reproduction recipe on its own line, labeled `Repro:`.** This is the `Fix` field's manual device check pulled out for visibility, not a second copy — a concrete repro is the most valuable thing in a bug comment, so make it separable rather than stating it twice.
 - **Keep a minor/acknowledged note short.** If no change is requested, say so in one or two sentences; don't pad it to the length of a real finding.
-- **Use plain severity words in the prose.** The Verdict label carries the taxonomy; the comment body should read as plain English to someone who doesn't know it.
+- **Whether a finding blocks is a plain-prose call layered on the Verdict.** The Verdict enum doesn't encode blocking-ness — a `Confirmed bug` can be non-blocking, a `Partial` can block — so say it in words (`this should block`, `not a blocker`); don't spin up a second label track.
+
+A worked rewrite — the wall first, the same finding second:
+
+> ❌ I looked into this and I believe there may be an issue where the timer scheduled by `scheduleAutoStop` ends up calling `this.stop()` (verified by reading the code), which as far as I can tell finalizes the session but does not appear to remove it from `byHandle`, so this could potentially be a concern.
+>
+> ✅ The auto-stop timer calls `this.stop()`, which finalizes the session but never removes it from `byHandle` — that delete lives only in `stopAndRemove`, which auto-stop doesn't go through, so an auto-stopped session stays registered forever.
+> Repro: set `maxDuration`, never call stop; after the timer fires, `byHandle` still holds the entry.
 
 Close with a one-paragraph **summary verdict** and the single most important thing to verify first. Stay skeptical: a verified "couldn't reproduce" is a more useful result than an unverified bug report.

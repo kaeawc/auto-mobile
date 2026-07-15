@@ -8,14 +8,18 @@
     "src/features/observe/android/index.ts",
     "src/features/observe/interfaces/index.ts",
     "src/features/observe/ios/index.ts",
+    "src/features/screen-stream/index.ts",
     "src/features/snapshot/index.ts",
     "src/features/video/index.ts",
+    "src/features/webrtc/index.ts",
     "src/models/index.ts",
     "src/utils/interfaces/PlanExecutor.ts",
     "src/utils/interfaces/PlanSerializer.ts",
     "src/utils/interfaces/index.ts",
+    "src/utils/ios-cmdline-tools/DeviceAppInspector.ts",
     "src/utils/screenshot-utils.ts",
-    "src/vision/index.ts"
+    "src/vision/index.ts",
+    "test/helpers/test-database.ts"
   ],
   "ignorePathPatterns": [
     "src/daemon/",
@@ -36,6 +40,36 @@
       "file": "src/utils/android-cmdline-tools/avdmanager.ts",
       "name": "COMMON_DEVICES",
       "reason": "Used via namespace import in tests (import * as avdmanager)"
+    },
+    {
+      "file": "src/constants/release.ts",
+      "name": "IOS_CTRL_PROXY_RELEASE_VERSION",
+      "reason": "Auto-generated release constant (DO NOT EDIT MANUALLY); kept for the generated API"
+    },
+    {
+      "file": "src/server/preferenceTools.ts",
+      "name": "setPreferenceToolsDependencies",
+      "reason": "Test-only dependency injection seam (used by test/server/preferenceTools.test.ts)"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "DeviceSessionUpdate",
+      "reason": "Kysely Updateable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "MemoryBaselineUpdate",
+      "reason": "Kysely Updateable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "NewFailureGroup",
+      "reason": "Kysely Insertable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "FailureGroupUpdate",
+      "reason": "Kysely Updateable table type, part of the DB type API surface"
     }
   ]
 }

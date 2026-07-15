@@ -1,0 +1,117 @@
+---
+name: Record Desktop Screenshot Baselines
+
+# Records the desktop-core Compose screenshot baselines on the reference OS
+# (Linux) and opens a PR with the PNGs. Screenshots are pixel-identical only on
+# one OS because font rasterization differs, so baselines cannot be recorded on a
+# developer's macOS/Windows machine and committed — they must be produced here,
+# on the same ubuntu-latest image (and JDK/font stack) that the
+# `desktop-core-unit-tests` job verifies them against. This is a manual,
+# on-demand job: run it from the Actions tab, review the PNGs in the resulting
+# PR, and merge.
+
+"on":
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: "Gradle --tests pattern for the screenshot tests to record"
+        required: true
+        type: string
+        default: "*ComponentScreenshotTest"
+      unpend:
+        description: "Drop `pending = true` from recorded tests so they become active checks"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Serialize record runs so two dispatches can't race to push baseline branches.
+concurrency:
+  group: record-screenshot-baselines
+  cancel-in-progress: false
+
+jobs:
+  record:
+    name: "Record baselines (Linux reference OS)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          # Admin token so the recorded-baselines branch can be pushed and a PR
+          # opened; the PR itself is reviewed by a human (visual artifacts).
+          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+
+      - name: "Record baselines (-Dscreenshot.record=true)"
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":desktop-core:test"
+          # --rerun-tasks forces the tests to actually execute (record mode) even
+          # when Gradle would otherwise consider them up to date.
+          gradle-flags: '["--tests", "${{ inputs.test_filter }}", "-Dscreenshot.record=true", "--rerun-tasks"]'
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Un-pend recorded tests"
+        if: ${{ inputs.unpend }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot/*ScreenshotTest.kt)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No screenshot test files found to un-pend."
+          else
+            scripts/screenshot/unpend_screenshot_tests.sh "${files[@]}"
+          fi
+
+      - name: "Verify baselines pass in normal mode"
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":desktop-core:test"
+          gradle-flags: '["--tests", "${{ inputs.test_filter }}", "--rerun-tasks"]'
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Open PR with recorded baselines"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add android/desktop-core/src/test/resources/screenshots/ \
+                  android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot/
+
+          if git diff --cached --quiet; then
+            echo "::notice::No baseline changes to commit — the committed baselines already match."
+            exit 0
+          fi
+
+          branch="chore/record-screenshot-baselines-${GITHUB_RUN_ID}"
+          git switch -c "$branch"
+          # No [skip ci]: the PR's desktop-core-unit-tests job re-verifies the
+          # recorded baselines on a fresh runner.
+          git commit -m "test(desktop): record screenshot baselines"
+          git push origin "$branch"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "test(desktop): record screenshot baselines" \
+            --body "Automated screenshot baseline recording from the \`Record Desktop Screenshot Baselines\` workflow (run \`${GITHUB_RUN_ID}\`, filter \`${{ inputs.test_filter }}\`).
+
+          Recorded on \`ubuntu-latest\` (the reference OS). **Review the PNGs visually** before merging — they are the source of truth for future screenshot comparisons.
+
+          Baselines verified against the tests in normal mode within the recording job."

@@ -91,9 +91,37 @@ describe("event-all markers daemon arg relay", () => {
       .toEqual(["@", "/", "#"]);
   });
 
+  test("--event-all-markers=<csv> parses into DaemonOptions", () => {
+    expect(parseDaemonArgs(["--event-all-markers=@,/,#"]).eventAllMarkers)
+      .toEqual(["@", "/", "#"]);
+  });
+
   test("trims and drops empties on parse", () => {
     expect(parseDaemonArgs(["--event-all-markers", " @ , / , "]).eventAllMarkers)
       .toEqual(["@", "/"]);
+  });
+
+  test("falls back to AUTOMOBILE_EVENT_ALL_MARKERS", () => {
+    expect(parseDaemonArgs([], { AUTOMOBILE_EVENT_ALL_MARKERS: "@,:" }).eventAllMarkers)
+      .toEqual(["@", ":"]);
+  });
+
+  test("preserves an explicit empty CLI override over AUTOMOBILE_EVENT_ALL_MARKERS", () => {
+    const options = parseDaemonArgs(
+      ["--event-all-markers="],
+      { AUTOMOBILE_EVENT_ALL_MARKERS: "@,:" }
+    );
+    expect(options.eventAllMarkers).toEqual([]);
+    expect(options.eventAllMarkersCliOverride).toBe(true);
+  });
+
+  test("CLI flag wins over AUTOMOBILE_EVENT_ALL_MARKERS", () => {
+    const options = parseDaemonArgs(
+      ["--event-all-markers", "#"],
+      { AUTOMOBILE_EVENT_ALL_MARKERS: "@" }
+    );
+    expect(options.eventAllMarkers).toEqual(["#"]);
+    expect(options.eventAllMarkersCliOverride).toBe(true);
   });
 
   test("ignores missing or flag-shaped values", () => {

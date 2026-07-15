@@ -7,6 +7,7 @@ import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manag
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { TOOL_OUTPUTS_DIR_ENV, TOOL_OUTPUTS_DIR_FLAG } from "../../src/utils/toolOutputArtifacts";
+import { EVENT_ALL_MARKERS_ENV, EVENT_ALL_MARKERS_FLAG } from "../../src/utils/eventAllMarkers";
 
 describe("DaemonManager launch", () => {
   const tempDirs: string[] = [];
@@ -22,6 +23,7 @@ describe("DaemonManager launch", () => {
     process.chdir(originalCwd);
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
     delete process.env.AUTOMOBILE_DATA_DIR;
+    delete process.env[EVENT_ALL_MARKERS_ENV];
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -226,6 +228,101 @@ describe("DaemonManager launch", () => {
 
     expect(capturedArgs).not.toContain(TOOL_OUTPUTS_DIR_FLAG);
     expect(capturedEnv![TOOL_OUTPUTS_DIR_ENV]).toBe(toolOutputsDir);
+  });
+
+  test("serializes explicit empty event-all marker override so daemon env fallback stays disabled", async () => {
+    const stateDir = createTempDir("daemon-launch-state-");
+    process.env.AUTOMOBILE_DATA_DIR = stateDir;
+    process.env[EVENT_ALL_MARKERS_ENV] = "@";
+
+    let capturedArgs: string[] | undefined;
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, args: string[], _options: SpawnOptions) => {
+        capturedArgs = args;
+        return {
+          unref() {},
+          once() { return this; },
+          off() { return this; },
+        } as ChildProcess;
+      }
+    };
+
+    let statusCallCount = 0;
+    class TestDaemonManager extends DaemonManager {
+      override findAllDaemonProcesses(): number[] { return []; }
+      override async status(): Promise<any> {
+        statusCallCount++;
+        return statusCallCount === 1
+          ? { running: false }
+          : { running: true, pid: 1234, port: 31847, socketPath: join(stateDir, "daemon.sock") };
+      }
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      join(stateDir, "daemon.lock"),
+      join(stateDir, "daemon.pid"),
+      join(stateDir, "daemon.sock"),
+      undefined,
+      processSpawner
+    );
+
+    await manager.start({ eventAllMarkers: [], eventAllMarkersCliOverride: true });
+
+    expect(capturedArgs).toContain(`${EVENT_ALL_MARKERS_FLAG}=`);
+    expect(capturedArgs).not.toContain(EVENT_ALL_MARKERS_FLAG);
+  });
+
+  test("does not serialize absent event-all marker config as an empty override", async () => {
+    const stateDir = createTempDir("daemon-launch-state-");
+    process.env.AUTOMOBILE_DATA_DIR = stateDir;
+
+    let capturedArgs: string[] | undefined;
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, args: string[], _options: SpawnOptions) => {
+        capturedArgs = args;
+        return {
+          unref() {},
+          once() { return this; },
+          off() { return this; },
+        } as ChildProcess;
+      }
+    };
+
+    let statusCallCount = 0;
+    class TestDaemonManager extends DaemonManager {
+      override findAllDaemonProcesses(): number[] { return []; }
+      override async status(): Promise<any> {
+        statusCallCount++;
+        return statusCallCount === 1
+          ? { running: false }
+          : { running: true, pid: 1234, port: 31847, socketPath: join(stateDir, "daemon.sock") };
+      }
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      join(stateDir, "daemon.lock"),
+      join(stateDir, "daemon.pid"),
+      join(stateDir, "daemon.sock"),
+      undefined,
+      processSpawner
+    );
+
+    await manager.start({ eventAllMarkers: [] });
+
+    expect(capturedArgs).not.toContain(`${EVENT_ALL_MARKERS_FLAG}=`);
+    expect(capturedArgs).not.toContain(EVENT_ALL_MARKERS_FLAG);
   });
 
   test("resolves relative daemon state paths before changing daemon cwd", async () => {

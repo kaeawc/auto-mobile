@@ -3,6 +3,20 @@ import { firstFlagValue } from "./cliArgs";
 export const EVENT_ALL_MARKERS_FLAG = "--event-all-markers";
 export const EVENT_ALL_MARKERS_ENV = "AUTOMOBILE_EVENT_ALL_MARKERS";
 
+export function hasEventAllMarkersCliOverride(args: string[]): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.startsWith(`${EVENT_ALL_MARKERS_FLAG}=`)) {
+      return true;
+    }
+    if (arg === EVENT_ALL_MARKERS_FLAG) {
+      const value = args[i + 1];
+      return value !== undefined && !value.startsWith("--");
+    }
+  }
+  return false;
+}
+
 /**
  * Split a comma-separated marker string into a normalized marker list.
  * Trims each entry and drops empties so `"@, /, #"` and `"@,/,#"` are equal.

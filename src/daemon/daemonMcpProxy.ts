@@ -207,13 +207,14 @@ export interface ProxiedResourceTemplate {
 
 /**
  * The daemon startup options that change its observable MCP behavior and so must
- * match before a running daemon can be reused: `embeddedSdk` plus every
- * output-reduction flag. A same-build MCP client that requests one of these
- * against an already-running daemon started without it (or vice versa) would
- * otherwise silently get the wrong tool-output contract until a manual restart
- * (issue #2759 — the `toolResultsNoStructuredContent` case). The output-reduction
- * fields are derived from `OUTPUT_REDUCTION_FLAG_SPECS` (whose `field` names map
- * 1:1 to `DaemonOptions`) so a new flag is covered automatically.
+ * match before a running daemon can be reused: `embeddedSdk`, marker-based
+ * eventAll promotion config, plus every output-reduction flag. A same-build MCP
+ * client that requests one of these against an already-running daemon started
+ * without it (or vice versa) would otherwise silently get the wrong tool-output
+ * or inputText behavior until a manual restart (issue #2759 — the
+ * `toolResultsNoStructuredContent` case). The output-reduction fields are
+ * derived from `OUTPUT_REDUCTION_FLAG_SPECS` (whose `field` names map 1:1 to
+ * `DaemonOptions`) so a new flag is covered automatically.
  */
 const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "embeddedSdk",
@@ -233,6 +234,10 @@ function stringOption(
   return typeof value === "string" ? value : undefined;
 }
 
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 /**
  * Reuse-critical startup options the connecting client *explicitly requests*
  * that the running daemon lacks. Reconciliation is **one-directional** (issue
@@ -240,9 +245,10 @@ function stringOption(
  * the daemon already has is never reported as a deficit just because a
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
  * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
- * read as "no opinion"; strings count only when the client supplies one that
- * differs from the daemon's. Returns a human-readable list (empty when the
- * daemon already satisfies every requested flag) for logging and error messages.
+ * read as "no opinion"; strings and marker arrays count only when the client
+ * supplies one that differs from the daemon's. Returns a human-readable list
+ * (empty when the daemon already satisfies every requested flag) for logging and
+ * error messages.
  */
 function startupOptionDeficits(
   requested: DaemonOptions | undefined,
@@ -261,6 +267,15 @@ function startupOptionDeficits(
     const have = stringOption(running, key);
     if (want !== undefined && want !== have) {
       deficits.push(`${key} (requested=${want}, running=${have ?? "unset"})`);
+    }
+  }
+  const requestedEventAllMarkers = requested?.eventAllMarkers;
+  if (requestedEventAllMarkers !== undefined) {
+    const runningEventAllMarkers = running?.eventAllMarkers ?? [];
+    if (!arraysEqual(requestedEventAllMarkers, runningEventAllMarkers)) {
+      deficits.push(
+        `eventAllMarkers (requested=${JSON.stringify(requestedEventAllMarkers)}, running=${JSON.stringify(runningEventAllMarkers)})`
+      );
     }
   }
   return deficits;

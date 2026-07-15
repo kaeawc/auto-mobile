@@ -8,7 +8,7 @@ import {
   stopWebRtcStream,
 } from "../../src/server/webrtcStreamManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
-import type { BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
 import type {
   AndroidH264Source,
   WebRtcPublisher,
@@ -95,6 +95,9 @@ function installFakes() {
       sources.push(source);
       return source as unknown as AndroidH264Source;
     },
+    // Hermetic: never resolve the real jar (which could attempt a GitHub
+    // download once the registry carries a videoJarSha256).
+    resolveVideoJar: async () => null,
     now: () => new Date("2026-07-11T00:00:00.000Z"),
   });
   return { publishers, sources };
@@ -197,6 +200,7 @@ describe("webrtcStreamManager", () => {
         sources.push(source);
         return source as unknown as AndroidH264Source;
       },
+      resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
 
@@ -226,6 +230,7 @@ describe("webrtcStreamManager", () => {
         sources.push(source);
         return source as unknown as AndroidH264Source;
       },
+      resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
 
@@ -245,5 +250,70 @@ describe("webrtcStreamManager", () => {
       overrides: { whipEndpoint: ENDPOINT },
     });
     expect(descriptor.streamId).toBe("ci-run-42");
+  });
+
+  // --- #3836: async jar resolution wiring ---
+
+  test("resolves the jar once at stream start and threads the path into createSource", async () => {
+    let resolveCalls = 0;
+    const jarPaths: (string | null)[] = [];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: (_options, jarPath) => {
+        jarPaths.push(jarPath);
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => {
+        resolveCalls++;
+        return "/verified/automobile-video.jar";
+      },
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+
+    expect(resolveCalls).toBe(1);
+    expect(jarPaths).toEqual(["/verified/automobile-video.jar"]);
+  });
+
+  test("degrade (null) proceeds and passes null (screenrecord) to createSource", async () => {
+    const jarPaths: (string | null)[] = [];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: (_options, jarPath) => {
+        jarPaths.push(jarPath);
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const descriptor = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    expect(descriptor.streamId).toBeDefined();
+    expect(jarPaths).toEqual([null]);
+  });
+
+  test("a fatal jar fail-mode aborts stream start before any publisher/stream is created", async () => {
+    let publisherCreated = 0;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        publisherCreated++;
+        return new FakePublisher(config, deps) as unknown as WebRtcPublisher;
+      },
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: async () => {
+        throw new ActionableError("video-server jar checksum verification failed");
+      },
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await expect(
+      startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } })
+    ).rejects.toThrow(/checksum verification failed/);
+    expect(publisherCreated).toBe(0);
+    expect(listWebRtcStreams()).toHaveLength(0);
   });
 });

@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
   createH264CaptureSource,
+  resolveVideoServerJar,
   WebRtcPublisher,
   resolveWebRtcStreamingConfig,
   type H264CaptureSource,
@@ -24,6 +25,8 @@ interface WebRtcStreamRecord {
   device: BootedDevice;
   publisher: WebRtcPublisher;
   source: H264CaptureSource | null;
+  /** Persistent-encoder jar resolved once at stream start; null → screenrecord. */
+  jarPath: string | null;
   bitrateBps?: number;
   size?: { width: number; height: number };
   startedAt: string;
@@ -32,14 +35,23 @@ interface WebRtcStreamRecord {
 export interface WebRtcStreamManagerDependencies {
   idGenerator: IdGenerator;
   createPublisher: (config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps) => WebRtcPublisher;
-  createSource: (options: H264CaptureSourceOptions) => H264CaptureSource;
+  createSource: (options: H264CaptureSourceOptions, jarPath: string | null) => H264CaptureSource;
+  /**
+   * Resolve the Android persistent-encoder jar once, off the frame path. Returns
+   * the verified path, or null to degrade to screenrecord; throws on a fatal
+   * fail-mode (checksum mismatch, or REQUIRE with nothing available). Non-Android
+   * devices resolve to null.
+   */
+  resolveVideoJar: (device: BootedDevice) => Promise<string | null>;
   now: () => Date;
 }
 
 const defaultDependencies: WebRtcStreamManagerDependencies = {
   idGenerator: defaultIdGenerator,
   createPublisher: (config, deps) => new WebRtcPublisher(config, deps),
-  createSource: options => createH264CaptureSource(options),
+  createSource: (options, jarPath) => createH264CaptureSource(options, jarPath),
+  resolveVideoJar: device =>
+    device.platform === "android" ? resolveVideoServerJar() : Promise.resolve(null),
   now: () => new Date(),
 };
 
@@ -105,15 +117,18 @@ async function startSource(record: WebRtcStreamRecord): Promise<void> {
   if (streams.get(record.streamId) !== record) {
     return;
   }
-  const source = dependencies.createSource({
-    device: record.device,
-    onData: chunk => record.publisher.writeH264Chunk(chunk),
-    onError: () => {
-      record.publisher.notifySourceFailed();
+  const source = dependencies.createSource(
+    {
+      device: record.device,
+      onData: chunk => record.publisher.writeH264Chunk(chunk),
+      onError: () => {
+        record.publisher.notifySourceFailed();
+      },
+      bitrateBps: record.bitrateBps,
+      size: record.size,
     },
-    bitrateBps: record.bitrateBps,
-    size: record.size,
-  });
+    record.jarPath
+  );
   record.source = source;
   await source.start();
   // The stream may have been stopped while the source was starting. stop() only
@@ -154,6 +169,14 @@ export async function startWebRtcStream(
 
   const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
 
+  // Resolve the persistent-encoder jar ONCE, before establishing the WHIP
+  // session — a fatal fail-mode (checksum mismatch, or REQUIRE with nothing
+  // available) must abort the stream start with its ActionableError rather than
+  // surfacing mid-capture. The download resolves here, off the per-frame path;
+  // startSource() only constructs the (synchronous) capture source. A degrade
+  // returns null → screenrecord.
+  const jarPath = await dependencies.resolveVideoJar(request.device);
+
   // The publisher's lifecycle hooks resolve the record by id (rather than
   // closing over it) so the record can be constructed with the publisher in one
   // shot. The hooks only run during publisher.start() (below), after the record
@@ -177,6 +200,7 @@ export async function startWebRtcStream(
     device: request.device,
     publisher,
     source: null,
+    jarPath,
     bitrateBps,
     size: config.size,
     startedAt: dependencies.now().toISOString(),

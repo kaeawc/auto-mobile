@@ -5,20 +5,17 @@ import {
   PersistentEncoderH264Source,
   type PersistentEncoderH264SourceOptions,
 } from "./PersistentEncoderH264Source";
-import { resolveVideoServerJarPath } from "./videoServerJar";
 
 /**
  * Injectable seams for {@link createAndroidH264CaptureSource} so the selection
  * and fallback behavior can be unit-tested without a device.
  */
 export interface AndroidH264CaptureSourceDeps {
-  resolveJarPath: (env?: NodeJS.ProcessEnv, cwd?: string) => string | null;
   createPersistent: (options: PersistentEncoderH264SourceOptions) => H264CaptureSource;
   createScreenrecord: (options: AndroidH264SourceOptions) => H264CaptureSource;
 }
 
 const defaultDeps: AndroidH264CaptureSourceDeps = {
-  resolveJarPath: resolveVideoServerJarPath,
   createPersistent: options => new PersistentEncoderH264Source(options),
   createScreenrecord: options => new AndroidH264Source(options),
 };
@@ -61,16 +58,19 @@ class FallbackH264CaptureSource implements H264CaptureSource {
 }
 
 /**
- * Build the WebRTC capture source for an Android device. When the persistent
- * encoder jar is resolvable it is preferred (no ~175s rotation seam), with an
- * automatic fallback to `screenrecord`; otherwise `screenrecord` is used
- * directly.
+ * Build the WebRTC capture source for an Android device from a PRE-RESOLVED jar
+ * path. Resolution (override → cached/downloaded → local build → null, with the
+ * download off the frame path) happens once at stream start in
+ * `webrtcStreamManager`; this factory stays synchronous and pure. When a jar
+ * path is provided the persistent encoder is preferred (no ~175s rotation seam),
+ * with an automatic fallback to `screenrecord`; a `null` path uses
+ * `screenrecord` directly.
  */
 export function createAndroidH264CaptureSource(
   options: AndroidH264SourceOptions,
+  jarPath: string | null,
   deps: AndroidH264CaptureSourceDeps = defaultDeps
 ): H264CaptureSource {
-  const jarPath = deps.resolveJarPath();
   if (!jarPath) {
     return deps.createScreenrecord(options);
   }

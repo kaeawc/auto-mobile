@@ -18,16 +18,16 @@ const IOS: BootedDevice = {
 } as BootedDevice;
 
 describe("createH264CaptureSource", () => {
-  test("routes Android devices to the Android source path", () => {
-    const source = createH264CaptureSource({ device: ANDROID, onData: () => {} });
+  test("routes Android devices to the Android source path (null jar → screenrecord)", () => {
+    const source = createH264CaptureSource({ device: ANDROID, onData: () => {} }, null);
 
     expect(source).not.toBeInstanceOf(IosH264Source);
     expect(typeof source.start).toBe("function");
     expect(typeof source.stop).toBe("function");
   });
 
-  test("routes iOS devices to the iOS source path", () => {
-    const source = createH264CaptureSource({ device: IOS, onData: () => {} });
+  test("routes iOS devices to the iOS source path (jar path ignored)", () => {
+    const source = createH264CaptureSource({ device: IOS, onData: () => {} }, "/tmp/automobile-video.jar");
 
     expect(source).toBeInstanceOf(IosH264Source);
   });

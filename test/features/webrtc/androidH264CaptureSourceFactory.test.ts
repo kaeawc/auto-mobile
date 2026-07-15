@@ -36,7 +36,6 @@ function makeDeps(overrides: Partial<AndroidH264CaptureSourceDeps>): {
   const persistent = new FakeSource();
   const screenrecord = new FakeSource();
   const deps: AndroidH264CaptureSourceDeps = {
-    resolveJarPath: () => "/tmp/automobile-video.jar",
     createPersistent: () => persistent,
     createScreenrecord: () => screenrecord,
     ...overrides,
@@ -45,17 +44,17 @@ function makeDeps(overrides: Partial<AndroidH264CaptureSourceDeps>): {
 }
 
 describe("createAndroidH264CaptureSource", () => {
-  test("uses screenrecord directly when no jar is resolvable", async () => {
-    const { deps, persistent, screenrecord } = makeDeps({ resolveJarPath: () => null });
-    const source = createAndroidH264CaptureSource(baseOptions(), deps);
+  test("uses screenrecord directly when the resolved jar path is null", async () => {
+    const { deps, persistent, screenrecord } = makeDeps({});
+    const source = createAndroidH264CaptureSource(baseOptions(), null, deps);
     await source.start();
     expect(screenrecord.started).toBe(1);
     expect(persistent.started).toBe(0);
   });
 
-  test("prefers the persistent encoder when the jar is available", async () => {
+  test("prefers the persistent encoder when a jar path is provided", async () => {
     const { deps, persistent, screenrecord } = makeDeps({});
-    const source = createAndroidH264CaptureSource(baseOptions(), deps);
+    const source = createAndroidH264CaptureSource(baseOptions(), "/tmp/automobile-video.jar", deps);
     await source.start();
     expect(persistent.started).toBe(1);
     expect(screenrecord.started).toBe(0);
@@ -69,11 +68,10 @@ describe("createAndroidH264CaptureSource", () => {
     const persistent = new FakeSource(() => Promise.reject(new Error("app_process killed")));
     const screenrecord = new FakeSource();
     const deps: AndroidH264CaptureSourceDeps = {
-      resolveJarPath: () => "/tmp/automobile-video.jar",
       createPersistent: () => persistent,
       createScreenrecord: () => screenrecord,
     };
-    const source = createAndroidH264CaptureSource(baseOptions(), deps);
+    const source = createAndroidH264CaptureSource(baseOptions(), "/tmp/automobile-video.jar", deps);
     await source.start();
 
     expect(persistent.started).toBe(1);
@@ -85,17 +83,16 @@ describe("createAndroidH264CaptureSource", () => {
     expect(persistent.stopped).toBe(0);
   });
 
-  test("passes the resolved jar path to the persistent source", () => {
+  test("passes the provided jar path to the persistent source", () => {
     let capturedJar: string | undefined;
     const deps: AndroidH264CaptureSourceDeps = {
-      resolveJarPath: () => "/custom/video.jar",
       createPersistent: options => {
         capturedJar = options.jarPath;
         return new FakeSource();
       },
       createScreenrecord: () => new FakeSource(),
     };
-    createAndroidH264CaptureSource(baseOptions(), deps);
+    createAndroidH264CaptureSource(baseOptions(), "/custom/video.jar", deps);
     expect(capturedJar).toBe("/custom/video.jar");
   });
 });

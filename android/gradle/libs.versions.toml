@@ -11,7 +11,7 @@ build-android-targetSdk = "36"             # Used in playground Android modules
 build-android-agp = "9.2.1"
 
 # Kotlin versions
-build-kotlin = "2.4.0"
+build-kotlin = "2.4.10"
 build-kotlin-language = "2.3"              # Used in all Kotlin modules
 build-kotlin-consumer = "2.2.21"           # Published runner/test-plan consumer floor
 build-kotlin-consumer-api = "2.2"          # API surface supported by older Kotlin consumers

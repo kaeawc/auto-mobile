@@ -10,6 +10,7 @@ import type { ObserveResult, ViewHierarchyResult } from "../models";
 import type { StorageChangedEvent } from "../features/storage/storageTypes";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
+import { annotateHierarchyDiff, type HierarchyDiffSummary } from "./hierarchyStreamDiff";
 
 /**
  * Navigation graph summary for streaming to IDE plugins.
@@ -89,6 +90,8 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
   navigationGraph?: NavigationGraphStreamData;
   performanceData?: PerformanceStreamData;
   storageEvent?: StorageChangedEvent;
+  /** Per-frame hierarchy diff summary (present on hierarchy_update messages). */
+  hierarchyDiff?: HierarchyDiffSummary;
 }
 
 /**
@@ -184,6 +187,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
 
+  // Previous hierarchy per device, used to compute the per-frame diff annotation
+  // pushed on hierarchy_update. Cleared on device connection loss so a reconnect
+  // starts from a clean baseline instead of diffing against a stale pre-drop tree.
+  private previousHierarchyByDevice = new Map<string, ViewHierarchyResult>();
+
   constructor(socketPath: string = getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "DeviceDataStream");
   }
@@ -232,11 +240,30 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Push a hierarchy update to all subscribers interested in this device.
    */
   pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult): void {
+    // Skip the diff clone+walk when nobody is listening (the layout inspector is
+    // usually closed): the frame would reach zero subscribers anyway. Drop the
+    // baseline too so a later re-subscribe diffs from a fresh frame, not a tree
+    // captured while it was away.
+    if (!this.hasSubscriberForDevice(deviceId)) {
+      this.previousHierarchyByDevice.delete(deviceId);
+      return;
+    }
+
+    // Annotate the frame with its per-node diff versus the last frame for this
+    // device (added/changed nodes carry a `diffState` attribute; a summary rides
+    // the message). The input is cloned, so the annotated copy pushed to clients
+    // never mutates the caller's hierarchy; the un-annotated original is retained
+    // as the next baseline.
+    const previous = this.previousHierarchyByDevice.get(deviceId) ?? null;
+    const { hierarchy: annotated, summary } = annotateHierarchyDiff(previous, hierarchy);
+    this.previousHierarchyByDevice.set(deviceId, hierarchy);
+
     const message: DeviceDataStreamMessage = {
       type: "hierarchy_update",
       deviceId,
       timestamp: hierarchy.updatedAt ?? this.timer.now(),
-      data: hierarchy,
+      data: annotated,
+      hierarchyDiff: summary,
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
@@ -437,6 +464,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Notify subscribers that the underlying device control connection was lost.
    */
   onDeviceConnectionLost(deviceId: string): void {
+    // Drop the diff baseline: the next hierarchy after a reconnect is a fresh
+    // full frame, not a delta from the tree captured before the connection dropped.
+    this.previousHierarchyByDevice.delete(deviceId);
+
     const message: DeviceDataStreamMessage = {
       type: "error",
       success: false,

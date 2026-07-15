@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.desktop.core.layout
 
 typealias UIElementInfo = dev.jasonpearson.automobile.desktop.domain.UIElementInfo
 
+typealias NodeDiffState = dev.jasonpearson.automobile.desktop.domain.NodeDiffState
+
 typealias ElementBounds = dev.jasonpearson.automobile.desktop.domain.ElementBounds
 
 typealias ScreenshotFrame = dev.jasonpearson.automobile.desktop.domain.ScreenshotFrame

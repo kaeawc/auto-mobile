@@ -45,10 +45,10 @@ Review a change — a PR (`$ARGUMENTS` = its number) or, with no argument, the c
 
 ## Output
 
-For **each** finding:
-- **Verdict** — one of: `Confirmed bug` · `Correctly fixes` · `Partial` · `Risky (regression / false-negative)` · `Already fixed on main` · `False positive (couldn't reproduce)`.
-- **Evidence** — `file:line` + how you verified (reproduced / read code / checked main / `git blame`).
-- **Fix** — prefer a named existing helper/convention; the manual device check to confirm it; and any regression or false-negative the change risks.
+For **each** finding, cover three things in plain prose:
+- your read on the change — is it a real bug, does the fix hold, are you confident or only suspicious;
+- where it is — `file:line`, and how you checked (reproduced, read the code, checked main, `git blame`);
+- how to fix it — a named existing helper/convention where one fits, the manual device check that would confirm it, and any regression or false-negative the change risks.
 
 When reviewing a PR, post findings as **inline review comments** anchored to the changed line (`gh api repos/<owner>/<repo>/pulls/<n>/reviews` with a `comments[]` array, `event: COMMENT`), with a short summary body — not one monolithic comment.
 
@@ -60,15 +60,16 @@ The finding can be correct and still land badly if it's a wall of text. Word eac
 - **State the mechanism as the finding, not under it.** One plain sentence — `X does A, so B never happens` — every symbol, file, and flag in backticks, an em-dash for the consequence. Don't bury the finding beneath a paragraph of trace; the mechanism *is* the lede.
 - **Offer a `Suggested change for <reason>` with a ```suggestion block when the fix is a concrete line edit.** Let the author accept or reject it inline instead of re-typing your prose into code.
 - **Skip the `Verdict:`/`Evidence:`/`Fix:` labels and the enum verbatim in the posted comment.** That structure is a checklist of what to cover — your read on the change, where it is, how to fix it — not a template to stamp into GitHub. Write it as ordinary prose, loose with wording and capitalization; `this basically double-frees the handle` beats `**Verdict:** Confirmed bug`. Drop how-you-verified parentheticals (`(verified by reading code)`, "a concern I checked and dropped") — the `file:line` citation carries that, and they read as defensive.
-- **Put a reproduction recipe on its own line, labeled `Repro:`.** This is the `Fix` field's manual device check pulled out for visibility, not a second copy — a concrete repro is the most valuable thing in a bug comment, so make it separable rather than stating it twice.
-- **Keep a minor/acknowledged note short.** If no change is requested, say so in one or two sentences; don't pad it to the length of a real finding.
-- **Whether a finding blocks is a plain-prose call layered on the Verdict.** The Verdict enum doesn't encode blocking-ness — a `Confirmed bug` can be non-blocking, a `Partial` can block — so say it in words (`this should block`, `not a blocker`); don't spin up a second label track.
+- **Put the reproduction on its own line.** A concrete repro is the most valuable thing in a bug comment — make it separable so the author can run it without re-deriving your claim.
+- **Keep every comment tight.** Say the thing in as few words as it takes; don't re-enumerate findings or restate the diff — the reader can find and read them.
+- **Say whether it blocks in plain words.** `this should block` or `not a blocker`, as a normal clause in the finding — don't spin up a label or severity track for it.
+- **If a thread's already been addressed, resolve it — don't write a comment.** A resolved thread already says "done"; a new comment saying so is noise.
 
 A worked rewrite — the wall first, the same finding second:
 
 > ❌ I looked into this and I believe there may be an issue where the timer scheduled by `scheduleAutoStop` ends up calling `this.stop()` (verified by reading the code), which as far as I can tell finalizes the session but does not appear to remove it from `byHandle`, so this could potentially be a concern.
 >
 > ✅ The auto-stop timer calls `this.stop()`, which finalizes the session but never removes it from `byHandle` — that delete lives only in `stopAndRemove`, which auto-stop doesn't go through, so an auto-stopped session stays registered forever.
-> Repro: set `maxDuration`, never call stop; after the timer fires, `byHandle` still holds the entry.
+> Set `maxDuration`, never call stop — after the timer fires, `byHandle` still holds the entry.
 
 Close with a one-paragraph **summary verdict** and the single most important thing to verify first. Stay skeptical: a verified "couldn't reproduce" is a more useful result than an unverified bug report.

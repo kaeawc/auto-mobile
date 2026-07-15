@@ -28,6 +28,14 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   maxDurationSeconds?: number;
   /** Quality/config overrides forwarded to every segment's recording. */
   configOverrides?: VideoRecordingConfigInput;
+  /**
+   * Invoked exactly once when the session finalizes (via {@link stop}), whether that
+   * stop was caller-driven or the {@link maxDurationSeconds} auto-stop. Lets the owning
+   * registry drop the session so an auto-stopped, never-caller-stopped recording does
+   * not leak a tracked entry. The session does not know its own registry handle, so the
+   * hook removes by session identity.
+   */
+  onFinalized?: () => void;
   startVideoRecording?: (
     request: Parameters<typeof defaultStartVideoRecording>[0]
   ) => Promise<ActiveVideoRecording>;
@@ -70,6 +78,11 @@ export class AndroidSegmentedPlanVideoSession {
   /** True while a timer-driven session is running, so rotations keep rescheduling. */
   private timerDriven = false;
 
+  private readonly onFinalized: (() => void) | undefined;
+
+  /** Guards {@link onFinalized} so a second (no-op) {@link stop} does not re-notify. */
+  private finalizedNotified = false;
+
   /** Tracks the most recent in-flight rotation so {@link stop} can await it. */
   private pendingRotation: Promise<void> = Promise.resolve();
 
@@ -96,6 +109,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.segmentRotateAfterMs = options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
     this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
+    this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
   }
@@ -174,7 +188,18 @@ export class AndroidSegmentedPlanVideoSession {
       this.maxDurationTimerHandle = undefined;
     }
     await this.pendingRotation;
-    return this.finalize();
+    const result = await this.finalize();
+    this.notifyFinalized();
+    return result;
+  }
+
+  /** Fires {@link onFinalized} at most once, so callers can drop the session from any registry. */
+  private notifyFinalized(): void {
+    if (this.finalizedNotified) {
+      return;
+    }
+    this.finalizedNotified = true;
+    this.onFinalized?.();
   }
 
   /**

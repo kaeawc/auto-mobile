@@ -301,6 +301,78 @@ describe("videoRecording tool segmentation branch", () => {
     expect(segmentStarts).toHaveLength(segmentStartsBefore);
   });
 
+  test("maxDuration auto-stop removes the session so a later bare stop reports only fresh segments", async () => {
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async request => {
+        const outputName = request.outputName;
+        const recordingId = outputName ?? `segment-${segmentStarts.length}`;
+        segmentStarts.push(recordingId);
+        return makeSegmentRecording(recordingId, outputName);
+      },
+      stopVideoRecording: async recordingId => {
+        const id = recordingId ?? `segment-${segmentStops.length}`;
+        segmentStops.push(id);
+        return {
+          metadata: makeSegmentMetadata(id),
+          evictedRecordingIds: [],
+        };
+      },
+    });
+
+    // Fire-and-forget usage: start a segmented recording with a maxDuration bound and
+    // never call stop. The session-level auto-stop must fire AND clean itself out of the
+    // registry — otherwise the dead entry leaks and its stale segments resurface later.
+    await handler()(androidDevice, {
+      action: "start",
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      maxDuration: 181,
+      outputName: "first",
+    });
+    expect(segmentTimer.getPendingTimeoutCount()).toBe(2);
+
+    // The segmented session now owns its lifecycle; don't let a late finalize rebuild the
+    // real manager/database singleton.
+    resetVideoRecordingManagerDependencies();
+
+    // Advance past the maxDuration bound (rotation at 170s, then auto-stop at 181s).
+    segmentTimer.advanceTime(181_000);
+    await waitFor(
+      async () => segmentStops.length === 2,
+      "auto-stop to finalize both segments of the first session"
+    );
+    await flush();
+
+    // Auto-stop cleared the session's timers and removed it from the registry.
+    expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
+
+    // A new recording starts on the SAME device (the QA runner's next test case).
+    await handler()(androidDevice, {
+      action: "start",
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      maxDuration: 300,
+      outputName: "second",
+    });
+
+    // Bare (by-device) stop: with the leak fixed, forDevice() sees only the new session,
+    // so the response lists only the fresh segment — never the auto-stopped first session's.
+    const stopRes = parse(
+      await handler()(androidDevice, {
+        action: "stop",
+        platform: "android",
+        // NO recordingId — bare, by-device stop.
+      })
+    );
+
+    const segments = stopRes.recordings as Array<Record<string, unknown>>;
+    expect(segments.length).toBe(1);
+    expect(segments[0].recordingId).toBe("second");
+    expect(
+      segments.some(segment => String(segment.filePath).includes("first"))
+    ).toBe(false);
+  });
+
   test("by-handle stop still works after wiring the bare-stop path", async () => {
     const startRes = parse(
       await handler()(androidDevice, {

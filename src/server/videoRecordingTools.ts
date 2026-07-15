@@ -64,6 +64,18 @@ const segmentedSessions = (() => {
       return [...byHandle.entries()].filter(([, session]) => session.deviceId === deviceId);
     },
     /**
+     * Drop a session from the registry by identity (its handle is not known inside the
+     * session). Wired to the session's `onFinalized` hook so an auto-stopped,
+     * never-caller-stopped recording cleans up instead of leaking a tracked entry.
+     */
+    remove(session: AndroidSegmentedPlanVideoSession): void {
+      for (const [handle, tracked] of byHandle) {
+        if (tracked === session) {
+          byHandle.delete(handle);
+        }
+      }
+    },
+    /**
      * Stop a tracked session: remove it from the registry, finalize it (which clears
      * its rotation timer), and return the ordered segment recordingId/filePath pairs.
      */
@@ -319,12 +331,15 @@ export function registerVideoRecordingTools(): void {
             target.platform === "android" &&
             maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS
           ) {
-            const session = new AndroidSegmentedPlanVideoSession({
+            const session: AndroidSegmentedPlanVideoSession = new AndroidSegmentedPlanVideoSession({
               device: target,
               outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
               configOverrides: buildConfigOverrides(args),
               timer: segmentedSessions.timer,
               maxDurationSeconds,
+              // Auto-stop finalizes without going through stopAndRemove, so drop the
+              // tracked entry here to avoid a registry leak on fire-and-forget recordings.
+              onFinalized: () => segmentedSessions.remove(session),
               ...segmentedSessions.recordingDependencies,
             });
             const active = await session.start();

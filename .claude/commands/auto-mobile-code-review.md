@@ -8,6 +8,15 @@ argument-hint: [PR number (optional; default = current branch diff vs origin/mai
 
 Review a change — a PR (`$ARGUMENTS` = its number) or, with no argument, the current branch's diff vs `origin/main` — for correctness, regressions, and fit with AutoMobile's architecture and conventions. The deliverable is a **verified, actionable** review: fewer findings, each grounded and checked, beats a long list of plausible-but-unverified concerns.
 
+## What a review is for
+
+The verification discipline below is the floor, not the point. Automation and planning should be catching defects; spend the review on what they can't — understanding the change and helping the author. Approach it with curiosity, not correction:
+
+- **Read for the author's intent first.** Work out what they were solving and how they weighed the alternatives before you judge the code — the comment should show you got it. Tie the change back to the issue/story it serves and review against *that*, not the diff in isolation.
+- **A question often beats an assertion.** "What ruled out reusing `X` here?" surfaces more than "use `X`" — and sometimes the answer is that you missed something. Lead with the question when you're genuinely unsure.
+- **Name what's genuinely good, briefly.** A real simplification, the correct hard call, clear product value — say so in a sentence. Recognition is signal; skip it when it isn't earned, and never manufacture it.
+- **The findings still have to be verified.** None of this softens the bar below: ground every finding, reproduce before asserting, and deliver a few checked findings over many plausible ones.
+
 ## Scope the diff
 
 - `git fetch origin main` first — always review against **latest main**, not a stale base.

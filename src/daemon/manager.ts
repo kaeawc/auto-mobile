@@ -749,6 +749,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.noWaitForPollingOverhead) {
       args.push("--no-waitfor-polling-overhead");
     }
+    if (options.noOcclusion) {
+      args.push("--no-occlusion");
+    }
     if (options.memPerfAudit) {
       args.push("--mem-perf-audit");
     }
@@ -1246,6 +1249,8 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.noNavigationScreenshots = true;
     } else if (args[i] === "--no-waitfor-polling-overhead") {
       options.noWaitForPollingOverhead = true;
+    } else if (args[i] === "--no-occlusion") {
+      options.noOcclusion = true;
     } else if (args[i] === "--mem-perf-audit") {
       options.memPerfAudit = true;
     } else if (args[i] === "--accessibility-audit") {

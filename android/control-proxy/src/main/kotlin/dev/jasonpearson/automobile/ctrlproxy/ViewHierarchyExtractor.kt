@@ -31,7 +31,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     private const val TAG = "ViewHierarchyExtractor"
     private const val MAX_DEPTH = 100 // Prevent infinite recursion
     private const val MAX_CHILDREN = 256 // Limit children to prevent memory issues
-    private const val OCCLUSION_FILTER_ENABLED = true
     private const val OCCLUSION_THRESHOLD = 0.95
     private const val DEFAULT_WINDOW_KEY = -1
     private const val CONTENT_HIDDEN_REASON_COMPOSE_INTEROP = "compose-interop-no-hide-descendants"
@@ -158,6 +157,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
    * @param disableAllFiltering When true, disable all optimizations and filtering (for observe with
    *   raw:true)
+   * @param occlusionEnabled When false, skip the cross-window occlusion pass entirely — no occluder
+   *   loop, no occlusionState/occludedBy/occludedByViewId fields (daemon's --no-occlusion flag,
+   *   default true)
    */
   fun extractFromAllWindows(
     windows: List<AccessibilityWindowInfo>,
@@ -166,6 +168,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     screenDimensions: ScreenDimensions? = null,
     dedupeTextContentDesc: Boolean = true,
     disableAllFiltering: Boolean = false,
+    occlusionEnabled: Boolean = true,
   ): ViewHierarchy {
     if (windows.isEmpty() && activeWindowRoot == null) {
       Log.w(TAG, "No windows available for extraction")
@@ -369,10 +372,19 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
     }
 
-    // Skip occlusion filtering when disabled, or when there's only one window
-    // (within-window "occlusion" between peer subtrees like notification_panel and
-    // keyguard_message_area_container incorrectly strips content in system UI)
-    if (!disableAllFiltering && OCCLUSION_FILTER_ENABLED && windowEntries.size > 1) {
+    // Skip occlusion filtering when disabled (disableAllFiltering or the --no-occlusion
+    // daemon flag), or when there's only one window (within-window "occlusion" between peer
+    // subtrees like notification_panel and keyguard_message_area_container incorrectly strips
+    // content in system UI)
+    val occlusionFilteringActive =
+      isOcclusionFilteringActive(disableAllFiltering, occlusionEnabled, windowEntries.size)
+    Log.d(
+      TAG,
+      "Occlusion filtering active: $occlusionFilteringActive " +
+        "(disableAllFiltering=$disableAllFiltering, occlusionEnabled=$occlusionEnabled, " +
+        "windowCount=${windowEntries.size})",
+    )
+    if (occlusionFilteringActive) {
       val occlusionInfo = buildOcclusionInfo(windowEntries)
       val filteredEntries = windowEntries.mapNotNull { windowEntry ->
         val hierarchy =
@@ -1510,6 +1522,17 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   // applyOcclusionFilteringSingleWindow removed: within-window occlusion filtering is disabled
   // because optimizeHierarchy restructures the tree in ways that break path-based relationship
   // detection, causing false occlusion between visual siblings at different depths.
+
+  /**
+   * Whether the cross-window occlusion pass (buildOcclusionInfo + filterOccludedHierarchy) should
+   * run for this extraction. `internal` so it's directly unit-testable without needing to stand up
+   * a full multi-window AccessibilityNodeInfo tree.
+   */
+  internal fun isOcclusionFilteringActive(
+    disableAllFiltering: Boolean,
+    occlusionEnabled: Boolean,
+    windowCount: Int,
+  ): Boolean = !disableAllFiltering && occlusionEnabled && windowCount > 1
 
   private fun buildOcclusionInfo(windowEntries: List<WindowEntry>): Map<NodeKey, OcclusionInfo> {
     val nodes = mutableListOf<OcclusionNode>()

@@ -283,8 +283,8 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
 
   test("set_accessibility_flags — no requestId on the wire", () => {
     expect(serializeCtrlProxyRequest(ctrlProxyRequests.setAccessibilityFlags({
-      includeNotImportantViews: true, reportViewIds: false, retrieveInteractiveWindows: true,
-    }))).toBe('{"type":"set_accessibility_flags","includeNotImportantViews":true,"reportViewIds":false,"retrieveInteractiveWindows":true}');
+      includeNotImportantViews: true, reportViewIds: false, retrieveInteractiveWindows: true, occlusionEnabled: false,
+    }))).toBe('{"type":"set_accessibility_flags","includeNotImportantViews":true,"reportViewIds":false,"retrieveInteractiveWindows":true,"occlusionEnabled":false}');
   });
 
   test("set_network_mock_rules — no requestId, rules array passed through", () => {

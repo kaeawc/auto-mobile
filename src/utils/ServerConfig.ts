@@ -34,6 +34,7 @@ class ServerConfig {
   private _a11yIncludeNotImportantViews: boolean = true;
   private _a11yReportViewIds: boolean = true;
   private _a11yRetrieveInteractiveWindows: boolean = true;
+  private _occlusionEnabled: boolean = true;
   private _planExecutionActive: boolean = false;
   private _observeResultDropElements: boolean = false;
   private _observeResultCompact: boolean = false;
@@ -208,11 +209,16 @@ class ServerConfig {
     this._a11yRetrieveInteractiveWindows = enabled;
   }
 
-  getAccessibilityFlagsConfig(): { includeNotImportantViews: boolean; reportViewIds: boolean; retrieveInteractiveWindows: boolean } {
+  setOcclusionEnabled(enabled: boolean): void {
+    this._occlusionEnabled = enabled;
+  }
+
+  getAccessibilityFlagsConfig(): { includeNotImportantViews: boolean; reportViewIds: boolean; retrieveInteractiveWindows: boolean; occlusionEnabled: boolean } {
     return {
       includeNotImportantViews: this._a11yIncludeNotImportantViews,
       reportViewIds: this._a11yReportViewIds,
       retrieveInteractiveWindows: this._a11yRetrieveInteractiveWindows,
+      occlusionEnabled: this._occlusionEnabled,
     };
   }
 

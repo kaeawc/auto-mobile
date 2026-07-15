@@ -541,15 +541,15 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches set_accessibility_flags`() = runTest {
     dispatch(
-      """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false}"""
+      """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false,"occlusionEnabled":false}"""
     )
-    assertEquals("setAccessibilityFlags" to listOf<Any?>(false, true, false), lastCall)
+    assertEquals("setAccessibilityFlags" to listOf<Any?>(false, true, false, false), lastCall)
   }
 
   @Test
   fun `set_accessibility_flags defaults all flags to true`() = runTest {
     dispatch("""{"type":"set_accessibility_flags"}""")
-    assertEquals("setAccessibilityFlags" to listOf<Any?>(true, true, true), lastCall)
+    assertEquals("setAccessibilityFlags" to listOf<Any?>(true, true, true, true), lastCall)
   }
 
   @Test

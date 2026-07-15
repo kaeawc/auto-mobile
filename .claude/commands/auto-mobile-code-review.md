@@ -52,4 +52,15 @@ For **each** finding:
 
 When reviewing a PR, post findings as **inline review comments** anchored to the changed line (`gh api repos/<owner>/<repo>/pulls/<n>/reviews` with a `comments[]` array, `event: COMMENT`), with a short summary body — not one monolithic comment.
 
+### Write the comment so a busy author acts on it
+
+The finding can be correct and still land badly if it's a wall of text. Word each inline comment so the author sees the severity, the ask, and the repro without decoding a paragraph:
+
+- **Lead with severity and the ask in the first sentence.** Open with whether it blocks (`Not a blocker, but —` / `Blocking: —`) and what you want changed, *then* trace the evidence. Don't bury the finding under the mechanism.
+- **One-line lede, then the trace.** Keep the opening sentence short; put the `file:line` walk in the sentences that follow. A 60-word sentence with three subordinate clauses is a wall, not a finding.
+- **Cut self-certifying parentheticals.** Drop `(verified by reading code)`, "a concern I checked and dropped", and similar filler — the `file:line` citation *is* your evidence, and these read as defensive. State the conclusion, not that you did the checking.
+- **Put a reproduction recipe on its own line, labeled `Repro:`.** A concrete repro is the most valuable thing in a bug comment — make it visually separable so the author can run it without re-deriving your claim.
+- **Keep a minor/acknowledged note short.** If no change is requested, say so in one or two sentences; don't pad it to the length of a real finding.
+- **Use plain severity words in the prose.** The Verdict label carries the taxonomy; the comment body should read as plain English to someone who doesn't know it.
+
 Close with a one-paragraph **summary verdict** and the single most important thing to verify first. Stay skeptical: a verified "couldn't reproduce" is a more useful result than an unverified bug report.

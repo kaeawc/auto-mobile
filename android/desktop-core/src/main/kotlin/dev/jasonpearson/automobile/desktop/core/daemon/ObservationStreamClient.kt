@@ -303,6 +303,7 @@ class ObservationStreamClient {
             timestamp = response.timestamp ?: System.currentTimeMillis(),
             data = response.data,
             packageName = packageName,
+            diff = response.hierarchyDiff,
           )
         _hierarchyUpdates.emit(update)
         log.info("Emitted hierarchy update to flow")
@@ -493,6 +494,22 @@ data class StreamResponse(
   val screenshotBase64Length: Int? = null,
   val navigationGraph: NavigationGraphStreamData? = null,
   val performanceData: PerformanceStreamData? = null,
+  val hierarchyDiff: HierarchyDiffSummary? = null,
+)
+
+/**
+ * Per-frame hierarchy diff summary emitted by the daemon on `hierarchy_update` (issue #3758).
+ * Counts how the current frame differs from the previous one for a device; [hasBaseline] is false
+ * for the first frame (or first after a reconnect), where nothing is diffed and no node is
+ * annotated. Absent for daemons that do not emit diff metadata, in which case the layout inspector
+ * renders unchanged.
+ */
+@Serializable
+data class HierarchyDiffSummary(
+  val hasBaseline: Boolean = false,
+  val added: Int = 0,
+  val changed: Int = 0,
+  val removed: Int = 0,
 )
 
 @Serializable
@@ -525,6 +542,7 @@ data class HierarchyStreamUpdate(
   val timestamp: Long,
   val data: JsonElement?,
   val packageName: String? = null,
+  val diff: HierarchyDiffSummary? = null,
 )
 
 data class ScreenshotStreamUpdate(

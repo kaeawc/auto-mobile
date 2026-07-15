@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
+import dev.jasonpearson.automobile.desktop.domain.NodeDiffState
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -100,6 +101,10 @@ private fun parseJsonObjectNode(
   // Parse extras map (sdk.* properties from the hierarchy merger)
   val extras = parseExtras(attrs, nodeObj)
 
+  // Parse the per-frame diff annotation stamped by the daemon (issue #3758).
+  // Absent on hierarchies without diff metadata, so the node renders unmarked.
+  val diffState = parseDiffState(attrs.getString("diffState"))
+
   // Parse children from "node" field
   val childrenElement = nodeObj["node"]
   val children = parseChildren(childrenElement, depth + 1, elementMap, parentMap)
@@ -129,6 +134,7 @@ private fun parseJsonObjectNode(
       depth = depth,
       children = children,
       extras = extras,
+      diffState = diffState,
     )
 
   // Populate lookup indexes as side-effect during parsing — zero extra traversals
@@ -212,6 +218,16 @@ private fun parseChildren(
     else -> emptyList()
   }
 }
+
+/**
+ * Map the daemon's `diffState` wire value to the typed enum; unknown/absent values render unmarked.
+ */
+private fun parseDiffState(value: String?): NodeDiffState? =
+  when (value) {
+    "added" -> NodeDiffState.Added
+    "changed" -> NodeDiffState.Changed
+    else -> null
+  }
 
 /** Parse the "extras" map from node JSON. Checks both the attributes object and the node itself. */
 private fun parseExtras(attrs: JsonObject, nodeObj: JsonObject): Map<String, String> {

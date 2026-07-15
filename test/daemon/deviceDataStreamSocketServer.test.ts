@@ -542,6 +542,58 @@ describe("DeviceDataStreamSocketServer", () => {
     });
   });
 
+  describe("hierarchy diff annotation", () => {
+    const frame = (text: string) =>
+      ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } } }) as any;
+
+    it("reports no baseline and annotates nothing on the first frame", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+
+      const [message] = socket.getWrittenMessages<any>();
+      expect(message.type).toBe("hierarchy_update");
+      expect(message.hierarchyDiff).toEqual({ hasBaseline: false, added: 0, changed: 0, removed: 0 });
+      expect(message.data.hierarchy.node.node[0].$.diffState).toBeUndefined();
+    });
+
+    it("annotates changed nodes and summarizes the diff against the previous frame", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushHierarchyUpdate("device-1", frame("b"));
+
+      const messages = socket.getWrittenMessages<any>();
+      expect(messages).toHaveLength(2);
+      expect(messages[1].hierarchyDiff).toEqual({ hasBaseline: true, added: 0, changed: 1, removed: 0 });
+      expect(messages[1].data.hierarchy.node.node[0].$.diffState).toBe("changed");
+    });
+
+    it("resets the diff baseline when the device connection is lost", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.onDeviceConnectionLost("device-1");
+      server.pushHierarchyUpdate("device-1", frame("b"));
+
+      // The post-reconnect frame is diffed against a fresh baseline, not the
+      // pre-drop tree, so it reports no baseline rather than a spurious change.
+      const messages = socket.getWrittenMessages<any>();
+      const hierarchyMessages = messages.filter(m => m.type === "hierarchy_update");
+      expect(hierarchyMessages[hierarchyMessages.length - 1].hierarchyDiff.hasBaseline).toBe(false);
+    });
+
+    it("does not mutate the caller's hierarchy when annotating", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      const second = frame("b");
+      server.pushHierarchyUpdate("device-1", second);
+
+      expect(second.hierarchy.node.node[0].$.diffState).toBeUndefined();
+    });
+  });
+
   describe("hasSubscriberForDevice", () => {
     it("returns false when there are no subscribers", () => {
       expect(server.hasSubscriberForDevice("device-1")).toBe(false);

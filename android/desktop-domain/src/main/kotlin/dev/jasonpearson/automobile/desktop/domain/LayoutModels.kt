@@ -1,5 +1,16 @@
 package dev.jasonpearson.automobile.desktop.domain
 
+/**
+ * How a hierarchy node changed since the previous observation-stream frame, as annotated by the
+ * daemon's per-frame diff. [Added] nodes are new this frame; [Changed] nodes exist at the same tree
+ * position with a changed attribute. Unchanged nodes carry no state (null), so hierarchies without
+ * diff metadata render exactly as before.
+ */
+public enum class NodeDiffState {
+  Added,
+  Changed,
+}
+
 public data class UIElementInfo(
   val id: String,
   val className: String,
@@ -17,6 +28,7 @@ public data class UIElementInfo(
   val children: List<UIElementInfo>,
   val depth: Int,
   val extras: Map<String, String> = emptyMap(),
+  val diffState: NodeDiffState? = null,
 )
 
 public data class ElementBounds(

@@ -244,10 +244,15 @@ private fun TreeNodeRow(
 ) {
   val colors = SharedTheme.globalColors
 
+  // Per-frame diff accent (issue #3758): tint added/changed nodes so live changes
+  // are visible in the tree. Selection/hover take priority; unmarked nodes render
+  // transparently, so hierarchies without diff metadata look unchanged.
+  val diffColor = diffAccentColor(node.element.diffState)
   val bgColor =
     when {
       isSelected -> Color(0xFF2196F3).copy(alpha = 0.2f)
       isHovered -> colors.text.normal.copy(alpha = 0.08f)
+      diffColor != null -> diffColor.copy(alpha = 0.14f)
       isInSelectedPath -> colors.text.normal.copy(alpha = 0.04f)
       else -> Color.Transparent
     }
@@ -354,6 +359,15 @@ private fun TreeNodeRow(
       if (node.element.isScrollable) {
         StateIndicator("\u2195", "Scrollable") // Up-down arrow
       }
+      node.element.diffState?.let { state ->
+        StateIndicator(
+          icon = if (state == NodeDiffState.Added) "+" else "\u25CF",
+          tooltip =
+            if (state == NodeDiffState.Added) "Added since last frame"
+            else "Changed since last frame",
+          color = diffAccentColor(state),
+        )
+      }
     }
 
     // Copy selector button — visible on row hover
@@ -412,15 +426,23 @@ private fun ElementIcon(className: String) {
 }
 
 @Composable
-private fun StateIndicator(icon: String, tooltip: String) {
+private fun StateIndicator(icon: String, tooltip: String, color: Color? = null) {
   val colors = SharedTheme.globalColors
 
   Text(
     icon,
     fontSize = 9.sp,
-    color = colors.text.normal.copy(alpha = 0.4f),
+    color = color ?: colors.text.normal.copy(alpha = 0.4f),
   )
 }
+
+/** Accent color for a node's diff state, or null when the node is unchanged/unmarked. */
+private fun diffAccentColor(state: NodeDiffState?): Color? =
+  when (state) {
+    NodeDiffState.Added -> Color(0xFF4CAF50)
+    NodeDiffState.Changed -> Color(0xFFFFC107)
+    null -> null
+  }
 
 private fun getSimpleClassName(fullName: String): String {
   return fullName.substringAfterLast(".")

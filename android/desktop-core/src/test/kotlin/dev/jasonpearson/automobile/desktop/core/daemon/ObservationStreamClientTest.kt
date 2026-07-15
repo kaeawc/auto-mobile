@@ -108,6 +108,54 @@ class ObservationStreamClientTest {
   }
 
   @Test
+  fun `emits hierarchy diff summary when the daemon provides it`() = runTest {
+    val client = ObservationStreamClient()
+
+    client.hierarchyUpdates.test {
+      client.handleMessage(
+        """
+        {
+          "type": "hierarchy_update",
+          "deviceId": "emulator-5554",
+          "timestamp": 2000,
+          "data": { "packageName": "com.example" },
+          "hierarchyDiff": { "hasBaseline": true, "added": 2, "changed": 3, "removed": 1 }
+        }
+        """
+          .trimIndent()
+      )
+
+      val update = awaitItem()
+      assertEquals(
+        HierarchyDiffSummary(hasBaseline = true, added = 2, changed = 3, removed = 1),
+        update.diff,
+      )
+    }
+  }
+
+  @Test
+  fun `hierarchy update diff is null when the daemon omits it`() = runTest {
+    // Older daemons predate diff metadata; the layout inspector must render cleanly with no diff.
+    val client = ObservationStreamClient()
+
+    client.hierarchyUpdates.test {
+      client.handleMessage(
+        """
+        {
+          "type": "hierarchy_update",
+          "deviceId": "emulator-5554",
+          "timestamp": 2001,
+          "data": { "packageName": "com.example" }
+        }
+        """
+          .trimIndent()
+      )
+
+      assertEquals(null, awaitItem().diff)
+    }
+  }
+
+  @Test
   fun `emits device connection lost event for disconnect error message`() = runTest {
     val client = ObservationStreamClient()
 

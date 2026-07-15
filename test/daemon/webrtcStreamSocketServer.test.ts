@@ -4,14 +4,35 @@ import {
   WebRtcStreamSocketServer,
   type WebRtcStreamSocketServerDependencies,
 } from "../../src/daemon/webrtcStreamSocketServer";
+import {
+  getWebRtcStreamDescriptor,
+  listWebRtcStreams,
+  resetWebRtcStreamManager,
+  setWebRtcStreamManagerDependencies,
+  startWebRtcStream,
+  stopWebRtcStream,
+} from "../../src/server/webrtcStreamManager";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
 } from "../../src/daemon/webrtcStreamSocketTypes";
 import type { BootedDevice } from "../../src/models";
-import type { WebRtcStreamDescriptor } from "../../src/features/webrtc";
+import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
+import type {
+  AndroidH264Source,
+  WebRtcStreamDescriptor,
+  WebRtcStreamingOverrides,
+} from "../../src/features/webrtc";
+import type { WhipClientOptions } from "../../src/features/webrtc/WhipClient";
+import type { RTCPeerConnection } from "werift";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  createSuccessfulWhipFetch,
+  FakeConnectedPeerConnection,
+  FakeH264Source,
+  type RecordedWhipRequest,
+} from "../helpers/webrtcFakes";
 
 const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
 
@@ -40,7 +61,11 @@ class TestableServer extends WebRtcStreamSocketServer {
   }
 }
 
-let started: Array<{ device: BootedDevice; streamId?: string }> = [];
+let started: Array<{
+  device: BootedDevice;
+  streamId?: string;
+  overrides?: WebRtcStreamingOverrides;
+}> = [];
 let stopped: string[] = [];
 
 function makeDeps(overrides: Partial<WebRtcStreamSocketServerDependencies> = {}): WebRtcStreamSocketServerDependencies {
@@ -49,7 +74,7 @@ function makeDeps(overrides: Partial<WebRtcStreamSocketServerDependencies> = {})
     resolveDevice: async () => ANDROID,
     startStream: async request => {
       const streamId = request.streamId ?? "webrtc_generated";
-      started.push({ device: request.device, streamId: request.streamId });
+      started.push({ device: request.device, streamId: request.streamId, overrides: request.overrides });
       const d = descriptor(streamId);
       active.set(streamId, d);
       return d;
@@ -69,6 +94,7 @@ function makeDeps(overrides: Partial<WebRtcStreamSocketServerDependencies> = {})
 afterEach(() => {
   started = [];
   stopped = [];
+  resetWebRtcStreamManager();
 });
 
 function lastResponse(socket: FakeSocket): WebRtcStreamSocketResponse {
@@ -119,6 +145,97 @@ describe("WebRtcStreamSocketServer", () => {
     const response = lastResponse(socket);
     expect(response.action).toBe("list");
     expect(response.streams?.map(s => s.streamId).sort()).toEqual(["s1", "s2"]);
+  });
+
+  test("start forwards WHIP endpoint and stream stays visible until stop", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+
+    await server.simulate(socket, {
+      id: "start",
+      action: "start",
+      streamId: "debug-1",
+      whipEndpoint: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1",
+    });
+    await server.simulate(socket, { id: "list", action: "list" });
+    const listed = lastResponse(socket);
+    await server.simulate(socket, { id: "status", action: "status", streamId: "debug-1" });
+    const status = lastResponse(socket);
+    await server.simulate(socket, { id: "stop", action: "stop", streamId: "debug-1" });
+    const stoppedResponse = lastResponse(socket);
+    await server.simulate(socket, { id: "after-stop", action: "list" });
+    const afterStop = lastResponse(socket);
+
+    expect(started[0].overrides).toEqual({
+      whipEndpoint: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1",
+    });
+    expect(listed.streams?.map(s => s.streamId)).toEqual(["debug-1"]);
+    expect(status.stream?.streamId).toBe("debug-1");
+    expect(stoppedResponse.stream?.state).toBe("stopped");
+    expect(stopped).toEqual(["debug-1"]);
+    expect(afterStop.streams).toEqual([]);
+  });
+
+  test("start reaches the real manager, posts WHIP, and remains visible until stop", async () => {
+    const posts: RecordedWhipRequest[] = [];
+    const sources: FakeH264Source[] = [];
+    setWebRtcStreamManagerDependencies({
+      createPublisher: (config, deps) =>
+        new WebRtcPublisher(config, {
+          ...deps,
+          createPeerConnection: () => new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
+          createWhipClient: (options: WhipClientOptions) =>
+            new WhipClient({
+              ...options,
+              fetchImpl: createSuccessfulWhipFetch(posts),
+            }),
+          timer: new FakeTimer(),
+        }),
+      createSource: () => {
+        const source = new FakeH264Source();
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      now: () => new Date("2026-07-14T00:00:00.000Z"),
+    });
+    const server = new TestableServer({
+      resolveDevice: async () => ANDROID,
+      startStream: startWebRtcStream,
+      stopStream: stopWebRtcStream,
+      listStreams: listWebRtcStreams,
+      getStream: getWebRtcStreamDescriptor,
+    });
+    const socket = new FakeSocket();
+
+    await server.simulate(socket, {
+      id: "start-real",
+      action: "start",
+      streamId: "debug-1",
+      whipEndpoint: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1",
+    });
+    const start = lastResponse(socket);
+    await server.simulate(socket, { id: "list-real", action: "list" });
+    const list = lastResponse(socket);
+    await server.simulate(socket, { id: "status-real", action: "status", streamId: "debug-1" });
+    const status = lastResponse(socket);
+    await server.simulate(socket, { id: "stop-real", action: "stop", streamId: "debug-1" });
+    const stop = lastResponse(socket);
+    await server.simulate(socket, { id: "after-stop-real", action: "list" });
+    const afterStop = lastResponse(socket);
+
+    expect(start.success).toBe(true);
+    expect(posts.filter(request => request.method === "POST")).toEqual([
+      { method: "POST", url: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1" },
+    ]);
+    expect(posts.filter(request => request.method === "DELETE")).toEqual([
+      { method: "DELETE", url: "http://localhost:8000/whip/resource/debug-1" },
+    ]);
+    expect(list.streams?.map(stream => stream.streamId)).toEqual(["debug-1"]);
+    expect(status.stream?.resourceUrl).toBe("http://localhost:8000/whip/resource/debug-1");
+    expect(stop.stream?.state).toBe("stopped");
+    expect(sources[0].started).toBe(true);
+    expect(sources[0].stopped).toBe(true);
+    expect(afterStop.streams).toEqual([]);
   });
 
   test("status for an unknown stream returns an error response", async () => {

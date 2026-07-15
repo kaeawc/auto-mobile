@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import "./runtime/reflectMetadata";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
 import {
   DAEMON_LAUNCH_CWD_ENV,

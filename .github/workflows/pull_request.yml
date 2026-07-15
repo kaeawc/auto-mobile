@@ -1050,6 +1050,7 @@ jobs:
 
       - name: "Run Lint"
         env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
           TURBO_TELEMETRY_DISABLED: "1"
           TURBO_NO_UPDATE_NOTIFIER: "1"
           DO_NOT_TRACK: "1"

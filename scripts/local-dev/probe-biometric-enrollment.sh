@@ -38,7 +38,7 @@ log() {
   printf '\n==> %s\n' "$*"
 }
 
-# shellcheck disable=SC2329 # Invoked indirectly from the cleanup trap.
+# shellcheck disable=SC2317,SC2329 # Invoked indirectly from the cleanup trap.
 warn() {
   printf 'WARN: %s\n' "$*" >&2
 }
@@ -84,7 +84,7 @@ adb_cmd() {
   "${ADB_BIN}" -s "${ADB_SERIAL}" "$@" || true
 }
 
-# shellcheck disable=SC2329 # Invoked indirectly via `trap cleanup EXIT`.
+# shellcheck disable=SC2317,SC2329 # Invoked indirectly via `trap cleanup EXIT`.
 cleanup() {
   if [[ "${KILL_ON_EXIT}" == "true" && "${STARTED_EMULATOR}" == "true" && -n "${ADB_SERIAL}" ]]; then
     warn "KILL_ON_EXIT=true, stopping ${ADB_SERIAL}"

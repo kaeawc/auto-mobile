@@ -150,10 +150,18 @@ require_finger_support() {
 }
 
 keyguard_showing() {
-  adb_cmd shell dumpsys window \
-    | tr -d '\r' \
-    | grep -o 'isKeyguardShowing=[a-z]*' \
-    | head -1
+  local window_dump keyguard_state
+  window_dump="$(adb_cmd shell dumpsys window | tr -d '\r')"
+  keyguard_state="$(
+    printf '%s\n' "${window_dump}" \
+      | sed -nE \
+        -e 's/.*isKeyguardShowing=(true|false).*/isKeyguardShowing=\1/p' \
+        -e 's/.*mShowingLockscreen=(true|false).*/isKeyguardShowing=\1/p' \
+        -e 's/^[[:space:]]*showing=(true|false)[[:space:]]*$/isKeyguardShowing=\1/p' \
+        -e 's/^[[:space:]]*mIsShowing=(true|false)[[:space:]]*$/isKeyguardShowing=\1/p' \
+      | head -1
+  )"
+  printf '%s\n' "${keyguard_state:-unknown}"
 }
 
 enrolled_print_count() {
@@ -167,6 +175,9 @@ enrolled_print_count() {
 enroll_fingerprint() {
   log "Enrolling fingerprint id ${ENROLLED_FINGER_ID} (PIN ${DEVICE_PIN})"
   adb_cmd shell locksettings set-pin "${DEVICE_PIN}"
+  adb_cmd shell cmd lock_settings set-pin --old "${DEVICE_PIN}" "${DEVICE_PIN}"
+  adb_cmd shell cmd lock_settings set-disabled --old "${DEVICE_PIN}" false
+  adb_cmd shell settings put secure lock_screen_lock_after_timeout 0
   adb_cmd shell am start -a android.settings.FINGERPRINT_ENROLL > /dev/null 2>&1
   sleep 1
   adb_cmd shell input text "${DEVICE_PIN}"
@@ -184,10 +195,24 @@ enroll_fingerprint() {
 }
 
 lock_device() {
+  # Enrollment can leave API 29 in a credential Settings activity that does not
+  # show keyguard until the task is backgrounded.
+  adb_cmd shell input keyevent 3
+  sleep 1
   # Two keyevent 26 presses ensure the keyguard is shown (first may only wake).
   adb_cmd shell input keyevent 26
+  sleep 2
   adb_cmd shell input keyevent 26
   sleep 1
+}
+
+prime_fingerprint_unlock() {
+  log "Priming fingerprint unlock with PIN"
+  lock_device
+  adb_cmd shell input text "${DEVICE_PIN}"
+  adb_cmd shell input keyevent 66
+  sleep 1
+  printf 'keyguard after PIN prime: %s\n' "$(keyguard_showing)"
 }
 
 log "Probe configuration"
@@ -245,6 +270,8 @@ enroll_result="failed"
 if [[ "${enroll_count}" =~ ^[0-9]+$ && "${enroll_count}" -ge 1 ]]; then
   enroll_result="succeeded"
 fi
+
+prime_fingerprint_unlock
 
 log "Validating unlock with enrolled finger id ${ENROLLED_FINGER_ID}"
 lock_device

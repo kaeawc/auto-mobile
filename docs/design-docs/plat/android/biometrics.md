@@ -49,11 +49,16 @@ Capability probing:
 - `adb -s <device> shell getprop ro.kernel.qemu` (1 indicates emulator)
 - `adb -s <device> emu help` to confirm `finger` commands are available
 
-## ADB validation (API 35)
+## ADB validation (API 29/35)
 
 Status:
 
-- API 29 not validated yet (no local AVD available).
+- API 35: enrollment/match/unlock sequence validated.
+- API 29 (`am-api29-ga-arm64`, July 15, 2026): enrollment and non-enrolled
+  rejection validate, but keyguard unlock with the enrolled `emu finger` id
+  remains unsupported/failed on the tested AVD. The probe handles API 29's
+  legacy keyguard dump fields and PIN/lockscreen setup, then reports this as a
+  failed unlock rather than a parser/setup failure.
 
 Automated smoke test:
 
@@ -67,7 +72,7 @@ Automated smoke test:
   `test/bats/probe-biometric-enrollment.bats`, and the tool-layer sequence is
   unit-covered in `test/features/action/BiometricAuth.test.ts`.
 
-Enrollment + auth steps (confirmed):
+Enrollment + auth steps (API 35 confirmed; API 29 status above):
 
 1. Set a device PIN (required for enrollment).
    - `adb -s <device> shell locksettings set-pin 1234`

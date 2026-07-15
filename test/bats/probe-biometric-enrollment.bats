@@ -72,13 +72,17 @@ case "$*" in
     printf 'android console command help:\n  finger        manage emulator fingerprint\n  kill          kill the emulator\n'
     exit 0
     ;;
-  "shell locksettings set-pin 1234")
+  "shell locksettings set-pin 1234"|"shell cmd lock_settings set-pin --old 1234 1234"|"shell cmd lock_settings set-disabled --old 1234 false"|"shell settings put secure lock_screen_lock_after_timeout 0")
     exit 0
     ;;
   "shell am start -a android.settings.FINGERPRINT_ENROLL")
     exit 0
     ;;
-  "shell input text 1234"|"shell input keyevent 66")
+  "shell input text 1234")
+    exit 0
+    ;;
+  "shell input keyevent 66")
+    printf 'isKeyguardShowing=false' > "${KEYGUARD_STATE_FILE}"
     exit 0
     ;;
   "shell cmd fingerprint sync")
@@ -100,8 +104,16 @@ case "$*" in
     exit 0
     ;;
   "shell dumpsys window")
-    cat "${KEYGUARD_STATE_FILE}"
-    printf '\n'
+    if [ "${KEYGUARD_FIELD_STYLE:-modern}" = "legacy" ]; then
+      state="$(sed 's/isKeyguardShowing=//' "${KEYGUARD_STATE_FILE}")"
+      printf '    KeyguardServiceDelegate\n'
+      printf '      showing=%s\n' "${state}"
+      printf '      KeyguardStateMonitor\n'
+      printf '        mIsShowing=%s\n' "${state}"
+    else
+      cat "${KEYGUARD_STATE_FILE}"
+      printf '\n'
+    fi
     exit 0
     ;;
 esac
@@ -162,6 +174,22 @@ SCRIPT
   grep -q "emu finger touch 2" "$INVOCATION_FILE"
   grep -q "shell dumpsys fingerprint" "$INVOCATION_FILE"
   grep -q "shell locksettings set-pin 1234" "$INVOCATION_FILE"
+  grep -q "shell cmd lock_settings set-pin --old 1234 1234" "$INVOCATION_FILE"
+  grep -q "shell cmd lock_settings set-disabled --old 1234 false" "$INVOCATION_FILE"
+  grep -q "shell settings put secure lock_screen_lock_after_timeout 0" "$INVOCATION_FILE"
+  grep -q "shell input keyevent 3" "$INVOCATION_FILE"
+}
+
+@test "accepts legacy API 29 KeyguardServiceDelegate keyguard output" {
+  make_mock_adb
+
+  run env ADB_SERIAL=emulator-5554 BOOT_TIMEOUT_SECONDS=5 ENROLL_TOUCH_CYCLES=2 KEYGUARD_FIELD_STYLE=legacy bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"keyguard before match: isKeyguardShowing=true"* ]]
+  [[ "$output" == *"keyguard after match:  isKeyguardShowing=false"* ]]
+  [[ "$output" == *"keyguard after mismatch: isKeyguardShowing=true"* ]]
+  [[ "$output" == *"smoke test PASSED"* ]]
 }
 
 @test "skips cleanly when the device does not expose emu finger" {

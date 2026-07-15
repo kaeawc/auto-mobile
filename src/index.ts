@@ -37,7 +37,11 @@ import {
   shouldSkipCtrlProxyDownload,
 } from "./utils/ctrlProxyDownloadControl";
 import { parseToolOutputsDirConfig } from "./utils/toolOutputArtifacts";
-import { parseEventAllMarkersConfig, EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
+import {
+  parseEventAllMarkersConfig,
+  hasEventAllMarkersCliOverride,
+  EVENT_ALL_MARKERS_FLAG,
+} from "./utils/eventAllMarkers";
 import {
   installProcessLifecycleHandlers,
   setFatalProcessHandler,
@@ -109,6 +113,7 @@ function parseArgs(log: ParseLogger): {
   networkMockable: boolean;
   dismissKeyboardAfterInput: boolean;
   eventAllMarkers: string[];
+  eventAllMarkersCliOverride: boolean;
   mcpRecording: boolean;
   navigationScreenshots: boolean;
   noWaitForPollingOverhead: boolean;
@@ -176,6 +181,7 @@ function parseArgs(log: ParseLogger): {
   const networkMockable = args.includes("--network-mockable");
   const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
   const eventAllMarkers = parseEventAllMarkersConfig(args, process.env);
+  const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
   const mcpRecording = args.includes("--mcp-recording");
   const navigationScreenshots = !args.includes("--no-navigation-screenshots");
   const noWaitForPollingOverhead = args.includes("--no-waitfor-polling-overhead");
@@ -384,6 +390,7 @@ function parseArgs(log: ParseLogger): {
     networkMockable,
     dismissKeyboardAfterInput,
     eventAllMarkers,
+    eventAllMarkersCliOverride,
     mcpRecording,
     navigationScreenshots,
     noWaitForPollingOverhead,
@@ -468,6 +475,7 @@ async function main() {
       networkMockable,
       dismissKeyboardAfterInput,
       eventAllMarkers,
+      eventAllMarkersCliOverride,
       mcpRecording,
       navigationScreenshots,
       noWaitForPollingOverhead,
@@ -616,6 +624,11 @@ async function main() {
       logger.warn(`${EVENT_ALL_MARKERS_FLAG} was provided but resolved to no markers; inputText eventAll auto-promotion stays disabled`);
     }
 
+    const eventAllMarkerDaemonOptions: Pick<DaemonOptions, "eventAllMarkers" | "eventAllMarkersCliOverride"> =
+      eventAllMarkers.length > 0 || eventAllMarkersCliOverride
+        ? { eventAllMarkers, eventAllMarkersCliOverride }
+        : {};
+
     if (daemonMode) {
       await startDaemon({
         port: daemonPort,
@@ -633,7 +646,7 @@ async function main() {
         networkMockable,
         embeddedSdk,
         dismissKeyboardAfterInput,
-        eventAllMarkers,
+        ...eventAllMarkerDaemonOptions,
         noUiPerfMode: !uiPerfMode,
         memPerfAudit: memPerfAuditMode,
         accessibilityAudit: a11yAuditMode,
@@ -696,7 +709,7 @@ async function main() {
         networkMockable,
         embeddedSdk,
         dismissKeyboardAfterInput,
-        eventAllMarkers,
+        ...eventAllMarkerDaemonOptions,
         noUiPerfMode: !uiPerfMode,
         memPerfAudit: memPerfAuditMode,
         accessibilityAudit: a11yAuditMode,

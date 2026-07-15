@@ -7,6 +7,15 @@ description: Use this workflow skill to review an AutoMobile change (a PR number
 
 Review a change — a PR (its number passed as the argument) or, with no argument, the current branch's diff vs `origin/main` — for correctness, regressions, and fit with AutoMobile's architecture and conventions. The deliverable is a **verified, actionable** review.
 
+## What a review is for
+
+The verification discipline below is the floor, not the point. Automation and planning should be catching defects; spend the review on what they can't — understanding the change and helping the author. Approach it with curiosity, not correction:
+
+- **Read for the author's intent first.** Work out what they were solving and how they weighed the alternatives before you judge the code — the comment should show you got it. Tie the change back to the issue/story it serves and review against *that*, not the diff in isolation.
+- **A question often beats an assertion.** "What ruled out reusing `X` here?" surfaces more than "use `X`" — and sometimes the answer is that you missed something. Lead with the question when you're genuinely unsure.
+- **Name what's genuinely good, briefly.** A real simplification, the correct hard call, clear product value — say so in a sentence. Recognition is signal; skip it when it isn't earned, and never manufacture it.
+- **The findings still have to be verified.** None of this softens the bar below: ground every finding, reproduce before asserting, and deliver a few checked findings over many plausible ones.
+
 ## Scope the diff
 
 - `git fetch origin main` first — always review against **latest main**, not a stale base.
@@ -45,6 +54,28 @@ Review a change — a PR (its number passed as the argument) or, with no argumen
 
 ## Output
 
-For **each** finding: a **Verdict** (`Confirmed bug` · `Correctly fixes` · `Partial` · `Risky (regression / false-negative)` · `Already fixed on main` · `False positive`), **Evidence** (`file:line` + how you verified: reproduced / read code / checked main / `git blame`), and a **Fix** (a named existing helper/convention, the manual device check to confirm, and any regression the change risks).
+For **each** finding, cover three things in plain prose: your read on the change (is it a real bug, does the fix hold, are you confident or only suspicious), where it is (`file:line`, and how you checked — reproduced, read the code, checked main, `git blame`), and how to fix it (a named existing helper/convention where one fits, the manual device check that would confirm it, and any regression or false-negative the change risks).
 
-When reviewing a PR, post findings as **inline review comments** anchored to the changed line (via `gh api .../pulls/<n>/reviews` with a `comments[]` array, `event: COMMENT`) plus a short summary body — not one monolithic comment. Close with a one-paragraph **summary verdict** and the single most important thing to verify first. Stay skeptical: a verified "couldn't reproduce" beats an unverified bug report.
+When reviewing a PR, post findings as **inline review comments** anchored to the changed line (via `gh api .../pulls/<n>/reviews` with a `comments[]` array, `event: COMMENT`) plus a short summary body — not one monolithic comment.
+
+### Write the comment so a busy author acts on it
+
+The finding can be correct and still land badly if it's a wall of text. Word each inline comment so the author sees the finding, the ask, and the repro without decoding a paragraph:
+
+- **Open with a question when it earns its place — otherwise state the finding flat.** A question is right when you genuinely don't understand the code, or when walking the author down your reasoning before you answer it reads better than asserting. When the finding is clear, just say what the bug is in one plain sentence — no `Found a bug`, no severity label. `Nit:` is the only label; reserve it for the genuinely minor.
+- **State the mechanism as the finding, not under it.** One plain sentence — `X does A, so B never happens` — every symbol, file, and flag in backticks, an em-dash for the consequence. Don't bury the finding beneath a paragraph of trace; the mechanism *is* the lede.
+- **Offer a `Suggested change for <reason>` with a ```suggestion block when the fix is a concrete line edit.** Let the author accept or reject it inline instead of re-typing your prose into code.
+- **Skip the `Verdict:`/`Evidence:`/`Fix:` labels and the enum verbatim in the posted comment.** That structure is a checklist of what to cover — your read on the change, where it is, how to fix it — not a template to stamp into GitHub. Write it as ordinary prose, loose with wording and capitalization; `this basically double-frees the handle` beats `**Verdict:** Confirmed bug`. Drop how-you-verified parentheticals (`(verified by reading code)`, "a concern I checked and dropped") — the `file:line` citation carries that, and they read as defensive.
+- **Put the reproduction on its own line.** A concrete repro is the most valuable thing in a bug comment — make it separable so the author can run it without re-deriving your claim.
+- **Keep every comment tight.** Say the thing in as few words as it takes; don't re-enumerate findings or restate the diff — the reader can find and read them.
+- **Say whether it blocks in plain words.** `this should block` or `not a blocker`, as a normal clause in the finding — don't spin up a label or severity track for it.
+- **If a thread's already been addressed, resolve it — don't write a comment.** A resolved thread already says "done"; a new comment saying so is noise.
+
+A worked rewrite — the wall first, the same finding second:
+
+> ❌ I looked into this and I believe there may be an issue where the timer scheduled by `scheduleAutoStop` ends up calling `this.stop()` (verified by reading the code), which as far as I can tell finalizes the session but does not appear to remove it from `byHandle`, so this could potentially be a concern.
+>
+> ✅ The auto-stop timer calls `this.stop()`, which finalizes the session but never removes it from `byHandle` — that delete lives only in `stopAndRemove`, which auto-stop doesn't go through, so an auto-stopped session stays registered forever.
+> Set `maxDuration`, never call stop — after the timer fires, `byHandle` still holds the entry.
+
+Close with a one-paragraph **summary verdict** and the single most important thing to verify first. Stay skeptical: a verified "couldn't reproduce" beats an unverified bug report.

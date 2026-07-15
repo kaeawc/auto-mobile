@@ -47,6 +47,17 @@ jobs:
       RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
       RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+  build-video-server-jar:
+    needs: validate-release-tag
+    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
+    # No verify-reproducible here: the verify-and-release job already re-verifies
+    # the release-built jar against the registry sha minted by prepare-release on a
+    # different runner — a stronger cross-run reproducibility check than an in-job
+    # double-build. The double-build runs once, at mint time (prepare-release).
+    uses: ./.github/workflows/build-video-server-jar.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
   verify-and-release:
     if: needs.validate-release-tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-latest
@@ -54,6 +65,7 @@ jobs:
       - validate-release-tag
       - build-ctrl-proxy-ios-ipa
       - build-control-proxy-apk
+      - build-video-server-jar
 
     steps:
       - name: Checkout code
@@ -100,6 +112,12 @@ jobs:
           name: ctrl-proxy-ios-ipa
           path: /tmp
 
+      - name: "Download video-server jar"
+        uses: actions/download-artifact@v7
+        with:
+          name: video-server-jar
+          path: /tmp
+
       - name: "Verify APK SHA256 matches source"
         id: verify_checksum
         run: |
@@ -116,6 +134,14 @@ jobs:
           CHECKSUM=$(grep '^checksum=' /tmp/ipa-verify.log | cut -d= -f2)
           echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
 
+      - name: "Verify video-server jar SHA256 matches source"
+        id: verify_video_jar_checksum
+        run: |
+          bash scripts/ci/verify-artifact-sha256.sh \
+            /tmp/automobile-video.jar videojar | tee /tmp/videojar-verify.log
+          CHECKSUM=$(grep '^checksum=' /tmp/videojar-verify.log | cut -d= -f2)
+          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+
       - name: Generate release constants
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
@@ -124,6 +150,8 @@ jobs:
             ${{ steps.verify_ipa_checksum.outputs.checksum }}
           IOS_CTRL_PROXY_RUNNER_SHA256:
             ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
+          VIDEO_JAR_SHA256:
+            ${{ steps.verify_video_jar_checksum.outputs.checksum }}
         run: bash scripts/generate-release-constants.sh
 
       - name: Verify release integrity
@@ -189,12 +217,16 @@ jobs:
           # Add checksum to notes
           APK_CHECKSUM="${{ steps.verify_checksum.outputs.checksum }}"
           IPA_CHECKSUM="${{ steps.verify_ipa_checksum.outputs.checksum }}"
+          VIDEO_JAR_CHECKSUM="${{ steps.verify_video_jar_checksum.outputs.checksum }}"
           NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'\
             '"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'\
             '"Download the APK from the release assets below."
           NOTES="${NOTES}"$'\n\n'"## CtrlProxy iOS IPA"$'\n\n'\
             '"**SHA256 Checksum:** \`${IPA_CHECKSUM}\`"$'\n\n'\
             '"Download the IPA from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## video-server jar"$'\n\n'\
+            '"**SHA256 Checksum:** \`${VIDEO_JAR_CHECKSUM}\`"$'\n\n'\
+            '"Download automobile-video.jar from the release assets below."
 
           # Save to file for GitHub release
           echo "$NOTES" > release_notes.txt
@@ -332,6 +364,7 @@ jobs:
           files: |
             /tmp/control-proxy-debug.apk
             /tmp/control-proxy.ipa
+            /tmp/automobile-video.jar
           draft: false
           prerelease: false
         env:
@@ -342,6 +375,7 @@ jobs:
           VER: ${{ steps.version.outputs.version }}
           APK_CHECKSUM: ${{ steps.verify_checksum.outputs.checksum }}
           IPA_CHECKSUM: ${{ steps.verify_ipa_checksum.outputs.checksum }}
+          VIDEO_JAR_CHECKSUM: ${{ steps.verify_video_jar_checksum.outputs.checksum }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -353,6 +387,8 @@ jobs:
           echo "**APK SHA256:** \`$APK_CHECKSUM\`" >> "$S"
           echo "**IPA Built:** control-proxy.ipa" >> "$S"
           echo "**IPA SHA256:** \`$IPA_CHECKSUM\`" >> "$S"
+          echo "**video-server jar Built:** automobile-video.jar" >> "$S"
+          echo "**video-server jar SHA256:** \`$VIDEO_JAR_CHECKSUM\`" >> "$S"
           echo "" >> "$S"
           echo "### Published Artifacts" >> "$S"
           N="https://www.npmjs.com/package"

@@ -200,7 +200,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
   apkSha256: "1be224f4f5e5a21087a6552a9567290da64ad7deea6de6239a38324a8d91b0cc",
-  ipaSha256: "08a150376e4b367d02207d048c3600c2dfba4e00c938d6cd3bf6d2aa83f07140",
+  ipaSha256: "d71be829ab2415ac0b0027cd785b309f289855d19e4e8da1114740e5f652c577",
   runnerSha256: "ff2890c45650d1b2fb15cc840fe92a648fbb1f5b955a5fe0537790d41296531a",
 };
 

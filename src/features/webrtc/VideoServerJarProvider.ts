@@ -10,7 +10,14 @@ import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/
 import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { resolveAutoMobileBaseDir } from "../../utils/tempDir";
+import { ensureSecureTempDirSync, getTempDir } from "../../utils/tempDir";
+
+/** Owner read/write only — cache files are per-user, never world-readable. */
+const SECURE_FILE_MODE = 0o600;
+/** Owner read/write/execute only, matching the auto-mobile secure-dir convention. */
+const SECURE_DIR_MODE = 0o700;
+/** Subdirectory under the auto-mobile base dir that holds the cached jar. */
+const CACHE_SUBDIR = "video-server";
 
 /** Fixed on-disk name of the cached persistent-encoder jar. */
 export const VIDEO_SERVER_JAR_CACHE_FILENAME = "automobile-video.jar";
@@ -57,6 +64,7 @@ export class VideoServerJarProvider {
   private readonly downloader: FileDownloader;
   private readonly checksumCalculator: ChecksumCalculator;
   private readonly cacheDir: string;
+  private readonly usesDefaultCacheDir: boolean;
   private readonly timer: Timer;
   private readonly env: NodeJS.ProcessEnv;
 
@@ -68,9 +76,10 @@ export class VideoServerJarProvider {
     this.checksumCalculator = deps.checksumCalculator ?? new DefaultChecksumCalculator();
     this.timer = deps.timer ?? defaultTimer;
     this.env = deps.env ?? process.env;
+    this.usesDefaultCacheDir = deps.cacheDir === undefined;
     // Anchor on the shared auto-mobile base-dir resolver so the AUTOMOBILE_DATA_DIR
     // override (and the bunx-temp-dir avoidance, #2724) apply to the jar cache too.
-    this.cacheDir = deps.cacheDir ?? path.join(resolveAutoMobileBaseDir(this.env), "video-server");
+    this.cacheDir = deps.cacheDir ?? getTempDir(CACHE_SUBDIR);
   }
 
   public static getInstance(): VideoServerJarProvider {
@@ -194,15 +203,32 @@ export class VideoServerJarProvider {
     return this.cachedJarPath;
   }
 
+  /**
+   * Ensure the cache directory exists with owner-only (0o700) permissions, and
+   * return its path. The jar + sidecar are per-user cache artifacts, so a fixed,
+   * predictable filename inside a 0o700 directory is not exposed to other users
+   * (same posture as the daemon's secure logs dir, #2724). The default location
+   * goes through the shared `ensureSecureTempDirSync` helper.
+   */
+  private async ensureSecureCacheDir(): Promise<string> {
+    if (this.usesDefaultCacheDir) {
+      return ensureSecureTempDirSync(CACHE_SUBDIR);
+    }
+    await fs.mkdir(this.cacheDir, { recursive: true, mode: SECURE_DIR_MODE });
+    return this.cacheDir;
+  }
+
   /** Download to a temp file, verify, then atomically move into the cache. */
   private async download(expected: string): Promise<string> {
     const url = resolveVideoJarUrl(this.env);
-    await fs.mkdir(this.cacheDir, { recursive: true });
-    const tempPath = `${this.cachedJarPath}.download`;
+    const dir = await this.ensureSecureCacheDir();
+    const jarPath = path.join(dir, VIDEO_SERVER_JAR_CACHE_FILENAME);
+    const tempPath = `${jarPath}.download`;
 
     logger.info("[VIDEO_JAR] Downloading persistent-encoder jar", { url, destination: tempPath });
     try {
       await this.downloader.download(url, tempPath);
+      await fs.chmod(tempPath, SECURE_FILE_MODE);
 
       const { checksum: actual } = await this.checksumCalculator.computeFileSha256(tempPath);
       if (actual.toLowerCase() !== expected.toLowerCase()) {
@@ -218,27 +244,28 @@ export class VideoServerJarProvider {
       }
 
       const { size } = await fs.stat(tempPath);
-      await fs.rename(tempPath, this.cachedJarPath);
-      await this.writeMetadata(actual, size);
-      logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", {
-        path: this.cachedJarPath,
-        sha256: actual,
-      });
-      return this.cachedJarPath;
+      await fs.rename(tempPath, jarPath);
+      await this.writeMetadata(dir, actual, size);
+      logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", { path: jarPath, sha256: actual });
+      return jarPath;
     } catch (error) {
       await fs.rm(tempPath, { force: true }).catch(() => {});
       throw error;
     }
   }
 
-  private async writeMetadata(sha256: string, size: number): Promise<void> {
+  private async writeMetadata(dir: string, sha256: string, size: number): Promise<void> {
     const metadata: VideoServerJarMetadata = {
       version: resolvePinnedVersion(this.env),
       sha256,
       size,
       downloadedAt: this.timer.now(),
     };
-    await fs.writeFile(this.metadataPath, JSON.stringify(metadata, null, 2), "utf8");
+    await fs.writeFile(
+      path.join(dir, VIDEO_SERVER_JAR_METADATA_FILENAME),
+      JSON.stringify(metadata, null, 2),
+      { encoding: "utf8", mode: SECURE_FILE_MODE }
+    );
   }
 
   /** True iff `filePath` is a readable zip containing a `classes.dex` entry. */

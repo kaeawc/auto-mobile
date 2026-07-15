@@ -55,6 +55,18 @@ Status:
 
 - API 29 not validated yet (no local AVD available).
 
+Automated smoke test:
+
+- `scripts/local-dev/probe-biometric-enrollment.sh` runs the full
+  enrollment/match/unlock sequence below against any running emulator (pass
+  `AVD_NAME` / `ADB_SERIAL`, or let it boot the default AVD). It probes
+  `ro.kernel.qemu` and `emu help` first and **skips cleanly** when no emulator
+  (or no `emu finger` support) is present, so it is safe to invoke on any leg;
+  set `REQUIRE_DEVICE=true` to make an unavailable device a hard failure. The
+  control flow is regression-tested against a mock `adb` in
+  `test/bats/probe-biometric-enrollment.bats`, and the tool-layer sequence is
+  unit-covered in `test/features/action/BiometricAuth.test.ts`.
+
 Enrollment + auth steps (confirmed):
 
 1. Set a device PIN (required for enrollment).

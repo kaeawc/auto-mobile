@@ -203,6 +203,31 @@ describe("videoRecording tool segmentation branch", () => {
     });
   });
 
+  test("iOS recording past the 300s cap starts as one continuous (non-segmented) recording (#3906)", async () => {
+    // 500s > the old 300s manager cap. iOS `simctl recordVideo` has no time limit, so this
+    // is a single continuous recording (never segmented), not a rejection or a segment set.
+    const res = parse(
+      await handler()(iosDevice, {
+        action: "start",
+        platform: "ios",
+        deviceId: iosDevice.deviceId,
+        maxDuration: 500,
+        outputName: "long-ios",
+      })
+    );
+
+    expect(res.count).toBe(1);
+    const recordings = res.recordings as Array<Record<string, unknown>>;
+    expect(recordings[0].segmented).toBeUndefined();
+    expect((recordings[0].settings as Record<string, unknown>).maxDurationSeconds).toBe(500);
+
+    await handler()(iosDevice, {
+      action: "stop",
+      platform: "ios",
+      recordingId: recordings[0].recordingId as string,
+    });
+  });
+
   test("android recording > 180s starts a segmented session and stop returns segments", async () => {
     const startRes = parse(
       await handler()(androidDevice, {

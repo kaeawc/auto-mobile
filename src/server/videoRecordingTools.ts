@@ -10,6 +10,7 @@ import {
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
+  IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
   startVideoRecording,
   stopVideoRecording,
@@ -168,16 +169,13 @@ const videoRecordingSchema = addDeviceTargetingToSchema(z.object({
   fps: z.number().int().positive().optional().describe("FPS"),
   resolution: resolutionSchema.optional().describe("Resolution"),
   format: z.enum(["mp4"]).optional(),
-  // Raised from 300 so long Android recordings (segmented under the hood) are
-  // accepted. Note: non-Android recordings still can't exceed the manager's
-  // single-recording cap (300s) since they aren't segmented; such a request
-  // passes schema validation but is rejected at videoRecordingManager. Left
-  // as-is intentionally (out of scope for segmented Android capture).
+  // Outer ceiling only; the manager enforces the real per-platform cap (iOS up to
+  // IOS_MAX_DURATION_SECONDS, non-iOS 300s — see resolveMaxDurationSeconds).
   maxDuration: z
     .number()
     .int()
     .positive()
-    .max(3600)
+    .max(IOS_MAX_DURATION_SECONDS)
     .optional()
     .describe("Max duration seconds"),
   outputName: z.string().optional().describe("Recording label"),

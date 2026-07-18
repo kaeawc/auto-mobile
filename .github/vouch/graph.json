@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "members": [
+    {
+      "login": "kaeawc",
+      "role": "founder",
+      "status": "active",
+      "reputation": 100,
+      "vouchedBy": null,
+      "redeemedToken": null,
+      "revocationCause": null,
+      "revocationReason": null,
+      "createdAtMs": 0,
+      "updatedAtMs": 0
+    }
+  ],
+  "invites": []
+}

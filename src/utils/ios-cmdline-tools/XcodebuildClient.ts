@@ -15,8 +15,14 @@ export interface Xcodebuild {
   isAvailable(): Promise<boolean>;
 }
 
-const execAsync = async (file: string, args: string[], maxBuffer?: number): Promise<ExecResult> => {
-  const options = maxBuffer ? { maxBuffer } : undefined;
+const execAsync = async (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal): Promise<ExecResult> => {
+  // Pass the AbortSignal to execFile so a timed-out command kills its child
+  // instead of leaving it running orphaned (issue #3938).
+  const options: Parameters<typeof execFile>[2] =
+    maxBuffer && signal ? { maxBuffer, signal }
+      : maxBuffer ? { maxBuffer }
+        : signal ? { signal }
+          : undefined;
   const result = await promisify(execFile)(file, args, options);
   const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
   const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
@@ -24,11 +30,11 @@ const execAsync = async (file: string, args: string[], maxBuffer?: number): Prom
 };
 
 export class XcodebuildClient implements Xcodebuild {
-  execAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
+  execAsync: (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>;
   private timer: Timer;
 
   constructor(
-    execAsyncFn: ((file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>) | null = null,
+    execAsyncFn: ((file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
     timer: Timer = defaultTimer
   ) {
     this.execAsync = execAsyncFn || execAsync;
@@ -50,19 +56,28 @@ export class XcodebuildClient implements Xcodebuild {
       throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
     }
 
-    const runCommand = () => this.execAsync("xcodebuild", args, maxBuffer);
+    const runCommand = (signal?: AbortSignal) => this.execAsync("xcodebuild", args, maxBuffer, signal);
 
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
+      const controller = new AbortController();
       const timeoutPromise = new Promise<ExecResult>((_, reject) => {
         timeoutId = this.timer.setTimeout(
-          () => reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`)),
+          () => {
+            controller.abort();
+            reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
+          },
           timeoutMs
         );
       });
 
+      const runPromise = runCommand(controller.signal);
+      // Once the timeout wins the race the aborted run promise rejects with an
+      // AbortError; keep it handled so it can't surface as an unhandledRejection.
+      runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
+
       try {
-        const result = await Promise.race([runCommand(), timeoutPromise]);
+        const result = await Promise.race([runPromise, timeoutPromise]);
         const duration = this.timer.now() - startTime;
         logger.debug(`[iOS] Command completed in ${duration}ms: ${fullCommand}`);
         return result;

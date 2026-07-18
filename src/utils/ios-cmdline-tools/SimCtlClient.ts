@@ -102,9 +102,12 @@ export interface SimCtl {
    * Wait for a simulator to be ready
    * @param udid - Device UDID to wait for
    * @param timeoutMs - Maximum time to wait in milliseconds
+   * @param options - When `assumeBooted` is set, skip the blocking `bootstatus -b`
+   *   readiness wait because the caller (e.g. `startSimulator`) already performed
+   *   it, and only resolve device metadata.
    * @returns Promise with booted device information
    */
-  waitForSimulatorReady(udid: string, timeoutMs?: number): Promise<BootedDevice>;
+  waitForSimulatorReady(udid: string, timeoutMs?: number, options?: { assumeBooted?: boolean }): Promise<BootedDevice>;
 
   /**
    * Get the list of available (booted and shutdown) simulator UDIDs
@@ -237,8 +240,21 @@ export interface SimCtl {
 }
 
 // Enhance the standard execAsync result to implement the ExecResult interface
-const execAsync = async (file: string, args: string[], maxBuffer?: number): Promise<ExecResult> => {
-  const options = maxBuffer ? { maxBuffer } : undefined;
+const execAsync = async (
+  file: string,
+  args: string[],
+  maxBuffer?: number,
+  signal?: AbortSignal
+): Promise<ExecResult> => {
+  // Pass the AbortSignal to execFile so that when a caller's timeout aborts, Node
+  // kills the child process (SIGTERM) instead of leaving it running orphaned
+  // (issue #3938). Without this a timed-out `bootstatus -b` keeps booting the
+  // simulator in the background after the tool has already reported failure.
+  const options: Parameters<typeof execFile>[2] =
+    maxBuffer && signal ? { maxBuffer, signal }
+      : maxBuffer ? { maxBuffer }
+        : signal ? { signal }
+          : undefined;
   const result = await promisify(execFile)(file, args, options);
 
   const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
@@ -336,7 +352,7 @@ interface SimulatorList {
 
 export class SimCtlClient implements SimCtl {
   device: BootedDevice | null;
-  execAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
+  execAsync: (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>;
   private timer: Timer;
   private platform: NodeJS.Platform;
   private readonly usesInjectedExecAsync: boolean;
@@ -356,7 +372,7 @@ export class SimCtlClient implements SimCtl {
    */
   constructor(
     device: BootedDevice | null = null,
-    execAsyncFn: ((file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>) | null = null,
+    execAsyncFn: ((file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
     timer: Timer = defaultTimer,
     platform: NodeJS.Platform = process.platform
   ) {
@@ -413,21 +429,32 @@ export class SimCtlClient implements SimCtl {
       throw new ActionableError(message);
     }
 
-    const runCommand = () => this.execAsync("xcrun", localArgs);
+    const runCommand = (signal?: AbortSignal) => this.execAsync("xcrun", localArgs, undefined, signal);
 
-    // Use Promise.race to implement timeout if specified
+    // Use Promise.race to implement timeout if specified. On timeout we abort the
+    // controller so the underlying child process is killed rather than left
+    // running orphaned (issue #3938).
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
+      const controller = new AbortController();
 
       const timeoutPromise = new Promise<ExecResult>((_, reject) => {
         timeoutId = this.timer.setTimeout(
-          () => reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`)),
+          () => {
+            controller.abort();
+            reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
+          },
           timeoutMs
         );
       });
 
+      const runPromise = runCommand(controller.signal);
+      // Once the timeout wins the race the aborted run promise rejects with an
+      // AbortError; keep it handled so it can't surface as an unhandledRejection.
+      runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
+
       try {
-        const result = await Promise.race([runCommand(), timeoutPromise]);
+        const result = await Promise.race([runPromise, timeoutPromise]);
         const duration = this.timer.now() - startTime;
         logger.debug(`[iOS] Command completed in ${duration}ms: ${command}`);
         return result;
@@ -566,8 +593,21 @@ export class SimCtlClient implements SimCtl {
     await this.executeCommand(`shutdown ${device.deviceId}`);
   }
 
-  async waitForSimulatorReady(udid: string, timeoutMs?: number): Promise<BootedDevice> {
+  async waitForSimulatorReady(
+    udid: string,
+    timeoutMs?: number,
+    options?: { assumeBooted?: boolean }
+  ): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
+
+    // The cold-boot path passes `assumeBooted`: startSimulator already ran
+    // `bootstatus -b` (which throws on failure/timeout), so the device is
+    // already fully booted. Re-running the wait here would be a redundant second
+    // boot wait with its own independent timeout budget (issue #3938 follow-up),
+    // so skip straight to metadata resolution.
+    if (options?.assumeBooted) {
+      return this.resolveReadySimulator(udid);
+    }
 
     // Use `simctl bootstatus -b` which blocks until the simulator is fully
     // booted (data migration complete, system app ready, springboard launched).
@@ -588,7 +628,16 @@ export class SimCtlClient implements SimCtl {
     }
     perf.endOperation("bootstatus");
 
-    // Now look up device metadata to return a full BootedDevice
+    return this.resolveReadySimulator(udid);
+  }
+
+  /**
+   * Look up full device metadata for an already-booted simulator and return it
+   * as a BootedDevice. Shared by the cold-boot (assumeBooted) and already-running
+   * branches of {@link waitForSimulatorReady}.
+   */
+  private async resolveReadySimulator(udid: string): Promise<BootedDevice> {
+    const perf = createGlobalPerformanceTracker();
     perf.startOperation("deviceLookup");
     const simulator = (await this.listSimulatorImages())
       .find(device => device.deviceId === udid);

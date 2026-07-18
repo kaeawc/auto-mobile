@@ -32,7 +32,7 @@ function simulatorListPayload(devices: unknown[]): string {
 describe("Simctl", function() {
   let simctl: Simctl;
   let mockDevice: BootedDevice;
-  let mockExecAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
+  let mockExecAsync: (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>;
 
   beforeEach(function() {
     resetSimctlCaches();
@@ -247,6 +247,89 @@ describe("Simctl", function() {
         `Command timed out after ${DEFAULT_DEVICE_READY_TIMEOUT_MS}ms: xcrun simctl bootstatus test-ios-device-id -b`,
       );
       resolveCommand?.(createExecResult("late bootstatus", ""));
+    });
+
+    test("aborts the underlying child process when the bootstatus wait times out", async function() {
+      const timer = new FakeTimer();
+      let capturedSignal: AbortSignal | undefined;
+      mockExecAsync = async (file: string, args: string[], _maxBuffer?: number, signal?: AbortSignal): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        capturedSignal = signal;
+        // Simulate a long-running child that only settles when aborted, mirroring
+        // execFile rejecting with an AbortError once its signal fires.
+        return new Promise<ExecResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          });
+        });
+      };
+
+      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+
+      const bootPromise = simctl.startSimulator("test-ios-device-id", 1234);
+      while (!capturedSignal) {
+        await Promise.resolve();
+      }
+      expect(capturedSignal.aborted).toBe(false);
+
+      timer.advanceTime(1234);
+
+      await expect(bootPromise).rejects.toThrow(
+        "Command timed out after 1234ms: xcrun simctl bootstatus test-ios-device-id -b",
+      );
+      // The timeout must abort the child rather than leave it running orphaned.
+      expect(capturedSignal.aborted).toBe(true);
+    });
+  });
+
+  describe("waitForSimulatorReady", function() {
+    const readyPayload = simulatorListPayload([
+      {
+        udid: "iphone-17-pro-udid",
+        name: "iPhone 17 Pro",
+        state: "Booted",
+        isAvailable: true,
+        deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+        os_version: "26.4"
+      }
+    ]);
+
+    function recordingReadyExec(commands: string[][]): typeof mockExecAsync {
+      return async (file: string, args: string[]): Promise<ExecResult> => {
+        commands.push([file, ...args]);
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(readyPayload, "");
+        }
+        return createExecResult("", "");
+      };
+    }
+
+    test("runs bootstatus -b on the already-running path (no assumeBooted)", async function() {
+      const commands: string[][] = [];
+      simctl = new Simctl(mockDevice, recordingReadyExec(commands));
+
+      const device = await simctl.waitForSimulatorReady("iphone-17-pro-udid");
+
+      expect(device.deviceId).toBe("iphone-17-pro-udid");
+      expect(commands).toContainEqual([
+        "xcrun", "simctl", "bootstatus", "iphone-17-pro-udid", "-b",
+      ]);
+    });
+
+    test("skips the redundant bootstatus -b when assumeBooted is set (cold-boot path)", async function() {
+      const commands: string[][] = [];
+      simctl = new Simctl(mockDevice, recordingReadyExec(commands));
+
+      const device = await simctl.waitForSimulatorReady("iphone-17-pro-udid", 1234, { assumeBooted: true });
+
+      expect(device.deviceId).toBe("iphone-17-pro-udid");
+      // The cold-boot path already waited via startSimulator; no second boot wait.
+      expect(commands.some(c => c.includes("bootstatus"))).toBe(false);
     });
   });
 

@@ -16,7 +16,7 @@ interface ApplicationModule {
     @Provides
     @SingleIn(AppScope::class)
     fun provideAutoMobileClient(): AutoMobileClient {
-      return McpClientFactory.createPreferred(null)
+      return McpClientFactory.createPreferred()
     }
 
     @Provides

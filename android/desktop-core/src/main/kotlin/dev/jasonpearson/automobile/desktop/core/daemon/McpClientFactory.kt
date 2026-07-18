@@ -9,7 +9,7 @@ object McpClientFactory {
    * back to [createPreferred] when [process] is null.
    */
   fun createFromProcess(process: McpProcess?): AutoMobileClient {
-    if (process == null) return createPreferred(null)
+    if (process == null) return createPreferred()
     return when (process.connectionType) {
       McpConnectionType.StreamableHttp -> {
         val port = process.port ?: 3000
@@ -25,11 +25,7 @@ object McpClientFactory {
     }
   }
 
-  fun createPreferred(httpServer: McpHttpServer?): AutoMobileClient {
-    if (httpServer != null) {
-      return McpHttpClient(httpServer.endpoint)
-    }
-
+  fun createPreferred(): AutoMobileClient {
     val configuredHttp = createConfiguredHttp()
     if (configuredHttp != null) {
       return configuredHttp

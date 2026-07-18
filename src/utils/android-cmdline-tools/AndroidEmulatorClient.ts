@@ -134,8 +134,10 @@ export function resolveHeadlessMode(
   return { headless: false, reason: "usable display detected" };
 }
 
-const execAsync = async (command: string): Promise<ExecResult> => {
-  const result = await promisify(exec)(command);
+const execAsync = async (command: string, signal?: AbortSignal): Promise<ExecResult> => {
+  // Pass the AbortSignal to exec so a timed-out command kills its child instead
+  // of leaving it running orphaned (issue #3938).
+  const result = await (signal ? promisify(exec)(command, { signal }) : promisify(exec)(command));
 
   // Add the required string methods
   // noinspection UnnecessaryLocalVariableJS
@@ -157,7 +159,7 @@ const execAsync = async (command: string): Promise<ExecResult> => {
 };
 
 export class AndroidEmulatorClient implements AndroidEmulator {
-  private execAsync: (command: string) => Promise<ExecResult>;
+  private execAsync: (command: string, signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: typeof spawn;
   private emulatorPath: string;
   private timer: Timer;
@@ -175,7 +177,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdConfigReader - Reader for AVD config.ini files (for testing)
    */
   constructor(
-    execAsyncFn: ((command: string) => Promise<ExecResult>) | null = null,
+    execAsyncFn: ((command: string, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
     spawnFn: typeof spawn | null = null,
     timer: Timer = defaultTimer,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
@@ -546,19 +548,27 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const fullCommand = `${this.emulatorPath} ${command}`;
     logger.debug(`Executing emulator command: ${fullCommand}`);
 
-    // Use Promise.race to implement timeout if specified
+    // Use Promise.race to implement timeout if specified. On timeout we abort the
+    // controller so the underlying child process is killed rather than left
+    // running orphaned (issue #3938).
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
+      const controller = new AbortController();
 
       const timeoutPromise = new Promise<ExecResult>((_, reject) => {
-        timeoutId = this.timer.setTimeout(() =>
-          reject(new ActionableError(`Command timed out after ${timeoutMs}ms: ${fullCommand}`)),
-                                          timeoutMs
-        );
+        timeoutId = this.timer.setTimeout(() => {
+          controller.abort();
+          reject(new ActionableError(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
+        }, timeoutMs);
       });
 
+      const runPromise = this.execAsync(fullCommand, controller.signal);
+      // Once the timeout wins the race the aborted run promise rejects with an
+      // AbortError; keep it handled so it can't surface as an unhandledRejection.
+      runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
+
       try {
-        return await Promise.race([this.execAsync(fullCommand), timeoutPromise]);
+        return await Promise.race([runPromise, timeoutPromise]);
       } finally {
         clearTimeout(timeoutId!);
       }

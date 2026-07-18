@@ -1,107 +1,74 @@
-# Vouch System (web-of-trust gating)
+# Vouch (contributor gating)
 
-A web-of-trust that gates GitHub issues and pull requests from non-contributors.
-It is modeled on Mitchell Hashimoto's Ghostty beta vouch system: a small set of
-trusted seed members can vouch newcomers in, each member has a bounded "vouch
-budget", trust flows down a forest, and denouncing a bad actor revokes their
-downstream sub-tree while charging a decaying reputation penalty up the chain
-that vouched them in.
+This repo uses [**`mitchellh/vouch`**](https://github.com/mitchellh/vouch) — a
+community trust-management system — to gate GitHub issues and pull requests from
+non-contributors. It is the same system Ghostty and 150+ other projects use; we
+consume the upstream GitHub Actions and the standard `VOUCHED.td` file format
+rather than maintaining our own implementation.
 
-## Why
+## How it works
 
-Open repos attract drive-by issues and PRs from accounts with no track record.
-Rather than a hard "contributors only" wall, the vouch system lets the community
-extend trust deliberately and *accountably*: anyone can be brought in by someone
-who is willing to stake reputation on them.
+- **Trust list:** [`.github/VOUCHED.td`](../../.github/VOUCHED.td) — a flat,
+  alphabetically-sorted text file ("Trustdown"). One handle per line, no `@`,
+  optional `github:` platform prefix. Denounce by prefixing `-` with an optional
+  reason:
 
-## Roles
+  ```
+  github:kaeawc
+  -github:slopmaster3000 Submitted endless amounts of AI slop
+  ```
 
-| Role | Vouched in by | Cascade-revocable | Notes |
-|------|---------------|-------------------|-------|
-| `founder` | nobody (seed) | **No — immune** | The repo owner. A root of trust. |
-| `contributor` | nobody (seed) | Only if explicitly denounced | Directly trusted (e.g. merged PRs). |
-| `vouched` | another member | Yes | Joined by redeeming/receiving a vouch. |
+- **Model:** flat. A user is *vouched*, *denounced*, or *unknown* — there are no
+  reputation scores, vouch budgets, invite tokens, or transitive/cascading trust.
+  Authority comes from GitHub repo permissions: only collaborators with an allowed
+  role (admin/maintain/write/triage) vouch or denounce. Vouched users do not gain
+  the ability to vouch others.
 
-## Mechanics
+- **Gating:** the `check-pr` / `check-issue` actions run on new PRs/issues and
+  close them if the author is unvouched or denounced (bots and write-access
+  collaborators are always allowed).
 
-- **Vouch budget.** Each member's capacity is `base(role) + floor(reputation /
-  reputationPerBonusVouch)`. Outstanding commitments (pending invites + active
-  members they vouched in) consume the budget. See
-  [`VouchPolicy.ts`](../../scripts/github/vouch/VouchPolicy.ts) for the defaults.
-- **Invite tokens.** A member spends a slot to mint a single-use token
-  (`/vouch invite`), or vouches someone in directly (`/vouch admit @user`).
-- **Trust graph.** Every `vouched` member stores a single `vouchedBy` pointer;
-  the whole forest is reconstructable from it.
-- **Revocation cascade.** Denouncing a member (`/vouch denounce @user`) revokes
-  them and everyone in their downstream sub-tree.
-- **Shared accountability.** The denounced member's *direct* voucher loses
-  `denouncePenalty` reputation; each ancestor further up pays a `penaltyDecay`
-  fraction of the one below, until it rounds to zero. Lower reputation means a
-  smaller vouch budget.
+- **Managing:** a maintainer comments on any issue to update the list:
+  - `vouch @user [reason]` — add to the trust list
+  - `denounce @user [reason]` — denounce
+  - `unvouch @user` — remove
 
-### What happens when someone you invited is denounced?
+  The `manage-by-issue` action commits the change back to `.github/VOUCHED.td`.
 
-Because you (the repo owner) are a `founder`:
+- **Web of trust (optional):** projects can aggregate *other projects'*
+  `VOUCHED.td` lists, so a trust/denounce decision in one repo can ripple across
+  repos with shared values. See the upstream README to opt into shared manager or
+  vouched lists.
 
-1. **The denounced member is revoked** — their issues/PRs are gated again.
-2. **The cascade goes down, not up** — everyone *they* vouched for is revoked too.
-3. **You take a reputation hit, never a revocation** — the penalty lowers your
-   vouch budget (you can invite fewer people until reputation recovers), but a
-   founder is immune from revocation and floored at zero reputation, so you never
-   lose access. Denouncing a bad actor can never lock you out of your own repo.
+## Workflows
 
-## Architecture
+| Workflow | Trigger | Effect |
+|----------|---------|--------|
+| [`vouch-check-pr.yml`](../../.github/workflows/vouch-check-pr.yml) | `pull_request_target` opened/reopened | Close PRs from unvouched/denounced authors |
+| [`vouch-check-issue.yml`](../../.github/workflows/vouch-check-issue.yml) | `issues` opened/reopened | Close issues from unvouched/denounced authors |
+| [`vouch-manage-by-issue.yml`](../../.github/workflows/vouch-manage-by-issue.yml) | `issue_comment` created | Apply `vouch`/`denounce`/`unvouch` from maintainers |
 
-The vouch system is **standalone GitHub CI tooling** under `scripts/github/vouch/`
-— it is deliberately **not** part of the AutoMobile MCP server: it adds no MCP
-tools, no database tables, and ships nothing in the server bundle. It reuses only
-the repo's shared primitives (`IdGenerator`, `Timer`).
+The action refs are pinned to `mitchellh/vouch@v1.5.0`
+(`d66fa29a64600490892131ad87597c30c91fcac4`).
 
-```
-GitHub event ──▶ scripts/github/vouch-gate.ts (adapter: fetch + file store)
-                      │
-                      ▼
-              VouchGitHubRunner ──▶ VouchEngine (pure domain: trust + accountability)
-                      │                   ▲
-                      ▼                   │
-              GitHubIssueClient      FileVouchStore ── .github/vouch/graph.json
-              (label/comment/close)   (committed JSON graph — auditable in git)
-```
+## Tuning enforcement
 
-- [`VouchEngine`](../../scripts/github/vouch/VouchEngine.ts) — pure, deterministic
-  (injected `IdGenerator` + `Timer`), no I/O. All trust/accountability logic.
-- [`FileVouchStore`](../../scripts/github/vouch/FileVouchStore.ts) +
-  [`VouchSnapshot`](../../scripts/github/vouch/VouchSnapshot.ts) — JSON graph
-  committed in the repo (transparent + auditable in git history).
-- [`VouchGitHubGate`](../../scripts/github/vouch/VouchGitHubGate.ts) — pure command
-  parsing + action planning.
-- [`VouchGitHubRunner`](../../scripts/github/vouch/VouchGitHubRunner.ts) —
-  orchestrates one event; side effects via an injected client.
+Both check actions default here to **enforcing** (`require-vouch: "true"`,
+`auto-close: "true"`). To soften:
 
-## Slash commands (post as an issue/PR comment)
+- `require-vouch: "false"` — allow anyone to open issues/PRs but still block
+  denounced users. A common setup is enforcing on PRs but permissive on issues so
+  anyone can still file bug reports.
+- `auto-close: "false"` — advisory only (report status without closing).
+- `dry-run: "true"` — log intended actions without applying them, useful while
+  rolling it out.
 
-| Command | Who can run it | Effect |
-|---------|----------------|--------|
-| `/vouch admit @user` | any active member with budget | Vouch `@user` in directly. |
-| `/vouch invite` | any active member with budget | Mint a single-use token. |
-| `/vouch redeem <token>` | anyone | Join by redeeming a token. |
-| `/vouch denounce @user [reason]` | founder / contributor | Revoke `@user`'s sub-tree. |
-| `/vouch status [@user]` | anyone | Report standing + remaining budget. |
+## Notes / prerequisites
 
-## Deploying the GitHub gate
-
-1. Seed the graph. The repo owner is already seeded as a `founder` in
-   [`.github/vouch/graph.json`](../../.github/vouch/graph.json). Add trusted
-   contributors by editing that file (`role: "contributor"`) or via `/vouch admit`.
-2. Enable the workflow: set the repository **variable** `VOUCH_GATE_ENABLED` to
-   `true` (Settings → Secrets and variables → Actions → Variables). The
-   [`vouch-gate.yml`](../../.github/workflows/vouch-gate.yml) workflow is inert
-   until then.
-3. Choose enforcement. It defaults to **advisory** — a gated issue/PR gets the
-   `needs-vouch` label and a guidance comment but stays open. Set the
-   `VOUCH_ENFORCE` variable to `true` to close gated issues/PRs.
-
-`pull_request_target` is used so PRs from forks can be gated and the graph (a
-base-repo file) can be read/written; the workflow reads only the event payload,
-never checks out untrusted PR code. Graph mutations are committed back to the
-default branch, so the trust graph's evolution is visible in git history.
+- `manage-by-issue` pushes to the default branch with `GITHUB_TOKEN`, which
+  requires repo **Settings → Actions → General → Workflow permissions →
+  "Read and write"**. For commits that must re-trigger other workflows or bypass
+  branch protection, swap in a GitHub App token
+  (`actions/create-github-app-token`), as Ghostty does.
+- Seed the trust list by editing `.github/VOUCHED.td` directly or via
+  `vouch @user` comments. The repo owner (`github:kaeawc`) is already seeded.

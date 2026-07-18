@@ -1,0 +1,31 @@
+name: "Vouch Check Issue"
+
+# Gates issues from non-contributors using mitchellh/vouch. Authors that are not
+# vouched (or are denounced) in .github/VOUCHED.td have their issue closed. Bots
+# and users with write access are always allowed.
+#
+# Soften if desired: set require-vouch: "false" to let anyone open issues while
+# still blocking denounced users, or auto-close: "false" to make it advisory.
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: "Check issue author vouch status"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mitchellh/vouch/action/check-issue@d66fa29a64600490892131ad87597c30c91fcac4 # v1.5.0
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          auto-close: "true"
+          auto-lock: "false"
+          require-vouch: "true"
+          vouched-file: ".github/VOUCHED.td"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

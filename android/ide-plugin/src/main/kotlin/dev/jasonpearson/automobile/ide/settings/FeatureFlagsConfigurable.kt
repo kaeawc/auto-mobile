@@ -53,7 +53,7 @@ class FeatureFlagsConfigurable : SearchableConfigurable, Configurable.NoScroll {
   override fun getDisplayName(): String = "Feature Flags"
 
   override fun createComponent(): JComponent {
-    val client = McpClientFactory.createPreferred(null)
+    val client = McpClientFactory.createPreferred()
     val viewModel = FeatureFlagsViewModel(client)
     this.viewModel = viewModel
     viewModel.loadFlags()

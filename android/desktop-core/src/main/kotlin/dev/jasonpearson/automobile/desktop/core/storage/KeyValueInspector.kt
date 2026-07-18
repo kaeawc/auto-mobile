@@ -23,7 +23,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,8 +42,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
-import dev.jasonpearson.automobile.desktop.core.socket.StorageChangeListener
-import dev.jasonpearson.automobile.desktop.core.socket.StorageSocketClient
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -59,7 +56,6 @@ private val HIGHLIGHT_COLOR = Color(0xFF4CAF50).copy(alpha = 0.3f)
  * Key-Value storage inspector for SharedPreferences (Android) / UserDefaults (iOS).
  *
  * @param keyValueFiles List of key-value storage files to display
- * @param storageSocketClient Optional socket client for real-time change updates
  * @param onSetValue Optional callback to persist a value change. Receives (fileName, key, value,
  *   type).
  * @param modifier Modifier for the composable
@@ -67,7 +63,6 @@ private val HIGHLIGHT_COLOR = Color(0xFF4CAF50).copy(alpha = 0.3f)
 @Composable
 fun KeyValueInspector(
   keyValueFiles: List<KeyValueFile>,
-  storageSocketClient: StorageSocketClient? = null,
   onSetValue:
     (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<Unit>)? =
     null,
@@ -86,20 +81,10 @@ fun KeyValueInspector(
   var saveError by remember { mutableStateOf<String?>(null) }
 
   // Track recently changed keys for highlight animation
-  // Key format: "fileName:key" to uniquely identify entries across files
+  // Key format: "fileName:key" to uniquely identify entries across files.
+  // The producer (a live storage-change subscription) is intentionally not wired here yet;
+  // it will be reconnected via the observation stream's `storage_update` frames (#3930).
   var recentlyChangedKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
-
-  // Subscribe to storage changes
-  DisposableEffect(storageSocketClient) {
-    val listener = StorageChangeListener { event ->
-      val changeKey = "${event.fileName}:${event.key}"
-      recentlyChangedKeys = recentlyChangedKeys + changeKey
-    }
-    storageSocketClient?.subscribe(listener)
-    onDispose {
-      storageSocketClient?.unsubscribe(listener)
-    }
-  }
 
   // Auto-clear highlighted keys after animation duration
   LaunchedEffect(recentlyChangedKeys) {

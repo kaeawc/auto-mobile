@@ -13,7 +13,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
  */
 val LocalAutoMobileGraph =
   staticCompositionLocalOf<AutoMobileGraphProvider> {
-    val client = McpClientFactory.createPreferred(null)
+    val client = McpClientFactory.createPreferred()
     object : AutoMobileGraphProvider {
       override val autoMobileClient = client
       override val settingsProvider = FakeSettingsProvider()

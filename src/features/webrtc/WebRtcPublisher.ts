@@ -2,6 +2,7 @@ import {
   MediaStreamTrack,
   RTCPeerConnection,
   useH264,
+  usePCMU,
   type RTCIceServer,
 } from "werift";
 import { logger } from "../../utils/logger";
@@ -10,6 +11,7 @@ import type { BackoffInput } from "../../utils/Backoff";
 import { DEFAULT_RTP_MTU } from "./h264";
 import { ReconnectController, type ReconnectState } from "./ReconnectController";
 import { RtpH264TrackWriter } from "./RtpH264TrackWriter";
+import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
 import { TrickleIceForwarder } from "./trickleIce";
 import { WhipClient, type WhipClientOptions } from "./WhipClient";
 
@@ -32,6 +34,8 @@ export interface WebRtcPublisherConfig {
    * server that supports the WHIP trickle extension. Defaults to false.
    */
   trickleIce?: boolean;
+  /** Add a sendonly PCMU audio track alongside video. Defaults to false. */
+  audioEnabled?: boolean;
 }
 
 export interface WebRtcPublisherDeps {
@@ -65,6 +69,8 @@ export interface WebRtcStreamDescriptor {
   iceServers: RTCIceServer[];
   framesSent: number;
   packetsSent: number;
+  audioPacketsSent: number;
+  audioSamplesSent: number;
 }
 
 /**
@@ -84,9 +90,11 @@ export class WebRtcPublisher {
   private readonly controller: ReconnectController;
 
   private readonly trickleIce: boolean;
+  private readonly audioEnabled: boolean;
 
   private pc: RTCPeerConnection | null = null;
   private writer: RtpH264TrackWriter | null = null;
+  private audioWriter: RtpPcmuTrackWriter | null = null;
   private resourceUrl: string | null = null;
   private state: ReconnectState = "idle";
   private closed = false;
@@ -98,6 +106,7 @@ export class WebRtcPublisher {
   constructor(config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps = {}) {
     this.config = config;
     this.trickleIce = config.trickleIce ?? false;
+    this.audioEnabled = config.audioEnabled ?? false;
     this.timer = deps.timer ?? defaultTimer;
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
@@ -106,7 +115,9 @@ export class WebRtcPublisher {
       (iceServers =>
         new RTCPeerConnection({
           iceServers,
-          codecs: { video: [useH264()] },
+          codecs: this.audioEnabled
+            ? { video: [useH264()], audio: [usePCMU()] }
+            : { video: [useH264()] },
         }));
     const createWhip = deps.createWhipClient ?? (options => new WhipClient(options));
     this.whip = createWhip({
@@ -141,6 +152,11 @@ export class WebRtcPublisher {
     this.writer?.writeChunk(chunk);
   }
 
+  /** Feed 8 kHz mono PCM16LE audio; ignored when audio is not enabled. */
+  writePcmAudioChunk(chunk: Buffer): void {
+    this.audioWriter?.writePcm16Chunk(chunk);
+  }
+
   /**
    * Report that the capture source failed. Unlike a WebRTC connection drop this
    * does not change the peer `connectionState`, so without this hook a dead
@@ -161,6 +177,7 @@ export class WebRtcPublisher {
 
   getDescriptor(): WebRtcStreamDescriptor {
     const stats = this.writer?.stats;
+    const audioStats = this.audioWriter?.stats;
     return {
       streamId: this.config.streamId,
       state: this.state,
@@ -169,6 +186,8 @@ export class WebRtcPublisher {
       iceServers: this.config.iceServers ?? [],
       framesSent: stats?.framesWritten ?? 0,
       packetsSent: stats?.packetsWritten ?? 0,
+      audioPacketsSent: audioStats?.packetsWritten ?? 0,
+      audioSamplesSent: audioStats?.samplesWritten ?? 0,
     };
   }
 
@@ -203,6 +222,14 @@ export class WebRtcPublisher {
         mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
         timer: this.timer,
       });
+      if (this.audioEnabled) {
+        const audioTrack = new MediaStreamTrack({ kind: "audio" });
+        const audioTransceiver = pc.addTransceiver(audioTrack, { direction: "sendonly" });
+        this.audioWriter = new RtpPcmuTrackWriter({
+          sink: audioTrack,
+          ssrc: audioTransceiver.sender.ssrc,
+        });
+      }
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -259,6 +286,7 @@ export class WebRtcPublisher {
       if (this.pc === pc) {
         this.pc = null;
         this.writer = null;
+        this.audioWriter = null;
         this.trickle?.stop();
         this.trickle = null;
         this.candidateSub?.unSubscribe();
@@ -349,6 +377,7 @@ export class WebRtcPublisher {
     const resourceUrl = this.resourceUrl;
     this.pc = null;
     this.writer = null;
+    this.audioWriter = null;
     this.resourceUrl = null;
 
     // Stop forwarding candidates and detach the listener before the pc closes.

@@ -39,11 +39,19 @@ import java.nio.ByteBuffer
  * - bits 0-61: presentation timestamp in microseconds
  *
  * Followed by `size` bytes of encoded frame data.
+ *
+ * When audio is enabled, the stream uses a multiplexed header:
+ * ```
+ * amux header: magic "amux" (4) | version (4) | track_count (4)
+ * track:       track_id (4) | codec_id (4) | param1 (4) | param2 (4)
+ * packet:      track_id (4) | pts_and_flags (8) | size (4) | payload
+ * ```
  */
 class VideoStreamWriter(
   private val socketName: String,
   private val width: Int,
   private val height: Int,
+  private val audioEnabled: Boolean = false,
 ) {
   private var serverSocket: LocalServerSocket? = null
   private var clientSocket: LocalSocket? = null
@@ -53,16 +61,22 @@ class VideoStreamWriter(
 
   companion object {
     /** "h264" as big-endian int: 0x68323634 */
-    const val CODEC_ID_H264 = 0x68323634
+    const val CODEC_ID_H264 = VideoStreamProtocol.CODEC_ID_H264
+    /** "amux" as big-endian int: 0x616d7578 */
+    const val CODEC_ID_AMUX = VideoStreamProtocol.CODEC_ID_AMUX
+    /** "s16l" as big-endian int: 0x7331366c */
+    const val CODEC_ID_PCM16 = VideoStreamProtocol.CODEC_ID_PCM16
+    const val TRACK_ID_VIDEO = VideoStreamProtocol.TRACK_ID_VIDEO
+    const val TRACK_ID_AUDIO = VideoStreamProtocol.TRACK_ID_AUDIO
 
     /** Bit 63: codec configuration data */
-    const val PACKET_FLAG_CONFIG = 1L shl 63
+    const val PACKET_FLAG_CONFIG = VideoStreamProtocol.PACKET_FLAG_CONFIG
 
     /** Bit 62: key frame (I-frame) */
-    const val PACKET_FLAG_KEY_FRAME = 1L shl 62
+    const val PACKET_FLAG_KEY_FRAME = VideoStreamProtocol.PACKET_FLAG_KEY_FRAME
 
     /** Mask for PTS (bits 0-61) */
-    const val PTS_MASK = (1L shl 62) - 1
+    const val PTS_MASK = VideoStreamProtocol.PTS_MASK
   }
 
   /**
@@ -85,15 +99,27 @@ class VideoStreamWriter(
     println("Client connected, writing stream header")
 
     // Write stream header
-    writeHeader()
+    if (audioEnabled) {
+      writeMuxHeader()
+    } else {
+      writeLegacyHeader()
+    }
   }
 
-  private fun writeHeader() {
-    val header = ByteBuffer.allocate(12)
-    header.putInt(CODEC_ID_H264)
-    header.putInt(width)
-    header.putInt(height)
-    outputStream!!.write(header.array())
+  private fun writeLegacyHeader() {
+    outputStream!!.write(VideoStreamProtocol.legacyHeader(width, height))
+    outputStream!!.flush()
+  }
+
+  private fun writeMuxHeader() {
+    outputStream!!.write(
+      VideoStreamProtocol.muxHeader(
+        width,
+        height,
+        AudioCapture.SAMPLE_RATE_HZ,
+        AudioCapture.CHANNELS,
+      )
+    )
     outputStream!!.flush()
   }
 
@@ -105,32 +131,31 @@ class VideoStreamWriter(
    * @return true if the packet was written successfully, false if the stream was closed
    */
   fun writePacket(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo): Boolean {
+    val data = ByteArray(bufferInfo.size)
+    buffer.position(bufferInfo.offset)
+    buffer.get(data, 0, bufferInfo.size)
+    val ptsAndFlags =
+      VideoStreamProtocol.ptsAndFlags(
+        bufferInfo.presentationTimeUs,
+        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0,
+        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
+      )
+
+    return writePacketData(TRACK_ID_VIDEO, ptsAndFlags, data)
+  }
+
+  fun writeAudioPacket(data: ByteArray, ptsUs: Long): Boolean {
+    return writePacketData(TRACK_ID_AUDIO, ptsUs and PTS_MASK, data)
+  }
+
+  @Synchronized
+  private fun writePacketData(trackId: Int, ptsAndFlags: Long, data: ByteArray): Boolean {
     if (stopped) return false
 
     val output = outputStream ?: return false
 
     try {
-      // Build pts_and_flags
-      var ptsAndFlags = bufferInfo.presentationTimeUs and PTS_MASK
-
-      if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-        ptsAndFlags = ptsAndFlags or PACKET_FLAG_CONFIG
-      }
-
-      if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
-        ptsAndFlags = ptsAndFlags or PACKET_FLAG_KEY_FRAME
-      }
-
-      // Write packet header (12 bytes)
-      val packetHeader = ByteBuffer.allocate(12)
-      packetHeader.putLong(ptsAndFlags)
-      packetHeader.putInt(bufferInfo.size)
-      output.write(packetHeader.array())
-
-      // Write packet data
-      val data = ByteArray(bufferInfo.size)
-      buffer.position(bufferInfo.offset)
-      buffer.get(data, 0, bufferInfo.size)
+      output.write(VideoStreamProtocol.packetHeader(audioEnabled, trackId, ptsAndFlags, data.size))
       output.write(data)
 
       return true

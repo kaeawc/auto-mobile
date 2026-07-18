@@ -1,19 +1,19 @@
 # WebRTC Screen Streaming (WHIP egress)
 
-<kbd>⚠️ Partial</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android Only</kbd>
+<kbd>⚠️ Partial</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android + iOS Video</kbd>
 
 > **Current state:** The AutoMobile publish path is implemented and tested — an
-> Android device's screen is captured as H.264, packetized to RTP, and pushed to
+> Android or iOS device screen video is captured as H.264, packetized to RTP, and pushed to
 > a coordination server over **WHIP** using [werift](https://github.com/shinyoshiaki/werift-webrtc)
 > (pure-TypeScript WebRTC). Control is via the daemon `webrtc-stream.sock` Unix
 > socket. A reference coordination server + browser viewer ships under
 > [`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/).
 >
-> Live device capture depends on `adb screenrecord` on a real Android device/emulator
-> (not exercised in unit tests); everything up to and including the WebRTC media
-> transport is covered by a real werift↔werift loopback and a full
-> publisher→server→subscriber end-to-end test. iOS is not yet supported (no live
-> H.264 source — see [iOS Screen Streaming](../../plat/ios/screen-streaming.md)).
+> Live Android capture depends on `adb screenrecord` or the persistent
+> `video-server` jar on a real device/emulator; iOS capture depends on the
+> CtrlProxy screen streaming helper plus local `ffmpeg` H.264 encoding. Everything
+> up to and including the WebRTC media transport is covered by a real
+> werift↔werift loopback and a full publisher→server→subscriber end-to-end test.
 >
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
@@ -64,8 +64,9 @@ by common media servers (MediaMTX, LiveKit, Janus, Cloudflare).
 |------|----------------|
 | `h264.ts` | Annex-B NAL splitter, access-unit assembler, RFC 6184 RTP packetizer (single-NAL + FU-A) |
 | `RtpH264TrackWriter.ts` | Turns the elementary stream into werift `RtpPacket`s; wall-clock 90 kHz timestamps, marker bit on the last packet of a frame |
+| `RtpPcmuTrackWriter.ts` | Turns 8 kHz mono PCM16LE audio into PCMU/G.711 RTP packets |
 | `AndroidH264Source.ts` | Runs `adb exec-out screenrecord --output-format=h264 -`; rotates segments before the 180 s `--time-limit` cap so the stream stays continuous |
-| `PersistentEncoderH264Source.ts` | Runs the long-lived `video-server` (VirtualDisplay + MediaCodec) via `app_process`; a single continuous encoder with no rotation seam. Parsed by `VideoServerStreamParser.ts` |
+| `PersistentEncoderH264Source.ts` | Runs the long-lived `video-server` (VirtualDisplay + MediaCodec, plus optional playback audio) via `app_process`; parsed by `VideoServerStreamParser.ts` |
 | `androidH264CaptureSourceFactory.ts` | Prefers the persistent encoder when `automobile-video.jar` is resolvable (`videoServerJar.ts`), falling back to `screenrecord` on unavailability or start failure |
 | `WhipClient.ts` | WHIP `POST` (offer→answer) and `DELETE`; resolves the `Location` resource URL used to reconnect/tear down |
 | `ReconnectController.ts` | Connect / reconnect with injectable backoff (default exponential 1 s→30 s) |
@@ -104,7 +105,8 @@ Newline-delimited JSON request/response.
   "whipToken": "…",             // optional bearer token
   "iceServers": [{ "urls": "stun:stun.l.google.com:19302" }],
   "bitrateKbps": 4000,          // optional
-  "size": { "width": 720, "height": 1280 }    // optional downscale
+  "size": { "width": 720, "height": 1280 },   // optional downscale
+  "audio": true                               // optional Android audio
 }
 ```
 
@@ -123,7 +125,9 @@ Newline-delimited JSON request/response.
     "resourceUrl": "https://coord:8080/whip/ci-run-42",
     "iceServers": [ … ],
     "framesSent": 0,
-    "packetsSent": 0
+    "packetsSent": 0,
+    "audioPacketsSent": 0,
+    "audioSamplesSent": 0
   }
 }
 ```
@@ -137,6 +141,7 @@ Newline-delimited JSON request/response.
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale, `WIDTHxHEIGHT` |
+| `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional Android audio (`audio: true` per request). Requires the persistent `video-server` jar. |
 
 Per-request fields override the environment defaults.
 
@@ -209,19 +214,35 @@ compromised:
 See [Environment variables](../../../using/environment-variables.md) for the full
 flag reference.
 
+## Optional audio
+
+Audio is opt-in (`AUTOMOBILE_WEBRTC_AUDIO=1` or `"audio": true`) and currently
+Android-only. The publisher adds a sendonly PCMU audio track and the Android
+`video-server` captures 8 kHz mono PCM16 from `REMOTE_SUBMIX`; the TypeScript
+publisher converts that PCM to PCMU RTP. Because `screenrecord` is video-only,
+audio-enabled streams require the persistent `automobile-video.jar` path. If the
+jar is unavailable or `REMOTE_SUBMIX` cannot initialize on the device build, the
+stream start fails instead of silently publishing video-only audio.
+
+Android playback capture is policy-limited: some apps/usages cannot be captured,
+and `REMOTE_SUBMIX` is privileged. The reference coordination server forwards
+both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
+`audioPacketsForwarded` in its reconnect descriptor.
+
 ## Known limitations / future work
 
-- **Android only.** iOS `simctl` provides screenshots/finalized recordings, not a
-  live H.264 elementary stream; a VideoToolbox encoder in the CtrlProxy runner is
-  required. See [ios-webrtc-streaming.md](./ios-webrtc-streaming.md) (#3777) for
-  the spike and recommended path.
+- **Platform capture differs.** Android capture prefers the persistent
+  `video-server` jar and falls back to `screenrecord`; iOS capture uses the
+  CtrlProxy helper and local `ffmpeg` H.264 encoding. Keep both helper binaries
+  available on workers that may stream either platform.
 - ~~**Persistent-encoder distribution.**~~ *Resolved:* the `video-server` jar now
   ships as a checksum-verified GitHub release asset and is downloaded/cached on
   demand, so production installs use the persistent encoder by default. See
   [Persistent-encoder delivery](#persistent-encoder-delivery-automobile-videojar)
   above.
-- **No audio.** Video only; a device-audio capture source would be required to
-  add an audio track (#3778).
+- **Audio is Android-only and opt-in.** iOS WebRTC capture remains video-only,
+  and Android audio depends on `REMOTE_SUBMIX` availability for the shell-owned
+  `video-server` process.
 - **Reference server is single-process/in-memory.** Use a hardened WHIP/WHEP SFU
   (MediaMTX, LiveKit, Janus, Cloudflare) in production; the publisher is unchanged.
 - **Trickle ICE is opt-in.** By default the publisher gathers candidates before

@@ -30,6 +30,7 @@ val androidPlatformJar: File =
 
 dependencies {
   compileOnly(files(androidPlatformJar))
+  testImplementation(libs.junit)
 }
 
 // Configure Kotlin compilation options

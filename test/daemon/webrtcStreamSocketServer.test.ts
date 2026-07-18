@@ -156,6 +156,7 @@ describe("WebRtcStreamSocketServer", () => {
       action: "start",
       streamId: "debug-1",
       whipEndpoint: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1",
+      audio: true,
     });
     await server.simulate(socket, { id: "list", action: "list" });
     const listed = lastResponse(socket);
@@ -168,6 +169,7 @@ describe("WebRtcStreamSocketServer", () => {
 
     expect(started[0].overrides).toEqual({
       whipEndpoint: "http://localhost:8000/api/v1/webrtc/whip?streamId=debug-1",
+      audioEnabled: true,
     });
     expect(listed.streams?.map(s => s.streamId)).toEqual(["debug-1"]);
     expect(status.stream?.streamId).toBe("debug-1");

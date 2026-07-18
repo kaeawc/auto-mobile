@@ -33,6 +33,7 @@ object VideoServer {
 
   private var encoder: VideoEncoder? = null
   private var capture: ScreenCapture? = null
+  private var audioCapture: AudioCapture? = null
   private var streamWriter: VideoStreamWriter? = null
 
   @JvmStatic
@@ -48,6 +49,7 @@ object VideoServer {
     val quality = parseQuality(args)
     val bitrateOverride = parseIntFlag(args, "--bit-rate")
     val sizeOverride = parseSizeFlag(args)
+    val audioEnabled = args.contains("--audio")
 
     println("AutoMobile Video Server")
     println("Quality preset: ${quality.name}")
@@ -63,6 +65,7 @@ object VideoServer {
     println(
       "Output: ${outputWidth}x${outputHeight} @ ${bitrate / 1_000_000}Mbps @ ${quality.fps}fps"
     )
+    println("Audio: ${if (audioEnabled) "enabled" else "disabled"}")
 
     // Install shutdown hook for clean termination
     Runtime.getRuntime()
@@ -75,7 +78,7 @@ object VideoServer {
       )
 
     try {
-      run(outputWidth, outputHeight, displayInfo.densityDpi, bitrate, quality.fps)
+      run(outputWidth, outputHeight, displayInfo.densityDpi, bitrate, quality.fps, audioEnabled)
     } catch (e: Exception) {
       System.err.println("Error: ${e.message}")
       e.printStackTrace()
@@ -144,6 +147,7 @@ object VideoServer {
         --quality, -q <preset>  Quality preset: low, medium, high (default: medium)
         --bit-rate <bps>        Override the preset bitrate (bits per second)
         --size <WxH>            Override the output resolution (e.g. 720x1280)
+        --audio                 Capture device playback audio as 8 kHz mono PCM16
         --help, -h              Show this help message
 
       Quality presets:
@@ -185,7 +189,14 @@ object VideoServer {
     }
   }
 
-  private fun run(width: Int, height: Int, densityDpi: Int, bitrate: Int, fps: Int) {
+  private fun run(
+    width: Int,
+    height: Int,
+    densityDpi: Int,
+    bitrate: Int,
+    fps: Int,
+    audioEnabled: Boolean,
+  ) {
     // Create encoder
     encoder =
       VideoEncoder(
@@ -201,8 +212,19 @@ object VideoServer {
     capture!!.start(surface)
 
     // Create stream writer
-    streamWriter = VideoStreamWriter(SOCKET_NAME, width, height)
+    streamWriter = VideoStreamWriter(SOCKET_NAME, width, height, audioEnabled)
     streamWriter!!.start()
+
+    if (audioEnabled) {
+      audioCapture = AudioCapture()
+      audioCapture!!.start(
+        onData = { data, ptsUs -> streamWriter?.writeAudioPacket(data, ptsUs) == true },
+        onError = { message ->
+          System.err.println(message)
+          running = false
+        },
+      )
+    }
 
     println("Streaming started")
 
@@ -233,10 +255,12 @@ object VideoServer {
   }
 
   private fun shutdown() {
+    audioCapture?.stop()
     streamWriter?.stop()
     capture?.stop()
     encoder?.stop()
 
+    audioCapture = null
     streamWriter = null
     capture = null
     encoder = null

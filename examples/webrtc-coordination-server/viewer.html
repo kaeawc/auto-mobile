@@ -96,8 +96,16 @@
 
         pc = new RTCPeerConnection({ iceServers: descriptor.iceServers || [] });
         pc.addTransceiver("video", { direction: "recvonly" });
+        if (descriptor.audio) {
+          pc.addTransceiver("audio", { direction: "recvonly" });
+          videoEl.muted = false;
+        } else {
+          videoEl.muted = true;
+        }
+        const media = new MediaStream();
+        videoEl.srcObject = media;
         pc.ontrack = (event) => {
-          videoEl.srcObject = event.streams[0] || new MediaStream([event.track]);
+          media.addTrack(event.track);
         };
         pc.onconnectionstatechange = () => {
           statusEl.textContent = "Connection: " + pc.connectionState;

@@ -8,7 +8,13 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { H264CaptureSource } from "./H264CaptureSource";
 import { defaultProcessSpawner, type ProcessSpawner, type SpawnedProcess } from "./processSpawner";
-import { VideoServerStreamParser } from "./VideoServerStreamParser";
+import {
+  VIDEO_SERVER_CODEC_ID_H264,
+  VIDEO_SERVER_CODEC_ID_PCM16,
+  type VideoServerPacket,
+  type VideoServerStreamHeader,
+  VideoServerStreamParser,
+} from "./VideoServerStreamParser";
 
 /** Remote path the DEX jar is pushed to before launch. */
 export const VIDEO_SERVER_REMOTE_JAR_PATH = "/data/local/tmp/automobile-video.jar";
@@ -17,6 +23,8 @@ export const VIDEO_SERVER_SOCKET_NAME = "automobile_video";
 const VIDEO_SERVER_MAIN_CLASS = "dev.jasonpearson.automobile.video.VideoServer";
 /** Server stdout line printed once it is ready to accept the socket client. */
 const READY_MARKER = "Waiting for client connection";
+/** Server stdout line printed after capture has fully started. */
+const STREAMING_STARTED_MARKER = "Streaming started";
 
 /** Minimal socket surface the source needs, for injectable testing. */
 export interface StreamSocket {
@@ -40,10 +48,13 @@ export interface PersistentEncoderH264SourceOptions {
   device: BootedDevice;
   /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
   onData: (chunk: Buffer) => void;
+  /** Called with each chunk of 8 kHz mono PCM16LE audio when enabled. */
+  onAudioData?: (chunk: Buffer) => void;
   /** Called when the source fails fatally after a successful start. */
   onError?: (error: Error) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  audioEnabled?: boolean;
   quality?: "low" | "medium" | "high";
   /** Local path to the built `automobile-video.jar`. Required to run. */
   jarPath: string;
@@ -81,6 +92,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private socket: StreamSocket | null = null;
   private forwardedPort: number | null = null;
   private running = false;
+  private resolveStartupAudioHeader: ((header: VideoServerStreamHeader) => void) | undefined;
+  private resolveStartupAudioPacket: ((packet: VideoServerPacket) => void) | undefined;
 
   constructor(options: PersistentEncoderH264SourceOptions) {
     this.options = options;
@@ -158,13 +171,53 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     this.forwardedPort = port;
 
+    const streamingStarted = this.options.audioEnabled
+      ? this.waitForStreamingStarted(server)
+      : null;
+    // The waiter is installed before connecting so a fast server cannot print
+    // the marker in the gap between client connect and the later startup await.
+    streamingStarted?.catch(() => {});
+
     const socket = await this.connector(port);
     if (!this.running) {
       socket.destroy();
       return;
     }
     this.socket = socket;
-    this.wireSocket(socket);
+    const startupAudioReady = this.options.audioEnabled
+      ? this.waitForStartupAudioReady()
+      : null;
+    let socketFailureMode: "startup" | "post-start" = this.options.audioEnabled
+      ? "startup"
+      : "post-start";
+    let rejectStartupSocketFailure: ((error: Error) => void) | undefined;
+    const startupSocketFailure = this.options.audioEnabled
+      ? new Promise<never>((_, reject) => {
+        rejectStartupSocketFailure = reject;
+      })
+      : null;
+    this.wireSocket(socket, error => {
+      if (socketFailureMode === "startup") {
+        rejectStartupSocketFailure?.(error);
+        return;
+      }
+      this.failIfRunning(error);
+    }, header => this.resolveStartupAudioHeader?.(header));
+
+    // For audio-enabled streams, REMOTE_SUBMIX initialization happens after the
+    // socket client connects. Do not resolve start() until that succeeds, or an
+    // unavailable audio source would look like a successful start followed by a
+    // reconnect-looping post-start failure.
+    if (this.options.audioEnabled) {
+      await Promise.race([
+        Promise.all([streamingStarted, startupAudioReady]),
+        startupSocketFailure,
+      ]);
+      if (!this.running) {
+        return;
+      }
+    }
+    socketFailureMode = "post-start";
 
     // Now that the source is live, a later server exit or socket drop IS a fatal
     // post-start failure: surface it via onError so the publisher reconnects.
@@ -196,10 +249,87 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (this.options.size) {
       args.push("--size", `${this.options.size.width}x${this.options.size.height}`);
     }
+    if (this.options.audioEnabled) {
+      args.push("--audio");
+    }
     return args;
   }
 
   private waitForReady(server: SpawnedProcess): Promise<void> {
+    return this.waitForServerLine(
+      server,
+      READY_MARKER,
+      `video-server did not become ready within ${this.readyTimeoutMs}ms`,
+      "video-server exited before ready"
+    );
+  }
+
+  private waitForStreamingStarted(server: SpawnedProcess): Promise<void> {
+    return this.waitForServerLine(
+      server,
+      STREAMING_STARTED_MARKER,
+      `video-server did not start streaming within ${this.readyTimeoutMs}ms`,
+      "video-server exited before streaming started"
+    );
+  }
+
+  private waitForStartupAudioReady(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let muxAudioHeaderSeen = false;
+      const timeout = this.timer.setTimeout(() => {
+        finish(() =>
+          reject(
+            new ActionableError(
+              `video-server did not produce PCM audio within ${this.readyTimeoutMs}ms`
+            )
+          )
+        );
+      }, this.readyTimeoutMs);
+
+      const finish = (fn: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.timer.clearTimeout(timeout);
+        this.resolveStartupAudioHeader = undefined;
+        this.resolveStartupAudioPacket = undefined;
+        fn();
+      };
+
+      this.resolveStartupAudioHeader = header => {
+        if (header.muxed === true && header.audio === true) {
+          muxAudioHeaderSeen = true;
+          return;
+        }
+        finish(() => {
+          reject(
+            new ActionableError(
+              "Audio was requested, but video-server did not advertise muxed PCM audio. Rebuild or provide a current automobile-video.jar."
+            )
+          );
+        });
+      };
+
+      this.resolveStartupAudioPacket = packet => {
+        if (
+          muxAudioHeaderSeen &&
+          packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16 &&
+          packet.data.length > 0
+        ) {
+          finish(resolve);
+        }
+      };
+    });
+  }
+
+  private waitForServerLine(
+    server: SpawnedProcess,
+    marker: string,
+    timeoutMessage: string,
+    exitMessagePrefix: string
+  ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       let stdoutBuffer = "";
@@ -209,49 +339,63 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         }
         settled = true;
         this.timer.clearTimeout(timeout);
+        server.stdout.off("data", onData);
+        server.removeListener("exit", onExit);
+        server.removeListener("error", onError);
         fn();
       };
       const timeout = this.timer.setTimeout(() => {
-        finish(() =>
-          reject(
-            new ActionableError(`video-server did not become ready within ${this.readyTimeoutMs}ms`)
-          )
-        );
+        finish(() => reject(new ActionableError(timeoutMessage)));
       }, this.readyTimeoutMs);
 
-      server.stdout.on("data", (chunk: Buffer) => {
+      const onData = (chunk: Buffer): void => {
         if (settled) {
           return; // stop accumulating once ready (or failed)
         }
         stdoutBuffer += chunk.toString();
-        if (stdoutBuffer.includes(READY_MARKER)) {
+        if (stdoutBuffer.includes(marker)) {
           finish(resolve);
         }
-      });
-      server.once("exit", (code, signal) => {
+      };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
         finish(() =>
-          reject(new Error(`video-server exited before ready (code=${code}, signal=${signal})`))
+          reject(new Error(`${exitMessagePrefix} (code=${code}, signal=${signal})`))
         );
-      });
-      server.once("error", (error: Error) => finish(() => reject(error)));
+      };
+      const onError = (error: Error): void => finish(() => reject(error));
+
+      server.stdout.on("data", onData);
+      server.once("exit", onExit);
+      server.once("error", onError);
     });
   }
 
-  private wireSocket(socket: StreamSocket): void {
+  private wireSocket(
+    socket: StreamSocket,
+    onSocketFailure: (error: Error) => void,
+    onStreamHeader?: (header: VideoServerStreamHeader) => void
+  ): void {
     const parser = new VideoServerStreamParser({
-      onHeader: header =>
+      onHeader: header => {
+        onStreamHeader?.(header);
         logger.info(
           `[PersistentEncoderH264Source] stream ${header.width}x${header.height} codec=0x${header.codecId.toString(16)}`
-        ),
+        );
+      },
       onPacket: packet => {
         if (this.socket === socket) {
-          this.options.onData(packet.data);
+          if (packet.codecId === VIDEO_SERVER_CODEC_ID_H264) {
+            this.options.onData(packet.data);
+          } else if (packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16) {
+            this.options.onAudioData?.(packet.data);
+            this.resolveStartupAudioPacket?.(packet);
+          }
         }
       },
     });
     socket.on("data", chunk => parser.push(chunk));
-    socket.on("error", error => this.failIfRunning(error));
-    socket.on("close", () => this.failIfRunning(new Error("video-server socket closed")));
+    socket.on("error", onSocketFailure);
+    socket.on("close", () => onSocketFailure(new Error("video-server socket closed")));
   }
 
   /** Surface a post-start fatal failure exactly once and stop feeding data. */

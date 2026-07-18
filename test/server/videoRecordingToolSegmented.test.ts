@@ -28,29 +28,18 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 
-/**
- * Generous ceiling for the two timer-driven tests below: they poll an async rotation
- * chain via {@link waitFor}, and under full-suite concurrency the event loop is saturated
- * enough that the (logically-correct) poll can outlast bun's 5s default. The condition is
- * always met well before this; the headroom just stops a loaded CI machine failing a
- * correct test.
- */
-const TIMER_DRIVEN_TEST_TIMEOUT_MS = 20_000;
+async function drainMicrotasks(turns = 10): Promise<void> {
+  for (let turn = 0; turn < turns; turn++) {
+    await Promise.resolve();
+  }
+}
 
-/** Drain all pending microtasks (setImmediate runs after the microtask queue). */
-const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-
-/** Poll an async condition, yielding to the full event loop between checks. */
-async function waitFor(condition: () => Promise<boolean>, label: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    if (await condition()) {
+async function waitFor(condition: () => boolean, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (condition()) {
       return;
     }
-    // A single macrotask yield (setImmediate) drains the microtask queue AND lets any
-    // I/O-phase callbacks in the rotation chain settle. A second real-timer yield here
-    // (defaultTimer.sleep(0)) only doubled the per-iteration wall-clock, which starved
-    // this loop past the 5s test budget under full-suite concurrency — so it's gone.
-    await flush();
+    await drainMicrotasks();
   }
   throw new Error(`Timed out waiting for: ${label}`);
 }
@@ -343,9 +332,7 @@ describe("videoRecording tool segmentation branch", () => {
     // Rotate once so the bare stop must return more than one segment, in order.
     segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
     await waitFor(
-      async () =>
-        segmentStarts.length === 2 &&
-        segmentStops.length === 1,
+      () => segmentStarts.length === 2 && segmentStops.length === 1,
       "segment 2 to start after rotation"
     );
 
@@ -382,9 +369,9 @@ describe("videoRecording tool segmentation branch", () => {
     // Advancing well past the rotation interval starts no new segment/recording.
     const segmentStartsBefore = segmentStarts.length;
     segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS * 3);
-    await flush();
+    await drainMicrotasks();
     expect(segmentStarts).toHaveLength(segmentStartsBefore);
-  }, TIMER_DRIVEN_TEST_TIMEOUT_MS);
+  });
 
   test("maxDuration auto-stop removes the session so a later bare stop reports only fresh segments", async () => {
     setSegmentedSessionRecordingDependencies({
@@ -423,10 +410,10 @@ describe("videoRecording tool segmentation branch", () => {
     // Advance past the maxDuration bound (rotation at 170s, then auto-stop at 181s).
     segmentTimer.advanceTime(181_000);
     await waitFor(
-      async () => segmentStops.length === 2,
+      () => segmentStops.length === 2,
       "auto-stop to finalize both segments of the first session"
     );
-    await flush();
+    await drainMicrotasks();
 
     // Auto-stop cleared the session's timers and removed it from the registry.
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
@@ -460,7 +447,7 @@ describe("videoRecording tool segmentation branch", () => {
     expect(
       segments.some(segment => String(segment.filePath).includes("first"))
     ).toBe(false);
-  }, TIMER_DRIVEN_TEST_TIMEOUT_MS);
+  });
 
   test("by-handle stop still works after wiring the bare-stop path", async () => {
     const startRes = parse(

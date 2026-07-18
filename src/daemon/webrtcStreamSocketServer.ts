@@ -151,6 +151,9 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     if (request.size) {
       overrides.size = request.size;
     }
+    if (request.audio !== undefined) {
+      overrides.audioEnabled = request.audio;
+    }
 
     const stream = await deps.startStream({ device, streamId: request.streamId, overrides });
     logger.info(`[WebRtcStream] started stream ${stream.streamId} for device ${device.deviceId}`);

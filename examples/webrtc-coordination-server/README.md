@@ -2,9 +2,9 @@
 
 A minimal, self-contained **WHIP ingest → WHEP egress** coordination server for
 AutoMobile's WebRTC screen streaming. An AutoMobile daemon (typically on a CI
-worker) **publishes** a device's screen here over WHIP; browsers **subscribe**
-over WHEP and watch it live. A small REST "reconnect API" lets a frontend
-discover active streams and reconnect.
+worker) **publishes** a device's screen, plus optional audio, here over WHIP;
+browsers **subscribe** over WHEP and watch it live. A small REST "reconnect API"
+lets a frontend discover active streams and reconnect.
 
 ```
  Android device                AutoMobile daemon              This server                 Browser
@@ -84,7 +84,9 @@ echo '{"action":"start","deviceId":"emulator-5554","streamId":"ci-run-42"}' \
   "createdAt": "2026-07-11T00:00:00.000Z",
   "whepUrl": "/whep/ci-run-42", // POST an SDP offer here to (re)connect
   "iceServers": [{ "urls": "stun:stun.l.google.com:19302" }],
-  "framesForwarded": 512
+  "framesForwarded": 512,
+  "audio": true,
+  "audioPacketsForwarded": 2400
 }
 ```
 

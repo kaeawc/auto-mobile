@@ -5,7 +5,9 @@ import {
   RTCPeerConnection,
   RtpPacket,
   useH264,
+  usePCMU,
 } from "werift";
+import { forwardRtpToOutboundTracks } from "../../examples/webrtc-coordination-server/coordinationServer";
 import { HttpCoordinationServer } from "../../examples/webrtc-coordination-server/httpServer";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 
@@ -41,6 +43,16 @@ function pFrame(fill: number): Buffer {
   return Buffer.concat([nal(1, 800, fill), START]);
 }
 
+function rtpPacket(sequenceNumber: number, timestamp: number, ssrc: number): RtpPacket {
+  const buffer = Buffer.alloc(12);
+  buffer[0] = 0x80;
+  buffer[1] = 96;
+  buffer.writeUInt16BE(sequenceNumber, 2);
+  buffer.writeUInt32BE(timestamp, 4);
+  buffer.writeUInt32BE(ssrc, 8);
+  return RtpPacket.deSerialize(buffer);
+}
+
 async function waitForIce(pc: RTCPeerConnection): Promise<void> {
   if (pc.iceGatheringState === "complete") {
     return;
@@ -62,6 +74,40 @@ async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<voi
 }
 
 describe("WebRTC coordination server e2e", () => {
+  test("clones RTP before forwarding to each subscriber track", () => {
+    const packet = rtpPacket(0x1234, 0x01020304, 0x05060708);
+    const secondTrackPackets: Array<{ sequenceNumber: number; timestamp: number; ssrc: number }> = [];
+
+    forwardRtpToOutboundTracks(
+      [
+        {
+          writeRtp: forwarded => {
+            forwarded.header.sequenceNumber = 1;
+            forwarded.header.timestamp = 2;
+            forwarded.header.ssrc = 3;
+          },
+        },
+        {
+          writeRtp: forwarded => {
+            secondTrackPackets.push({
+              sequenceNumber: forwarded.header.sequenceNumber,
+              timestamp: forwarded.header.timestamp,
+              ssrc: forwarded.header.ssrc,
+            });
+          },
+        },
+      ],
+      packet
+    );
+
+    expect(secondTrackPackets).toEqual([
+      { sequenceNumber: 0x1234, timestamp: 0x01020304, ssrc: 0x05060708 },
+    ]);
+    expect(packet.header.sequenceNumber).toBe(0x1234);
+    expect(packet.header.timestamp).toBe(0x01020304);
+    expect(packet.header.ssrc).toBe(0x05060708);
+  });
+
   test(
     "publisher -> WHIP ingest -> WHEP subscriber forwards frames, reconnect API lists the stream",
     async () => {
@@ -191,6 +237,62 @@ describe("WebRTC coordination server e2e", () => {
 
         await waitFor(() => received.length > 5, 5000);
         expect(received.length).toBeGreaterThan(5);
+      } finally {
+        await publisher.stop();
+        await viewer.close();
+        await http.close();
+      }
+    },
+    30000
+  );
+
+  test(
+    "audio enabled: publisher -> WHIP ingest -> WHEP subscriber forwards audio RTP",
+    async () => {
+      const http = new HttpCoordinationServer({ iceServers: [] });
+      const port = await http.listen(0, "127.0.0.1");
+      const base = `http://127.0.0.1:${port}`;
+
+      const publisher = new WebRtcPublisher({
+        streamId: "e2e-audio",
+        whipEndpoint: `${base}/whip?streamId=e2e-audio`,
+        audioEnabled: true,
+      });
+
+      const viewer = new RTCPeerConnection({
+        codecs: { video: [useH264()], audio: [usePCMU()] },
+      });
+      const audioPackets: RtpPacket[] = [];
+      viewer.onTrack.subscribe((track: MediaStreamTrack) => {
+        if (track.kind === "audio") {
+          track.onReceiveRtp.subscribe((rtp: RtpPacket) => audioPackets.push(rtp));
+        }
+      });
+
+      try {
+        await publisher.start();
+
+        viewer.addTransceiver("video", { direction: "recvonly" });
+        viewer.addTransceiver("audio", { direction: "recvonly" });
+        const offer = await viewer.createOffer();
+        await viewer.setLocalDescription(offer);
+        await waitForIce(viewer);
+        const whepRes = await fetch(`${base}/whep/e2e-audio`, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: viewer.localDescription?.sdp ?? "",
+        });
+        expect(whepRes.status).toBe(201);
+        await viewer.setRemoteDescription({ type: "answer", sdp: await whepRes.text() });
+        await waitFor(() => viewer.connectionState === "connected", 8000);
+
+        publisher.writePcmAudioChunk(Buffer.alloc(320));
+        await waitFor(() => audioPackets.length > 0, 5000);
+
+        const streamRes = await fetch(`${base}/api/streams/e2e-audio`);
+        const descriptor = (await streamRes.json()) as { audio: boolean; audioPacketsForwarded: number };
+        expect(descriptor.audio).toBe(true);
+        expect(descriptor.audioPacketsForwarded).toBeGreaterThan(0);
       } finally {
         await publisher.stop();
         await viewer.close();

@@ -50,6 +50,10 @@ class FakePublisher {
     this.stopped = true;
   }
   writeH264Chunk(): void {}
+  pcmAudioChunks: Buffer[] = [];
+  writePcmAudioChunk(chunk: Buffer): void {
+    this.pcmAudioChunks.push(chunk);
+  }
   notifySourceFailed(): void {
     this.sourceFailedCount++;
   }
@@ -66,6 +70,14 @@ class FakePublisher {
       framesSent: 0,
       packetsSent: 0,
     };
+  }
+}
+
+class AsyncConnectedPublisher extends FakePublisher {
+  override async start(): Promise<void> {
+    await this.onBeforeEstablish?.();
+    this.started = true;
+    void Promise.resolve(this.onConnected?.()).catch(() => this.notifySourceFailed());
   }
 }
 
@@ -315,5 +327,138 @@ describe("webrtcStreamManager", () => {
     ).rejects.toThrow(/checksum verification failed/);
     expect(publisherCreated).toBe(0);
     expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("passes audio config to publisher/source and routes PCM audio chunks", async () => {
+    const publishers: FakePublisher[] = [];
+    let capturedSourceOptions:
+      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | undefined;
+    let capturedJarPath: string | null | undefined;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: (options, jarPath) => {
+        capturedSourceOptions = options;
+        capturedJarPath = jarPath;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => "/verified/automobile-video.jar",
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+
+    expect((publishers[0].config as { audioEnabled?: boolean }).audioEnabled).toBe(true);
+    expect(capturedSourceOptions?.audioEnabled).toBe(true);
+    expect(capturedJarPath).toBe("/verified/automobile-video.jar");
+
+    capturedSourceOptions?.onAudioData?.(Buffer.from([1, 2, 3, 4]));
+    expect(publishers[0].pcmAudioChunks).toEqual([Buffer.from([1, 2, 3, 4])]);
+  });
+
+  test("rejects audio stream start when the initial async source start fails", async () => {
+    const publishers: AsyncConnectedPublisher[] = [];
+    const sources: FakeSource[] = [];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new AsyncConnectedPublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => {
+        const source = new FakeSource();
+        source.start = async () => {
+          source.started = true;
+          throw new Error("REMOTE_SUBMIX failed");
+        };
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => "/verified/automobile-video.jar",
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await expect(
+      startWebRtcStream({
+        device: ANDROID,
+        overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+      })
+    ).rejects.toThrow(/REMOTE_SUBMIX failed/);
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0].started).toBe(true);
+    expect(sources[0].stopped).toBe(true);
+    expect(publishers[0].stopped).toBe(true);
+    expect(publishers[0].sourceFailedCount).toBe(1);
+    expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("failed async audio startup cleanup does not delete a replacement stream with the same id", async () => {
+    const publishers: AsyncConnectedPublisher[] = [];
+    const sources: FakeSource[] = [];
+    let firstStartReject: ((error: Error) => void) | undefined;
+    let firstSourceStarted!: () => void;
+    const firstSourceStartedPromise = new Promise<void>(resolve => {
+      firstSourceStarted = resolve;
+    });
+    let createSourceCalls = 0;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new AsyncConnectedPublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => {
+        createSourceCalls++;
+        const source = new FakeSource();
+        if (createSourceCalls === 1) {
+          source.start = async () => {
+            source.started = true;
+            firstSourceStarted();
+            await new Promise<void>((_resolve, reject) => {
+              firstStartReject = reject;
+            });
+          };
+        }
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => "/verified/automobile-video.jar",
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const firstStart = startWebRtcStream({
+      device: ANDROID,
+      streamId: "replace-me",
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+    await firstSourceStartedPromise;
+    expect(listWebRtcStreams().map(stream => stream.streamId)).toEqual(["replace-me"]);
+
+    await stopWebRtcStream("replace-me");
+    const replacement = await startWebRtcStream({
+      device: ANDROID,
+      streamId: "replace-me",
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+
+    firstStartReject?.(new Error("REMOTE_SUBMIX failed after replacement"));
+    await expect(firstStart).rejects.toThrow(/REMOTE_SUBMIX failed after replacement/);
+
+    expect(replacement.streamId).toBe("replace-me");
+    expect(getWebRtcStreamDescriptor("replace-me")?.streamId).toBe("replace-me");
+    expect(listWebRtcStreams().map(stream => stream.streamId)).toEqual(["replace-me"]);
+    expect(publishers[1].stopped).toBe(false);
+    expect(sources[1].stopped).toBe(false);
   });
 });

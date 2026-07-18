@@ -26,6 +26,8 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
   iceServers?: WebRtcIceServerInput[];
   bitrateKbps?: number;
   size?: { width: number; height: number };
+  /** Enable optional audio capture/publishing. */
+  audio?: boolean;
 }
 
 export interface WebRtcStreamSocketResponse extends SocketResponse {

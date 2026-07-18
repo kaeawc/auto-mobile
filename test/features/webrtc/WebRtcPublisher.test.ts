@@ -24,6 +24,14 @@ class FakePeerConnection {
   }
 }
 
+class RecordingPeerConnection extends FakePeerConnection {
+  transceiverKinds: string[] = [];
+  addTransceiver(track: { kind: string }) {
+    this.transceiverKinds.push(track.kind);
+    return { sender: { ssrc: this.transceiverKinds.length } };
+  }
+}
+
 /**
  * Unit tests for publisher wiring that can be asserted without a real peer
  * connection. The full media path is covered by WebRtcPublisher.loopback.test.ts
@@ -96,5 +104,53 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     );
     await publisher.stop();
     expect(() => publisher.notifySourceFailed()).not.toThrow();
+  });
+});
+
+describe("WebRtcPublisher audio", () => {
+  test("adds an audio transceiver only when audio is enabled and writes PCMU packets", async () => {
+    const pc = new RecordingPeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", audioEnabled: true },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+
+    await publisher.start();
+    publisher.writePcmAudioChunk(Buffer.alloc(4));
+
+    expect(pc.transceiverKinds).toEqual(["video", "audio"]);
+    expect(publisher.getDescriptor().audioPacketsSent).toBe(1);
+
+    await publisher.stop();
+  });
+
+  test("keeps the default video-only transceiver set", async () => {
+    const pc = new RecordingPeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+
+    await publisher.start();
+    publisher.writePcmAudioChunk(Buffer.alloc(4));
+
+    expect(pc.transceiverKinds).toEqual(["video"]);
+    expect(publisher.getDescriptor().audioPacketsSent).toBe(0);
+
+    await publisher.stop();
   });
 });

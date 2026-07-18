@@ -17,12 +17,14 @@ import {
   resetSegmentedSessions,
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
+  setVideoRecordingDeviceDetectorForTesting,
 } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 
@@ -109,6 +111,7 @@ describe("videoRecording tool segmentation branch", () => {
   let segmentTimer: FakeTimer;
   let fakeBackend: FakeVideoCaptureBackend;
   let fakeRepository: FakeVideoRecordingRepository;
+  let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let archiveRoot: string;
   let segmentStarts: string[];
   let segmentStops: string[];
@@ -126,6 +129,13 @@ describe("videoRecording tool segmentation branch", () => {
     fakeBackend = new FakeVideoCaptureBackend();
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
     fakeRepository = new FakeVideoRecordingRepository();
+    // A bare (by-device) stop resolves target devices via detectConnectedPlatforms(), which on
+    // the real DeviceSessionManager spawns `adb`/`xcrun simctl` subprocesses. On a loaded macOS
+    // CI runner `simctl list` can stall past the test timeout (#3943), so inject a fake detector
+    // that resolves the connected device synchronously with no subprocess.
+    fakeDeviceSessionManager = new FakeDeviceSessionManager();
+    fakeDeviceSessionManager.setConnectedDevices([androidDevice]);
+    setVideoRecordingDeviceDetectorForTesting(fakeDeviceSessionManager);
     segmentStarts = [];
     segmentStops = [];
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
@@ -154,6 +164,7 @@ describe("videoRecording tool segmentation branch", () => {
   afterEach(() => {
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
+    setVideoRecordingDeviceDetectorForTesting(undefined);
   });
 
   afterAll(async () => {
@@ -346,6 +357,11 @@ describe("videoRecording tool segmentation branch", () => {
       })
     );
 
+    // Regression guard for #3943: the bare stop must resolve its target device through the
+    // injected DeviceSessionManager singleton, never the real one (whose detectConnectedPlatforms
+    // spawns an `xcrun simctl` subprocess that stalls the test on macOS CI).
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
+
     expect(stopRes.segmented).toBe(true);
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
     expect(segments.length).toBe(2);
@@ -433,6 +449,10 @@ describe("videoRecording tool segmentation branch", () => {
         // NO recordingId — bare, by-device stop.
       })
     );
+
+    // Regression guard for #3943 (this bare stop hits the same device-resolution path):
+    // it must go through the injected DeviceSessionManager, never the real subprocess one.
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
 
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
     expect(segments.length).toBe(1);

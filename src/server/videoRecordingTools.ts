@@ -188,6 +188,27 @@ export function resetSegmentedSessions(): void {
   segmentedSessions.reset();
 }
 
+/**
+ * Narrow device-detection seam used by {@link resolveTargetDevices} when a call targets
+ * all devices (e.g. a bare, by-device stop). The real {@link DeviceSessionManager} singleton
+ * satisfies it. Exposing only `detectConnectedPlatforms` keeps this honest under strict `tsc`
+ * (a fake need not reproduce the manager's nominal private members) and lets a test resolve
+ * devices without spawning real `adb`/`xcrun simctl` subprocesses — the latter can stall past
+ * a test's timeout on a loaded macOS CI runner (issue #3943).
+ */
+interface ConnectedDeviceDetector {
+  detectConnectedPlatforms(): Promise<BootedDevice[]>;
+}
+
+let deviceDetectorForTesting: ConnectedDeviceDetector | undefined;
+
+/** Test seam: inject the detector used to resolve all-device targets. Pass undefined to reset. */
+export function setVideoRecordingDeviceDetectorForTesting(
+  detector: ConnectedDeviceDetector | undefined
+): void {
+  deviceDetectorForTesting = detector;
+}
+
 export interface VideoRecordingArgs {
   action: "start" | "stop";
   platform: "android" | "ios";
@@ -283,7 +304,8 @@ async function resolveTargetDevices(
     return [device];
   }
 
-  const devices = await DeviceSessionManager.getInstance().detectConnectedPlatforms();
+  const detector = deviceDetectorForTesting ?? DeviceSessionManager.getInstance();
+  const devices = await detector.detectConnectedPlatforms();
   const matching = devices.filter(candidate => candidate.platform === device.platform);
 
   if (matching.length === 0) {

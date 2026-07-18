@@ -600,34 +600,44 @@ export class SimCtlClient implements SimCtl {
   ): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
 
+    // The cold-boot path passes `assumeBooted`: startSimulator already ran
+    // `bootstatus -b` (which throws on failure/timeout), so the device is
+    // already fully booted. Re-running the wait here would be a redundant second
+    // boot wait with its own independent timeout budget (issue #3938 follow-up),
+    // so skip straight to metadata resolution.
+    if (options?.assumeBooted) {
+      return this.resolveReadySimulator(udid);
+    }
+
     // Use `simctl bootstatus -b` which blocks until the simulator is fully
     // booted (data migration complete, system app ready, springboard launched).
     // This is far more reliable than polling `simctl list devices` for state.
-    //
-    // Skip it when `assumeBooted` is set: the cold-boot path already ran
-    // `bootstatus -b` inside `startSimulator` (which throws on failure/timeout),
-    // so reaching here with a started handle means the device is already fully
-    // booted. Re-running it would be a redundant second boot wait with its own
-    // independent timeout budget (issue #3938 follow-up).
-    if (!options?.assumeBooted) {
-      perf.startOperation("bootstatus");
-      try {
-        await this.executeCommand(`bootstatus ${udid} -b`, timeoutMs);
-      } catch (error) {
-        perf.endOperation("bootstatus");
-        const message = error instanceof Error ? error.message : String(error);
-        // "Invalid device" means the UDID doesn't exist at all
-        if (message.includes("Invalid device")) {
-          throw new ActionableError(`Simulator with UDID ${udid} not found`);
-        }
-        throw new ActionableError(
-          `Simulator with UDID ${udid} failed to become ready: ${message}`
-        );
-      }
+    perf.startOperation("bootstatus");
+    try {
+      await this.executeCommand(`bootstatus ${udid} -b`, timeoutMs);
+    } catch (error) {
       perf.endOperation("bootstatus");
+      const message = error instanceof Error ? error.message : String(error);
+      // "Invalid device" means the UDID doesn't exist at all
+      if (message.includes("Invalid device")) {
+        throw new ActionableError(`Simulator with UDID ${udid} not found`);
+      }
+      throw new ActionableError(
+        `Simulator with UDID ${udid} failed to become ready: ${message}`
+      );
     }
+    perf.endOperation("bootstatus");
 
-    // Now look up device metadata to return a full BootedDevice
+    return this.resolveReadySimulator(udid);
+  }
+
+  /**
+   * Look up full device metadata for an already-booted simulator and return it
+   * as a BootedDevice. Shared by the cold-boot (assumeBooted) and already-running
+   * branches of {@link waitForSimulatorReady}.
+   */
+  private async resolveReadySimulator(udid: string): Promise<BootedDevice> {
+    const perf = createGlobalPerformanceTracker();
     perf.startOperation("deviceLookup");
     const simulator = (await this.listSimulatorImages())
       .find(device => device.deviceId === udid);

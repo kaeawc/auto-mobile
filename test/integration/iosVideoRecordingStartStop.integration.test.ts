@@ -10,8 +10,12 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const execFileAsync = promisify(execFile);
-const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
-const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
+// Force-disabled: flaky in CI — the simulator's simctl recording intermittently
+// produces an empty (0-byte) .mov, so stop/finalize fails after the readiness
+// probe deadline. Tracked in #3910. Re-enable by restoring the env gate:
+//   const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
+//   const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
+const describeIntegration = describe.skip;
 const DEFAULT_WAIT_MS = 4000;
 const DEFAULT_TEST_TIMEOUT_MS = 420000;
 

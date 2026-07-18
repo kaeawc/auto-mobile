@@ -377,4 +377,117 @@ describe("CriticalSectionCoordinator", () => {
 
     expect(executionLog.length).toBe(2);
   });
+
+  // Regression: the coordinator is a process-wide singleton, and the plan
+  // execution lock defaults to scope "session" — so two DIFFERENT plans (from
+  // different sessions) can run concurrently in one daemon. Before namespacing,
+  // both plans keyed barrier state by the bare lock name, so a device from plan
+  // B could satisfy plan A's barrier and release plan A's devices before plan
+  // A's own devices arrived. The namespace (the plan's base session UUID) scopes
+  // each plan's barrier so this cannot happen.
+  describe("cross-plan namespace isolation", () => {
+    // Yield the microtask queue so any synchronous barrier resolutions settle.
+    const flush = async (): Promise<void> => {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    };
+
+    test("WITHOUT a namespace, two plans reusing a lock name collide (documents the bug)", async () => {
+      // Both "plans" use the bare lock "sync" with deviceCount 2. A device from
+      // each plan arrives; with no namespace they share one barrier and 2/2 lifts
+      // it — releasing devices that belong to different plans.
+      let aReleased = false;
+      let bReleased = false;
+
+      const a1 = coordinator
+        .awaitBarrier("sync", "planA-device-1", 2, 30000)
+        .then(() => { aReleased = true; });
+      const b1 = coordinator
+        .awaitBarrier("sync", "planB-device-1", 2, 30000)
+        .then(() => { bReleased = true; });
+
+      await flush();
+
+      // The shared bare-lock barrier saw 2 arrivals and released both — even
+      // though neither plan actually had both of ITS devices present.
+      expect(aReleased).toBe(true);
+      expect(bReleased).toBe(true);
+      await Promise.all([a1, b1]);
+    });
+
+    test("WITH a per-plan namespace, one plan's devices cannot satisfy another plan's barrier", async () => {
+      let aReleased = false;
+      let bReleased = false;
+
+      // One device from each plan arrives at the same lock name but different
+      // namespaces. Neither barrier should lift: each still needs its own second
+      // device.
+      const a1 = coordinator
+        .awaitBarrier("sync", "planA-device-1", 2, 30000, "session-A")
+        .then(() => { aReleased = true; });
+      const b1 = coordinator
+        .awaitBarrier("sync", "planB-device-1", 2, 30000, "session-B")
+        .then(() => { bReleased = true; });
+
+      await flush();
+      expect(aReleased).toBe(false);
+      expect(bReleased).toBe(false);
+
+      // Plan A's second device arrives -> only plan A's barrier lifts.
+      const a2 = coordinator
+        .awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
+      await flush();
+      expect(aReleased).toBe(true);
+      expect(bReleased).toBe(false);
+
+      // Plan B's second device arrives -> plan B's barrier lifts.
+      const b2 = coordinator
+        .awaitBarrier("sync", "planB-device-2", 2, 30000, "session-B");
+      await flush();
+      expect(bReleased).toBe(true);
+
+      await Promise.all([a1, a2, b1, b2]);
+    });
+
+    test("forceCleanup on one plan does not wipe another plan's live barrier state", async () => {
+      let aReleased = false;
+
+      // Plan A parks one device at the barrier.
+      const a1 = coordinator
+        .awaitBarrier("sync", "planA-device-1", 2, 30000, "session-A")
+        .then(() => { aReleased = true; });
+      await flush();
+
+      // Plan B (same lock name, different namespace) hits an error and force-
+      // cleans up ITS scope. This must not disturb plan A's waiting device.
+      coordinator.forceCleanup("sync", "session-B");
+      await flush();
+      expect(aReleased).toBe(false);
+
+      // Plan A's second device still completes the barrier normally.
+      const a2 = coordinator
+        .awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
+      await flush();
+      expect(aReleased).toBe(true);
+
+      await Promise.all([a1, a2]);
+    });
+
+    test("critical-section mutexes are isolated per namespace (concurrent, not serialized, across plans)", async () => {
+      // Two plans each run a single-device critical section under the same lock
+      // name. With per-plan namespaces they use different mutexes, so plan B does
+      // not block on plan A's still-held lock.
+      coordinator.registerExpectedDevices("edit", 1, "session-A");
+      coordinator.registerExpectedDevices("edit", 1, "session-B");
+
+      const releaseA = await coordinator.enterCriticalSection("edit", "A-d1", 30000, "session-A");
+      // Plan B can still acquire its own namespaced lock while A holds A's.
+      const releaseB = await coordinator.enterCriticalSection("edit", "B-d1", 30000, "session-B");
+
+      // Both acquired independently.
+      expect(typeof releaseA).toBe("function");
+      expect(typeof releaseB).toBe("function");
+      releaseA();
+      releaseB();
+    });
+  });
 });

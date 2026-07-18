@@ -299,7 +299,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.waitForEmulatorReady(device.name, timeoutMs, childProcess, device.deviceId);
       case "ios":
-        return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name, timeoutMs);
+        // A `childProcess` is only supplied on the cold-boot path, where
+        // `startSimulator` has already run `bootstatus -b`. Signal that so the
+        // wait doesn't redundantly repeat the full boot-readiness wait; the
+        // already-running path (no childProcess) still performs it.
+        return this.simctl.waitForSimulatorReady(
+          device.deviceId ?? device.name,
+          timeoutMs,
+          { assumeBooted: Boolean(childProcess) }
+        );
       default:
         throw new ActionableError("Unknown platform");
     }

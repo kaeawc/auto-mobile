@@ -17,12 +17,14 @@ import {
   resetSegmentedSessions,
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
+  setVideoRecordingDeviceDetectorForTesting,
 } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 
@@ -50,10 +52,15 @@ function parse(response: ToolResponse): Record<string, unknown> {
   return JSON.parse(response.content?.[0]?.text ?? "{}");
 }
 
+// Directory the fake segment paths live under. Set to the per-test archiveRoot in
+// beforeEach so a real, cross-platform, auto-cleaned dir exists when the tool writes the
+// segments.json manifest there (a hardcoded "/tmp" is not writable on the Windows CI leg).
+let fakeSegmentDir = os.tmpdir();
+
 function makeSegmentRecording(id: string, outputName: string | undefined): ActiveVideoRecording {
   return {
     recordingId: id,
-    outputPath: `/tmp/${id}.mp4`,
+    outputPath: path.join(fakeSegmentDir, `${id}.mp4`),
     fileName: `${id}.mp4`,
     startedAt: new Date(0).toISOString(),
     outputName,
@@ -65,7 +72,7 @@ function makeSegmentMetadata(id: string): VideoRecordingMetadata {
   return {
     recordingId: id,
     fileName: `${id}.mp4`,
-    filePath: `/tmp/${id}.mp4`,
+    filePath: path.join(fakeSegmentDir, `${id}.mp4`),
     format: "mp4",
     sizeBytes: 1,
     codec: "h264",
@@ -93,6 +100,7 @@ describe("videoRecording tool segmentation branch", () => {
   let segmentTimer: FakeTimer;
   let fakeBackend: FakeVideoCaptureBackend;
   let fakeRepository: FakeVideoRecordingRepository;
+  let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let archiveRoot: string;
   let segmentStarts: string[];
   let segmentStops: string[];
@@ -110,10 +118,18 @@ describe("videoRecording tool segmentation branch", () => {
     fakeBackend = new FakeVideoCaptureBackend();
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
     fakeRepository = new FakeVideoRecordingRepository();
+    // A bare (by-device) stop resolves target devices via detectConnectedPlatforms(), which on
+    // the real DeviceSessionManager spawns `adb`/`xcrun simctl` subprocesses. On a loaded macOS
+    // CI runner `simctl list` can stall past the test timeout (#3943), so inject a fake detector
+    // that resolves the connected device synchronously with no subprocess.
+    fakeDeviceSessionManager = new FakeDeviceSessionManager();
+    fakeDeviceSessionManager.setConnectedDevices([androidDevice]);
+    setVideoRecordingDeviceDetectorForTesting(fakeDeviceSessionManager);
     segmentStarts = [];
     segmentStops = [];
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
     await fsPromises.mkdir(archiveRoot, { recursive: true });
+    fakeSegmentDir = archiveRoot;
 
     const service = new VideoRecorderService({
       backend: fakeBackend,
@@ -137,6 +153,7 @@ describe("videoRecording tool segmentation branch", () => {
   afterEach(() => {
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
+    setVideoRecordingDeviceDetectorForTesting(undefined);
   });
 
   afterAll(async () => {
@@ -192,7 +209,32 @@ describe("videoRecording tool segmentation branch", () => {
     });
   });
 
-  test("android recording > 180s starts a segmented session and stop returns segments", async () => {
+  test("iOS recording past the 300s cap starts as one continuous (non-segmented) recording (#3906)", async () => {
+    // 500s > the old 300s manager cap. iOS `simctl recordVideo` has no time limit, so this
+    // is a single continuous recording (never segmented), not a rejection or a segment set.
+    const res = parse(
+      await handler()(iosDevice, {
+        action: "start",
+        platform: "ios",
+        deviceId: iosDevice.deviceId,
+        maxDuration: 500,
+        outputName: "long-ios",
+      })
+    );
+
+    expect(res.count).toBe(1);
+    const recordings = res.recordings as Array<Record<string, unknown>>;
+    expect(recordings[0].segmented).toBeUndefined();
+    expect((recordings[0].settings as Record<string, unknown>).maxDurationSeconds).toBe(500);
+
+    await handler()(iosDevice, {
+      action: "stop",
+      platform: "ios",
+      recordingId: recordings[0].recordingId as string,
+    });
+  });
+
+  test("android recording > 180s: stop returns ordered segments + a segments.json manifest (#3905)", async () => {
     const startRes = parse(
       await handler()(androidDevice, {
         action: "start",
@@ -207,6 +249,8 @@ describe("videoRecording tool segmentation branch", () => {
     const started = (startRes.recordings as Array<Record<string, unknown>>)[0];
     expect(started.segmented).toBe(true);
     expect(started.outputName).toBe("vid");
+    // start echoes the session handle as sessionId so it matches stop output.
+    expect(started.sessionId).toBe(started.recordingId);
 
     const handle = started.recordingId as string;
     const stopRes = parse(
@@ -218,11 +262,31 @@ describe("videoRecording tool segmentation branch", () => {
     );
 
     expect(stopRes.segmented).toBe(true);
-    const stoppedSegments = stopRes.recordings as Array<Record<string, unknown>>;
+    const segments = stopRes.recordings as Array<Record<string, unknown>>;
     // No timer rotation occurred, so exactly the first segment is returned.
-    expect(stoppedSegments.length).toBe(1);
-    expect(stoppedSegments[0].recordingId).toBe(handle);
-    expect(typeof stoppedSegments[0].filePath).toBe("string");
+    expect(segments.length).toBe(1);
+    expect(segments[0].recordingId).toBe(handle);
+    expect(typeof segments[0].filePath).toBe("string");
+    // Grouping metadata: capture order + shared sessionId on every segment.
+    expect(segments[0].segmentIndex).toBe(0);
+    expect(segments[0].sessionId).toBe(handle);
+
+    // Manifest lives in the first segment's directory (so per-recording eviction cleans it up).
+    const manifestPath = stopRes.manifestPath as string;
+    expect(path.basename(manifestPath)).toBe("segments.json");
+    expect(path.dirname(manifestPath)).toBe(path.dirname(segments[0].filePath as string));
+
+    // On-disk manifest content matches the response, in order.
+    const manifest = JSON.parse(await fsPromises.readFile(manifestPath, "utf8"));
+    expect(manifest.sessionId).toBe(handle);
+    expect(manifest.segmentCount).toBe(segments.length);
+    expect(manifest.segments).toEqual(
+      segments.map((segment, index) => ({
+        index,
+        recordingId: segment.recordingId,
+        filePath: segment.filePath,
+      }))
+    );
   });
 
   test("bare (by-device) stop finalizes the segmented session and leaves no rotation timer", async () => {
@@ -280,12 +344,24 @@ describe("videoRecording tool segmentation branch", () => {
       })
     );
 
+    // Regression guard for #3943: the bare stop must resolve its target device through the
+    // injected DeviceSessionManager singleton, never the real one (whose detectConnectedPlatforms
+    // spawns an `xcrun simctl` subprocess that stalls the test on macOS CI).
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
+
     expect(stopRes.segmented).toBe(true);
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
     expect(segments.length).toBe(2);
     expect(segments.every(segment => segment.segmented === true)).toBe(true);
     expect(typeof segments[0].filePath).toBe("string");
     expect(typeof segments[1].filePath).toBe("string");
+    // Segments carry their capture order and a shared sessionId (the first segment's id),
+    // and a bare stop surfaces the manifest path(s) it wrote (#3905).
+    expect(segments.map(segment => segment.segmentIndex)).toEqual([0, 1]);
+    const sessionId = segments[0].sessionId;
+    expect(sessionId).toBe(segments[0].recordingId);
+    expect(segments.every(segment => segment.sessionId === sessionId)).toBe(true);
+    expect((stopRes.manifestPaths as string[]).length).toBe(1);
 
     // Invariant: the rotation timer must not survive a bare stop.
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
@@ -360,6 +436,10 @@ describe("videoRecording tool segmentation branch", () => {
         // NO recordingId — bare, by-device stop.
       })
     );
+
+    // Regression guard for #3943 (this bare stop hits the same device-resolution path):
+    // it must go through the injected DeviceSessionManager, never the real subprocess one.
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBeGreaterThanOrEqual(1);
 
     const segments = stopRes.recordings as Array<Record<string, unknown>>;
     expect(segments.length).toBe(1);

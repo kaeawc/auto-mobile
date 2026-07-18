@@ -61,6 +61,14 @@ const criticalSectionSchema = z.object({
     .describe(
       "Barrier timeout ms (default 30000)"
     ),
+  // Internal: the plan's base session UUID, injected by PlanExecutor
+  // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
+  // plans that reuse the same lock name get isolated barriers instead of
+  // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
+  __lockNamespace: z
+    .string()
+    .optional()
+    .describe("Internal plan-scoped lock namespace (injected)"),
 });
 
 type CriticalSectionParams = z.infer<typeof criticalSectionSchema>;
@@ -75,7 +83,7 @@ const criticalSectionHandler = async (
   _progress?: unknown,
   signal?: AbortSignal
 ): Promise<any> => {
-  const { lock, steps, deviceCount, timeout } = params;
+  const { lock, steps, deviceCount, timeout, __lockNamespace: namespace } = params;
   const normalizedSteps = PlanNormalizer.normalizeSteps(
     steps as CriticalSectionStepInput[]
   );
@@ -101,7 +109,7 @@ const criticalSectionHandler = async (
 
   // Register expected device count
   try {
-    coordinator.registerExpectedDevices(lock, deviceCount);
+    coordinator.registerExpectedDevices(lock, deviceCount, namespace);
   } catch (error) {
     throw new ActionableError(
       `Failed to register devices for critical section "${lock}": ${error}`
@@ -115,7 +123,8 @@ const criticalSectionHandler = async (
     release = await coordinator.enterCriticalSection(
       lock,
       device.deviceId,
-      timeout
+      timeout,
+      namespace
     );
 
     logger.info(
@@ -196,7 +205,7 @@ const criticalSectionHandler = async (
     });
   } catch (error) {
     // Force cleanup on error to prevent other devices from waiting forever
-    coordinator.forceCleanup(lock);
+    coordinator.forceCleanup(lock, namespace);
 
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(

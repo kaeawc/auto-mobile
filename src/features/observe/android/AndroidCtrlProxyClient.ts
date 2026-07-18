@@ -989,6 +989,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public bindSession(sessionId: string): void {
     if (this.boundSessionId !== sessionId) {
+      // A per-device client routes nav events to whichever session bound last.
+      // That is correct under the pool's one-device-one-live-session invariant
+      // (a device is released before it is reassigned). Trace the transition off
+      // a previously-bound session so a concurrent-share regression — two live
+      // sessions driving one device — is diagnosable in the logs. Debug, not
+      // warn: the common case (a released device rebinding to its next session)
+      // is expected and must not be noisy.
+      if (this.boundSessionId !== null) {
+        logger.debug(
+          `[AndroidCtrlProxyClient] Rebinding device ${this.device.deviceId} from session ` +
+          `${this.boundSessionId} to ${sessionId}`
+        );
+      }
       this.boundSessionId = sessionId;
       // Invalidate cached hierarchy detector so it picks up the new session's NavigationGraphManager
       if (this.hierarchyNavigationDetector) {
@@ -996,6 +1009,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.hierarchyNavigationDetector = null;
       }
     }
+  }
+
+  /**
+   * Test-only accessor for the currently bound session (or null when unbound).
+   * Lets isolation tests pin the routing invariant that `bindSession` is
+   * last-writer-wins and that an unbound client has no session.
+   */
+  public getBoundSessionIdForTesting(): string | null {
+    return this.boundSessionId;
   }
 
   /**

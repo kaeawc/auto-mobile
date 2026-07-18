@@ -33,7 +33,13 @@ import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingR
 import { VisualHighlightClient } from "../features/debug/VisualHighlight";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
+// Per-platform single-recording caps chosen by resolveMaxDurationSeconds. Android >180s is
+// segmented before reaching the manager (see videoRecordingTools), so a direct Android
+// recording never legitimately exceeds MAX_DURATION_SECONDS; iOS `simctl recordVideo` has no
+// time limit and records continuously until SIGINT, so it only needs a higher cap. The
+// `videoRecording` schema's maxDuration ceiling mirrors IOS_MAX_DURATION_SECONDS.
 const MAX_DURATION_SECONDS = 300;
+export const IOS_MAX_DURATION_SECONDS = 3600;
 // Android uses HighlightAnimator's total fade-in + display + fade-out duration.
 // iOS SDK overlays auto-remove after their 3 second TTL.
 const ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
@@ -223,15 +229,19 @@ function configToInput(config: VideoRecordingConfig): VideoRecordingConfigInput 
   };
 }
 
-function resolveMaxDurationSeconds(value?: number): number {
+function resolveMaxDurationSeconds(
+  value: number | undefined,
+  platform: BootedDevice["platform"]
+): number {
   if (value === undefined) {
     return DEFAULT_MAX_DURATION_SECONDS;
   }
   if (!Number.isFinite(value) || value <= 0) {
     throw new ActionableError("maxDuration must be a positive number of seconds.");
   }
-  if (value > MAX_DURATION_SECONDS) {
-    throw new ActionableError(`maxDuration must be <= ${MAX_DURATION_SECONDS} seconds.`);
+  const cap = platform === "ios" ? IOS_MAX_DURATION_SECONDS : MAX_DURATION_SECONDS;
+  if (value > cap) {
+    throw new ActionableError(`maxDuration must be <= ${cap} seconds.`);
   }
   return Math.round(value);
 }
@@ -549,7 +559,10 @@ export async function startVideoRecording(
   }
   const overrides = request.configOverrides ?? {};
   const configInput = await resolveConfigInput(overrides);
-  const maxDurationSeconds = resolveMaxDurationSeconds(request.maxDurationSeconds);
+  const maxDurationSeconds = resolveMaxDurationSeconds(
+    request.maxDurationSeconds,
+    request.device.platform
+  );
   const highlightInputs = request.highlights ?? [];
 
   for (const highlight of highlightInputs) {

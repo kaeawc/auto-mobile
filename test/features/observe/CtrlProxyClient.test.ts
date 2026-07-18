@@ -2849,5 +2849,31 @@ describe("AndroidCtrlProxyClient", function() {
       // Simply verify the client was created without error
       expect(client).toBeDefined();
     });
+
+    // Pins the session-isolation invariants a per-device client relies on. A
+    // per-device CtrlProxy client is last-writer-wins: it is safe only because
+    // the pool guarantees one live session per device at a time. These assertions
+    // make a routing-semantics regression fail loudly instead of silently mixing
+    // one session's navigation state into another's.
+    test("is unbound (null) until a session is bound", function() {
+      // The per-test client from beforeEach is created without a session bound.
+      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBeNull();
+    });
+
+    test("is last-writer-wins: the most recently bound session is the active one", function() {
+      accessibilityServiceClient.bindSession("session-A");
+      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-A");
+
+      // Rebinding (e.g. the device is reassigned to a new session) switches the
+      // active session; the previous binding does not linger.
+      accessibilityServiceClient.bindSession("session-B");
+      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-B");
+    });
+
+    test("re-binding the same session is idempotent", function() {
+      accessibilityServiceClient.bindSession("session-A");
+      accessibilityServiceClient.bindSession("session-A");
+      expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-A");
+    });
   });
 });

@@ -23,6 +23,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   // Call tracking for assertions
   private setCurrentDeviceCalls: BootedDevice[] = [];
   private ensureDeviceReadyCalls: number = 0;
+  private detectConnectedPlatformsCalls: number = 0;
   private verificationAttempts: Map<string, number> = new Map();
   private deviceVerificationCalls: Map<string, Platform> = new Map();
   private lastOptions: DeviceReadyOptions | undefined;
@@ -160,6 +161,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   clearHistory(): void {
     this.setCurrentDeviceCalls = [];
     this.ensureDeviceReadyCalls = 0;
+    this.detectConnectedPlatformsCalls = 0;
     this.verificationAttempts.clear();
     this.deviceVerificationCalls.clear();
     this.lastOptions = undefined;
@@ -233,7 +235,18 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     return selectedDevice;
   }
 
+  /**
+   * Get the number of times detectConnectedPlatforms was called (for test assertions).
+   * Lets a test prove a code path resolved devices through this fake singleton rather
+   * than reaching the real one (which would spawn adb/simctl subprocesses).
+   */
+  getDetectConnectedPlatformsCallCount(): number {
+    return this.detectConnectedPlatformsCalls;
+  }
+
   async detectConnectedPlatforms(): Promise<BootedDevice[]> {
+    this.detectConnectedPlatformsCalls++;
+
     if (this.simulateDisconnection) {
       return [];
     }

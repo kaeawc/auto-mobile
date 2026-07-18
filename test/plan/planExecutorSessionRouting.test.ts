@@ -234,6 +234,79 @@ describe("PlanExecutor - Session-based Device Routing", () => {
     expect(capturedParams[0]).toHaveProperty("testParam", "value1");
   });
 
+  test("injects __lockNamespace (base sessionUuid) into a tool whose schema declares it", async () => {
+    // The plan's base sessionUuid must reach the coordination tools as
+    // __lockNamespace so the shared CriticalSectionCoordinator is scoped per
+    // plan. Only schemas that declare the field keep it through schema.parse.
+    const capturedParams: any[] = [];
+    const mockHandler = mock(async (params: any) => {
+      capturedParams.push({ ...params });
+      return { success: true };
+    });
+
+    const testToolSchema = z.object({
+      platform: z.string().optional(),
+      sessionUuid: z.string().optional(),
+      __lockNamespace: z.string().optional(),
+      testParam: z.string().optional(),
+    });
+
+    ToolRegistry.register(
+      "testLockNamespaceTool",
+      "Test tool that declares __lockNamespace",
+      testToolSchema,
+      mockHandler
+    );
+    (ToolRegistry.getTool("testLockNamespaceTool")! as any).requiresDevice = true;
+
+    const plan: Plan = {
+      name: "Test Lock Namespace Injection",
+      mcpVersion: "1.0",
+      steps: [{ tool: "testLockNamespaceTool", params: { testParam: "v" } }],
+    };
+
+    const sessionUuid = "base-session-uuid-789";
+    await planExecutor.executePlan(plan, 0, "android", undefined, sessionUuid);
+
+    expect(capturedParams.length).toBe(1);
+    expect(capturedParams[0]).toHaveProperty("__lockNamespace", sessionUuid);
+  });
+
+  test("does NOT leak __lockNamespace to tools whose schema omits it", async () => {
+    // A regular tool's schema (no __lockNamespace) must strip the injected field,
+    // so the internal namespace never surfaces on ordinary tool params.
+    const capturedParams: any[] = [];
+    const mockHandler = mock(async (params: any) => {
+      capturedParams.push({ ...params });
+      return { success: true };
+    });
+
+    const testToolSchema = z.object({
+      platform: z.string().optional(),
+      sessionUuid: z.string().optional(),
+      testParam: z.string().optional(),
+    });
+
+    ToolRegistry.register(
+      "testNoLockNamespaceTool",
+      "Test tool that does not declare __lockNamespace",
+      testToolSchema,
+      mockHandler
+    );
+    (ToolRegistry.getTool("testNoLockNamespaceTool")! as any).requiresDevice = true;
+
+    const plan: Plan = {
+      name: "Test Lock Namespace Not Leaked",
+      mcpVersion: "1.0",
+      steps: [{ tool: "testNoLockNamespaceTool", params: { testParam: "v" } }],
+    };
+
+    await planExecutor.executePlan(plan, 0, "android", undefined, "base-session-uuid-000");
+
+    expect(capturedParams.length).toBe(1);
+    expect(capturedParams[0]).not.toHaveProperty("__lockNamespace");
+  });
+
   test("should NOT override deviceId if already present in step params", async () => {
     // Register a mock tool
     const capturedParams: any[] = [];

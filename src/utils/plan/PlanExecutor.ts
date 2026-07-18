@@ -345,6 +345,16 @@ export class DefaultPlanExecutor implements PlanExecutor {
       logger.info(`[PlanExecutor] Injecting sessionUuid ${sessionUuid} into ${step.tool}`);
     }
 
+    // Scope the shared CriticalSectionCoordinator by the plan's base session UUID
+    // (identical across every device track of one plan, distinct across plans),
+    // so two concurrent plans reusing a lock name get isolated barriers. Only the
+    // criticalSection/barrier schemas declare __lockNamespace, so every other
+    // tool strips it at schema.parse; resolveExecutionTarget ignores __-params,
+    // so device routing is unaffected.
+    if (sessionUuid && !enhancedParams.__lockNamespace) {
+      enhancedParams.__lockNamespace = sessionUuid;
+    }
+
     return enhancedParams;
   }
 

@@ -498,6 +498,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public bindSession(sessionId: string): void {
     if (this.boundSessionId !== sessionId) {
+      // See AndroidCtrlProxyClient.bindSession: a per-device client is
+      // last-writer-wins. Trace a transition off a previously-bound session so a
+      // concurrent-share regression is diagnosable, but stay at debug so the
+      // common released-then-reassigned case is not noisy.
+      if (this.boundSessionId !== null) {
+        logger.debug(
+          `[IOSCtrlProxyClient] Rebinding device ${this.device.deviceId} from session ` +
+          `${this.boundSessionId} to ${sessionId}`
+        );
+      }
       this.boundSessionId = sessionId;
       // Invalidate cached hierarchy detector so it picks up the new session's NavigationGraphManager
       if (this.hierarchyNavigationDetector) {
@@ -505,6 +515,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         this.hierarchyNavigationDetector = null;
       }
     }
+  }
+
+  /**
+   * Test-only accessor for the currently bound session (or null when unbound).
+   * Mirrors the Android client so isolation tests can pin the routing invariant.
+   */
+  public getBoundSessionIdForTesting(): string | null {
+    return this.boundSessionId;
   }
 
   /**

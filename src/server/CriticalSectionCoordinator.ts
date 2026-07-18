@@ -17,6 +17,11 @@ export class CriticalSectionCoordinator {
   private readonly BARRIER_TIMEOUT_MS = 30000; // 30 seconds
   private readonly LOCK_CLEANUP_DELAY_MS = 5000; // 5 seconds after last device
 
+  // Separator used to build the internal map key from an optional namespace and
+  // the human lock name. NUL cannot appear in a plan-authored lock name or a
+  // session UUID, so `namespace + SEP + lock` is collision-free.
+  private static readonly NAMESPACE_SEPARATOR = "\u0000";
+
   private constructor() {
     this.locks = new Map();
     this.barrierCounts = new Map();
@@ -33,37 +38,51 @@ export class CriticalSectionCoordinator {
   }
 
   /**
+	 * Build the internal map key for a lock. When a namespace is supplied (the
+	 * plan's base session UUID), it scopes the lock so two independent plans that
+	 * happen to reuse the same lock name get isolated barrier/mutex state instead
+	 * of colliding (issue: cross-plan barrier collision). Callers that pass no
+	 * namespace key by the bare lock name, preserving the pre-namespace behavior.
+	 */
+  private scopedKey(lock: string, namespace?: string): string {
+    return namespace
+      ? `${namespace}${CriticalSectionCoordinator.NAMESPACE_SEPARATOR}${lock}`
+      : lock;
+  }
+
+  /**
 	 * Registers the expected number of devices for a lock.
 	 * Must be called before any device arrives at the barrier.
 	 */
-  public registerExpectedDevices(lock: string, deviceCount: number): void {
+  public registerExpectedDevices(lock: string, deviceCount: number, namespace?: string): void {
     if (deviceCount < 1) {
       throw new Error(
         `Invalid device count ${deviceCount} for lock "${lock}". Must be at least 1.`
       );
     }
 
+    const key = this.scopedKey(lock, namespace);
     logger.debug(
       `Registering ${deviceCount} expected devices for lock "${lock}"`
     );
-    this.expectedDeviceCounts.set(lock, deviceCount);
+    this.expectedDeviceCounts.set(key, deviceCount);
 
     // Ensure lock mutex exists
-    if (!this.locks.has(lock)) {
-      this.locks.set(lock, new Mutex());
+    if (!this.locks.has(key)) {
+      this.locks.set(key, new Mutex());
     }
 
-    if (!this.barrierCounts.has(lock)) {
-      this.barrierCounts.set(lock, new Set());
+    if (!this.barrierCounts.has(key)) {
+      this.barrierCounts.set(key, new Set());
     }
-    if (!this.barrierResolvers.has(lock)) {
-      this.barrierResolvers.set(lock, []);
+    if (!this.barrierResolvers.has(key)) {
+      this.barrierResolvers.set(key, []);
     }
 
-    const existingTimer = this.cleanupTimers.get(lock);
+    const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
       defaultTimer.clearTimeout(existingTimer);
-      this.cleanupTimers.delete(lock);
+      this.cleanupTimers.delete(key);
     }
   }
 
@@ -74,21 +93,23 @@ export class CriticalSectionCoordinator {
   public async enterCriticalSection(
     lock: string,
     deviceId: string,
-    timeout: number = this.BARRIER_TIMEOUT_MS
+    timeout: number = this.BARRIER_TIMEOUT_MS,
+    namespace?: string
   ): Promise<() => void> {
+    const key = this.scopedKey(lock, namespace);
     logger.debug(`Device ${deviceId} entering critical section "${lock}"`);
 
     // Ensure lock exists
-    if (!this.locks.has(lock)) {
-      this.locks.set(lock, new Mutex());
+    if (!this.locks.has(key)) {
+      this.locks.set(key, new Mutex());
     }
 
     // Wait at barrier
-    await this.waitAtBarrier(lock, deviceId, timeout);
+    await this.waitAtBarrier(key, deviceId, timeout, lock);
 
     // Acquire the mutex for serial execution
     logger.debug(`Device ${deviceId} acquiring lock "${lock}"`);
-    const release = await this.locks.get(lock)!.acquire();
+    const release = await this.locks.get(key)!.acquire();
 
     logger.debug(`Device ${deviceId} acquired lock "${lock}"`);
 
@@ -96,7 +117,7 @@ export class CriticalSectionCoordinator {
     return () => {
       logger.debug(`Device ${deviceId} releasing lock "${lock}"`);
       release();
-      this.scheduleCleanup(lock);
+      this.scheduleCleanup(key);
     };
   }
 
@@ -115,40 +136,47 @@ export class CriticalSectionCoordinator {
     lock: string,
     deviceId: string,
     deviceCount: number,
-    timeout: number = this.BARRIER_TIMEOUT_MS
+    timeout: number = this.BARRIER_TIMEOUT_MS,
+    namespace?: string
   ): Promise<void> {
-    this.registerExpectedDevices(lock, deviceCount);
-    await this.waitAtBarrier(lock, deviceId, timeout);
-    this.scheduleCleanup(lock);
+    this.registerExpectedDevices(lock, deviceCount, namespace);
+    const key = this.scopedKey(lock, namespace);
+    await this.waitAtBarrier(key, deviceId, timeout, lock);
+    this.scheduleCleanup(key);
   }
 
   /**
 	 * Wait at the barrier until all expected devices have arrived.
+	 *
+	 * Operates on the already-scoped map `key`; `label` is the human lock name
+	 * used only for log/error messages so namespaced keys never leak into
+	 * user-facing text.
 	 */
   private async waitAtBarrier(
-    lock: string,
+    key: string,
     deviceId: string,
-    timeout: number
+    timeout: number,
+    label: string
   ): Promise<void> {
-    const expectedCount = this.expectedDeviceCounts.get(lock);
+    const expectedCount = this.expectedDeviceCounts.get(key);
 
     if (expectedCount === undefined) {
       throw new Error(
-        `No expected device count registered for lock "${lock}". ` +
+        `No expected device count registered for lock "${label}". ` +
 					`Call registerExpectedDevices() before entering critical section.`
       );
     }
 
     // Add this device to the barrier
-    let arrivedDevices = this.barrierCounts.get(lock);
+    let arrivedDevices = this.barrierCounts.get(key);
     if (!arrivedDevices) {
       arrivedDevices = new Set();
-      this.barrierCounts.set(lock, arrivedDevices);
+      this.barrierCounts.set(key, arrivedDevices);
     }
 
     if (arrivedDevices.has(deviceId)) {
       throw new Error(
-        `Device ${deviceId} already arrived at barrier for lock "${lock}". ` +
+        `Device ${deviceId} already arrived at barrier for lock "${label}". ` +
 					`Nested critical sections with the same lock are not supported.`
       );
     }
@@ -157,17 +185,17 @@ export class CriticalSectionCoordinator {
     const currentCount = arrivedDevices.size;
 
     logger.debug(
-      `Device ${deviceId} arrived at barrier "${lock}" (${currentCount}/${expectedCount})`
+      `Device ${deviceId} arrived at barrier "${label}" (${currentCount}/${expectedCount})`
     );
 
     // If all devices have arrived, release all waiting devices
     if (currentCount === expectedCount) {
       logger.debug(
-        `All ${expectedCount} devices arrived at barrier "${lock}", releasing all`
+        `All ${expectedCount} devices arrived at barrier "${label}", releasing all`
       );
 
-      const resolvers = this.barrierResolvers.get(lock) || [];
-      this.barrierResolvers.set(lock, []);
+      const resolvers = this.barrierResolvers.get(key) || [];
+      this.barrierResolvers.set(key, []);
 
       // Release all waiting devices
       for (const resolve of resolvers) {
@@ -183,23 +211,23 @@ export class CriticalSectionCoordinator {
     // Wait for other devices to arrive
     await new Promise<void>((resolve, reject) => {
       // Add to waiters
-      const resolvers = this.barrierResolvers.get(lock) || [];
+      const resolvers = this.barrierResolvers.get(key) || [];
       resolvers.push(resolve);
-      this.barrierResolvers.set(lock, resolvers);
+      this.barrierResolvers.set(key, resolvers);
 
       // Set timeout
       const timer = defaultTimer.setTimeout(() => {
         // Remove this resolver
-        const currentResolvers = this.barrierResolvers.get(lock) || [];
+        const currentResolvers = this.barrierResolvers.get(key) || [];
         const index = currentResolvers.indexOf(resolve);
         if (index > -1) {
           currentResolvers.splice(index, 1);
         }
 
-        const arrivedCount = this.barrierCounts.get(lock)?.size || 0;
+        const arrivedCount = this.barrierCounts.get(key)?.size || 0;
         reject(
           new Error(
-            `Timeout waiting for critical section "${lock}". ` +
+            `Timeout waiting for critical section "${label}". ` +
 							`${arrivedCount}/${expectedCount} devices arrived after ${timeout}ms. ` +
 							`Missing devices may have failed or not reached the critical section.`
           )
@@ -214,7 +242,7 @@ export class CriticalSectionCoordinator {
       };
 
       // Replace the resolver with the wrapped version
-      const currentResolvers = this.barrierResolvers.get(lock) || [];
+      const currentResolvers = this.barrierResolvers.get(key) || [];
       const resolverIndex = currentResolvers.indexOf(resolve);
       if (resolverIndex > -1) {
         currentResolvers[resolverIndex] = wrappedResolve;
@@ -225,41 +253,45 @@ export class CriticalSectionCoordinator {
   /**
 	 * Schedule cleanup of lock resources after all devices have finished.
 	 */
-  private scheduleCleanup(lock: string): void {
-    const existingTimer = this.cleanupTimers.get(lock);
+  private scheduleCleanup(key: string): void {
+    const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
       defaultTimer.clearTimeout(existingTimer);
     }
 
     // Schedule new cleanup
     const timer = defaultTimer.setTimeout(() => {
-      logger.debug(`Cleaning up lock resources for "${lock}"`);
-      this.locks.delete(lock);
-      this.barrierCounts.delete(lock);
-      this.expectedDeviceCounts.delete(lock);
-      this.barrierResolvers.delete(lock);
-      this.cleanupTimers.delete(lock);
+      logger.debug(`Cleaning up lock resources for "${key}"`);
+      this.locks.delete(key);
+      this.barrierCounts.delete(key);
+      this.expectedDeviceCounts.delete(key);
+      this.barrierResolvers.delete(key);
+      this.cleanupTimers.delete(key);
     }, this.LOCK_CLEANUP_DELAY_MS);
 
-    this.cleanupTimers.set(lock, timer);
+    this.cleanupTimers.set(key, timer);
   }
 
   /**
 	 * Immediately clean up resources for a lock (used in error scenarios).
+	 *
+	 * Scoped by the same optional namespace as the other methods so one plan's
+	 * error-path cleanup cannot wipe a different plan's live lock state.
 	 */
-  public forceCleanup(lock: string): void {
+  public forceCleanup(lock: string, namespace?: string): void {
+    const key = this.scopedKey(lock, namespace);
     logger.debug(`Force cleaning up lock resources for "${lock}"`);
 
-    const existingTimer = this.cleanupTimers.get(lock);
+    const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
       defaultTimer.clearTimeout(existingTimer);
     }
 
-    this.locks.delete(lock);
-    this.barrierCounts.delete(lock);
-    this.expectedDeviceCounts.delete(lock);
-    this.barrierResolvers.delete(lock);
-    this.cleanupTimers.delete(lock);
+    this.locks.delete(key);
+    this.barrierCounts.delete(key);
+    this.expectedDeviceCounts.delete(key);
+    this.barrierResolvers.delete(key);
+    this.cleanupTimers.delete(key);
   }
 
   /**

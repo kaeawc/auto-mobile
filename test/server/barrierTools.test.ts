@@ -84,4 +84,39 @@ describe("barrier tool", () => {
       )
     ).rejects.toThrow(/Barrier "lonely" failed for device device-1/);
   });
+
+  test("schema preserves the injected __lockNamespace (not stripped by parse)", () => {
+    const tool = ToolRegistry.getToolForPlan("barrier");
+    const parsed = tool!.schema.parse({
+      lock: "sync",
+      deviceCount: 2,
+      __lockNamespace: "session-A",
+    });
+    expect(parsed.__lockNamespace).toBe("session-A");
+  });
+
+  test("__lockNamespace scopes the barrier: same lock name, different plans do not cross-satisfy", async () => {
+    const tool = ToolRegistry.getToolForPlan("barrier");
+
+    // One device from plan A and one from plan B arrive at the same lock name
+    // "sync" (deviceCount 2) but with different namespaces. If the namespace were
+    // ignored the shared barrier would lift at 2 arrivals and both would pass;
+    // with scoping each still waits for its own second device, so both time out.
+    const aTimedOut = tool!.deviceAwareHandler!(
+      makeDevice("planA-device-1"),
+      { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-A" },
+      undefined,
+      undefined
+    ).then(() => "passed").catch(() => "timed-out");
+
+    const bTimedOut = tool!.deviceAwareHandler!(
+      makeDevice("planB-device-1"),
+      { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-B" },
+      undefined,
+      undefined
+    ).then(() => "passed").catch(() => "timed-out");
+
+    expect(await aTimedOut).toBe("timed-out");
+    expect(await bTimedOut).toBe("timed-out");
+  });
 });

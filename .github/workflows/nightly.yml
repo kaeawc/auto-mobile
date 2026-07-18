@@ -446,6 +446,50 @@ jobs:
           report_paths: '**/build/test-results/**/*.xml'
 
   # =============================================================================
+  # Android on-device H.264 capture integration tests (bun)
+  # =============================================================================
+  # These two integration suites (issues #3775 / #3776) are env-gated
+  # (AUTOMOBILE_ANDROID_H264_INTEGRATION / AUTOMOBILE_PERSISTENT_ENCODER_INTEGRATION)
+  # and are therefore SKIPPED by the normal `turbo run test` / coverage jobs. They
+  # cover the one seam the unit suites structurally cannot: the real
+  # `adb exec-out screenrecord --output-format=h264` command and the persistent
+  # on-device encoder against a live emulator. Nightly is the only place they run.
+  android-h264-integration-tests:
+    name: "Android H264 Capture Integration Tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-video-server-jar
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Download video-server jar"
+        uses: actions/download-artifact@v7
+        with:
+          name: video-server-jar
+          path: artifacts
+
+      - uses: ./.github/actions/android-emulator
+        with:
+          working-directory: './android/'
+          # cwd inside run-emulator-tests.sh is ./android/, so hop back to the repo
+          # root before invoking bun. The persistent-encoder suite resolves the DEX
+          # from AUTOMOBILE_VIDEO_SERVER_JAR (the artifact downloaded above).
+          script: |
+            cd "$GITHUB_WORKSPACE"
+            AUTOMOBILE_ANDROID_H264_INTEGRATION=1 \
+            AUTOMOBILE_ANDROID_H264_DEVICE_ID=emulator-5554 \
+              bun test test/integration/androidH264SourceDevice.integration.test.ts
+            AUTOMOBILE_PERSISTENT_ENCODER_INTEGRATION=1 \
+            AUTOMOBILE_ANDROID_H264_DEVICE_ID=emulator-5554 \
+            AUTOMOBILE_VIDEO_SERVER_JAR="$GITHUB_WORKSPACE/artifacts/automobile-video.jar" \
+              bun test test/integration/persistentEncoderH264SourceDevice.integration.test.ts
+
+  # =============================================================================
   # iOS simulator integration test (comprehensive daily run)
   # =============================================================================
   # Also runs on PRs that touch the native-integration surface (pull_request.yml).

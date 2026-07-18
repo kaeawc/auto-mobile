@@ -460,6 +460,11 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
   let tapOnElement: TapOnElement;
   let executeAndroidTapWithCoordinates: any;
 
+  const makeElement = () => ({
+    "resource-id": "test:id/button",
+    "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+  } as any);
+
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(true);
@@ -488,213 +493,161 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
     ).mockResolvedValue(undefined);
   });
 
-  test("delegates tap to TalkBackTapStrategy.executeTap", async () => {
-    const element = {
-      "resource-id": "test:id/button",
-      "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-    } as any;
+  describe("default (direct activation)", () => {
+    test("tap directly activates the target via ACTION_CLICK, no cursor navigation", async () => {
+      const element = makeElement();
 
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "tap",
-      50,
-      50,
-      element,
-      500,
-      {},
-      undefined
-    );
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, {}, undefined
+      );
 
-    expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.tapCalls[0].deviceId).toBe("emulator-5554");
-    expect(fakeTalkBackStrategy.tapCalls[0].element).toBe(element);
-    expect(fakeTalkBackStrategy.tapCalls[0].action).toBe("tap");
-  });
-
-  test("delegates doubleTap to TalkBackTapStrategy.executeTap", async () => {
-    const element = {
-      "resource-id": "test:id/button",
-      "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-    } as any;
-
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "doubleTap",
-      50,
-      50,
-      element,
-      500,
-      {},
-      undefined
-    );
-
-    expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.tapCalls[0].action).toBe("doubleTap");
-  });
-
-  test("uses executeLongPress for longPress action", async () => {
-    const element = {
-      "resource-id": "test:id/button",
-      "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-    } as any;
-
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "longPress",
-      50,
-      50,
-      element,
-      1000,
-      {},
-      undefined
-    );
-
-    // Should not call executeTap for longPress
-    expect(fakeTalkBackStrategy.tapCalls).toHaveLength(0);
-    // Should call executeLongPress (not coordinate fallback directly)
-    expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.longPressCalls[0]).toMatchObject({
-      x: 50,
-      y: 50,
-      durationMs: 1000,
-      element
-    });
-    expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
-  });
-
-  test("falls back to ADB tap when executeLongPress fails", async () => {
-    const element = {
-      "resource-id": "test:id/button",
-      "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-    } as any;
-
-    fakeTalkBackStrategy.setLongPressResult({
-      success: false,
-      method: "coordinate-fallback",
-      error: "Long press failed"
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.directActivationCalls[0].element).toBe(element);
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
+      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
 
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "longPress",
-      50,
-      50,
-      element,
-      1000,
-      {},
-      undefined
-    );
+    test("tap falls back to coordinate gesture when direct activation fails", async () => {
+      fakeTalkBackStrategy.setDirectActivationResult({
+        success: false, method: "accessibility-action", error: "no node"
+      });
+      const element = makeElement();
 
-    expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
-    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("longPress", 50, 50, 1000, element, undefined);
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, {}, undefined
+      );
+
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("tap");
+    });
+
+    test("tap falls back to ADB when direct activation and coordinate gesture both fail", async () => {
+      fakeTalkBackStrategy.setDirectActivationResult({
+        success: false, method: "accessibility-action", error: "no node"
+      });
+      fakeTalkBackStrategy.setFallbackResult({
+        success: false, method: "coordinate-fallback", error: "fallback failed"
+      });
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, {}, undefined
+      );
+
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
+    });
+
+    test("doubleTap uses coordinate fallback (no ACTION_CLICK, no cursor navigation)", async () => {
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "doubleTap", 50, 50, element, 500, {}, undefined
+      );
+
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("doubleTap");
+    });
   });
 
-  test("uses coordinate fallback when focus navigation fails", async () => {
-    const element = {
-      "resource-id": "test:id/button",
-      "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-    } as any;
+  describe("opt-in screen-reader navigation (fidelity mode)", () => {
+    const navOptions = { screenReaderNavigation: true } as any;
 
-    fakeTalkBackStrategy.setTapResult({
-      success: false,
-      method: "focus-navigation",
-      error: "Navigation failed"
+    test("tap drives the cursor via executeTap", async () => {
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, navOptions, undefined
+      );
+
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.tapCalls[0].deviceId).toBe("emulator-5554");
+      expect(fakeTalkBackStrategy.tapCalls[0].element).toBe(element);
+      expect(fakeTalkBackStrategy.tapCalls[0].action).toBe("tap");
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
     });
 
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "tap",
-      50,
-      50,
-      element,
-      500,
-      {},
-      undefined
-    );
+    test("doubleTap drives the cursor via executeTap", async () => {
+      const element = makeElement();
 
-    expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("tap");
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "doubleTap", 50, 50, element, 500, navOptions, undefined
+      );
+
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.tapCalls[0].action).toBe("doubleTap");
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
+    });
+
+    test("falls back to coordinate gesture when cursor navigation fails", async () => {
+      fakeTalkBackStrategy.setTapResult({
+        success: false, method: "focus-navigation", error: "Navigation failed"
+      });
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, navOptions, undefined
+      );
+
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("tap");
+    });
+
+    test("falls back to ADB when cursor navigation and coordinate gesture both fail", async () => {
+      fakeTalkBackStrategy.setTapResult({
+        success: false, method: "focus-navigation", error: "Navigation failed"
+      });
+      fakeTalkBackStrategy.setFallbackResult({
+        success: false, method: "coordinate-fallback", error: "Fallback failed"
+      });
+      const element = makeElement();
+
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, navOptions, undefined
+      );
+
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
+    });
   });
 
-  test("falls back to ADB tap when coordinate fallback fails", async () => {
-    const element = {
-      "resource-id": "test:id/button",
-      "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-    } as any;
+  describe("longPress (unaffected by navigation mode)", () => {
+    test("uses executeLongPress for longPress action", async () => {
+      const element = makeElement();
 
-    fakeTalkBackStrategy.setTapResult({
-      success: false,
-      method: "focus-navigation",
-      error: "Navigation failed"
-    });
-    fakeTalkBackStrategy.setFallbackResult({
-      success: false,
-      method: "coordinate-fallback",
-      error: "Fallback failed"
-    });
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "longPress", 50, 50, element, 1000, {}, undefined
+      );
 
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "tap",
-      50,
-      50,
-      element,
-      500,
-      {},
-      undefined
-    );
-
-    expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
-    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
-  });
-
-  test("routes text-only element through focus navigation", async () => {
-    const element = {
-      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-      text: "Button without ID"
-    } as any;
-
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "tap",
-      50,
-      50,
-      element,
-      500,
-      {},
-      undefined
-    );
-
-    // Strategy is called even without resource-id
-    expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.tapCalls[0].element).toBe(element);
-    expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
-  });
-
-  test("falls back to ADB tap when strategy returns failure for element with no identifying info", async () => {
-    const element = {
-      bounds: { left: 0, top: 0, right: 100, bottom: 100 }
-      // no text, no resource-id, no content-desc
-    } as any;
-
-    fakeTalkBackStrategy.setTapResult({
-      success: false,
-      method: "focus-navigation",
-      error: "no identifying information"
-    });
-    fakeTalkBackStrategy.setFallbackResult({
-      success: false,
-      method: "coordinate-fallback",
-      error: "fallback failed"
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
+      expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.longPressCalls[0]).toMatchObject({
+        x: 50, y: 50, durationMs: 1000, element
+      });
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
     });
 
-    await (tapOnElement as any).executeAndroidTapWithAccessibility(
-      "tap",
-      50,
-      50,
-      element,
-      500,
-      {},
-      undefined
-    );
+    test("falls back to ADB tap when executeLongPress fails", async () => {
+      fakeTalkBackStrategy.setLongPressResult({
+        success: false, method: "coordinate-fallback", error: "Long press failed"
+      });
+      const element = makeElement();
 
-    expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-    expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
-    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
+      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+        "longPress", 50, 50, element, 1000, {}, undefined
+      );
+
+      expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("longPress", 50, 50, 1000, element, undefined);
+    });
   });
 });

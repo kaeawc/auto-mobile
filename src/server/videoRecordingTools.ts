@@ -1,3 +1,5 @@
+import { promises as fsPromises } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import {
@@ -10,6 +12,7 @@ import {
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
+  IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
   startVideoRecording,
   stopVideoRecording,
@@ -27,6 +30,63 @@ import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
+
+/** File name of the per-session manifest written alongside the first segment. */
+const SEGMENT_MANIFEST_FILE = "segments.json";
+
+/** One finalized segment of a timer-driven segmented session, in capture order. */
+interface StoppedSegment {
+  recordingId: string;
+  filePath: string;
+  segmentIndex: number;
+}
+
+/** Result of finalizing a segmented session: its ordered segments + grouping metadata. */
+interface StoppedSegmentedSession {
+  /** Stable session handle — the first segment's recordingId. Groups the segments. */
+  sessionId: string;
+  segments: StoppedSegment[];
+  /** Absolute path of the written manifest, or undefined if the write failed. */
+  manifestPath: string | undefined;
+}
+
+/**
+ * Write a `segments.json` manifest listing every segment of a session in order, so a caller
+ * (or an external process that only sees the archive on disk) can discover and concatenate
+ * the clips without re-deriving order. It is written into the FIRST segment's directory, so
+ * the existing per-recording eviction (`rm(dirname)`) cleans it up with that segment — no new
+ * eviction surface. Best-effort: a write failure is logged and returns undefined rather than
+ * failing the stop, since the tool response already carries the authoritative ordering.
+ */
+async function writeSegmentManifest(
+  sessionId: string,
+  segments: StoppedSegment[]
+): Promise<string | undefined> {
+  const first = segments[0];
+  if (!first) {
+    return undefined;
+  }
+  const manifestPath = path.join(path.dirname(first.filePath), SEGMENT_MANIFEST_FILE);
+  try {
+    const manifest = {
+      sessionId,
+      segmentCount: segments.length,
+      segments: segments.map(segment => ({
+        index: segment.segmentIndex,
+        recordingId: segment.recordingId,
+        filePath: segment.filePath,
+      })),
+    };
+    await fsPromises.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    return manifestPath;
+  } catch (error) {
+    logger.warn(
+      `[VideoRecording] Failed to write segment manifest for session ${sessionId}: ` +
+      `${error instanceof Error ? error.message : String(error)}`
+    );
+    return undefined;
+  }
+}
 
 type SegmentedSessionRecordingDependencies = Pick<
   AndroidSegmentedPlanVideoSessionOptions,
@@ -76,16 +136,23 @@ const segmentedSessions = (() => {
       }
     },
     /**
-     * Stop a tracked session: remove it from the registry, finalize it (which clears
-     * its rotation timer), and return the ordered segment recordingId/filePath pairs.
+     * Stop a tracked session: remove it from the registry, finalize it (which clears its
+     * rotation timer), write the session manifest, and return the ordered segments plus the
+     * grouping metadata (sessionId + manifestPath). The handle is the sessionId.
      */
     async stopAndRemove(
       handle: string,
       session: AndroidSegmentedPlanVideoSession
-    ): Promise<Array<{ recordingId: string; filePath: string }>> {
+    ): Promise<StoppedSegmentedSession> {
       byHandle.delete(handle);
       const { filePaths, recordingIds } = await session.stop();
-      return recordingIds.map((id, index) => ({ recordingId: id, filePath: filePaths[index] }));
+      const segments: StoppedSegment[] = recordingIds.map((id, index) => ({
+        recordingId: id,
+        filePath: filePaths[index],
+        segmentIndex: index,
+      }));
+      const manifestPath = await writeSegmentManifest(handle, segments);
+      return { sessionId: handle, segments, manifestPath };
     },
     /** Test seam: inject the Timer used by segmented sessions. */
     setTimer(timer: Timer | undefined): void {
@@ -168,16 +235,13 @@ const videoRecordingSchema = addDeviceTargetingToSchema(z.object({
   fps: z.number().int().positive().optional().describe("FPS"),
   resolution: resolutionSchema.optional().describe("Resolution"),
   format: z.enum(["mp4"]).optional(),
-  // Raised from 300 so long Android recordings (segmented under the hood) are
-  // accepted. Note: non-Android recordings still can't exceed the manager's
-  // single-recording cap (300s) since they aren't segmented; such a request
-  // passes schema validation but is rejected at videoRecordingManager. Left
-  // as-is intentionally (out of scope for segmented Android capture).
+  // Outer ceiling only; the manager enforces the real per-platform cap (iOS up to
+  // IOS_MAX_DURATION_SECONDS, non-iOS 300s — see resolveMaxDurationSeconds).
   maxDuration: z
     .number()
     .int()
     .positive()
-    .max(3600)
+    .max(IOS_MAX_DURATION_SECONDS)
     .optional()
     .describe("Max duration seconds"),
   outputName: z.string().optional().describe("Recording label"),
@@ -256,11 +320,17 @@ async function tryStopSegmentedSession(recordingId: string) {
   }
 
   try {
-    const recordings = await segmentedSessions.stopAndRemove(recordingId, session);
+    const { sessionId, segments, manifestPath } = await segmentedSessions.stopAndRemove(
+      recordingId,
+      session
+    );
     return createJSONToolResponse({
       action: "stop",
-      count: recordings.length,
-      recordings,
+      count: segments.length,
+      manifestPath,
+      // Each segment carries sessionId + segmentIndex, so `recordings[]` has the same shape
+      // whether it came from a by-handle or a bare (multi-session) stop.
+      recordings: segments.map(segment => ({ ...segment, sessionId })),
       segmented: true,
     });
   } catch (error) {
@@ -347,6 +417,8 @@ export function registerVideoRecordingTools(): void {
 
             recordings.push({
               recordingId: active.recordingId,
+              // Session handle grouping the segments; matches the stop response's sessionId.
+              sessionId: active.recordingId,
               outputPath: active.outputPath,
               startedAt: active.startedAt,
               outputName: active.outputName,
@@ -414,6 +486,7 @@ export function registerVideoRecordingTools(): void {
       const results: Array<Record<string, unknown>> = [];
       const failures: Array<Record<string, unknown>> = [];
       const evictedRecordingIds: string[] = [];
+      const manifestPaths: string[] = [];
       let stoppedAnySegmented = false;
       const targetDevices = await resolveTargetDevices(device, args);
       let activeRecords: VideoRecordingRecord[] | undefined;
@@ -428,11 +501,19 @@ export function registerVideoRecordingTools(): void {
           stoppedAnySegmented = true;
           for (const [handle, session] of deviceSessions) {
             try {
-              const segments = await segmentedSessions.stopAndRemove(handle, session);
+              const { sessionId, segments, manifestPath } = await segmentedSessions.stopAndRemove(
+                handle,
+                session
+              );
+              if (manifestPath) {
+                manifestPaths.push(manifestPath);
+              }
               for (const segment of segments) {
                 results.push({
                   recordingId: segment.recordingId,
                   filePath: segment.filePath,
+                  segmentIndex: segment.segmentIndex,
+                  sessionId,
                   deviceId: target.deviceId,
                   platform: target.platform,
                   segmented: true,
@@ -509,6 +590,7 @@ export function registerVideoRecordingTools(): void {
         count: results.length,
         recordings: results,
         segmented: stoppedAnySegmented ? true : undefined,
+        manifestPaths: manifestPaths.length > 0 ? manifestPaths : undefined,
         failures: failures.length > 0 ? failures : undefined,
         evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
       });

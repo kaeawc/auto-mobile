@@ -27,6 +27,11 @@ describe("videoRecordingManager", () => {
   let fakeRepository: FakeVideoRecordingRepository;
   let archiveRoot: string;
   let testDevice: BootedDevice;
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-device",
+    platform: "ios",
+    name: "iPhone Simulator",
+  };
 
   beforeAll(async () => {
     archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
@@ -196,11 +201,6 @@ describe("videoRecordingManager", () => {
   });
 
   test("records scheduled highlight timelines for iOS recordings", async () => {
-    const iosDevice: BootedDevice = {
-      deviceId: "ios-device",
-      platform: "ios",
-      name: "iPhone Simulator",
-    };
     const highlightShape = {
       type: "box",
       bounds: { x: 10, y: 20, width: 30, height: 40 },
@@ -237,11 +237,6 @@ describe("videoRecordingManager", () => {
   });
 
   test("uses iOS overlay lifetime for long recording highlight timelines", async () => {
-    const iosDevice: BootedDevice = {
-      deviceId: "ios-device",
-      platform: "ios",
-      name: "iPhone Simulator",
-    };
     const highlightShape = {
       type: "box",
       bounds: { x: 10, y: 20, width: 30, height: 40 },
@@ -305,5 +300,41 @@ describe("videoRecordingManager", () => {
         timeline: { appearedAtSeconds: 0.5, disappearedAtSeconds: 1 },
       },
     ]);
+  });
+
+  describe("maxDuration per-platform cap (#3906)", () => {
+    test("iOS recording past the 300s non-iOS cap is accepted and arms auto-stop at maxDuration", async () => {
+      // 500s: above the non-iOS cap (300), below the iOS cap (3600).
+      const active = await startVideoRecording({
+        device: iosDevice,
+        maxDurationSeconds: 500,
+      });
+
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+      expect(fakeBackend.stopCalls.length).toBe(0);
+
+      // Just before 500s: still recording. At 500s: auto-stop fires.
+      fakeTimer.advanceTime(499_999);
+      expect(fakeBackend.stopCalls.length).toBe(0);
+      fakeTimer.advanceTime(1);
+      await waitForRecordingCount(0);
+      expect(fakeBackend.stopCalls.length).toBe(1);
+
+      expect(active.recordingId).toBeDefined();
+    });
+
+    test("iOS recording above the iOS cap (3600s) is rejected", async () => {
+      await expect(
+        startVideoRecording({ device: iosDevice, maxDurationSeconds: 3601 })
+      ).rejects.toThrow("maxDuration must be <= 3600 seconds.");
+      expect(fakeBackend.startCalls.length).toBe(0);
+    });
+
+    test("non-iOS recording above the 300s cap is still rejected (Android segments before the manager)", async () => {
+      await expect(
+        startVideoRecording({ device: testDevice, maxDurationSeconds: 301 })
+      ).rejects.toThrow("maxDuration must be <= 300 seconds.");
+      expect(fakeBackend.startCalls.length).toBe(0);
+    });
   });
 });

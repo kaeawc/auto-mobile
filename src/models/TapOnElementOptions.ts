@@ -39,6 +39,13 @@ export interface TapOnElementOptions {
   // If not specified, will be determined automatically based on TalkBack state
   focusFirst?: boolean;
 
+  // Opt-in screen-reader navigation fidelity mode (see #3937). When true and a
+  // screen reader is active, drive the screen-reader cursor by swipe navigation
+  // to reach the target before activating — reproducing the real user journey.
+  // Default (false/undefined): activate the target node directly via the
+  // accessibility action (deterministic, no cursor stepping). See #3936.
+  screenReaderNavigation?: boolean;
+
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;

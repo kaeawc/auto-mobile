@@ -1414,8 +1414,12 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   /**
-   * Execute tap using CtrlProxy actions (TalkBack mode)
-   * Uses focus navigation when TalkBack is enabled, falls back to coordinate-based tapping if navigation fails.
+   * Execute tap using CtrlProxy actions (TalkBack mode).
+   *
+   * Default (#3936): directly activate the target via ACTION_CLICK — deterministic,
+   * no cursor stepping — then fall back to a coordinate gesture, then ADB.
+   * When `options.screenReaderNavigation` is set (opt-in fidelity mode, #3937),
+   * drive the TalkBack cursor by swipe navigation to the target before activating.
    * For longPress, tries ACTION_LONG_CLICK first, then coordinate gesture, then ADB.
    */
   private async executeAndroidTapWithAccessibility(
@@ -1424,7 +1428,7 @@ export class TapOnElement extends BaseVisualChange {
     y: number,
     element: Element,
     durationMs: number,
-    _options?: TapOnElementOptions,
+    options?: TapOnElementOptions,
     signal?: AbortSignal
   ): Promise<void> {
     const driver = this.talkBackDriverFactory.createDriver(this.device);
@@ -1449,23 +1453,40 @@ export class TapOnElement extends BaseVisualChange {
       return;
     }
 
-    // Try focus navigation for tap and doubleTap actions
     if (action === "tap" || action === "doubleTap") {
-      const result = await this.talkBackStrategy.executeTap(
-        this.device.deviceId,
-        element,
-        action as "tap" | "doubleTap",
-        driver
-      );
+      if (options?.screenReaderNavigation) {
+        // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
+        // navigation to the target, then activate.
+        const result = await this.talkBackStrategy.executeTap(
+          this.device.deviceId,
+          element,
+          action as "tap" | "doubleTap",
+          driver
+        );
 
-      if (result.success) {
-        return;
+        if (result.success) {
+          return;
+        }
+
+        logger.warn(
+          `[TapOnElement] Focus navigation failed (${result.error}), ` +
+          `falling back to coordinate-based tap at (${x}, ${y})`
+        );
+      } else if (action === "tap") {
+        // Default (#3936): directly activate the target node via ACTION_CLICK,
+        // without moving the cursor. doubleTap has no single accessibility action,
+        // so it drops straight to the coordinate fallback below.
+        const result = await this.talkBackStrategy.executeDirectActivation(element, driver);
+
+        if (result.success) {
+          return;
+        }
+
+        logger.warn(
+          `[TapOnElement] Direct accessibility activation failed (${result.error}), ` +
+          `falling back to coordinate-based tap at (${x}, ${y})`
+        );
       }
-
-      logger.warn(
-        `[TapOnElement] Focus navigation failed (${result.error}), ` +
-        `falling back to coordinate-based tap at (${x}, ${y})`
-      );
     }
 
     // Fallback to coordinate-based taps via accessibility service dispatchGesture
@@ -1565,8 +1586,9 @@ export class TapOnElement extends BaseVisualChange {
     y: number,
     durationMs: number
   ): Promise<void> {
-    // Resolve accessibility label: ios-accessibility-label > text > fallback
+    // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
     const label = (element["ios-accessibility-label"] as string | undefined)
+      ?? (typeof element["content-desc"] === "string" && element["content-desc"] ? element["content-desc"] : undefined)
       ?? (typeof element.text === "string" && element.text ? element.text : undefined);
 
     if (!label) {

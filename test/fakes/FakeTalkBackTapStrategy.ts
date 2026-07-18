@@ -13,11 +13,16 @@ export class FakeTalkBackTapStrategy {
   tapResult: TalkBackTapResult = { success: true, method: "focus-navigation" };
   fallbackResult: TalkBackTapResult = { success: true, method: "coordinate-fallback" };
   longPressResult: TalkBackTapResult = { success: true, method: "accessibility-action" };
+  directActivationResult: TalkBackTapResult = { success: true, method: "accessibility-action" };
 
   tapCalls: Array<{
     deviceId: string;
     element: Element;
     action: TalkBackTapAction;
+  }> = [];
+
+  directActivationCalls: Array<{
+    element: Element;
   }> = [];
 
   fallbackCalls: Array<{
@@ -37,9 +42,18 @@ export class FakeTalkBackTapStrategy {
   private tapOverrides: TalkBackTapResult[] = [];
   private fallbackOverrides: TalkBackTapResult[] = [];
   private longPressOverrides: TalkBackTapResult[] = [];
+  private directActivationOverrides: TalkBackTapResult[] = [];
 
   setTapResult(result: TalkBackTapResult): void {
     this.tapResult = result;
+  }
+
+  setDirectActivationResult(result: TalkBackTapResult): void {
+    this.directActivationResult = result;
+  }
+
+  queueDirectActivationResult(result: TalkBackTapResult): void {
+    this.directActivationOverrides.push(result);
   }
 
   setFallbackResult(result: TalkBackTapResult): void {
@@ -75,6 +89,19 @@ export class FakeTalkBackTapStrategy {
     }
 
     return this.tapResult;
+  }
+
+  async executeDirectActivation(
+    element: Element,
+    _driver: TalkBackNavigationDriver
+  ): Promise<TalkBackTapResult> {
+    this.directActivationCalls.push({ element });
+
+    if (this.directActivationOverrides.length > 0) {
+      return this.directActivationOverrides.shift()!;
+    }
+
+    return this.directActivationResult;
   }
 
   async executeCoordinateFallback(

@@ -181,6 +181,46 @@ export class TalkBackTapStrategy {
   }
 
   /**
+   * Directly activate the target element via ACTION_CLICK, without moving the
+   * TalkBack cursor.
+   *
+   * This is the default screen-reader activation model (#3936): deterministic,
+   * a single accessibility action, and immune to the cursor-navigation failure
+   * modes of {@link executeTap}. It requires a resource-id to resolve the node;
+   * callers fall back to a coordinate gesture when this returns unsuccessful
+   * (e.g. no resource-id, or the node rejects the action).
+   *
+   * @param element - The target element (must have a resource-id to activate directly)
+   * @param driver - The TalkBack navigation driver
+   * @returns Result indicating success/failure; method is "accessibility-action"
+   */
+  async executeDirectActivation(
+    element: Element,
+    driver: TalkBackNavigationDriver
+  ): Promise<TalkBackTapResult> {
+    const resourceId = element["resource-id"] as string | undefined;
+    if (!resourceId) {
+      return {
+        success: false,
+        method: "accessibility-action",
+        error: "Element has no resource-id for direct accessibility activation"
+      };
+    }
+
+    const result = await driver.requestAction("click", resourceId);
+    if (result.success) {
+      logger.info(`[TalkBackTapStrategy] Direct activation via ACTION_CLICK succeeded`);
+      return { success: true, method: "accessibility-action" };
+    }
+
+    return {
+      success: false,
+      method: "accessibility-action",
+      error: result.error ?? "ACTION_CLICK failed"
+    };
+  }
+
+  /**
    * Execute a coordinate-based tap as a fallback when focus navigation fails or isn't applicable.
    *
    * @param x - X coordinate

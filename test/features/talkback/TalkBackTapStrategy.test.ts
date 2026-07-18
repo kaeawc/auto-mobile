@@ -383,4 +383,53 @@ describe("TalkBackTapStrategy", () => {
       expect(result.error).toContain("tap failed");
     });
   });
+
+  describe("executeDirectActivation", () => {
+    test("activates via ACTION_CLICK when element has a resource-id", async () => {
+      const element = {
+        "resource-id": "test:id/button",
+        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+      } as Element;
+
+      driver.setActionResult({ success: true, action: "click", totalTimeMs: 1 });
+
+      const result = await strategy.executeDirectActivation(element, driver);
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("accessibility-action");
+      expect(driver.actionHistory).toHaveLength(1);
+      expect(driver.actionHistory[0]).toEqual({ action: "click", resourceId: "test:id/button" });
+      expect(driver.getTapCount()).toBe(0); // no cursor stepping, no coordinate taps
+    });
+
+    test("returns failure without attempting an action when element has no resource-id", async () => {
+      const element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        text: "Button"
+      } as Element;
+
+      const result = await strategy.executeDirectActivation(element, driver);
+
+      expect(result.success).toBe(false);
+      expect(result.method).toBe("accessibility-action");
+      expect(result.error).toBeDefined();
+      expect(driver.getActionCount()).toBe(0);
+    });
+
+    test("returns failure when ACTION_CLICK is rejected", async () => {
+      const element = {
+        "resource-id": "test:id/button",
+        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+      } as Element;
+
+      driver.setActionResult({ success: false, action: "click", totalTimeMs: 1, error: "node not found" });
+
+      const result = await strategy.executeDirectActivation(element, driver);
+
+      expect(result.success).toBe(false);
+      expect(result.method).toBe("accessibility-action");
+      expect(result.error).toContain("node not found");
+      expect(driver.actionHistory[0]).toEqual({ action: "click", resourceId: "test:id/button" });
+    });
+  });
 });

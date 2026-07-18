@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { VouchEngine } from "../../../src/features/vouch/VouchEngine";
-import { DEFAULT_VOUCH_POLICY, vouchCapacity } from "../../../src/features/vouch/VouchPolicy";
-import { emptyVouchState, type VouchState } from "../../../src/features/vouch/types";
+import { VouchEngine } from "../../../scripts/github/vouch/VouchEngine";
+import { DEFAULT_VOUCH_POLICY, vouchCapacity } from "../../../scripts/github/vouch/VouchPolicy";
+import { emptyVouchState, type VouchState } from "../../../scripts/github/vouch/types";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models/ActionableError";

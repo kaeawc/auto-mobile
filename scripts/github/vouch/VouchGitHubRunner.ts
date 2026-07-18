@@ -10,7 +10,7 @@ import { VouchEngine } from "./VouchEngine";
 import { DEFAULT_GATE_LABEL, parseVouchCommand, planGateAction } from "./VouchGitHubGate";
 import type { VouchStateStore } from "./FileVouchStore";
 import { canonicalLogin, type Member, type VouchState } from "./types";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 /** Minimal GitHub issue/PR surface the runner needs. */
 export interface GitHubIssueClient {

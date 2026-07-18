@@ -5,18 +5,18 @@
  * non-determinism (token generation, current time) is injected via
  * {@link IdGenerator} and {@link Timer}, so the whole trust/accountability model
  * is exercised by fast, deterministic unit tests. Persistence is layered on top
- * by `VouchRepository`/`VouchService`.
+ * by the file-backed `FileVouchStore` (the committed JSON trust graph).
  *
  * Operations mutate the passed-in state and return a structured result describing
  * what changed, so a caller can persist exactly the touched entities.
  */
 
-import type { IdGenerator } from "../../utils/IdGenerator";
-import { defaultIdGenerator } from "../../utils/IdGenerator";
-import type { Timer } from "../../utils/SystemTimer";
-import { defaultTimer } from "../../utils/SystemTimer";
-import { ActionableError } from "../../models/ActionableError";
-import { logger } from "../../utils/logger";
+import type { IdGenerator } from "../../../src/utils/IdGenerator";
+import { defaultIdGenerator } from "../../../src/utils/IdGenerator";
+import type { Timer } from "../../../src/utils/SystemTimer";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { logger } from "../../../src/utils/logger";
 import {
   applyPenalty,
   DEFAULT_VOUCH_POLICY,

@@ -19,25 +19,56 @@
  */
 
 import { promises as fs } from "fs";
-import { FileVouchStore } from "../../src/features/vouch/FileVouchStore";
-import { VouchEngine } from "../../src/features/vouch/VouchEngine";
+import { FileVouchStore } from "./vouch/FileVouchStore";
+import { VouchEngine } from "./vouch/VouchEngine";
 import {
   runVouchGate,
   type GitHubIssueClient,
   type VouchEventPayload,
-} from "../../src/features/vouch/VouchGitHubRunner";
+} from "./vouch/VouchGitHubRunner";
 
 const DEFAULT_GRAPH_PATH = ".github/vouch/graph.json";
 
+/**
+ * Coerce a (potentially event-file-derived) issue number to a validated positive
+ * safe integer. Issue/PR numbers are always small positive integers; validating
+ * here means the only event-payload value that reaches the request URL is a
+ * checked number, not an attacker-influenced string path segment (CodeQL:
+ * "file data in outbound network request").
+ */
+function toSafeIssueNumber(value: number): number {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    throw new Error(`Refusing to build a request for a non-positive-integer issue number: ${value}`);
+  }
+  return n;
+}
+
 class RestGitHubClient implements GitHubIssueClient {
+  /** Fixed, trusted request origin. The destination host never varies with input. */
+  private readonly origin: string;
+
   constructor(
-    private readonly apiUrl: string,
+    apiUrl: string,
     private readonly repo: string,
     private readonly token: string
-  ) {}
+  ) {
+    this.origin = new URL(apiUrl).origin;
+  }
 
+  /**
+   * Build the request URL from the fixed trusted origin plus a fully
+   * caller-constructed path, then assert the resolved URL still points at that
+   * origin before sending. The `issueNumber` segments are validated integers and
+   * the repo/label segments are URL-encoded, so no event-file string can redirect
+   * the request to a different host.
+   */
   private async request(method: string, path: string, body?: unknown): Promise<Response> {
-    const response = await fetch(`${this.apiUrl}/repos/${this.repo}${path}`, {
+    const url = new URL(`/repos/${this.repo}${path}`, this.origin);
+    if (url.origin !== this.origin) {
+      throw new Error(`Refusing to send a request to an unexpected origin: ${url.origin}`);
+    }
+    return await fetch(url, {
       method,
       headers: {
         "authorization": `Bearer ${this.token}`,
@@ -47,11 +78,12 @@ class RestGitHubClient implements GitHubIssueClient {
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    return response;
   }
 
   async addLabel(issueNumber: number, label: string): Promise<void> {
-    const res = await this.request("POST", `/issues/${issueNumber}/labels`, { labels: [label] });
+    const res = await this.request("POST", `/issues/${toSafeIssueNumber(issueNumber)}/labels`, {
+      labels: [label],
+    });
     if (!res.ok) {
       throw new Error(`addLabel failed: ${res.status} ${await res.text()}`);
     }
@@ -60,7 +92,7 @@ class RestGitHubClient implements GitHubIssueClient {
   async removeLabel(issueNumber: number, label: string): Promise<void> {
     const res = await this.request(
       "DELETE",
-      `/issues/${issueNumber}/labels/${encodeURIComponent(label)}`
+      `/issues/${toSafeIssueNumber(issueNumber)}/labels/${encodeURIComponent(label)}`
     );
     // 404 just means the label was not present — not an error for our purposes.
     if (!res.ok && res.status !== 404) {
@@ -69,14 +101,18 @@ class RestGitHubClient implements GitHubIssueClient {
   }
 
   async comment(issueNumber: number, body: string): Promise<void> {
-    const res = await this.request("POST", `/issues/${issueNumber}/comments`, { body });
+    const res = await this.request("POST", `/issues/${toSafeIssueNumber(issueNumber)}/comments`, {
+      body,
+    });
     if (!res.ok) {
       throw new Error(`comment failed: ${res.status} ${await res.text()}`);
     }
   }
 
   async close(issueNumber: number): Promise<void> {
-    const res = await this.request("PATCH", `/issues/${issueNumber}`, { state: "closed" });
+    const res = await this.request("PATCH", `/issues/${toSafeIssueNumber(issueNumber)}`, {
+      state: "closed",
+    });
     if (!res.ok) {
       throw new Error(`close failed: ${res.status} ${await res.text()}`);
     }

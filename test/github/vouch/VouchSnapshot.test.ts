@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { VouchEngine } from "../../../src/features/vouch/VouchEngine";
-import { emptyVouchState } from "../../../src/features/vouch/types";
+import { VouchEngine } from "../../../scripts/github/vouch/VouchEngine";
+import { emptyVouchState } from "../../../scripts/github/vouch/types";
 import {
   parseVouchState,
   serializeVouchState,
   stringifyVouchState,
   VOUCH_SNAPSHOT_VERSION,
-} from "../../../src/features/vouch/VouchSnapshot";
+} from "../../../scripts/github/vouch/VouchSnapshot";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 

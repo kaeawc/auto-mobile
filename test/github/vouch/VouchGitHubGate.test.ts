@@ -3,8 +3,8 @@ import {
   DEFAULT_GATE_LABEL,
   parseVouchCommand,
   planGateAction,
-} from "../../../src/features/vouch/VouchGitHubGate";
-import type { GateDecision } from "../../../src/features/vouch/types";
+} from "../../../scripts/github/vouch/VouchGitHubGate";
+import type { GateDecision } from "../../../scripts/github/vouch/types";
 
 describe("parseVouchCommand", () => {
   test("parses invite", () => {

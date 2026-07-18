@@ -27,7 +27,7 @@ who is willing to stake reputation on them.
 - **Vouch budget.** Each member's capacity is `base(role) + floor(reputation /
   reputationPerBonusVouch)`. Outstanding commitments (pending invites + active
   members they vouched in) consume the budget. See
-  [`VouchPolicy.ts`](../../src/features/vouch/VouchPolicy.ts) for the defaults.
+  [`VouchPolicy.ts`](../../scripts/github/vouch/VouchPolicy.ts) for the defaults.
 - **Invite tokens.** A member spends a slot to mint a single-use token
   (`/vouch invite`), or vouches someone in directly (`/vouch admit @user`).
 - **Trust graph.** Every `vouched` member stores a single `vouchedBy` pointer;
@@ -52,6 +52,11 @@ Because you (the repo owner) are a `founder`:
 
 ## Architecture
 
+The vouch system is **standalone GitHub CI tooling** under `scripts/github/vouch/`
+— it is deliberately **not** part of the AutoMobile MCP server: it adds no MCP
+tools, no database tables, and ships nothing in the server bundle. It reuses only
+the repo's shared primitives (`IdGenerator`, `Timer`).
+
 ```
 GitHub event ──▶ scripts/github/vouch-gate.ts (adapter: fetch + file store)
                       │
@@ -59,21 +64,18 @@ GitHub event ──▶ scripts/github/vouch-gate.ts (adapter: fetch + file store
               VouchGitHubRunner ──▶ VouchEngine (pure domain: trust + accountability)
                       │                   ▲
                       ▼                   │
-              GitHubIssueClient      VouchStateStore
-              (label/comment/close)   ├─ FileVouchStore (.github/vouch/graph.json)  ← Action path
-                                      └─ VouchRepository (SQLite)                    ← daemon/MCP path
+              GitHubIssueClient      FileVouchStore ── .github/vouch/graph.json
+              (label/comment/close)   (committed JSON graph — auditable in git)
 ```
 
-- [`VouchEngine`](../../src/features/vouch/VouchEngine.ts) — pure, deterministic
+- [`VouchEngine`](../../scripts/github/vouch/VouchEngine.ts) — pure, deterministic
   (injected `IdGenerator` + `Timer`), no I/O. All trust/accountability logic.
-- [`VouchService`](../../src/features/vouch/VouchService.ts) — engine + SQLite
-  persistence, for the daemon/MCP path.
-- [`FileVouchStore`](../../src/features/vouch/FileVouchStore.ts) +
-  [`VouchSnapshot`](../../src/features/vouch/VouchSnapshot.ts) — JSON graph in the
-  repo, for the GitHub-Action path (transparent + auditable in git history).
-- [`VouchGitHubGate`](../../src/features/vouch/VouchGitHubGate.ts) — pure command
+- [`FileVouchStore`](../../scripts/github/vouch/FileVouchStore.ts) +
+  [`VouchSnapshot`](../../scripts/github/vouch/VouchSnapshot.ts) — JSON graph
+  committed in the repo (transparent + auditable in git history).
+- [`VouchGitHubGate`](../../scripts/github/vouch/VouchGitHubGate.ts) — pure command
   parsing + action planning.
-- [`VouchGitHubRunner`](../../src/features/vouch/VouchGitHubRunner.ts) —
+- [`VouchGitHubRunner`](../../scripts/github/vouch/VouchGitHubRunner.ts) —
   orchestrates one event; side effects via an injected client.
 
 ## Slash commands (post as an issue/PR comment)

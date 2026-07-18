@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "fs";
 import * as os from "os";
 import * as path from "path";
-import { FileVouchStore } from "../../../src/features/vouch/FileVouchStore";
-import { VouchEngine } from "../../../src/features/vouch/VouchEngine";
-import { emptyVouchState } from "../../../src/features/vouch/types";
+import { FileVouchStore } from "../../../scripts/github/vouch/FileVouchStore";
+import { VouchEngine } from "../../../scripts/github/vouch/VouchEngine";
+import { emptyVouchState } from "../../../scripts/github/vouch/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 

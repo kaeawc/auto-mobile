@@ -1,10 +1,9 @@
 /**
  * JSON (de)serialization for {@link VouchState}.
  *
- * The engine is storage-agnostic. The daemon/MCP path persists the graph in
- * SQLite (`VouchRepository`); the GitHub-Action path instead keeps the graph as a
+ * The engine is storage-agnostic. This GitHub-Action tooling keeps the graph as a
  * committed JSON file in the repo, so the trust graph is transparent and auditable
- * through git history. This module is the bridge for the latter.
+ * through git history. This module is the bridge to that file.
  */
 
 import { emptyVouchState, type InviteToken, type Member, type VouchState } from "./types";

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { runVouchGate, type GitHubIssueClient } from "../../../src/features/vouch/VouchGitHubRunner";
-import type { VouchStateStore } from "../../../src/features/vouch/FileVouchStore";
-import { VouchEngine } from "../../../src/features/vouch/VouchEngine";
-import { emptyVouchState, type VouchState } from "../../../src/features/vouch/types";
+import { runVouchGate, type GitHubIssueClient } from "../../../scripts/github/vouch/VouchGitHubRunner";
+import type { VouchStateStore } from "../../../scripts/github/vouch/FileVouchStore";
+import { VouchEngine } from "../../../scripts/github/vouch/VouchEngine";
+import { emptyVouchState, type VouchState } from "../../../scripts/github/vouch/types";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 

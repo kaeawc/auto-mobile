@@ -632,33 +632,6 @@ export interface LayoutEventsTable {
   created_at: Generated<string>;
 }
 
-// Vouch system tables (web-of-trust gating for GitHub issues/PRs)
-export interface VouchMembersTable {
-  login: string;
-  role: "founder" | "contributor" | "vouched";
-  status: "active" | "revoked";
-  reputation: number;
-  vouched_by: string | null;
-  redeemed_token: string | null;
-  revocation_cause: "denounced" | "voucher-revoked" | null;
-  revocation_reason: string | null;
-  created_at_ms: number;
-  updated_at_ms: number;
-  created_at: Generated<string>;
-}
-
-export interface VouchInvitesTable {
-  token: string;
-  issued_by: string;
-  status: "pending" | "redeemed" | "revoked" | "expired";
-  created_at_ms: number;
-  expires_at_ms: number;
-  redeemed_by: string | null;
-  redeemed_at_ms: number | null;
-  invalidated_reason: string | null;
-  created_at: Generated<string>;
-}
-
 // Main database interface - add new tables here
 export interface Database {
   device_configs: DeviceConfigTable;
@@ -710,8 +683,6 @@ export interface Database {
   storage_events: StorageEventsTable;
   layout_events: LayoutEventsTable;
   device_sessions: DeviceSessionsTable;
-  vouch_members: VouchMembersTable;
-  vouch_invites: VouchInvitesTable;
 }
 
 // Convenience types for each table

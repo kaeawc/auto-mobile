@@ -94,6 +94,7 @@ nav:
       - 'Status Glossary': design-docs/status-glossary.md
       - 'DB Concurrency RMW Audit': design-docs/db-concurrency-rmw-audit.md
       - 'Image Backend': design-docs/image-backend.md
+      - 'Vouch System': design-docs/vouch-system.md
       - 'Sharp Bun 0.35 Repro': reproductions/sharp-bun-035/README.md
       - 'API Surface':
           - 'Autocomplete Audit': design-docs/api-surface/autocomplete-audit.md

@@ -7,6 +7,7 @@ import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecu
 import { FakeOverlayDetector } from "../../../fakes/FakeOverlayDetector";
 import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessibilityService";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
 import type { OverlayCandidate, SwipeOnResolvedOptions } from "../../../../src/features/action/swipeon/types";
 
@@ -86,6 +87,7 @@ function makeScrollUntilVisible({
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
     accessibilityDetector,
+    adb: new FakeAdbClient() as any,
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
     timer,
@@ -286,6 +288,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       observeScreen: fakeObserveScreen as any,
       accessibilityService: fakeAccessibilityService,
       accessibilityDetector: fakeDetector,
+      adb: new FakeAdbClient() as any,
       overlayDetector: fakeOverlayDetector,
       talkBackExecutor: fakeTalkBack,
       timer: fakeTimer,

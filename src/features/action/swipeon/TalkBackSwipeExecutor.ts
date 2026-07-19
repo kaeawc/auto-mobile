@@ -9,6 +9,7 @@ import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
+import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
 import { Timer } from "../../../utils/interfaces/Timer";
@@ -22,6 +23,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     private readonly executeGesture: GestureExecutor,
     private readonly accessibilityService: AndroidCtrlProxyClient,
     private readonly accessibilityDetector: AccessibilityDetector,
+    private readonly adb: AdbExecutor,
     private readonly timer: Timer
   ) {}
 
@@ -47,10 +49,13 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf);
     }
 
-    // Check if TalkBack is enabled (not just any accessibility service)
+    // Check if TalkBack is enabled (not just any accessibility service).
+    // Pass the real ADB executor so detection still works on a cold/expired
+    // cache — passing null here made TalkBack-aware swipe silently degrade to
+    // a coordinate swipe whenever the 60s detection cache was not warm (#3915).
     const detectedService = await this.accessibilityDetector.detectMethod(
       this.device.deviceId,
-      null
+      this.adb
     );
     const isTalkBackEnabled = detectedService === "talkback";
 

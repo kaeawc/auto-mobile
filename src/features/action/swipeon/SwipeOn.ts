@@ -93,6 +93,7 @@ export class SwipeOn extends BaseVisualChange {
       this.executeGesture,
       this.accessibilityService,
       this.accessibilityDetector,
+      this.adb,
       this.timer
     );
     const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
@@ -110,6 +111,7 @@ export class SwipeOn extends BaseVisualChange {
       observeScreen: this.observeScreen,
       accessibilityService: this.accessibilityService,
       accessibilityDetector: this.accessibilityDetector,
+      adb: this.adb,
       overlayDetector: this.overlayDetector,
       talkBackExecutor: this.talkBackExecutor,
       timer: this.timer,

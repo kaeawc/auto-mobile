@@ -62,6 +62,7 @@ export function registerAccessibilityFocusTools() {
     return createStructuredToolResponse({
       success: true,
       focusedElement: result.focusedElement,
+      confirmed: result.confirmed,
       warning: result.warning
     });
   };

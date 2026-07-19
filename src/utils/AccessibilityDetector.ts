@@ -176,8 +176,13 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
         return { enabled: true, service: "talkback" };
       }
 
-      // Check if any accessibility service is enabled (but not TalkBack specifically)
-      const isAnyServiceEnabled = output !== "null" && output.length > 0 && !output.includes("null");
+      // Check if any accessibility service is enabled (but not TalkBack specifically).
+      // `settings get` returns the literal string "null" when the setting is unset;
+      // otherwise a colon-separated list of component names. Key off that exact
+      // sentinel — a substring scan (`!output.includes("null")`) misclassified any
+      // legitimately-enabled service whose component string merely contains "null"
+      // as disabled (#3922).
+      const isAnyServiceEnabled = output.length > 0 && output !== "null";
 
       if (isAnyServiceEnabled) {
         logger.debug(

@@ -424,8 +424,5 @@ class FailuresStreamSocketClient(
 }
 
 object FailuresStreamSocketPaths {
-  fun socketPath(): String {
-    val home = System.getProperty("user.home", "").ifBlank { "." }
-    return File(home, ".auto-mobile/failures-stream.sock").path
-  }
+  fun socketPath(): String = AutoMobileSocketPaths.socketPath("failures-stream.sock")
 }

@@ -40,9 +40,7 @@ import kotlinx.serialization.json.Json
  */
 class FailuresPushSocketClient {
   companion object {
-    private fun getSocketPath(): String {
-      return "${System.getProperty("user.home")}/.auto-mobile/failures-push.sock"
-    }
+    private fun getSocketPath(): String = AutoMobileSocketPaths.socketPath("failures-push.sock")
   }
 
   private val log = LoggerFactory.getLogger(FailuresPushSocketClient::class.java)

@@ -42,9 +42,7 @@ import kotlinx.serialization.json.Json
  */
 class TelemetryPushSocketClient : TelemetryPushClient {
   companion object {
-    private fun getSocketPath(): String {
-      return "${System.getProperty("user.home")}/.auto-mobile/telemetry-push.sock"
-    }
+    private fun getSocketPath(): String = AutoMobileSocketPaths.socketPath("telemetry-push.sock")
 
     fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))
   }

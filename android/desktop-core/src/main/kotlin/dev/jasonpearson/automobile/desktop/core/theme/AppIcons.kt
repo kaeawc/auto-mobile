@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Public
@@ -120,6 +121,9 @@ object AppIcons {
 
   val Diagnostics: ImageVector
     get() = Icons.Filled.LocalHospital
+
+  val Snapshots: ImageVector
+    get() = Icons.Filled.PhotoCamera
 
   val Telemetry: ImageVector
     get() = Icons.Filled.Satellite

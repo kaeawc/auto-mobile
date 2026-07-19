@@ -31,11 +31,24 @@ EOF
 
 # curl/unzip stubs that fabricate the archive layout the installer expects,
 # recording the requested URL so tests can assert the pin is in it.
+# Builds a fake archive, stubs curl to deliver it, and exports the digest the
+# installer should expect. Without a real payload the installer's sha256
+# verification would reject every stubbed download.
 stub_download() {
   local installed_version="$1"
+  ARCHIVE="$BATS_TEST_TMPDIR/fake-xcodegen.zip"
+  printf 'fake xcodegen archive %s' "$installed_version" > "$ARCHIVE"
+  if command -v shasum >/dev/null 2>&1; then
+    ARCHIVE_SHA="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+  else
+    ARCHIVE_SHA="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+  fi
   cat > "$STUB_DIR/curl" <<EOF
 #!/bin/bash
 for arg in "\$@"; do echo "\$arg"; done >> "$STUB_DIR/curl.log"
+out=""; prev=""
+for a in "\$@"; do [[ "\$prev" == "-o" ]] && out="\$a"; prev="\$a"; done
+cp "$ARCHIVE" "\$out"
 EOF
   cat > "$STUB_DIR/unzip" <<EOF
 #!/bin/bash
@@ -52,17 +65,46 @@ EOF
 }
 
 run_installer() {
-  run env PATH="$STUB_DIR:/usr/bin:/bin" XCODEGEN_PREFIX="$PREFIX" bash "$SCRIPT"
+  run env PATH="$STUB_DIR:/usr/bin:/bin" XCODEGEN_PREFIX="$PREFIX" \
+      XCODEGEN_RELEASE_SHA256="${ARCHIVE_SHA:-}" bash "$SCRIPT"
 }
 
 @test "no-ops when the pinned version is already installed" {
-  stub_xcodegen "2.46.0"
+  # Model a COMPLETE install: the fast path requires share/xcodegen next to the
+  # binary, so that an install interrupted between the two copies is repaired
+  # rather than reported as already done.
+  mkdir -p "$PREFIX/bin" "$PREFIX/share/xcodegen"
+  cat > "$PREFIX/bin/xcodegen" <<'EOF'
+#!/bin/bash
+echo "Version: 2.46.0"
+EOF
+  chmod +x "$PREFIX/bin/xcodegen"
   stub_download "2.46.0"
-  run_installer
+
+  run env PATH="$PREFIX/bin:$STUB_DIR:/usr/bin:/bin" XCODEGEN_PREFIX="$PREFIX" \
+      XCODEGEN_RELEASE_SHA256="$ARCHIVE_SHA" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"already installed"* ]]
   # Must not download anything on the happy path.
   [ ! -f "$STUB_DIR/curl.log" ]
+}
+
+@test "repairs an install whose share/ directory is missing" {
+  # The sticky-partial-install case: a version-only fast path would report
+  # "already installed" forever and never restore the templates.
+  mkdir -p "$PREFIX/bin"
+  cat > "$PREFIX/bin/xcodegen" <<'EOF'
+#!/bin/bash
+echo "Version: 2.46.0"
+EOF
+  chmod +x "$PREFIX/bin/xcodegen"
+  stub_download "2.46.0"
+
+  run env PATH="$PREFIX/bin:$STUB_DIR:/usr/bin:/bin" XCODEGEN_PREFIX="$PREFIX" \
+      XCODEGEN_RELEASE_SHA256="$ARCHIVE_SHA" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"already installed"* ]]
+  [ -d "$PREFIX/share/xcodegen" ]
 }
 
 @test "installs the pinned version when xcodegen is absent" {
@@ -103,7 +145,7 @@ run_installer() {
   local ghpath="$BATS_TEST_TMPDIR/github_path"
   : > "$ghpath"
   run env PATH="$STUB_DIR:/usr/bin:/bin" XCODEGEN_PREFIX="$PREFIX" \
-      GITHUB_PATH="$ghpath" bash "$SCRIPT"
+      XCODEGEN_RELEASE_SHA256="$ARCHIVE_SHA" GITHUB_PATH="$ghpath" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   grep -q "$PREFIX/bin" "$ghpath"
 }
@@ -154,6 +196,7 @@ for a in "\$@"; do [[ "\$prev" == "-o" ]] && out="\$a"; prev="\$a"; done
 printf 'not the real archive' > "\$out"
 EOF
   chmod +x "$STUB_DIR/curl"
+  # Deliberately expect the real pin while curl delivers different bytes.
   run env PATH="$STUB_DIR:/usr/bin:/bin" XCODEGEN_PREFIX="$PREFIX" bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"digest mismatch"* ]]

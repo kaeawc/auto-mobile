@@ -30,7 +30,7 @@ XCODEGEN_RELEASE_URL="https://github.com/yonaskolb/XcodeGen/releases/download/${
 # different bytes -- reproducing #3975 with the guard reporting green. Pinning
 # the digest is what actually makes this version-exact.
 # shellcheck disable=SC2034  # consumed by scripts that source this file
-XCODEGEN_RELEASE_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+XCODEGEN_RELEASE_SHA256="${XCODEGEN_RELEASE_SHA256:-4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806}"
 
 # The installer may land in ${HOME}/.local when /usr/local is not writable, and
 # a subprocess cannot change its caller's PATH. Without this, an install that

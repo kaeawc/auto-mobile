@@ -96,15 +96,32 @@
   grep -q "verify-release-integrity.sh" ".github/workflows/prepare-release.yml"
 }
 
-@test "build-ctrl-proxy-ios-ipa.yml removes untrusted Homebrew aws tap before installing XcodeGen" {
-  workflow=".github/workflows/build-ctrl-proxy-ios-ipa.yml"
+@test "workflows install XcodeGen through the pinned installer, never bare brew" {
+  # Supersedes the old aws-tap-untap assertion. That untap existed only to
+  # silence Homebrew's untrusted-tap warning during `brew install xcodegen`;
+  # the installer no longer uses Homebrew at all, so the warning — and the
+  # need to untap — is gone.
+  #
+  # A bare `brew install xcodegen` resolves against whatever formula index the
+  # runner ships (2.45.4 on macos-26 vs 2.46.0 for contributors). Those order
+  # the PBXProject `targets` array differently, so an unpinned generator makes
+  # every PR fail the drift check with an ordering-only diff (issue #3975).
+  for workflow in .github/workflows/build-ctrl-proxy-ios-ipa.yml \
+                  .github/workflows/pull_request.yml \
+                  .github/workflows/merge.yml \
+                  .github/workflows/nightly.yml; do
+    ! grep -Fq "brew install xcodegen" "$workflow"
+    grep -Fq "scripts/ios/install-xcodegen.sh" "$workflow"
+  done
+}
 
-  grep -Fq "brew untap aws/tap || true" "$workflow"
-  grep -Fq "brew install xcodegen" "$workflow"
-  ! grep -Fq "HOMEBREW_NO_REQUIRE_TAP_TRUST" "$workflow"
-
-  untap_line="$(grep -Fn "brew untap aws/tap || true" "$workflow" | cut -d: -f1 | head -n 1)"
-  install_line="$(grep -Fn "brew install xcodegen" "$workflow" | cut -d: -f1 | head -n 1)"
-
-  [[ "$untap_line" -lt "$install_line" ]]
+@test "no script installs XcodeGen via bare brew" {
+  # The contributor-facing half of #3975: these regenerate project files, so an
+  # unpinned install here commits a skewed pbxproj even with CI pinned.
+  # grep -rIn emits "file:line:content", so strip that prefix before deciding
+  # whether the hit is a comment — several of these scripts discuss the old
+  # bare-brew install in their header comments.
+  run bash -c "grep -rIn --include='*.sh' -F 'brew install xcodegen' scripts/ \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true"
+  [ -z "$output" ]
 }

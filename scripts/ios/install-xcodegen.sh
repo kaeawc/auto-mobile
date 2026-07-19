@@ -17,7 +17,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/xcodegen_version.sh
+# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
 source "${SCRIPT_DIR}/xcodegen_version.sh"
 
 current="$(installed_xcodegen_version)"

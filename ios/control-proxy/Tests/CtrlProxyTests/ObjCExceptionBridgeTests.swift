@@ -159,4 +159,34 @@ final class ObjCExceptionBridgeTests: XCTestCase {
         XCTAssertTrue(symbolsUnavailable.boolValue, "must flag the private symbols as unavailable")
         XCTAssertNotNil(errorMessage)
     }
+
+    // MARK: - Multi-Finger Swipe Symbol Availability (issue #2952)
+
+    /// Mirrors the pinch case above: off-device the private XCTest symbols are
+    /// definitionally unavailable, so `synthesizeMultiFingerSwipe` must report
+    /// `symbolsUnavailable == true` rather than conflating the availability gap
+    /// with a genuine synthesis error. Unlike pinch there is no public-API
+    /// fallback to take (see `MultiFingerSwipeDiagnostics`); the signal instead
+    /// selects a distinct, actionable failure message.
+    func testSynthesizeMultiFingerSwipeReportsSymbolsUnavailableOffDevice() {
+        var symbolsUnavailable: ObjCBool = false
+        var errorMessage: NSString?
+        let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
+            10, 20, 110, 220, 2, 25, 0.3, 0, &symbolsUnavailable, &errorMessage
+        )
+        XCTAssertFalse(succeeded, "private synthesis cannot succeed off-device")
+        XCTAssertTrue(symbolsUnavailable.boolValue, "must flag the private symbols as unavailable")
+        XCTAssertNotNil(errorMessage)
+    }
+
+    /// `symbolsUnavailable` is declared `_Nullable`, so a caller that does not care
+    /// about the availability split must be able to pass NULL without crashing.
+    func testSynthesizeMultiFingerSwipeToleratesNilSymbolsUnavailableOutParam() {
+        var errorMessage: NSString?
+        let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
+            10, 20, 110, 220, 2, 25, 0.3, 0, nil, &errorMessage
+        )
+        XCTAssertFalse(succeeded, "private synthesis cannot succeed off-device")
+        XCTAssertNotNil(errorMessage, "the error message must still be reported")
+    }
 }

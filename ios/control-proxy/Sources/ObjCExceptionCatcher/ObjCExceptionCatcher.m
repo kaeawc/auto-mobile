@@ -48,29 +48,39 @@ BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     CGFloat fingerSpacing,
     NSTimeInterval duration,
     NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable,
     NSString *_Nullable *_Nullable errorMessage
 ) {
+    // Default: symbols are assumed present until a guard proves otherwise, so a
+    // genuine synthesis error is not misreported as an availability gap.
+    if (symbolsUnavailable != NULL) {
+        *symbolsUnavailable = NO;
+    }
 #if TARGET_OS_IOS
     __block BOOL success = NO;
     __block NSString *failure = nil;
+    __block BOOL unavailable = NO;
 
     NSException *exception = ObjCExceptionCatcher_tryBlock(^{
         Class pathClass = NSClassFromString(@"XCPointerEventPath");
         Class recordClass = NSClassFromString(@"XCSynthesizedEventRecord");
 
         if (pathClass == Nil || recordClass == Nil) {
+            unavailable = YES;
             failure = @"XCTest private multi-touch event synthesis classes are unavailable";
             return;
         }
         if (![pathClass instancesRespondToSelector:@selector(initForTouchAtPoint:offset:)] ||
             ![pathClass instancesRespondToSelector:@selector(moveToPoint:atOffset:)] ||
             ![pathClass instancesRespondToSelector:@selector(liftUpAtOffset:)]) {
+            unavailable = YES;
             failure = @"XCPointerEventPath does not support the expected multi-touch selectors";
             return;
         }
         if (![recordClass instancesRespondToSelector:@selector(initWithName:interfaceOrientation:)] ||
             ![recordClass instancesRespondToSelector:@selector(addPointerEventPath:)] ||
             ![recordClass instancesRespondToSelector:@selector(synthesizeWithError:)]) {
+            unavailable = YES;
             failure = @"XCSynthesizedEventRecord does not support the expected synthesis selectors";
             return;
         }
@@ -103,16 +113,29 @@ BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     });
 
     if (exception != nil) {
+        // A caught exception is a genuine synthesis failure, not an availability
+        // gap, so leave `unavailable` as-is (NO unless a guard already set it).
         NSString *reason = exception.reason != nil ? exception.reason : @"no reason";
         failure = [NSString stringWithFormat:@"Objective-C exception during multi-finger swipe synthesis: %@ - %@",
                    exception.name, reason];
     }
-    if (!success && errorMessage != NULL) {
-        *errorMessage = failure != nil ? failure : @"multi-finger swipe synthesis failed";
+    if (!success) {
+        if (symbolsUnavailable != NULL) {
+            *symbolsUnavailable = unavailable;
+        }
+        if (errorMessage != NULL) {
+            *errorMessage = failure != nil ? failure : @"multi-finger swipe synthesis failed";
+        }
     }
 
     return success;
 #else
+    // Off-iOS the private symbols are definitionally unavailable. There is no
+    // public-API fallback for a multi-finger swipe, so this only selects the
+    // availability-flavored failure message (see MultiFingerSwipeDiagnostics).
+    if (symbolsUnavailable != NULL) {
+        *symbolsUnavailable = YES;
+    }
     if (errorMessage != NULL) {
         *errorMessage = @"XCTest private multi-touch event synthesis is only available on iOS";
     }

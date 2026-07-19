@@ -1,7 +1,11 @@
-import { describe, expect, test, beforeEach, mock } from "bun:test";
+import { describe, expect, test, beforeEach, afterAll, mock } from "bun:test";
+import os from "node:os";
+import path from "node:path";
+import { promises as fsPromises } from "node:fs";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice } from "../../src/models";
 import type { TestExecutionRecord, TestExecutionRepository } from "../../src/db/testExecutionRepository";
+import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
 // spinning up a real PlanExecutor. The companion test
@@ -47,6 +51,13 @@ const iosDevice: BootedDevice = {
   status: "booted",
 };
 
+const androidDevice: BootedDevice = {
+  deviceId: "emulator-5554",
+  name: "Android Emulator",
+  platform: "android",
+  status: "booted",
+};
+
 const SIMPLE_PLAN = `
 name: simple-test
 steps:
@@ -75,6 +86,15 @@ const baseDeps = () => ({
 });
 
 describe("PlanExecutionOrchestrator", () => {
+  // Temp dirs created by the android manifest test; removed after the suite.
+  const manifestTempDirs: string[] = [];
+
+  afterAll(async () => {
+    for (const dir of manifestTempDirs) {
+      await fsPromises.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   beforeEach(() => {
     executePlanMock.mockClear();
     // The plan-execution guard is a process-wide singleton; reset between tests
@@ -342,6 +362,79 @@ steps:
         },
       },
     ]);
+  });
+
+  test("android plan run writes a segments.json manifest with ordered segments (#3905 plan path)", async () => {
+    // Real temp dir so writeSegmentManifest has a writable directory (all segments
+    // share it, so the manifest lands next to the first segment).
+    const segmentDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-plan-video-"));
+    manifestTempDirs.push(segmentDir);
+
+    // The fake recorder maps recordingId === outputName, and filePath === <segmentDir>/<id>.mp4,
+    // so each rotated segment gets a distinct, deterministic path.
+    const startedNames: string[] = [];
+    const androidRecorder: VideoRecorder = {
+      startVideoRecording: mock((options: any) => {
+        const id = options.outputName as string;
+        startedNames.push(id);
+        return Promise.resolve({
+          recordingId: id,
+          outputPath: path.join(segmentDir, `${id}.mp4`),
+          fileName: `${id}.mp4`,
+          startedAt: new Date(0).toISOString(),
+          outputName: id,
+        } as any);
+      }),
+      stopVideoRecording: mock((recordingId?: string) =>
+        Promise.resolve({
+          metadata: { recordingId, filePath: path.join(segmentDir, `${recordingId}.mp4`) },
+          evictedRecordingIds: [],
+        } as any)
+      ),
+    };
+
+    const fakeTimer = new FakeTimer();
+    // Drive step-based rotation: advance past the rotate window and invoke the
+    // orchestrator-supplied onBeforePlanStep hook twice, so finalize returns 3 ordered segments.
+    executePlanMock.mockImplementationOnce(async (...args: any[]) => {
+      const options = args[7] as { onBeforePlanStep?: () => Promise<void> } | undefined;
+      if (options?.onBeforePlanStep) {
+        fakeTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS + 1);
+        await options.onBeforePlanStep();
+        fakeTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS + 1);
+        await options.onBeforePlanStep();
+      }
+      return {
+        success: true,
+        executedSteps: 2,
+        totalSteps: 2,
+        debug: { executionTimeMs: 1, steps: [] },
+      };
+    });
+
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: androidDevice, request: { ...baseRequest, platform: "android" } },
+      { timer: fakeTimer, videoRecorder: androidRecorder }
+    );
+    const result = await orchestrator.execute();
+
+    expect(result.success).toBe(true);
+    // Three segments: the first plus two rotations.
+    expect(result.videoRecordingIds).toEqual(startedNames);
+    expect(result.videoRecordingIds).toHaveLength(3);
+
+    // The manifest lives next to the first segment and lists every segment in order.
+    const manifestPath = path.join(segmentDir, "segments.json");
+    const manifest = JSON.parse(await fsPromises.readFile(manifestPath, "utf8"));
+    expect(manifest.sessionId).toBe(result.videoRecordingIds![0]);
+    expect(manifest.segmentCount).toBe(3);
+    expect(manifest.segments).toEqual(
+      result.videoRecordingIds!.map((recordingId, index) => ({
+        index,
+        recordingId,
+        filePath: path.join(segmentDir, `${recordingId}.mp4`),
+      }))
+    );
   });
 
   test("repository write errors are logged and do not crash the run", async () => {

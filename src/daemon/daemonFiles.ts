@@ -11,6 +11,10 @@ export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
   defaultPath: path.join(os.homedir(), ".auto-mobile", "video-recording.sock"),
 };
 
+export const VIDEO_STREAM_SOCKET_CONFIG: SocketServerConfig = {
+  defaultPath: path.join(os.homedir(), ".auto-mobile", "video-stream.sock"),
+};
+
 export const TEST_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
   defaultPath: path.join(os.homedir(), ".auto-mobile", "test-recording.sock"),
 };

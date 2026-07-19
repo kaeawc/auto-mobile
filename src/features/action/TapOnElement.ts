@@ -1463,7 +1463,6 @@ export class TapOnElement extends BaseVisualChange {
         const result = await this.talkBackStrategy.executeTap(
           this.device.deviceId,
           element,
-          action as "tap" | "doubleTap",
           driver
         );
 

@@ -17,7 +17,6 @@ export interface TalkBackTapResult {
   error?: string;
 }
 
-export type TalkBackTapAction = "tap" | "doubleTap";
 export type TalkBackFallbackAction = "tap" | "doubleTap" | "longPress";
 
 interface TalkBackTapStrategyDependencies {
@@ -62,16 +61,17 @@ export class TalkBackTapStrategy {
    * 4. Navigates to the element
    * 5. Activates it with double-tap (with ACTION_CLICK fallback)
    *
+   * TalkBack activation is always a double-tap-to-activate on the focused node,
+   * so there is no single-vs-double distinction to honour here (#3920).
+   *
    * @param deviceId - The device ID
    * @param element - The target element (must have at least one of resource-id, text, or content-desc)
-   * @param action - The action to perform ("tap" or "doubleTap")
    * @param driver - The TalkBack navigation driver
    * @returns Result indicating success/failure and method used
    */
   async executeTap(
     deviceId: string,
     element: Element,
-    action: TalkBackTapAction,
     driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
     const resourceId = element?.["resource-id"] as string | undefined;
@@ -127,8 +127,7 @@ export class TalkBackTapStrategy {
       const navigationPath = this.pathCalculator.calculatePath(
         currentFocus,
         targetSelector,
-        orderedElements,
-        5 // verification interval
+        orderedElements
       );
 
       if (!navigationPath) {

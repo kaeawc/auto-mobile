@@ -36,9 +36,7 @@ describe("FocusNavigationExecutor", () => {
       currentFocusIndex: 0,
       targetFocusIndex: 2,
       swipeCount: 5,
-      direction: "forward",
-      intermediateCheckpoints: []
-    };
+      direction: "forward"    };
 
     const driverFactory: FocusNavigationDriverFactory = {
       createDriver: () => driver
@@ -81,9 +79,7 @@ describe("FocusNavigationExecutor", () => {
       currentFocusIndex: 0,
       targetFocusIndex: 2,
       swipeCount: 3,
-      direction: "forward",
-      intermediateCheckpoints: []
-    };
+      direction: "forward"    };
 
     const driverFactory: FocusNavigationDriverFactory = {
       createDriver: () => driver
@@ -168,9 +164,7 @@ describe("FocusNavigationExecutor", () => {
       currentFocusIndex: 2,
       targetFocusIndex: 2,
       swipeCount: 0,
-      direction: "forward",
-      intermediateCheckpoints: []
-    };
+      direction: "forward"    };
 
     const driverFactory: FocusNavigationDriverFactory = {
       createDriver: () => driver
@@ -202,9 +196,7 @@ describe("FocusNavigationExecutor", () => {
       currentFocusIndex: 0,
       targetFocusIndex: 2,
       swipeCount: 0,
-      direction: "forward",
-      intermediateCheckpoints: []
-    };
+      direction: "forward"    };
 
     const driverFactory: FocusNavigationDriverFactory = {
       createDriver: () => driver
@@ -241,9 +233,7 @@ describe("FocusNavigationExecutor", () => {
       currentFocusIndex: 0,
       targetFocusIndex: 0,
       swipeCount: 0,
-      direction: "forward",
-      intermediateCheckpoints: []
-    };
+      direction: "forward"    };
 
     const driverFactory: FocusNavigationDriverFactory = {
       createDriver: () => driver
@@ -284,9 +274,7 @@ describe("FocusNavigationExecutor", () => {
       currentFocusIndex: null,
       targetFocusIndex: 0,
       swipeCount: 2,
-      direction: "forward",
-      intermediateCheckpoints: []
-    };
+      direction: "forward"    };
 
     const driverFactory: FocusNavigationDriverFactory = {
       createDriver: () => driver
@@ -329,9 +317,7 @@ describe("FocusNavigationExecutor", () => {
       currentFocusIndex: null,
       targetFocusIndex: 2,
       swipeCount: 50,
-      direction: "forward",
-      intermediateCheckpoints: []
-    };
+      direction: "forward"    };
 
     const driverFactory: FocusNavigationDriverFactory = {
       createDriver: () => driver

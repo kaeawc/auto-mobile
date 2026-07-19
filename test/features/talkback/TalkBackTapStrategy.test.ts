@@ -222,6 +222,71 @@ describe("TalkBackTapStrategy", () => {
       expect(result.error).toContain("both failed");
     });
 
+    // Regression for #3918: activation must double-tap the node TalkBack
+    // actually focused (live bounds), not the caller's stored element whose
+    // bounds may be stale.
+    test("activates at the live focused node's coordinates, not the passed element's stale bounds", async () => {
+      // The caller's element carries stale bounds (center 5,5)...
+      const staleElement = {
+        "resource-id": "test:id/button",
+        "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
+      } as Element;
+      // ...while the node TalkBack actually focused is elsewhere (center 600,700).
+      const liveFocusedElement = {
+        "resource-id": "test:id/button",
+        "bounds": { left: 500, top: 600, right: 700, bottom: 800 }
+      } as Element;
+
+      driver.setElements([liveFocusedElement], 0);
+      spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
+
+      const result = await strategy.executeTap("device-1", staleElement, "tap", driver);
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("focus-navigation");
+      expect(driver.getTapCount()).toBe(2);
+      // Both taps land on the live focused node, not (5,5).
+      expect(driver.tapHistory[0]).toMatchObject({ x: 600, y: 700 });
+      expect(driver.tapHistory[1]).toMatchObject({ x: 600, y: 700 });
+    });
+
+    // Regression for #3918: a bounds-less activation target must never tap (0,0).
+    test("falls back to ACTION_CLICK (never taps 0,0) when the target has no bounds", async () => {
+      const boundsLessElement = {
+        "resource-id": "test:id/button"
+        // no bounds on the caller's element...
+      } as Element;
+      // ...and the live focused node also has no bounds.
+      const boundsLessFocused = { "resource-id": "test:id/button" } as Element;
+
+      driver.setElements([boundsLessFocused], 0);
+      spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
+      driver.setActionResult({ success: true, action: "click", totalTimeMs: 1 });
+
+      const result = await strategy.executeTap("device-1", boundsLessElement, "tap", driver);
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("accessibility-action");
+      expect(driver.getTapCount()).toBe(0); // never tapped (0,0)
+      expect(driver.actionHistory[0]).toEqual({ action: "click", resourceId: "test:id/button" });
+    });
+
+    test("fails explicitly (no 0,0 tap, no ACTION_CLICK) when a bounds-less target has no resource-id", async () => {
+      const boundsLessTextElement = { text: "Button" } as Element;
+      const boundsLessFocused = { text: "Button" } as Element;
+
+      driver.setElements([boundsLessFocused], 0);
+      spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
+
+      const result = await strategy.executeTap("device-1", boundsLessTextElement, "tap", driver);
+
+      expect(result.success).toBe(false);
+      expect(result.method).toBe("focus-navigation");
+      expect(result.error).toContain("no bounds");
+      expect(driver.getTapCount()).toBe(0);
+      expect(driver.getActionCount()).toBe(0);
+    });
+
     test("returns error when navigation path cannot be calculated", async () => {
       const element = {
         "resource-id": "test:id/nonexistent",

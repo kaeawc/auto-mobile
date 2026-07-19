@@ -387,8 +387,7 @@ public enum HierarchyMerger {
         // Recurse into existing children, pairing each with its SDK counterpart
         let processedChildren: [UIElementInfo]?
         if let children = element.node {
-            var processed: [UIElementInfo] = []
-            for child in children {
+            processedChildren = children.map { child in
                 let childSdk = findDirectMatch(
                     className: child.className,
                     resourceId: child.resourceId,
@@ -397,19 +396,16 @@ public enum HierarchyMerger {
                     boundsLookup: boundsLookup,
                     identifierLookup: identifierLookup
                 )
-                processed.append(
-                    injectSdkOnlyNodes(
-                        element: child,
-                        sdkNode: childSdk,
-                        lookup: lookup,
-                        boundsLookup: boundsLookup,
-                        identifierLookup: identifierLookup,
-                        matchedSdkKeyCounts: matchedSdkKeyCounts,
-                        injectedParentKeys: &injectedParentKeys
-                    )
+                return injectSdkOnlyNodes(
+                    element: child,
+                    sdkNode: childSdk,
+                    lookup: lookup,
+                    boundsLookup: boundsLookup,
+                    identifierLookup: identifierLookup,
+                    matchedSdkKeyCounts: matchedSdkKeyCounts,
+                    injectedParentKeys: &injectedParentKeys
                 )
             }
-            processedChildren = processed
         } else {
             processedChildren = nil
         }

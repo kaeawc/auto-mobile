@@ -170,6 +170,9 @@ public enum ViewHierarchyWalker {
             accessibilityLabel: view.accessibilityLabel,
             accessibilityIdentifier: view.accessibilityIdentifier,
             isAccessibilityElement: view.isAccessibilityElement,
+            // Only readable in-process: the out-of-process runner cannot query the
+            // VoiceOver cursor, so the SDK captures it here (#3924).
+            isAccessibilityFocused: view.accessibilityElementIsFocused(),
             accessibilityElementsHidden: view.accessibilityElementsHidden,
             accessibilityTraits: traits,
             accessibilityCustomActions: customActions,

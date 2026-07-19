@@ -276,7 +276,11 @@ public enum HierarchyMerger {
             enabled: element.enabled,
             focusable: element.focusable,
             focused: element.focused,
-            accessibilityFocused: element.accessibilityFocused,
+            // XCUITest cannot observe the VoiceOver cursor, so this flag only ever
+            // arrives from the matched in-app SDK node; fall back to the existing
+            // value when there is no SDK match. Follows the "true"-or-nil
+            // convention used for the other boolean attributes (#3924).
+            accessibilityFocused: sdkNode?.isAccessibilityFocused == true ? "true" : element.accessibilityFocused,
             scrollable: element.scrollable,
             password: element.password,
             checkable: element.checkable,
@@ -581,6 +585,9 @@ public enum HierarchyMerger {
                 right: node.bounds.right,
                 bottom: node.bounds.bottom
             ),
+            // Preserve the VoiceOver cursor flag on SDK-only nodes that are injected
+            // into the tree without an XCUITest counterpart (#3924).
+            accessibilityFocused: node.isAccessibilityFocused ? "true" : nil,
             extras: extras,
             node: convertedChildren?.isEmpty == true ? nil : convertedChildren
         )

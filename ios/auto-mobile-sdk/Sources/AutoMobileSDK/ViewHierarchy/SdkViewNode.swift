@@ -39,6 +39,11 @@ public struct SdkViewNode: Codable, Sendable {
     public let accessibilityLabel: String?
     public let accessibilityIdentifier: String?
     public let isAccessibilityElement: Bool
+    /// Whether this element currently holds the VoiceOver cursor. Captured in-app
+    /// via `accessibilityElementIsFocused()`, which the out-of-process runner
+    /// cannot read itself — this is the signal that lets AutoMobile report
+    /// `accessibilityFocusedElement` on iOS (#3924).
+    public let isAccessibilityFocused: Bool
     public let accessibilityElementsHidden: Bool
     public let accessibilityTraits: [String]
     public let accessibilityCustomActions: [String]
@@ -61,6 +66,7 @@ public struct SdkViewNode: Codable, Sendable {
         accessibilityLabel: String? = nil,
         accessibilityIdentifier: String? = nil,
         isAccessibilityElement: Bool = false,
+        isAccessibilityFocused: Bool = false,
         accessibilityElementsHidden: Bool = false,
         accessibilityTraits: [String] = [],
         accessibilityCustomActions: [String] = [],
@@ -82,6 +88,7 @@ public struct SdkViewNode: Codable, Sendable {
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityIdentifier = accessibilityIdentifier
         self.isAccessibilityElement = isAccessibilityElement
+        self.isAccessibilityFocused = isAccessibilityFocused
         self.accessibilityElementsHidden = accessibilityElementsHidden
         self.accessibilityTraits = accessibilityTraits
         self.accessibilityCustomActions = accessibilityCustomActions
@@ -101,7 +108,7 @@ public struct SdkViewNode: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case className, bounds, accessibilityLabel, accessibilityIdentifier,
-             isAccessibilityElement, accessibilityElementsHidden,
+             isAccessibilityElement, isAccessibilityFocused, accessibilityElementsHidden,
              accessibilityTraits, accessibilityCustomActions, gestureRecognizers,
              alpha, backgroundColor, cornerRadius,
              borderColor, borderWidth, isLayerNode,
@@ -115,6 +122,7 @@ public struct SdkViewNode: Codable, Sendable {
         self.accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
         self.accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
         self.isAccessibilityElement = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
+        self.isAccessibilityFocused = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityFocused) ?? false
         self.accessibilityElementsHidden = try c.decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
         self.accessibilityTraits = try c.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
         self.accessibilityCustomActions = try c.decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []

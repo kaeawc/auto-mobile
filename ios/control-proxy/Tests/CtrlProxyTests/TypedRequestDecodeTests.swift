@@ -570,22 +570,66 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         XCTAssertEqual(response?.type, "voiceover_state_result")
     }
 
-    func testGetCurrentFocusDecodeDispatchReturnsNotImplemented() {
+    // #3924: both commands are implemented now — they answer from the SDK-enriched
+    // hierarchy instead of returning the old "not yet implemented" error.
+    func testGetCurrentFocusDecodeDispatch() {
         let response = dispatch(
             #"{"type":"get_current_focus","requestId":"cf-1"}"#,
-            as: WebSocketResponse.self
+            as: CurrentFocusResponse.self
         )
         XCTAssertEqual(response?.type, "current_focus_result")
-        XCTAssertEqual(response?.success, false)
+        XCTAssertEqual(response?.requestId, "cf-1")
+        XCTAssertEqual(response?.success, true)
     }
 
-    func testGetTraversalOrderDecodeDispatchReturnsNotImplemented() {
+    func testGetTraversalOrderDecodeDispatch() {
         let response = dispatch(
             #"{"type":"get_traversal_order","requestId":"to-1"}"#,
-            as: WebSocketResponse.self
+            as: TraversalOrderResponse.self
         )
         XCTAssertEqual(response?.type, "traversal_order_result")
-        XCTAssertEqual(response?.success, false)
+        XCTAssertEqual(response?.requestId, "to-1")
+        XCTAssertEqual(response?.success, true)
+        XCTAssertEqual(response?.totalCount, response?.elements.count)
+    }
+
+    // MARK: - VoiceOver focus / traversal helpers (#3924)
+
+    /// Build an element tree: root > [container > [a11yChild], plainChild]
+    private func makeAccessibilityTree(focusedLabel: String?) -> UIElementInfo {
+        func element(_ label: String, isA11y: Bool, children: [UIElementInfo]? = nil) -> UIElementInfo {
+            UIElementInfo(
+                text: label,
+                className: "View",
+                bounds: ElementBounds(left: 0, top: 0, right: 10, bottom: 10),
+                accessibilityFocused: label == focusedLabel ? "true" : nil,
+                extras: ["sdk.isAccessibilityElement": isA11y ? "true" : "false"],
+                node: children
+            )
+        }
+        let a11yChild = element("a11yChild", isA11y: true)
+        let container = element("container", isA11y: false, children: [a11yChild])
+        let plainChild = element("plainChild", isA11y: true)
+        return element("root", isA11y: false, children: [container, plainChild])
+    }
+
+    func testFindAccessibilityFocusedLocatesNestedFocusedElement() {
+        let tree = makeAccessibilityTree(focusedLabel: "a11yChild")
+        let focused = CommandHandler.findAccessibilityFocused(tree)
+        XCTAssertEqual(focused?.text, "a11yChild")
+    }
+
+    func testFindAccessibilityFocusedReturnsNilWhenCursorAbsent() {
+        let tree = makeAccessibilityTree(focusedLabel: nil)
+        XCTAssertNil(CommandHandler.findAccessibilityFocused(tree))
+    }
+
+    func testCollectAccessibilityElementsReturnsOnlyA11yElementsInTraversalOrder() {
+        let tree = makeAccessibilityTree(focusedLabel: nil)
+        var ordered: [UIElementInfo] = []
+        CommandHandler.collectAccessibilityElements(tree, into: &ordered)
+        // Containers are traversed into but not themselves reported.
+        XCTAssertEqual(ordered.map(\.text), ["a11yChild", "plainChild"])
     }
 
     func testAddHighlightDecodeParsesNestedShape() throws {

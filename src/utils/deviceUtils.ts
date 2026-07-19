@@ -63,7 +63,7 @@ export interface PlatformDeviceManager {
    * @param device - The device to start
    * @returns Promise with the spawned child process for the running device
    */
-  startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess>;
+  startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess | null>;
 
   /**
    * Kill/terminate a running device
@@ -250,7 +250,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  ): Promise<ChildProcess> {
+  ): Promise<ChildProcess | null> {
     const isRunning = await this.isDeviceImageRunning(device);
     if (isRunning) {
       throw new ActionableError(

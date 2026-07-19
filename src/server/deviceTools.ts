@@ -350,7 +350,7 @@ export function registerDeviceTools() {
       "cold-boot",
       perf,
       args,
-      childProcess.pid,
+      childProcess?.pid,
     );
   }
 

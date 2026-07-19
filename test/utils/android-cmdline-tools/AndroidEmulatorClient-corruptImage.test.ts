@@ -223,6 +223,36 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     }
   });
 
+  test("returns null (not a fabricated handle) when the spawn exits with 'Running multiple emulators with the same AVD'", async () => {
+    const fakeChild = createFakeChildProcess();
+
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        // This AVD is already owned by another emulator process; the spawned
+        // process exits non-zero with this signature. We hold no handle for the
+        // already-running instance, so startEmulator must resolve null (#3938),
+        // not a fabricated `{} as ChildProcess`.
+        fakeChild.stderr!.emit("data", Buffer.from("ERROR | Running multiple emulators with the same AVD is an experimental feature.\n"));
+        fakeChild.emit("exit", 1);
+      });
+      return fakeChild;
+    }) as any;
+
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
+        return createExecResult("Pixel_9_Pro\n");
+      }
+      return createExecResult("");
+    };
+
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.startEmulator("Pixel_9_Pro");
+    expect(result).toBeNull();
+  });
+
   test("rejects with exit code when emulator exits non-zero without known error pattern", async () => {
     const fakeChild = createFakeChildProcess();
 

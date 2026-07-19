@@ -126,6 +126,22 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
+  it("cold-boots without a process handle (adopted device: startDevice returns null)", async () => {
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+    // startEmulator adopts an already-running/starting AVD it did not spawn, so
+    // it returns null (#3938). The response must still build — bootAndRespond
+    // reads childProcess?.pid, which must tolerate a null handle without throwing.
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, null);
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.source).toBe("cold-boot");
+    expect(result.processId).toBeUndefined();
+  });
+
   it("passes timeout to the cold boot start operation", async () => {
     fakeDeviceUtils.setBootedDevices("ios", []);
     fakeDeviceUtils.setDeviceImages("ios", [{

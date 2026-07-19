@@ -56,7 +56,7 @@ interface AndroidEmulator {
    * @param avdName - The AVD name to start
    * @returns Promise with the spawned child process
    */
-  startEmulator(avdName: string): Promise<ChildProcess>;
+  startEmulator(avdName: string): Promise<ChildProcess | null>;
 
   /**
    * Kill a running emulator
@@ -800,7 +800,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async startEmulator(
     avdName: string,
-  ): Promise<ChildProcess> {
+  ): Promise<ChildProcess | null> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
 
@@ -820,16 +820,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     if (alreadyRunning) {
       logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
-      // AVD is already running, return a mock ChildProcess since we didn't spawn it
-      // The caller (waitForEmulatorReady) will wait for it to be ready
-      return {} as ChildProcess;
+      // We did not spawn this AVD, so there is no process handle to hand back.
+      // Return null rather than a fabricated `{} as ChildProcess` (issue #3938);
+      // the caller (waitForEmulatorReady) waits for readiness regardless.
+      return null;
     }
 
     if (alreadyStarting) {
       logger.info(`AVD '${avdName}' is already starting - waiting for it to be ready`);
-      // AVD is already starting, return a mock ChildProcess since we didn't spawn it
-      // The caller (waitForEmulatorReady) will wait for it to be ready
-      return {} as ChildProcess;
+      // Started by another actor — no process handle to hand back (issue #3938).
+      return null;
     }
 
     // Check architecture compatibility before attempting to start
@@ -1000,8 +1000,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             if (!startupValidationComplete) {
               startupValidationComplete = true;
               perf.endOperation("panicDetection");
-              // Return a mock ChildProcess - the caller will wait for the AVD to be ready
-              resolve({} as ChildProcess);
+              // Another emulator already owns this AVD; we hold no process handle
+              // for it. Resolve null rather than a fabricated handle (issue #3938);
+              // the caller waits for readiness regardless.
+              resolve(null);
             }
             return;
           }

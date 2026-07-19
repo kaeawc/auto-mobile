@@ -576,11 +576,21 @@ export class SimCtlClient implements SimCtl {
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
 
-    // simctl bootstatus is synchronous, so we return a mock process handle
-    // with the minimal subset of ChildProcess fields used by callers
+    // `simctl bootstatus -b` is synchronous, so there is no long-lived OS child
+    // process to hand back. Rather than fabricate a mock handle whose `kill()` is
+    // a no-op (issue #3938), return an honest handle: `pid` is undefined (no OS
+    // process), and `kill()` performs the meaningful cancellation for a simulator
+    // — shutting it back down. `ChildProcess.kill` is synchronous, so the
+    // shutdown is fired best-effort and the boolean result reports that a
+    // cancellation was initiated.
     return {
-      pid: this.timer.now(), // Use timestamp as mock PID
-      kill: () => false,
+      pid: undefined,
+      kill: (): boolean => {
+        void this.executeCommand(`shutdown ${udid}`).catch(error => {
+          logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
+        });
+        return true;
+      },
       killed: false,
       connected: false,
       exitCode: 0,

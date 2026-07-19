@@ -284,6 +284,45 @@ describe("Simctl", function() {
     });
   });
 
+  describe("startSimulator returned handle", function() {
+    test("does not fabricate a pid (no real OS process backs a synchronous bootstatus)", async function() {
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync);
+
+      const handle = await simctl.startSimulator("iphone-udid");
+
+      // AC3: honest handle — no fabricated timestamp pid.
+      expect(handle.pid).toBeUndefined();
+    });
+
+    test("kill() shuts the simulator back down instead of being a no-op", async function() {
+      const commands: string[][] = [];
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        commands.push([file, ...args]);
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync);
+
+      const handle = await simctl.startSimulator("iphone-udid");
+
+      // AC1: kill() reports success and issues `simctl shutdown <udid>` rather
+      // than the previous no-op `() => false`.
+      expect(handle.kill()).toBe(true);
+      for (let i = 0; i < 25 && !commands.some(c => c.includes("shutdown")); i++) {
+        await Promise.resolve();
+      }
+      expect(commands).toContainEqual(["xcrun", "simctl", "shutdown", "iphone-udid"]);
+    });
+  });
+
   describe("waitForSimulatorReady", function() {
     const readyPayload = simulatorListPayload([
       {

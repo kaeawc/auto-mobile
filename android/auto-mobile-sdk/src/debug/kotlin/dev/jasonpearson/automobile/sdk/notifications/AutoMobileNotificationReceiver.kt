@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import dev.jasonpearson.automobile.sdk.AutoMobileNotifications
 import dev.jasonpearson.automobile.sdk.NotificationAction
 import dev.jasonpearson.automobile.sdk.NotificationStyle
@@ -49,7 +50,8 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
     }
   }
 
-  private fun parseActions(actionsJson: String?): List<NotificationAction> {
+  @VisibleForTesting
+  internal fun parseActions(actionsJson: String?): List<NotificationAction> {
     if (actionsJson.isNullOrBlank()) return emptyList()
     return try {
       val array = JSONArray(actionsJson)

@@ -155,8 +155,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       return fakeChild;
     }) as any;
 
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
       }
       return createExecResult("");
@@ -188,8 +188,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       return fakeChild;
     }) as any;
 
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
       }
       return createExecResult("");
@@ -221,8 +221,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       return fakeChild;
     }) as any;
 
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
       }
       return createExecResult("");
@@ -245,8 +245,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
   });
 
   test("lists available AVD names when requested AVD does not exist", async () => {
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\nMedium_Phone_API_35\n");
       }
       return createExecResult("");

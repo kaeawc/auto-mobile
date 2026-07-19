@@ -1,4 +1,4 @@
-import { ChildProcess, exec, spawn } from "child_process";
+import { ChildProcess, execFile, spawn } from "child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "util";
 import { logger } from "../logger";
@@ -23,7 +23,7 @@ interface AndroidEmulator {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with stdout and stderr
    */
-  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
+  executeCommand(args: string[], timeoutMs?: number): Promise<ExecResult>;
 
   /**
    * List all available AVDs
@@ -134,16 +134,20 @@ export function resolveHeadlessMode(
   return { headless: false, reason: "usable display detected" };
 }
 
-const execAsync = async (command: string, signal?: AbortSignal): Promise<ExecResult> => {
-  // Pass the AbortSignal to exec so a timed-out command kills its child instead
-  // of leaving it running orphaned (issue #3938).
-  const result = await (signal ? promisify(exec)(command, { signal }) : promisify(exec)(command));
+const execAsync = async (file: string, args: string[], signal?: AbortSignal): Promise<ExecResult> => {
+  // Run the emulator binary via execFile (argv, no shell) rather than exec. This
+  // removes the shell entirely — command arguments such as AVD names are passed
+  // literally instead of being interpreted/split by a shell (issue #3938) — and
+  // the AbortSignal is forwarded so a timed-out command kills its child instead
+  // of leaving it running orphaned.
+  const options: Parameters<typeof execFile>[2] = signal ? { signal } : undefined;
+  const result = await promisify(execFile)(file, args, options);
 
   // Add the required string methods
   // noinspection UnnecessaryLocalVariableJS
   const enhancedResult: ExecResult = {
-    stdout: result.stdout,
-    stderr: result.stderr,
+    stdout: typeof result.stdout === "string" ? result.stdout : result.stdout.toString(),
+    stderr: typeof result.stderr === "string" ? result.stderr : result.stderr.toString(),
     toString() {
       return this.stdout;
     },
@@ -159,7 +163,7 @@ const execAsync = async (command: string, signal?: AbortSignal): Promise<ExecRes
 };
 
 export class AndroidEmulatorClient implements AndroidEmulator {
-  private execAsync: (command: string, signal?: AbortSignal) => Promise<ExecResult>;
+  private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: typeof spawn;
   private emulatorPath: string;
   private timer: Timer;
@@ -177,7 +181,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdConfigReader - Reader for AVD config.ini files (for testing)
    */
   constructor(
-    execAsyncFn: ((command: string, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
+    execAsyncFn: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null = null,
     spawnFn: typeof spawn | null = null,
     timer: Timer = defaultTimer,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
@@ -384,7 +388,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     try {
       // Get AVD config to determine its architecture
-      const result = await this.executeCommand(`-avd ${avdName} -verbose`, 3000);
+      const result = await this.executeCommand(["-avd", avdName, "-verbose"], 3000);
       const output = result.stdout + result.stderr;
 
       // Look for architecture information in the output
@@ -543,9 +547,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with stdout and stderr
    */
-  async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
-    await this.ensureEmulatorPath();
-    const fullCommand = `${this.emulatorPath} ${command}`;
+  async executeCommand(args: string[], timeoutMs?: number): Promise<ExecResult> {
+    const emulatorPath = await this.ensureEmulatorPath();
+    const fullCommand = `${emulatorPath} ${args.join(" ")}`;
     logger.debug(`Executing emulator command: ${fullCommand}`);
 
     // Use Promise.race to implement timeout if specified. On timeout we abort the
@@ -562,7 +566,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }, timeoutMs);
       });
 
-      const runPromise = this.execAsync(fullCommand, controller.signal);
+      const runPromise = this.execAsync(emulatorPath, args, controller.signal);
       // Once the timeout wins the race the aborted run promise rejects with an
       // AbortError; keep it handled so it can't surface as an unhandledRejection.
       runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
@@ -574,7 +578,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
     }
 
-    return await this.execAsync(fullCommand);
+    return await this.execAsync(emulatorPath, args);
   }
 
   /**
@@ -583,7 +587,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async listAvds(): Promise<DeviceInfo[]> {
     try {
-      const result = await this.executeCommand("-list-avds");
+      const result = await this.executeCommand(["-list-avds"]);
       const devices = result.stdout
         .split("\n")
         .map(line => line.trim())

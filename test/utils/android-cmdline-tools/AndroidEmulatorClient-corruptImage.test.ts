@@ -91,7 +91,7 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   includes: (s: string) => stdout.includes(s),
 });
 
-const mockExecAsync = async (_command: string): Promise<ExecResult> => {
+const mockExecAsync = async (_file: string, _args: string[]): Promise<ExecResult> => {
   return createExecResult("", "");
 };
 
@@ -202,8 +202,8 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return fakeChild;
     }) as any;
 
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
       }
       return createExecResult("");
@@ -234,8 +234,8 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return fakeChild;
     }) as any;
 
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
       }
       return createExecResult("");
@@ -262,8 +262,8 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return fakeChild;
     }) as any;
 
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("-list-avds")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
       }
       return createExecResult("");
@@ -319,8 +319,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const fakeChild = createFakeChildProcess();
 
     // Mock exec to return no running emulators (simulating the device never appearing)
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("adb devices")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("adb devices")) {
         return createExecResult("List of devices attached\n\n");
       }
       return createExecResult("");
@@ -348,8 +348,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
   test("throws with exit code when child process exits non-zero without known pattern", async () => {
     const fakeChild = createFakeChildProcess();
 
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("adb devices")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("adb devices")) {
         return createExecResult("List of devices attached\n\n");
       }
       return createExecResult("");
@@ -373,8 +373,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
   });
 
   test("works normally without child process (backward compatible)", async () => {
-    const execAsync = async (command: string): Promise<ExecResult> => {
-      if (command.includes("adb devices")) {
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      if (args.join(" ").includes("adb devices")) {
         return createExecResult("List of devices attached\n\n");
       }
       return createExecResult("");

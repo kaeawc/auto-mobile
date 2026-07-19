@@ -246,6 +246,55 @@ const plugins = {
 	import: importRules,
 };
 
+// The import-extension, Timer, and structuredContent bans apply to every *.ts
+// file. Extracted so the src-only functional-style block can extend this list
+// without re-listing (and drifting from) these entries.
+const importAndTimerSelectors = [
+	{
+		selector: "ImportDeclaration[source.value=/^\\..*\\.js$/]",
+		message: "Do not use .js extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.js'). This causes MODULE_NOT_FOUND errors in tests.",
+	},
+	{
+		selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
+		message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
+	},
+	{
+		selector: "CallExpression[callee.name='setTimeout']",
+		message: "Use Timer.setTimeout() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
+	},
+	{
+		selector: "CallExpression[callee.name='setInterval']",
+		message: "Use Timer.setInterval() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
+	},
+	{
+		// Reading a payload field off an MCP envelope's `structuredContent`
+		// (e.g. `response.structuredContent.found`) is the #2907 dead-read
+		// foot-gun: only `success`/`error` are hoisted, and a field name that
+		// isn't there is a silent `undefined`. Route reads through the typed
+		// seam so the intent is explicit and the miss surfaces.
+		selector: "MemberExpression[object.property.name='structuredContent']",
+		message: "Do not read a field off `structuredContent` directly. Use getStructuredField(response, key) for one field or getStructuredPayload(response) for the whole payload. Import from 'utils/toolUtils' (issue #2907).",
+	},
+];
+
+// Functional-style syntax bans, scoped to src/ only (see the src override
+// block below). Tests and generated files are intentionally exempt: test setup
+// legitimately leans on imperative iteration. `for-in` is banned outright
+// (prototype-walk foot-gun; prefer Object.keys/entries + for-of); `forEach` is
+// banned because it hides accumulation side effects that read more clearly as
+// map/filter/reduce or a for-of. Loop counters (`++`/`--`) and `for-of` itself
+// are deliberately NOT banned — that churn (240+ sites) outweighs the benefit.
+const functionalStyleSelectors = [
+	{
+		selector: "ForInStatement",
+		message: "Avoid for-in (it walks the prototype chain and yields string keys). Use for-of over Object.keys()/Object.entries()/Object.values(), or a declarative map/filter/reduce.",
+	},
+	{
+		selector: "CallExpression[callee.property.name='forEach']",
+		message: "Avoid .forEach() — it hides accumulation side effects. Prefer a declarative .map()/.filter()/.reduce(), or a plain for-of when a side effect is genuinely intended.",
+	},
+];
+
 export const baseRules = {
 	"@typescript-eslint/no-unused-vars": [
 		2,
@@ -388,34 +437,7 @@ export const baseRules = {
 	// import rules
 	// Prevent .js/.ts extensions in relative imports (which cause test failures with esbuild-register)
 	// This uses no-restricted-syntax since import/extensions doesn't cleanly support this use case
-	"no-restricted-syntax": [
-		2,
-		{
-			selector: "ImportDeclaration[source.value=/^\\..*\\.js$/]",
-			message: "Do not use .js extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.js'). This causes MODULE_NOT_FOUND errors in tests.",
-		},
-		{
-			selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
-			message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
-		},
-		{
-			selector: "CallExpression[callee.name='setTimeout']",
-			message: "Use Timer.setTimeout() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
-		},
-		{
-			selector: "CallExpression[callee.name='setInterval']",
-			message: "Use Timer.setInterval() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
-		},
-		{
-			// Reading a payload field off an MCP envelope's `structuredContent`
-			// (e.g. `response.structuredContent.found`) is the #2907 dead-read
-			// foot-gun: only `success`/`error` are hoisted, and a field name that
-			// isn't there is a silent `undefined`. Route reads through the typed
-			// seam so the intent is explicit and the miss surfaces.
-			selector: "MemberExpression[object.property.name='structuredContent']",
-			message: "Do not read a field off `structuredContent` directly. Use getStructuredField(response, key) for one field or getStructuredPayload(response) for the whole payload. Import from 'utils/toolUtils' (issue #2907).",
-		},
-	],
+	"no-restricted-syntax": [2, ...importAndTimerSelectors],
 
 	// file whitespace
 	"no-multiple-empty-lines": [2, {max: 2, maxEOF: 0}],
@@ -459,6 +481,23 @@ export default [
 		rules: {
 			"auto-mobile/catch-convention": 2,
 			"auto-mobile/no-unknown-cast": 2,
+		},
+	},
+	{
+		// Stage 1 of the move toward declarative/functional style (see the
+		// exploration notes). Enforced as errors on src/ only; the large body of
+		// pre-existing violations is captured in eslint-suppressions.json, so this
+		// gates NEW code without a big-bang rewrite. Thresholds are deliberately
+		// loose to start (complexity 15, depth 4) and can be ratcheted down as the
+		// suppression baseline is burned down. Tests/generated files are exempt.
+		files: ["src/**/*.ts"],
+		plugins,
+		languageOptions,
+		rules: {
+			"max-depth": ["error", 4],
+			"complexity": ["error", 15],
+			"max-nested-callbacks": ["error", 4],
+			"no-restricted-syntax": [2, ...importAndTimerSelectors, ...functionalStyleSelectors],
 		},
 	},
 	{
@@ -545,7 +584,9 @@ export default [
 					selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
 					message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
 				},
-				// setTimeout/setInterval rules intentionally omitted - this file wraps them
+				// setTimeout/setInterval rules intentionally omitted - this file wraps them.
+				// Functional-style bans still apply (this is a src file).
+				...functionalStyleSelectors,
 			],
 		},
 	},

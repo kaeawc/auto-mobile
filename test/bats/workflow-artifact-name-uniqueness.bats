@@ -13,6 +13,17 @@
 # The scope here is deliberately global rather than a pin on the two known
 # steps: the same class of collision is invisible until it fires, and it fires
 # only on an already-failing run.
+#
+# Two axes are out of reach of a file-static check, so do not over-trust this:
+#
+#   - A reusable workflow's uploads land in the *caller's* artifact namespace,
+#     so a caller/callee collision spans two files. (build-control-proxy-apk,
+#     build-ctrl-proxy-ios-ipa and build-video-server-jar are called this way;
+#     their names do not collide with any caller's today.)
+#   - A matrix job whose artifact name is a single static literal collides with
+#     itself at runtime across matrix legs. Every matrix upload here correctly
+#     interpolates ${{ matrix.os }}; dropping that interpolation would be the
+#     same failure class as #3976 and would still pass this guard.
 
 # Print "<job>\t<artifact name>" for every upload-artifact step in a workflow.
 #
@@ -21,21 +32,44 @@
 # screenshot-diff-artifact-upload.bats. awk, not sed -- BSD sed lacks the
 # range/address forms this needs.
 #
-# `name:` is read as the first name key following the `uses:` line, which is
-# the `with.name` input; the *step's* own display name precedes `uses:` and so
-# is never picked up.
+# Whole step blocks are buffered and scanned at flush time rather than read as
+# a "uses: then name:" sequence. YAML mapping keys are unordered, so a step
+# written `with:` first and `uses:` second is legal; a sequential reader skips
+# it AND then mis-attributes the *next* step's name to it, which would let a
+# duplicate slip through the very guard meant to catch it. The `uses:` value is
+# matched with optional quotes for the same reason.
+#
+# Within a block the artifact name is the `name:` under `with:` -- the step's
+# own display name is `- name:`, which carries a leading dash and so cannot
+# match, and it precedes `with:` in any case.
 upload_artifact_names() {
   awk '
+    function flush() {
+      if (n_lines == 0) return
+      is_upload = 0
+      for (i = 1; i <= n_lines; i++) {
+        if (lines[i] ~ /uses: *["'"'"']?actions\/upload-artifact/) is_upload = 1
+      }
+      if (is_upload) {
+        in_with = 0
+        for (i = 1; i <= n_lines; i++) {
+          if (lines[i] ~ /^ *with: *$/) { in_with = 1; continue }
+          if (in_with && lines[i] ~ /^ *name: /) {
+            artifact = lines[i]
+            sub(/^ *name: /, "", artifact)
+            print job "\t" artifact
+            break
+          }
+        }
+      }
+      n_lines = 0
+    }
     /^jobs:/ { in_jobs = 1; next }
     !in_jobs { next }
-    /^  [A-Za-z0-9_-]+:/ { job = $1; sub(":", "", job) }
-    /uses: actions\/upload-artifact/ { pending = 1; next }
-    pending && /^ *name: / {
-      artifact = $0
-      sub(/^ *name: /, "", artifact)
-      print job "\t" artifact
-      pending = 0
-    }
+    /^  [A-Za-z0-9_-]+:/ { flush(); job = $1; sub(":", "", job) }
+    /^ *- / { flush() }
+    { lines[++n_lines] = $0 }
+    END { flush() }
   ' "$1"
 }
 
@@ -68,6 +102,39 @@ workflows() {
     echo "$duplicates"
   fi
   [ -z "$duplicates" ]
+}
+
+@test "the extractor is not fooled by key order or quoting" {
+  # A guard that silently misses a duplicate is worse than no guard, so pin the
+  # two shapes a sequential "uses: then name:" reader would drop: `with:` before
+  # `uses:`, and a quoted `uses:` value. Both are legal YAML that nothing in the
+  # repo happens to use today.
+  fixture="$BATS_TEST_TMPDIR/synthetic.yml"
+  cat > "$fixture" <<'YAML'
+jobs:
+  example:
+    steps:
+      - name: "With before uses"
+        with:
+          name: artifact-alpha
+          path: out
+        uses: actions/upload-artifact@v6
+      - name: "Quoted uses"
+        uses: "actions/upload-artifact@v6"
+        with:
+          name: artifact-beta
+      - name: "Ordinary"
+        uses: actions/upload-artifact@v6
+        with:
+          name: artifact-gamma
+YAML
+
+  run upload_artifact_names "$fixture"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 3 ]
+  [[ "$output" == *$'example\tartifact-alpha'* ]]
+  [[ "$output" == *$'example\tartifact-beta'* ]]
+  [[ "$output" == *$'example\tartifact-gamma'* ]]
 }
 
 @test "junit-runner heap dumps are namespaced by job" {

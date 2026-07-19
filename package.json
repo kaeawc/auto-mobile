@@ -11,7 +11,7 @@
     "test:memory-leaks": "bun --expose-gc scripts/detect-memory-leaks.ts",
     "lint": "eslint . --fix --pass-on-unpruned-suppressions",
     "lint:prune": "eslint . --prune-suppressions",
-    "lint:baseline": "eslint . --suppress-rule max-depth --suppress-rule complexity --suppress-rule max-nested-callbacks --suppress-rule auto-mobile/no-imperative-iteration",
+    "lint:baseline": "eslint . --suppress-rule max-depth --suppress-rule complexity --suppress-rule max-nested-callbacks --suppress-rule auto-mobile/no-accumulator-foreach",
     "typecheck": "bash scripts/typecheck-baseline.sh",
     "typecheck:update": "bash scripts/typecheck-baseline.sh --update",
     "watch": "bun --watch src/index.ts",

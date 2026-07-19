@@ -128,7 +128,7 @@ consequences worth knowing:
   the gain in. Without that flag ESLint exits **2** on any over-count.
 - Because the entry is only a count, a rule with budget in a file can absorb a
   different violation *of that same rule*. Keep a ratchet rule's selectors in
-  their own rule (see `auto-mobile/no-imperative-iteration`) rather than folding
+  their own rule (see `auto-mobile/no-accumulator-foreach`) rather than folding
   them into a shared rule like `no-restricted-syntax`, or a baselined violation
   can be silently traded for a genuinely-dangerous one.
 
@@ -136,7 +136,11 @@ Only add **non-auto-fixable** rules to this ratchet: `lint` runs `--fix`, so an
 auto-fixable rule would rewrite `src/` on every CI run.
 
 Current ratchet rules and thresholds: `complexity` 15, `max-depth` 4,
-`max-nested-callbacks` 3, `auto-mobile/no-imperative-iteration` (src/ only).
+`max-nested-callbacks` 3, `auto-mobile/no-accumulator-foreach` (src/ only).
+
+Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
+The ratchet nudges toward declarative style where a clean declarative form
+exists; it does not outlaw iteration.
 
 ## File-backed DB lifecycle tests
 

@@ -40,7 +40,7 @@
     "auto-mobile/catch-convention": {
       "count": 1
     },
-    "auto-mobile/no-imperative-iteration": {
+    "auto-mobile/no-accumulator-foreach": {
       "count": 2
     },
     "complexity": {
@@ -407,7 +407,7 @@
     "@typescript-eslint/no-misused-promises": {
       "count": 1
     },
-    "auto-mobile/no-imperative-iteration": {
+    "auto-mobile/no-accumulator-foreach": {
       "count": 3
     },
     "complexity": {
@@ -476,9 +476,6 @@
     }
   },
   "src/features/observe/ViewHierarchy.ts": {
-    "auto-mobile/no-imperative-iteration": {
-      "count": 4
-    },
     "complexity": {
       "count": 3
     }

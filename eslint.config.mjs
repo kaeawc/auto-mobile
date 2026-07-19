@@ -233,9 +233,15 @@ function noUnknownCastRule() {
 }
 
 // Building a collection by mutating it inside a callback. These are the forms
-// that have a direct declarative replacement (map/filter/flatMap/Object.entries),
-// as opposed to a callback that logs or recurses, where the only rewrite is a
-// for-of — which is *more* imperative and defeats the point of the rule.
+// that have a direct declarative replacement (map/filter/flatMap), as opposed to
+// a callback that logs or recurses, where the only rewrite is a loop — which is
+// *more* imperative and defeats the point of the rule.
+//
+// Note the deliberately narrow blast radius: every explicit loop form (`for`,
+// `for-of`, `for-in`, `while`) is allowed. The goal is to gently direct toward
+// declarative style where a clean declarative form exists, not to outlaw
+// iteration. Loops remain the clearest tool for device I/O, retries, byte and
+// image processing, and ordered async batches.
 const ACCUMULATOR_METHODS = new Set(["push", "unshift", "add", "set"]);
 
 function isAccumulatorCall(node) {
@@ -260,20 +266,16 @@ function callbackIsPureAccumulation(callback) {
 	);
 }
 
-function noImperativeIterationRule() {
+function noAccumulatorForEachRule() {
 	return {
 		meta: {
 			type: "suggestion",
 			messages: {
-				forIn: "Avoid for-in: it walks the prototype chain and yields string keys. Use for-of over Object.keys()/Object.entries()/Object.values(), or a declarative map/filter/reduce. If enumerating inherited properties is genuinely intended, add an eslint-disable-next-line with a one-line justification.",
 				accumulation: "This .forEach() only builds a collection by mutation. Prefer the declarative form (.map()/.filter()/.flatMap(), or new Map()/new Set() over a mapped array) so the result is a value rather than an accumulated side effect. If the mutation is genuinely the clearest expression, add an eslint-disable-next-line with a one-line justification.",
 			},
 		},
 		create(context) {
 			return {
-				ForInStatement(node) {
-					context.report({ node, messageId: "forIn" });
-				},
 				CallExpression(node) {
 					if (
 						node.callee?.type === "MemberExpression" &&
@@ -292,7 +294,7 @@ const catchConventionPlugin = {
 	rules: {
 		"catch-convention": catchConventionRule(),
 		"no-unknown-cast": noUnknownCastRule(),
-		"no-imperative-iteration": noImperativeIterationRule(),
+		"no-accumulator-foreach": noAccumulatorForEachRule(),
 	},
 };
 
@@ -525,7 +527,7 @@ export default [
 		// rewrite. Thresholds start loose and ratchet down as the baseline is
 		// burned down — see the "Lint suppressions baseline" section in CLAUDE.md.
 		//
-		// The iteration bans live in their own `auto-mobile/no-imperative-iteration`
+		// The forEach ban lives in its own `auto-mobile/no-accumulator-foreach`
 		// rule rather than in `no-restricted-syntax` on purpose. Bulk suppressions
 		// are keyed per file + per RULE and are only a count, so folding these into
 		// no-restricted-syntax would let a baselined forEach be traded for a banned
@@ -543,7 +545,7 @@ export default [
 			// The deepest callback nest in src/ is currently 3, so 3 is the tightest
 			// cap that still baselines clean; 4 would have no bite.
 			"max-nested-callbacks": ["error", 3],
-			"auto-mobile/no-imperative-iteration": 2,
+			"auto-mobile/no-accumulator-foreach": 2,
 		},
 	},
 	{

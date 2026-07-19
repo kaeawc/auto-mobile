@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { ESLint } from "eslint";
 
-const FOR_IN = "Avoid for-in";
 const ACCUMULATION = "This .forEach() only builds a collection by mutation";
 
-async function lintSnippet(code: string, filePath = "src/imperativeIterationFixture.ts"): Promise<string[]> {
+async function lintSnippet(code: string, filePath = "src/accumulatorForEachFixture.ts"): Promise<string[]> {
   const eslint = new ESLint({
     cwd: process.cwd(),
     overrideConfigFile: "eslint.config.mjs",
@@ -28,17 +27,7 @@ function matches(messages: string[], fragment: string): boolean {
   return messages.some(message => message.startsWith(fragment));
 }
 
-describe("auto-mobile/no-imperative-iteration", () => {
-  test("flags for-in", async () => {
-    const messages = await lintSnippet(`export function probe(o: Record<string, number>): void {
-  for (const key in o) {
-    console.log(key);
-  }
-}
-`);
-    expect(matches(messages, FOR_IN)).toBe(true);
-  });
-
+describe("auto-mobile/no-accumulator-foreach", () => {
   test("flags a forEach whose body only pushes", async () => {
     const messages = await lintSnippet(`export function probe(xs: string[]): string[] {
   const out: string[] = [];
@@ -88,29 +77,55 @@ describe("auto-mobile/no-imperative-iteration", () => {
     expect(matches(messages, ACCUMULATION)).toBe(false);
   });
 
-  test("does not apply outside src/", async () => {
-    const messages = await lintSnippet(`export function probe(o: Record<string, number>): void {
+  // Explicit loops are deliberately allowed. The rule nudges toward declarative
+  // style where a clean declarative form exists; it does not outlaw iteration.
+  test("allows every explicit loop form", async () => {
+    const messages = await lintSnippet(`export function probe(o: Record<string, number>, xs: number[]): number {
+  let n = 0;
   for (const key in o) {
-    console.log(key);
+    n += o[key];
   }
+  for (const x of xs) {
+    n += x;
+  }
+  for (let i = 0; i < xs.length; i++) {
+    n += xs[i];
+  }
+  while (n > 1000) {
+    n -= 1;
+  }
+  return n;
 }
-`, "test/imperativeIterationFixture.test.ts");
-    expect(matches(messages, FOR_IN)).toBe(false);
+`);
+    expect(messages).toEqual([]);
+  });
+
+  test("does not apply outside src/", async () => {
+    const messages = await lintSnippet(`export function probe(xs: string[]): string[] {
+  const out: string[] = [];
+  xs.forEach(x => {
+    out.push(x);
+  });
+  return out;
+}
+`, "test/accumulatorForEachFixture.test.ts");
+    expect(matches(messages, ACCUMULATION)).toBe(false);
   });
 
   // Regression guard for the suppression-budget leak this rule exists to avoid:
-  // these selectors must NOT live in no-restricted-syntax, whose per-file count
-  // is shared with the setTimeout/structuredContent bans (main carries zero
-  // no-restricted-syntax suppressions, and that must stay true).
-  test("keeps iteration bans out of the shared no-restricted-syntax budget", async () => {
-    const messages = await lintSnippet(`export function probe(o: Record<string, number>): void {
-  for (const key in o) {
-    console.log(key);
-  }
+  // the forEach ban must NOT live in no-restricted-syntax, whose per-file
+  // suppression count is shared with the setTimeout/structuredContent bans (main
+  // carries zero no-restricted-syntax suppressions, and that must stay true).
+  test("keeps the forEach ban out of the shared no-restricted-syntax budget", async () => {
+    const messages = await lintSnippet(`export function probe(xs: string[]): string[] {
+  const out: string[] = [];
+  xs.forEach(x => {
+    out.push(x);
+  });
+  return out;
 }
 `);
-    const forInMessages = messages.filter(message => message.startsWith(FOR_IN));
-    expect(forInMessages).toHaveLength(1);
+    expect(messages.filter(message => message.startsWith(ACCUMULATION))).toHaveLength(1);
     // The Timer ban is a no-restricted-syntax rule and must still be separate.
     expect(matches(messages, "Use Timer.setTimeout()")).toBe(false);
   });

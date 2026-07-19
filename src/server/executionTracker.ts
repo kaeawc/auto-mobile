@@ -9,6 +9,13 @@ interface ActiveExecution {
   sessionUuid?: string;
   startTime: number;
   abortController: AbortController;
+  /**
+   * The reason this execution was cancelled, recorded synchronously at cancellation time for
+   * device-disconnected cancellations. This is the tracker's own authoritative record of *why*
+   * it aborted — consumers should read it instead of `abortController.signal.reason`, whose
+   * observability is unreliable on some runtimes under load (macOS CI Bun flake, issue #3909).
+   */
+  cancelReason?: Error;
 }
 
 type ExecutionScope = "session" | "global";
@@ -167,7 +174,13 @@ export class ExecutionTracker {
         continue;
       }
       if (cancelReason.startsWith("device-disconnected:")) {
-        execution.abortController.abort(new Error(cancelReason));
+        // Record the reason on the execution *before* aborting, so the tracker's own
+        // authoritative `cancelReason` is set synchronously with the counted cancellation
+        // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same
+        // Error instance is passed to abort() so consumers reading the signal still match.
+        const reasonError = new Error(cancelReason);
+        execution.cancelReason = reasonError;
+        execution.abortController.abort(reasonError);
       } else {
         execution.abortController.abort();
       }

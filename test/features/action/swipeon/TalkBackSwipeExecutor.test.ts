@@ -4,7 +4,9 @@ import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetec
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { SwipeDirection } from "../../../../src/models";
+import type { AdbExecutor } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice } from "../../../../src/models";
 
@@ -25,13 +27,15 @@ function makeExecutor(
   fakeGesture: FakeGestureExecutor,
   fakeProxy: FakeCtrlProxy,
   fakeDetector: FakeAccessibilityDetector,
-  fakeTimer: FakeTimer
+  fakeTimer: FakeTimer,
+  fakeAdb: AdbExecutor = new FakeAdbClient() as unknown as AdbExecutor
 ): TalkBackSwipeExecutor {
   return new TalkBackSwipeExecutor(
     device,
     fakeGesture,
     fakeProxy as any,
     fakeDetector,
+    fakeAdb,
     fakeTimer
   );
 }
@@ -82,6 +86,37 @@ describe("TalkBackSwipeExecutor", () => {
       expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(1);
       expect(fakeCtrlProxy.getActionHistory()).toHaveLength(0);
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
+    });
+  });
+
+  describe("TalkBack detection dependency (#3915 regression)", () => {
+    test("passes the injected ADB executor (not null) to detectMethod on android", async () => {
+      fakeAccessibilityDetector.setTalkBackEnabled(true);
+      const sentinelAdb = new FakeAdbClient() as unknown as AdbExecutor;
+      const exec = makeExecutor(
+        ANDROID_DEVICE,
+        fakeGestureExecutor,
+        fakeCtrlProxy,
+        fakeAccessibilityDetector,
+        fakeTimer,
+        sentinelAdb
+      );
+
+      await exec.executeSwipeGesture(
+        100, 500, 100, 200,
+        "up" as SwipeDirection,
+        null,
+        { duration: 300 },
+        perf
+      );
+
+      // The bug passed `null`, which made detectMethod throw+swallow and report
+      // "not talkback" on a cold cache. Detection must receive the real executor.
+      expect(fakeAccessibilityDetector.detectMethodAdbArgs.length).toBeGreaterThan(0);
+      for (const arg of fakeAccessibilityDetector.detectMethodAdbArgs) {
+        expect(arg).not.toBeNull();
+      }
+      expect(fakeAccessibilityDetector.detectMethodAdbArgs[0]).toBe(sentinelAdb);
     });
   });
 

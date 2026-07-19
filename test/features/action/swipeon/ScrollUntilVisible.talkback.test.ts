@@ -7,6 +7,7 @@ import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecu
 import { FakeOverlayDetector } from "../../../fakes/FakeOverlayDetector";
 import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessibilityService";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
 import type { SwipeOnResolvedOptions } from "../../../../src/features/action/swipeon/types";
 
@@ -83,6 +84,7 @@ function makeScrollUntilVisible({
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
     accessibilityDetector,
+    adb: new FakeAdbClient() as any,
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
     timer,
@@ -166,6 +168,29 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
   describe("when TalkBack is enabled", () => {
     beforeEach(() => {
       detector.setTalkBackEnabled(true);
+    });
+
+    test("passes the injected ADB executor (not null) to detectMethod (#3915 regression)", async () => {
+      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      finder.nextElementByText = TARGET_ELEMENT;
+
+      const suv = makeScrollUntilVisible({
+        accessibilityDetector: detector,
+        finder,
+        timer,
+        accessibilityService,
+        observeResults: [makeObserveResult(0)],
+        talkBackExecutor
+      });
+
+      await suv.execute({ ...BASE_OPTIONS });
+
+      // The bug passed `null`, which made TalkBack detection silently report
+      // "not talkback" on a cold cache. Detection must receive the real executor.
+      expect(detector.detectMethodAdbArgs.length).toBeGreaterThan(0);
+      for (const arg of detector.detectMethodAdbArgs) {
+        expect(arg).not.toBeNull();
+      }
     });
 
     test("does not call requestAction(focus) when focusTarget is not set and element already visible", async () => {

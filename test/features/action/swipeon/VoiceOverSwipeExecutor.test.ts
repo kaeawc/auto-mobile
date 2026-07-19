@@ -7,6 +7,7 @@ import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker
 import type { GestureExecutor } from "../../../../src/features/action/swipeon/types";
 import type { SwipeResult } from "../../../../src/models/SwipeResult";
 import type { Element } from "../../../../src/models";
+import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 function makeSwipeResult(overrides: Partial<SwipeResult> = {}): SwipeResult {
   return {
@@ -99,6 +100,27 @@ describe("VoiceOverSwipeExecutor", () => {
       expect(calls[0]).toMatchObject({ x1: 100, y1: 500, x2: 100, y2: 200 });
       expect(calls[1]).toMatchObject({ x1: 100, y1: 200, x2: 100, y2: 500 });
       expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
+    });
+  });
+
+  describe("force-accessibility-mode feature flag threading (#3925)", () => {
+    test("forwards the injected featureFlags to isVoiceOverEnabled on iOS", async () => {
+      const { executor } = makeFakeGestureExecutor();
+      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+
+      const voiceOverExecutor = new VoiceOverSwipeExecutor(
+        { platform: "ios", deviceId: "00001234-ABCD" } as any,
+        executor,
+        fakeIosClient as any,
+        fakeVoiceOverDetector,
+        fakeTimer,
+        sentinelFlags
+      );
+
+      await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf);
+
+      expect(fakeVoiceOverDetector.isVoiceOverEnabledFeatureFlagsArgs[0]).toBe(sentinelFlags);
     });
   });
 

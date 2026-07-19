@@ -10,6 +10,7 @@ import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
+import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 
 /**
  * Sanity-check the platform-agnostic TapStrategy contract. Tests
@@ -182,6 +183,58 @@ describe("TapStrategy", () => {
         buildViewHierarchy(iosDevice)
       );
       expect(result).toBeNull();
+    });
+  });
+
+  // Regression guard for #3925: the tap strategies must forward the injected
+  // FeatureFlagService to detection so `force-accessibility-mode` /
+  // `accessibility-auto-detect` apply to tapOn exactly as they do to observe.
+  describe("force-accessibility-mode feature flag threading (#3925)", () => {
+    const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+
+    it("AndroidTapStrategy forwards featureFlags to detectMethod", async () => {
+      const detector = new FakeAccessibilityDetector();
+      const strategy = new AndroidTapStrategy(
+        androidDevice,
+        new FakeAdbClient() as any,
+        detector,
+        sentinelFlags
+      );
+      await strategy.isAccessibilityServiceEnabled();
+      expect(detector.detectMethodFeatureFlagsArgs).toEqual([sentinelFlags]);
+    });
+
+    it("IosTapStrategy forwards featureFlags to isVoiceOverEnabled", async () => {
+      const detector = new FakeIosVoiceOverDetector();
+      const strategy = new IosTapStrategy(iosDevice, detector, sentinelFlags);
+      await strategy.isAccessibilityServiceEnabled();
+      expect(detector.isVoiceOverEnabledFeatureFlagsArgs).toEqual([sentinelFlags]);
+    });
+
+    it("createTapStrategy threads featureFlags into the Android strategy", async () => {
+      const detector = new FakeAccessibilityDetector();
+      const strategy = createTapStrategy(
+        androidDevice,
+        new FakeAdbClient() as any,
+        detector,
+        new FakeIosVoiceOverDetector(),
+        sentinelFlags
+      );
+      await strategy.isAccessibilityServiceEnabled();
+      expect(detector.detectMethodFeatureFlagsArgs).toEqual([sentinelFlags]);
+    });
+
+    it("createTapStrategy threads featureFlags into the iOS strategy", async () => {
+      const detector = new FakeIosVoiceOverDetector();
+      const strategy = createTapStrategy(
+        iosDevice,
+        new FakeAdbClient() as any,
+        new FakeAccessibilityDetector(),
+        detector,
+        sentinelFlags
+      );
+      await strategy.isAccessibilityServiceEnabled();
+      expect(detector.isVoiceOverEnabledFeatureFlagsArgs).toEqual([sentinelFlags]);
     });
   });
 

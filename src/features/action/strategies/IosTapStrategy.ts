@@ -10,6 +10,7 @@ import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../ut
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { attachRawViewHierarchy } from "../../../utils/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
+import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 /**
  * iOS implementation of {@link TapStrategy}. Filters the response
@@ -23,7 +24,8 @@ export class IosTapStrategy implements TapStrategy {
 
   constructor(
     private readonly device: BootedDevice,
-    private readonly iosVoiceOverDetector: IosVoiceOverDetector = defaultIosVoiceOverDetector
+    private readonly iosVoiceOverDetector: IosVoiceOverDetector = defaultIosVoiceOverDetector,
+    private readonly featureFlags?: FeatureFlagService
   ) {}
 
   prepareViewHierarchyForResponse(
@@ -46,7 +48,13 @@ export class IosTapStrategy implements TapStrategy {
   async isAccessibilityServiceEnabled(): Promise<boolean> {
     // Resolve lazily so Android paths never touch the iOS singleton.
     const ctrlProxy = IOSCtrlProxyClient.getInstance(this.device);
-    return this.iosVoiceOverDetector.isVoiceOverEnabled(this.device.deviceId, ctrlProxy);
+    // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
+    // apply to tap detection uniformly with the observe path (#3925).
+    return this.iosVoiceOverDetector.isVoiceOverEnabled(
+      this.device.deviceId,
+      ctrlProxy,
+      this.featureFlags
+    );
   }
 
   shouldRunPreTapStability(_options: TapOnElementOptions): boolean {

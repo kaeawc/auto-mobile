@@ -3,6 +3,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import type { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
+import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { AndroidTapStrategy } from "./AndroidTapStrategy";
 import { IosTapStrategy } from "./IosTapStrategy";
 
@@ -15,10 +16,11 @@ export function createTapStrategy(
   device: BootedDevice,
   adb: AdbExecutor,
   accessibilityDetector: AccessibilityDetector,
-  iosVoiceOverDetector: IosVoiceOverDetector
+  iosVoiceOverDetector: IosVoiceOverDetector,
+  featureFlags?: FeatureFlagService
 ): TapStrategy {
   if (device.platform === "ios") {
-    return new IosTapStrategy(device, iosVoiceOverDetector);
+    return new IosTapStrategy(device, iosVoiceOverDetector, featureFlags);
   }
-  return new AndroidTapStrategy(device, adb, accessibilityDetector);
+  return new AndroidTapStrategy(device, adb, accessibilityDetector, featureFlags);
 }

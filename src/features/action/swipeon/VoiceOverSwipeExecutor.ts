@@ -6,6 +6,7 @@ import { BoomerangConfig, GestureExecutor, VoiceOverSwipeRunner } from "./types"
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
 import type { IOSCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
+import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 /**
  * VoiceOverSwipeExecutor handles iOS VoiceOver-compatible swipe gestures.
@@ -26,7 +27,8 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     private readonly executeGesture: GestureExecutor,
     private readonly iosClient: IOSCtrlProxy,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector,
-    private readonly timer: Timer
+    private readonly timer: Timer,
+    private readonly featureFlags?: FeatureFlagService
   ) {}
 
   /**
@@ -68,9 +70,12 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf);
     }
 
+    // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
+    // apply to swipe detection uniformly with the observe path (#3925).
     const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverEnabled(
       this.device.deviceId,
-      this.iosClient
+      this.iosClient,
+      this.featureFlags
     );
 
     if (!isVoiceOverEnabled) {

@@ -10,6 +10,7 @@ import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
 import type { SwipeOnResolvedOptions } from "../../../../src/features/action/swipeon/types";
+import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 const DEVICE: BootedDevice = {
   name: "test-device",
@@ -47,7 +48,8 @@ function makeScrollUntilVisible({
   timer,
   accessibilityService,
   observeResults,
-  talkBackExecutor
+  talkBackExecutor,
+  featureFlags
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -55,6 +57,7 @@ function makeScrollUntilVisible({
   accessibilityService: FakeScrollAccessibilityService;
   observeResults: ObserveResult[];
   talkBackExecutor: FakeTalkBackSwipeExecutor;
+  featureFlags?: FeatureFlagService;
 }): ScrollUntilVisible {
   let callIdx = 0;
 
@@ -85,6 +88,7 @@ function makeScrollUntilVisible({
     accessibilityService,
     accessibilityDetector,
     adb: new FakeAdbClient() as any,
+    featureFlags,
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
     timer,
@@ -191,6 +195,27 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
       for (const arg of detector.detectMethodAdbArgs) {
         expect(arg).not.toBeNull();
       }
+    });
+
+    test("forwards the injected featureFlags to detectMethod (#3925 regression)", async () => {
+      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      finder.nextElementByText = TARGET_ELEMENT;
+      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+
+      const suv = makeScrollUntilVisible({
+        accessibilityDetector: detector,
+        finder,
+        timer,
+        accessibilityService,
+        observeResults: [makeObserveResult(0)],
+        talkBackExecutor,
+        featureFlags: sentinelFlags
+      });
+
+      await suv.execute({ ...BASE_OPTIONS });
+
+      expect(detector.detectMethodFeatureFlagsArgs.length).toBeGreaterThan(0);
+      expect(detector.detectMethodFeatureFlagsArgs[0]).toBe(sentinelFlags);
     });
 
     test("does not call requestAction(focus) when focusTarget is not set and element already visible", async () => {

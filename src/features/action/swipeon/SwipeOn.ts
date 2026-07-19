@@ -47,6 +47,7 @@ import { getScreenBounds } from "../../../utils/screenBounds";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
+import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 export class SwipeOn extends BaseVisualChange {
   private executeGesture: GestureExecutor;
@@ -78,6 +79,7 @@ export class SwipeOn extends BaseVisualChange {
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
+    const featureFlags = dependencies.featureFlags ?? FeatureFlagService.getInstance();
     this.visionConfig = dependencies.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer = dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = dependencies.visionAnalyzer;
@@ -94,7 +96,8 @@ export class SwipeOn extends BaseVisualChange {
       this.accessibilityService,
       this.accessibilityDetector,
       this.adb,
-      this.timer
+      this.timer,
+      featureFlags
     );
     const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.voiceOverExecutor = dependencies.voiceOverExecutor ?? new VoiceOverSwipeExecutor(
@@ -102,7 +105,8 @@ export class SwipeOn extends BaseVisualChange {
       this.executeGesture,
       IOSCtrlProxyClient.getInstance(device),
       iosVoiceOverDetector,
-      this.timer
+      this.timer,
+      featureFlags
     );
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,
@@ -112,6 +116,7 @@ export class SwipeOn extends BaseVisualChange {
       accessibilityService: this.accessibilityService,
       accessibilityDetector: this.accessibilityDetector,
       adb: this.adb,
+      featureFlags,
       overlayDetector: this.overlayDetector,
       talkBackExecutor: this.talkBackExecutor,
       timer: this.timer,

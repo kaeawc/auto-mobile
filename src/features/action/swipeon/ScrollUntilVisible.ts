@@ -17,6 +17,7 @@ import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry"
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { Timer } from "../../../utils/SystemTimer";
 import { SwipeOnResolvedOptions, BoomerangConfig, TalkBackSwipeRunner, OverlayAnalyzer, ScrollAccessibilityService } from "./types";
@@ -41,6 +42,7 @@ interface ScrollUntilVisibleDependencies {
   accessibilityService: ScrollAccessibilityService;
   accessibilityDetector: AccessibilityDetector;
   adb: AdbExecutor;
+  featureFlags?: FeatureFlagService;
   overlayDetector: OverlayAnalyzer;
   talkBackExecutor: TalkBackSwipeRunner;
   timer: Timer;
@@ -135,9 +137,12 @@ export class ScrollUntilVisible {
       }
       // Pass the real ADB executor (not null) so TalkBack detection works on a
       // cold/expired cache instead of silently reporting "not talkback" (#3915).
+      // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
+      // apply to scroll detection uniformly with the observe path (#3925).
       const accessibilityService = await this.deps.accessibilityDetector.detectMethod(
         this.deps.device.deviceId,
-        this.deps.adb
+        this.deps.adb,
+        this.deps.featureFlags
       );
       return accessibilityService === "talkback";
     });

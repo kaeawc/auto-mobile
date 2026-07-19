@@ -125,6 +125,9 @@ object AppIcons {
   val Snapshots: ImageVector
     get() = Icons.Filled.PhotoCamera
 
+  val DeviceControls: ImageVector
+    get() = Icons.Filled.Tune
+
   val Telemetry: ImageVector
     get() = Icons.Filled.Satellite
 }

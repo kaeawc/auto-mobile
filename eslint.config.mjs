@@ -232,10 +232,67 @@ function noUnknownCastRule() {
 	};
 }
 
+// Building a collection by mutating it inside a callback. These are the forms
+// that have a direct declarative replacement (map/filter/flatMap/Object.entries),
+// as opposed to a callback that logs or recurses, where the only rewrite is a
+// for-of — which is *more* imperative and defeats the point of the rule.
+const ACCUMULATOR_METHODS = new Set(["push", "unshift", "add", "set"]);
+
+function isAccumulatorCall(node) {
+	return node?.type === "CallExpression" &&
+		node.callee?.type === "MemberExpression" &&
+		ACCUMULATOR_METHODS.has(propertyName(node.callee.property));
+}
+
+// True only when EVERY statement in the callback is a bare accumulator call.
+// A callback that also logs, branches, awaits, or recurses is left alone: it is
+// doing real work, not just building a collection.
+function callbackIsPureAccumulation(callback) {
+	if (callback?.type !== "ArrowFunctionExpression" && callback?.type !== "FunctionExpression") {
+		return false;
+	}
+	// Concise arrow body: `xs.forEach(x => out.push(x))`
+	if (callback.body.type !== "BlockStatement") {
+		return isAccumulatorCall(callback.body);
+	}
+	return callback.body.body.length > 0 && callback.body.body.every(
+		statement => statement.type === "ExpressionStatement" && isAccumulatorCall(statement.expression)
+	);
+}
+
+function noImperativeIterationRule() {
+	return {
+		meta: {
+			type: "suggestion",
+			messages: {
+				forIn: "Avoid for-in: it walks the prototype chain and yields string keys. Use for-of over Object.keys()/Object.entries()/Object.values(), or a declarative map/filter/reduce. If enumerating inherited properties is genuinely intended, add an eslint-disable-next-line with a one-line justification.",
+				accumulation: "This .forEach() only builds a collection by mutation. Prefer the declarative form (.map()/.filter()/.flatMap(), or new Map()/new Set() over a mapped array) so the result is a value rather than an accumulated side effect. If the mutation is genuinely the clearest expression, add an eslint-disable-next-line with a one-line justification.",
+			},
+		},
+		create(context) {
+			return {
+				ForInStatement(node) {
+					context.report({ node, messageId: "forIn" });
+				},
+				CallExpression(node) {
+					if (
+						node.callee?.type === "MemberExpression" &&
+						propertyName(node.callee.property) === "forEach" &&
+						callbackIsPureAccumulation(node.arguments[0])
+					) {
+						context.report({ node, messageId: "accumulation" });
+					}
+				},
+			};
+		},
+	};
+}
+
 const catchConventionPlugin = {
 	rules: {
 		"catch-convention": catchConventionRule(),
 		"no-unknown-cast": noUnknownCastRule(),
+		"no-imperative-iteration": noImperativeIterationRule(),
 	},
 };
 
@@ -245,55 +302,6 @@ const plugins = {
 	"auto-mobile": catchConventionPlugin,
 	import: importRules,
 };
-
-// The import-extension, Timer, and structuredContent bans apply to every *.ts
-// file. Extracted so the src-only functional-style block can extend this list
-// without re-listing (and drifting from) these entries.
-const importAndTimerSelectors = [
-	{
-		selector: "ImportDeclaration[source.value=/^\\..*\\.js$/]",
-		message: "Do not use .js extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.js'). This causes MODULE_NOT_FOUND errors in tests.",
-	},
-	{
-		selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
-		message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
-	},
-	{
-		selector: "CallExpression[callee.name='setTimeout']",
-		message: "Use Timer.setTimeout() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
-	},
-	{
-		selector: "CallExpression[callee.name='setInterval']",
-		message: "Use Timer.setInterval() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
-	},
-	{
-		// Reading a payload field off an MCP envelope's `structuredContent`
-		// (e.g. `response.structuredContent.found`) is the #2907 dead-read
-		// foot-gun: only `success`/`error` are hoisted, and a field name that
-		// isn't there is a silent `undefined`. Route reads through the typed
-		// seam so the intent is explicit and the miss surfaces.
-		selector: "MemberExpression[object.property.name='structuredContent']",
-		message: "Do not read a field off `structuredContent` directly. Use getStructuredField(response, key) for one field or getStructuredPayload(response) for the whole payload. Import from 'utils/toolUtils' (issue #2907).",
-	},
-];
-
-// Functional-style syntax bans, scoped to src/ only (see the src override
-// block below). Tests and generated files are intentionally exempt: test setup
-// legitimately leans on imperative iteration. `for-in` is banned outright
-// (prototype-walk foot-gun; prefer Object.keys/entries + for-of); `forEach` is
-// banned because it hides accumulation side effects that read more clearly as
-// map/filter/reduce or a for-of. Loop counters (`++`/`--`) and `for-of` itself
-// are deliberately NOT banned — that churn (240+ sites) outweighs the benefit.
-const functionalStyleSelectors = [
-	{
-		selector: "ForInStatement",
-		message: "Avoid for-in (it walks the prototype chain and yields string keys). Use for-of over Object.keys()/Object.entries()/Object.values(), or a declarative map/filter/reduce.",
-	},
-	{
-		selector: "CallExpression[callee.property.name='forEach']",
-		message: "Avoid .forEach() — it hides accumulation side effects. Prefer a declarative .map()/.filter()/.reduce(), or a plain for-of when a side effect is genuinely intended.",
-	},
-];
 
 export const baseRules = {
 	"@typescript-eslint/no-unused-vars": [
@@ -437,7 +445,34 @@ export const baseRules = {
 	// import rules
 	// Prevent .js/.ts extensions in relative imports (which cause test failures with esbuild-register)
 	// This uses no-restricted-syntax since import/extensions doesn't cleanly support this use case
-	"no-restricted-syntax": [2, ...importAndTimerSelectors],
+	"no-restricted-syntax": [
+		2,
+		{
+			selector: "ImportDeclaration[source.value=/^\\..*\\.js$/]",
+			message: "Do not use .js extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.js'). This causes MODULE_NOT_FOUND errors in tests.",
+		},
+		{
+			selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
+			message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
+		},
+		{
+			selector: "CallExpression[callee.name='setTimeout']",
+			message: "Use Timer.setTimeout() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
+		},
+		{
+			selector: "CallExpression[callee.name='setInterval']",
+			message: "Use Timer.setInterval() instead. Import { Timer, defaultTimer } from 'utils/SystemTimer'.",
+		},
+		{
+			// Reading a payload field off an MCP envelope's `structuredContent`
+			// (e.g. `response.structuredContent.found`) is the #2907 dead-read
+			// foot-gun: only `success`/`error` are hoisted, and a field name that
+			// isn't there is a silent `undefined`. Route reads through the typed
+			// seam so the intent is explicit and the miss surfaces.
+			selector: "MemberExpression[object.property.name='structuredContent']",
+			message: "Do not read a field off `structuredContent` directly. Use getStructuredField(response, key) for one field or getStructuredPayload(response) for the whole payload. Import from 'utils/toolUtils' (issue #2907).",
+		},
+	],
 
 	// file whitespace
 	"no-multiple-empty-lines": [2, {max: 2, maxEOF: 0}],
@@ -484,20 +519,31 @@ export default [
 		},
 	},
 	{
-		// Stage 1 of the move toward declarative/functional style (see the
-		// exploration notes). Enforced as errors on src/ only; the large body of
-		// pre-existing violations is captured in eslint-suppressions.json, so this
-		// gates NEW code without a big-bang rewrite. Thresholds are deliberately
-		// loose to start (complexity 15, depth 4) and can be ratcheted down as the
-		// suppression baseline is burned down. Tests/generated files are exempt.
+		// Stage 1 of the move toward declarative style (PR #3957). Enforced as
+		// errors on src/ only; pre-existing violations are captured in
+		// eslint-suppressions.json so this gates NEW code without a big-bang
+		// rewrite. Thresholds start loose and ratchet down as the baseline is
+		// burned down — see the "Lint suppressions baseline" section in CLAUDE.md.
+		//
+		// The iteration bans live in their own `auto-mobile/no-imperative-iteration`
+		// rule rather than in `no-restricted-syntax` on purpose. Bulk suppressions
+		// are keyed per file + per RULE and are only a count, so folding these into
+		// no-restricted-syntax would let a baselined forEach be traded for a banned
+		// setTimeout/structuredContent read with no CI failure — silently weakening
+		// guards that main enforces absolutely (main has zero no-restricted-syntax
+		// suppressions). A separate rule keeps those budgets from mixing, and also
+		// survives the `...baseRules` spreads in the overrides below, which replace
+		// the whole no-restricted-syntax entry.
 		files: ["src/**/*.ts"],
 		plugins,
 		languageOptions,
 		rules: {
 			"max-depth": ["error", 4],
 			"complexity": ["error", 15],
-			"max-nested-callbacks": ["error", 4],
-			"no-restricted-syntax": [2, ...importAndTimerSelectors, ...functionalStyleSelectors],
+			// The deepest callback nest in src/ is currently 3, so 3 is the tightest
+			// cap that still baselines clean; 4 would have no bite.
+			"max-nested-callbacks": ["error", 3],
+			"auto-mobile/no-imperative-iteration": 2,
 		},
 	},
 	{
@@ -584,9 +630,7 @@ export default [
 					selector: "ImportDeclaration[source.value=/^\\..*\\.ts$/]",
 					message: "Do not use .ts extension in relative imports. Use extensionless imports instead (e.g., './foo' not './foo.ts').",
 				},
-				// setTimeout/setInterval rules intentionally omitted - this file wraps them.
-				// Functional-style bans still apply (this is a src file).
-				...functionalStyleSelectors,
+				// setTimeout/setInterval rules intentionally omitted - this file wraps them
 			],
 		},
 	},

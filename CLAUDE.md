@@ -106,6 +106,38 @@ baseline — it is a one-way ratchet (`--update` refuses to grow it without
 (rarely) record it with `typecheck:update`. The baseline is version-sensitive:
 regenerate it in the same PR that bumps the `typescript` dependency.
 
+## Lint suppressions baseline
+
+`eslint-suppressions.json` is ESLint's native bulk-suppressions file. It records
+the pre-existing violations of rules that were added after the code was written,
+so CI gates NEW code without requiring a big-bang rewrite. It is the lint
+equivalent of the typecheck baseline above.
+
+```bash
+bun run lint            # gate: fail on NEW violations (CI runs this)
+bun run lint:prune      # after FIXING violations: shrink the baseline
+bun run lint:baseline   # after ADDING a ratchet rule: record existing violations
+```
+
+Suppressions are keyed per file + per rule and store only a **count**. Two
+consequences worth knowing:
+
+- When you fix a violation the baseline is momentarily larger than reality.
+  `bun run lint` passes `--pass-on-unpruned-suppressions` so improving code never
+  breaks the build; run `bun run lint:prune` and commit the smaller file to lock
+  the gain in. Without that flag ESLint exits **2** on any over-count.
+- Because the entry is only a count, a rule with budget in a file can absorb a
+  different violation *of that same rule*. Keep a ratchet rule's selectors in
+  their own rule (see `auto-mobile/no-imperative-iteration`) rather than folding
+  them into a shared rule like `no-restricted-syntax`, or a baselined violation
+  can be silently traded for a genuinely-dangerous one.
+
+Only add **non-auto-fixable** rules to this ratchet: `lint` runs `--fix`, so an
+auto-fixable rule would rewrite `src/` on every CI run.
+
+Current ratchet rules and thresholds: `complexity` 15, `max-depth` 4,
+`max-nested-callbacks` 3, `auto-mobile/no-imperative-iteration` (src/ only).
+
 ## File-backed DB lifecycle tests
 
 Any test suite that opens a real `auto-mobile.db` (module close/reopen, migration

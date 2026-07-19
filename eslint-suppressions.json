@@ -5,9 +5,6 @@
     },
     "complexity": {
       "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 4
     }
   },
   "src/daemon/buildIdentity.ts": {
@@ -43,11 +40,11 @@
     "auto-mobile/catch-convention": {
       "count": 1
     },
+    "auto-mobile/no-imperative-iteration": {
+      "count": 2
+    },
     "complexity": {
       "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 2
     }
   },
   "src/daemon/deviceDataStreamSocketServer.ts": {
@@ -338,9 +335,6 @@
   "src/features/action/swipeon/OverlayDetector.ts": {
     "complexity": {
       "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 1
     }
   },
   "src/features/action/swipeon/ScrollUntilVisible.ts": {
@@ -413,11 +407,11 @@
     "@typescript-eslint/no-misused-promises": {
       "count": 1
     },
+    "auto-mobile/no-imperative-iteration": {
+      "count": 3
+    },
     "complexity": {
       "count": 2
-    },
-    "no-restricted-syntax": {
-      "count": 3
     }
   },
   "src/features/navigation/NavigationScreenshotManager.ts": {
@@ -428,11 +422,6 @@
   "src/features/navigation/ScreenFingerprint.ts": {
     "complexity": {
       "count": 2
-    }
-  },
-  "src/features/navigation/TestCoverageAnalyzer.ts": {
-    "no-restricted-syntax": {
-      "count": 1
     }
   },
   "src/features/observe/DeviceServiceClient.ts": {
@@ -471,9 +460,6 @@
   "src/features/observe/PredictiveUIState.ts": {
     "complexity": {
       "count": 2
-    },
-    "no-restricted-syntax": {
-      "count": 1
     }
   },
   "src/features/observe/ScreenshotBackoffScheduler.ts": {
@@ -490,11 +476,11 @@
     }
   },
   "src/features/observe/ViewHierarchy.ts": {
+    "auto-mobile/no-imperative-iteration": {
+      "count": 4
+    },
     "complexity": {
       "count": 3
-    },
-    "no-restricted-syntax": {
-      "count": 4
     }
   },
   "src/features/observe/Window.ts": {
@@ -575,9 +561,6 @@
       "count": 8
     },
     "complexity": {
-      "count": 4
-    },
-    "no-restricted-syntax": {
       "count": 4
     }
   },
@@ -660,11 +643,6 @@
       "count": 1
     }
   },
-  "src/features/video/NoopVideoCaptureBackend.ts": {
-    "auto-mobile/catch-convention": {
-      "count": 1
-    }
-  },
   "src/features/video/VideoRecorderService.ts": {
     "auto-mobile/catch-convention": {
       "count": 1
@@ -742,9 +720,6 @@
   "src/server/index.ts": {
     "complexity": {
       "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 3
     }
   },
   "src/server/interactionTools.ts": {
@@ -781,11 +756,6 @@
       "count": 1
     }
   },
-  "src/server/resourceRegistry.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/server/systemTrayHelpers.ts": {
     "complexity": {
       "count": 1
@@ -809,9 +779,6 @@
       "count": 1
     },
     "complexity": {
-      "count": 2
-    },
-    "no-restricted-syntax": {
       "count": 2
     }
   },
@@ -887,9 +854,6 @@
     },
     "max-depth": {
       "count": 5
-    },
-    "no-restricted-syntax": {
-      "count": 1
     }
   },
   "src/utils/KeepScreenAwakeManager.ts": {
@@ -899,9 +863,6 @@
   },
   "src/utils/PerformanceTracker.ts": {
     "max-depth": {
-      "count": 1
-    },
-    "no-restricted-syntax": {
       "count": 1
     }
   },
@@ -1010,17 +971,9 @@
       "count": 2
     }
   },
-  "src/utils/plan/PlanNormalizer.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/utils/plan/PlanSerializer.ts": {
     "max-depth": {
       "count": 2
-    },
-    "no-restricted-syntax": {
-      "count": 1
     }
   },
   "src/utils/plan/PlanValidator.ts": {

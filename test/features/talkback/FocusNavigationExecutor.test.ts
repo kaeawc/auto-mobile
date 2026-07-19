@@ -263,4 +263,97 @@ describe("FocusNavigationExecutor", () => {
     expect(thrownError!.message).toContain("Target not found");
     expect(driver.getSwipeCount()).toBe(0);
   });
+
+  test("self-corrects when the supplied path points the wrong direction (#3917)", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const elements = [
+      makeElement("a", 0),
+      makeElement("b", 1),
+      makeElement("c", 2),
+      makeElement("d", 3),
+      makeElement("e", 4)
+    ];
+    // Cursor is really on "c" (index 2); the target "a" is behind it (index 0).
+    driver.setElements(elements, 2);
+
+    const targetSelector: FocusElementSelector = { resourceId: "a" };
+    // A path built while the cursor was unresolved: forward-from-0, which points
+    // AWAY from the target.
+    const path: FocusNavigationPath = {
+      currentFocusIndex: null,
+      targetFocusIndex: 0,
+      swipeCount: 2,
+      direction: "forward",
+      intermediateCheckpoints: []
+    };
+
+    const driverFactory: FocusNavigationDriverFactory = {
+      createDriver: () => driver
+    };
+    const executor = new FocusNavigationExecutor({ timer, driverFactory });
+
+    const resultPromise = executor.navigateToElement("device-1", targetSelector, path, {
+      verificationInterval: 1,
+      swipeDelay: 0
+    });
+    for (let i = 0; i < 15; i++) {
+      timer.advanceTime(100);
+      await new Promise(r => setImmediate(r));
+    }
+    const result = await resultPromise;
+
+    expect(result).toBe(true);
+    // Once the cursor is observed, navigation reverses and converges on "a" —
+    // the final swipe is backward (endX < startX).
+    const lastSwipe = driver.swipeHistory[driver.swipeHistory.length - 1];
+    expect(lastSwipe.x2).toBeLessThan(lastSwipe.x1);
+  });
+
+  test("bails when the TalkBack cursor can't be tracked instead of marching to maxSwipes (#3917)", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const elements = [
+      makeElement("a", 0),
+      makeElement("b", 1),
+      makeElement("c", 2)
+    ];
+    // No cursor is ever reported (focusedIndex null, autoAdvance off), so the
+    // cursor position can never be resolved in the traversal order.
+    driver.setElements(elements, null);
+    driver.autoAdvanceOnSwipe = false;
+
+    const targetSelector: FocusElementSelector = { resourceId: "c" };
+    // A large swipe count that, without the progress guard, would march blindly.
+    const path: FocusNavigationPath = {
+      currentFocusIndex: null,
+      targetFocusIndex: 2,
+      swipeCount: 50,
+      direction: "forward",
+      intermediateCheckpoints: []
+    };
+
+    const driverFactory: FocusNavigationDriverFactory = {
+      createDriver: () => driver
+    };
+    const executor = new FocusNavigationExecutor({ timer, driverFactory });
+
+    let thrownError: Error | null = null;
+    const resultPromise = executor.navigateToElement("device-1", targetSelector, path, {
+      verificationInterval: 1,
+      swipeDelay: 0
+    }).catch(e => {
+      thrownError = e as Error;
+    });
+    for (let i = 0; i < 20; i++) {
+      timer.advanceTime(100);
+      await new Promise(r => setImmediate(r));
+    }
+    await resultPromise;
+
+    expect(thrownError).not.toBeNull();
+    expect(thrownError!.message).toContain("could not track the TalkBack cursor position");
+    // Bailed after a couple of no-progress checks, nowhere near the 50 swipes.
+    expect(driver.getSwipeCount()).toBeLessThan(10);
+  });
 });

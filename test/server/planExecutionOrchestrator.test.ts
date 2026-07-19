@@ -437,6 +437,42 @@ steps:
     );
   });
 
+  test("android plan run: a failing manifest write is best-effort and does not fail the run", async () => {
+    // Segments land in a directory that does not exist, so writeSegmentManifest's
+    // fs.writeFile rejects with ENOENT. The write is best-effort (log-and-continue),
+    // so the plan run must still succeed and still surface the recording ids.
+    const missingDir = path.join(os.tmpdir(), "auto-mobile-plan-video-missing", "nope");
+    const androidRecorder: VideoRecorder = {
+      startVideoRecording: mock((options: any) =>
+        Promise.resolve({
+          recordingId: options.outputName as string,
+          outputPath: path.join(missingDir, `${options.outputName}.mp4`),
+          fileName: `${options.outputName}.mp4`,
+          startedAt: new Date(0).toISOString(),
+          outputName: options.outputName,
+        } as any)
+      ),
+      stopVideoRecording: mock((recordingId?: string) =>
+        Promise.resolve({
+          metadata: { recordingId, filePath: path.join(missingDir, `${recordingId}.mp4`) },
+          evictedRecordingIds: [],
+        } as any)
+      ),
+    };
+
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: androidDevice, request: { ...baseRequest, platform: "android" } },
+      { timer: new FakeTimer(), videoRecorder: androidRecorder }
+    );
+    const result = await orchestrator.execute();
+
+    expect(result.success).toBe(true);
+    // Finalize still returns the segment even though the manifest could not be written.
+    expect(result.videoRecordingIds).toHaveLength(1);
+    // No manifest was written (the target directory does not exist).
+    await expect(fsPromises.access(path.join(missingDir, "segments.json"))).rejects.toThrow();
+  });
+
   test("repository write errors are logged and do not crash the run", async () => {
     const exploding = {
       recordExecution: () => Promise.reject(new Error("db down")),

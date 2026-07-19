@@ -15,6 +15,7 @@ import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMappin
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
 import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
+import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 import {
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
@@ -523,6 +524,13 @@ export class PlanExecutionOrchestrator {
         const session = new AndroidSegmentedPlanVideoSession({
           device: this.device,
           outputNamePrefix: videoOutputPrefix,
+          // Share the orchestrator's clock so step-driven rotation timing is deterministic
+          // under test (in production both are the real defaultTimer, so no behavior change).
+          timer: this.timer,
+          // Route each segment's capture through the injected recorder so tests can
+          // drive the Android plan path with fakes (production passes the real manager).
+          startVideoRecording: this.videoRecorder.startVideoRecording,
+          stopVideoRecording: this.videoRecorder.stopVideoRecording,
         });
         await session.startFirstSegment();
         state.androidSession = session;
@@ -584,6 +592,18 @@ export class PlanExecutionOrchestrator {
         async () => {
           const finalized = await video.androidSession!.finalize();
           this.perfLog(`Segmented video finalized (${finalized.filePaths.length} file(s))`);
+          // Best-effort manifest so a plan run's ordered segments are discoverable on disk,
+          // matching the raw videoRecording stop path (writeSegmentManifest logs-and-continues
+          // on failure). The session handle is the first segment's recordingId, mirroring the
+          // tool path's sessionId grouping.
+          const segments: StoppedSegment[] = finalized.recordingIds.map((recordingId, index) => ({
+            recordingId,
+            filePath: finalized.filePaths[index],
+            segmentIndex: index,
+          }));
+          if (segments.length > 0) {
+            await writeSegmentManifest(segments[0].recordingId, segments);
+          }
           return { videoFilePaths: finalized.filePaths, videoRecordingIds: finalized.recordingIds };
         }
       );

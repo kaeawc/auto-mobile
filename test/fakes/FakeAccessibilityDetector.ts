@@ -15,6 +15,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   private detectionCallCount = 0;
   private invalidatedDevices: string[] = [];
   private invalidationCountAtFirstDetection: number | null = null;
+  private detectMethodQueue: AccessibilityService[] = [];
 
   /** Records the `adb` argument passed to each detectMethod call (regression guard for #3915). */
   public readonly detectMethodAdbArgs: Array<AdbExecutor | null | undefined> = [];
@@ -34,6 +35,17 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
    */
   setDefaultResult(enabled: boolean, service: AccessibilityService = "unknown"): void {
     this.defaultResult = { enabled, service };
+  }
+
+  /**
+   * Queue a sequence of `detectMethod` results consumed in FIFO order; once the
+   * queue is exhausted, detection falls back to the per-device / default result.
+   * Lets a test model a state transition across the two detections a toggle now
+   * performs — the pre-apply idempotency check and the post-apply confirmation
+   * (#3921). Only affects `detectMethod`; `isAccessibilityEnabled` is unchanged.
+   */
+  enqueueDetectMethodResults(...services: AccessibilityService[]): void {
+    this.detectMethodQueue.push(...services);
   }
 
   /**
@@ -83,6 +95,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
     this.invalidationCountAtFirstDetection = null;
     this.detectMethodAdbArgs.length = 0;
     this.detectMethodFeatureFlagsArgs.length = 0;
+    this.detectMethodQueue.length = 0;
   }
 
   async isAccessibilityEnabled(
@@ -106,6 +119,9 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
       this.invalidationCountAtFirstDetection = this.invalidatedDevices.length;
     }
     this.detectionCallCount++;
+    if (this.detectMethodQueue.length > 0) {
+      return this.detectMethodQueue.shift()!;
+    }
     const result = this.detectionResults.get(deviceId) || this.defaultResult;
     return result.service;
   }

@@ -1,7 +1,7 @@
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import type { Element } from "../../models/Element";
-import type { ElementSelector as FocusElementSelector } from "../../utils/AccessibilityFocusTracker";
+import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
 
 interface TextMatchOptions {
   partialMatch?: boolean;

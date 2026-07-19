@@ -91,8 +91,12 @@ targets:
       - target: CtrlProxyApp
         # Note: We don't depend on CtrlProxy framework - sources are compiled directly into UI tests
         # to give XCTest access for XCUIApplication
+      # Must embed: the xctest bundle is loaded from CtrlProxyUITests-Runner.app, a
+      # different bundle from CtrlProxyApp.app, so @rpath cannot reach the copy the
+      # app embeds. Without this the runner dies at dlopen with
+      # "Library not loaded: @rpath/ObjCExceptionCatcher.framework".
       - target: ObjCExceptionCatcher
-        embed: false
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.uitests

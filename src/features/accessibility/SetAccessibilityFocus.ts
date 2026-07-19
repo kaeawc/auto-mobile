@@ -87,16 +87,24 @@ export class SetAccessibilityFocus {
       return { success: false, error: message };
     }
 
-    // Confirm the cursor moved (best-effort; never fail the operation on a read error).
+    // Confirm the cursor moved (best-effort; never fail the operation on a read
+    // error). `confirmed` records whether the read-back actually succeeded so
+    // callers can distinguish "focused, couldn't confirm" from "didn't focus"
+    // (#3922).
     let focusedElement: Element | undefined;
+    let confirmed = false;
     try {
       const focus = await service.requestCurrentFocus();
       focusedElement = focus.focusedElement ?? undefined;
+      confirmed = true;
     } catch (error) {
       logger.warn(`[accessibilityFocus] Failed to read current focus after ${action}: ${error}`);
     }
 
-    return { success: true, focusedElement };
+    const warning = confirmed
+      ? undefined
+      : `Focus ${action} was dispatched but the resulting focus state could not be read back to confirm it.`;
+    return { success: true, focusedElement, confirmed, warning };
   }
 
   /**

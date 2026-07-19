@@ -49,6 +49,7 @@
 		818C27D4C9349EE5D7B46AC4 /* ObjCExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = F9D3D13C3FE12BA2CD012082 /* ObjCExceptionCatcher.m */; };
 		81E23C054BAEC85A37171E29 /* CtrlProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8AC18133C075D1909F9D04E6 /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
+		8D5933C825193DD5F0FDF354 /* ObjCExceptionCatcher.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8E00E330C839DBF9AC5DCC8E /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		96ED92C8F268021CE148C4FF /* CtrlProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; };
 		9E975A4E407F93A21BD80EB4 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDA90BC9E26458BCE47381F /* SdkDatabaseClient.swift */; };
@@ -131,6 +132,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		20E17E3CCC662C873AD48A47 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				8D5933C825193DD5F0FDF354 /* ObjCExceptionCatcher.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		882047DB62E7BA5C6856C006 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -399,6 +411,7 @@
 			buildPhases = (
 				7CFC5122F30AA08D7EB28C15 /* Sources */,
 				DAD3A99273A4DAD849C7E1B0 /* Frameworks */,
+				20E17E3CCC662C873AD48A47 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -533,11 +546,11 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				61A21F82A43E4D436CD13CCD /* CtrlProxy */,
 				829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+				E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
+				61A21F82A43E4D436CD13CCD /* CtrlProxy */,
 				D665478F817F2DF283B43BFB /* CtrlProxyTests */,
 				2B5458099134F47AA1A7C4DA /* CtrlProxyUITests */,
-				E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
 			);
 		};
 /* End PBXProject section */

@@ -109,6 +109,7 @@ export class TapOnElement extends BaseVisualChange {
   private elementSelector: ElementSelector;
   private viewHierarchy: ViewHierarchy;
   private talkBackStrategy: TalkBackTapStrategy;
+  private readonly featureFlags: FeatureFlagService;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private strategy: TapStrategy;
@@ -198,12 +199,13 @@ export class TapOnElement extends BaseVisualChange {
     this.talkBackStrategy = options.talkBackStrategy ?? new TalkBackTapStrategy({ timer: this.timer });
     this.talkBackDriverFactory = options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
     this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
+    this.featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
     this.strategy = options.tapStrategy ?? createTapStrategy(
       device,
       this.adb,
       this.accessibilityDetector,
       this.iosVoiceOverDetector,
-      options.featureFlags ?? FeatureFlagService.getInstance()
+      this.featureFlags
     );
     this.longPressMetadataDetector = new LongPressMetadataDetector(this.elementParser);
   }
@@ -1425,6 +1427,17 @@ export class TapOnElement extends BaseVisualChange {
    * drive the TalkBack cursor by swipe navigation to the target before activating.
    * For longPress, tries ACTION_LONG_CLICK first, then coordinate gesture, then ADB.
    */
+  /**
+   * Whether opt-in screen-reader navigation (cursor-traversal fidelity mode,
+   * #3937) is requested. Enabled by the `screen-reader-navigation` feature flag
+   * (the global opt-in) OR the per-call `screenReaderNavigation` option. Default
+   * stays direct-activation (#3936).
+   */
+  private isScreenReaderNavigationEnabled(options?: TapOnElementOptions): boolean {
+    return Boolean(options?.screenReaderNavigation)
+      || this.featureFlags.isEnabled("screen-reader-navigation");
+  }
+
   private async executeAndroidTapWithAccessibility(
     action: string,
     x: number,
@@ -1457,13 +1470,12 @@ export class TapOnElement extends BaseVisualChange {
     }
 
     if (action === "tap" || action === "doubleTap") {
-      if (options?.screenReaderNavigation) {
+      if (this.isScreenReaderNavigationEnabled(options)) {
         // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
         // navigation to the target, then activate.
         const result = await this.talkBackStrategy.executeTap(
           this.device.deviceId,
           element,
-          action as "tap" | "doubleTap",
           driver
         );
 

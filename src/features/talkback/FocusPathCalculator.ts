@@ -1,5 +1,5 @@
 import type { Element } from "../../models/Element";
-import type { ElementSelector as FocusElementSelector } from "../../utils/AccessibilityFocusTracker";
+import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 
 export interface FocusNavigationPath {
@@ -7,7 +7,6 @@ export interface FocusNavigationPath {
   targetFocusIndex: number;
   swipeCount: number;
   direction: "forward" | "backward";
-  intermediateCheckpoints: number[];
 }
 
 export class FocusPathCalculator {
@@ -20,8 +19,7 @@ export class FocusPathCalculator {
   calculatePath(
     currentFocus: Element | null,
     targetSelector: FocusElementSelector,
-    orderedElements: Element[],
-    checkpointInterval: number = 5
+    orderedElements: Element[]
   ): FocusNavigationPath | null {
     if (!orderedElements.length) {
       return null;
@@ -47,32 +45,8 @@ export class FocusPathCalculator {
       currentFocusIndex: resolvedCurrentIndex,
       targetFocusIndex: targetIndex,
       swipeCount,
-      direction,
-      intermediateCheckpoints: this.buildCheckpoints(
-        boundedCurrentIndex,
-        swipeCount,
-        direction,
-        checkpointInterval
-      )
+      direction
     };
-  }
-
-  private buildCheckpoints(
-    startIndex: number,
-    swipeCount: number,
-    direction: "forward" | "backward",
-    checkpointInterval: number
-  ): number[] {
-    if (swipeCount === 0 || checkpointInterval <= 0) {
-      return [];
-    }
-
-    const checkpoints: number[] = [];
-    for (let i = checkpointInterval; i < swipeCount; i += checkpointInterval) {
-      const offset = direction === "forward" ? i : -i;
-      checkpoints.push(startIndex + offset);
-    }
-    return checkpoints;
   }
 
   private clampIndex(index: number, length: number): number {

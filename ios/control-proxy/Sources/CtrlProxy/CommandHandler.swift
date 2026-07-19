@@ -1007,24 +1007,75 @@ public class CommandHandler: CommandHandling {
 
     // MARK: - Accessibility Features
 
-    private func handleGetCurrentFocus(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
-        // Stub: Focus tracking not yet implemented
-        return WebSocketResponse.error(
-            type: ResponseType.currentFocusResult.rawValue,
+    /// Report the element holding the VoiceOver cursor. The cursor is only visible
+    /// in-process, so it reaches us as `accessibility-focused` on the SDK-enriched
+    /// hierarchy (see HierarchyMerger, #3924). Returns a null focusedElement when
+    /// nothing is focused — that is a success, not an error.
+    private func handleGetCurrentFocus(_ request: RequestEnvelope, startTime: Date) throws -> CurrentFocusResponse {
+        let enriched = try enrichedHierarchyForAccessibility()
+        let focused = enriched.hierarchy.flatMap { Self.findAccessibilityFocused($0) }
+        return CurrentFocusResponse(
             requestId: request.requestId,
-            error: "Current focus not yet implemented on iOS",
+            focusedElement: focused,
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }
 
-    private func handleGetTraversalOrder(_ request: RequestEnvelope, startTime: Date) throws -> WebSocketResponse {
-        // Stub: Traversal order not yet implemented
-        return WebSocketResponse.error(
-            type: ResponseType.traversalOrderResult.rawValue,
+    /// Report accessibility elements in VoiceOver traversal (depth-first) order,
+    /// plus the index of the focused one when the cursor is present (#3924).
+    private func handleGetTraversalOrder(_ request: RequestEnvelope, startTime: Date) throws -> TraversalOrderResponse {
+        let enriched = try enrichedHierarchyForAccessibility()
+        var ordered: [UIElementInfo] = []
+        if let root = enriched.hierarchy {
+            Self.collectAccessibilityElements(root, into: &ordered)
+        }
+        let focusedIndex = ordered.firstIndex { $0.accessibilityFocused == "true" }
+        return TraversalOrderResponse(
             requestId: request.requestId,
-            error: "Traversal order not yet implemented on iOS",
+            elements: ordered,
+            focusedIndex: focusedIndex,
             totalTimeMs: totalTimeMs(from: startTime)
         )
+    }
+
+    /// Extract the hierarchy and merge the in-app SDK view tree into it, so
+    /// accessibility-only signals (the VoiceOver cursor, `isAccessibilityElement`)
+    /// are present. Shared by the focus and traversal handlers.
+    private func enrichedHierarchyForAccessibility() throws -> ViewHierarchy {
+        let hierarchy: ViewHierarchy
+        do {
+            hierarchy = try perfProvider.track("extraction") {
+                try elementLocator.getViewHierarchy(disableAllFiltering: false)
+            }
+        } catch {
+            throw CommandError.executionFailed("Failed to get view hierarchy: \(error.localizedDescription)")
+        }
+        return enrichWithMatchingSdkHierarchy(hierarchy)
+    }
+
+    /// Depth-first search for the element carrying the VoiceOver cursor.
+    static func findAccessibilityFocused(_ element: UIElementInfo) -> UIElementInfo? {
+        if element.accessibilityFocused == "true" {
+            return element
+        }
+        for child in element.node ?? [] {
+            if let match = findAccessibilityFocused(child) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    /// Collect, depth-first, the elements VoiceOver would stop on. `isAccessibilityElement`
+    /// is the precise signal and is carried through from the in-app SDK; containers that
+    /// merely hold other elements are skipped but still traversed into.
+    static func collectAccessibilityElements(_ element: UIElementInfo, into ordered: inout [UIElementInfo]) {
+        if element.extras?["sdk.isAccessibilityElement"] == "true" {
+            ordered.append(element)
+        }
+        for child in element.node ?? [] {
+            collectAccessibilityElements(child, into: &ordered)
+        }
     }
 
     private func handleAddHighlight(_ request: RequestAddHighlight, startTime: Date) throws -> WebSocketResponse {

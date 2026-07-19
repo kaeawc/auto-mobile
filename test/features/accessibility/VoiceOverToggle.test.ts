@@ -49,6 +49,9 @@ describe("VoiceOverToggle", () => {
 
   describe("enable VoiceOver on simulator", () => {
     test("returns supported:true applied:true", async () => {
+      // Post-apply confirmation re-detect reports VoiceOver on (#3921).
+      fakeDetector.setVoiceOverEnabled(true);
+
       const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
       const result = await toggle.toggle(true);
 
@@ -56,6 +59,19 @@ describe("VoiceOverToggle", () => {
       expect(result.applied).toBe(true);
       expect(result.currentState).toBe(true);
       expect(result.reason).toBeUndefined();
+    });
+
+    test("reports applied:false when VoiceOver did not turn on after apply", async () => {
+      // simctl write ran but the confirmation re-detect still reports off — the
+      // toggle must not claim success optimistically (#3921).
+      fakeDetector.setVoiceOverEnabled(false);
+
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const result = await toggle.toggle(true);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.currentState).toBe(false);
     });
 
     test("runs correct xcrun simctl spawn commands when enabling", async () => {
@@ -115,6 +131,23 @@ describe("VoiceOverToggle", () => {
           `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
         )
       ).toBe(true);
+    });
+  });
+
+  describe("simctl failure during apply phase", () => {
+    test("returns a typed failure (not an uncaught throw) when a simctl command fails", async () => {
+      fakeExec.setCommandHandler("VoiceOverTouchEnabled", () => {
+        throw new Error("simctl spawn failed");
+      });
+
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      // #3921: the simctl failure is wrapped into a typed result, matching
+      // TalkBackToggle's graceful contract, rather than propagating raw.
+      const result = await toggle.toggle(true);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.reason).toContain("simctl spawn failed");
     });
   });
 

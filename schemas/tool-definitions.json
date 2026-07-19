@@ -320,6 +320,9 @@
             "bounds"
           ],
           "additionalProperties": {}
+        },
+        "confirmed": {
+          "type": "boolean"
         }
       },
       "required": [

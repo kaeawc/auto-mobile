@@ -24,4 +24,13 @@ export interface SetAccessibilityFocusResult {
    * The element that received accessibility focus
    */
   focusedElement?: Element;
+
+  /**
+   * Whether the post-action focus state was successfully read back to confirm
+   * the cursor moved. `false` means the set/clear was dispatched but the
+   * confirmation read failed, so `focusedElement` may be missing even though the
+   * action itself did not error — callers can use this to decide whether to
+   * retry rather than assume the cursor never moved (#3922).
+   */
+  confirmed?: boolean;
 }

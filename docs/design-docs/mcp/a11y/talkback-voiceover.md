@@ -1,8 +1,13 @@
 # TalkBack/VoiceOver
 
-<kbd>🚧 Design Only</kbd>
+<kbd>⚠️ Partial</kbd>
 
-> **Current state:** This document describes the full 4-phase implementation plan. Phase 1 detection infrastructure (TalkBack state via ADB secure settings) is partially implemented. Phases 2–4 (tool adaptations, focus tracking, advanced features) are **not yet implemented**. iOS VoiceOver support is planned. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** Screen-reader detection and the core tool adaptations are **implemented on both platforms**.
+>
+> - **Android (TalkBack):** detection via ADB secure settings; TalkBack-aware `tapOn` (direct `ACTION_CLICK` activation, with opt-in cursor navigation behind the `screen-reader-navigation` feature flag) and `swipeOn` (`ACTION_SCROLL_FORWARD`/`BACKWARD` with a two-finger fallback).
+> - **iOS (VoiceOver):** detection via CtrlProxy; VoiceOver-aware tap (label-based accessibility activation) and swipe (accessibility scroll action with a three-finger fallback). The runner reports the VoiceOver cursor, so `observe` populates `accessibilityFocusedElement`.
+>
+> **Still open:** iOS focus *control* (set/clear focus, cursor stepping), VoiceOver Rotor, Magic Tap, and physical-device VoiceOver toggle. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Overview
 
@@ -188,16 +193,23 @@ iOS VoiceOver follows the same phased approach. Key differences:
 | Focus API | `FOCUS_ACCESSIBILITY` | `UIAccessibilityFocus` |
 | Rotor | No equivalent | Two-finger rotate for navigation modes |
 
-iOS is secondary priority; initial focus is Android TalkBack validation.
-
 ---
 
-## Future Enhancement Ideas
+## Still Open
 
-- **Explicit focus control tools**: `setAccessibilityFocus`, `getAccessibilityFocus`, `navigateFocus`
-- **Announcement control**: Trigger screen reader announcements for user testing
-- **Enhanced scroll-until-visible**: Smart loop detection, bi-directional search, focus tracking
-- **Accessibility tree export**: Full node hierarchy with actions for debugging
-- **Complex gesture simulation**: TalkBack local/global context menus, rotor navigation
-- **Accessibility auditing**: Combine TalkBack support with WCAG auditing
-- **iOS VoiceOver parity**: Three-finger swipe, rotor, Magic Tap support
+Tracked in [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md), which is the
+source of truth for remaining gaps:
+
+- **iOS focus control**: `setAccessibilityFocus` / `clearAccessibilityFocus` and cursor
+  stepping on iOS. Reading the cursor is done — the runner reports it and `observe`
+  populates `accessibilityFocusedElement` — but moving it is not.
+- **VoiceOver Rotor**: two-finger rotate to change navigation mode (parity doc Gap 4).
+- **VoiceOver Magic Tap**: two-finger double-tap for an app's primary action (parity doc Gap 5).
+- **Physical-device VoiceOver toggle**: simulator-only today; no known `idevice` equivalent.
+- **Announcement control**: trigger screen-reader announcements for user testing.
+- **Accessibility tree export**: full node hierarchy with actions, for debugging.
+- **TalkBack context menus**: local/global menu gestures.
+
+Delivered since this document was written, and no longer "future": TalkBack and VoiceOver
+detection, tap adaptation on both platforms, scroll-action swipe with two-finger (Android)
+and three-finger (iOS) fallbacks, and WCAG auditing alongside screen-reader support.

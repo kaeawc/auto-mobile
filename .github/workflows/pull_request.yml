@@ -1308,7 +1308,7 @@ jobs:
           xcode-version: ${{ matrix.config.xcode }}
 
       - name: "Install XcodeGen"
-        run: brew install xcodegen
+        run: ./scripts/ios/install-xcodegen.sh
 
       - name: "Check XcodeGen Project Drift"
         run: ./scripts/ios/xcodegen-drift-check.sh --all
@@ -1369,7 +1369,7 @@ jobs:
       # Validated by the #3779 spike: outputs unused here, `- wait: [ids]` list
       # barrier works, and an install failure surfaces loudly at the wait.
       - name: "Install XcodeGen"
-        run: brew install xcodegen
+        run: ./scripts/ios/install-xcodegen.sh
         background: true
         id: install-xcodegen
 

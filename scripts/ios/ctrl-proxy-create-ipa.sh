@@ -68,13 +68,7 @@ fi
 
 if ! command -v xcodegen &> /dev/null; then
     echo -e "${YELLOW}Warning: xcodegen not found. Attempting to install via brew...${NC}"
-    if command -v brew &> /dev/null; then
-        brew install xcodegen
-    else
-        echo -e "${RED}Error: xcodegen not found and brew not available.${NC}"
-        echo -e "${RED}Please install xcodegen: brew install xcodegen${NC}"
-        exit 1
-    fi
+    "${SCRIPT_DIR}/install-xcodegen.sh"
 fi
 
 XCODE_VERSION=$(xcodebuild -version)

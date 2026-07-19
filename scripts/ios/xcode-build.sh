@@ -114,7 +114,7 @@ fi
 if ! command -v xcodegen &> /dev/null; then
     if command -v brew &> /dev/null; then
         print_info "Installing xcodegen..."
-        brew install xcodegen || echo "xcodegen install failed, continuing with committed projects"
+        "${SCRIPT_DIR}/install-xcodegen.sh" || echo "xcodegen install failed, continuing with committed projects"
     fi
 fi
 

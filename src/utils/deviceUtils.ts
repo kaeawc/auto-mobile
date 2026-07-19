@@ -82,6 +82,49 @@ export interface PlatformDeviceManager {
   waitForDeviceReady(device: DeviceInfo, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
 }
 
+/**
+ * Wait for a freshly-started device to become ready, actively cancelling the
+ * boot if readiness fails (issue #3952).
+ *
+ * #3951 gave the start handle an honest `kill()` (iOS shuts the simulator down;
+ * Android kills the spawned emulator process). This wires that capability into
+ * the boot flow: if `waitForDeviceReady` throws — a readiness timeout or
+ * failure — the device we just started is torn back down instead of being left
+ * booting in the background, where a retry would collide with a half-booted
+ * device (`Unable to boot device in current state: Booting`).
+ *
+ * A `null` handle means we adopted an already-running/already-starting device we
+ * did not spawn; there is nothing to kill, so it is left untouched — which is
+ * the correct behavior for adopted devices.
+ *
+ * @param deviceManager - The platform device manager performing the readiness wait
+ * @param device - The device that was started
+ * @param handle - The start handle from `startDevice` (null for adopted devices)
+ * @param timeoutMs - Optional readiness timeout
+ * @returns The booted device once ready
+ * @throws Re-throws the original readiness error after cancelling the boot
+ */
+export async function waitForDeviceReadyOrCancel(
+  deviceManager: PlatformDeviceManager,
+  device: DeviceInfo,
+  handle: ChildProcess | null,
+  timeoutMs?: number,
+): Promise<BootedDevice> {
+  try {
+    return await deviceManager.waitForDeviceReady(device, timeoutMs, handle);
+  } catch (error) {
+    if (handle) {
+      logger.warn(
+        `[startDevice] readiness failed for ${device.deviceId ?? device.name}; ` +
+        `cancelling boot via handle.kill()`,
+        error,
+      );
+      handle.kill();
+    }
+    throw error;
+  }
+}
+
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;

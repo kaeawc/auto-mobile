@@ -18,6 +18,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   private executedOperations: string[] = [];
   private mockChildProcesses: Map<string, ChildProcess | null> = new Map();
   private waitForDeviceReadyChildProcess: ChildProcess | null | undefined;
+  private waitForDeviceReadyError: Error | undefined;
 
   /**
    * Configure available device images for a platform
@@ -89,6 +90,15 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
 
   getWaitForDeviceReadyChildProcess(): ChildProcess | null | undefined {
     return this.waitForDeviceReadyChildProcess;
+  }
+
+  /**
+   * Configure waitForDeviceReady to reject, simulating a readiness
+   * timeout/failure (issue #3952 cancel-on-failure path).
+   * @param error - The error to throw, or undefined to resolve normally
+   */
+  setWaitForDeviceReadyError(error: Error | undefined): void {
+    this.waitForDeviceReadyError = error;
   }
 
   /**
@@ -220,6 +230,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     this.executedOperations.push(
       `waitForDeviceReady:${device.name}:${timeoutMs}`,
     );
+
+    if (this.waitForDeviceReadyError) {
+      throw this.waitForDeviceReadyError;
+    }
 
     // Return a booted device with the same name and platform
     return {

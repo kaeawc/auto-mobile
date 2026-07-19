@@ -142,6 +142,40 @@ describe("startDevice handler", () => {
     expect(result.processId).toBeUndefined();
   });
 
+  it("cancels the boot (kills the start handle) when cold-boot readiness fails", async () => {
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+
+    // A freshly-spawned device hands back a real handle; readiness then fails.
+    // The boot must be torn back down via handle.kill() rather than left
+    // mid-boot (issue #3952).
+    let killed = false;
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, {
+      kill: (): boolean => { killed = true; return true; },
+      pid: 4242,
+    } as any);
+    fakeDeviceUtils.setWaitForDeviceReadyError(new Error("readiness timeout"));
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow("readiness timeout");
+    expect(killed).toBe(true);
+  });
+
+  it("does not kill an adopted device (null handle) when readiness fails", async () => {
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+
+    // Adopted device: startDevice returned null, so there is nothing to kill.
+    // The failure must still propagate without a null-deref crash (issue #3952).
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, null);
+    fakeDeviceUtils.setWaitForDeviceReadyError(new Error("readiness timeout"));
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow("readiness timeout");
+  });
+
   it("passes timeout to the cold boot start operation", async () => {
     fakeDeviceUtils.setBootedDevices("ios", []);
     fakeDeviceUtils.setDeviceImages("ios", [{

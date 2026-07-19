@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager, PlatformDeviceManager, waitForDeviceReadyOrCancel } from "../utils/deviceUtils";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
@@ -334,7 +334,7 @@ export function registerDeviceTools() {
     }
 
     perf.startOperation("waitForReady");
-    const readyDevice = await deviceUtils.waitForDeviceReady(image, timeoutMs, childProcess);
+    const readyDevice = await waitForDeviceReadyOrCancel(deviceUtils, image, childProcess, timeoutMs);
     perf.endOperation("waitForReady");
 
     if (progress) {

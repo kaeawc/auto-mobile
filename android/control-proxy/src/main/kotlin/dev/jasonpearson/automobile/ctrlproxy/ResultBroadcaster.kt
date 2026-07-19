@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.ErrorResponse
-import kotlinx.coroutines.CancellationException
 
 /**
  * Guards a result broadcast so that a throw while *sending* a result still yields a correlated
@@ -35,10 +34,14 @@ class ResultBroadcaster(
     Log.e(TAG, message, error)
   },
 ) {
+  /** The shared correlated-error-on-throw core (#3086). */
+  private val reporter = CorrelatedErrorReporter(broadcastError, logError)
+
   /**
    * Run [block] (which performs the actual result broadcast). If it throws anything other than a
-   * cooperative [CancellationException], broadcast an [ErrorResponse] correlated by [requestId] so
-   * the awaiting client fails fast instead of hanging.
+   * cooperative cancellation, broadcast an [ErrorResponse] correlated by [requestId] so the
+   * awaiting client fails fast instead of hanging. See [CorrelatedErrorReporter.guarding] for the
+   * semantics.
    *
    * @param requestId correlation id from the originating request; null when the request carried
    *   none (the fallback frame then carries a null requestId, exactly as the synchronous decode
@@ -47,32 +50,14 @@ class ResultBroadcaster(
    *   triage.
    */
   suspend fun guard(requestId: String?, action: String, block: suspend () -> Unit) {
-    try {
-      block()
-    } catch (e: CancellationException) {
-      // Cooperative cancellation means the service scope is shutting down — never convert it into a
-      // client-facing error frame; let it propagate so the coroutine unwinds cleanly.
-      throw e
-    } catch (e: Exception) {
-      val cause = e.message ?: e::class.simpleName ?: "unknown error"
-      logError("Error broadcasting $action (requestId=$requestId)", e)
-      try {
-        broadcastError(
-          ErrorResponse(requestId = requestId, error = "Broadcast failed for $action: $cause")
-        )
-      } catch (fallbackError: CancellationException) {
-        throw fallbackError
-      } catch (fallbackError: Exception) {
-        // A failure while reporting the broadcast failure must not escape (which would let the
-        // exception bubble to the launched coroutine and defeat the fix). Log and swallow — the
-        // client then falls back to its timeout, but only for this genuinely-unrecoverable
-        // double-failure tail.
-        logError(
-          "Failed to broadcast fallback error for $action (requestId=$requestId)",
-          fallbackError,
-        )
-      }
-    }
+    reporter.guarding(
+      requestId = requestId,
+      failureLogMessage = "Error broadcasting $action (requestId=$requestId)",
+      errorMessagePrefix = "Broadcast failed for $action",
+      doubleFailureLogMessage =
+        "Failed to broadcast fallback error for $action (requestId=$requestId)",
+      block = block,
+    )
   }
 
   companion object {

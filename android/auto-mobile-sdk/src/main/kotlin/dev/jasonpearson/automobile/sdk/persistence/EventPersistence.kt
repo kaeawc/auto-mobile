@@ -224,16 +224,15 @@ internal class FileEventPersistence(
 
   internal fun deserializeEvents(json: String): List<SdkEvent> {
     val array = JSONArray(json)
-    val events = mutableListOf<SdkEvent>()
-    for (i in 0 until array.length()) {
+    return (0 until array.length()).mapNotNull { i ->
       val obj = array.getJSONObject(i)
-      val type = obj.optString("type")
-      val timestamp = obj.optLong("timestamp")
-      val appId = obj.optString("applicationId").ifEmpty { null }
-      val event = deserializeEvent(type, obj, timestamp, appId)
-      if (event != null) events.add(event)
+      deserializeEvent(
+        type = obj.optString("type"),
+        obj = obj,
+        timestamp = obj.optLong("timestamp"),
+        appId = obj.optString("applicationId").ifEmpty { null },
+      )
     }
-    return events
   }
 
   @Suppress("CyclomaticComplexMethod")
@@ -399,10 +398,6 @@ internal class FileEventPersistence(
 
   private fun jsonObjectToMap(obj: JSONObject?): Map<String, String> {
     if (obj == null) return emptyMap()
-    val map = mutableMapOf<String, String>()
-    for (key in obj.keys()) {
-      map[key] = obj.optString(key)
-    }
-    return map
+    return obj.keys().asSequence().associateWith { key -> obj.optString(key) }
   }
 }

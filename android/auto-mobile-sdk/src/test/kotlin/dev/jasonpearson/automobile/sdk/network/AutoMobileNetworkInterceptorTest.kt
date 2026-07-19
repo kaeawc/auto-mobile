@@ -294,6 +294,49 @@ class AutoMobileNetworkInterceptorTest {
   }
 
   @Test
+  fun `captureHeaders joins repeated request header values in encounter order`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureHeaders = true)
+    // addHeader appends rather than replacing, so this is the only way to produce a
+    // Headers instance with a repeated name. Three values, not two: two would still pass
+    // if the join order were reversed or the fold kept only the outermost pair.
+    val request =
+      Request.Builder()
+        .url("https://api.example.com/users")
+        .addHeader("X-Trace", "first")
+        .addHeader("X-Trace", "second")
+        .addHeader("X-Trace", "third")
+        .build()
+
+    interceptor.intercept(fakeChain(request = request))
+    buffer.flush()
+
+    val event = flushed[0][0] as SdkNetworkRequestEvent
+    assertEquals("first, second, third", event.requestHeaders!!["X-Trace"])
+  }
+
+  @Test
+  fun `captureHeaders keeps repeated header names case sensitive`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureHeaders = true)
+    // Differently-cased names are distinct keys -- they must not be folded together, which
+    // is why this cannot delegate to okhttp's Headers.toMultimap() (that lowercases names).
+    val request =
+      Request.Builder()
+        .url("https://api.example.com/users")
+        .addHeader("X-Case", "lower")
+        .addHeader("X-CASE", "upper")
+        .build()
+
+    interceptor.intercept(fakeChain(request = request))
+    buffer.flush()
+
+    val event = flushed[0][0] as SdkNetworkRequestEvent
+    assertEquals("lower", event.requestHeaders!!["X-Case"])
+    assertEquals("upper", event.requestHeaders!!["X-CASE"])
+  }
+
+  @Test
   fun `captureHeaders true captures response headers`() {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureHeaders = true)

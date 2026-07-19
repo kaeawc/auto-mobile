@@ -341,7 +341,7 @@ jobs:
           xcode-version: ${{ matrix.config.xcode }}
 
       - name: "Install XcodeGen"
-        run: brew install xcodegen
+        run: ./scripts/ios/install-xcodegen.sh
 
       - name: "Generate Xcode Projects"
         run: ./scripts/ios/xcodegen-generate.sh

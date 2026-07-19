@@ -31,19 +31,8 @@ jobs:
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
-      - name: "Cache Homebrew packages"
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/Library/Caches/Homebrew
-            /opt/homebrew/Cellar/xcodegen
-            /usr/local/Cellar/xcodegen
-          key: homebrew-xcodegen-${{ runner.os }}
-
       - name: "Install XcodeGen"
-        run: |
-          brew untap aws/tap || true
-          brew install xcodegen
+        run: ./scripts/ios/install-xcodegen.sh
 
       - name: "Cache Ruby gems"
         uses: actions/cache@v5

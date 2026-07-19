@@ -37,6 +37,8 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
+source "${SCRIPT_DIR}/xcodegen_version.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 XCODEPROJ="${CTRL_PROXY_IOS_DIR}/CtrlProxy.xcodeproj"
@@ -82,16 +84,12 @@ fi
 # Generate Xcode project if needed (xcodeproj is committed to git, so this is
 # only triggered in local dev when the project file is missing)
 if [ ! -d "${XCODEPROJ}" ]; then
-    if ! command -v xcodegen &> /dev/null; then
-        echo -e "${YELLOW}Warning: xcodegen not found. Attempting to install via brew...${NC}"
-        if command -v brew &> /dev/null; then
-            brew install xcodegen
-        else
-            echo -e "${RED}Error: xcodegen not found and brew not available.${NC}"
-            echo -e "${RED}Please install xcodegen: brew install xcodegen${NC}"
-            exit 1
-        fi
-    fi
+    # Version check, not presence check (see #3975): an already-installed but
+    # skewed XcodeGen would otherwise regenerate a project that reads as drift.
+    echo -e "${YELLOW}Ensuring pinned XcodeGen ${XCODEGEN_VERSION}...${NC}"
+    "${SCRIPT_DIR}/install-xcodegen.sh"
+    hash -r 2>/dev/null || true
+    require_pinned_xcodegen_version
     echo -e "${BLUE}Generating Xcode project...${NC}"
     cd "${CTRL_PROXY_IOS_DIR}"
     xcodegen generate

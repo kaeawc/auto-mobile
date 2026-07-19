@@ -16,6 +16,8 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
+source "${SCRIPT_DIR}/xcodegen_version.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
 
@@ -45,20 +47,19 @@ print_info() {
     echo -e "  ${BLUE}ℹ${NC} $1"
 }
 
-# Check if xcodegen is available
-if ! command -v xcodegen &> /dev/null; then
-    echo -e "${YELLOW}Warning: xcodegen not found, attempting to install via Homebrew...${NC}"
-    if command -v brew &> /dev/null; then
-        brew install xcodegen
-    else
-        echo -e "${RED}Error: Neither xcodegen nor Homebrew is available${NC}"
-        echo -e "Install XcodeGen: brew install xcodegen"
-        exit 1
-    fi
-fi
+# Install the pinned XcodeGen if it is missing or skewed. A bare
+# `brew install xcodegen` here was how a contributor could regenerate with an
+# arbitrary version and commit a skewed project file (issue #3975). The
+# installer no-ops when the pinned version is already present, so calling it
+# unconditionally costs nothing and keeps this branch-free.
+"${SCRIPT_DIR}/install-xcodegen.sh"
+# Bash caches resolved command paths; drop a stale entry for a previous xcodegen.
+hash -r 2>/dev/null || true
 
-XCODEGEN_VERSION=$(xcodegen --version)
-print_info "XcodeGen version: ${XCODEGEN_VERSION}"
+# Gate the WRITE path: never generate project files with a skewed generator.
+require_pinned_xcodegen_version
+
+print_info "XcodeGen version: ${XCODEGEN_VERSION} (pinned)"
 echo ""
 
 # Find all project.yml files

@@ -6,8 +6,21 @@ import { spawnSync } from "node:child_process";
 
 const repoRoot = join(import.meta.dir, "../..");
 const driftCheckScript = join(repoRoot, "scripts/ios/xcodegen-drift-check.sh");
+const versionScript = join(repoRoot, "scripts/ios/xcodegen_version.sh");
 const workflowPath = join(repoRoot, ".github/workflows/pull_request.yml");
 const tempDirs: string[] = [];
+
+// The drift check sources xcodegen_version.sh and gates on the pinned version
+// before generating (issue #3975), so the sandbox must carry the real pin —
+// read it from the version file rather than duplicating the literal, so a
+// version bump keeps these fixtures in sync automatically.
+const pinnedXcodegenVersion = (() => {
+  const match = /^XCODEGEN_VERSION="([^"]+)"/m.exec(readFileSync(versionScript, "utf8"));
+  if (!match) {
+    throw new Error(`Could not parse XCODEGEN_VERSION from ${versionScript}`);
+  }
+  return match[1];
+})();
 
 function expectExitStatus(result: ReturnType<typeof spawnSync>, expectedStatus: number): void {
   if (result.status !== expectedStatus) {
@@ -39,6 +52,8 @@ function createTempRepo(): string {
   writeFileSync(join(tempDir, "baseline/project.pbxproj"), "committed project\n");
   cpSync(driftCheckScript, join(tempDir, "scripts/ios/xcodegen-drift-check.sh"));
   chmodSync(join(tempDir, "scripts/ios/xcodegen-drift-check.sh"), 0o755);
+  // The drift check sources this for the pin and the require_pinned gate.
+  cpSync(versionScript, join(tempDir, "scripts/ios/xcodegen_version.sh"));
   writeFileSync(
     join(tempDir, "scripts/ios/xcodegen-generate.sh"),
     `#!/bin/bash
@@ -66,6 +81,11 @@ esac
     join(tempDir, "bin/xcodegen"),
     `#!/bin/bash
 set -euo pipefail
+
+if [[ "$*" == "--version" ]]; then
+    echo "Version: \${FAKE_XCODEGEN_VERSION:-${pinnedXcodegenVersion}}"
+    exit 0
+fi
 
 if [[ "$*" != "generate" ]]; then
     echo "unexpected xcodegen invocation: $*" >&2
@@ -184,6 +204,34 @@ describe("xcodegen drift check", () => {
     expectExitStatus(result, 1);
     expect(result.stdout + result.stderr).toContain("XcodeGen project files are out of date");
     expect(result.stdout + result.stderr).toContain("?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
+  });
+
+  test("ctrl-proxy scope refuses to generate with a skewed XcodeGen version", () => {
+    // Regression guard for #3975: generating with a version other than the pin
+    // produces an ordering-only diff that reads as a stale project file. The
+    // gate must fail BEFORE writing, naming both versions.
+    const repoDir = createTempRepo();
+
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_REPO_ROOT: repoDir,
+        FAKE_XCODEGEN_VERSION: "2.45.4",
+        FAKE_XCODEGEN_BEHAVIOR: "modify",
+        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    expectExitStatus(result, 1);
+    const output = result.stdout + result.stderr;
+    expect(output).toContain("version mismatch");
+    expect(output).toContain("2.45.4");
+    expect(output).toContain(pinnedXcodegenVersion);
+    // It must not have run the generator, so the project stays untouched.
+    expect(readFileSync(join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"), "utf8"))
+      .toBe("committed project\n");
   });
 
   test("ctrl-proxy scope passes when xcodegen generation leaves the committed CtrlProxy project unchanged", () => {

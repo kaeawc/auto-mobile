@@ -76,7 +76,6 @@ flowchart TB
 | [Navigation Graph](mcp/nav/index.md) | Automatic screen flow mapping |
 | [Daemon](mcp/daemon/index.md) | Device pooling and test execution |
 | [SDK Event Pipeline](mcp/sdk-event-pipeline.md) | Cross-platform event tracking, crash detection, and session management |
-| [Vouch System](vouch-system.md) | Web-of-trust gating for GitHub issues/PRs from non-contributors |
 
 ## Design Principles
 

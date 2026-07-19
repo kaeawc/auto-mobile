@@ -8,7 +8,6 @@ import dev.jasonpearson.automobile.sdk.AutoMobileNotifications
 import dev.jasonpearson.automobile.sdk.NotificationAction
 import dev.jasonpearson.automobile.sdk.NotificationStyle
 import org.json.JSONArray
-import org.json.JSONObject
 
 class AutoMobileNotificationReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
@@ -53,17 +52,17 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
   private fun parseActions(actionsJson: String?): List<NotificationAction> {
     if (actionsJson.isNullOrBlank()) return emptyList()
     return try {
-      val actions = mutableListOf<NotificationAction>()
       val array = JSONArray(actionsJson)
-      for (i in 0 until array.length()) {
-        val obj = array.optJSONObject(i) ?: JSONObject()
+      (0 until array.length()).mapNotNull { i ->
+        val obj = array.optJSONObject(i) ?: return@mapNotNull null
         val label = obj.optString("label")
         val actionId = obj.optString("actionId")
         if (label.isNotBlank() && actionId.isNotBlank()) {
-          actions.add(NotificationAction(label = label, actionId = actionId))
+          NotificationAction(label = label, actionId = actionId)
+        } else {
+          null
         }
       }
-      actions
     } catch (e: Exception) {
       Log.w(TAG, "Failed to parse notification actions", e)
       emptyList()

@@ -289,13 +289,9 @@ internal class AutoMobileNetworkInterceptor(
     }
   }
 
-  private fun okhttp3.Headers.toMap(): Map<String, String> {
-    val map = mutableMapOf<String, String>()
-    for (i in 0 until size) {
-      val name = name(i)
-      val existing = map[name]
-      map[name] = if (existing != null) "$existing, ${value(i)}" else value(i)
+  private fun okhttp3.Headers.toMap(): Map<String, String> =
+    (0 until size).groupBy(keySelector = { name(it) }, valueTransform = { value(it) }).mapValues {
+      (_, values) ->
+      values.joinToString(", ")
     }
-    return map
-  }
 }

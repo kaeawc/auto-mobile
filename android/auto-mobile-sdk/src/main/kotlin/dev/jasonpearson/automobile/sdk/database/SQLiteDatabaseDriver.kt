@@ -107,11 +107,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
           // Get row data
           while (cursor.moveToNext()) {
-            val row = mutableListOf<Any?>()
-            for (i in 0 until cursor.columnCount) {
-              row.add(getColumnValue(cursor, i))
-            }
-            rows.add(row)
+            rows.add((0 until cursor.columnCount).map { getColumnValue(cursor, it) })
           }
         }
 
@@ -299,11 +295,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         columns.addAll(cursor.columnNames)
 
         while (cursor.moveToNext()) {
-          val row = mutableListOf<Any?>()
-          for (i in 0 until cursor.columnCount) {
-            row.add(getColumnValue(cursor, i))
-          }
-          rows.add(row)
+          rows.add((0 until cursor.columnCount).map { getColumnValue(cursor, it) })
         }
       }
     } catch (e: Exception) {

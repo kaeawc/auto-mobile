@@ -239,15 +239,12 @@ object AutoMobileNotifications {
       }
     }
 
-    val candidatePaths = mutableListOf<String>()
-    when {
-      trimmed.startsWith("file://") -> candidatePaths.add(trimmed.removePrefix("file://"))
-      trimmed.startsWith("/") -> candidatePaths.add(trimmed)
-      else -> {
-        candidatePaths.add(trimmed)
-        candidatePaths.add("$DEFAULT_IMAGE_DIR/$trimmed")
+    val candidatePaths =
+      when {
+        trimmed.startsWith("file://") -> listOf(trimmed.removePrefix("file://"))
+        trimmed.startsWith("/") -> listOf(trimmed)
+        else -> listOf(trimmed, "$DEFAULT_IMAGE_DIR/$trimmed")
       }
-    }
 
     for (path in candidatePaths) {
       val file = File(path)

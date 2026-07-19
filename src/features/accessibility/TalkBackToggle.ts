@@ -40,12 +40,7 @@ export class TalkBackToggle {
     // already in the requested state.  Use detectMethod rather than
     // isAccessibilityEnabled so that other active services (e.g. CtrlProxy)
     // do not cause a false positive.
-    this.detector.invalidateCache(this.device.deviceId);
-    const detectedService = await this.detector.detectMethod(
-      this.device.deviceId,
-      this.adb
-    );
-    const talkBackCurrentlyEnabled = detectedService === "talkback";
+    const talkBackCurrentlyEnabled = await this.detectTalkBackEnabled();
     if (talkBackCurrentlyEnabled === enabled) {
       return {
         supported: true,
@@ -54,23 +49,51 @@ export class TalkBackToggle {
       };
     }
 
-    // Step 3: Apply ADB commands
-    if (enabled) {
-      await this.enableTalkBack(serviceComponent);
-      // Step 4: Best-effort permission dialog dismissal
-      await this.dismissPermissionDialog();
-    } else {
-      await this.disableTalkBack();
+    // Step 3: Apply ADB commands. A settings-write failure here (e.g. the a11y
+    // path AND the ADB fallback both fail) is wrapped into a typed result rather
+    // than propagating raw out of toggle(), matching the graceful contract of the
+    // other paths (#3921).
+    try {
+      if (enabled) {
+        await this.enableTalkBack(serviceComponent);
+        // Step 4: Best-effort permission dialog dismissal
+        await this.dismissPermissionDialog();
+      } else {
+        await this.disableTalkBack();
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn(`[TalkBackToggle] Failed to ${enabled ? "enable" : "disable"} TalkBack: ${reason}`);
+      return {
+        supported: true,
+        applied: false,
+        currentState: talkBackCurrentlyEnabled,
+        reason
+      };
     }
 
-    // Step 5: Invalidate detection cache so next check reflects the new state
-    this.detector.invalidateCache(this.device.deviceId);
+    // Step 5: Invalidate the detection cache and re-detect to CONFIRM the state
+    // actually changed — never report success optimistically. If dialog dismissal
+    // failed (or TalkBack never fully activated), `applied` reflects the real
+    // post-apply state instead of the requested one (#3921).
+    const confirmedEnabled = await this.detectTalkBackEnabled();
 
     return {
       supported: true,
-      applied: true,
-      currentState: enabled
+      applied: confirmedEnabled === enabled,
+      currentState: confirmedEnabled
     };
+  }
+
+  /**
+   * Invalidate the stale detection cache and re-detect whether TalkBack
+   * specifically is the active service. Used both for the pre-apply idempotency
+   * check and the post-apply confirmation so the two never drift.
+   */
+  private async detectTalkBackEnabled(): Promise<boolean> {
+    this.detector.invalidateCache(this.device.deviceId);
+    const service = await this.detector.detectMethod(this.device.deviceId, this.adb);
+    return service === "talkback";
   }
 
   // Why: try the a11y service first to skip ADB round-trip latency; fall back to ADB
@@ -208,10 +231,7 @@ export class TalkBackToggle {
         await this.timer.sleep(DIALOG_DISMISS_DELAY_MS);
       }
       try {
-        const dumpResult = await this.adb.executeCommand(
-          "shell uiautomator dump /dev/tty"
-        );
-        const xml = dumpResult.stdout;
+        const xml = await this.dumpWindowHierarchy();
 
         // Guard: only tap when the TalkBack consent dialog is on screen.
         // "TalkBack" is a brand name that stays untranslated in all locales,
@@ -246,5 +266,19 @@ export class TalkBackToggle {
       }
     }
     logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");
+  }
+
+  /**
+   * Capture the current window hierarchy XML. Dumps to a device file and reads
+   * it back rather than to `/dev/tty`: `uiautomator dump /dev/tty` frequently
+   * prints its own status line ("UI hierarchy dumped to: /dev/tty") to stdout
+   * instead of the XML, so the consent dialog is never matched and dismissal
+   * silently stalls (#3921).
+   */
+  private async dumpWindowHierarchy(): Promise<string> {
+    const remotePath = "/sdcard/window_dump.xml";
+    await this.adb.executeCommand(`shell uiautomator dump ${remotePath}`);
+    const catResult = await this.adb.executeCommand(`shell cat ${remotePath}`);
+    return catResult.stdout;
   }
 }

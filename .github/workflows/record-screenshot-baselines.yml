@@ -97,8 +97,9 @@ jobs:
           name: record-screenshot-baselines-diffs
           path: |
             android/desktop-core/build/reports/screenshots/
-            android/desktop-core/src/test/resources/screenshots/
+            android/desktop-core/src/test/resources/screenshots/*.png
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: "Open PR with recorded baselines"
         shell: bash

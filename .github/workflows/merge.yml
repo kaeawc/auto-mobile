@@ -74,6 +74,7 @@ jobs:
           name: desktop-core-screenshot-diffs
           path: android/desktop-core/build/reports/screenshots/
           if-no-files-found: ignore
+          retention-days: 7
 
   build-ide-plugin:
     name: "Build IDE Plugin"

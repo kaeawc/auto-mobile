@@ -63,18 +63,29 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
+import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfigClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
+import dev.jasonpearson.automobile.desktop.core.daemon.McpDeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
+import dev.jasonpearson.automobile.desktop.core.daemon.McpVideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClient
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import dev.jasonpearson.automobile.desktop.core.device.DeviceControlsDashboard
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
 import dev.jasonpearson.automobile.desktop.core.failures.DateRange
@@ -116,6 +127,7 @@ import dev.jasonpearson.automobile.desktop.core.shell.SearchResult
 import dev.jasonpearson.automobile.desktop.core.shell.SearchResultProvider
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
 import dev.jasonpearson.automobile.desktop.core.shell.buildDefaultCommands
+import dev.jasonpearson.automobile.desktop.core.snapshot.SnapshotsDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
@@ -320,6 +332,8 @@ fun AutoMobileContent(
     listOf(
       HorizontalTab("test_runs", "Test Runs", AppIcons.TestRuns),
       HorizontalTab("storage", "Storage", AppIcons.Storage),
+      HorizontalTab("snapshots", "Snapshots", AppIcons.Snapshots),
+      HorizontalTab("device_controls", "Device", AppIcons.DeviceControls),
       HorizontalTab("diagnostics", "Diagnostics", AppIcons.Diagnostics),
     )
   }
@@ -483,6 +497,29 @@ fun AutoMobileContent(
         }
       }
     }
+
+  // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
+  // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders
+  // its empty state instead of reaching for a daemon that isn't there.
+  val snapshotActions: DeviceSnapshotActions? =
+    remember(clientProvider) { clientProvider?.let { McpDeviceSnapshotActions(it) } }
+  val snapshotConfigClient: DeviceSnapshotConfigClient? =
+    remember(dataSourceMode) {
+      if (dataSourceMode == DataSourceMode.Real) DeviceSnapshotSocketClient() else null
+    }
+
+  // Appearance and video recording follow the same split: config over their own sockets, verbs
+  // over the MCP client.
+  val appearanceClient: AppearanceClient? =
+    remember(dataSourceMode) {
+      if (dataSourceMode == DataSourceMode.Real) AppearanceSocketClient() else null
+    }
+  val recordingConfigClient: VideoRecordingConfigClient? =
+    remember(dataSourceMode) {
+      if (dataSourceMode == DataSourceMode.Real) VideoRecordingSocketClient() else null
+    }
+  val recordingActions: VideoRecordingActions? =
+    remember(clientProvider) { clientProvider?.let { McpVideoRecordingActions(it) } }
 
   // Take-screenshot is driven from both the native menu bar and the in-app menu.
   // Run it on a composition-scoped coroutine (not GlobalScope) so the call and its
@@ -1362,6 +1399,20 @@ fun AutoMobileContent(
                       deviceId = activeDeviceId,
                       packageName = selectedAppId,
                       platform = storagePlatform,
+                      observationStreamClient = observationStreamClient,
+                    )
+                  "snapshots" ->
+                    SnapshotsDashboard(
+                      actions = snapshotActions,
+                      configClient = snapshotConfigClient,
+                      activeDeviceId = activeDeviceId,
+                    )
+                  "device_controls" ->
+                    DeviceControlsDashboard(
+                      appearanceClient = appearanceClient,
+                      recordingActions = recordingActions,
+                      recordingConfigClient = recordingConfigClient,
+                      activeDeviceId = activeDeviceId,
                     )
                   "diagnostics" ->
                     DiagnosticsDashboard(

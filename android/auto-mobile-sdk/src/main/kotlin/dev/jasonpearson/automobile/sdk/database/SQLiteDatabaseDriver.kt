@@ -18,38 +18,35 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   private val openDatabases = ConcurrentHashMap<String, SQLiteDatabase>()
 
   override fun getDatabases(): List<DatabaseDescriptor> {
-    val databases = mutableListOf<DatabaseDescriptor>()
-
-    // Get databases from Context.databaseList()
-    context.databaseList().forEach { dbName ->
-      if (!dbName.endsWith("-journal") && !dbName.endsWith("-wal") && !dbName.endsWith("-shm")) {
-        val dbFile = context.getDatabasePath(dbName)
-        if (dbFile.exists() && dbFile.isFile) {
-          databases.add(DatabaseDescriptor(name = dbName, path = dbFile.absolutePath))
+    val declared =
+      context
+        .databaseList()
+        .filterNot { it.isJournalSidecar() }
+        .mapNotNull { name ->
+          context
+            .getDatabasePath(name)
+            .takeIf { it.exists() && it.isFile }
+            ?.let { file ->
+              DatabaseDescriptor(name = name, path = file.absolutePath)
+            }
         }
-      }
-    }
 
-    // Also scan for databases in the databases directory
-    val dbDir = File(context.applicationInfo.dataDir, "databases")
-    if (dbDir.exists() && dbDir.isDirectory) {
-      dbDir
-        .listFiles { file ->
-          file.isFile &&
-            !file.name.endsWith("-journal") &&
-            !file.name.endsWith("-wal") &&
-            !file.name.endsWith("-shm")
-        }
-        ?.forEach { file ->
-          // Only add if not already in list
-          if (databases.none { it.path == file.absolutePath }) {
-            databases.add(DatabaseDescriptor(name = file.name, path = file.absolutePath))
-          }
-        }
-    }
+    // Also scan the databases directory. listFiles() returns null when the directory is
+    // absent or is not a directory, which the orEmpty() below folds into "nothing found".
+    val scanned =
+      File(context.applicationInfo.dataDir, "databases")
+        .listFiles { file -> file.isFile && !file.name.isJournalSidecar() }
+        ?.map { DatabaseDescriptor(name = it.name, path = it.absolutePath) }
+        .orEmpty()
 
-    return databases.sortedBy { it.name }
+    // distinctBy keeps the first occurrence, so databaseList() entries win on a path
+    // collision -- the same precedence the previous "only add if not already in list" had.
+    return (declared + scanned).distinctBy { it.path }.sortedBy { it.name }
   }
+
+  /** SQLite write-ahead/journal companions that sit next to a real database file. */
+  private fun String.isJournalSidecar(): Boolean =
+    endsWith("-journal") || endsWith("-wal") || endsWith("-shm")
 
   override fun getTables(databasePath: String): List<String> {
     synchronized(databaseLock) {
@@ -107,11 +104,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
           // Get row data
           while (cursor.moveToNext()) {
-            val row = mutableListOf<Any?>()
-            for (i in 0 until cursor.columnCount) {
-              row.add(getColumnValue(cursor, i))
-            }
-            rows.add(row)
+            rows.add((0 until cursor.columnCount).map { getColumnValue(cursor, it) })
           }
         }
 
@@ -299,11 +292,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         columns.addAll(cursor.columnNames)
 
         while (cursor.moveToNext()) {
-          val row = mutableListOf<Any?>()
-          for (i in 0 until cursor.columnCount) {
-            row.add(getColumnValue(cursor, i))
-          }
-          rows.add(row)
+          rows.add((0 until cursor.columnCount).map { getColumnValue(cursor, it) })
         }
       }
     } catch (e: Exception) {

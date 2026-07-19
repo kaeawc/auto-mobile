@@ -43,6 +43,37 @@ class SQLiteDatabaseDriverTest {
   }
 
   @Test
+  fun `getDatabases lists each database once sorted by name excluding journal sidecars`() {
+    val beta = createDatabase("zz-beta-${System.nanoTime()}.db")
+    val alpha = createDatabase("aa-alpha-${System.nanoTime()}.db")
+    // Sidecars sit next to a real database and must never be reported as databases
+    // themselves. They are also the reason the discovery pass cannot be a bare listFiles().
+    val sidecars =
+      listOf("-journal", "-wal", "-shm").map { suffix ->
+        File(alpha.parentFile, alpha.name + suffix).also {
+          it.writeText("not a database")
+          filesToDelete.add(it)
+        }
+      }
+
+    val discovered = SQLiteDatabaseDriver(context).getDatabases()
+    val names = discovered.map { it.name }
+
+    // Both databases are reachable via BOTH context.databaseList() and the directory scan,
+    // so a dedup regression would surface here as a duplicated entry.
+    assertEquals(names.distinct(), names, "getDatabases must not report a database twice")
+    assertEquals(discovered.map { it.path }.distinct(), discovered.map { it.path })
+    assertTrue(
+      names.containsAll(listOf(alpha.name, beta.name)),
+      "expected both databases in $names",
+    )
+    sidecars.forEach { sidecar ->
+      assertTrue(names.none { it == sidecar.name }, "sidecar ${sidecar.name} leaked into $names")
+    }
+    assertEquals(names.sorted(), names, "getDatabases must return entries sorted by name")
+  }
+
+  @Test
   fun `serializes parallel reads and writes through one driver`() {
     val dbFile = createDatabase("parallel-${System.nanoTime()}.db")
     val driver = SQLiteDatabaseDriver(context)

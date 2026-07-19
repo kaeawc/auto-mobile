@@ -1596,7 +1596,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: junit-runner-heap-dumps
+          name: junit-runner-heap-dumps-unit
           path: heap-dump
           if-no-files-found: ignore
 
@@ -1665,7 +1665,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: junit-runner-heap-dumps
+          name: junit-runner-heap-dumps-emulator
           path: heap-dump
           if-no-files-found: ignore
 

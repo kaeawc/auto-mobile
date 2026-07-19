@@ -68,7 +68,7 @@ internal class AutoMobileNetworkInterceptor(
     // Capture request headers — include OkHttp defaults that will be added later
     val reqHeaders =
       if (captureHeaders) {
-        val headers = request.headers.toMap().toMutableMap()
+        val headers = request.headers.toHeaderMap().toMutableMap()
         if ("Host" !in headers) headers["Host"] = request.url.host
         if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
         headers
@@ -145,12 +145,12 @@ internal class AutoMobileNetworkInterceptor(
 
     val finalReqHeaders =
       if (captureHeaders) {
-        response.request.headers.toMap()
+        response.request.headers.toHeaderMap()
       } else reqHeaders
 
     val respHeaders =
       if (captureHeaders) {
-        response.headers.toMap()
+        response.headers.toHeaderMap()
       } else null
 
     val respBody =
@@ -289,13 +289,26 @@ internal class AutoMobileNetworkInterceptor(
     }
   }
 
-  private fun okhttp3.Headers.toMap(): Map<String, String> {
-    val map = mutableMapOf<String, String>()
+  /**
+   * Flatten headers into a map, joining repeated names with ", " in encounter order.
+   *
+   * Deliberately hand-rolled rather than delegating to okhttp's `Headers.toMultimap()`: that
+   * lowercases every name, which would silently change the header casing we report as telemetry.
+   * Named `toHeaderMap` rather than `toMap` because okhttp's `Headers` is an `Iterable<Pair<..>>`,
+   * so a `toMap` extension here shadows the stdlib one -- and the stdlib version takes last-wins on
+   * duplicate names instead of joining them.
+   *
+   * Single-pass on purpose: this runs up to three times per intercepted request, and the common
+   * single-valued header must not allocate an intermediate list or copy its value string.
+   */
+  private fun okhttp3.Headers.toHeaderMap(): Map<String, String> {
+    // Deliberately not buildMap: its MutableMap receiver shadows `size`, so `0 until size`
+    // would read the map being built (0) rather than the header count and silently produce
+    // an empty map.
+    val merged = LinkedHashMap<String, String>(size)
     for (i in 0 until size) {
-      val name = name(i)
-      val existing = map[name]
-      map[name] = if (existing != null) "$existing, ${value(i)}" else value(i)
+      merged.merge(name(i), value(i)) { existing, next -> "$existing, $next" }
     }
-    return map
+    return merged
   }
 }

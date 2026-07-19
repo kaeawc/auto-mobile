@@ -46,6 +46,7 @@ import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from 
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
 import { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } from "./webrtcStreamSocketServer";
+import { startVideoStreamSocketServer, stopVideoStreamSocketServer } from "./videoStreamSocketServer";
 import { getDaemonSocketPaths } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -349,6 +350,7 @@ export class Daemon {
     await startFailuresPushSocketServer();
     await startTelemetryPushSocketServer();
     await startWebRtcStreamSocketServer();
+    await startVideoStreamSocketServer();
 
     // Wire up callback to establish WebSocket connections when IDE plugins subscribe
     this.setupDeviceDataStreamCallback();
@@ -1483,6 +1485,7 @@ export class Daemon {
     await stopFailuresPushSocketServer();
     await stopTelemetryPushSocketServer();
     await stopWebRtcStreamSocketServer();
+    await stopVideoStreamSocketServer();
     stopAppearanceSyncScheduler();
     stopPerformanceMonitor();
 

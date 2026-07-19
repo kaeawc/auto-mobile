@@ -456,11 +456,13 @@ public class GesturePerformer: GesturePerforming {
 
                 if !succeeded {
                     // Unlike pinch (#2910) there is no public-API fallback to take
-                    // here — no XCUITest API synthesizes an N-finger swipe along an
-                    // arbitrary vector, and a single-finger substitute would be a
-                    // different gesture. The availability signal therefore only
-                    // distinguishes the failure message (#2952); see
-                    // MultiFingerSwipeDiagnostics for the full rationale.
+                    // here — for two or more fingers no XCUITest API delivers
+                    // parallel simultaneous touch paths, and a single-finger
+                    // substitute would be a different gesture. The availability
+                    // signal therefore only distinguishes the failure message
+                    // (#2952); see MultiFingerSwipeDiagnostics for the full
+                    // rationale, including why the public `scroll(byDeltaX:deltaY:)`
+                    // does not qualify despite being available on iOS.
                     throw GestureError.gestureFailed(
                         MultiFingerSwipeDiagnostics.failureMessage(
                             symbolsUnavailable: symbolsUnavailable.boolValue,

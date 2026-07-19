@@ -45,6 +45,24 @@ final class MultiFingerSwipeDiagnosticsTests: XCTestCase {
         )
     }
 
+    /// This string is the third segment of a stacked message (`GestureError`
+    /// prepends "Gesture failed: ", the TS layer prepends "iOS multi-finger gesture
+    /// failed: "), and long error text costs agent context. Keep the framing tight
+    /// and single-line so it renders cleanly in a JSON error field.
+    func testUnavailableMessageStaysCompactAndSingleLine() {
+        let message = MultiFingerSwipeDiagnostics.failureMessage(
+            symbolsUnavailable: true,
+            underlying: ""
+        )
+        XCTAssertFalse(message.contains("\n"), "must be single-line on the wire")
+        XCTAssertFalse(message.contains("  "), "must not contain doubled spaces")
+        XCTAssertLessThanOrEqual(
+            message.count,
+            160,
+            "framing must stay compact, got \(message.count) chars: \(message)"
+        )
+    }
+
     func testBothBranchesPreserveTheUnderlyingDetail() {
         let detail = "multi-finger swipe synthesis failed: unknown error"
         XCTAssertTrue(

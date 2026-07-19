@@ -67,15 +67,19 @@ FOUNDATION_EXPORT NSException * _Nullable ObjCExceptionCatcher_tryBlock(void (NS
 /// platform is not iOS), and left NO for a genuine synthesis error or a caught
 /// Objective-C exception.
 ///
-/// Unlike pinch, a YES here does NOT enable a degraded gesture — there is no public
-/// XCUITest API that can synthesize an N-finger swipe along an arbitrary vector:
-/// `XCUIElement.swipeLeft/Right/Up/Down` are single-finger and direction-only,
-/// `pinch(withScale:velocity:)` moves the fingers toward/away from each other rather
-/// than in parallel, `scroll(byDeltaX:deltaY:)` is macOS-only, and
-/// `press(forDuration:thenDragTo:)` is single-finger. Substituting a one-finger swipe
-/// would perform a semantically different gesture (VoiceOver two-finger gestures, map
-/// pan vs. drag), which is worse than a clear failure. The flag therefore selects a
-/// distinct, actionable error message — see `MultiFingerSwipeDiagnostics`.
+/// Unlike pinch, a YES here does NOT enable a degraded gesture: for two or more
+/// fingers no public XCUITest API delivers simultaneous touch paths translating in
+/// parallel. `pinch(withScale:velocity:)` and `rotate(_:withVelocity:)` are the only
+/// continuous public multi-touch gestures, and they move the touches toward/away or
+/// circularly — neither takes a translation vector. `swipeLeft/Right/Up/Down` are
+/// single-finger and direction-only, and `press(forDuration:thenDragTo:)` carries one
+/// touch. `scroll(byDeltaX:deltaY:)` IS available on iOS (15.0+) but belongs to the
+/// `XCUIElementMouseEvents` category and emits a pointer/scroll-wheel event, not
+/// synthesized touches. Substituting a one-finger swipe would perform a semantically
+/// different gesture (VoiceOver multi-finger commands, map pan vs. drag), which is
+/// worse than a clear failure. The flag therefore selects a distinct, actionable
+/// error message — see `MultiFingerSwipeDiagnostics` for the full rationale and its
+/// scope (`fingerCount >= 2`).
 FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     CGFloat startX,
     CGFloat startY,

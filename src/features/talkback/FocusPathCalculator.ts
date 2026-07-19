@@ -32,6 +32,10 @@ export class FocusPathCalculator {
       return null;
     }
 
+    // When the cursor can't be located in the traversal order, plan a forward
+    // sweep from the start — the reasonable default for "no focus yet". The
+    // unresolved state is surfaced as `currentFocusIndex: null` so the executor
+    // can guard against a non-converging march (see FocusNavigationExecutor, #3917).
     const resolvedCurrentIndex = this.matcher.findCurrentFocusIndex(currentFocus, orderedElements);
     const currentIndex = resolvedCurrentIndex ?? 0;
 

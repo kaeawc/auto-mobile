@@ -155,7 +155,8 @@ export class FocusNavigationExecutor {
     let remainingSwipes = currentPath.swipeCount;
     let totalSwipes = 0;
     let lastFocusSignature: string | null = null;
-    let stuckChecks = 0;
+    let noProgressChecks = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
 
     if (remainingSwipes === 0) {
       const initialVerification = await this.verifyNavigationState(
@@ -232,20 +233,6 @@ export class FocusNavigationExecutor {
         );
       }
 
-      const focusSignature = this.buildFocusSignature(verification.currentFocus);
-      if (focusSignature && focusSignature === lastFocusSignature) {
-        stuckChecks += 1;
-        if (stuckChecks >= FocusNavigationExecutor.DEFAULT_MAX_STUCK_CHECKS) {
-          throw new ActionableError(
-            "Focus did not move after multiple swipes. " +
-            "Try scrolling the container or ensure the element is focusable."
-          );
-        }
-      } else {
-        stuckChecks = 0;
-        lastFocusSignature = focusSignature;
-      }
-
       const recalculated = this.pathCalculator.calculatePath(
         verification.currentFocus,
         targetSelector,
@@ -257,6 +244,41 @@ export class FocusNavigationExecutor {
           `Target element disappeared during navigation (${this.describeSelector(targetSelector)}). ` +
           "Try using debugSearch to validate the selector."
         );
+      }
+
+      // Progress guard (#3917): the distance to the target is the recalculated
+      // swipe count when the cursor is resolved, and unknown when the cursor
+      // can't be located in the traversal order. If we fail to get closer for
+      // several consecutive checks, bail instead of swiping in a (possibly wrong)
+      // direction until maxSwipes — this catches a cursor moving the wrong way or
+      // one we can't track. When the cursor is resolvable, an initially wrong
+      // direction is still corrected below via shouldRecalculatePath.
+      const focusSignature = this.buildFocusSignature(verification.currentFocus);
+      const focusMoved = focusSignature === null || focusSignature !== lastFocusSignature;
+      lastFocusSignature = focusSignature;
+
+      const distanceToTarget =
+        recalculated.currentFocusIndex === null ? null : recalculated.swipeCount;
+      if (distanceToTarget !== null && distanceToTarget < bestDistance) {
+        bestDistance = distanceToTarget;
+        noProgressChecks = 0;
+      } else {
+        noProgressChecks += 1;
+        if (noProgressChecks >= FocusNavigationExecutor.DEFAULT_MAX_STUCK_CHECKS) {
+          if (!focusMoved) {
+            throw new ActionableError(
+              "Focus did not move after multiple swipes. " +
+              "Try scrolling the container or ensure the element is focusable."
+            );
+          }
+          throw new ActionableError(
+            distanceToTarget === null
+              ? "Focus navigation could not track the TalkBack cursor position. " +
+                "Try scrolling the container first or narrow the selector."
+              : "Focus navigation is not converging on the target. " +
+                "Try scrolling the container first or narrow the selector."
+          );
+        }
       }
 
       if (this.shouldRecalculatePath(currentPath, recalculated)) {

@@ -16,7 +16,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   private bootedDevices: Map<Platform, BootedDevice[]> = new Map();
   private runningDeviceNames: Set<string> = new Set();
   private executedOperations: string[] = [];
-  private mockChildProcesses: Map<string, ChildProcess> = new Map();
+  private mockChildProcesses: Map<string, ChildProcess | null> = new Map();
   private waitForDeviceReadyChildProcess: ChildProcess | null | undefined;
 
   /**
@@ -75,7 +75,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    * @param deviceName - The device name
    * @param childProcess - The mock child process to return
    */
-  setMockChildProcess(deviceName: string, childProcess: ChildProcess): void {
+  setMockChildProcess(deviceName: string, childProcess: ChildProcess | null): void {
     this.mockChildProcesses.set(deviceName, childProcess);
   }
 
@@ -170,7 +170,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     return { devices, succeededPlatforms };
   }
 
-  async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess> {
+  async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess | null> {
     this.executedOperations.push(`startDevice:${device.name}:${timeoutMs ?? "default"}`);
     this.runningDeviceNames.add(device.name);
     if (device.deviceId) {
@@ -190,7 +190,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
 
     // Return mock process if configured, otherwise return a default mock
     if (this.mockChildProcesses.has(device.name)) {
-      return this.mockChildProcesses.get(device.name)!;
+      return this.mockChildProcesses.get(device.name) ?? null;
     }
 
     // Return a minimal mock ChildProcess

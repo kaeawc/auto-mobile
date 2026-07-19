@@ -7,8 +7,11 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 interface AutoMobileClient {
   val transportName: String
@@ -308,6 +311,54 @@ internal data class ListResourceTemplatesResult(val resourceTemplates: List<McpR
 @Serializable internal data class ReadResourceResult(val contents: List<McpResourceContent>)
 
 internal const val LATEST_MCP_PROTOCOL_VERSION = "2025-11-25"
+
+/**
+ * MCP protocol revisions this client can speak. The client always offers
+ * [LATEST_MCP_PROTOCOL_VERSION] on `initialize`; a server is free to answer with any revision it
+ * prefers, and we accept anything in this set. The wire surface the desktop uses (`tools/list`,
+ * `tools/call`, `resources/list`, `resources/read`) is unchanged across these revisions.
+ */
+internal val SUPPORTED_MCP_PROTOCOL_VERSIONS =
+  setOf("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+
+/** `clientInfo.name` reported to the daemon. This is the desktop app, not the IDE plugin. */
+internal const val DESKTOP_CLIENT_NAME = "auto-mobile-desktop"
+
+/** Params for the MCP `initialize` request, shared by the HTTP and STDIO clients. */
+internal fun buildInitializeParams(): JsonObject = buildJsonObject {
+  put("protocolVersion", JsonPrimitive(LATEST_MCP_PROTOCOL_VERSION))
+  put("capabilities", JsonObject(emptyMap()))
+  put(
+    "clientInfo",
+    buildJsonObject {
+      put("name", JsonPrimitive(DESKTOP_CLIENT_NAME))
+      put("version", JsonPrimitive(DesktopBuildInfo.VERSION))
+    },
+  )
+}
+
+/**
+ * Reads the daemon's negotiated `protocolVersion` out of an `initialize` result and returns it.
+ *
+ * Throws [McpConnectionException] with actionable text when the daemon omits the field (it is
+ * required by every MCP revision, so absence means a malformed server) or answers with a revision
+ * this client does not implement — the alternative is silently speaking the wrong protocol.
+ */
+internal fun negotiateProtocolVersion(result: JsonObject): String {
+  val negotiated =
+    result["protocolVersion"]?.jsonPrimitive?.content
+      ?: throw McpConnectionException(
+        "Daemon's initialize response omitted protocolVersion. Expected one of " +
+          "${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile daemon."
+      )
+  if (negotiated !in SUPPORTED_MCP_PROTOCOL_VERSIONS) {
+    throw McpConnectionException(
+      "Daemon negotiated unsupported MCP protocol version '$negotiated'. This desktop build " +
+        "speaks ${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile desktop app."
+    )
+  }
+  return negotiated
+}
 
 internal fun <T> decodeToolResponse(
   json: Json,

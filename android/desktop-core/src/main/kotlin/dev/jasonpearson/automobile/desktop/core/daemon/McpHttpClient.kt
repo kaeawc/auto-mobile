@@ -17,7 +17,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 class McpHttpClient(
@@ -411,28 +410,12 @@ class McpHttpClient(
       return
     }
 
-    val response =
-      sendRequest(
-        "initialize",
-        buildJsonObject {
-          put("protocolVersion", JsonPrimitive(LATEST_MCP_PROTOCOL_VERSION))
-          put("capabilities", JsonObject(emptyMap()))
-          put(
-            "clientInfo",
-            buildJsonObject {
-              put("name", JsonPrimitive("auto-mobile-ide-plugin"))
-              put("version", JsonPrimitive("0.1.0"))
-            },
-          )
-        },
-        includeSession = false,
-      )
+    val response = sendRequest("initialize", buildInitializeParams(), includeSession = false)
 
     val result =
       response.result?.jsonObject
         ?: throw McpConnectionException("Initialize response missing result")
-    protocolVersion =
-      result["protocolVersion"]?.jsonPrimitive?.content ?: LATEST_MCP_PROTOCOL_VERSION
+    protocolVersion = negotiateProtocolVersion(result)
     initialized = true
 
     sendNotification("notifications/initialized")

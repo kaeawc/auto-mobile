@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
@@ -415,24 +416,11 @@ class McpStdioClient(
       ensureProcessStarted()
     }
 
-    val response =
-      sendRequest(
-        "initialize",
-        buildJsonObject {
-          put("protocolVersion", JsonPrimitive(LATEST_MCP_PROTOCOL_VERSION))
-          put("capabilities", JsonObject(emptyMap()))
-          put(
-            "clientInfo",
-            buildJsonObject {
-              put("name", JsonPrimitive("auto-mobile-ide-plugin"))
-              put("version", JsonPrimitive("0.1.0"))
-            },
-          )
-        },
-      )
-    if (response.result == null) {
-      throw McpConnectionException("Initialize response missing result")
-    }
+    val response = sendRequest("initialize", buildInitializeParams())
+    val result =
+      response.result?.jsonObject
+        ?: throw McpConnectionException("Initialize response missing result")
+    negotiateProtocolVersion(result)
     synchronized(ioLock) {
       initialized = true
     }

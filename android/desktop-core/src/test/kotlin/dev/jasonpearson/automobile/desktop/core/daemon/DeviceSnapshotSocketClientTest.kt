@@ -90,8 +90,7 @@ class DeviceSnapshotSocketClientTest {
   @Test
   fun `evicted snapshot names are surfaced from a set`() {
     TestConfigSocket(
-        resultJson =
-          """{"config": ${configJson(64)}, "evictedSnapshotNames": ["old-1", "old-2"]}"""
+        resultJson = """{"config": ${configJson(64)}, "evictedSnapshotNames": ["old-1", "old-2"]}"""
       )
       .use { server ->
         val client = DeviceSnapshotSocketClient(socketPathValue = server.socketPath.toString())
@@ -161,29 +160,28 @@ class DeviceSnapshotSocketClientTest {
         .bind(UnixDomainSocketAddress.of(socketPath))
     private var captured: kotlinx.serialization.json.JsonObject? = null
     private var failure: Throwable? = null
-    private val thread =
-      Thread {
-          try {
-            serverChannel.accept().use { channel ->
-              val reader =
-                BufferedReader(
-                  InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
-                )
-              val writer =
-                BufferedWriter(
-                  OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-                )
-              val request = json.parseToJsonElement(reader.readLine()).jsonObject
-              captured = request
-              writer.write(responseLine(request["id"]?.jsonPrimitive?.content ?: "unknown"))
-              writer.newLine()
-              writer.flush()
-            }
-          } catch (throwable: Throwable) {
-            failure = throwable
-          }
+    private val thread = Thread {
+      try {
+        serverChannel.accept().use { channel ->
+          val reader =
+            BufferedReader(
+              InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+            )
+          val writer =
+            BufferedWriter(
+              OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+            )
+          val request = json.parseToJsonElement(reader.readLine()).jsonObject
+          captured = request
+          writer.write(responseLine(request["id"]?.jsonPrimitive?.content ?: "unknown"))
+          writer.newLine()
+          writer.flush()
         }
-        .also { it.start() }
+      } catch (throwable: Throwable) {
+        failure = throwable
+      }
+    }
+      .also { it.start() }
 
     fun awaitRequest(): kotlinx.serialization.json.JsonObject {
       thread.join(REQUEST_TIMEOUT_MILLIS)

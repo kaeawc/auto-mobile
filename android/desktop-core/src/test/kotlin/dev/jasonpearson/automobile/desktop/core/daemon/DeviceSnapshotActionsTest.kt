@@ -115,8 +115,7 @@ class DeviceSnapshotActionsTest {
   @Test
   fun `capture with no evictions defaults the list to empty`() {
     val client = FakeAutoMobileClient()
-    client.callToolResult =
-      toolResponse("""{"snapshotName":"snap-2","snapshotType":"vm"}""")
+    client.callToolResult = toolResponse("""{"snapshotName":"snap-2","snapshotType":"vm"}""")
 
     assertTrue(actionsWith(client).captureSnapshot("emulator-5554").evictedSnapshotNames.isEmpty())
   }

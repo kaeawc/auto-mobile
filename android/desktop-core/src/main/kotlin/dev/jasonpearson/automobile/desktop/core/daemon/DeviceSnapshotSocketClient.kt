@@ -118,22 +118,22 @@ class DeviceSnapshotSocketClient(
       val reader =
         BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
       val writer =
-        BufferedWriter(OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8))
+        BufferedWriter(
+          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+        )
 
       writer.write(json.encodeToString(DeviceSnapshotSocketRequest.serializer(), request))
       writer.newLine()
       writer.flush()
 
-      val line =
-        reader.readLine() ?: throw McpConnectionException("Device snapshot socket closed")
+      val line = reader.readLine() ?: throw McpConnectionException("Device snapshot socket closed")
       val response = json.decodeFromString(DeviceSnapshotSocketResponse.serializer(), line)
 
       if (!response.success) {
         throw McpConnectionException(response.error ?: "Device snapshot request failed")
       }
       val result =
-        response.result
-          ?: throw McpConnectionException("Device snapshot response missing result")
+        response.result ?: throw McpConnectionException("Device snapshot response missing result")
 
       return DeviceSnapshotConfigResult(
         config = result.config,
@@ -157,8 +157,7 @@ internal data class DeviceSnapshotSocketRequest(
   val params: DeviceSnapshotSocketParams? = null,
 )
 
-@Serializable
-internal data class DeviceSnapshotSocketParams(val config: DeviceSnapshotConfigInput?)
+@Serializable internal data class DeviceSnapshotSocketParams(val config: DeviceSnapshotConfigInput?)
 
 @Serializable
 internal data class DeviceSnapshotSocketResponse(

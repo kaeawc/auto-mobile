@@ -28,10 +28,10 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfigClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotMetadata
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
@@ -241,7 +241,9 @@ private fun ActionChip(
   Box(
     modifier =
       Modifier.background(accent.copy(alpha = 0.15f * alpha), RoundedCornerShape(4.dp))
-        .let { if (enabled) it.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand) else it }
+        .let {
+          if (enabled) it.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand) else it
+        }
         .padding(horizontal = 8.dp, vertical = 3.dp)
   ) {
     Text(label, fontSize = 9.sp, softWrap = false, color = accent.copy(alpha = alpha))

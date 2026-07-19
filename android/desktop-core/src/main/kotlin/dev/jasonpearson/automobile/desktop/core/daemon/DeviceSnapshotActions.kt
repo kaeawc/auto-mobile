@@ -85,7 +85,8 @@ class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClien
         }
       )
     return DeviceSnapshotCaptureResult(
-      snapshotName = response.snapshotName ?: throw McpConnectionException("Capture returned no snapshotName"),
+      snapshotName =
+        response.snapshotName ?: throw McpConnectionException("Capture returned no snapshotName"),
       snapshotType = response.snapshotType.orEmpty(),
       evictedSnapshotNames = response.evictedSnapshotNames,
     )

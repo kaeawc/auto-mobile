@@ -539,10 +539,8 @@ public enum DaemonManager {
             "\(NSHomeDirectory())/.bun/bin/\(name)",
             "\(NSHomeDirectory())/.local/bin/\(name)",
         ]
-        for path in commonPaths {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
+        for path in commonPaths where FileManager.default.isExecutableFile(atPath: path) {
+            return path
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/which")

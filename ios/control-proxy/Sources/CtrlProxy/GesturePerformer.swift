@@ -167,8 +167,8 @@ public class GesturePerformer: GesturePerforming {
             if (isKnownTextInput || isTextLikeOther) && snapshot.hasFocus {
                 return true
             }
-            for child in snapshot.children {
-                if snapshotHasTextInputWithFocus(child, depth: depth + 1) { return true }
+            for child in snapshot.children where snapshotHasTextInputWithFocus(child, depth: depth + 1) {
+                return true
             }
             return false
         }

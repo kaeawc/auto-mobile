@@ -64,6 +64,18 @@ jobs:
           name: desktop-core-test-results
           path: android/desktop-core/build/reports/tests/test/
 
+      # Screenshot comparisons fail with pixel diffs that are only inspectable
+      # as images -- the HTML test report above carries the stack trace but not
+      # the rendering. See issue #3913.
+      - name: "Upload Screenshot Diffs"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-core-screenshot-diffs
+          path: android/desktop-core/build/reports/screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-ide-plugin:
     name: "Build IDE Plugin"
     # Disabled: consistently >1 minute on merge and not required for release/docs publishing.

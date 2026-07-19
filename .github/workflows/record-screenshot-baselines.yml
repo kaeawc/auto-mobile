@@ -81,6 +81,26 @@ jobs:
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+      # A baseline that fails the verification immediately following its own
+      # recording (issue #3913) can only be diagnosed from the pixel diffs
+      # ScreenshotComparator writes as "<name>.diff.png" / "<name>.actual.png".
+      # Without this upload they die with the runner.
+      #
+      # The recorded baselines ride along: when verify fails the job stops
+      # before "Open PR", so the PNGs from the record step are discarded too,
+      # and a three-way baseline/actual/diff compare is what makes the
+      # mismatch legible.
+      - name: "Upload Screenshot Diffs"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: record-screenshot-baselines-diffs
+          path: |
+            android/desktop-core/build/reports/screenshots/
+            android/desktop-core/src/test/resources/screenshots/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: "Open PR with recorded baselines"
         shell: bash
         env:

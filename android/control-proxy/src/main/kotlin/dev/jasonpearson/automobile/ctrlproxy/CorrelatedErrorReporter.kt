@@ -21,13 +21,15 @@ import kotlinx.coroutines.CancellationException
  * is now structural: this type is the one place the body lives, and `CorrelatedErrorDriftGuardTest`
  * fails CI if a consumer starts hand-rolling it again.
  *
- * Three layers, because the consumers enter at different points:
+ * Two entry points, because the consumers enter at different points:
  * - [guarding] — run a block, report anything it throws. Used by [ResultBroadcaster] and
  *   [AsyncActionRunner].
- * - [report] — log an *already-caught* throwable, then emit its frame.
  * - [emit] + [causeOf] — the frame-emitting tail and the cause rule on their own, for
  *   [ServiceScopeGuard]: a [kotlinx.coroutines.CoroutineExceptionHandler] is handed a throwable
  *   rather than a block, and must log synchronously (see [emit]).
+ *
+ * The log-then-emit middle (`report`) is deliberately private: nothing outside needs it today, and
+ * per CLAUDE.md the interface grows when a second consumer arrives, not ahead of need.
  *
  * @param broadcastError sink for the correlated fallback frame — `webSocketServer.broadcast(…)` in
  *   production (lazily resolving the `lateinit` server), a capturing lambda in tests.
@@ -88,7 +90,7 @@ class CorrelatedErrorReporter(
    * tail. A [CancellationException] from the fallback still propagates, for the same reason as in
    * [guarding].
    */
-  suspend fun report(
+  private suspend fun report(
     requestId: String?,
     throwable: Throwable,
     failureLogMessage: String,

@@ -175,4 +175,46 @@ class CorrelatedErrorReporterTest {
     assertEquals("req-1", broadcasts.single().requestId)
     assertTrue("a successful emit must not log", logs.isEmpty())
   }
+
+  @Test
+  fun `emit carries a null requestId through to the frame`() = runTest {
+    reporter()
+      .emit(
+        requestId = null,
+        errorMessage = "Uncaught async failure: boom",
+        doubleFailureLogMessage = "double failure log",
+      )
+
+    assertNull(broadcasts.single().requestId)
+  }
+
+  @Test
+  fun `emit swallows a failing sink rather than escaping to its caller`() = runTest {
+    // ServiceScopeGuard enters here directly; an escape would re-enter its handler and loop.
+    reporter(broadcastError = { throw IllegalStateException("sink down") })
+      .emit(
+        requestId = "req-1",
+        errorMessage = "Uncaught async failure: boom",
+        doubleFailureLogMessage = "double failure log",
+      )
+
+    assertEquals(listOf("double failure log"), logs.map { it.first })
+  }
+
+  @Test
+  fun `emit propagates a cancellation raised by the sink`() = runTest {
+    try {
+      reporter(broadcastError = { throw CancellationException("scope died") })
+        .emit(
+          requestId = "req-1",
+          errorMessage = "Uncaught async failure: boom",
+          doubleFailureLogMessage = "double failure log",
+        )
+      fail("expected the cancellation to propagate")
+    } catch (expected: CancellationException) {
+      assertEquals("scope died", expected.message)
+    }
+
+    assertTrue(logs.isEmpty())
+  }
 }

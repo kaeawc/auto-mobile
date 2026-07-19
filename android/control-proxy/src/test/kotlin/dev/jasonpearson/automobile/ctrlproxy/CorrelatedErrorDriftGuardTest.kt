@@ -23,6 +23,16 @@ import org.junit.Test
  * scanning logic is factored into [CorrelatedErrorDriftScanner] (a pure function over source text)
  * so the enforcement contract is itself unit-tested against synthetic good/bad snippets — the
  * real-file assertions then prove the live sources comply.
+ *
+ * **Scope, and why it stops where it does.** [CorrelatedErrorDriftScanner.CONSUMER_FILES] is a
+ * hand-maintained list of three, so a *fourth* seam that hand-rolls the body is not caught.
+ * Widening the scan to every file in the package was considered and rejected: `WebSocketServer.kt`
+ * (the decode path, #2985) and `HierarchyExtractErrorFrames.kt` both construct `ErrorResponse` for
+ * legitimate non-fallback reasons, so a package-wide rule would fire on correct code. This is the
+ * same limit [BroadcastGuardAdoptionTest] documents for raw `serviceScope.launch` — it "cannot
+ * distinguish such an action from the ~30 legitimate raw launches without false positives" — and it
+ * is why [ServiceScopeGuard] closed that gap *by construction* rather than by scanning. A text
+ * scanner is a backstop against reintroducing a known body, not a proof of absence.
  */
 class CorrelatedErrorDriftGuardTest {
 
@@ -56,7 +66,7 @@ class CorrelatedErrorDriftGuardTest {
       class Example(private val reporter: CorrelatedErrorReporter) {
         suspend fun guard(e: Exception) {
           val cause = e.message ?: e::class.simpleName ?: "unknown error"
-          reporter.report(null, cause)
+          reporter.emit(null, cause, "double failure")
         }
       }
       """
@@ -77,14 +87,104 @@ class CorrelatedErrorDriftGuardTest {
       class Example(private val reporter: CorrelatedErrorReporter) {
         suspend fun guard(requestId: String?) {
           broadcastError(ErrorResponse(requestId = requestId, error = "boom"))
+          reporter.emit(requestId, "x", "y")
+        }
+      }
+      """
+        .trimIndent()
+
+    // Delegating elsewhere does not excuse constructing a fallback frame by hand.
+    assertEquals(
+      listOf(CorrelatedErrorDriftScanner.Kind.HAND_ROLLED_ERROR_FRAME),
+      scan(source).map { it.kind },
+    )
+  }
+
+  @Test
+  fun `a cause derivation that changes the fallback constant is still flagged`() {
+    // The point of drift is that the copy *differs*. Matching only today's literal would miss this.
+    val source =
+      """
+      package dev.jasonpearson.automobile.ctrlproxy
+
+      class Example(private val reporter: CorrelatedErrorReporter) {
+        suspend fun guard(e: Exception, requestId: String?) {
+          val cause = e.message ?: e::class.simpleName ?: "unspecified failure"
+          reporter.emit(requestId, cause, "double failure")
         }
       }
       """
         .trimIndent()
 
     assertEquals(
+      listOf(CorrelatedErrorDriftScanner.Kind.HAND_ROLLED_CAUSE),
+      scan(source).map { it.kind },
+    )
+  }
+
+  @Test
+  fun `holding a reporter field without ever calling it does not count as delegating`() {
+    val source =
+      """
+      package dev.jasonpearson.automobile.ctrlproxy
+
+      class Example(broadcast: suspend (ErrorResponse) -> Unit) {
+        private val reporter = CorrelatedErrorReporter(broadcast) { _, _ -> }
+
+        suspend fun guard(block: suspend () -> Unit) {
+          try {
+            block()
+          } catch (e: Exception) {
+            log(e)
+          }
+        }
+      }
+      """
+        .trimIndent()
+
+    assertTrue(
+      "a field that is never invoked must not satisfy the check: ${scan(source)}",
+      scan(source).any { it.kind == CorrelatedErrorDriftScanner.Kind.MISSING_DELEGATION },
+    )
+  }
+
+  @Test
+  fun `a raw string containing a comment opener does not blank the rest of the file`() {
+    val source =
+      "package dev.jasonpearson.automobile.ctrlproxy\n" +
+        "\n" +
+        "class Example(private val reporter: CorrelatedErrorReporter) {\n" +
+        "  val doc = \"\"\"not a comment: /* still code below */\"\"\"\n" +
+        "\n" +
+        "  suspend fun guard(requestId: String?) {\n" +
+        "    broadcastError(ErrorResponse(requestId = requestId, error = \"boom\"))\n" +
+        "    reporter.emit(requestId, \"x\", \"y\")\n" +
+        "  }\n" +
+        "}\n"
+
+    assertEquals(
+      "code after a raw string must still be scanned",
       listOf(CorrelatedErrorDriftScanner.Kind.HAND_ROLLED_ERROR_FRAME),
       scan(source).map { it.kind },
+    )
+  }
+
+  @Test
+  fun `a char literal holding a quote does not swallow the rest of the line`() {
+    val source =
+      """
+      package dev.jasonpearson.automobile.ctrlproxy
+
+      class Example(private val reporter: CorrelatedErrorReporter) {
+        val quote = '"' // the reporter owns the "unknown error" fallback
+        suspend fun guard(requestId: String?) = reporter.emit(requestId, "x", "y")
+      }
+      """
+        .trimIndent()
+
+    assertTrue(
+      "a trailing comment after a char literal must still be stripped: ${scan(source)}",
+      scan(source).isEmpty(),
     )
   }
 
@@ -279,7 +379,7 @@ object CorrelatedErrorDriftScanner {
 
     code.lineSequence().forEachIndexed { index, line ->
       val lineNumber = index + 1
-      if (line.contains(CAUSE_FALLBACK_LITERAL)) {
+      if (CAUSE_DERIVATION_TOKENS.any { line.contains(it) }) {
         violations += Violation(Kind.HAND_ROLLED_CAUSE, fileName, lineNumber)
       }
       if (line.contains(ERROR_FRAME_CONSTRUCTION)) {
@@ -287,54 +387,96 @@ object CorrelatedErrorDriftScanner {
       }
     }
 
-    if (!code.contains(CORE_TYPE)) {
+    if (DELEGATION_CALLS.none { code.contains(it) }) {
       violations += Violation(Kind.MISSING_DELEGATION, fileName, 0)
     }
 
     return violations
   }
 
-  private const val CAUSE_FALLBACK_LITERAL = "\"unknown error\""
+  /**
+   * Both halves of the cause rule, so that drift which *changes* the fallback constant is caught
+   * too. Matching only the literal would miss `?: e::class.simpleName ?: "unspecified failure"` —
+   * and a body that differs from today's is exactly what drift looks like.
+   */
+  private val CAUSE_DERIVATION_TOKENS = listOf("\"unknown error\"", "::class.simpleName")
+
   private const val ERROR_FRAME_CONSTRUCTION = "ErrorResponse("
-  private const val CORE_TYPE = "CorrelatedErrorReporter"
+
+  /**
+   * Delegation must be an actual *call*, not a bare mention of the type: a consumer that holds a
+   * `CorrelatedErrorReporter` field, never invokes it, and hand-rolls the body beside it would
+   * otherwise satisfy the check by construction.
+   *
+   * The receiver is spelled out rather than matching a bare `.emit(` — the package is full of
+   * `Flow.emit(` calls (`WebSocketServer`, `HierarchyDebouncer`), any of which would otherwise pass
+   * for delegation.
+   */
+  private val DELEGATION_CALLS =
+    listOf("reporter.guarding(", "reporter.emit(", "CorrelatedErrorReporter.causeOf(")
 
   /**
    * Blank out `//` line comments and `/* … */` block comments (including KDoc) so prose describing
    * the core is never mistaken for a re-implementation of it. Lines are preserved so reported line
    * numbers still point at the real source.
+   *
+   * String and character literals are tracked, not stripped — the scanner needs to see the cause
+   * constant, which *is* a string literal. Tracking them is what stops a comment opener appearing
+   * inside a literal from opening a comment and blanking the real code after it.
    */
   private fun stripComments(source: String): String {
     val out = StringBuilder(source.length)
     var inBlockComment = false
-    var inString = false
+    var inLineString = false
+    var inRawString = false
+    var inCharLiteral = false
     var index = 0
 
     while (index < source.length) {
       val char = source[index]
       val next = source.getOrNull(index + 1)
+      val isRawDelimiter = char == '"' && next == '"' && source.getOrNull(index + 2) == '"'
 
       when {
-        char == '\n' -> {
-          inString = false
-          out.append(char)
-          index++
-        }
         inBlockComment -> {
           if (char == '*' && next == '/') {
             inBlockComment = false
             index += 2
           } else {
+            if (char == '\n') out.append(char)
             index++
           }
         }
-        inString -> {
-          if (char == '\\') {
-            out.append(char).append(next ?: ' ')
-            index += 2
+        // A raw string spans lines and honors no escapes; only `"""` closes it.
+        inRawString -> {
+          if (isRawDelimiter) {
+            inRawString = false
+            out.append("\"\"\"")
+            index += 3
           } else {
-            if (char == '"') inString = false
             out.append(char)
             index++
+          }
+        }
+        inLineString || inCharLiteral -> {
+          when {
+            char == '\\' -> {
+              out.append(char).append(next ?: ' ')
+              index += 2
+            }
+            // An unterminated literal cannot span a line; recover rather than swallow the file.
+            char == '\n' -> {
+              inLineString = false
+              inCharLiteral = false
+              out.append(char)
+              index++
+            }
+            else -> {
+              if (inLineString && char == '"') inLineString = false
+              if (inCharLiteral && char == '\'') inCharLiteral = false
+              out.append(char)
+              index++
+            }
           }
         }
         char == '/' && next == '*' -> {
@@ -344,8 +486,18 @@ object CorrelatedErrorDriftScanner {
         char == '/' && next == '/' -> {
           while (index < source.length && source[index] != '\n') index++
         }
+        isRawDelimiter -> {
+          inRawString = true
+          out.append("\"\"\"")
+          index += 3
+        }
         char == '"' -> {
-          inString = true
+          inLineString = true
+          out.append(char)
+          index++
+        }
+        char == '\'' -> {
+          inCharLiteral = true
           out.append(char)
           index++
         }

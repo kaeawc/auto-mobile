@@ -232,10 +232,69 @@ function noUnknownCastRule() {
 	};
 }
 
+// Building a collection by mutating it inside a callback. These are the forms
+// that have a direct declarative replacement (map/filter/flatMap), as opposed to
+// a callback that logs or recurses, where the only rewrite is a loop — which is
+// *more* imperative and defeats the point of the rule.
+//
+// Note the deliberately narrow blast radius: every explicit loop form (`for`,
+// `for-of`, `for-in`, `while`) is allowed. The goal is to gently direct toward
+// declarative style where a clean declarative form exists, not to outlaw
+// iteration. Loops remain the clearest tool for device I/O, retries, byte and
+// image processing, and ordered async batches.
+const ACCUMULATOR_METHODS = new Set(["push", "unshift", "add", "set"]);
+
+function isAccumulatorCall(node) {
+	return node?.type === "CallExpression" &&
+		node.callee?.type === "MemberExpression" &&
+		ACCUMULATOR_METHODS.has(propertyName(node.callee.property));
+}
+
+// True only when EVERY statement in the callback is a bare accumulator call.
+// A callback that also logs, branches, awaits, or recurses is left alone: it is
+// doing real work, not just building a collection.
+function callbackIsPureAccumulation(callback) {
+	if (callback?.type !== "ArrowFunctionExpression" && callback?.type !== "FunctionExpression") {
+		return false;
+	}
+	// Concise arrow body: `xs.forEach(x => out.push(x))`
+	if (callback.body.type !== "BlockStatement") {
+		return isAccumulatorCall(callback.body);
+	}
+	return callback.body.body.length > 0 && callback.body.body.every(
+		statement => statement.type === "ExpressionStatement" && isAccumulatorCall(statement.expression)
+	);
+}
+
+function noAccumulatorForEachRule() {
+	return {
+		meta: {
+			type: "suggestion",
+			messages: {
+				accumulation: "This .forEach() only builds a collection by mutation. Prefer the declarative form (.map()/.filter()/.flatMap(), or new Map()/new Set() over a mapped array) so the result is a value rather than an accumulated side effect. If the mutation is genuinely the clearest expression, add an eslint-disable-next-line with a one-line justification.",
+			},
+		},
+		create(context) {
+			return {
+				CallExpression(node) {
+					if (
+						node.callee?.type === "MemberExpression" &&
+						propertyName(node.callee.property) === "forEach" &&
+						callbackIsPureAccumulation(node.arguments[0])
+					) {
+						context.report({ node, messageId: "accumulation" });
+					}
+				},
+			};
+		},
+	};
+}
+
 const catchConventionPlugin = {
 	rules: {
 		"catch-convention": catchConventionRule(),
 		"no-unknown-cast": noUnknownCastRule(),
+		"no-accumulator-foreach": noAccumulatorForEachRule(),
 	},
 };
 
@@ -459,6 +518,34 @@ export default [
 		rules: {
 			"auto-mobile/catch-convention": 2,
 			"auto-mobile/no-unknown-cast": 2,
+		},
+	},
+	{
+		// Stage 1 of the move toward declarative style (PR #3957). Enforced as
+		// errors on src/ only; pre-existing violations are captured in
+		// eslint-suppressions.json so this gates NEW code without a big-bang
+		// rewrite. Thresholds start loose and ratchet down as the baseline is
+		// burned down — see the "Lint suppressions baseline" section in CLAUDE.md.
+		//
+		// The forEach ban lives in its own `auto-mobile/no-accumulator-foreach`
+		// rule rather than in `no-restricted-syntax` on purpose. Bulk suppressions
+		// are keyed per file + per RULE and are only a count, so folding these into
+		// no-restricted-syntax would let a baselined forEach be traded for a banned
+		// setTimeout/structuredContent read with no CI failure — silently weakening
+		// guards that main enforces absolutely (main has zero no-restricted-syntax
+		// suppressions). A separate rule keeps those budgets from mixing, and also
+		// survives the `...baseRules` spreads in the overrides below, which replace
+		// the whole no-restricted-syntax entry.
+		files: ["src/**/*.ts"],
+		plugins,
+		languageOptions,
+		rules: {
+			"max-depth": ["error", 4],
+			"complexity": ["error", 15],
+			// The deepest callback nest in src/ is currently 3, so 3 is the tightest
+			// cap that still baselines clean; 4 would have no bite.
+			"max-nested-callbacks": ["error", 3],
+			"auto-mobile/no-accumulator-foreach": 2,
 		},
 	},
 	{

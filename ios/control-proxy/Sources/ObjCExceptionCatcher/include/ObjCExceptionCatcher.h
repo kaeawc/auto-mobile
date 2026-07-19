@@ -61,6 +61,21 @@ FOUNDATION_EXPORT NSException * _Nullable ObjCExceptionCatcher_tryBlock(void (NS
 /// Synthesizes a simultaneous multi-finger swipe through XCTest private event APIs.
 /// Returns NO with a descriptive error message when the private symbols are unavailable
 /// or synthesis fails. Objective-C exceptions are caught and reported through errorMessage.
+///
+/// `symbolsUnavailable` mirrors `ObjCExceptionCatcher_synthesizePinch` (see issue #2952):
+/// it is set to YES only when the required private classes/selectors are missing (or the
+/// platform is not iOS), and left NO for a genuine synthesis error or a caught
+/// Objective-C exception.
+///
+/// Unlike pinch, a YES here does NOT enable a degraded gesture — there is no public
+/// XCUITest API that can synthesize an N-finger swipe along an arbitrary vector:
+/// `XCUIElement.swipeLeft/Right/Up/Down` are single-finger and direction-only,
+/// `pinch(withScale:velocity:)` moves the fingers toward/away from each other rather
+/// than in parallel, `scroll(byDeltaX:deltaY:)` is macOS-only, and
+/// `press(forDuration:thenDragTo:)` is single-finger. Substituting a one-finger swipe
+/// would perform a semantically different gesture (VoiceOver two-finger gestures, map
+/// pan vs. drag), which is worse than a clear failure. The flag therefore selects a
+/// distinct, actionable error message — see `MultiFingerSwipeDiagnostics`.
 FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     CGFloat startX,
     CGFloat startY,
@@ -70,6 +85,7 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     CGFloat fingerSpacing,
     NSTimeInterval duration,
     NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable,
     NSString *_Nullable *_Nullable errorMessage
 );
 

@@ -440,6 +440,7 @@ public class GesturePerformer: GesturePerforming {
             try runOnMainThread {
                 let orientation = GesturePerformer.currentInterfaceOrientation()
                 var errorMessage: NSString?
+                var symbolsUnavailable: ObjCBool = false
                 let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
                     CGFloat(startX),
                     CGFloat(startY),
@@ -449,11 +450,23 @@ public class GesturePerformer: GesturePerforming {
                     CGFloat(fingerSpacing),
                     duration,
                     orientation.rawValue,
+                    &symbolsUnavailable,
                     &errorMessage
                 )
 
                 if !succeeded {
-                    throw GestureError.gestureFailed(errorMessage as String? ?? "multi-finger swipe synthesis failed")
+                    // Unlike pinch (#2910) there is no public-API fallback to take
+                    // here — no XCUITest API synthesizes an N-finger swipe along an
+                    // arbitrary vector, and a single-finger substitute would be a
+                    // different gesture. The availability signal therefore only
+                    // distinguishes the failure message (#2952); see
+                    // MultiFingerSwipeDiagnostics for the full rationale.
+                    throw GestureError.gestureFailed(
+                        MultiFingerSwipeDiagnostics.failureMessage(
+                            symbolsUnavailable: symbolsUnavailable.boolValue,
+                            underlying: errorMessage as String? ?? "multi-finger swipe synthesis failed"
+                        )
+                    )
                 }
             }
         }

@@ -335,10 +335,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             } else if char == ")", depth > 0 {
                 depth -= 1
             } else if depth == 0 {
-                for keyword in keywords {
-                    if matchesKeyword(in: query, at: i, keyword: keyword) {
-                        return SQLKeyword(keyword: keyword, index: i)
-                    }
+                for keyword in keywords where matchesKeyword(in: query, at: i, keyword: keyword) {
+                    return SQLKeyword(keyword: keyword, index: i)
                 }
             }
             i = query.index(after: i)

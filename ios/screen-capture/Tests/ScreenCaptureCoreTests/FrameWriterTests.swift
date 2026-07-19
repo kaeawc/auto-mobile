@@ -19,7 +19,7 @@ final class FrameWriterTests: XCTestCase {
         let height = 3
         let bytesPerRow = 8
         // 24 bytes of BGRA: 2px × 3 rows × 4 bytes
-        let payload: [UInt8] = (0..<UInt8(bytesPerRow * height)).map { $0 }
+        let payload = Array(0..<UInt8(bytesPerRow * height))
 
         payload.withUnsafeBufferPointer { ptr in
             writer.write(

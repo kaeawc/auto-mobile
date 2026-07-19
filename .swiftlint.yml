@@ -38,7 +38,6 @@ disabled_rules:
   - file_length  # Can be overly restrictive for valid large files
   - type_body_length  # Can be overly restrictive
   - function_body_length  # Can be overly restrictive
-  - cyclomatic_complexity  # Can be too restrictive
   - function_parameter_count  # Some APIs legitimately need many parameters
 
 # Opt-in rules (not enabled by default)
@@ -97,6 +96,29 @@ opt_in_rules:
 force_unwrapping:
   severity: error
 
+# Declarative-style semantic rules. These are already opt-in above and each has a
+# single obvious functional rewrite (map/Array(seq)/reduce(into:)/first(where:)/
+# for-where/isEmpty). CI runs SwiftLint non-strict, so a default `warning` is
+# ignored — promote them to `error` so a new imperative accumulator fails the
+# SwiftLint job at author time. The whole existing tree was already clean of these
+# (the four pre-existing hits were fixed in the same change that added this block).
+# The noisier `contains_over_*` family is deliberately left at `warning`: it false-
+# positives on `Data.range(of:)` (Data has no subsequence `contains(_:)`).
+for_where:
+  severity: error
+array_init:
+  severity: error
+reduce_into:
+  severity: error
+first_where:
+  severity: error
+empty_count:
+  severity: error
+empty_string:
+  severity: error
+empty_collection_literal:
+  severity: error
+
 identifier_name:
   min_length:
     error: 1
@@ -133,6 +155,18 @@ type_name:
 nesting:
   type_level: 2
   function_level: 3
+
+# Readability signal, enabled warning-only for now. The goal (per the imperative-
+# patterns exploration) is to *measure* the complexity baseline before deciding
+# whether to tighten — not to force-refactor legitimate dispatch switches. CI runs
+# SwiftLint non-strict so warnings never block; the `error` threshold is set out of
+# reach (highest current function is 43, in CommandHandler/Models dispatch) so this
+# rule can never fail the build on its own. A follow-up can lower `error` and drive
+# down the ~5 functions above 20 once there's appetite for those rewrites.
+cyclomatic_complexity:
+  warning: 10
+  error: 200
+  ignores_case_statements: false
 
 large_tuple:
   warning: 3

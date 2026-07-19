@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
 import type { Element } from "../../../src/models/Element";
-import type { ElementSelector as FocusElementSelector } from "../../../src/utils/AccessibilityFocusTracker";
+import type { ElementSelector as FocusElementSelector } from "../../../src/features/talkback/ElementSelector";
 
 const makeElement = (index: number, overrides: Partial<Element> = {}): Element => ({
   bounds: {

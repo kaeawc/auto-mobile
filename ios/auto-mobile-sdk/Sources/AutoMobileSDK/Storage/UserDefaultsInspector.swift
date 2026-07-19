@@ -265,12 +265,11 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     /// snapshot means system keys can never appear as an add, modify, or
     /// remove. Inspection reads via ``getDriver()`` are unaffected.
     private static func snapshotDict(_ pairs: [KeyValuePair]) -> [String: KeyValuePair] {
-        var dict: [String: KeyValuePair] = [:]
-        dict.reserveCapacity(pairs.count)
-        for pair in pairs where !isSystemKey(pair.key) {
-            dict[pair.key] = pair
-        }
-        return dict
+        // Later pairs win on duplicate keys, matching the prior append-order loop.
+        Dictionary(
+            pairs.lazy.filter { !isSystemKey($0.key) }.map { ($0.key, $0) },
+            uniquingKeysWith: { _, last in last }
+        )
     }
 
     /// Diff two key→value snapshots into per-key changes, sorted by key so

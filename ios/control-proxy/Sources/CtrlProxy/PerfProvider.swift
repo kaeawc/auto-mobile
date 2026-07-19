@@ -499,10 +499,7 @@ public class PerfProvider {
         defer { lock.unlock() }
 
         // Collect all completed entries
-        var entries: [PerfTiming] = []
-        for entry in completedEntries {
-            entries.append(entry.toTiming(timeProvider: timeProvider))
-        }
+        var entries = completedEntries.map { $0.toTiming(timeProvider: timeProvider) }
         completedEntries.removeAll()
 
         // Include debounce info if any

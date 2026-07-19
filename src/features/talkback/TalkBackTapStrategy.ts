@@ -324,8 +324,35 @@ export class TalkBackTapStrategy {
     driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
     const resourceId = element["resource-id"] as string | undefined;
-    const center = this.getElementCenter(element);
+    // Activate against the node TalkBack actually focused (live bounds), not the
+    // caller's possibly-stale element (#3918).
+    const center = await this.resolveActivationCenter(element, driver);
     const tapDuration = 50;
+
+    // No usable bounds on either the focused node or the caller's element: never
+    // tap (0,0). Try ACTION_CLICK on the resource-id, otherwise fail explicitly
+    // rather than reporting a top-left tap as success (#3918).
+    if (!center) {
+      if (resourceId) {
+        logger.warn(
+          "[TalkBackTapStrategy] Activation target has no bounds; using ACTION_CLICK fallback"
+        );
+        const clickResult = await driver.requestAction("click", resourceId);
+        if (clickResult.success) {
+          return { success: true, method: "accessibility-action" };
+        }
+        return {
+          success: false,
+          method: "focus-navigation",
+          error: `Activation failed: target has no bounds and ACTION_CLICK failed (${clickResult.error ?? "unknown"})`
+        };
+      }
+      return {
+        success: false,
+        method: "focus-navigation",
+        error: "Activation failed: target has no bounds and no resource-id for ACTION_CLICK"
+      };
+    }
 
     // First tap of double-tap activation
     const firstTap = await driver.requestTapCoordinates(center.x, center.y, tapDuration);
@@ -381,13 +408,43 @@ export class TalkBackTapStrategy {
     return { success: true, method: "focus-navigation" };
   }
 
-  private getElementCenter(element: Element): { x: number; y: number } {
+  /**
+   * Compute the center of an element's bounds, or `null` when the element has no
+   * bounds. Returning null (rather than the old `(0,0)`) forces callers to treat
+   * a bounds-less target as an explicit failure/fallback instead of silently
+   * tapping the top-left corner and reporting success (#3918).
+   */
+  private getElementCenter(element: Element): { x: number; y: number } | null {
     if (!element.bounds) {
-      return { x: 0, y: 0 };
+      return null;
     }
     return {
       x: Math.round((element.bounds.left + element.bounds.right) / 2),
       y: Math.round((element.bounds.top + element.bounds.bottom) / 2)
     };
+  }
+
+  /**
+   * Resolve the coordinates to activate against. Prefer the node TalkBack
+   * actually focused — read live via {@link TalkBackNavigationDriver.requestCurrentFocus}
+   * — over the caller-supplied `element`, whose stored bounds may be stale and
+   * land the double-tap on the wrong screen location (#3918). Falls back to the
+   * passed element when the live focus cannot be read or carries no bounds.
+   */
+  private async resolveActivationCenter(
+    element: Element,
+    driver: TalkBackNavigationDriver
+  ): Promise<{ x: number; y: number } | null> {
+    try {
+      const focus = await driver.requestCurrentFocus();
+      const focused = focus.focusedElement;
+      if (focused?.bounds) {
+        return this.getElementCenter(focused);
+      }
+    } catch (error) {
+      // Live-focus read is best-effort; fall back to the caller's element bounds.
+      logger.debug(`[TalkBackTapStrategy] Could not read current focus for activation: ${error}`);
+    }
+    return this.getElementCenter(element);
   }
 }

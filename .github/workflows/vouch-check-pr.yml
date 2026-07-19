@@ -1,0 +1,32 @@
+name: "Vouch Check PR"
+
+# Gates pull requests from non-contributors using mitchellh/vouch. Authors that
+# are not vouched (or are denounced) in .github/VOUCHED.td have their PR closed.
+# Bots and users with write access are always allowed. `pull_request_target` runs
+# in the base-repo context so forked PRs can be checked; it reads only the event
+# payload, not untrusted PR code.
+#
+# Soften if desired: set require-vouch: "false" to only block denounced users, or
+# auto-close: "false" to make it advisory (comment without closing).
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    name: "Check PR author vouch status"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mitchellh/vouch/action/check-pr@d66fa29a64600490892131ad87597c30c91fcac4 # v1.5.0
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          auto-close: "true"
+          require-vouch: "true"
+          vouched-file: ".github/VOUCHED.td"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

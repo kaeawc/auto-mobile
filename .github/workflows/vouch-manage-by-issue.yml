@@ -1,0 +1,49 @@
+name: "Vouch Manage by Issue"
+
+# Lets maintainers manage the trust list by commenting on any issue:
+#   vouch @user [reason]      → add @user to .github/VOUCHED.td
+#   denounce @user [reason]   → denounce @user
+#   unvouch @user             → remove @user
+# Only commenters with an allowed role (admin/maintain/write/triage) are honored;
+# the action commits the updated VOUCHED.td back to the default branch.
+#
+# NOTE: pushing with GITHUB_TOKEN requires repo Settings → Actions → General →
+# Workflow permissions set to "Read and write". For commits that re-trigger other
+# workflows (or to bypass branch protection), swap GITHUB_TOKEN for a GitHub App
+# token (actions/create-github-app-token) as ghostty and others do.
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  # Serialize file mutations so concurrent comments don't clobber VOUCHED.td.
+  group: vouch-manage
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  manage:
+    name: "Apply vouch/denounce from issue comment"
+    runs-on: ubuntu-latest
+    # Only run when a comment actually contains a management keyword.
+    if: >
+      contains(github.event.comment.body, 'vouch') ||
+      contains(github.event.comment.body, 'denounce') ||
+      contains(github.event.comment.body, 'unvouch')
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: mitchellh/vouch/action/manage-by-issue@d66fa29a64600490892131ad87597c30c91fcac4 # v1.5.0
+        with:
+          repo: ${{ github.repository }}
+          issue-id: ${{ github.event.issue.number }}
+          comment-id: ${{ github.event.comment.id }}
+          roles: "admin,maintain,write,triage"
+          vouched-file: ".github/VOUCHED.td"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

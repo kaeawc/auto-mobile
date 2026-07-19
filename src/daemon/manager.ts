@@ -12,6 +12,11 @@ import {
 } from "../db/migrationDependencyIntegrity";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
+import {
+  EVENT_ALL_MARKERS_FLAG,
+  hasEventAllMarkersCliOverride,
+  parseEventAllMarkersConfig,
+} from "../utils/eventAllMarkers";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import { ActionableError } from "../models";
 import {
@@ -740,6 +745,11 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.dismissKeyboardAfterInput) {
       args.push("--dismiss-keyboard-after-input");
     }
+    if (options.eventAllMarkers && options.eventAllMarkers.length > 0) {
+      args.push(EVENT_ALL_MARKERS_FLAG, options.eventAllMarkers.join(","));
+    } else if (options.eventAllMarkersCliOverride) {
+      args.push(`${EVENT_ALL_MARKERS_FLAG}=`);
+    }
     if (options.noUiPerfMode) {
       args.push("--no-ui-perf-mode");
     }
@@ -1193,6 +1203,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
     env,
     resolveDaemonLaunchWorkingDirectory()
   );
+  const eventAllMarkers = parseEventAllMarkersConfig(args, env);
+  const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
+  if (eventAllMarkers.length > 0 || eventAllMarkersCliOverride) {
+    options.eventAllMarkers = eventAllMarkers;
+    options.eventAllMarkersCliOverride = eventAllMarkersCliOverride;
+  }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
       options.port = parseInt(args[i + 1], 10);

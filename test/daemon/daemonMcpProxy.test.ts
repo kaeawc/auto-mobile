@@ -430,7 +430,13 @@ describe("DaemonMcpProxy", () => {
     });
 
     describe("startup option mismatch handling", () => {
-      function runningStatus(options: { embeddedSdk?: boolean; toolResultsNoStructuredContent?: boolean; toolOutputsDir?: string }) {
+      function runningStatus(options: {
+        embeddedSdk?: boolean;
+        toolResultsNoStructuredContent?: boolean;
+        toolOutputsDir?: string;
+        eventAllMarkers?: string[];
+        eventAllMarkersCliOverride?: boolean;
+      }) {
         return {
           running: true,
           pid: 1234,
@@ -526,6 +532,65 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("restarts daemon when explicit empty event-all markers override differs", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ eventAllMarkers: ["@"] }), // ensureVersionMatches
+          runningStatus({ eventAllMarkers: ["@"] }), // ensureBuildMatches
+          runningStatus({ eventAllMarkers: ["@"] }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ eventAllMarkers: [], eventAllMarkersCliOverride: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { eventAllMarkers: [], eventAllMarkersCliOverride: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({
+            eventAllMarkers: [],
+            eventAllMarkersCliOverride: true,
+          });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when requested event-all markers differ", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ eventAllMarkers: ["/"] }), // ensureVersionMatches
+          runningStatus({ eventAllMarkers: ["/"] }), // ensureBuildMatches
+          runningStatus({ eventAllMarkers: ["/"] }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ eventAllMarkers: ["@"] }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { eventAllMarkers: ["@"] },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ eventAllMarkers: ["@"] });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("does not restart daemon when output-reduction flags match", async () => {
         const fakeClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
@@ -578,6 +643,32 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("does not restart daemon when event-all markers match", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ eventAllMarkers: ["@"] }), // ensureVersionMatches
+          runningStatus({ eventAllMarkers: ["@"] }), // ensureBuildMatches
+          runningStatus({ eventAllMarkers: ["@"] }), // ensureStartupOptionsMatch
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { eventAllMarkers: ["@"] },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("does NOT restart (no downgrade) when a bare client connects to a configured daemon (issue #3846)", async () => {
         const fakeClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
@@ -587,9 +678,9 @@ describe("DaemonMcpProxy", () => {
         // connecting client is bare (no daemonOptions) and must NOT trigger a
         // restart that strips those flags.
         fakeManager.statusResults = [
-          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // ensureVersionMatches
-          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // ensureBuildMatches
-          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // ensureStartupOptionsMatch
+          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true, eventAllMarkers: ["@"] }), // ensureVersionMatches
+          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true, eventAllMarkers: ["@"] }), // ensureBuildMatches
+          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true, eventAllMarkers: ["@"] }), // ensureStartupOptionsMatch
         ];
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({

@@ -466,7 +466,11 @@ export class SetUIState extends BaseVisualChange {
             return { success: false, error: `Failed to clear text: ${clearResult.error}` };
           }
 
-          // Input new text
+          // Input new text. Intentionally passes no mode so the shared
+          // InputText.execute applies event-all marker auto-promotion here too
+          // (a form field value containing a configured marker, e.g. an
+          // @mention, is typed via eventAll). This is by design — the feature
+          // is scoped to both inputText and setUIState text fields.
           logger.debug(`[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value.length}`);
           const inputStart = Date.now();
           const inputResult = await inputText.execute(fieldSpec.value);

@@ -8,6 +8,8 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { resolveAutoInputMode } from "./resolveAutoInputMode";
+import { serverConfig } from "../../utils/ServerConfig";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll";
 
@@ -29,7 +31,7 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    mode: InputTextMode = "a11y"
+    mode?: InputTextMode
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
@@ -45,6 +47,21 @@ export class InputText extends BaseVisualChange {
       };
     }
 
+    // Resolve the Android input mode: an explicit caller-supplied mode always
+    // wins; otherwise consumer-configured markers may auto-promote to
+    // `eventAll` (real key events); otherwise fall back to the default `a11y`.
+    // Mode is Android-only — iOS ignores it, so skip the resolution there.
+    let resolvedMode: InputTextMode = mode ?? "a11y";
+    if (this.device.platform === "android" && mode === undefined) {
+      const autoMode = resolveAutoInputMode(text, serverConfig.getEventAllMarkers());
+      if (autoMode) {
+        resolvedMode = autoMode;
+        logger.debug(
+          "[InputText] auto-promoted a11y -> eventAll (text matched a configured event-all marker)"
+        );
+      }
+    }
+
     return this.observedInteraction(
       async () => {
         try {
@@ -52,7 +69,7 @@ export class InputText extends BaseVisualChange {
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidTextInput", () =>
-                this.executeAndroidTextInput(text, imeAction, dismissKeyboard, mode)
+                this.executeAndroidTextInput(text, imeAction, dismissKeyboard, resolvedMode)
               );
             case "ios":
               // dismissKeyboard is Android-only — it works around an emulator
@@ -67,12 +84,13 @@ export class InputText extends BaseVisualChange {
         } catch (error) {
           perf.end();
           const errorMessage = error instanceof Error ? error.message : String(error);
+          logger.warn(`[InputText] text input failed (mode=${resolvedMode}): ${errorMessage}`, error);
 
           return {
             success: false,
             text,
             error: `Failed to send text input: ${errorMessage}`,
-            method: this.device.platform === "android" ? mode : "a11y"
+            method: this.device.platform === "android" ? resolvedMode : "a11y"
           };
         }
       },

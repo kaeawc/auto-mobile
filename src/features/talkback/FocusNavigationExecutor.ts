@@ -1,7 +1,7 @@
 import type { Element } from "../../models/Element";
 import type { ScreenSize } from "../../models/ScreenSize";
 import { ActionableError, type BootedDevice, type CurrentFocusResult, type TraversalOrderResult } from "../../models";
-import type { ElementSelector as FocusElementSelector } from "../../utils/AccessibilityFocusTracker";
+import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { DeviceDetection } from "../../utils/DeviceDetection";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";

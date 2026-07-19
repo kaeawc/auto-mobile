@@ -6,7 +6,7 @@ import {
 } from "../../../src/features/talkback/FocusNavigationExecutor";
 import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
 import type { Element } from "../../../src/models/Element";
-import type { ElementSelector as FocusElementSelector } from "../../../src/utils/AccessibilityFocusTracker";
+import type { ElementSelector as FocusElementSelector } from "../../../src/features/talkback/ElementSelector";
 import { FakeFocusNavigationDriver } from "../../fakes/FakeFocusNavigationDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 

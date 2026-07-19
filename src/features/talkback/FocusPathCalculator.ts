@@ -1,5 +1,5 @@
 import type { Element } from "../../models/Element";
-import type { ElementSelector as FocusElementSelector } from "../../utils/AccessibilityFocusTracker";
+import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 
 export interface FocusNavigationPath {

@@ -1,5 +1,5 @@
 import { ActionableError, BootedDevice, Platform, SomePlatform } from "../models";
-import { MultiPlatformDeviceManager } from "./deviceUtils";
+import { MultiPlatformDeviceManager, waitForDeviceReadyOrCancel } from "./deviceUtils";
 import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { Window as WindowImpl } from "../features/observe/Window";
@@ -843,9 +843,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const childProcess = await this.deviceUtils.startDevice(deviceImage);
     perf.endOperation("startDevice");
 
-    // Wait for the emulator to fully boot and get its device ID
+    // Wait for the emulator to fully boot and get its device ID. Cancel the boot
+    // (shut the half-booted emulator back down) if readiness fails (issue #3952).
     perf.startOperation("waitForReady");
-    const newDevice = await this.deviceUtils.waitForDeviceReady(deviceImage, undefined, childProcess);
+    const newDevice = await waitForDeviceReadyOrCancel(this.deviceUtils, deviceImage, childProcess);
     perf.endOperation("waitForReady");
 
     if (!newDevice) {

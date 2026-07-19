@@ -4,7 +4,7 @@ import { logger } from "../utils/logger";
 import { SessionManager } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import { Mutex } from "async-mutex";
-import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager, PlatformDeviceManager, waitForDeviceReadyOrCancel } from "../utils/deviceUtils";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -716,7 +716,7 @@ export class DevicePool {
         logger.info(`[DevicePool] Starting additional ${device.platform} device ${label}`);
         const childProcess = await this.deviceManager.startDevice(device);
         const ready = this.criteriaMatcher.withDeviceImageMetadata(
-          await this.deviceManager.waitForDeviceReady(device, undefined, childProcess),
+          await waitForDeviceReadyOrCancel(this.deviceManager, device, childProcess),
           device
         );
         await this.addDevice(ready);
@@ -781,7 +781,7 @@ export class DevicePool {
       excludedImageIds.add(this.criteriaMatcher.getDeviceImageKey(device));
       const childProcess = await this.deviceManager.startDevice(device);
       const ready = this.criteriaMatcher.withDeviceImageMetadata(
-        await this.deviceManager.waitForDeviceReady(device, undefined, childProcess),
+        await waitForDeviceReadyOrCancel(this.deviceManager, device, childProcess),
         device
       );
       await this.addDevice(ready);

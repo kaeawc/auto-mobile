@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -87,6 +88,30 @@ describe("DevicePool", () => {
     async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<FakeChildProcess> {
       await super.startDevice(device, timeoutMs);
       return this.childProcess;
+    }
+  }
+
+  // Hands back a spawned handle from startDevice, then fails readiness — used to
+  // assert the pool cancels a hung boot via handle.kill() (issue #3952). Reuses
+  // FakeChildProcess, adding only a kill counter.
+  class KillTrackingChildProcess extends FakeChildProcess {
+    killCount = 0;
+    override kill(): boolean {
+      this.killCount++;
+      return true;
+    }
+  }
+
+  class FakeDeviceManagerWithFailingReadiness extends FakeDeviceManager {
+    readonly childProcess = new KillTrackingChildProcess();
+
+    async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<ChildProcess> {
+      await super.startDevice(device, timeoutMs);
+      return this.childProcess as unknown as ChildProcess;
+    }
+
+    async waitForDeviceReady(): Promise<BootedDevice> {
+      throw new Error("readiness timeout");
     }
   }
 
@@ -627,6 +652,29 @@ describe("DevicePool", () => {
       ]);
       expect(devicePool.getDevice("emulator-5554")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
+    test("cancels the boot (kills the spawned handle) when a pool cold-boot fails readiness", async () => {
+      const images: DeviceInfo[] = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      const manager = new FakeDeviceManagerWithFailingReadiness(images);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+
+      // No pre-booted devices: the pool must cold-boot one, readiness then fails.
+      // Allocation cannot be satisfied (throws), but the half-booted device must
+      // have been torn back down via handle.kill() (issue #3952).
+      await expect(
+        devicePool.assignMultipleDevices(["session-1"], 1000, "android")
+      ).rejects.toThrow();
+      expect(manager.childProcess.killCount).toBe(1);
     });
 
     test("boots replacement emulator after stale pooled emulator is evicted before allocation", async () => {

@@ -126,12 +126,36 @@ run_installer() {
   [[ "$output" == *"OK"* ]]
 }
 
-@test "the pin matches the version that generated the committed project" {
-  # A bump without regenerating turns every PR red, so tie the pin to the
-  # committed pbxproj rather than asserting the literal against itself.
+@test "the archive digest is pinned alongside the version" {
+  # The version alone is not enough: GitHub release assets are mutable, so a
+  # re-uploaded xcodegen.zip under the same tag would still report the pinned
+  # version and pass the gate while generating different bytes — #3975 with the
+  # guard green. The digest is what makes the pin actually byte-exact.
   source "$VERSION_FILE"
-  run grep -q "objectVersion" "$REPO_ROOT/ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
-  [ "$status" -eq 0 ]
-  [ -n "$XCODEGEN_VERSION" ]
   [[ "$XCODEGEN_RELEASE_URL" == *"/${XCODEGEN_VERSION}/"* ]]
+  [[ "$XCODEGEN_RELEASE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+}
+
+@test "the installer verifies the digest before installing" {
+  # Guards against the verification being dropped in a future refactor: a
+  # tampered archive must not reach the destination prefix.
+  grep -q "XCODEGEN_RELEASE_SHA256" "$SCRIPT"
+  grep -qE "shasum -a 256|sha256sum" "$SCRIPT"
+}
+
+@test "rejects an archive whose digest does not match the pin" {
+  stub_download "2.46.0"
+  # Make the fabricated archive's bytes differ from the pinned digest by
+  # letting the real verification run against stubbed content.
+  cat > "$STUB_DIR/curl" <<EOF
+#!/bin/bash
+out=""; prev=""
+for a in "\$@"; do [[ "\$prev" == "-o" ]] && out="\$a"; prev="\$a"; done
+printf 'not the real archive' > "\$out"
+EOF
+  chmod +x "$STUB_DIR/curl"
+  run env PATH="$STUB_DIR:/usr/bin:/bin" XCODEGEN_PREFIX="$PREFIX" bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"digest mismatch"* ]]
+  [ ! -e "$PREFIX/bin/xcodegen" ]
 }

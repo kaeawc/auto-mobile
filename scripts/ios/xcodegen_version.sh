@@ -25,6 +25,20 @@ XCODEGEN_VERSION="2.46.0"
 # shellcheck disable=SC2034  # consumed by scripts that source this file
 XCODEGEN_RELEASE_URL="https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
 
+# GitHub release assets are MUTABLE: a re-uploaded xcodegen.zip under the same
+# tag would still report 2.46.0 and sail through the version gate, then generate
+# different bytes -- reproducing #3975 with the guard reporting green. Pinning
+# the digest is what actually makes this version-exact.
+# shellcheck disable=SC2034  # consumed by scripts that source this file
+XCODEGEN_RELEASE_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+
+# The installer may land in ${HOME}/.local when /usr/local is not writable, and
+# a subprocess cannot change its caller's PATH. Without this, an install that
+# SUCCEEDS is invisible to the caller's require_pinned gate, which then fails
+# telling the user to run the installer that just worked. Mirrors the same
+# export in scripts/ktfmt/install_ktfmt.sh.
+export PATH="${HOME}/.local/bin:${PATH}"
+
 # Parse the version from `xcodegen --version` (e.g. "Version: 2.46.0"). Prints
 # the empty string if xcodegen is absent or emits nothing parseable. Always
 # succeeds, so callers need no `|| true` -- which would disable set -e (SC2310).

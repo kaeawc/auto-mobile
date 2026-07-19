@@ -48,6 +48,8 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
+source "${SCRIPT_DIR}/xcodegen_version.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 XCODEPROJ="${CTRL_PROXY_IOS_DIR}/CtrlProxy.xcodeproj"
@@ -66,10 +68,14 @@ if ! command -v xcodebuild &> /dev/null; then
     exit 1
 fi
 
-if ! command -v xcodegen &> /dev/null; then
-    echo -e "${YELLOW}Warning: xcodegen not found. Attempting to install via brew...${NC}"
-    "${SCRIPT_DIR}/install-xcodegen.sh"
-fi
+# Check the VERSION, not mere presence: a contributor who already has a
+# different XcodeGen would otherwise skip the installer and regenerate a skewed
+# project file — exactly the #3975 shape this pin exists to prevent. The
+# installer no-ops when the pin is already satisfied.
+echo -e "${YELLOW}Ensuring pinned XcodeGen ${XCODEGEN_VERSION}...${NC}"
+"${SCRIPT_DIR}/install-xcodegen.sh"
+hash -r 2>/dev/null || true
+require_pinned_xcodegen_version
 
 XCODE_VERSION=$(xcodebuild -version)
 XCODE_VERSION=${XCODE_VERSION%%$'\n'*}

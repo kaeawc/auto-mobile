@@ -106,13 +106,18 @@
   # runner ships (2.45.4 on macos-26 vs 2.46.0 for contributors). Those order
   # the PBXProject `targets` array differently, so an unpinned generator makes
   # every PR fail the drift check with an ordering-only diff (issue #3975).
-  for workflow in .github/workflows/build-ctrl-proxy-ios-ipa.yml \
-                  .github/workflows/pull_request.yml \
-                  .github/workflows/merge.yml \
-                  .github/workflows/nightly.yml; do
+  # Scan every workflow rather than a hard-coded list, so a newly added one
+  # cannot reintroduce a bare install unnoticed.
+  run bash -c "grep -rIl -F 'xcodegen' .github/workflows/ || true"
+  [ -n "$output" ]
+  for workflow in $output; do
     ! grep -Fq "brew install xcodegen" "$workflow"
-    grep -Fq "scripts/ios/install-xcodegen.sh" "$workflow"
   done
+  grep -rIq -F "scripts/ios/install-xcodegen.sh" .github/workflows/
+
+  # Retained from #3551, independent of xcodegen: tap trust must not be
+  # disabled wholesale to silence Homebrew warnings.
+  ! grep -rIq -F "HOMEBREW_NO_REQUIRE_TAP_TRUST" .github/workflows/
 }
 
 @test "no script installs XcodeGen via bare brew" {

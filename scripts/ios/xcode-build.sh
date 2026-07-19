@@ -28,6 +28,8 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
+source "${SCRIPT_DIR}/xcodegen_version.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
 
@@ -110,16 +112,27 @@ if ! has_simulator_sdk; then
     fi
 fi
 
-# Install xcodegen if not available (needed to regenerate projects for Xcode version compatibility)
-if ! command -v xcodegen &> /dev/null; then
-    if command -v brew &> /dev/null; then
-        print_info "Installing xcodegen..."
-        "${SCRIPT_DIR}/install-xcodegen.sh" || echo "xcodegen install failed, continuing with committed projects"
-    fi
-fi
+# Install the pinned xcodegen (needed to regenerate projects for Xcode version
+# compatibility). Checks the VERSION, not mere presence: a machine that already
+# has a different XcodeGen would otherwise regenerate every project skewed —
+# the #3975 shape. The installer no-ops when the pin is already satisfied, and
+# the old `command -v brew` guard is gone because it no longer uses Homebrew.
+print_info "Ensuring pinned xcodegen ${XCODEGEN_VERSION}..."
+"${SCRIPT_DIR}/install-xcodegen.sh" || echo "xcodegen install failed, continuing with committed projects"
+hash -r 2>/dev/null || true
 
-# Regenerate Xcode projects from project.yml if xcodegen is available
-if command -v xcodegen &> /dev/null; then
+# Regenerate only with the pinned version. This path tolerates a failed install
+# by falling back to the committed projects, so a skew is a warn-and-skip here
+# rather than a hard failure — but it must never regenerate with a skewed
+# generator, which would silently rewrite every ios/*/project.pbxproj.
+# Read the version by invoking the binary directly rather than through
+# installed_xcodegen_version(): a *function* call inside a command substitution
+# silently disables set -e for it (SC2311), and this script tolerates a missing
+# xcodegen, so it must not rely on errexit here anyway.
+current_xcodegen_version="$(xcodegen --version 2>/dev/null | awk '{ gsub(/\r/, ""); print $NF; exit }')"
+if [ "${current_xcodegen_version}" != "${XCODEGEN_VERSION}" ]; then
+    print_info "xcodegen ${current_xcodegen_version:-none} != pinned ${XCODEGEN_VERSION}; using committed projects"
+elif command -v xcodegen &> /dev/null; then
     echo -e "${BLUE}Regenerating Xcode projects from project.yml...${NC}"
     shopt -s nullglob
     PROJECT_YMLS=("${IOS_DIR}"/*/project.yml)

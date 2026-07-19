@@ -4,6 +4,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
+import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 
 describe("TapOnElement TalkBack mode detection", () => {
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
@@ -616,6 +617,53 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
       expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
+    });
+  });
+
+  // #3937: the `screen-reader-navigation` feature flag is the global opt-in for
+  // fidelity mode — it drives cursor traversal even without the per-call option.
+  describe("screen-reader-navigation feature flag (global opt-in)", () => {
+    const makeFlaggedTapOnElement = (flagEnabled: boolean) => {
+      const featureFlags = {
+        isEnabled: (key: string) => flagEnabled && key === "screen-reader-navigation"
+      } as unknown as FeatureFlagService;
+      const tap = new TapOnElement(
+        { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
+        fakeAdb as any,
+        {
+          accessibilityDetector: fakeAccessibilityDetector,
+          timer: fakeTimer,
+          talkBackStrategy: fakeTalkBackStrategy,
+          featureFlags
+        }
+      );
+      spyOn(tap as any, "executeAndroidTapWithCoordinates").mockResolvedValue(undefined);
+      return tap;
+    };
+
+    test("flag ON drives cursor traversal even without the per-call option", async () => {
+      const tap = makeFlaggedTapOnElement(true);
+      const element = makeElement();
+
+      await (tap as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, {}, undefined
+      );
+
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.tapCalls[0].element).toBe(element);
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
+    });
+
+    test("flag OFF keeps the direct-activation default", async () => {
+      const tap = makeFlaggedTapOnElement(false);
+      const element = makeElement();
+
+      await (tap as any).executeAndroidTapWithAccessibility(
+        "tap", 50, 50, element, 500, {}, undefined
+      );
+
+      expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.tapCalls).toHaveLength(0);
     });
   });
 

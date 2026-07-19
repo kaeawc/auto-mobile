@@ -7,6 +7,7 @@ export type FeatureFlagKey =
   | "predictive-ui"
   | "force-accessibility-mode"
   | "accessibility-auto-detect"
+  | "screen-reader-navigation"
   | "raw-element-search"
   | "ai-recovery"
   | "mcp-recording"
@@ -113,6 +114,13 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     label: "Accessibility auto-detect",
     description: "Automatically detect and adapt to TalkBack/VoiceOver when enabled.",
     defaultValue: true,
+  },
+  {
+    key: "screen-reader-navigation",
+    label: "Screen-reader navigation (fidelity mode)",
+    description:
+      "Opt-in: when a screen reader is active, drive the cursor by swipe traversal to the target before activating (reproduces the real user journey) instead of activating the node directly. For accessibility validation — reachability, traversal order, focus traps.",
+    defaultValue: false,
   },
   {
     key: "ai-recovery",

@@ -1362,6 +1362,7 @@ fun AutoMobileContent(
                       deviceId = activeDeviceId,
                       packageName = selectedAppId,
                       platform = storagePlatform,
+                      observationStreamClient = observationStreamClient,
                     )
                   "diagnostics" ->
                     DiagnosticsDashboard(

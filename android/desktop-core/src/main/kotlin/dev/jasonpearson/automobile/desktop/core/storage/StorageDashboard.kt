@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.datasource.StorageDataSource
@@ -33,6 +34,9 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 private val LOG = LoggerFactory.getLogger("StorageDashboard")
+
+/** How long a live-changed entry stays highlighted in the key-value inspector. */
+private const val HIGHLIGHT_DURATION_MS = 2000L
 
 /** Storage tab options. */
 enum class StorageTab(val title: String, val icon: String) {
@@ -49,6 +53,8 @@ fun StorageDashboard(
   deviceId: String? = null,
   packageName: String? = null,
   platform: StoragePlatform = StoragePlatform.Android,
+  observationStreamClient: ObservationStreamClient? =
+    null, // Shared stream client for live storage changes
 ) {
   val graph = LocalAutoMobileGraph.current
   val colors = SharedTheme.globalColors
@@ -60,6 +66,39 @@ fun StorageDashboard(
   var keyValueFiles by remember { mutableStateOf<List<KeyValueFile>>(emptyList()) }
   var isLoading by remember { mutableStateOf(true) }
   var error by remember { mutableStateOf<String?>(null) }
+
+  // Live key/value changes pushed by the daemon. Highlight expiry is tracked per key rather than
+  // as one shared deadline, so a later change can't cut short an earlier key's highlight.
+  var highlightExpiries by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+  val recentlyChangedKeys = highlightExpiries.keys
+
+  LaunchedEffect(observationStreamClient, deviceId, packageName) {
+    if (observationStreamClient == null) return@LaunchedEffect
+
+    observationStreamClient.storageUpdates.collect { update ->
+      // The stream is device-scoped but not package-scoped, so filter to the inspected app.
+      if (deviceId != null && update.deviceId != null && update.deviceId != deviceId) {
+        return@collect
+      }
+      if (packageName != null && update.packageName != packageName) return@collect
+
+      val newlyHighlighted = update.highlightKeys(keyValueFiles)
+      keyValueFiles = keyValueFiles.applyStorageUpdate(update)
+      if (newlyHighlighted.isNotEmpty()) {
+        val expiresAt = System.currentTimeMillis() + HIGHLIGHT_DURATION_MS
+        highlightExpiries = highlightExpiries + newlyHighlighted.associateWith { expiresAt }
+      }
+    }
+  }
+
+  // Drop highlights as they individually expire. Writing the map restarts this effect, which then
+  // schedules the next-soonest expiry, so one pass per restart is enough -- no loop needed.
+  LaunchedEffect(highlightExpiries) {
+    val nextExpiry = highlightExpiries.values.minOrNull() ?: return@LaunchedEffect
+    val waitMs = nextExpiry - System.currentTimeMillis()
+    if (waitMs > 0) kotlinx.coroutines.delay(waitMs)
+    highlightExpiries = highlightExpiries.filterValues { it > System.currentTimeMillis() }
+  }
 
   LaunchedEffect(dataSourceMode, clientProvider, deviceId, packageName) {
     LOG.info(
@@ -203,6 +242,7 @@ fun StorageDashboard(
             dataSource?.let { ds ->
               { fileName, key, value, type -> ds.setKeyValue(fileName, key, value, type) }
             },
+          recentlyChangedKeys = recentlyChangedKeys,
           modifier = Modifier.fillMaxSize(),
         )
     }

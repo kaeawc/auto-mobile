@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.domain.KeyValueType
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
@@ -76,6 +77,17 @@ class ObservationStreamClient {
       onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
   val performanceUpdates: SharedFlow<PerformanceStreamUpdate> = _performanceUpdates.asSharedFlow()
+
+  // Flow for live key/value storage changes. Storage writes can burst (a screen that persists
+  // several preferences at once), so this follows the performance flow's non-blocking policy
+  // rather than suspending the socket reader.
+  private val _storageUpdates =
+    MutableSharedFlow<StorageStreamUpdate>(
+      replay = 1,
+      extraBufferCapacity = 32,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+  val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
   // Flow for device-level stream events such as control connection loss.
   private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
@@ -383,6 +395,27 @@ class ObservationStreamClient {
           log.info("Emitted performance update to flow")
         }
       }
+      "storage_update" -> {
+        val storageEvent = response.storageEvent
+        if (storageEvent == null) {
+          log.warn("storage_update without a storageEvent payload, ignoring")
+        } else {
+          _storageUpdates.tryEmit(
+            StorageStreamUpdate(
+              deviceId = response.deviceId,
+              // The frame's own timestamp is the daemon's receive clock; the event carries the
+              // device-side time the change actually happened, which is what ordering wants.
+              timestamp = storageEvent.timestamp,
+              packageName = storageEvent.packageName,
+              fileName = storageEvent.fileName,
+              key = storageEvent.key,
+              value = storageEvent.value,
+              valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
+              sequenceNumber = storageEvent.sequenceNumber,
+            )
+          )
+        }
+      }
       "ping" -> {
         log.info("Received ping, sending pong")
         sendPong()
@@ -431,6 +464,26 @@ class ObservationStreamClient {
         id = UUID.randomUUID().toString(),
         command = "request_navigation_graph",
         appId = appId,
+      )
+    sendRequest(request)
+  }
+
+  /**
+   * Ask the daemon for a single fresh observation now, without changing the subscription cadence.
+   *
+   * The captured hierarchy arrives out-of-band on [hierarchyUpdates] like any other frame; the
+   * daemon's direct reply is only an ack (or an `error` frame, which surfaces on [deviceEvents]).
+   *
+   * @param deviceId Capture just this device; null captures every subscribed device.
+   */
+  fun requestObservation(deviceId: String? = null) {
+    if (!_connectionState.value.isConnected) return
+
+    val request =
+      StreamRequest(
+        id = UUID.randomUUID().toString(),
+        command = "request_observation",
+        deviceId = deviceId,
       )
     sendRequest(request)
   }
@@ -495,7 +548,41 @@ data class StreamResponse(
   val navigationGraph: NavigationGraphStreamData? = null,
   val performanceData: PerformanceStreamData? = null,
   val hierarchyDiff: HierarchyDiffSummary? = null,
+  val storageEvent: StorageEventData? = null,
 )
+
+/**
+ * Payload of a `storage_update` frame — one key/value change observed on the device.
+ *
+ * [key] and [value] are nullable by protocol: a null [key] means the whole file was cleared, and a
+ * null [value] means the key was deleted (or the file cleared).
+ */
+@Serializable
+data class StorageEventData(
+  val packageName: String,
+  val fileName: String,
+  val key: String? = null,
+  val value: String? = null,
+  val valueType: String = KeyValueType.Unknown.protocolName,
+  val timestamp: Long = 0L,
+  val sequenceNumber: Long = 0L,
+)
+
+/** A live key/value change, surfaced to the storage inspector. */
+data class StorageStreamUpdate(
+  val deviceId: String?,
+  val timestamp: Long,
+  val packageName: String,
+  val fileName: String,
+  val key: String?,
+  val value: String?,
+  val valueType: KeyValueType,
+  val sequenceNumber: Long,
+) {
+  /** True when the whole file was cleared rather than a single key changing. */
+  val isFileCleared: Boolean
+    get() = key == null
+}
 
 /**
  * Per-frame hierarchy diff summary emitted by the daemon on `hierarchy_update` (issue #3758).

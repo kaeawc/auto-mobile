@@ -32,6 +32,17 @@ class TestDaemonInstance(private val port: Int = 0) {
   /** Recorded method calls (e.g. "initialize", "tools/call:observe"). */
   val calls = CopyOnWriteArrayList<String>()
 
+  /** Params the client sent on `initialize`, for asserting the handshake. */
+  @Volatile
+  var initializeParams: JsonObject? = null
+    private set
+
+  /**
+   * `protocolVersion` returned from `initialize`. Set to an unsupported revision, or to null to
+   * omit the field entirely, to exercise negotiation failures.
+   */
+  @Volatile var negotiatedProtocolVersion: String? = LATEST_MCP_PROTOCOL_VERSION
+
   /** Tools to advertise via tools/list. */
   private val advertisedTools = CopyOnWriteArrayList<McpTool>()
 
@@ -123,12 +134,13 @@ class TestDaemonInstance(private val port: Int = 0) {
   }
 
   private fun handleInitialize(request: JsonRpcRequest): JsonRpcResponse {
+    initializeParams = request.params?.jsonObject
     return JsonRpcResponse(
       jsonrpc = "2.0",
       id = request.id,
       result =
         buildJsonObject {
-          put("protocolVersion", LATEST_MCP_PROTOCOL_VERSION)
+          negotiatedProtocolVersion?.let { put("protocolVersion", it) }
           put("capabilities", JsonObject(emptyMap()))
           put(
             "serverInfo",

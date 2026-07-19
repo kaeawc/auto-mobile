@@ -8,11 +8,11 @@ import org.robolectric.RobolectricTestRunner
 
 /**
  * Pins [AutoMobileNotificationReceiver.parseActions] against the malformed-entry cases that the
- * receiver has to tolerate, since notification action JSON arrives over a broadcast extra and is not
- * schema-validated before it gets here.
+ * receiver has to tolerate, since notification action JSON arrives over a broadcast extra and is
+ * not schema-validated before it gets here.
  *
- * Robolectric supplies a real `org.json` implementation; the android.jar stub on the plain unit-test
- * classpath would return default values instead of parsing.
+ * Robolectric supplies a real `org.json` implementation; the android.jar stub on the plain
+ * unit-test classpath would return default values instead of parsing.
  */
 @RunWith(RobolectricTestRunner::class)
 class AutoMobileNotificationReceiverTest {
@@ -22,7 +22,8 @@ class AutoMobileNotificationReceiverTest {
   @Test
   fun `parseActions returns actions in array order`() {
     val json =
-      """[{"label":"Reply","actionId":"reply"},{"label":"Snooze","actionId":"snooze"}]""".trimIndent()
+      """[{"label":"Reply","actionId":"reply"},{"label":"Snooze","actionId":"snooze"}]"""
+        .trimIndent()
 
     assertEquals(
       listOf(NotificationAction("Reply", "reply"), NotificationAction("Snooze", "snooze")),

@@ -320,6 +320,9 @@
             "bounds"
           ],
           "additionalProperties": {}
+        },
+        "confirmed": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -350,6 +353,10 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "__lockNamespace": {
+          "description": "Internal plan-scoped lock namespace (injected)",
+          "type": "string"
         }
       },
       "required": [
@@ -779,6 +786,10 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "__lockNamespace": {
+          "description": "Internal plan-scoped lock namespace (injected)",
+          "type": "string"
         }
       },
       "required": [

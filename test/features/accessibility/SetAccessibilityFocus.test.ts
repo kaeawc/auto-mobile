@@ -91,6 +91,9 @@ describe("SetAccessibilityFocus", () => {
 
     expect(result.success).toBe(true);
     expect(result.focusedElement?.["resource-id"]).toBe("com.example:id/title");
+    // Focus was read back, so the move is confirmed and there is no warning (#3922).
+    expect(result.confirmed).toBe(true);
+    expect(result.warning).toBeUndefined();
   });
 
   test("resolves text selector to a resource-id via the element finder", async () => {
@@ -263,6 +266,10 @@ describe("SetAccessibilityFocus", () => {
 
     expect(result.success).toBe(true);
     expect(result.focusedElement).toBeUndefined();
+    // The confirmation read failed: surface confirmed:false + a warning so callers
+    // can distinguish "focused, couldn't confirm" from "didn't focus" (#3922).
+    expect(result.confirmed).toBe(false);
+    expect(result.warning).toContain("could not be read back");
   });
 
   test("throws ActionableError on iOS (Android-only gating)", async () => {

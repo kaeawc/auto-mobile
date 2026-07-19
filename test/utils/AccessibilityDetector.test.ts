@@ -152,6 +152,29 @@ describe("AccessibilityDetector - Unit Tests", () => {
       const service = await detector.detectMethod("device123", fakeAdb);
       expect(service).toBe("unknown");
     });
+
+    // Regression for #3922: a legitimately-enabled service whose component name
+    // merely contains the substring "null" (e.g. a package literally named
+    // "...null...") must not be misclassified as disabled by a substring scan.
+    test("detects a service whose component name contains the substring 'null'", async () => {
+      fakeAdb.setResponse("com.nullsoft.player/com.nullsoft.player.A11yService");
+
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
+      expect(enabled).toBe(true);
+
+      const service = await detector.detectMethod("device123", fakeAdb);
+      expect(service).toBe("unknown");
+    });
+
+    test("treats the literal 'null' sentinel (setting unset) as disabled", async () => {
+      fakeAdb.setResponse("null");
+
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
+      expect(enabled).toBe(false);
+
+      const service = await detector.detectMethod("device123", fakeAdb);
+      expect(service).toBe("unknown");
+    });
   });
 
   describe("Caching Behavior", () => {

@@ -68,7 +68,18 @@ public enum class KeyValueType(public val protocolName: kotlin.String) {
   Float("FLOAT"),
   Boolean("BOOLEAN"),
   StringSet("STRING_SET"),
-  Unknown("UNKNOWN"),
+  Unknown("UNKNOWN");
+
+  public companion object {
+    /**
+     * Maps a daemon `valueType` string onto this enum, case-insensitively.
+     *
+     * The daemon's type union is wider than this enum — it also emits DOUBLE, DATA, DATE, ARRAY and
+     * DICTIONARY for iOS — so anything unrecognized becomes [Unknown] rather than failing.
+     */
+    public fun fromProtocolName(protocolName: kotlin.String): KeyValueType =
+      entries.firstOrNull { it.protocolName.equals(protocolName, ignoreCase = true) } ?: Unknown
+  }
 }
 
 public enum class StoragePlatform {

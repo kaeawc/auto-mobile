@@ -12,6 +12,7 @@ import dev.jasonpearson.automobile.desktop.core.storage.KeyValueType
 import dev.jasonpearson.automobile.desktop.core.storage.QueryResult
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.storage.TableInfo
+import dev.jasonpearson.automobile.desktop.core.storage.parseKeyValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -20,8 +21,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 private val LOG = LoggerFactory.getLogger("RealStorageDataSource")
@@ -473,39 +472,10 @@ class RealStorageDataSource(
     }
   }
 
-  private fun mapKeyValueType(type: String): KeyValueType {
-    return when (type.uppercase()) {
-      "STRING" -> KeyValueType.String
-      "INT" -> KeyValueType.Int
-      "LONG" -> KeyValueType.Long
-      "FLOAT" -> KeyValueType.Float
-      "BOOLEAN" -> KeyValueType.Boolean
-      "STRING_SET" -> KeyValueType.StringSet
-      else -> KeyValueType.Unknown
-    }
-  }
+  private fun mapKeyValueType(type: String): KeyValueType = KeyValueType.fromProtocolName(type)
 
-  private fun parseValue(jsonValue: String?, type: String): Any? {
-    if (jsonValue == null) return null
-
-    return try {
-      when (type.uppercase()) {
-        "STRING" -> jsonValue
-        "INT" -> jsonValue.toIntOrNull() ?: jsonValue
-        "LONG" -> jsonValue.toLongOrNull() ?: jsonValue
-        "FLOAT" -> jsonValue.toFloatOrNull() ?: jsonValue
-        "BOOLEAN" -> jsonValue.toBooleanStrictOrNull() ?: jsonValue
-        "STRING_SET" -> {
-          // Parse JSON array of strings to Set<String>
-          val element = json.parseToJsonElement(jsonValue)
-          element.jsonArray.map { it.jsonPrimitive.content }.toSet()
-        }
-        else -> jsonValue
-      }
-    } catch (e: Exception) {
-      jsonValue
-    }
-  }
+  private fun parseValue(jsonValue: String?, type: String): Any? =
+    parseKeyValue(jsonValue, mapKeyValueType(type))
 }
 
 // MCP response models for database resources

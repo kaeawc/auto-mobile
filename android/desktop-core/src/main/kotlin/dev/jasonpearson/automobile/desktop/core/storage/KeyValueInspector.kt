@@ -23,7 +23,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,11 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
-/** Duration for the highlight animation when a key changes */
-private const val HIGHLIGHT_DURATION_MS = 2000L
 
 /** Color for highlighting recently changed entries */
 private val HIGHLIGHT_COLOR = Color(0xFF4CAF50).copy(alpha = 0.3f)
@@ -58,6 +53,9 @@ private val HIGHLIGHT_COLOR = Color(0xFF4CAF50).copy(alpha = 0.3f)
  * @param keyValueFiles List of key-value storage files to display
  * @param onSetValue Optional callback to persist a value change. Receives (fileName, key, value,
  *   type).
+ * @param recentlyChangedKeys Entries to highlight as just-changed, as `"fileName:key"` identities.
+ *   Hoisted so the caller owns both the live-update source and the highlight lifetime; see
+ *   [StorageDashboard], which drives this from the observation stream's `storage_update` frames.
  * @param modifier Modifier for the composable
  */
 @Composable
@@ -66,6 +64,7 @@ fun KeyValueInspector(
   onSetValue:
     (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<Unit>)? =
     null,
+  recentlyChangedKeys: Set<String> = emptySet(),
   modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
@@ -79,20 +78,6 @@ fun KeyValueInspector(
   var editValue by remember { mutableStateOf("") }
   var isSaving by remember { mutableStateOf(false) }
   var saveError by remember { mutableStateOf<String?>(null) }
-
-  // Track recently changed keys for highlight animation
-  // Key format: "fileName:key" to uniquely identify entries across files.
-  // The producer (a live storage-change subscription) is intentionally not wired here yet;
-  // it will be reconnected via the observation stream's `storage_update` frames (#3930).
-  var recentlyChangedKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
-
-  // Auto-clear highlighted keys after animation duration
-  LaunchedEffect(recentlyChangedKeys) {
-    if (recentlyChangedKeys.isNotEmpty()) {
-      delay(HIGHLIGHT_DURATION_MS)
-      recentlyChangedKeys = emptySet()
-    }
-  }
 
   // Filter entries by search query
   val filteredEntries =
@@ -286,7 +271,7 @@ fun KeyValueInspector(
             val isEditing = entry == editingEntry
 
             // Check if this entry was recently changed
-            val changeKey = "${selectedFile?.name}:${entry.key}"
+            val changeKey = highlightKey(selectedFile?.name.orEmpty(), entry.key)
             val isRecentlyChanged = changeKey in recentlyChangedKeys
 
             // Animate background color for recently changed entries

@@ -1,7 +1,6 @@
 import type { Element } from "../../src/models/Element";
 import type {
   TalkBackTapResult,
-  TalkBackTapAction,
   TalkBackFallbackAction
 } from "../../src/features/talkback/TalkBackTapStrategy";
 import type { TalkBackNavigationDriver } from "../../src/features/talkback/TalkBackNavigationDriver";
@@ -18,7 +17,6 @@ export class FakeTalkBackTapStrategy {
   tapCalls: Array<{
     deviceId: string;
     element: Element;
-    action: TalkBackTapAction;
   }> = [];
 
   directActivationCalls: Array<{
@@ -79,10 +77,9 @@ export class FakeTalkBackTapStrategy {
   async executeTap(
     deviceId: string,
     element: Element,
-    action: TalkBackTapAction,
     _driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
-    this.tapCalls.push({ deviceId, element, action });
+    this.tapCalls.push({ deviceId, element });
 
     if (this.tapOverrides.length > 0) {
       return this.tapOverrides.shift()!;

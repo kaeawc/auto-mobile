@@ -43,7 +43,7 @@ describe("TalkBackTapStrategy", () => {
         // no text, no resource-id, no content-desc
       } as Element;
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
@@ -61,7 +61,7 @@ describe("TalkBackTapStrategy", () => {
       const navigateToElement = spyOn(mockExecutor, "navigateToElement")
         .mockResolvedValue(true);
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
@@ -80,7 +80,7 @@ describe("TalkBackTapStrategy", () => {
       const navigateToElement = spyOn(mockExecutor, "navigateToElement")
         .mockResolvedValue(true);
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
@@ -99,26 +99,7 @@ describe("TalkBackTapStrategy", () => {
       const navigateToElement = spyOn(mockExecutor, "navigateToElement")
         .mockResolvedValue(true);
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
-
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("focus-navigation");
-      expect(navigateToElement).toHaveBeenCalledTimes(1);
-      expect(driver.getTapCount()).toBe(2); // Double-tap to activate
-    });
-
-    test("uses focus navigation for doubleTap action", async () => {
-      const element = {
-        "resource-id": "test:id/button",
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-      } as Element;
-
-      driver.setElements([element], 0);
-
-      const navigateToElement = spyOn(mockExecutor, "navigateToElement")
-        .mockResolvedValue(true);
-
-      const result = await strategy.executeTap("device-1", element, "doubleTap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
@@ -137,7 +118,7 @@ describe("TalkBackTapStrategy", () => {
       const navigateToElement = spyOn(mockExecutor, "navigateToElement")
         .mockRejectedValue(new Error("Navigation failed"));
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
@@ -157,7 +138,7 @@ describe("TalkBackTapStrategy", () => {
       driver.queueTapResult({ success: false, totalTimeMs: 1, error: "tap failed" });
       driver.setActionResult({ success: true, action: "click", totalTimeMs: 1 });
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("accessibility-action");
@@ -177,7 +158,7 @@ describe("TalkBackTapStrategy", () => {
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
       driver.setTapResult({ success: false, totalTimeMs: 1, error: "tap failed" });
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
@@ -196,7 +177,7 @@ describe("TalkBackTapStrategy", () => {
       driver.queueTapResult({ success: true, totalTimeMs: 1 }); // first tap succeeds
       driver.setTapResult({ success: false, totalTimeMs: 1, error: "second tap failed" });
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
@@ -215,7 +196,7 @@ describe("TalkBackTapStrategy", () => {
       driver.queueTapResult({ success: false, totalTimeMs: 1, error: "tap failed" });
       driver.setActionResult({ success: false, action: "click", totalTimeMs: 1, error: "click failed" });
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
@@ -240,7 +221,7 @@ describe("TalkBackTapStrategy", () => {
       driver.setElements([liveFocusedElement], 0);
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
 
-      const result = await strategy.executeTap("device-1", staleElement, "tap", driver);
+      const result = await strategy.executeTap("device-1", staleElement, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
@@ -263,7 +244,7 @@ describe("TalkBackTapStrategy", () => {
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
       driver.setActionResult({ success: true, action: "click", totalTimeMs: 1 });
 
-      const result = await strategy.executeTap("device-1", boundsLessElement, "tap", driver);
+      const result = await strategy.executeTap("device-1", boundsLessElement, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("accessibility-action");
@@ -278,7 +259,7 @@ describe("TalkBackTapStrategy", () => {
       driver.setElements([boundsLessFocused], 0);
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
 
-      const result = await strategy.executeTap("device-1", boundsLessTextElement, "tap", driver);
+      const result = await strategy.executeTap("device-1", boundsLessTextElement, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
@@ -298,7 +279,7 @@ describe("TalkBackTapStrategy", () => {
         { "resource-id": "test:id/other", "bounds": { left: 0, top: 0, right: 50, bottom: 50 } } as Element
       ], 0);
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
@@ -313,7 +294,7 @@ describe("TalkBackTapStrategy", () => {
 
       driver.queueTraversalResult({ error: "Service unavailable", totalTimeMs: 1 });
 
-      const result = await strategy.executeTap("device-1", element, "tap", driver);
+      const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");

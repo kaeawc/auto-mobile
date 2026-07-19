@@ -46,7 +46,6 @@ describe("FocusPathCalculator", () => {
     expect(path?.targetFocusIndex).toBe(7);
     expect(path?.swipeCount).toBe(6);
     expect(path?.direction).toBe("forward");
-    expect(path?.intermediateCheckpoints).toEqual([6]);
   });
 
   test("calculates backward path", () => {
@@ -68,7 +67,6 @@ describe("FocusPathCalculator", () => {
     expect(path?.targetFocusIndex).toBe(1);
     expect(path?.swipeCount).toBe(3);
     expect(path?.direction).toBe("backward");
-    expect(path?.intermediateCheckpoints).toEqual([]);
   });
 
   test("defaults to index 0 when there is no current focus", () => {

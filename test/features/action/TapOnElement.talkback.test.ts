@@ -568,20 +568,20 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
       expect(fakeTalkBackStrategy.tapCalls[0].deviceId).toBe("emulator-5554");
       expect(fakeTalkBackStrategy.tapCalls[0].element).toBe(element);
-      expect(fakeTalkBackStrategy.tapCalls[0].action).toBe("tap");
       expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
       expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
     });
 
-    test("doubleTap drives the cursor via executeTap", async () => {
+    test("doubleTap also drives the cursor via executeTap (activation is always double-tap)", async () => {
       const element = makeElement();
 
       await (tapOnElement as any).executeAndroidTapWithAccessibility(
         "doubleTap", 50, 50, element, 500, navOptions, undefined
       );
 
+      // Both "tap" and "doubleTap" route to executeTap; TalkBack activation is
+      // always a double-tap-to-activate, so there is no distinct behavior (#3920).
       expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-      expect(fakeTalkBackStrategy.tapCalls[0].action).toBe("doubleTap");
       expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
     });
 

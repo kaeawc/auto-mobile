@@ -176,8 +176,7 @@ export class FocusNavigationExecutor {
       const recalculated = this.pathCalculator.calculatePath(
         initialVerification.currentFocus,
         targetSelector,
-        initialVerification.orderedElements,
-        verificationInterval
+        initialVerification.orderedElements
       );
       if (!recalculated) {
         throw new ActionableError(
@@ -236,8 +235,7 @@ export class FocusNavigationExecutor {
       const recalculated = this.pathCalculator.calculatePath(
         verification.currentFocus,
         targetSelector,
-        verification.orderedElements,
-        verificationInterval
+        verification.orderedElements
       );
       if (!recalculated) {
         throw new ActionableError(

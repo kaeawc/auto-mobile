@@ -1,5 +1,3 @@
-import { promises as fsPromises } from "node:fs";
-import path from "node:path";
 import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import {
@@ -28,18 +26,9 @@ import {
 } from "./androidSegmentedPlanVideoSession";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
-
-/** File name of the per-session manifest written alongside the first segment. */
-const SEGMENT_MANIFEST_FILE = "segments.json";
-
-/** One finalized segment of a timer-driven segmented session, in capture order. */
-interface StoppedSegment {
-  recordingId: string;
-  filePath: string;
-  segmentIndex: number;
-}
 
 /** Result of finalizing a segmented session: its ordered segments + grouping metadata. */
 interface StoppedSegmentedSession {
@@ -48,44 +37,6 @@ interface StoppedSegmentedSession {
   segments: StoppedSegment[];
   /** Absolute path of the written manifest, or undefined if the write failed. */
   manifestPath: string | undefined;
-}
-
-/**
- * Write a `segments.json` manifest listing every segment of a session in order, so a caller
- * (or an external process that only sees the archive on disk) can discover and concatenate
- * the clips without re-deriving order. It is written into the FIRST segment's directory, so
- * the existing per-recording eviction (`rm(dirname)`) cleans it up with that segment — no new
- * eviction surface. Best-effort: a write failure is logged and returns undefined rather than
- * failing the stop, since the tool response already carries the authoritative ordering.
- */
-async function writeSegmentManifest(
-  sessionId: string,
-  segments: StoppedSegment[]
-): Promise<string | undefined> {
-  const first = segments[0];
-  if (!first) {
-    return undefined;
-  }
-  const manifestPath = path.join(path.dirname(first.filePath), SEGMENT_MANIFEST_FILE);
-  try {
-    const manifest = {
-      sessionId,
-      segmentCount: segments.length,
-      segments: segments.map(segment => ({
-        index: segment.segmentIndex,
-        recordingId: segment.recordingId,
-        filePath: segment.filePath,
-      })),
-    };
-    await fsPromises.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    return manifestPath;
-  } catch (error) {
-    logger.warn(
-      `[VideoRecording] Failed to write segment manifest for session ${sessionId}: ` +
-      `${error instanceof Error ? error.message : String(error)}`
-    );
-    return undefined;
-  }
 }
 
 type SegmentedSessionRecordingDependencies = Pick<

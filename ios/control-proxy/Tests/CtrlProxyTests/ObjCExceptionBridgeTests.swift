@@ -178,4 +178,15 @@ final class ObjCExceptionBridgeTests: XCTestCase {
         XCTAssertTrue(symbolsUnavailable.boolValue, "must flag the private symbols as unavailable")
         XCTAssertNotNil(errorMessage)
     }
+
+    /// `symbolsUnavailable` is declared `_Nullable`, so a caller that does not care
+    /// about the availability split must be able to pass NULL without crashing.
+    func testSynthesizeMultiFingerSwipeToleratesNilSymbolsUnavailableOutParam() {
+        var errorMessage: NSString?
+        let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
+            10, 20, 110, 220, 2, 25, 0.3, 0, nil, &errorMessage
+        )
+        XCTAssertFalse(succeeded, "private synthesis cannot succeed off-device")
+        XCTAssertNotNil(errorMessage, "the error message must still be reported")
+    }
 }

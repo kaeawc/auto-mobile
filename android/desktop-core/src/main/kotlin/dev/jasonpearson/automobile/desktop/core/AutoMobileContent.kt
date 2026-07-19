@@ -65,9 +65,13 @@ import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfigClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
+import dev.jasonpearson.automobile.desktop.core.daemon.McpDeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
@@ -116,6 +120,7 @@ import dev.jasonpearson.automobile.desktop.core.shell.SearchResult
 import dev.jasonpearson.automobile.desktop.core.shell.SearchResultProvider
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
 import dev.jasonpearson.automobile.desktop.core.shell.buildDefaultCommands
+import dev.jasonpearson.automobile.desktop.core.snapshot.SnapshotsDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
@@ -320,6 +325,7 @@ fun AutoMobileContent(
     listOf(
       HorizontalTab("test_runs", "Test Runs", AppIcons.TestRuns),
       HorizontalTab("storage", "Storage", AppIcons.Storage),
+      HorizontalTab("snapshots", "Snapshots", AppIcons.Snapshots),
       HorizontalTab("diagnostics", "Diagnostics", AppIcons.Diagnostics),
     )
   }
@@ -482,6 +488,16 @@ fun AutoMobileContent(
           }
         }
       }
+    }
+
+  // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
+  // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders
+  // its empty state instead of reaching for a daemon that isn't there.
+  val snapshotActions: DeviceSnapshotActions? =
+    remember(clientProvider) { clientProvider?.let { McpDeviceSnapshotActions(it) } }
+  val snapshotConfigClient: DeviceSnapshotConfigClient? =
+    remember(dataSourceMode) {
+      if (dataSourceMode == DataSourceMode.Real) DeviceSnapshotSocketClient() else null
     }
 
   // Take-screenshot is driven from both the native menu bar and the in-app menu.
@@ -1363,6 +1379,12 @@ fun AutoMobileContent(
                       packageName = selectedAppId,
                       platform = storagePlatform,
                       observationStreamClient = observationStreamClient,
+                    )
+                  "snapshots" ->
+                    SnapshotsDashboard(
+                      actions = snapshotActions,
+                      configClient = snapshotConfigClient,
+                      activeDeviceId = activeDeviceId,
                     )
                   "diagnostics" ->
                     DiagnosticsDashboard(

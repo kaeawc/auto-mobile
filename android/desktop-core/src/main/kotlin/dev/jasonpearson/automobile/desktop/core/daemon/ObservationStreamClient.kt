@@ -42,9 +42,8 @@ import kotlinx.serialization.json.contentOrNull
  */
 class ObservationStreamClient {
   companion object {
-    internal fun getSocketPath(): String {
-      return "${System.getProperty("user.home")}/.auto-mobile/observation-stream.sock"
-    }
+    internal fun getSocketPath(): String =
+      AutoMobileSocketPaths.socketPath("observation-stream.sock")
 
     fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))
   }

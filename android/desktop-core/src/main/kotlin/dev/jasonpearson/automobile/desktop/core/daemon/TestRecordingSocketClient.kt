@@ -200,10 +200,7 @@ class FakeTestRecordingClient(
 }
 
 object TestRecordingSocketPaths {
-  fun socketPath(): String {
-    val home = System.getProperty("user.home", "").ifBlank { "." }
-    return File(home, ".auto-mobile/test-recording.sock").path
-  }
+  fun socketPath(): String = AutoMobileSocketPaths.socketPath("test-recording.sock")
 }
 
 @Serializable

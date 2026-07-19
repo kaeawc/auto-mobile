@@ -13,6 +13,7 @@ import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/Adb
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
 import { Timer } from "../../../utils/interfaces/Timer";
+import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   private static readonly DEFAULT_APEX_PAUSE_MS = 100;
@@ -24,7 +25,8 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     private readonly accessibilityService: AndroidCtrlProxyClient,
     private readonly accessibilityDetector: AccessibilityDetector,
     private readonly adb: AdbExecutor,
-    private readonly timer: Timer
+    private readonly timer: Timer,
+    private readonly featureFlags?: FeatureFlagService
   ) {}
 
   async executeSwipeGesture(
@@ -53,9 +55,12 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     // Pass the real ADB executor so detection still works on a cold/expired
     // cache — passing null here made TalkBack-aware swipe silently degrade to
     // a coordinate swipe whenever the 60s detection cache was not warm (#3915).
+    // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
+    // apply to swipe detection uniformly with the observe path (#3925).
     const detectedService = await this.accessibilityDetector.detectMethod(
       this.device.deviceId,
-      this.adb
+      this.adb,
+      this.featureFlags
     );
     const isTalkBackEnabled = detectedService === "talkback";
 

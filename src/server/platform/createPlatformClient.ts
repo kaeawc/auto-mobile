@@ -6,6 +6,7 @@ import type { NotificationUIDetector } from "../../utils/interfaces/Notification
 import type { PlatformClient } from "../../utils/interfaces/PlatformClient";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
+import { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
 import type { ProcessExecutor } from "../../utils/ProcessExecutor";
 import type {
   AdbClientFactory,
@@ -40,6 +41,7 @@ export interface CreatePlatformClientOptions {
   tapStrategy?: TapStrategy;
   systemConfiguration?: SystemConfigurationAdapter;
   notificationUI?: NotificationUIDetector;
+  featureFlags?: FeatureFlagService;
 }
 
 /**
@@ -71,9 +73,11 @@ export function createPlatformClient(
 
   const adb = adbFactory.create(device);
 
+  const featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
+
   const tapStrategy =
     options.tapStrategy ??
-    createTapStrategy(device, adb, accessibilityDetector, iosVoiceOverDetector);
+    createTapStrategy(device, adb, accessibilityDetector, iosVoiceOverDetector, featureFlags);
 
   const systemConfiguration =
     options.systemConfiguration ??

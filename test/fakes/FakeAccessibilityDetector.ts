@@ -19,6 +19,9 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   /** Records the `adb` argument passed to each detectMethod call (regression guard for #3915). */
   public readonly detectMethodAdbArgs: Array<AdbExecutor | null | undefined> = [];
 
+  /** Records the `featureFlags` argument passed to each detectMethod call (regression guard for #3925). */
+  public readonly detectMethodFeatureFlagsArgs: Array<FeatureFlagService | undefined> = [];
+
   /**
    * Configure the detection result for a specific device
    */
@@ -79,6 +82,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
     this.invalidatedDevices = [];
     this.invalidationCountAtFirstDetection = null;
     this.detectMethodAdbArgs.length = 0;
+    this.detectMethodFeatureFlagsArgs.length = 0;
   }
 
   async isAccessibilityEnabled(
@@ -94,9 +98,10 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    _featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService
   ): Promise<AccessibilityService> {
     this.detectMethodAdbArgs.push(adb);
+    this.detectMethodFeatureFlagsArgs.push(featureFlags);
     if (this.invalidationCountAtFirstDetection === null) {
       this.invalidationCountAtFirstDetection = this.invalidatedDevices.length;
     }

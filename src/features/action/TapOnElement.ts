@@ -46,6 +46,7 @@ import {
 import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
+import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 
@@ -65,6 +66,7 @@ interface TapOnElementDependencies {
   talkBackStrategy?: TalkBackTapStrategy;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   iosVoiceOverDetector?: IosVoiceOverDetector;
+  featureFlags?: FeatureFlagService;
   /**
    * Override the platform-specific {@link TapStrategy}. Tests use this
    * to inject a fake; production code leaves it unset so the constructor
@@ -200,7 +202,8 @@ export class TapOnElement extends BaseVisualChange {
       device,
       this.adb,
       this.accessibilityDetector,
-      this.iosVoiceOverDetector
+      this.iosVoiceOverDetector,
+      options.featureFlags ?? FeatureFlagService.getInstance()
     );
     this.longPressMetadataDetector = new LongPressMetadataDetector(this.elementParser);
   }

@@ -9,6 +9,7 @@ import { SwipeDirection } from "../../../../src/models";
 import type { AdbExecutor } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice } from "../../../../src/models";
+import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 const ANDROID_DEVICE: BootedDevice = {
   name: "test-device",
@@ -28,7 +29,8 @@ function makeExecutor(
   fakeProxy: FakeCtrlProxy,
   fakeDetector: FakeAccessibilityDetector,
   fakeTimer: FakeTimer,
-  fakeAdb: AdbExecutor = new FakeAdbClient() as unknown as AdbExecutor
+  fakeAdb: AdbExecutor = new FakeAdbClient() as unknown as AdbExecutor,
+  featureFlags?: FeatureFlagService
 ): TalkBackSwipeExecutor {
   return new TalkBackSwipeExecutor(
     device,
@@ -36,7 +38,8 @@ function makeExecutor(
     fakeProxy as any,
     fakeDetector,
     fakeAdb,
-    fakeTimer
+    fakeTimer,
+    featureFlags
   );
 }
 
@@ -117,6 +120,32 @@ describe("TalkBackSwipeExecutor", () => {
         expect(arg).not.toBeNull();
       }
       expect(fakeAccessibilityDetector.detectMethodAdbArgs[0]).toBe(sentinelAdb);
+    });
+  });
+
+  describe("force-accessibility-mode feature flag threading (#3925)", () => {
+    test("forwards the injected featureFlags to detectMethod on android", async () => {
+      fakeAccessibilityDetector.setTalkBackEnabled(true);
+      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const exec = makeExecutor(
+        ANDROID_DEVICE,
+        fakeGestureExecutor,
+        fakeCtrlProxy,
+        fakeAccessibilityDetector,
+        fakeTimer,
+        new FakeAdbClient() as unknown as AdbExecutor,
+        sentinelFlags
+      );
+
+      await exec.executeSwipeGesture(
+        100, 500, 100, 200,
+        "up" as SwipeDirection,
+        null,
+        { duration: 300 },
+        perf
+      );
+
+      expect(fakeAccessibilityDetector.detectMethodFeatureFlagsArgs[0]).toBe(sentinelFlags);
     });
   });
 

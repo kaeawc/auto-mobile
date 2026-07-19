@@ -11,6 +11,9 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   private callCount: number = 0;
   private invalidatedDevices: string[] = [];
 
+  /** Records the `featureFlags` argument passed to each isVoiceOverEnabled call (regression guard for #3925). */
+  public readonly isVoiceOverEnabledFeatureFlagsArgs: Array<FeatureFlagService | undefined> = [];
+
   /**
    * Configure VoiceOver enabled state for all devices
    */
@@ -39,14 +42,16 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     this.voiceOverEnabled = false;
     this.callCount = 0;
     this.invalidatedDevices = [];
+    this.isVoiceOverEnabledFeatureFlagsArgs.length = 0;
   }
 
   async isVoiceOverEnabled(
     _deviceId: string,
     _client: IOSCtrlProxy,
-    _featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService
   ): Promise<boolean> {
     this.callCount++;
+    this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
     return this.voiceOverEnabled;
   }
 

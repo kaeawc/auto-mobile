@@ -118,6 +118,7 @@ export interface SwipeOnDependencies {
   parser?: import("../../../utils/interfaces/ElementParser").ElementParser;
   accessibilityDetector?: AccessibilityDetector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
+  featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagService;
   voiceOverExecutor?: VoiceOverSwipeRunner;
   autoTargetSelector?: AutoTargetSelectorService;
   visionConfig?: import("../../../vision/VisionTypes").VisionFallbackConfig;

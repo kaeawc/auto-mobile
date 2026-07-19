@@ -10,6 +10,7 @@ import type { AccessibilityDetector } from "../../../utils/interfaces/Accessibil
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../../utils/AccessibilityDetector";
 import { attachRawViewHierarchy } from "../../../utils/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
+import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 /**
  * Android implementation of {@link TapStrategy}. Filters the response
@@ -23,7 +24,8 @@ export class AndroidTapStrategy implements TapStrategy {
   constructor(
     private readonly device: BootedDevice,
     private readonly adb: AdbExecutor,
-    private readonly accessibilityDetector: AccessibilityDetector = defaultAccessibilityDetector
+    private readonly accessibilityDetector: AccessibilityDetector = defaultAccessibilityDetector,
+    private readonly featureFlags?: FeatureFlagService
   ) {}
 
   prepareViewHierarchyForResponse(
@@ -37,7 +39,13 @@ export class AndroidTapStrategy implements TapStrategy {
   }
 
   async isAccessibilityServiceEnabled(): Promise<boolean> {
-    const method = await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb);
+    // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
+    // apply to tap detection uniformly with the observe path (#3925).
+    const method = await this.accessibilityDetector.detectMethod(
+      this.device.deviceId,
+      this.adb,
+      this.featureFlags
+    );
     return method === "talkback";
   }
 

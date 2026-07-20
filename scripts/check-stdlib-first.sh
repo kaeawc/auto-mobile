@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Require a short decision record when a PR adds a direct runtime or development
-# dependency. This keeps a generic package from becoming the first answer when
+# Require a short decision record when a PR adds a direct runtime, development,
+# or optional dependency. This keeps a generic package from becoming the first answer when
 # the standard library or an existing AutoMobile seam already fits.
 
 set -euo pipefail
@@ -20,8 +20,8 @@ BASE_COMMIT="$(git merge-base "$BASE_REF" HEAD)"
 BASE_PACKAGE_JSON="$(git show "${BASE_COMMIT}:package.json")"
 CURRENT_PACKAGE_JSON="$(<package.json)"
 
-base_dependencies="$(jq -r '(.dependencies // {} | keys[]) , (.devDependencies // {} | keys[])' <<<"$BASE_PACKAGE_JSON" | sort -u)"
-current_dependencies="$(jq -r '(.dependencies // {} | keys[]) , (.devDependencies // {} | keys[])' <<<"$CURRENT_PACKAGE_JSON" | sort -u)"
+base_dependencies="$(jq -r '(.dependencies // {} | keys[]) , (.devDependencies // {} | keys[]) , (.optionalDependencies // {} | keys[])' <<<"$BASE_PACKAGE_JSON" | sort -u)"
+current_dependencies="$(jq -r '(.dependencies // {} | keys[]) , (.devDependencies // {} | keys[]) , (.optionalDependencies // {} | keys[])' <<<"$CURRENT_PACKAGE_JSON" | sort -u)"
 added_dependencies="$(comm -13 <(printf '%s\n' "$base_dependencies") <(printf '%s\n' "$current_dependencies"))"
 
 if [[ -z "$added_dependencies" ]]; then

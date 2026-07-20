@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
@@ -51,6 +51,26 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
   afterEach(() => {
     resetDbWriteBarrier();
   });
+
+  /**
+   * Drive the shared singleton through the shutdown sequence a real reopen would:
+   * drain the live barrier, then `resetDbWriteBarrier()` (what `closeDatabase()`
+   * does), and hand back the fresh instance. Asserts the identity actually changed
+   * so a consumer test can never "pass" against a barrier that was never swapped.
+   *
+   * Consumers under test here are constructed WITHOUT an injected resolver, so
+   * they run the shipped default (`getDbWriteBarrier`) — the injected-resolver
+   * tests prove each consumer re-resolves, but only these prove the real default
+   * does.
+   */
+  function reopenSharedBarrier(): DbWriteBarrier {
+    const shutdownBarrier = getDbWriteBarrier();
+    shutdownBarrier.beginDrain();
+    resetDbWriteBarrier();
+    const reopened = getDbWriteBarrier();
+    expect(reopened).not.toBe(shutdownBarrier);
+    return reopened;
+  }
 
   describe("TelemetryRecorder", () => {
     class FakeRepository implements TelemetryRepository {
@@ -107,11 +127,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const repo = new FakeRepository();
       const recorder = new TelemetryRecorder(repo, () => null); // default resolver
 
-      // Drain the shared barrier, then reset (models drain -> closeDatabase).
-      const shutdownBarrier = getDbWriteBarrier();
-      shutdownBarrier.beginDrain();
-      resetDbWriteBarrier();
-      expect(getDbWriteBarrier()).not.toBe(shutdownBarrier);
+      reopenSharedBarrier();
 
       await recorder.recordLogEvent(makeLogInput());
       // Resolves the fresh singleton, not the pinned drained one.
@@ -166,6 +182,28 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
         mgr.recordHeartbeat("s1");
         await Promise.resolve();
         expect(activity).toHaveLength(0);
+      } finally {
+        mgr.stopCleanupTimer();
+      }
+    });
+
+    test("default resolver reads the shared singleton at use-time (acceptance #1)", async () => {
+      const timer = new FakeTimer();
+      const { repo, activity } = makeRepo();
+      const mgr = new SessionManager(timer, repo); // default resolver
+      try {
+        // createSession only calls upsertActiveSession, so `activity` is still
+        // empty here — recordActivity is reached solely via recordHeartbeat below.
+        await mgr.createSession("s1", "emulator-5554", "android");
+        expect(activity).toHaveLength(0);
+
+        reopenSharedBarrier();
+
+        mgr.recordHeartbeat("s1");
+        await Promise.resolve();
+
+        // Resolves the fresh singleton, not the pinned drained one.
+        expect(activity).toContain("s1");
       } finally {
         mgr.stopCleanupTimer();
       }
@@ -230,6 +268,28 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
 
       expect(draining.trackCalls).toBeGreaterThan(0);
       expect(draining.ranCount).toBe(0);
+    });
+
+    test("default resolver reads the shared singleton at use-time (acceptance #1)", async () => {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1000000);
+      const repo = new FailureAnalyticsRepository(timer, db); // default resolver
+
+      const reopened = reopenSharedBarrier();
+      // Spy the reopened instance rather than counting in-flight writes: this
+      // asserts the routing itself, so it stays valid no matter how quickly the
+      // retention cleanup settles. Matches the convention in
+      // test/features/observe/CtrlProxyClient.test.ts.
+      const trackSpy = spyOn(reopened, "track");
+
+      await repo.recordFailure(makeFailureInput());
+
+      // Had the repository pinned the construction-time (drained) barrier, the
+      // reopened one would never have been asked to track anything.
+      expect(trackSpy).toHaveBeenCalled();
+
+      // Settle the un-awaited retention write so it cannot outlive db.destroy().
+      await reopened.drain(1000);
     });
   });
 });

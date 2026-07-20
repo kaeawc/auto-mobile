@@ -78,8 +78,17 @@ export interface DbWriteBarrier {
    * them — none capture the instance at construction. TelemetryRecorder,
    * FailureAnalyticsRepository and SessionManager were converted from a captured
    * field to a per-write resolver in #2912 (decision (a)); AndroidCtrlProxyClient
-   * already resolved fresh per call. A future in-process reopen path therefore
-   * needs no consumer reconstruction and no in-place barrier reset.
+   * and IosSdkEventIngestor already resolved fresh per call. A future in-process
+   * reopen path therefore needs no consumer reconstruction and no in-place
+   * barrier reset.
+   *
+   * The two use-site consumers deliberately take NO `getBarrier` resolver
+   * parameter, unlike the three converted ones. That asymmetry is intentional,
+   * not an oversight: the conversion existed to fix construction-captured
+   * staleness, which resolving the global per call already avoids. A resolver
+   * would exist only to let a test swap the instance, and a test can `spyOn` the
+   * freshly-reset singleton instead (see CtrlProxyClient.test.ts). Unify them
+   * with the resolver pattern if a test ever genuinely needs injection (#2960).
    */
   beginDrain(): void;
 

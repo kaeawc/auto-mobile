@@ -1496,6 +1496,7 @@ jobs:
         background: true
 
       - name: "Build CtrlProxy iOS for Testing"
+        id: build-ctrlproxy
         run: ./scripts/ios/ctrl-proxy-build-for-testing.sh
 
       - name: "Verify CtrlProxy iOS Artifacts"
@@ -1569,17 +1570,17 @@ jobs:
         run: xcrun simctl shutdown all || true
 
       - name: "Select Xcode 26.5"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.5"
 
       - name: "Ensure iOS Simulator runtime (Xcode 26.5)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Boot iOS Simulator (Xcode 26.5)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         # A wedged simulator boot has stalled this step ~30 min, pushing the job
         # past its 45-min cap (issue #4078). Bound it well above the observed p95
         # (~9 min) so a real slow boot still passes but a hang fails here.
@@ -1595,28 +1596,28 @@ jobs:
       # This is a freshly-booted sim, so re-confirm the daemon and warm CtrlProxy
       # again before the second Reminders run (same rationale as the 26.2 block).
       - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       - name: "Warm up iOS CtrlProxy (Xcode 26.5)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
       # Pre-build the XCTest bundle before the second leg's warm-up too (same rationale
       # as the 26.2 leg above); the freshly-booted 26.5 sim is cold again here.
       - name: "Pre-build Reminders XCTest bundle (Xcode 26.5)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 15
         run: ./scripts/ci/prebuild-reminders-xctest-bundle.sh
 
       - name: "Warm up Reminders target app (Xcode 26.5)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 5
         run: ./scripts/ci/warm-reminders-target-app.sh
 
       - name: "Run Reminders integration tests (Xcode 26.5)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 10
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"

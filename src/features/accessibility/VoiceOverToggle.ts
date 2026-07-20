@@ -42,9 +42,16 @@ export class VoiceOverToggle {
       const serviceCommand = enabled
         ? "launchctl kickstart -p system/com.apple.VoiceOverTouch"
         : "launchctl kill SIGTERM system/com.apple.VoiceOverTouch";
-      await this.processExecutor.exec(
-        `xcrun simctl spawn ${this.device.deviceId} ${serviceCommand}`
-      );
+      try {
+        await this.processExecutor.exec(
+          `xcrun simctl spawn ${this.device.deviceId} ${serviceCommand}`
+        );
+      } catch (error) {
+        if (enabled || !this.isServiceAlreadyStopped(error)) {
+          throw error;
+        }
+        logger.debug("[VoiceOverToggle] VoiceOver service was already stopped");
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.warn(`[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver: ${reason}`);
@@ -74,5 +81,9 @@ export class VoiceOverToggle {
 
   private isSimulator(): boolean {
     return isIosSimulatorUdid(this.device.deviceId);
+  }
+
+  private isServiceAlreadyStopped(error: unknown): boolean {
+    return error instanceof Error && error.message.includes("No process to signal.");
   }
 }

@@ -9,6 +9,18 @@ private final class FakeVoiceOverStateProvider: VoiceOverStateProviding {
     }
 }
 
+private final class FakeVoiceOverDefaultsReader: VoiceOverDefaultsReading {
+    private var values: [String: Bool] = [:]
+
+    func set(_ value: Bool, forKey key: String, inDomain domain: String) {
+        values["\(domain).\(key)"] = value
+    }
+
+    func bool(forKey key: String, inDomain domain: String) -> Bool {
+        return values["\(domain).\(key)"] ?? false
+    }
+}
+
 final class CommandHandlerTests: XCTestCase {
     var fakeTimeProvider: FakeTimeProvider!
     var perfProvider: PerfProvider!
@@ -1612,6 +1624,21 @@ final class CommandHandlerTests: XCTestCase {
         guard let response = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
 
         XCTAssertFalse(response.enabled)
+    }
+
+    func testDefaultVoiceOverStateProviderReadsRunningKey() {
+        let defaultsReader = FakeVoiceOverDefaultsReader()
+        defaultsReader.set(true, forKey: "VOTIsRunningKey", inDomain: "com.apple.Accessibility")
+
+        let provider = DefaultVoiceOverStateProvider(defaultsReader: defaultsReader)
+
+        XCTAssertTrue(provider.isVoiceOverRunning())
+    }
+
+    func testDefaultVoiceOverStateProviderTreatsMissingRunningKeyAsStopped() {
+        let provider = DefaultVoiceOverStateProvider(defaultsReader: FakeVoiceOverDefaultsReader())
+
+        XCTAssertFalse(provider.isVoiceOverRunning())
     }
 
     func testGetVoiceOverStateIsEncodable() throws {

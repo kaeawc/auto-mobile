@@ -142,6 +142,19 @@ describe("VoiceOverToggle", () => {
         )
       ).toBe(true);
     });
+
+    test("treats an already-stopped VoiceOver service as a successful disable", async () => {
+      fakeExec.setCommandHandler("launchctl kill SIGTERM", () => {
+        throw new Error("Command failed: launchctl kill SIGTERM\nexit code: 3\nstderr:\nNo process to signal.");
+      });
+
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const result = await toggle.toggle(false);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(true);
+      expect(result.currentState).toBe(false);
+    });
   });
 
   describe("simctl failure during apply phase", () => {

@@ -670,6 +670,7 @@ jobs:
 
       - name: "Upload Fast Validation Logs"
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: fast-validation-logs
@@ -813,6 +814,7 @@ jobs:
 
       - name: "Upload Logs"
         if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure())
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: installer-minimal-${{ matrix.os }}-logs
@@ -882,6 +884,7 @@ jobs:
 
       - name: "Upload Logs"
         if: env.RUN_INSTALLER == 'true' && (steps.run-installer-development.outputs.install_exit_code != '0' || failure())
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: installer-development-${{ matrix.os }}-logs
@@ -1070,6 +1073,7 @@ jobs:
 
       - name: "Upload Build/Test Logs"
         if: env.RUN_MCP_BUILD_TEST == 'true' && (failure() || cancelled() || matrix.os == 'windows-latest')
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: mcp-build-test-logs-${{ matrix.os }}
@@ -1095,6 +1099,7 @@ jobs:
 
       - name: "Upload Heap Snapshots"
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: heap-snapshots
@@ -1198,6 +1203,7 @@ jobs:
 
       - name: "Upload Build/Test Logs"
         if: failure() || cancelled()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: mcp-build-test-logs-ubuntu-latest
@@ -1620,6 +1626,7 @@ jobs:
       # is required because the logs live under the dot-dir ~/.auto-mobile.
       - name: "Upload AutoMobile daemon logs"
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: automobile-daemon-logs-xctestrunner
@@ -1681,6 +1688,7 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
       - name: "Upload Heap Dumps"
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: junit-runner-heap-dumps-unit
@@ -1709,6 +1717,7 @@ jobs:
 
       - name: "Upload Compatibility Logs"
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: junit-runner-kotlin-consumer-compatibility-logs
@@ -1750,6 +1759,7 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
       - name: "Upload Heap Dumps"
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: junit-runner-heap-dumps-emulator
@@ -1826,6 +1836,7 @@ jobs:
 
       - name: "Upload Heap Dumps"
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: junit-runner-emulator-wtf-heap-dumps

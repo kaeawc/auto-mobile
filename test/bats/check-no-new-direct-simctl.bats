@@ -49,7 +49,12 @@ teardown() {
 }
 
 @test "fails closed when the base ref is absent" {
-  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh origin/main' _ "$repo_dir"
+  # Neutralize the CI environment: on a GitHub Actions runner GITHUB_ACTIONS
+  # and GITHUB_BASE_REF are set, which would send the script down its
+  # fetch-the-PR-base branch (and die at `git fetch` in this remote-less temp
+  # repo, exit 128) instead of the fail-closed path this test exercises.
+  run env -u GITHUB_ACTIONS -u GITHUB_BASE_REF \
+    bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh origin/main' _ "$repo_dir"
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"base ref origin/main does not exist"* ]]

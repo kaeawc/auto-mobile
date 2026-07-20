@@ -134,6 +134,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       },
     } as SimCtl;
     backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    (backend as any).ensureFfmpegAvailable = async () => {};
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-recording-udid" };
 
     await backend.start(mockConfig);

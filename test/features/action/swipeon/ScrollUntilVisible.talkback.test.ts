@@ -9,7 +9,7 @@ import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessi
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
-import type { SwipeOnResolvedOptions } from "../../../../src/features/action/swipeon/types";
+import type { SwipeOnResolvedOptions, VoiceOverSwipeRunner } from "../../../../src/features/action/swipeon/types";
 import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 const DEVICE: BootedDevice = {
@@ -49,7 +49,9 @@ function makeScrollUntilVisible({
   accessibilityService,
   observeResults,
   talkBackExecutor,
-  featureFlags
+  featureFlags,
+  device = DEVICE,
+  voiceOverExecutor
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -58,6 +60,8 @@ function makeScrollUntilVisible({
   observeResults: ObserveResult[];
   talkBackExecutor: FakeTalkBackSwipeExecutor;
   featureFlags?: FeatureFlagService;
+  device?: BootedDevice;
+  voiceOverExecutor?: VoiceOverSwipeRunner;
 }): ScrollUntilVisible {
   let callIdx = 0;
 
@@ -81,7 +85,7 @@ function makeScrollUntilVisible({
   };
 
   return new ScrollUntilVisible({
-    device: DEVICE,
+    device,
     finder: finder as any,
     geometry: fakeGeometry,
     observeScreen: fakeObserveScreen as any,
@@ -91,6 +95,7 @@ function makeScrollUntilVisible({
     featureFlags,
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
+    voiceOverExecutor,
     timer,
     getDuration: () => 300,
     resolveBoomerangConfig: () => undefined,
@@ -388,6 +393,51 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
       expect(result.success).toBe(true);
       expect(result.found).toBe(true);
     });
+  });
+});
+
+describe("ScrollUntilVisible VoiceOver behavior", () => {
+  test("returns the VoiceOver unsupported result without dispatching a TalkBack or synthesized swipe", async () => {
+    const finder = new FakeElementFinder();
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const talkBackExecutor = new FakeTalkBackSwipeExecutor();
+    let voiceOverCalls = 0;
+    const voiceOverExecutor: VoiceOverSwipeRunner = {
+      async executeSwipeGesture(x1, y1, x2, y2, _direction, _container, gestureOptions) {
+        voiceOverCalls++;
+        return {
+          success: false,
+          error: "VoiceOver scrolling is not supported",
+          fallbackReason: "XCTest-synthesized touches do not reach VoiceOver",
+          x1,
+          y1,
+          x2,
+          y2,
+          duration: gestureOptions?.duration ?? 300
+        };
+      }
+    };
+
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: new FakeAccessibilityDetector(),
+      finder,
+      timer,
+      accessibilityService: new FakeScrollAccessibilityService(),
+      observeResults: [makeObserveResult(0)],
+      talkBackExecutor,
+      device: { name: "ios-device", platform: "ios", deviceId: "ios-1" },
+      voiceOverExecutor
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("VoiceOver scrolling is not supported");
+    expect(result.fallbackReason).toContain("do not reach VoiceOver");
+    expect(voiceOverCalls).toBe(1);
+    expect(talkBackExecutor.getCallCount()).toBe(0);
   });
 });
 

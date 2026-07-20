@@ -12,11 +12,11 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 | Detection overhead <50ms | ✅ | ✅ | Validated by benchmarks |
 | Feature flag override | ✅ | ✅ | `force-accessibility-mode` |
 | `tapOn` adaptation | ✅ `ACTION_CLICK` | ✅ Accessibility activation | Transparent to agent |
-| `swipeOn` / scroll adaptation | ✅ `ACTION_SCROLL_FORWARD/BACKWARD` | ✅ Accessibility scroll action | Fallback differs |
+| `swipeOn` / scroll adaptation | ✅ `ACTION_SCROLL_FORWARD/BACKWARD` | ❌ Unsupported | CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver |
 | `inputText` / `clearText` | ✅ Unchanged | ✅ Unchanged | Both use text injection |
 | `pressButton` | ✅ Unchanged | ✅ Unchanged | Device/navigation buttons |
 | `accessibilityState` in observe | ✅ `service: "talkback"` | ✅ `service: "voiceover"` | |
-| `accessibilityFocusedElement` | ✅ Reported | ❌ Not tracked | Gap — see below |
+| `accessibilityFocusedElement` | ✅ Reported | ✅ With iOS SDK | Requires SDK-enriched hierarchy |
 | Programmatic enable/disable | ✅ Via ADB | ✅ Simulator only | Physical device support deferred |
 | MCP tool to toggle | ✅ `TalkBackToggle` | ✅ `VoiceOverToggle` (Simulator) | Gap — see below |
 | Three-finger swipe fallback | N/A | ✅ | VoiceOver-specific |
@@ -30,15 +30,15 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 
 ## Gaps
 
-### Gap 1: `accessibilityFocusedElement` not reported on iOS
+### Gap 1: VoiceOver cursor requires the iOS SDK
 
 **TalkBack:** The Android CtrlProxy reports `accessibility-focused: true` on the element with TalkBack's cursor. `ObserveResult.accessibilityFocusedElement` is populated on every observation, allowing agents to verify that the screen reader cursor landed on the expected element.
 
-**VoiceOver:** The iOS CtrlProxy does not currently report which element has the VoiceOver cursor. `accessibilityFocusedElement` is absent in iOS observe results.
+**VoiceOver:** The iOS CtrlProxy projects the VoiceOver cursor onto the SDK-enriched hierarchy, so `observe().accessibilityFocusedElement` is available when the foreground app includes the AutoMobile iOS SDK. The out-of-process runner cannot read the cursor without that in-process SDK signal.
 
-**Impact:** Agents cannot verify VoiceOver cursor position after interactions. Workaround: check `focusedElement` (input focus) for text fields, and verify element presence in `observe().elements` for other controls.
+**Impact:** Agents cannot verify VoiceOver cursor position for apps that do not include the iOS SDK. For SDK-enabled apps, they can verify the focused element after interactions.
 
-**Resolution path:** Add VoiceOver cursor tracking to the CtrlProxy Swift runner. The runner already knows the VoiceOver cursor position via `UIAccessibilityElement.accessibilityElementIsFocused`. Add a `voiceoverFocusedElement` field to the hierarchy response and populate `accessibilityFocusedElement` in `CtrlProxyHierarchy.ts`.
+**Resolution path:** Keep the iOS SDK and CtrlProxy runner versions aligned so the SDK's `accessibilityElementIsFocused()` signal is present in the merged hierarchy.
 
 ---
 

@@ -20,7 +20,7 @@ import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/Adb
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { Timer } from "../../../utils/SystemTimer";
-import { SwipeOnResolvedOptions, BoomerangConfig, TalkBackSwipeRunner, OverlayAnalyzer, ScrollAccessibilityService } from "./types";
+import { SwipeOnResolvedOptions, BoomerangConfig, TalkBackSwipeRunner, VoiceOverSwipeRunner, OverlayAnalyzer, ScrollAccessibilityService } from "./types";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { exponentialBackoff } from "../../../utils/Backoff";
@@ -45,6 +45,7 @@ interface ScrollUntilVisibleDependencies {
   featureFlags?: FeatureFlagService;
   overlayDetector: OverlayAnalyzer;
   talkBackExecutor: TalkBackSwipeRunner;
+  voiceOverExecutor?: VoiceOverSwipeRunner;
   timer: Timer;
   getDuration: (options: SwipeOnResolvedOptions) => number;
   resolveBoomerangConfig: (options: SwipeOnResolvedOptions) => BoomerangConfig | undefined;
@@ -229,7 +230,13 @@ export class ScrollUntilVisible {
       // Execute swipe with observedInteraction
       const swipeResult = await this.deps.observedInteraction(
         async () => {
-          return await this.deps.talkBackExecutor.executeSwipeGesture(
+          const swipeRunner = this.deps.device.platform === "ios"
+            ? this.deps.voiceOverExecutor
+            : this.deps.talkBackExecutor;
+          if (!swipeRunner) {
+            throw new Error("VoiceOver swipe runner is not configured for iOS scroll-until-visible");
+          }
+          return await swipeRunner.executeSwipeGesture(
             Math.floor(startX),
             Math.floor(startY),
             Math.floor(endX),
@@ -253,6 +260,17 @@ export class ScrollUntilVisible {
           }
         }
       );
+
+      if (!swipeResult.success && this.deps.device.platform === "ios") {
+        perf.end();
+        return {
+          ...swipeResult,
+          targetType: "screen",
+          found: false,
+          scrollIterations: scrollIteration,
+          elapsedMs: this.deps.timer.now() - startTime
+        };
+      }
 
       // Update observation
       if (swipeResult.observation && swipeResult.observation.viewHierarchy) {

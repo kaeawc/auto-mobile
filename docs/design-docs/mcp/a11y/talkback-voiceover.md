@@ -5,7 +5,7 @@
 > **Current state:** Screen-reader detection and the core tool adaptations are **implemented on both platforms**.
 >
 > - **Android (TalkBack):** detection via ADB secure settings; TalkBack-aware `tapOn` (direct `ACTION_CLICK` activation, with opt-in cursor navigation behind the `screen-reader-navigation` feature flag) and `swipeOn` (`ACTION_SCROLL_FORWARD`/`BACKWARD` with a two-finger fallback).
-> - **iOS (VoiceOver):** detection via CtrlProxy; VoiceOver-aware tap (label-based accessibility activation) and swipe (accessibility scroll action with a three-finger fallback). The runner reports the VoiceOver cursor, so `observe` populates `accessibilityFocusedElement`.
+> - **iOS (VoiceOver):** detection via CtrlProxy and VoiceOver-aware tap (label-based accessibility activation). VoiceOver scrolling is unsupported: CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver, and there is no functional three-finger gesture fallback. The runner reports the VoiceOver cursor when the foreground app supplies SDK-enriched hierarchy data.
 >
 > **Still open:** iOS focus *control* (set/clear focus, cursor stepping), VoiceOver Rotor, Magic Tap, and physical-device VoiceOver toggle. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
 
@@ -200,9 +200,9 @@ iOS VoiceOver follows the same phased approach. Key differences:
 Tracked in [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md), which is the
 source of truth for remaining gaps:
 
-- **iOS focus control**: `setAccessibilityFocus` / `clearAccessibilityFocus` and cursor
-  stepping on iOS. Reading the cursor is done — the runner reports it and `observe`
-  populates `accessibilityFocusedElement` — but moving it is not.
+- **iOS focus control and stepping**: `setAccessibilityFocus` / `clearAccessibilityFocus`
+  and cursor stepping are not implemented. Cursor reporting is available only for
+  SDK-enabled foreground apps; the out-of-process CtrlProxy cannot report it without the SDK.
 - **VoiceOver Rotor commands**: two-finger rotate cannot be synthesized into VoiceOver.
   Standard headings are instead exposed as `role: "heading"` in SDK-backed iOS observations;
   custom rotors and Rotor-driven cursor navigation remain unavailable (parity doc Gap 4).
@@ -213,5 +213,5 @@ source of truth for remaining gaps:
 - **TalkBack context menus**: local/global menu gestures.
 
 Delivered since this document was written, and no longer "future": TalkBack and VoiceOver
-detection, tap adaptation on both platforms, scroll-action swipe with two-finger (Android)
-and three-finger (iOS) fallbacks, and WCAG auditing alongside screen-reader support.
+ detection, tap adaptation on both platforms, Android scroll-action swipe with a two-finger
+ fallback, unsupported iOS VoiceOver scrolling, and WCAG auditing alongside screen-reader support.

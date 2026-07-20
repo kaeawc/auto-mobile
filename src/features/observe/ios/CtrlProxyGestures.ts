@@ -16,13 +16,13 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   }
 
   /**
-   * Request a multi-finger swipe gesture for VoiceOver compatibility.
+   * Request a simultaneous multi-finger swipe gesture.
    *
    * @param x1 - Start X coordinate
    * @param y1 - Start Y coordinate
    * @param x2 - End X coordinate
    * @param y2 - End Y coordinate
-   * @param fingerCount - Number of fingers (e.g. 3 for VoiceOver scroll)
+   * @param fingerCount - Number of fingers
    * @param duration - Gesture duration in milliseconds (default: 300)
    * @param timeoutMs - Request timeout in milliseconds (default: 5000)
    * @param perf - Optional performance tracker

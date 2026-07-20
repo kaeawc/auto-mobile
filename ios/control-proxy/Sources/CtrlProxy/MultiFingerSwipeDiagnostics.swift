@@ -26,9 +26,9 @@ import Foundation
 /// `XCUIElement.scroll(byDeltaX:deltaY:)` is **not** ruled out by availability —
 /// it is `API_AVAILABLE(ios(15.0))`. It is ruled out because it lives in the
 /// `XCUIElementMouseEvents` category and delivers a pointer/scroll-wheel event
-/// rather than synthesized touches, so it cannot drive a VoiceOver two- or
-/// three-finger gesture or a two-finger map pan — the semantics `multiFingerSwipe`
-/// exists to produce.
+/// rather than synthesized touches, so it cannot drive a two-finger map pan — a
+/// gesture `multiFingerSwipe` exists to produce. Synthesized touches are delivered
+/// below VoiceOver's gesture layer, so neither path can drive VoiceOver gestures.
 ///
 /// Scope of that claim: it holds for `fingerCount >= 2`. A `fingerCount` of 1 is
 /// reachable (the bridge clamps with `fingerCount > 1 ? fingerCount : 1`) and does
@@ -37,12 +37,12 @@ import Foundation
 /// the runner does not special-case it.
 ///
 /// Why the runner does not substitute a single-finger swipe for N >= 2: it would
-/// silently perform a *different* gesture — multi-finger swipes drive VoiceOver
-/// commands and map panning, where a one-finger swipe means something else
-/// entirely. The runner therefore reports a clear failure and spends the
-/// availability signal on making that failure actionable. Note this is the
-/// *runner's* policy only: a TypeScript caller may still choose to degrade, and
-/// `VoiceOverSwipeExecutor` currently does exactly that (see issue #3993).
+/// silently perform a *different* gesture — for example, a map pan can become a
+/// drag, where a one-finger swipe means something else entirely. The runner
+/// therefore reports a clear failure and spends the availability signal on making
+/// that failure actionable. Note this is the *runner's* policy only: a TypeScript
+/// caller may still choose to degrade, and `VoiceOverSwipeExecutor` currently does
+/// exactly that (see issue #3993).
 ///
 /// The real synthesis path is device-only, so this selection is extracted here to
 /// stay verifiable off-device — the same pattern as `PinchFallback`.

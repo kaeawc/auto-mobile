@@ -32,6 +32,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.serializer
 
 /**
  * Client for the observation stream Unix socket server. Subscribes to receive real-time hierarchy
@@ -252,7 +253,7 @@ class ObservationStreamClient {
     val currentWriter = writer ?: return false
 
     return try {
-      val message = json.encodeToString(StreamRequest.serializer(), request)
+      val message = json.encodeToString(serializer<StreamRequest>(), request)
       currentWriter.write(message)
       currentWriter.newLine()
       currentWriter.flush()
@@ -291,7 +292,7 @@ class ObservationStreamClient {
   }
 
   internal suspend fun handleMessage(message: String) {
-    val response = json.decodeFromString(StreamResponse.serializer(), message)
+    val response = json.decodeFromString(serializer<StreamResponse>(), message)
     log.info("Handling message type: ${response.type}")
 
     when (response.type) {

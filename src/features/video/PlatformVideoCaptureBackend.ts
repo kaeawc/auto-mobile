@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
@@ -28,7 +28,7 @@ import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 
 interface AndroidBackendHandle {
   kind: "android";
-  process: ChildProcessWithoutNullStreams;
+  process: TrackedChildProcess;
   exitState: ProcessExitState;
   exitPromise: Promise<void>;
   stderr: string[];
@@ -152,10 +152,8 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       // Pull the file from the device
       logger.info(`[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`);
       const adb = this.adbFactory.create(backendHandle.device);
-      const { adbPath, baseArgs } = await adb.getBaseCommandParts();
-
-      const pullArgs = [...baseArgs, "pull", backendHandle.deviceTempPath, handle.outputPath];
-      const pullProcess = spawn(adbPath, pullArgs, { stdio: ["ignore", "pipe", "pipe"] });
+      const pullArgs = ["pull", backendHandle.deviceTempPath, handle.outputPath];
+      const pullProcess = await adb.spawn(pullArgs);
 
       await new Promise<void>((resolve, reject) => {
         pullProcess.once("exit", code => {
@@ -171,8 +169,8 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
       // Clean up temp file on device
       logger.info(`[VideoCapture] Cleaning up temp file on device`);
-      const rmArgs = [...baseArgs, "shell", "rm", backendHandle.deviceTempPath];
-      const rmProcess = spawn(adbPath, rmArgs, { stdio: ["ignore", "pipe", "pipe"] });
+      const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
+      const rmProcess = await adb.spawn(rmArgs);
 
       await new Promise<void>(resolve => {
         rmProcess.once("exit", () => {
@@ -218,7 +216,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     config: VideoCaptureConfig
   ): Promise<RecordingHandle> {
     const adb = this.adbFactory.create(device);
-    const { adbPath, baseArgs } = await adb.getBaseCommandParts();
     const bitrateKbps = clampBitrateKbps(config);
     const bitrateBps = Math.max(1, Math.round(bitrateKbps * 1000));
     const timeLimitSeconds = this.resolveAndroidTimeLimit(config.maxDurationSeconds);
@@ -234,7 +231,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     const deviceTempPath = `/sdcard/auto-mobile-${config.recordingId}.mp4`;
 
     const args = [
-      ...baseArgs,
       "shell",
       "screenrecord",
       "--bit-rate",
@@ -249,12 +245,12 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     args.push(deviceTempPath);
 
-    logger.info(`[VideoCapture] Starting Android recording: ${adbPath} ${args.join(" ")}`);
+    logger.info(`[VideoCapture] Starting Android recording: ${args.join(" ")}`);
     logger.info(`[VideoCapture] Device temp path: ${deviceTempPath}`);
     logger.info(`[VideoCapture] Output path: ${config.outputPath}`);
     logger.info(`[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`);
 
-    const process = spawn(adbPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const process = await adb.spawn(args);
 
     try {
       await waitForSpawn(process);

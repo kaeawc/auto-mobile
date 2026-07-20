@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { EventEmitter } from "events";
+import { PassThrough } from "stream";
 import { AdbClient, resetAdbClientCaches } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ExecResult } from "../../../src/models";
 import { isAdbMissingDeviceError } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
@@ -76,5 +78,54 @@ describe("AdbClient.getBootedAndroidDevices", () => {
 
     await expect(adb.executeCommand("shell true", undefined, undefined, true, controller.signal))
       .rejects.toThrow("Operation cancelled");
+  });
+
+  test("executes argv with one device selector and the resolved executable", async () => {
+    let received: { file: string; args: string[] } | undefined;
+    const adb = new AdbClient(
+      { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
+      async (file: string, args: string[], _maxBuffer?: number): Promise<ExecResult> => {
+        received = { file, args };
+        return createExecResult("ok");
+      }
+    );
+
+    await adb.execute(["shell", "getprop", "ro.product.model"], { noRetry: true });
+
+    expect(received?.file).toEndWith("adb");
+    expect(received?.args).toEqual([
+      "-s", "emulator-5554", "shell", "getprop", "ro.product.model",
+    ]);
+  });
+
+  test("spawns argv without retry and terminates only its child on abort", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      stdin: null,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      killCalls: [] as string[],
+      kill(signal?: string) { this.killCalls.push(signal ?? "SIGTERM"); return true; },
+    });
+    let received: { file: string; args: string[] } | undefined;
+    const adb = new AdbClient(
+      { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
+      async (): Promise<ExecResult> => createExecResult(""),
+      ((file: string, args: string[]) => {
+        received = { file, args };
+        return child;
+      }) as never
+    );
+    const controller = new AbortController();
+
+    const process = await adb.spawn(["exec-out", "screenrecord", "--output-format=h264", "-"], {
+      signal: controller.signal,
+    });
+    controller.abort();
+    child.emit("exit", null, "SIGTERM");
+
+    expect(process.stdout).toBe(child.stdout);
+    expect(received?.file).toEndWith("adb");
+    expect(received?.args).toEqual(["-s", "emulator-5554", "exec-out", "screenrecord", "--output-format=h264", "-"]);
+    expect(child.killCalls).toEqual(["SIGTERM"]);
   });
 });

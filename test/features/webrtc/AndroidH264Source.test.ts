@@ -3,7 +3,6 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
   AndroidH264Source,
-  type ProcessSpawner,
   type SpawnedProcess,
 } from "../../../src/features/webrtc/AndroidH264Source";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -25,7 +24,11 @@ class FakeProcess extends EventEmitter implements SpawnedProcess {
   }
 }
 
-function fakeAdbFactory(commands: string[] = []): AdbClientFactory {
+function fakeAdbFactory(
+  commands: string[] = [],
+  spawnArgs: string[][] = [],
+  processes: FakeProcess[] = []
+): AdbClientFactory {
   return {
     create() {
       return {
@@ -33,6 +36,12 @@ function fakeAdbFactory(commands: string[] = []): AdbClientFactory {
         executeCommand: async (command: string) => {
           commands.push(command);
           return { stdout: "", stderr: "", exitCode: 0 };
+        },
+        spawn: async (args: string[]) => {
+          spawnArgs.push(args);
+          const process = new FakeProcess();
+          processes.push(process);
+          return process;
         },
       } as unknown as ReturnType<AdbClientFactory["create"]>;
     },
@@ -46,19 +55,11 @@ function makeSource(overrides: Partial<Parameters<typeof AndroidH264Source.proto
   const timer = new FakeTimer();
   const spawnArgs: string[][] = [];
 
-  const spawner: ProcessSpawner = (_command, args) => {
-    spawnArgs.push(args);
-    const proc = new FakeProcess();
-    processes.push(proc);
-    return proc;
-  };
-
   const source = new AndroidH264Source({
     device: DEVICE,
     onData: chunk => chunks.push(chunk),
-    adbFactory: fakeAdbFactory(commands),
+    adbFactory: fakeAdbFactory(commands, spawnArgs, processes),
     timer,
-    spawner,
     segmentRotateMs: 1000,
     ...overrides,
   });
@@ -74,7 +75,7 @@ describe("AndroidH264Source", () => {
     expect(processes).toHaveLength(1);
     const args = spawnArgs[0].join(" ");
     expect(args).toContain("exec-out screenrecord --output-format=h264");
-    expect(args).toContain("-s emulator-5554");
+    expect(args).not.toContain("-s emulator-5554");
     expect(args.endsWith(" -")).toBe(true);
 
     processes[0].stdout.write(Buffer.from([0, 0, 0, 1, 0x67]));
@@ -178,9 +179,9 @@ describe("AndroidH264Source", () => {
     const adbFactory = {
       create() {
         return {
-          getAdbPathOnly: () =>
-            new Promise<string>(resolve => {
-              resolveAdb = () => resolve("adb");
+          spawn: () =>
+            new Promise<SpawnedProcess>(resolve => {
+              resolveAdb = () => resolve(new FakeProcess());
             }),
           executeCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
         } as unknown as ReturnType<AdbClientFactory["create"]>;
@@ -188,7 +189,7 @@ describe("AndroidH264Source", () => {
     } as unknown as AdbClientFactory;
 
     const { source, processes } = makeSource({ adbFactory });
-    const startPromise = source.start(); // suspends on getAdbPathOnly
+    const startPromise = source.start(); // suspends on adb.spawn
     await source.stop(); // running=false while current is still null
     resolveAdb!(); // startSegment resumes after setup
     await startPromise;

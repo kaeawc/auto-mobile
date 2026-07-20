@@ -1,4 +1,5 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -69,27 +70,7 @@ export class TerminateApp extends BaseVisualChange {
     const terminateLogic = async (): Promise<TerminateAppResult> => {
       // Auto-detect target user if not specified
       const targetUserId = await perf.track("detectTargetUser", async () => {
-        if (options?.userId !== undefined) {
-          return options.userId;
-        }
-
-        // Check if app is in foreground and get its user
-        const foregroundApp = await this.adb.getForegroundApp();
-        if (foregroundApp && foregroundApp.packageName === packageName) {
-          return foregroundApp.userId;
-        }
-
-        // Get list of users and prefer work profile
-        const users = await this.adb.listUsers();
-
-        // Find first work profile (userId > 0 and running)
-        const workProfile = users.find(u => u.userId > 0 && u.running);
-        if (workProfile) {
-          return workProfile.userId;
-        }
-
-        // Fall back to primary user
-        return 0;
+        return (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: options?.userId })).userId;
       });
 
       // Check if app is installed

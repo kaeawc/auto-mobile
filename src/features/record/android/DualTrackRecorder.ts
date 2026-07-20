@@ -265,7 +265,7 @@ export class DualTrackRecorder {
     const scaler = buildScaler(ranges);
 
     return new GetEventReader({
-      deviceId: this.device.deviceId,
+      adb,
       touchNode: node,
       scaler,
       density,

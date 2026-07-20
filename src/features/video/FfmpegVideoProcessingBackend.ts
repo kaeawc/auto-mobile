@@ -356,20 +356,16 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     config: VideoCaptureConfig
   ): Promise<RecordingHandle> {
     const adb = this.adbFactory.create(device);
-    const { adbPath, baseArgs } = await adb.getBaseCommandParts();
 
     const screenrecordArgs = [
-      ...baseArgs,
       "exec-out",
       "screenrecord",
       "-",
     ];
 
-    logger.info(`[FfmpegVideo] Starting screenrecord: ${adbPath} ${screenrecordArgs.join(" ")}`);
+    logger.info(`[FfmpegVideo] Starting screenrecord: ${screenrecordArgs.join(" ")}`);
 
-    const captureProcess = spawn(adbPath, screenrecordArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const captureProcess = await adb.spawn(screenrecordArgs);
 
     captureProcess.stderr.on("data", chunk => {
       const text = chunk.toString();

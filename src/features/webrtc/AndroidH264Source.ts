@@ -5,9 +5,9 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
-import { defaultProcessSpawner, type ProcessSpawner, type SpawnedProcess } from "./processSpawner";
 
 export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
 
@@ -21,7 +21,6 @@ export const ANDROID_STREAM_SEGMENT_ROTATE_MS = (ANDROID_SCREENRECORD_MAX_SECOND
 export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
   adbFactory?: AdbClientFactory;
   timer?: Timer;
-  spawner?: ProcessSpawner;
   /** Override the per-segment time limit (seconds); capped at the screenrecord max. */
   segmentTimeLimitSeconds?: number;
   /** Override when to proactively rotate to the next segment (ms). */
@@ -34,17 +33,16 @@ export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
  * `screenrecord` caps each run at 180s, segments are rotated automatically: a
  * new segment is started shortly before the current one hits the cap so the
  * downstream RTP writer keeps receiving frames. The source is device-facing but
- * fully injectable (adb factory, spawner, timer) for tests.
+ * fully injectable (ADB factory and timer) for tests.
  */
 export class AndroidH264Source implements H264CaptureSource {
   private readonly options: AndroidH264SourceOptions;
   private readonly adbFactory: AdbClientFactory;
   private readonly timer: Timer;
-  private readonly spawner: ProcessSpawner;
   private readonly segmentTimeLimitSeconds: number;
   private readonly segmentRotateMs: number;
 
-  private current: SpawnedProcess | null = null;
+  private current: AdbProcess | null = null;
   private rotateHandle: NodeJS.Timeout | null = null;
   private running = false;
   private segmentCount = 0;
@@ -53,7 +51,6 @@ export class AndroidH264Source implements H264CaptureSource {
     this.options = options;
     this.adbFactory = options.adbFactory ?? defaultAdbClientFactory;
     this.timer = options.timer ?? defaultTimer;
-    this.spawner = options.spawner ?? defaultProcessSpawner;
     this.segmentTimeLimitSeconds = Math.min(
       options.segmentTimeLimitSeconds ?? ANDROID_SCREENRECORD_MAX_SECONDS,
       ANDROID_SCREENRECORD_MAX_SECONDS
@@ -102,17 +99,13 @@ export class AndroidH264Source implements H264CaptureSource {
 
   private async startSegment(): Promise<void> {
     const adb = this.adbFactory.create(this.options.device);
-    const adbPath = await adb.getAdbPathOnly();
     // stop() may have run while we awaited adb setup; it returns early when
     // `current` is still null, so spawning now would leak a screenrecord process
     // that no later stop() would kill.
     if (!this.running) {
       return;
     }
-    const baseArgs = this.options.device.deviceId ? ["-s", this.options.device.deviceId] : [];
-
     const args = [
-      ...baseArgs,
       "exec-out",
       "screenrecord",
       "--output-format=h264",
@@ -128,10 +121,10 @@ export class AndroidH264Source implements H264CaptureSource {
     args.push("-");
 
     logger.info(
-      `[AndroidH264Source] starting screenrecord segment ${this.segmentCount + 1}: ${adbPath} ${args.join(" ")}`
+      `[AndroidH264Source] starting screenrecord segment ${this.segmentCount + 1}: ${args.join(" ")}`
     );
 
-    const process = this.spawner(adbPath, args);
+    const process = await adb.spawn(args);
     this.current = process;
     this.segmentCount++;
 
@@ -165,7 +158,7 @@ export class AndroidH264Source implements H264CaptureSource {
   }
 
   private handleSegmentExit(
-    process: SpawnedProcess,
+    process: AdbProcess,
     code: number | null,
     signal: NodeJS.Signals | null
   ): void {

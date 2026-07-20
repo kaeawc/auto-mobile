@@ -1,5 +1,6 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { UninstallAppResult } from "../../models/UninstallAppResult";
 import { BootedDevice } from "../../models";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
@@ -148,26 +149,7 @@ export class UninstallApp {
   private async executeAndroid(packageName: string, keepData: boolean, userId?: number): Promise<UninstallAppResult> {
     try {
       // Auto-detect target user if not specified
-      let targetUserId = userId;
-      if (targetUserId === undefined) {
-        // Check if app is in foreground and get its user
-        const foregroundApp = await this.adb.getForegroundApp();
-        if (foregroundApp && foregroundApp.packageName === packageName) {
-          targetUserId = foregroundApp.userId;
-        } else {
-          // Get list of users and prefer work profile
-          const users = await this.adb.listUsers();
-
-          // Find first work profile (userId > 0 and running)
-          const workProfile = users.find(u => u.userId > 0 && u.running);
-          if (workProfile) {
-            targetUserId = workProfile.userId;
-          } else {
-            // Fall back to primary user
-            targetUserId = 0;
-          }
-        }
-      }
+      const targetUserId = (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: userId })).userId;
 
       // Check if app is installed. Keep the cache disabled so the pre-uninstall
       // check always reflects live device state (the previous executor-arg path

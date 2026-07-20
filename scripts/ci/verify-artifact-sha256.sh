@@ -13,13 +13,11 @@
 #   verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
 set -euo pipefail
 
-# shellcheck source=scripts/lib/read-registry-field.sh disable=SC1091
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/read-registry-field.sh"
-
 ARTIFACT_PATH="${1:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 PLATFORM="${2:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 
 RELEASE_TS="src/constants/release.ts"
+RELEASE_READER="$(dirname "${BASH_SOURCE[0]}")/../read-release-registry.ts"
 
 # sha256sum is GNU coreutils and absent on stock macOS; fall back to shasum
 # (matching verify-release-integrity.sh) so this works on any runner (#3658).
@@ -61,7 +59,7 @@ fi
 # whole pipeline then yields an empty value and a real release aborts with a
 # misleading "No SHA256 checksum found" even though the checksum is populated
 # (interface-collision bug, #3784).
-SOURCE_SHA256=$(read_registry_field "$FIELD" "$RELEASE_TS")
+SOURCE_SHA256=$(bun "$RELEASE_READER" "$FIELD" "$RELEASE_TS")
 # The helper does no format validation, so enforce the 64-hex floor here: an
 # empty or malformed registry value (e.g. `ipaSha256: ""`) yields empty
 # SOURCE_SHA256 so the `-z` guard below fires with the actionable "No checksum"

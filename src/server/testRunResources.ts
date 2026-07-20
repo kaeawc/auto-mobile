@@ -1,5 +1,6 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
+import { optionalBoolean, optionalEnum, optionalInteger, optionalString, queryParamsToRecord } from "./queryParamValidation";
 import { TestExecutionRepository, TestRun, TestRunQueryOptions } from "../db/testExecutionRepository";
 
 const TEST_RUN_RESOURCE_URIS = {
@@ -73,83 +74,6 @@ interface TestRunResponse {
   filters: Record<string, unknown>;
 }
 
-function normalizeParam(value: string | undefined): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function parseInteger(
-  value: string | undefined,
-  label: string,
-  options: { min?: number; max?: number } = {}
-): number | undefined {
-  const normalized = normalizeParam(value);
-  if (normalized === undefined) {
-    return undefined;
-  }
-
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
-    throw new Error(`Invalid ${label}: ${value}`);
-  }
-
-  const min = options.min ?? 0;
-  if (parsed < min) {
-    throw new Error(`Invalid ${label}: ${value}`);
-  }
-
-  if (options.max !== undefined && parsed > options.max) {
-    throw new Error(`Invalid ${label}: ${value}`);
-  }
-
-  return parsed;
-}
-
-function parseEnum<T extends string>(
-  value: string | undefined,
-  label: string,
-  allowed: readonly T[]
-): T | undefined {
-  const normalized = normalizeParam(value);
-  if (normalized === undefined) {
-    return undefined;
-  }
-  if (allowed.includes(normalized as T)) {
-    return normalized as T;
-  }
-  throw new Error(`Invalid ${label}: ${value}`);
-}
-
-function parseString(value: string | undefined): string | undefined {
-  return normalizeParam(value);
-}
-
-function parseQueryParams(query: string): Record<string, string> {
-  const params = new URLSearchParams(query);
-  const entries: Record<string, string> = {};
-  for (const [key, value] of params.entries()) {
-    entries[key] = value;
-  }
-  return entries;
-}
-
-function parseBoolean(value: string | undefined): boolean | undefined {
-  const normalized = normalizeParam(value);
-  if (normalized === undefined) {
-    return undefined;
-  }
-  if (normalized === "true" || normalized === "1") {
-    return true;
-  }
-  if (normalized === "false" || normalized === "0") {
-    return false;
-  }
-  return undefined;
-}
-
 function parseTestRunParams(params: Record<string, string>): TestRunQueryArgs {
   const unknownKeys = Object.keys(params).filter(key => !TEST_RUN_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
@@ -157,12 +81,12 @@ function parseTestRunParams(params: Record<string, string>): TestRunQueryArgs {
   }
 
   return {
-    lookbackDays: parseInteger(params.lookbackDays, "lookbackDays", { min: 1 }),
-    limit: parseInteger(params.limit, "limit", { min: 1, max: TEST_RUN_LIMIT_MAX }),
-    testClass: parseString(params.testClass),
-    testMethod: parseString(params.testMethod),
-    orderDirection: parseEnum(params.orderDirection, "orderDirection", ["asc", "desc"]),
-    latestOnly: parseBoolean(params.latestOnly),
+    lookbackDays: optionalInteger(params.lookbackDays, "lookbackDays", { min: 1 }),
+    limit: optionalInteger(params.limit, "limit", { min: 1, max: TEST_RUN_LIMIT_MAX }),
+    testClass: optionalString(params.testClass),
+    testMethod: optionalString(params.testMethod),
+    orderDirection: optionalEnum(params.orderDirection, "orderDirection", ["asc", "desc"]),
+    latestOnly: optionalBoolean(params.latestOnly, "latestOnly"),
   };
 }
 
@@ -334,7 +258,7 @@ export function registerTestRunResources(): void {
     "application/json",
     async params => {
       try {
-        const queryParams = parseQueryParams(params.params ?? "");
+        const queryParams = queryParamsToRecord(params.params ?? "");
         const options = parseTestRunParams(queryParams);
         const uri = buildTestRunUri(options);
         return getTestRunResource(options, uri);

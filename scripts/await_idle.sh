@@ -166,13 +166,13 @@ wait_for_ui_stability() {
 
             # Parse specific metrics using awk for simpler extraction
             local percentile_50th
-            percentile_50th=$(echo "$gfx_output" | grep "50th percentile:" | awk '{print $3}' | sed 's/ms//')
+            percentile_50th=$(echo "$gfx_output" | grep "50th percentile:" | awk '{print $3}'); percentile_50th="${percentile_50th%ms}"
             local percentile_90th
-            percentile_90th=$(echo "$gfx_output" | grep "90th percentile:" | awk '{print $3}' | sed 's/ms//')
+            percentile_90th=$(echo "$gfx_output" | grep "90th percentile:" | awk '{print $3}'); percentile_90th="${percentile_90th%ms}"
             local percentile_95th
-            percentile_95th=$(echo "$gfx_output" | grep "95th percentile:" | awk '{print $3}' | sed 's/ms//')
+            percentile_95th=$(echo "$gfx_output" | grep "95th percentile:" | awk '{print $3}'); percentile_95th="${percentile_95th%ms}"
             local percentile_99th
-            percentile_99th=$(echo "$gfx_output" | grep "99th percentile:" | awk '{print $3}' | sed 's/ms//')
+            percentile_99th=$(echo "$gfx_output" | grep "99th percentile:" | awk '{print $3}'); percentile_99th="${percentile_99th%ms}"
             local missed_vsync
             missed_vsync=$(echo "$gfx_output" | grep "Number Missed Vsync:" | awk '{print $4}')
             local slow_ui_thread

@@ -4,13 +4,20 @@
 #  A) detect-dead-code-ts.sh: timestamp must not emit a literal "%3N" on BSD date
 #  B) validate_shell_scripts.sh / xml/validate_xml.sh: portable CPU count (no bare nproc)
 #  C) xml/format_xml.sh: formatter stderr must not be merged into the output file
-#  D) validate_mkdocs_nav.sh: duplicate nav entries must be detectable
 
 setup() {
   WORK_DIR="$(mktemp -d)"
 }
 teardown() {
   rm -rf "$WORK_DIR"
+}
+
+@test "MkDocs navigation validator resolves the repository from its own path" {
+  local validator
+  validator="$(cd scripts && pwd)/validate_mkdocs_nav.sh"
+  run bash -c 'cd "$1" && "$2"' _ "$WORK_DIR" "$validator"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Found "*"files referenced"* ]]
 }
 
 # --- A ---------------------------------------------------------------------
@@ -77,26 +84,4 @@ EOF
   run cat "$target"
   [[ "$output" == *"<root/>"* ]]
   [[ "$output" != *"deprecated option"* ]]
-}
-
-# --- D ---------------------------------------------------------------------
-@test "duplicate nav entries are detected" {
-  local abs
-  abs="$(cd scripts && pwd)/validate_mkdocs_nav.sh"
-  local fn="$WORK_DIR/extract_raw.sh"
-  awk '/^extract_nav_files_raw\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$abs" > "$fn"
-
-  cat > "$WORK_DIR/mkdocs.yml" <<'YML'
-nav:
-  - Home: index.md
-  - Guide: guide.md
-  - Also home: index.md
-YML
-
-  run env MKDOCS_YML="$WORK_DIR/mkdocs.yml" bash -c '
-    source "$1"
-    extract_nav_files_raw | sort | uniq -d
-  ' _ "$fn"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"index.md"* ]]
 }

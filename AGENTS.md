@@ -7,6 +7,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - After implementation changes, run relevant validation commands
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
+- Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail.
 - For Swift, prefer an existing standard-library or Foundation API before adding an extension, helper, or package. Use `URLComponents` plus `URLQueryItem` for query values and `Codable` for AutoMobile-owned stable schemas. Keep `JSONSerialization` only at documented dynamic/bridge boundaries. A convenience dependency requires a stated platform-API gap, deployment-target check, and tests using interfaces/fakes.

@@ -39,6 +39,11 @@ jobs:
         with:
           lfs: false
 
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
       - name: "Download APK artifact"
         uses: actions/download-artifact@v7
         with:
@@ -69,8 +74,8 @@ jobs:
       - name: "Get current SHA256 values from source"
         id: current
         run: |
-          # Read each field from the dedicated NIGHTLY_CHECKSUM_ENTRY (the block
-          # anchored on `version: "nightly"`) via the shared helper — the single
+          # Read each field from the dedicated NIGHTLY_CHECKSUM_ENTRY via the
+          # typed module reader — the single
           # source of truth also used by verify-artifact-sha256.sh +
           # verify-release-integrity.sh (which read registry[0]). Nightly must
           # compare against — and later overwrite — the nightly slot, NEVER a
@@ -79,12 +84,11 @@ jobs:
           # main-built sha (#3784). Anchoring on the quoted `version: "nightly"`
           # line also skips the `ReleaseChecksumEntry` interface declarations
           # (`apkSha256: string;`) that precede the registry (#3784).
-          source scripts/lib/read-registry-field.sh
           RELEASE_TS="src/constants/release.ts"
-          APK_CURRENT=$(read_registry_field apkSha256 "$RELEASE_TS" nightly)
-          IPA_CURRENT=$(read_registry_field ipaSha256 "$RELEASE_TS" nightly)
-          RUNNER_CURRENT=$(read_registry_field runnerSha256 "$RELEASE_TS" nightly)
-          VIDEO_JAR_CURRENT=$(read_registry_field videoJarSha256 "$RELEASE_TS" nightly)
+          APK_CURRENT=$(bun scripts/read-release-registry.ts apkSha256 "$RELEASE_TS" nightly)
+          IPA_CURRENT=$(bun scripts/read-release-registry.ts ipaSha256 "$RELEASE_TS" nightly)
+          RUNNER_CURRENT=$(bun scripts/read-release-registry.ts runnerSha256 "$RELEASE_TS" nightly)
+          VIDEO_JAR_CURRENT=$(bun scripts/read-release-registry.ts videoJarSha256 "$RELEASE_TS" nightly)
           echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
           echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
           echo "runner_sha256=$RUNNER_CURRENT" >> $GITHUB_OUTPUT

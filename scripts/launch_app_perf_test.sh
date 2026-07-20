@@ -249,13 +249,13 @@ launch_and_collect_metrics() {
 
         # Extract metrics using simpler grep patterns that work on macOS and Linux
         local p50
-        p50=$(echo "$gfx_output" | grep "^50th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        p50=$(echo "$gfx_output" | grep "^50th percentile:" | awk '{print $3}' || echo ""); p50="${p50%ms}"
         local p90
-        p90=$(echo "$gfx_output" | grep "^90th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        p90=$(echo "$gfx_output" | grep "^90th percentile:" | awk '{print $3}' || echo ""); p90="${p90%ms}"
         local p95
-        p95=$(echo "$gfx_output" | grep "^95th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        p95=$(echo "$gfx_output" | grep "^95th percentile:" | awk '{print $3}' || echo ""); p95="${p95%ms}"
         local p99
-        p99=$(echo "$gfx_output" | grep "^99th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        p99=$(echo "$gfx_output" | grep "^99th percentile:" | awk '{print $3}' || echo ""); p99="${p99%ms}"
         local missed_vsync
         missed_vsync=$(echo "$gfx_output" | grep "^Number Missed Vsync:" | awk '{print $4}' || echo "")
         local slow_ui

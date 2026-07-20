@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { promises as fsPromises } from "node:fs";
 import os, { platform } from "node:os";
@@ -21,7 +22,9 @@ import {
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
+import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 function commandVersionAvailable(command: string): boolean {
   const result = spawnSync(command, ["-version"], { stdio: "ignore" });
@@ -110,6 +113,34 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       format: "mp4",
       device: mockDevice,
     };
+  });
+
+  test("starts iOS recording through the injected SimCtl argv boundary", async function() {
+    const stderr = new PassThrough();
+    const child = new EventEmitter() as ChildProcess;
+    Object.assign(child, { stderr, stdout: null, stdin: null, killed: false, kill: () => true });
+    let receivedArgs: string[] = [];
+    let receivedOptions: SpawnOptions | undefined;
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async (args: string[], options?: SpawnOptions) => {
+        receivedArgs = args;
+        receivedOptions = options;
+        defaultTimer.setTimeout(() => {
+          child.emit("spawn");
+          stderr.write("Recording started\n");
+        }, 0);
+        return child;
+      },
+    } as SimCtl;
+    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-recording-udid" };
+
+    await backend.start(mockConfig);
+
+    expect(receivedArgs).toEqual(["io", "ios-recording-udid", "recordVideo", path.join(mockConfig.outputDirectory, "test-recording-raw.mov")]);
+    expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
   });
 
   describe("Hardware Acceleration Detection", function() {

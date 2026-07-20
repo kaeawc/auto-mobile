@@ -8,6 +8,7 @@ import type {
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
+import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -77,6 +78,32 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
       await expect(backend.start(config)).rejects.toThrow("Unsupported platform");
     });
+  });
+
+  test("starts iOS recording through the injected SimCtl argv boundary", async () => {
+    const process = new FakeChildProcess();
+    process.simulateSpawn();
+    let receivedArgs: string[] = [];
+    let receivedOptions: unknown;
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async (args: string[], options?: unknown) => {
+        receivedArgs = args;
+        receivedOptions = options;
+        return process as any;
+      },
+    } as SimCtl;
+    backend = new PlatformVideoCaptureBackend(undefined, undefined, () => simctl);
+    const device: BootedDevice = { platform: "ios", deviceId: "ios-platform-udid", name: "iPhone" };
+
+    await backend.start({
+      recordingId: "recording", outputDirectory: tempDir, outputPath: path.join(tempDir, "video.mp4"),
+      fileName: "video.mp4", startedAt: new Date().toISOString(), qualityPreset: "low", targetBitrateKbps: 1000,
+      maxThroughputMbps: 5, fps: 15, maxArchiveSizeMb: 2048, format: "mp4", device,
+    });
+
+    expect(receivedArgs).toEqual(["io", "ios-platform-udid", "recordVideo", "--codec", "h264", "--force", path.join(tempDir, "video.mp4")]);
+    expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "ignore"] });
   });
 
   describe("Stop Operation", () => {

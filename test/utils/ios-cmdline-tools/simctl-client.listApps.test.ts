@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient, type SimCtlFileSystem } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 
 describe("SimCtlClient listApps", () => {
-  test("pipes listapps through plutil and uses --all flag", async () => {
+  test("runs listapps with argv and uses --all flag", async () => {
     const device: BootedDevice = {
       deviceId: "ios-device-123",
       name: "iOS Device",
@@ -18,7 +18,7 @@ describe("SimCtlClient listApps", () => {
       if (args.join(" ") === "simctl --version") {
         return createExecResult("simctl version 1.0.0", "");
       }
-      if (cmd.includes("listapps ios-device-123 --all | plutil")) {
+      if (cmd === "xcrun simctl listapps ios-device-123 --all") {
         const payload = JSON.stringify({
           "com.apple.Preferences": { bundleName: "Settings" }
         });
@@ -30,7 +30,8 @@ describe("SimCtlClient listApps", () => {
     const simctl = new SimCtlClient(device, execAsync);
     const apps = await simctl.listApps();
 
-    expect(execCalls.some(c => c.includes("listapps ios-device-123 --all | plutil"))).toBe(true);
+    expect(execCalls).toContain("xcrun simctl listapps ios-device-123 --all");
+    expect(execCalls.some(c => c.startsWith("/bin/sh "))).toBe(false);
     expect(apps).toEqual([{ bundleId: "com.apple.Preferences", bundleName: "Settings" }]);
   });
 
@@ -48,10 +49,10 @@ describe("SimCtlClient listApps", () => {
       if (args.join(" ") === "simctl --version") {
         return createExecResult("simctl version 1.0.0", "");
       }
-      if (cmd.includes("listapps ios-device-456 --all | plutil")) {
+      if (cmd === "xcrun simctl listapps ios-device-456 --all") {
         throw new Error("unknown option: --all");
       }
-      if (cmd.includes("listapps ios-device-456 | plutil")) {
+      if (cmd === "xcrun simctl listapps ios-device-456") {
         const payload = JSON.stringify({
           "com.apple.Fitness": { bundleName: "Fitness" }
         });
@@ -63,8 +64,35 @@ describe("SimCtlClient listApps", () => {
     const simctl = new SimCtlClient(device, execAsync);
     const apps = await simctl.listApps();
 
-    expect(execCalls.some(c => c.includes("listapps ios-device-456 --all | plutil"))).toBe(true);
-    expect(execCalls.some(c => c.includes("listapps ios-device-456 | plutil") && !c.includes("--all"))).toBe(true);
+    expect(execCalls).toContain("xcrun simctl listapps ios-device-456 --all");
+    expect(execCalls).toContain("xcrun simctl listapps ios-device-456");
     expect(apps).toEqual([{ bundleId: "com.apple.Fitness", bundleName: "Fitness" }]);
+  });
+
+  test("converts plist output with argv-based plutil and removes temporary files", async () => {
+    const device: BootedDevice = { deviceId: "ios-device-plist", name: "iOS Device", platform: "ios", source: "local" };
+    const files = new Map<string, string>();
+    const calls: string[] = [];
+    const fileSystem: SimCtlFileSystem = {
+      mkdtemp: async prefix => `${prefix}test`,
+      writeFile: async (path, data) => { files.set(path, data); },
+      readFile: async path => files.get(path) ?? "",
+      rm: async path => { calls.push(`rm ${path}`); },
+    };
+    const execAsync = async (file: string, args: string[]) => {
+      calls.push(`${file} ${args.join(" ")}`);
+      if (args.join(" ") === "simctl --version") {return createExecResult("simctl version 1.0.0", "");}
+      if (args.join(" ") === "simctl listapps ios-device-plist --all") {return createExecResult("<plist />", "");}
+      if (file === "plutil") {
+        files.set(args[args.indexOf("-o") + 1], JSON.stringify({ "com.apple.Maps": { bundleName: "Maps" } }));
+      }
+      return createExecResult("", "");
+    };
+
+    const apps = await new SimCtlClient(device, execAsync, undefined, undefined, undefined, fileSystem).listApps();
+
+    expect(calls.some(call => call.startsWith("plutil -convert json -o "))).toBe(true);
+    expect(calls.some(call => call.startsWith("rm "))).toBe(true);
+    expect(apps).toEqual([{ bundleId: "com.apple.Maps", bundleName: "Maps" }]);
   });
 });

@@ -28,7 +28,8 @@ developer's local runtime.
 
 ## Dependency decisions
 
-Every new direct dependency must have a short Markdown record in
+Every new dependency declared in `dependencies`, `devDependencies`, or
+`optionalDependencies` must have a short Markdown record in
 `docs/decisions/`. Include this exact field so `bun run check:stdlib-first` can
 verify it:
 

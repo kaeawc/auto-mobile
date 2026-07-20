@@ -8,7 +8,32 @@ Use this command when the user wants to implement a GitHub issue in the AutoMobi
 
 Parse the first user-provided argument as the GitHub issue number. If no issue number is provided, ask for one before doing any work.
 
-Keep all work in the current isolated worktree. Do not modify the central clone at `~/kaeawc/auto-mobile`.
+Before reading the issue or changing files, always create a fresh worktree from
+the latest `main`. Never reuse the caller's current worktree, even when it is
+clean. Do not commit, push, reset, or otherwise modify files in the central
+clone at `~/kaeawc/auto-mobile`.
+
+From the repository root, fetch the current remote main branch, then create a
+unique sibling worktree and branch based directly on `origin/main`. Use a
+timestamp or another collision-free suffix in both names, then change into the
+new worktree for every remaining phase. For example:
+
+```bash
+issue_number=<issue-number>
+stamp=$(date +%Y%m%d%H%M%S)
+repo_root=$(git rev-parse --show-toplevel)
+worktree_parent=$(dirname "$repo_root")
+worktree_path="$worktree_parent/auto-mobile-issue-${issue_number}-${stamp}"
+branch="work/issue-${issue_number}-${stamp}"
+git -C "$repo_root" fetch origin main
+git -C "$repo_root" worktree add -b "$branch" "$worktree_path" origin/main
+cd "$worktree_path"
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+```
+
+If a generated path or branch already exists, choose a new unique suffix and
+repeat the creation step. Treat a failed freshness check as a blocker: do not
+continue in another worktree.
 
 ## Phase 1: Issue Intake
 

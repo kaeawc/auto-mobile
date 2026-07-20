@@ -8,6 +8,7 @@ import type { FeatureFlagService } from "../../src/features/featureFlags/Feature
  */
 export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   private voiceOverEnabled: boolean = false;
+  private readonly voiceOverEnabledResults: boolean[] = [];
   private callCount: number = 0;
   private invalidatedDevices: string[] = [];
 
@@ -19,6 +20,11 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
    */
   setVoiceOverEnabled(enabled: boolean): void {
     this.voiceOverEnabled = enabled;
+  }
+
+  /** Configure successive detection results, falling back to the configured state when exhausted. */
+  enqueueVoiceOverEnabledResults(...results: boolean[]): void {
+    this.voiceOverEnabledResults.push(...results);
   }
 
   /**
@@ -40,6 +46,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
    */
   reset(): void {
     this.voiceOverEnabled = false;
+    this.voiceOverEnabledResults.length = 0;
     this.callCount = 0;
     this.invalidatedDevices = [];
     this.isVoiceOverEnabledFeatureFlagsArgs.length = 0;
@@ -52,7 +59,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   ): Promise<boolean> {
     this.callCount++;
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
-    return this.voiceOverEnabled;
+    return this.voiceOverEnabledResults.shift() ?? this.voiceOverEnabled;
   }
 
   invalidateCache(deviceId: string): void {

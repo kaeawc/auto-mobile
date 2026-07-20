@@ -10,12 +10,15 @@ owner="src/utils/ios-cmdline-tools/SimCtlClient.ts"
 violations=()
 
 if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
-  # GitHub Actions checks out a PR merge commit without retaining origin/main.
-  # Its first parent is the checked-out base, so retain the ratchet in CI
-  # instead of silently skipping it. Non-CI callers still fail closed.
-  if [[ "${GITHUB_ACTIONS:-}" == "true" ]] && git rev-parse --verify --quiet 'HEAD^1^{commit}' >/dev/null; then
-    base_ref='HEAD^1'
-  else
+  # pull_request checkouts are shallow by default, so neither origin/main nor
+  # HEAD^1 is guaranteed to exist. Fetch the actual PR base before comparing.
+  if [[ "$base_ref" == 'origin/main' && "${GITHUB_ACTIONS:-}" == 'true' && -n "${GITHUB_BASE_REF:-}" ]]; then
+    base_ref="origin/$GITHUB_BASE_REF"
+    git fetch --no-tags --depth=1 origin \
+      "refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
+  fi
+
+  if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
     printf 'Cannot check new simctl calls: base ref %s does not exist.\n' "$base_ref" >&2
     exit 2
   fi

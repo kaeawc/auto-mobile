@@ -15,6 +15,7 @@ setup() {
 
 teardown() {
   rm -rf "$repo_dir"
+  rm -rf "${remote_dir:-}" "${shallow_dir:-}"
 }
 
 @test "rejects a new argv-form xcrun execution" {
@@ -54,8 +55,28 @@ teardown() {
   [[ "$output" == *"base ref origin/main does not exist"* ]]
 }
 
-@test "uses the PR merge base in GitHub Actions when origin main is absent" {
-  run bash -c 'cd "$1" && GITHUB_ACTIONS=true bash scripts/check-no-new-direct-simctl.sh' _ "$repo_dir"
+@test "fetches the GitHub Actions PR base from a depth-one checkout" {
+  remote_dir="$(mktemp -d)"
+  shallow_dir="$(mktemp -d)"
+  git -C "$repo_dir" branch -M main
+  git -C "$repo_dir" remote add origin "$remote_dir"
+  git -C "$remote_dir" init --bare -q
+  git -C "$repo_dir" push -q origin main
+  git -C "$repo_dir" checkout -qb feature
+  printf '%s\n' 'export const noop = true;' > "$repo_dir/src/change.ts"
+  git -C "$repo_dir" add src/change.ts
+  git -C "$repo_dir" commit -qm feature
+  git -C "$repo_dir" push -q origin feature
+  rmdir "$shallow_dir"
+  git clone --depth 1 --branch feature -q "file://$remote_dir" "$shallow_dir"
+
+  run git -C "$shallow_dir" rev-parse --verify --quiet 'HEAD^1^{commit}'
+  [ "$status" -ne 0 ]
+  run git -C "$shallow_dir" rev-parse --verify --quiet 'origin/main^{commit}'
+  [ "$status" -ne 0 ]
+
+  run bash -c 'cd "$1" && GITHUB_ACTIONS=true GITHUB_BASE_REF=main bash scripts/check-no-new-direct-simctl.sh' _ "$shallow_dir"
 
   [ "$status" -eq 0 ]
+  git -C "$shallow_dir" rev-parse --verify --quiet 'origin/main^{commit}'
 }

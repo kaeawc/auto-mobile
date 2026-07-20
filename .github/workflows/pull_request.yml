@@ -38,6 +38,7 @@ jobs:
       ide_plugin_changed: ${{ steps.filter-ide-plugin.outputs.ide_plugin }}
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
+      kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       native_integration_changed: ${{ steps.filter-native-integration.outputs.native_integration }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
@@ -242,6 +243,27 @@ jobs:
               - 'scripts/android/**'
               - 'scripts/local-dev/hot-reload.sh'
               - '.github/workflows/android*.yml'
+
+      # Narrower than `android` above: detekt analyzes Kotlin only, so an XML
+      # resource or a doc under android/ has nothing for it to look at. The
+      # .kts glob covers module build files, which change a module's classpath
+      # and so must re-analyze it. The non-Kotlin entries are the inputs that
+      # change what detekt *reports* on unchanged sources -- rule config,
+      # dependency versions, and the Gradle/toolchain version -- so they have to
+      # re-run it even though no .kt moved.
+      - name: "Check for Kotlin source changes"
+        id: filter-kotlin
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            kotlin:
+              - 'android/**/*.kt'
+              - 'android/**/*.kts'
+              - 'android/gradle.properties'
+              - 'android/gradle/libs.versions.toml'
+              - 'android/gradle/wrapper/**'
+              - 'android/config/detekt/**'
+              - '.github/actions/gradle-task-run/**'
 
       - name: "Check for iOS-related changes"
         id: filter-ios
@@ -628,11 +650,6 @@ jobs:
             --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
             --max-parallel 4
 
-      - name: "Run detekt"
-        shell: bash
-        working-directory: android
-        run: ./gradlew detektMain detektTest
-
       - name: "Run BATS Tests (Ubuntu)"
         shell: bash
         run: bats test/bats/
@@ -657,6 +674,52 @@ jobs:
         with:
           name: fast-validation-logs
           path: scratch/fast-validate-*/
+          retention-days: 7
+
+  # Detekt used to be a step inside Fast Validation, where its ~7 minutes of
+  # cold Gradle work dominated an otherwise ~1 minute job. It is its own job so
+  # it runs concurrently instead of serially, and so it can go through
+  # gradle-task-run for build/configuration cache reuse -- the raw `./gradlew`
+  # call it replaced had no Gradle caching at all and recompiled every module
+  # from scratch on every PR.
+  detekt:
+    name: "Detekt"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    # detekt analyzes Kotlin only, so a PR touching none of the inputs in the
+    # `kotlin` filter cannot change what it reports. This gates whether the job
+    # runs at all; when it does run it analyzes the whole tree, so it is not a
+    # narrowing of what gets checked. merge.yml re-runs it unconditionally.
+    if: needs.detect-changes.outputs.kotlin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      # Deliberately the FULL task list, not a per-module subset. An earlier
+      # revision scoped this to the modules a PR changed; that is unsafe with
+      # this project's detekt config, which disables every file-local rule set
+      # and leaves `potential-bugs` -- whose rules are cross-module type
+      # resolution -- as the only active one. A change in one module can move a
+      # finding in a consumer, so scoping would land it on main and redden the
+      # next unrelated PR. The Gradle build cache, not a shorter task list, is
+      # what makes this fast.
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: "detektMain detektTest"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Upload Detekt Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: detekt-reports
+          path: android/**/build/reports/detekt/
+          if-no-files-found: ignore
           retention-days: 7
 
   bats-tests:

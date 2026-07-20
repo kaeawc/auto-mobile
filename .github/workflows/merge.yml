@@ -246,7 +246,7 @@ jobs:
       - name: "Run detekt"
         shell: "bash"
         working-directory: android
-        run: ./gradlew detekt
+        run: ./gradlew detektMain detektTest
 
   validate-shell-scripts:
     name: "Validate Shell Scripts"

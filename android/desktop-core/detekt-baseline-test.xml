@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>HasPlatformType:McpDaemonClientInputTest.kt:McpDaemonClientInputTest.TestDaemonSocket$val socketPath = tempDir.resolve("daemon.sock")</ID>
+    <ID>ImplicitDefaultLocale:ScreenshotEnvironment.kt:ScreenshotEnvironment$"%.4f".format(result.differentPixelRatio * 100)</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["A"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["B"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["C"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Heavy"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Home"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Light"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Orphan"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Profile"]!!</ID>
+    <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Target"]!!</ID>
+    <ID>UnnecessaryNotNullOperator:TelemetryModelsTest.kt:TelemetryModelsTest$event.stackTrace!!</ID>
+  </CurrentIssues>
+</SmellBaseline>

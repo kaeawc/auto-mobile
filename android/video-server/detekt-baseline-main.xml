@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$audioCapture!!</ID>
+    <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$capture!!</ID>
+    <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$encoder!!</ID>
+    <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$streamWriter!!</ID>
+    <ID>UnsafeCallOnNullableType:VideoStreamWriter.kt:VideoStreamWriter$outputStream!!</ID>
+    <ID>UnsafeCallOnNullableType:VideoStreamWriter.kt:VideoStreamWriter$serverSocket!!</ID>
+  </CurrentIssues>
+</SmellBaseline>

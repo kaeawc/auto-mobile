@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ImplicitDefaultLocale:DaemonVersionHandshakeTest.kt:DaemonVersionHandshakeTest$"%02x".format(it)</ID>
+    <ID>ImplicitDefaultLocale:JUnitRunnerMemoryTest.kt:JUnitRunnerMemoryTest$String.format("%.2f MiB", mb)</ID>
+  </CurrentIssues>
+</SmellBaseline>

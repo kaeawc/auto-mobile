@@ -1,0 +1,49 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ImplicitDefaultLocale:FailuresDashboard.kt:String.format("%.1f", value / 1_000.0)</ID>
+    <ID>ImplicitDefaultLocale:FailuresDashboard.kt:String.format("%.1f", value / 1_000_000.0)</ID>
+    <ID>ImplicitDefaultLocale:NetworkBodyRenderer.kt:"%.1f".format(bytes / (1024.0 * 1024.0))</ID>
+    <ID>ImplicitDefaultLocale:NetworkBodyRenderer.kt:"%.1f".format(bytes / 1024.0)</ID>
+    <ID>ImplicitDefaultLocale:StatusBar.kt:"%.0f".format(currentMemoryMb)</ID>
+    <ID>ImplicitDefaultLocale:TelemetryDashboard.kt:"%.1f".format(it)</ID>
+    <ID>ImplicitDefaultLocale:TelemetryDetailPanel.kt:"%.1f".format(it)</ID>
+    <ID>ImplicitDefaultLocale:TelemetryDetailPanel.kt:"%.2f".format(it)</ID>
+    <ID>ImplicitDefaultLocale:TestDashboard.kt:"%d.%02ds".format(seconds, millis)</ID>
+    <ID>ImplicitDefaultLocale:TestDashboard.kt:"%d:%02d.%02d".format(minutes, seconds, millis)</ID>
+    <ID>ImplicitDefaultLocale:TestDashboard.kt:String.format("%.3f", seconds)</ID>
+    <ID>ImplicitDefaultLocale:ThreePaneShell.kt:"%.0f".format(cpu)</ID>
+    <ID>ImplicitDefaultLocale:ThreePaneShell.kt:"%.0f".format(rps)</ID>
+    <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.recompositionRate!!</ID>
+    <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.timeToInteractiveMs!!</ID>
+    <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.touchLatencyMs!!</ID>
+    <ID>UnsafeCallOnNullableType:DaemonStatusSection.kt:daemonStatus!!</ID>
+    <ID>UnsafeCallOnNullableType:DaemonStatusSection.kt:socketPath!!</ID>
+    <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:onUpdateCell!!</ID>
+    <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:selectedTable!!</ID>
+    <ID>UnsafeCallOnNullableType:DeviceListSection.kt:error!!</ID>
+    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.fileName!!</ID>
+    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.lineNumber!!</ID>
+    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:selectedFailure!!</ID>
+    <ID>UnsafeCallOnNullableType:FailuresPushSocketClient.kt:FailuresPushSocketClient$channel!!</ID>
+    <ID>UnsafeCallOnNullableType:KeyValueInspector.kt:saveError!!</ID>
+    <ID>UnsafeCallOnNullableType:KeyValueInspector.kt:selectedFile!!</ID>
+    <ID>UnsafeCallOnNullableType:McpConnectionSection.kt:connectedProcess!!</ID>
+    <ID>UnsafeCallOnNullableType:McpDaemonClient.kt:McpDaemonClient$response.result!!</ID>
+    <ID>UnsafeCallOnNullableType:McpHttpClient.kt:McpHttpClient$protocolVersion!!</ID>
+    <ID>UnsafeCallOnNullableType:McpHttpClient.kt:McpHttpClient$response.result!!</ID>
+    <ID>UnsafeCallOnNullableType:McpHttpClient.kt:McpHttpClient$sessionId!!</ID>
+    <ID>UnsafeCallOnNullableType:McpProcessesPanel.kt:daemonStartError!!</ID>
+    <ID>UnsafeCallOnNullableType:McpProcessesPanel.kt:testingPid!!</ID>
+    <ID>UnsafeCallOnNullableType:McpStdioClient.kt:McpStdioClient$response.result!!</ID>
+    <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:hoveredTransitionId!!</ID>
+    <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:screenshotBitmap!!</ID>
+    <ID>UnsafeCallOnNullableType:NavigationDetailViews.kt:screenshotBitmap!!</ID>
+    <ID>UnsafeCallOnNullableType:ObservationStreamClient.kt:ObservationStreamClient$channel!!</ID>
+    <ID>UnsafeCallOnNullableType:PropertyInspectorPanel.kt:element.text!!</ID>
+    <ID>UnsafeCallOnNullableType:RetryPolicy.kt:lastException!!</ID>
+    <ID>UnsafeCallOnNullableType:TelemetryDashboard.kt:previousDeviceId!!</ID>
+    <ID>UnsafeCallOnNullableType:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$channel!!</ID>
+  </CurrentIssues>
+</SmellBaseline>

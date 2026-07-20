@@ -631,7 +631,7 @@ jobs:
       - name: "Run detekt"
         shell: bash
         working-directory: android
-        run: ./gradlew detekt
+        run: ./gradlew detektMain detektTest
 
       - name: "Run BATS Tests (Ubuntu)"
         shell: bash

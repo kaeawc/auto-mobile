@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ImplicitDefaultLocale:CtrlProxy.kt:CtrlProxy$"%02x".format(it)</ID>
+    <ID>ImplicitDefaultLocale:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$"%02x".format(it)</ID>
+    <ID>MapGetWithNotNullAssertionOperator:StorageSubscriptionManager.kt:StorageSubscriptionManager$subscriptions[subscriptionId]!!</ID>
+    <ID>UnnecessaryNotNullOperator:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy!!</ID>
+    <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$event.text?.joinToString("") { it.toString() }</ID>
+    <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$resolvedAlias?.let { deleteCaCertFromStorage(it) }</ID>
+    <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$webSocketServer?.broadcast( dev.jasonpearson.automobile.protocol.DeviceInfoResult( timestamp = System.currentTimeMillis(), requestId = requestId, success = true, screenWidth = screenDimensions?.width, screenHeight = screenDimensions?.height, density = getDensity(), rotation = getRotation(), sdkInt = Build.VERSION.SDK_INT, deviceModel = Build.MODEL, isEmulator = getIsEmulator(), wakefulness = getWakefulness(), foregroundActivity = foreground, totalTimeMs = totalTimeMs, ) )</ID>
+    <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$webSocketServer?.broadcast( dev.jasonpearson.automobile.protocol.GlobalActionResult( timestamp = System.currentTimeMillis(), requestId = requestId, success = success, action = action, totalTimeMs = totalTimeMs, error = if (!success) "Unsupported or failed action: $action" else null, ) )</ID>
+    <ID>UnnecessarySafeCall:HierarchyDebouncer.kt:HierarchyDebouncer$resultToEmit?.let { _hierarchyFlow.emit(it) }</ID>
+    <ID>UnreachableCode:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$child.node != null</ID>
+    <ID>UnreachableCode:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$children.add(child)</ID>
+    <ID>UnreachableCode:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$meetsFilterCriteria(child)</ID>
+    <ID>UnreachableCode:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$true</ID>
+    <ID>UnreachableCode:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$val child = try { json.decodeFromJsonElement(UIElementInfo.serializer(), childJson) } catch (e: Exception) { return null }</ID>
+    <ID>UnsafeCallOnNullableType:CtrlProxy.kt:CtrlProxy$focusedNode!!</ID>
+    <ID>UnsafeCallOnNullableType:StorageSubscriptionManager.kt:StorageSubscriptionManager$subscriptions[subscriptionId]!!</ID>
+  </CurrentIssues>
+</SmellBaseline>

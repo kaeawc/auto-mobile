@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ImplicitDefaultLocale:TestTimingPanel.kt:"%.1f".format(rate * 100)</ID>
+    <ID>ImplicitDefaultLocale:TestTimingPanel.kt:"%.2f".format(durationMs / 1000.0)</ID>
+    <ID>UnsafeCallOnNullableType:TestPlanSchemaStore.kt:TestPlanSchemaStore$rootSchema!!</ID>
+  </CurrentIssues>
+</SmellBaseline>

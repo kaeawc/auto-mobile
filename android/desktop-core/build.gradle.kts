@@ -58,8 +58,7 @@ val hostJavacppPlatform: String by lazy {
   val arch = System.getProperty("os.arch").lowercase()
   val arm = arch == "aarch64" || arch == "arm64"
   when {
-    os.contains("mac") || os.contains("darwin") ->
-      if (arm) "macosx-arm64" else "macosx-x86_64"
+    os.contains("mac") || os.contains("darwin") -> if (arm) "macosx-arm64" else "macosx-x86_64"
     os.contains("win") -> "windows-x86_64"
     else -> if (arm) "linux-arm64" else "linux-x86_64"
   }

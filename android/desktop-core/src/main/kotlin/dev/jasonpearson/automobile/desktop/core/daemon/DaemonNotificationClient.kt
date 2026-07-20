@@ -219,16 +219,9 @@ class DaemonNotificationClient(
       val line = reader.readLine() ?: return
       if (line.isBlank()) continue
 
-      val frame =
-        try {
-          json.decodeFromString(DaemonFrame.serializer(), line)
-        } catch (e: Exception) {
-          // A frame this client does not model is not a reason to drop the subscription.
-          LOG.debug("Ignoring unparseable daemon frame: ${e.message}")
-          continue
-        }
-
+      val frame = decodeFrame(line) ?: continue
       if (frame.type != "daemon_notification") continue
+
       val kind = ListChangedKind.forMethod(frame.method)
       if (kind == null) {
         LOG.debug("Ignoring unknown daemon notification: ${frame.method}")
@@ -237,6 +230,22 @@ class DaemonNotificationClient(
       _notifications.tryEmit(kind)
     }
   }
+
+  /**
+   * Decodes one frame, or null when it is not something this client models.
+   *
+   * Kept as a function rather than an inline `try` expression: a `continue` inside a catch used in
+   * expression position makes the whole remainder of the loop body read as unreachable to
+   * control-flow analysis.
+   */
+  private fun decodeFrame(line: String): DaemonFrame? =
+    try {
+      json.decodeFromString(DaemonFrame.serializer(), line)
+    } catch (e: Exception) {
+      // An unmodelled frame is not a reason to drop the subscription.
+      LOG.debug("Ignoring unparseable daemon frame: ${e.message}")
+      null
+    }
 
   private fun closeChannel() {
     try {

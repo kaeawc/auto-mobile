@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -31,6 +32,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonNotificationClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
@@ -1067,9 +1069,32 @@ private fun McpProcessDetails(process: McpProcess) {
   var resourcesExpanded by remember { mutableStateOf(false) }
   var toolsExpanded by remember { mutableStateOf(false) }
   var error by remember { mutableStateOf<String?>(null) }
+  var refreshToken by remember { mutableStateOf(0) }
+
+  // Only a Unix-socket process has a control socket to subscribe on; HTTP/STDIO processes keep
+  // the previous fetch-once behaviour.
+  val notifications =
+    remember(process.pid, process.socketPath) {
+      val socketPath = process.socketPath
+      if (process.connectionType == McpConnectionType.UnixSocket && !socketPath.isNullOrBlank()) {
+        DaemonNotificationClient(socketPathValue = socketPath)
+      } else {
+        null
+      }
+    }
+
+  DisposableEffect(notifications) { onDispose { notifications?.dispose() } }
+
+  // Refetch when the daemon says the lists changed. A daemon that predates the subscription
+  // reports Unsupported and never emits, so the fetch-once behaviour is untouched there.
+  LaunchedEffect(notifications) {
+    if (notifications == null) return@LaunchedEffect
+    notifications.connect()
+    notifications.notifications.collect { refreshToken += 1 }
+  }
 
   // Fetch resources and tools from MCP server
-  LaunchedEffect(process.pid) {
+  LaunchedEffect(process.pid, refreshToken) {
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
         kotlinx.coroutines.withTimeout(5000) {

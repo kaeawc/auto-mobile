@@ -252,7 +252,7 @@ export class AvdManagerClient {
       return { command: path, args };
     }
 
-    const command = [quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ");
+    const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
     return {
       command: environment?.ComSpec ?? environment?.COMSPEC ?? "cmd.exe",
       args: ["/d", "/v:off", "/s", "/c", command],

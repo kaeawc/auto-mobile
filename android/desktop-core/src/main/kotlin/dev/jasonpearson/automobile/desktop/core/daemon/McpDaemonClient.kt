@@ -22,6 +22,7 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.serializer
 
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
@@ -44,7 +45,7 @@ class McpDaemonClient(
   override fun listResources(): List<McpResource> {
     val response = sendRequest("resources/list")
     ensureSuccess(response)
-    val result = json.decodeFromJsonElement(ListResourcesResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ListResourcesResult>(), response.result!!)
     return result.resources
   }
 
@@ -52,14 +53,14 @@ class McpDaemonClient(
     val response = sendRequest("resources/list-templates")
     ensureSuccess(response)
     val result =
-      json.decodeFromJsonElement(ListResourceTemplatesResult.serializer(), response.result!!)
+      json.decodeFromJsonElement(serializer<ListResourceTemplatesResult>(), response.result!!)
     return result.resourceTemplates
   }
 
   override fun listTools(): List<McpTool> {
     val response = sendRequest("tools/list")
     ensureSuccess(response)
-    val result = json.decodeFromJsonElement(ListToolsResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
     return result.tools
   }
 
@@ -70,7 +71,7 @@ class McpDaemonClient(
         buildJsonObject { put("uri", JsonPrimitive(uri)) },
       )
     ensureSuccess(response)
-    val result = json.decodeFromJsonElement(ReadResourceResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ReadResourceResult>(), response.result!!)
     return result.contents
   }
 
@@ -87,7 +88,7 @@ class McpDaemonClient(
   override fun listFeatureFlags(): List<FeatureFlagState> {
     val response = sendRequest("ide/listFeatureFlags")
     ensureSuccess(response)
-    val result = json.decodeFromJsonElement(FeatureFlagListResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<FeatureFlagListResult>(), response.result!!)
     return result.flags
   }
 
@@ -108,7 +109,7 @@ class McpDaemonClient(
         },
       )
     ensureSuccess(response)
-    return json.decodeFromJsonElement(FeatureFlagState.serializer(), response.result!!)
+    return json.decodeFromJsonElement(serializer<FeatureFlagState>(), response.result!!)
   }
 
   override fun listPerformanceAuditResults(
@@ -124,12 +125,12 @@ class McpDaemonClient(
 
   override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {
     val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, TestTimingSummary.serializer())
+    return decodeResourceResponse(json, contents, serializer<TestTimingSummary>())
   }
 
   override fun getTestRuns(query: TestRunQuery): TestRunSummary {
     val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, TestRunSummary.serializer())
+    return decodeResourceResponse(json, contents, serializer<TestRunSummary>())
   }
 
   override fun startTestRecording(platform: String): TestRecordingStartResult {
@@ -164,7 +165,7 @@ class McpDaemonClient(
           }
         },
       )
-    return decodeToolResponse(json, response, ExecutePlanResult.serializer())
+    return decodeToolResponse(json, response, serializer<ExecutePlanResult>())
   }
 
   override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
@@ -185,7 +186,7 @@ class McpDaemonClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, StartDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
       StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
     }
@@ -201,7 +202,7 @@ class McpDaemonClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, SetActiveDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<SetActiveDeviceResult>())
     } catch (e: Exception) {
       SetActiveDeviceResult(success = false, message = e.message ?: "Failed to set active device")
     }
@@ -216,7 +217,7 @@ class McpDaemonClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, ObserveResult.serializer())
+      decodeToolResponse(json, response, serializer<ObserveResult>())
     } catch (e: Exception) {
       ObserveResult()
     }
@@ -238,7 +239,7 @@ class McpDaemonClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, KillDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<KillDeviceResult>())
     } catch (e: Exception) {
       KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
     }
@@ -249,7 +250,7 @@ class McpDaemonClient(
     val response = sendRequest("ide/status")
     ensureSuccess(response)
     return json.decodeFromJsonElement(
-      dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
+      serializer<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse>(),
       response.result!!,
     )
   }
@@ -264,7 +265,7 @@ class McpDaemonClient(
         },
       )
     ensureSuccess(response)
-    return json.decodeFromJsonElement(UpdateServiceResult.serializer(), response.result!!)
+    return json.decodeFromJsonElement(serializer<UpdateServiceResult>(), response.result!!)
   }
 
   override fun inputTap(
@@ -378,7 +379,7 @@ class McpDaemonClient(
       )
     ensureSuccess(response)
     return try {
-      json.decodeFromJsonElement(SetKeyValueResult.serializer(), response.result!!)
+      json.decodeFromJsonElement(serializer<SetKeyValueResult>(), response.result!!)
     } catch (e: Exception) {
       SetKeyValueResult(success = false, message = e.message ?: "Failed to set key value")
     }
@@ -402,7 +403,7 @@ class McpDaemonClient(
       )
     ensureSuccess(response)
     return try {
-      json.decodeFromJsonElement(RemoveKeyValueResult.serializer(), response.result!!)
+      json.decodeFromJsonElement(serializer<RemoveKeyValueResult>(), response.result!!)
     } catch (e: Exception) {
       RemoveKeyValueResult(success = false, message = e.message ?: "Failed to remove key value")
     }
@@ -424,7 +425,7 @@ class McpDaemonClient(
       )
     ensureSuccess(response)
     return try {
-      json.decodeFromJsonElement(ClearKeyValueResult.serializer(), response.result!!)
+      json.decodeFromJsonElement(serializer<ClearKeyValueResult>(), response.result!!)
     } catch (e: Exception) {
       ClearKeyValueResult(success = false, message = e.message ?: "Failed to clear key value file")
     }
@@ -455,7 +456,7 @@ class McpDaemonClient(
           success = false,
           error = "Daemon response missing result",
         )
-    val inputResult = json.decodeFromJsonElement(InputActionResult.serializer(), result)
+    val inputResult = json.decodeFromJsonElement(serializer<InputActionResult>(), result)
     if (inputResult.action != method) {
       return InputActionResult(
         action = method,

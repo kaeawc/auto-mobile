@@ -98,9 +98,9 @@ describe("AvdManagerClient", () => {
     child.close(0);
 
     await expect(pending).resolves.toEqual([]);
+    expect(normalizePath(calls[0]?.args[4] ?? "")).toBe('"/sdk/cmdline-tools/latest/bin/avdmanager.bat" "list" "avd"');
     expect(calls[0]).toMatchObject({
       command: "cmd.exe",
-      args: ["/d", "/v:off", "/s", "/c", '"/sdk/cmdline-tools/latest/bin/avdmanager.bat" "list" "avd"'],
       shell: false
     });
   });

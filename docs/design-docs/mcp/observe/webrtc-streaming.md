@@ -19,7 +19,7 @@
 
 This is the **browser/CI-facing** streaming path. It is distinct from:
 - the `videoRecording` MCP tool (records a clip to a file), and
-- the IDE live-mirroring path over `video-stream.sock` + Klarity
+- the desktop live-mirroring path over `video-stream.sock` + an in-process FFmpeg decoder
   ([screen-streaming.md](./screen-streaming.md)).
 
 ## Motivation
@@ -262,4 +262,4 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 - [werift-webrtc](https://github.com/shinyoshiaki/werift-webrtc)
 - [CI worker setup guide](../../../webrtc-streaming-ci-worker.md)
 - [Reference coordination server](../../../../examples/webrtc-coordination-server/README.md)
-- [IDE live mirroring (Unix socket + Klarity)](./screen-streaming.md)
+- [Desktop live mirroring (Unix socket + FFmpeg decode)](./screen-streaming.md)

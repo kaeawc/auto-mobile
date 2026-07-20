@@ -78,7 +78,7 @@ The capture mechanism differs significantly between platforms:
 
 | Platform | Capture Location | Frame Format | Decoder Needed |
 |----------|-----------------|--------------|----------------|
-| Android | On device | H.264 encoded | Yes (Klarity) |
+| Android | On device | H.264 encoded | Yes (bytedeco FFmpeg) |
 | iOS | On Mac | Raw BGRA | No |
 
 See platform-specific documentation for implementation details:
@@ -150,15 +150,15 @@ When video streaming is unavailable:
 | Touch input | Plan for it, implement later |
 | Quality auto-adjustment | Automatically lower quality on frame drops |
 | Multiple devices | Single device streaming at a time |
-| Android decoder | Klarity only, no FFmpeg subprocess fallback |
+| Android decoder | `org.bytedeco:ffmpeg` (in-process JNI), host-platform classifier only. Klarity was the original choice but cannot consume a live stream — its API takes file paths only. No FFmpeg *subprocess* fallback. |
 | iOS Swift integration | Swift-to-Node bridge |
 | macOS permissions | User handles permission prompts |
 | macOS entitlements | No special entitlements needed for iOS capture |
 
 ## Related: browser/CI streaming over WebRTC
 
-This document covers **IDE** live mirroring over a Unix socket with a Klarity
-decoder. For pushing a device stream to a **browser** or a **CI dashboard** over
+This document covers **desktop** live mirroring over a Unix socket
+(`video-stream.sock`) with an in-process FFmpeg decoder. For pushing a device stream to a **browser** or a **CI dashboard** over
 standard WebRTC (WHIP ingest → WHEP egress), see
 [WebRTC Screen Streaming (WHIP egress)](./webrtc-streaming.md). Both paths reuse
 the same on-device H.264 capture; only the transport and consumer differ.

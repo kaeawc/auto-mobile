@@ -173,16 +173,36 @@ final class TestTimingCache {
             params["sessionUuid"] = sessionUuid
         }
 
-        if params.isEmpty {
+        return Self.buildRequestUri(parameters: params)
+    }
+
+    /// Builds the daemon resource URI using Foundation's query-item encoding.
+    ///
+    /// Session UUIDs normally contain only URL-safe characters, but treating that
+    /// as an invariant would let a future value containing `&` or `=` change the
+    /// query structure. `URLComponents` keeps each logical value as one item.
+    static func buildRequestUri(parameters: [String: String]) -> String {
+        guard !parameters.isEmpty else {
             return "automobile:test-timings"
         }
 
-        let query = params
-            .map { key, value in
-                "\(key)=\(encodeQueryParam(value))"
-            }
-            .joined(separator: "&")
-        return "automobile:test-timings?\(query)"
+        var components = URLComponents()
+        components.scheme = "automobile"
+        components.path = "test-timings"
+        components.queryItems = parameters.map { key, value in
+            URLQueryItem(name: key, value: value)
+        }
+
+        // URLComponents deliberately leaves `+` unescaped. The daemon parses
+        // this query with URLSearchParams, where a literal plus is form-decoded
+        // as a space, so preserve it as data for that cross-runtime boundary.
+        components.percentEncodedQuery = components.percentEncodedQuery?
+            .replacingOccurrences(of: "+", with: "%2B")
+
+        // The scheme, path, and logical values above are all valid Foundation
+        // components. Keep the protocol's no-query resource URI as a defensive
+        // fallback instead of ever emitting a partly encoded query.
+        return components.string ?? "automobile:test-timings"
     }
 
     private func resolveMinSamples() -> Int {
@@ -198,10 +218,6 @@ final class TestTimingCache {
     private func resolveTimeoutMs() -> Int {
         let value = config.intValue(forKey: "automobile.junit.timing.fetch.timeout.ms", defaultValue: 5000)
         return value > 0 ? value : 5000
-    }
-
-    private func encodeQueryParam(_ value: String) -> String {
-        return value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
     }
 
     private var config: TimingConfig {

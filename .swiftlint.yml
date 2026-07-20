@@ -175,6 +175,15 @@ large_tuple:
 # Reporter type (xcode, json, csv, checkstyle, codeclimate, junit, html, emoji, sonarqube, markdown, github-actions-logging)
 reporter: "xcode"
 
+# A logical query value must be passed to URLComponents/URLQueryItem. The
+# urlQueryAllowed character set permits query delimiters such as `&` and `=`,
+# allowing manual encoding to split one value into multiple fields.
+custom_rules:
+  no_manual_url_query_value_encoding:
+    regex: 'addingPercentEncoding\s*\(\s*withAllowedCharacters\s*:\s*(?:\.|CharacterSet\s*\.)urlQueryAllowed\s*\)'
+    message: "Use URLComponents and URLQueryItem for query values instead of .urlQueryAllowed."
+    severity: error
+
 # Test targets file-disable the fail-fast crash rules (force-unwrap/force-try are
 # idiomatic in fixtures). Allow those rules to be blanket-disabled without tripping
 # blanket_disable_command; every other rule still requires scoped this/next/previous.

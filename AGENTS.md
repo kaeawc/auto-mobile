@@ -9,6 +9,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail.
+- For Swift, prefer an existing standard-library or Foundation API before adding an extension, helper, or package. Use `URLComponents` plus `URLQueryItem` for query values and `Codable` for AutoMobile-owned stable schemas. Keep `JSONSerialization` only at documented dynamic/bridge boundaries. A convenience dependency requires a stated platform-API gap, deployment-target check, and tests using interfaces/fakes.
 
 # Project Structure
 

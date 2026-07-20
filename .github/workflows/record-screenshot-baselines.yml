@@ -53,6 +53,9 @@ jobs:
           # --rerun-tasks forces the tests to actually execute (record mode) even
           # when Gradle would otherwise consider them up to date.
           gradle-flags: '["--tests", "${{ inputs.test_filter }}", "-Dscreenshot.record=true", "--rerun-tasks"]'
+          # Both invocations below run :desktop-core:test in this one job, so
+          # they need distinct artifact names or the second 409s.
+          artifact-name-suffix: "record"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -76,6 +79,7 @@ jobs:
         with:
           gradle-tasks: ":desktop-core:test"
           gradle-flags: '["--tests", "${{ inputs.test_filter }}", "--rerun-tasks"]'
+          artifact-name-suffix: "verify"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

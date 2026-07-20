@@ -23,6 +23,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.serializer
 
 private val LOG = LoggerFactory.getLogger("RealStorageDataSource")
 
@@ -73,7 +74,7 @@ class RealStorageDataSource(
       LOG.info("getDatabases: Fetching from URI: $dbsUri")
       val dbsContents = client.readResource(dbsUri)
       val dbsText = dbsContents.firstOrNull()?.text ?: return Result.Success(emptyList())
-      val dbsResponse = json.decodeFromString(McpDatabasesResponse.serializer(), dbsText)
+      val dbsResponse = json.decodeFromString(serializer<McpDatabasesResponse>(), dbsText)
 
       if (dbsResponse.error != null) {
         LOG.warn("getDatabases: Response error: ${dbsResponse.error}")
@@ -90,7 +91,8 @@ class RealStorageDataSource(
           val tablesText = tablesContents.firstOrNull()?.text
           val tableNames =
             if (tablesText != null) {
-              val tablesResponse = json.decodeFromString(McpTablesResponse.serializer(), tablesText)
+              val tablesResponse =
+                json.decodeFromString(serializer<McpTablesResponse>(), tablesText)
               tablesResponse.tables
             } else {
               emptyList()
@@ -106,7 +108,7 @@ class RealStorageDataSource(
             val columns =
               if (structText != null) {
                 val structResponse =
-                  json.decodeFromString(McpTableStructureResponse.serializer(), structText)
+                  json.decodeFromString(serializer<McpTableStructureResponse>(), structText)
                 structResponse.columns.map { col ->
                   ColumnInfo(
                     name = col.name,
@@ -163,7 +165,7 @@ class RealStorageDataSource(
         contents.firstOrNull()?.text
           ?: return Result.Success(QueryResult(emptyList(), emptyList(), 0, 0))
 
-      val response = json.decodeFromString(McpTableDataResponse.serializer(), text)
+      val response = json.decodeFromString(serializer<McpTableDataResponse>(), text)
 
       if (response.error != null) {
         return Result.Error(RuntimeException(response.error))
@@ -204,7 +206,7 @@ class RealStorageDataSource(
         put("query", query)
       }
       val toolElement = client.callTool("sqlQuery", arguments)
-      val sqlResult = decodeToolResponse(json, toolElement, McpSqlResult.serializer())
+      val sqlResult = decodeToolResponse(json, toolElement, serializer<McpSqlResult>())
 
       if (sqlResult.error != null) {
         return Result.Success(QueryResult(emptyList(), emptyList(), 0, 0, error = sqlResult.error))
@@ -280,7 +282,7 @@ class RealStorageDataSource(
       }
       LOG.info("getKeyValueFiles: Response text (first 500 chars): ${filesText.take(500)}")
 
-      val filesResponse = json.decodeFromString(McpStorageFilesResponse.serializer(), filesText)
+      val filesResponse = json.decodeFromString(serializer<McpStorageFilesResponse>(), filesText)
       LOG.info(
         "getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}"
       )
@@ -303,7 +305,7 @@ class RealStorageDataSource(
             if (entriesText != null) {
               val entriesResponse =
                 json.decodeFromString(
-                  McpStorageEntriesResponse.serializer(),
+                  serializer<McpStorageEntriesResponse>(),
                   entriesText,
                 )
               LOG.info(

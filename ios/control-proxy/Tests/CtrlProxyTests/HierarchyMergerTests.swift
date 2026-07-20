@@ -10,7 +10,6 @@ final class HierarchyMergerTests: XCTestCase {
         bounds: ElementBounds = ElementBounds(left: 0, top: 0, right: 100, bottom: 100),
         text: String? = nil,
         contentDesc: String? = nil,
-        role: String? = nil,
         extras: [String: String]? = nil,
         children: [UIElementInfo]? = nil
     ) -> UIElementInfo {
@@ -19,7 +18,6 @@ final class HierarchyMergerTests: XCTestCase {
             contentDesc: contentDesc,
             className: className,
             bounds: bounds,
-            role: role,
             extras: extras,
             node: children
         )
@@ -155,47 +153,6 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertNotNil(extras)
         XCTAssertEqual(extras?["sdk.accessibilityTraits"], "button")
         XCTAssertEqual(extras?["sdk.hasTapTarget"], "true")
-    }
-
-    func testHeaderTraitProjectsToHeadingRole() {
-        let xcuiRoot = makeElement(
-            className: "UILabel",
-            text: "Entries",
-            role: "text"
-        )
-        let sdkRoot = makeSdkNode(
-            className: "UILabel",
-            accessibilityLabel: "Entries",
-            accessibilityTraits: ["header"],
-            isAccessibilityElement: true
-        )
-
-        let result = HierarchyMerger.merge(
-            xcuitest: makeHierarchy(root: xcuiRoot),
-            sdk: makeSdkHierarchy(root: sdkRoot)
-        )
-
-        XCTAssertEqual(result.hierarchy?.role, "heading")
-    }
-
-    func testHeaderTraitKeepsSdkOnlyHeadingInHierarchy() {
-        let xcuiRoot = makeElement(className: "XCUIElementTypeApplication")
-        let sdkRoot = makeSdkNode(
-            className: "UIView",
-            children: [
-                makeSdkNode(
-                    className: "UILabel",
-                    accessibilityTraits: ["header"]
-                )
-            ]
-        )
-
-        let result = HierarchyMerger.merge(
-            xcuitest: makeHierarchy(root: xcuiRoot),
-            sdk: makeSdkHierarchy(root: sdkRoot)
-        )
-
-        XCTAssertEqual(result.hierarchy?.node?.first?.role, "heading")
     }
 
     // MARK: - Tolerance Matching

@@ -285,7 +285,11 @@ export class CtrlProxyHierarchy {
     if (node.checked) {attrs["checked"] = node.checked;}
     if (node.selected) {attrs["selected"] = node.selected;}
     if (longClickable) {attrs["long-clickable"] = longClickable;}
-    if (node.role) {attrs["role"] = node.role;}
+    if (this.hasHeaderTrait(node)) {
+      attrs["role"] = "heading";
+    } else if (node.role) {
+      attrs["role"] = node.role;
+    }
     if (stateDescription) {attrs["state-description"] = stateDescription;}
     if (errorMessage) {attrs["error-message"] = errorMessage;}
     if (hintText) {attrs["hint-text"] = hintText;}
@@ -315,6 +319,16 @@ export class CtrlProxyHierarchy {
       return record[dashedKey] as T;
     }
     return undefined;
+  }
+
+  /**
+   * Current CtrlProxy IPA releases already expose SDK traits in `extras`.
+   * Promote the standard header trait here so this semantic observation does
+   * not require a runner release and does not claim to drive the VoiceOver Rotor.
+   */
+  private hasHeaderTrait(node: CtrlProxyNode): boolean {
+    const traits = node.extras?.["sdk.accessibilityTraits"];
+    return traits?.split(",").some(trait => trait.trim() === "header") ?? false;
   }
 
   /**

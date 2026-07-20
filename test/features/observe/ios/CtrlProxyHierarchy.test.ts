@@ -414,7 +414,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     expect(field.$["actions"]).toEqual(["set_text", "clear_text"]);
   });
 
-  test("preserves heading role for trait-based navigation queries", () => {
+  test("promotes an SDK header trait to a heading role", () => {
     const root: CtrlProxyNode = {
       className: "XCUIApplication",
       bounds: { left: 0, top: 0, right: 402, bottom: 874 },
@@ -422,7 +422,8 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
         {
           className: "UILabel",
           text: "Entries",
-          role: "heading",
+          role: "text",
+          extras: { "sdk.accessibilityTraits": "staticText,header" },
           bounds: { left: 16, top: 120, right: 386, bottom: 166 },
         },
       ],

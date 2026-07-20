@@ -30,6 +30,13 @@ class TestConfigSocketServer(
   private val resultJson: String? = null,
   private val error: String? = null,
   socketFileName: String = "test.sock",
+  /**
+   * A JSON object whose fields are merged into the response alongside `id`/`type`/`success`,
+   * instead of wrapping [resultJson] in a `result` object. The WebRTC stream socket answers with
+   * `stream`/`streams` at the top level rather than under `result`, so it needs this.
+   */
+  private val rawBodyJson: String? = null,
+  private val success: Boolean = true,
 ) : AutoCloseable {
   private val json = Json { ignoreUnknownKeys = true }
   private val tempDir: Path = Files.createTempDirectory(Path.of("/tmp"), "amsock-")
@@ -76,13 +83,21 @@ class TestConfigSocketServer(
 
   private fun responseLine(requestId: String): String {
     val body =
-      if (error == null) {
-        val compact = (resultJson ?: "{}").lineSequence().joinToString("") { it.trim() }
-        """"result":$compact"""
-      } else {
-        """"error":${JsonPrimitive(error)}"""
+      when {
+        rawBodyJson != null -> {
+          // Merge the caller's object into the envelope: drop its outer braces so the fields sit
+          // alongside id/type/success rather than nesting.
+          val compact = rawBodyJson.lineSequence().joinToString("") { it.trim() }
+          compact.removePrefix("{").removeSuffix("}")
+        }
+        error != null -> """"error":${JsonPrimitive(error)}"""
+        else -> {
+          val compact = (resultJson ?: "{}").lineSequence().joinToString("") { it.trim() }
+          """"result":$compact"""
+        }
       }
-    return """{"id":"$requestId","type":"$responseType","success":${error == null},$body}"""
+    val succeeded = if (rawBodyJson != null) success else error == null
+    return """{"id":"$requestId","type":"$responseType","success":$succeeded,$body}"""
   }
 
   override fun close() {

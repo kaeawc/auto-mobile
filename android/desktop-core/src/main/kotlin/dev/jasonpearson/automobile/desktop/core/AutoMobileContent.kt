@@ -82,6 +82,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClient
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamSocketClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -520,6 +522,11 @@ fun AutoMobileContent(
     }
   val recordingActions: VideoRecordingActions? =
     remember(clientProvider) { clientProvider?.let { McpVideoRecordingActions(it) } }
+  // Screen sharing is daemon-side publishing, so it needs no MCP client -- just the socket.
+  val webRtcStreamClient: WebRtcStreamClient? =
+    remember(dataSourceMode) {
+      if (dataSourceMode == DataSourceMode.Real) WebRtcStreamSocketClient() else null
+    }
 
   // Take-screenshot is driven from both the native menu bar and the in-app menu.
   // Run it on a composition-scoped coroutine (not GlobalScope) so the call and its
@@ -1412,6 +1419,7 @@ fun AutoMobileContent(
                       appearanceClient = appearanceClient,
                       recordingActions = recordingActions,
                       recordingConfigClient = recordingConfigClient,
+                      streamClient = webRtcStreamClient,
                       activeDeviceId = activeDeviceId,
                     )
                   "diagnostics" ->

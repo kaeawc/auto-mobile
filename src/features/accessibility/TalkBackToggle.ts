@@ -26,14 +26,19 @@ export class TalkBackToggle {
   }
 
   async toggle(enabled: boolean): Promise<TalkBackResult> {
-    // Step 1: Verify TalkBack is installed on this device
-    const serviceComponent = await this.detectInstalledService();
-    if (!serviceComponent) {
-      return {
-        supported: false,
-        applied: false,
-        reason: "TalkBack service not installed on this device"
-      };
+    // Step 1: Verify the Google TalkBack package before enabling it. Disabling
+    // relies on the active-service detector so it also removes vendor/AOSP
+    // TalkBack components that use the same TalkBackService contract.
+    let serviceComponent: string | null = null;
+    if (enabled) {
+      serviceComponent = await this.detectInstalledService();
+      if (!serviceComponent) {
+        return {
+          supported: false,
+          applied: false,
+          reason: "TalkBack service not installed on this device"
+        };
+      }
     }
 
     // Step 2: Idempotency — invalidate stale cache, then check if TalkBack is
@@ -55,7 +60,7 @@ export class TalkBackToggle {
     // other paths (#3921).
     try {
       if (enabled) {
-        await this.enableTalkBack(serviceComponent);
+        await this.enableTalkBack(serviceComponent!);
         // Step 4: Best-effort permission dialog dismissal
         await this.dismissPermissionDialog();
       } else {

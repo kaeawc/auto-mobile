@@ -267,6 +267,30 @@ describe("TalkBackToggle", () => {
   });
 
   describe("disable TalkBack", () => {
+    test("disables an active non-Google TalkBack service even when Google's package is absent", async () => {
+      const vendorTalkBackService = "com.android.talkback/com.android.talkback.TalkBackService";
+      fakeAdb.setCommandResponse(
+        "pm list packages com.google.android.marvin.talkback",
+        makeExecResult("")
+      );
+      fakeAdb.setCommandResponse(
+        "settings get secure enabled_accessibility_services",
+        makeExecResult(vendorTalkBackService)
+      );
+      fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
+
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const result = await toggle.toggle(false);
+
+      expect(result).toEqual({ supported: true, applied: true, currentState: false });
+      expect(
+        fakeAdb.wasCommandExecuted("shell pm list packages com.google.android.marvin.talkback")
+      ).toBe(false);
+      expect(
+        fakeAdb.wasCommandExecuted("shell settings delete secure enabled_accessibility_services")
+      ).toBe(true);
+    });
+
     test("returns supported:true applied:true when TalkBack is installed and currently enabled", async () => {
       fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       // Idempotency: talkback (currently on) -> proceed to disable. Confirmation:

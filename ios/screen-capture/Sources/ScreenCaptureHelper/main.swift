@@ -78,7 +78,7 @@ case .listSimulators:
         exit(1)
     }
 
-case .captureSimulator(let windowID, let fps):
+case .captureSimulator(let windowID, let fps, let audio):
     let window: SCWindow
     switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
     case .success(.some(let resolved)):
@@ -96,7 +96,7 @@ case .captureSimulator(let windowID, let fps):
     let simSession = SimulatorCaptureSession(writer: writer)
 
     if case .failure(let error) = runBlocking({
-        try await simSession.start(window: window, fps: fps)
+        try await simSession.start(window: window, fps: fps, audio: audio)
     }) {
         logError("error: failed to start simulator capture: \(error)")
         exit(1)

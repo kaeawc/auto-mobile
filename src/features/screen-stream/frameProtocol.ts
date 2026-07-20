@@ -4,7 +4,9 @@
  * Header (16 bytes, little-endian UInt32):
  *   width(4) | height(4) | bytesPerRow(4) | timestampMs(4)
  *
- * Followed by `height * bytesPerRow` bytes of BGRA pixel data.
+ * Followed by `height * bytesPerRow` bytes of BGRA pixel data. Audio records
+ * reserve width=0: height=8000, bytesPerRow=1, timestampMs=payload length,
+ * followed by 8 kHz mono PCM16LE bytes.
  *
  * The decoder buffers incoming chunks and emits complete frames as soon as
  * enough bytes have arrived. It tolerates arbitrary chunking from the helper's
@@ -25,6 +27,10 @@ export interface DecodedFrame {
   pixels: Buffer;
 }
 
+export interface DecodedAudio {
+  pcm16le: Buffer;
+}
+
 export interface MalformedFrameError {
   reason: "header_width_zero" | "header_height_zero" | "header_bytes_per_row_too_small";
   header: FrameHeader;
@@ -39,7 +45,11 @@ export class FrameDecoder {
    * have completed. Malformed headers are surfaced via `onMalformed`; the
    * decoder discards the offending bytes and continues parsing.
    */
-  push(chunk: Buffer, onMalformed?: (error: MalformedFrameError) => void): DecodedFrame[] {
+  push(
+    chunk: Buffer,
+    onMalformed?: (error: MalformedFrameError) => void,
+    onAudio?: (audio: DecodedAudio) => void
+  ): DecodedFrame[] {
     if (chunk.length > 0) {
       this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
     }
@@ -51,6 +61,10 @@ export class FrameDecoder {
         if (this.buffer.length < FRAME_HEADER_SIZE) {break;}
         const header = parseHeader(this.buffer);
         this.buffer = this.buffer.subarray(FRAME_HEADER_SIZE);
+        if (isAudioHeader(header)) {
+          this.pendingHeader = header;
+          continue;
+        }
         const malformed = validateHeader(header);
         if (malformed) {
           onMalformed?.({ reason: malformed, header });
@@ -59,19 +73,29 @@ export class FrameDecoder {
         this.pendingHeader = header;
       }
 
-      const expected = this.pendingHeader.height * this.pendingHeader.bytesPerRow;
+      const expected = isAudioHeader(this.pendingHeader)
+        ? this.pendingHeader.timestampMs
+        : this.pendingHeader.height * this.pendingHeader.bytesPerRow;
       if (this.buffer.length < expected) {break;}
 
       // Copy pixels to release the underlying chunk allocation; otherwise
       // every emitted frame pins the entire upstream buffer in memory.
-      const pixels = Buffer.from(this.buffer.subarray(0, expected));
+      const payload = Buffer.from(this.buffer.subarray(0, expected));
       this.buffer = this.buffer.subarray(expected);
-      frames.push({ header: this.pendingHeader, pixels });
+      if (isAudioHeader(this.pendingHeader)) {
+        onAudio?.({ pcm16le: payload });
+      } else {
+        frames.push({ header: this.pendingHeader, pixels: payload });
+      }
       this.pendingHeader = null;
     }
 
     return frames;
   }
+}
+
+function isAudioHeader(header: FrameHeader): boolean {
+  return header.width === 0 && header.height === 8_000 && header.bytesPerRow === 1;
 }
 
 function parseHeader(buffer: Buffer): FrameHeader {

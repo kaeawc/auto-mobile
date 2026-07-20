@@ -11,6 +11,8 @@ import Foundation
 /// Followed by `height * bytesPerRow` bytes of BGRA pixel data.
 public enum FrameProtocol {
     public static let headerSize = 16
+    public static let audioSampleRate: UInt32 = 8_000
+    public static let audioChannelCount: UInt32 = 1
 
     public struct Header: Equatable {
         public let width: UInt32
@@ -38,6 +40,15 @@ public enum FrameProtocol {
             base.advanced(by: 12).storeBytes(of: header.timestampMs.littleEndian, as: UInt32.self)
         }
         return data
+    }
+
+    public static func encodeAudioHeader(payloadLength: Int) -> Data {
+        encodeHeader(Header(
+            width: 0,
+            height: audioSampleRate,
+            bytesPerRow: audioChannelCount,
+            timestampMs: UInt32(payloadLength)
+        ))
     }
 
     public static func decodeHeader(_ data: Data) -> Header? {

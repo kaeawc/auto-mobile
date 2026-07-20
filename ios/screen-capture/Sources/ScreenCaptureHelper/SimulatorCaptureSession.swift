@@ -21,15 +21,18 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         self.writer = writer
     }
 
-    func start(window: SCWindow, fps: Int) async throws {
+    func start(window: SCWindow, fps: Int, audio: Bool) async throws {
         self.fps = fps
         let filter = SCContentFilter(desktopIndependentWindow: window)
-        let config = SimulatorCaptureSession.makeConfiguration(window: window, fps: fps)
+        let config = SimulatorCaptureSession.makeConfiguration(window: window, fps: fps, audio: audio)
         configuredPixelWidth = config.width
         configuredPixelHeight = config.height
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        if audio {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+        }
         try await stream.startCapture()
         self.stream = stream
     }
@@ -54,7 +57,14 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
-        guard type == .screen, sampleBuffer.isValid else { return }
+        guard sampleBuffer.isValid else { return }
+        if type == .audio {
+            if let pcm16le = pcm16leAudio(sampleBuffer: sampleBuffer) {
+                writer.writeAudio(pcm16le: pcm16le)
+            }
+            return
+        }
+        guard type == .screen else { return }
 
         // Drop non-complete statuses (idle, blank, suspended, stopped) so we
         // don't re-emit identical pixels or partial buffers.
@@ -111,7 +121,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         }
     }
 
-    private static func makeConfiguration(window: SCWindow, fps: Int) -> SCStreamConfiguration {
+    private static func makeConfiguration(window: SCWindow, fps: Int, audio: Bool) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
         // Logical (points) size; the delivered CVPixelBuffer is in native
         // pixels (2x/3x for Retina), and downstream consumers must use
@@ -122,6 +132,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.showsCursor = false
         config.scalesToFit = false
+        config.capturesAudio = audio
+        config.sampleRate = 8_000
+        config.channelCount = 1
         return config
     }
 

@@ -120,7 +120,10 @@ async function startWithFrame(
   await started;
 }
 
-function createHarness(device: BootedDevice = IOS_DEVICE) {
+function createHarness(
+  device: BootedDevice = IOS_DEVICE,
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+) {
   const helper = new FakeFrameCaptureHelper();
   const encoder = new FakeChildProcess();
   const helperTargets: CaptureTarget[] = [];
@@ -144,6 +147,7 @@ function createHarness(device: BootedDevice = IOS_DEVICE) {
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
+    ...overrides,
   });
 
   return { source, helper, encoder, helperTargets, encoderSpawns, chunks, errors };
@@ -209,6 +213,38 @@ describe("IosH264Source", () => {
     await startWithFrame(source, helper, frame(1, 1, 0x11));
 
     expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 5 }]);
+  });
+
+  test("requests simulator audio and forwards its PCM16LE chunks unchanged", async () => {
+    const audio: Buffer[] = [];
+    const { source, helper, helperTargets } = createHarness(IOS_SIMULATOR, {
+      audioEnabled: true,
+      onAudioData: chunk => audio.push(chunk),
+    });
+
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    helper.emit("audio", { pcm16le: Buffer.from([0x34, 0x12]) });
+    await started;
+
+    expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 5, audio: true }]);
+    expect(audio).toEqual([Buffer.from([0x34, 0x12])]);
+  });
+
+  test("rejects audio startup when the Simulator never produces PCM", async () => {
+    const timer = new FakeTimer();
+    const { source, helper } = createHarness(IOS_SIMULATOR, {
+      audioEnabled: true,
+      timer,
+      firstFrameTimeoutMs: 1,
+    });
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    timer.advanceTime(1);
+
+    await expect(started).rejects.toThrow(/did not produce PCM audio/);
   });
 
   test("passes explicit simulator fps to helper target and ffmpeg input", async () => {

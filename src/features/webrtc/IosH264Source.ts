@@ -9,6 +9,7 @@ import {
 } from "../screen-stream/IOSScreenCaptureHelper";
 import type {
   CaptureTarget,
+  DecodedAudio,
   DecodedFrame,
   IosScreenCaptureHelperOptions,
   MalformedFrameError,
@@ -30,6 +31,7 @@ export interface IosFrameCaptureHelper {
   start(): void;
   stop(): Promise<unknown>;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
+  on(event: "audio", listener: (audio: DecodedAudio) => void): this;
   on(event: "malformed", listener: (error: MalformedFrameError) => void): this;
   on(event: "stderr", listener: (line: string) => void): this;
   on(event: "exit", listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): this;
@@ -129,6 +131,7 @@ export class IosH264Source implements H264CaptureSource {
   private encoderBackpressured = false;
   private teardownPromise: Promise<void> | null = null;
   private cancelFirstFrameWait: (() => void) | null = null;
+  private cancelFirstAudioWait: (() => void) | null = null;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -171,8 +174,9 @@ export class IosH264Source implements H264CaptureSource {
       this.helper = helper;
       this.wireHelperFrames(helper);
       const firstFrame = this.waitForFirstFrame(helper, target);
+      const firstAudio = this.options.audioEnabled ? this.waitForFirstAudio(helper) : null;
       helper.start();
-      await firstFrame;
+      await Promise.all([firstFrame, firstAudio]);
     } catch (error) {
       this.phase = "stopping";
       await this.beginTeardown();
@@ -187,6 +191,7 @@ export class IosH264Source implements H264CaptureSource {
     }
     this.phase = "stopping";
     this.cancelFirstFrameWait?.();
+    this.cancelFirstAudioWait?.();
     await this.beginTeardown();
   }
 
@@ -196,6 +201,7 @@ export class IosH264Source implements H264CaptureSource {
         kind: "simulator",
         windowID: await this.simulatorWindowResolver(helperPath, this.options.device),
         fps: this.fps,
+        ...(this.options.audioEnabled === true ? { audio: true } : {}),
       };
     }
     return { kind: "device", deviceId: this.options.device.deviceId };
@@ -264,8 +270,40 @@ export class IosH264Source implements H264CaptureSource {
     });
   }
 
+  private waitForFirstAudio(helper: IosFrameCaptureHelper): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.timer.clearTimeout(timeout);
+        if (this.cancelFirstAudioWait === cancel) {
+          this.cancelFirstAudioWait = null;
+        }
+        callback();
+      };
+      const cancel = (): void => finish(resolve);
+      const timeout = this.timer.setTimeout(() => {
+        finish(() => reject(new ActionableError("iOS Simulator audio capture did not produce PCM audio before startup timed out.")));
+      }, this.firstFrameTimeoutMs);
+      this.cancelFirstAudioWait = cancel;
+      helper.on("audio", () => {
+        if (this.helper === helper && this.isActive()) {
+          finish(resolve);
+        }
+      });
+    });
+  }
+
   private wireHelperFrames(helper: IosFrameCaptureHelper): void {
     helper.on("frame", frame => this.handleFrame(frame));
+    helper.on("audio", audio => {
+      if (this.isActive() && this.options.audioEnabled) {
+        this.options.onAudioData?.(audio.pcm16le);
+      }
+    });
     helper.on("malformed", error => {
       logger.warn(`[IosH264Source] malformed frame from helper: ${error.reason}`);
     });
@@ -410,6 +448,8 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private async teardown(): Promise<void> {
+    this.cancelFirstAudioWait?.();
+    this.cancelFirstAudioWait = null;
     const encoder = this.encoder;
     this.encoder = null;
     this.encoderSize = null;

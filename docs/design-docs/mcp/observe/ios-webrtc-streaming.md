@@ -51,6 +51,13 @@ continuous BGRA frames for:
 - **Physical devices** via AVFoundation USB capture.
 - **Simulators** via ScreenCaptureKit simulator-window capture.
 
+When WebRTC audio is explicitly enabled, the Simulator helper also captures
+the selected window's audio through ScreenCaptureKit and multiplexes 8 kHz mono
+PCM16LE records over its existing stdout transport. `IosH264Source` forwards
+those chunks to the shared PCMU packetizer unchanged. Physical iOS playback
+audio remains unavailable through public APIs and fails with an actionable
+error rather than silently publishing video-only.
+
 `IosH264Source` wraps that helper, pipes frames into `ffmpeg` with
 `h264_videotoolbox`, and forwards raw H.264 Annex-B stdout chunks into the
 existing `WebRtcPublisher`. The helper binary is resolved from

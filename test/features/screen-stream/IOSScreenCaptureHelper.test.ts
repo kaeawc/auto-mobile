@@ -24,6 +24,15 @@ function encodeFrame(
   return Buffer.concat([header, Buffer.alloc(height * bytesPerRow, fill)]);
 }
 
+function encodeAudio(pcm16le: Buffer): Buffer {
+  const header = Buffer.alloc(FRAME_HEADER_SIZE);
+  header.writeUInt32LE(0, 0);
+  header.writeUInt32LE(8_000, 4);
+  header.writeUInt32LE(1, 8);
+  header.writeUInt32LE(pcm16le.length, 12);
+  return Buffer.concat([header, pcm16le]);
+}
+
 function withFakeSpawner(
   target: CaptureTarget = { kind: "device", deviceId: "00008140-001A2B3C0AE2401E" }
 ): { fake: FakeChildProcess; spawnArgs: { command: string; args: string[] }; helper: IOSScreenCaptureHelper } {
@@ -132,6 +141,27 @@ describe("IOSScreenCaptureHelper", () => {
     await flush();
     expect(frames).toHaveLength(1);
     expect(frames[0].header.width).toBe(2);
+  });
+
+  test("passes --audio only for an explicitly audio-enabled simulator target", () => {
+    const { spawnArgs, helper } = withFakeSpawner({ kind: "simulator", windowID: 1, audio: true });
+    helper.start();
+
+    expect(spawnArgs.args).toEqual(["--simulator-window", "1", "--audio"]);
+  });
+
+  test("emits multiplexed PCM16LE audio without treating it as a malformed frame", async () => {
+    const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 1, audio: true });
+    const audio: Buffer[] = [];
+    const malformed: MalformedFrameError[] = [];
+    helper.on("audio", chunk => audio.push(chunk.pcm16le));
+    helper.on("malformed", error => malformed.push(error));
+    helper.start();
+    fake.stdout.push(encodeAudio(Buffer.from([0x34, 0x12, 0xcc, 0xed])));
+    await flush();
+
+    expect(audio).toEqual([Buffer.from([0x34, 0x12, 0xcc, 0xed])]);
+    expect(malformed).toEqual([]);
   });
 
   test("emits malformed events for invalid headers", async () => {

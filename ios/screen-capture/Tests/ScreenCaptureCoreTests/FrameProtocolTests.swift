@@ -5,6 +5,18 @@ import XCTest
 @testable import ScreenCaptureCore
 
 final class FrameProtocolTests: XCTestCase {
+    func testEncodeAudioHeaderUsesReservedZeroWidthMarker() {
+        let data = FrameProtocol.encodeAudioHeader(payloadLength: 320)
+
+        XCTAssertEqual(data.count, FrameProtocol.headerSize)
+        XCTAssertEqual(Array(data), [
+            0, 0, 0, 0,
+            0x40, 0x1F, 0, 0,
+            1, 0, 0, 0,
+            0x40, 1, 0, 0,
+        ])
+    }
+
     func testEncodeHeaderProducesLittleEndianBytes() {
         let header = FrameProtocol.Header(
             width: 0x01020304,

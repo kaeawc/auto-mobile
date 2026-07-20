@@ -2,6 +2,7 @@ import { ActionableError } from "../../models";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 import { createAndroidH264CaptureSource } from "./androidH264CaptureSourceFactory";
 import { IosH264Source } from "./IosH264Source";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
 /**
  * Build a capture source for a device. `jarPath` is the pre-resolved Android
@@ -18,8 +19,10 @@ export const createH264CaptureSource: H264CaptureSourceFactory = (options, jarPa
     return createAndroidH264CaptureSource(options, jarPath);
   }
   if (options.device.platform === "ios") {
-    if (options.audioEnabled) {
-      throw new ActionableError("WebRTC audio capture is currently supported only on Android.");
+    if (options.audioEnabled && !isIosSimulatorUdid(options.device.deviceId)) {
+      throw new ActionableError(
+        "WebRTC playback audio capture is available only for iOS Simulator targets; public iOS APIs cannot capture playback audio from a physical device."
+      );
     }
     return new IosH264Source(options);
   }

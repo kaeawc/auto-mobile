@@ -2,6 +2,14 @@ import XCTest
 @testable import ScreenCaptureCore
 
 final class CommandLineOptionsTests: XCTestCase {
+    func testParsesAudioForSimulatorCapture() throws {
+        let options = try CommandLineOptions.parse([
+            "screen-capture-helper", "--simulator-window", "42", "--audio"
+        ])
+
+        XCTAssertEqual(options.mode, .captureSimulator(windowID: 42, fps: 5, audio: true))
+    }
+
     func testDefaultsToCaptureWithoutDeviceID() throws {
         let opts = try CommandLineOptions.parse(["screen-capture-helper"])
         XCTAssertEqual(opts.mode, .capture(deviceID: nil))
@@ -65,7 +73,8 @@ final class CommandLineOptionsTests: XCTestCase {
             opts.mode,
             .captureSimulator(
                 windowID: 98765,
-                fps: CommandLineOptions.defaultSimulatorFPS
+                fps: CommandLineOptions.defaultSimulatorFPS,
+                audio: false
             )
         )
     }
@@ -76,7 +85,7 @@ final class CommandLineOptionsTests: XCTestCase {
             "--simulator-window", "1",
             "--simulator-fps", "30",
         ])
-        XCTAssertEqual(opts.mode, .captureSimulator(windowID: 1, fps: 30))
+        XCTAssertEqual(opts.mode, .captureSimulator(windowID: 1, fps: 30, audio: false))
     }
 
     func testRejectsSimulatorFPSBelowRange() {

@@ -31,4 +31,24 @@ describe("createH264CaptureSource", () => {
 
     expect(source).toBeInstanceOf(IosH264Source);
   });
+
+  test("routes an audio-enabled iOS Simulator to the iOS source path", () => {
+    const simulator = { ...IOS, deviceId: "4DA8AF35-C59B-43D3-A8FE-5640A7B0B8C1" } as BootedDevice;
+    const source = createH264CaptureSource(
+      { device: simulator, onData: () => {}, onAudioData: () => {}, audioEnabled: true },
+      null
+    );
+
+    expect(source).toBeInstanceOf(IosH264Source);
+  });
+
+  test("explains that playback audio is unavailable on physical iOS devices", () => {
+    const physicalDevice = { ...IOS, deviceId: "00008140-001A2B3C0AE2401E" } as BootedDevice;
+    expect(() =>
+      createH264CaptureSource(
+        { device: physicalDevice, onData: () => {}, onAudioData: () => {}, audioEnabled: true },
+        null
+      )
+    ).toThrow(/playback audio.*iOS Simulator/i);
+  });
 });

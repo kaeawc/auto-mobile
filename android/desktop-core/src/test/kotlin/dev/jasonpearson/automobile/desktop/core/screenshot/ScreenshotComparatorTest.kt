@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.screenshot
 
 import java.awt.Color
+import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.File
 import java.nio.file.Files
@@ -27,6 +28,52 @@ class ScreenshotComparatorTest {
     val image = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
     for (y in 0 until height) for (x in 0 until width) image.setRGB(x, y, color.rgb)
     return image
+  }
+
+  /**
+   * A premultiplied-alpha capture with anti-aliased, partially transparent pixels — what
+   * `captureToImage().toAwtImage()` produces for real Compose content, as opposed to the solid
+   * fills the other cases use.
+   */
+  private fun premultipliedAntiAliasedCapture(width: Int, height: Int): BufferedImage {
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE)
+    for (y in 0 until height) for (x in 0 until width) {
+      // Diagonal alpha ramp so most pixels are partially transparent, where a lossy
+      // premultiply/unpremultiply round-trip would show up.
+      val alpha = ((x + y) * 255 / (width + height)).coerceIn(0, 255)
+      image.setRGB(x, y, Color(20 + x % 200, 200 - y % 200, (x * y) % 256, alpha).rgb)
+    }
+    val g = image.createGraphics()
+    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+    g.color = Color(255, 255, 255, 180)
+    g.drawLine(0, 0, width - 1, height - 1)
+    g.dispose()
+    return image
+  }
+
+  /**
+   * Recording a baseline and immediately verifying the *same* capture against it must report
+   * [ScreenshotComparator.Result.Match] — i.e. the PNG round-trip `record` performs is lossless as
+   * far as [ScreenshotComparator.compare] is concerned.
+   *
+   * This pins the record→verify half of the reproducibility question for issue #3913: `compare`
+   * reads the baseline back through `ImageIO` while `actual` is the raw in-memory capture, so an
+   * asymmetric round-trip here would make every recorded baseline fail its own verification. It
+   * does not — which is what rules the comparator out as the cause of that failure and points at
+   * the render step instead.
+   */
+  @Test
+  fun `recording then verifying the same anti-aliased capture matches`() {
+    val captured = premultipliedAntiAliasedCapture(200, 100)
+    val baseline = File(tempDir, "anti_aliased.png")
+
+    ScreenshotComparator.record(baseline, captured)
+
+    assertEquals(
+      ScreenshotComparator.Result.Match,
+      ScreenshotComparator.compare(baseline, captured, tempDir, "anti_aliased"),
+      "a freshly recorded baseline must verify against the capture it was recorded from",
+    )
   }
 
   @Test

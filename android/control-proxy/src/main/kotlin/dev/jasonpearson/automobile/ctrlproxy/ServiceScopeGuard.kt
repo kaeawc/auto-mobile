@@ -48,6 +48,14 @@ class ServiceScopeGuard(
     Log.e(TAG, message, error)
   },
 ) {
+  /**
+   * The shared correlated-error-on-throw core (#3086). This consumer uses the
+   * [CorrelatedErrorReporter.emit] / [CorrelatedErrorReporter.causeOf] tail rather than `guarding`
+   * or `report`: a [CoroutineExceptionHandler] is handed an already-caught throwable (so there is
+   * no block to wrap) and cannot suspend, so it must log synchronously here and dispatch only the
+   * broadcast onto [emitScope].
+   */
+  private val reporter = CorrelatedErrorReporter(broadcastResponse, logError)
 
   /**
    * The handler to add to the `serviceScope` context. On any uncaught throwable other than a
@@ -61,25 +69,19 @@ class ServiceScopeGuard(
     if (throwable is CancellationException) return@CoroutineExceptionHandler
 
     val requestId = context[RequestIdContext]?.requestId
-    val cause = throwable.message ?: throwable::class.simpleName ?: "unknown error"
+    val cause = CorrelatedErrorReporter.causeOf(throwable)
+    // Logged synchronously on the failing thread, before dispatching the broadcast: if the emit
+    // scope is already shut down the launch below never runs, and this log is then the only trace.
     logError("Uncaught exception in a serviceScope launch (requestId=$requestId)", throwable)
 
     emitScope().launch {
-      try {
-        broadcastResponse(
-          ErrorResponse(requestId = requestId, error = "Uncaught async failure: $cause")
-        )
-      } catch (broadcastError: CancellationException) {
-        throw broadcastError
-      } catch (broadcastError: Exception) {
-        // A failure while reporting the uncaught exception must not escape — it would re-enter this
-        // same handler and loop. Log and swallow; the client then falls back to its timeout, but
-        // only for this genuinely-unrecoverable double-failure tail.
-        logError(
-          "Failed to broadcast uncaught-exception error frame (requestId=$requestId)",
-          broadcastError,
-        )
-      }
+      reporter.emit(
+        requestId = requestId,
+        errorMessage = "Uncaught async failure: $cause",
+        doubleFailureLogMessage = {
+          "Failed to broadcast uncaught-exception error frame (requestId=$requestId)"
+        },
+      )
     }
   }
 

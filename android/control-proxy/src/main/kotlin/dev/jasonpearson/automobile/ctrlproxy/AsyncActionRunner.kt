@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -39,10 +38,13 @@ class AsyncActionRunner(
     Log.e(TAG, message, error)
   },
 ) {
+  /** The shared correlated-error-on-throw core (#3086). */
+  private val reporter = CorrelatedErrorReporter(broadcastResponse, logError)
+
   /**
-   * Launch [block] on [scope]. If it throws anything other than a cooperative
-   * [CancellationException], broadcast an [ErrorResponse] correlated by [requestId] so the awaiting
-   * client fails fast instead of hanging.
+   * Launch [block] on [scope]. If it throws anything other than a cooperative cancellation,
+   * broadcast an [ErrorResponse] correlated by [requestId] so the awaiting client fails fast
+   * instead of hanging. See [CorrelatedErrorReporter.guarding] for the semantics.
    *
    * @param requestId correlation id from the originating request; null when the request carried
    *   none (the error frame then carries a null requestId, exactly as the synchronous decode path
@@ -59,31 +61,18 @@ class AsyncActionRunner(
     // catch — a non-[Exception] [Throwable] such as an [Error]/[AssertionError] — still escapes
     // with
     // the correlation id attached, letting the scope-level [ServiceScopeGuard] emit a *correlated*
-    // error frame instead of a null-id one. The common `Exception` case is handled below directly.
+    // error frame instead of a null-id one. The common `Exception` case is handled by the reporter.
     scope.launch(RequestIdContext(requestId)) {
-      try {
-        block()
-      } catch (e: CancellationException) {
-        // Cooperative cancellation means the service scope is shutting down — never convert it into
-        // a client-facing error frame; let it propagate so the coroutine unwinds cleanly.
-        throw e
-      } catch (e: Exception) {
-        val cause = e.message ?: e::class.simpleName ?: "unknown error"
-        logError("Async action '$action' failed (requestId=$requestId)", e)
-        try {
-          broadcastResponse(
-            ErrorResponse(requestId = requestId, error = "Action '$action' failed: $cause")
-          )
-        } catch (broadcastError: CancellationException) {
-          throw broadcastError
-        } catch (broadcastError: Exception) {
-          // A failure while reporting the error must not escape and crash the launch (which would
-          // defeat the whole point). Log and swallow — the client will fall back to its timeout.
-          logError(
-            "Failed to broadcast async error for action '$action' (requestId=$requestId)",
-            broadcastError,
-          )
-        }
+      val launchScope = this
+      reporter.guarding(
+        requestId = requestId,
+        failureLogMessage = { "Async action '$action' failed (requestId=$requestId)" },
+        errorMessagePrefix = { "Action '$action' failed" },
+        doubleFailureLogMessage = {
+          "Failed to broadcast async error for action '$action' (requestId=$requestId)"
+        },
+      ) {
+        block(launchScope)
       }
     }
 

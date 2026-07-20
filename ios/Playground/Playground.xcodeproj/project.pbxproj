@@ -18,6 +18,7 @@
 		C437D38FD2B064F815AE6F33 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */; };
 		E46744897A309BECE20573D9 /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 5B1F96DAE2D3DE50DD89C21C /* AutoMobileSDK */; };
 		EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */; };
+		F99EE983EC6317D09E5A3247 /* AccessibilityRotorDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61225B3155981050B6A59A6 /* AccessibilityRotorDemo.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,6 +45,7 @@
 		CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets.xcassets; path = Sources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlaygroundTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D01BCE22E951887741F32904 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		D61225B3155981050B6A59A6 /* AccessibilityRotorDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityRotorDemo.swift; sourceTree = "<group>"; };
 		E40DD68F934F5F0D2981ACA1 /* Playground.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Playground.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverTab.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -138,6 +140,7 @@
 		EAF2D62F55B68E2361617BFC /* Tabs */ = {
 			isa = PBXGroup;
 			children = (
+				D61225B3155981050B6A59A6 /* AccessibilityRotorDemo.swift */,
 				25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */,
 				FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */,
 				64FD18EC8D1B9A665615C374 /* SettingsTab.swift */,
@@ -244,6 +247,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F99EE983EC6317D09E5A3247 /* AccessibilityRotorDemo.swift in Sources */,
 				97CA6F2DE628A139094EF72D /* Colors.swift in Sources */,
 				5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */,
 				15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */,

@@ -379,10 +379,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
   });
 
   describe("FFmpeg Diagnostics", function() {
-    test("should treat simctl display selection as iOS recording startup", function() {
+    test("should require simctl's first-frame signal before reporting iOS recording startup", function() {
       expect(containsIosRecordingStartMessage(
         "Note: No display specified. Defaulting to display: 4FCB34AC-FD7C-4A7E-9A19-CB10950490D8 (screenID: 1, name: LCD)\n"
-      )).toBe(true);
+      )).toBe(false);
       expect(containsIosRecordingStartMessage("Recording started\n")).toBe(true);
       expect(containsIosRecordingStartMessage("Unable to boot simulator\n")).toBe(false);
     });

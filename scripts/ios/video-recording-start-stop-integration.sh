@@ -49,6 +49,25 @@ fi
 export AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION=1
 export AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID="${DEVICE_ID}"
 
+# A simulator can report booted while its display service has not yet produced a
+# frame. Starting `simctl io recordVideo` in that state can leave the raw .mov at
+# zero bytes even after a graceful SIGINT. Capture one screenshot first: this
+# both exercises the same display service and gives the test a concrete readiness
+# signal before it begins recording.
+DISPLAY_WARMUP_DIR="$(mktemp -d)"
+DISPLAY_WARMUP_SCREENSHOT="${DISPLAY_WARMUP_DIR}/display-warmup.png"
+if ! xcrun simctl io "${DEVICE_ID}" screenshot "${DISPLAY_WARMUP_SCREENSHOT}"; then
+  rm -rf "${DISPLAY_WARMUP_DIR}"
+  echo "error: failed to warm simulator display for ${DEVICE_ID}" >&2
+  exit 1
+fi
+if [[ ! -s "${DISPLAY_WARMUP_SCREENSHOT}" ]]; then
+  rm -rf "${DISPLAY_WARMUP_DIR}"
+  echo "error: failed to warm simulator display for ${DEVICE_ID}: screenshot was empty" >&2
+  exit 1
+fi
+rm -rf "${DISPLAY_WARMUP_DIR}"
+
 # This integration test legitimately drives the real videoRecording start/stop
 # handler, which resolves the file-backed database (VideoRecordingRepository ->
 # getDatabase() -> resolveDbPath()). Under bun test, NODE_ENV=test arms a guard

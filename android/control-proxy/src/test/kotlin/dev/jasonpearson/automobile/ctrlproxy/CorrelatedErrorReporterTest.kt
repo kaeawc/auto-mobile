@@ -158,6 +158,14 @@ class CorrelatedErrorReporterTest {
     assertEquals("unknown error", CorrelatedErrorReporter.causeOf(anonymous))
   }
 
+  @Test
+  fun `frame preserves the request id and error text verbatim`() {
+    assertEquals(
+      ErrorResponse(requestId = "req-1", error = "Hierarchy extraction failed: boom"),
+      CorrelatedErrorReporter.frame("req-1", "Hierarchy extraction failed: boom"),
+    )
+  }
+
   // ---------------------------------------------------------------------------
   // emit
   // ---------------------------------------------------------------------------

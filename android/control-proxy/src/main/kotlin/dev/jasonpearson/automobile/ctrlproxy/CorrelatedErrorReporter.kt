@@ -132,7 +132,7 @@ class CorrelatedErrorReporter(
     doubleFailureLogMessage: () -> String,
   ) {
     try {
-      broadcastError(ErrorResponse(requestId = requestId, error = errorMessage))
+      broadcastError(frame(requestId, errorMessage))
     } catch (fallbackError: CancellationException) {
       throw fallbackError
     } catch (fallbackError: Exception) {
@@ -141,6 +141,13 @@ class CorrelatedErrorReporter(
   }
 
   companion object {
+    /**
+     * The one factory for a fallback [ErrorResponse]. Shared by correlated-error consumers so a new
+     * path cannot change the frame shape while reusing the cause rule.
+     */
+    fun frame(requestId: String?, errorMessage: String): ErrorResponse =
+      ErrorResponse(requestId = requestId, error = errorMessage)
+
     /**
      * The one cause-derivation rule: the throwable's message, else its simple class name, else a
      * constant. Shared so a consumer that logs the cause itself cannot derive it differently.

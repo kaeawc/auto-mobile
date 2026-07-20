@@ -2050,9 +2050,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // error frame — let it propagate so the coroutine unwinds cleanly.
           throw e
         } catch (e: Exception) {
-          val cause = e.message ?: e::class.simpleName ?: "unknown error"
           Log.e(TAG, "Error extracting hierarchy for uuid=$uuid", e)
-          sendResult(success = false, error = cause)
+          sendResult(success = false, error = CorrelatedErrorReporter.causeOf(e))
           broadcastHierarchyExtractFrame(HierarchyExtractErrorFrames.thrownFrame(uuid, e))
         }
       }

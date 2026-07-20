@@ -3,6 +3,8 @@ import type { ChildProcess } from "node:child_process";
 import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
+const normalizePath = (value: string): string => value.replace(/\\/g, "/");
+
 class FakeChild {
   readonly stdout = { on: (_event: string, callback: (data: Buffer) => void) => { this.stdoutCallback = callback; } };
   readonly stderr = { on: (_event: string, callback: (data: Buffer) => void) => { this.stderrCallback = callback; } };
@@ -75,12 +77,13 @@ describe("AvdManagerClient", () => {
     await expect(pending).resolves.toMatchObject({ success: true });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      command: "/sdk/cmdline-tools/latest/bin/avdmanager",
       args: [
         "create", "avd", "-n", "pixel; touch should-not-run", "-k",
         "system-images;android-36;google_apis;x86_64", "-p", "/tmp/AVD name;$(nope)"
       ]
     });
+    expect(typeof calls[0]?.command).toBe("string");
+    expect(normalizePath(calls[0]?.command as string)).toBe("/sdk/cmdline-tools/latest/bin/avdmanager");
     expect(child.stdinWrites).toEqual(["\n"]);
     expect(child.stdinEnded).toBe(true);
   });
@@ -95,7 +98,7 @@ describe("AvdManagerClient", () => {
     child.close(0);
 
     await expect(pending).resolves.toEqual([]);
-    expect(calls[0]?.command).toBe("/sdk/cmdline-tools/latest/bin/avdmanager.bat");
+    expect(normalizePath(calls[0]?.command ?? "")).toBe("/sdk/cmdline-tools/latest/bin/avdmanager.bat");
     expect(calls[0]).toMatchObject({ args: ["list", "avd"], shell: true });
   });
 

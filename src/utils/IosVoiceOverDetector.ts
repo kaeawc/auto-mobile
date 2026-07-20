@@ -34,8 +34,8 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    * @returns Promise resolving to true if VoiceOver is enabled
    */
   async isVoiceOverEnabled(
-   deviceId: string,
-   client: IOSCtrlProxy,
+    deviceId: string,
+    client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService,
     timeoutMs?: number
   ): Promise<boolean> {

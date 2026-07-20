@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 private val LOG = LoggerFactory.getLogger("DaemonNotificationClient")
 
@@ -193,12 +194,12 @@ class DaemonNotificationClient(
         id = UUID.randomUUID().toString(),
         method = SUBSCRIBE_NOTIFICATIONS_METHOD,
       )
-    writer.write(json.encodeToString(DaemonNotificationRequest.serializer(), request))
+    writer.write(json.encodeToString(serializer<DaemonNotificationRequest>(), request))
     writer.newLine()
     writer.flush()
 
     val line = reader.readLine() ?: throw IllegalStateException("Daemon closed during subscribe")
-    val response = json.decodeFromString(DaemonFrame.serializer(), line)
+    val response = json.decodeFromString(serializer<DaemonFrame>(), line)
 
     if (response.success != true) {
       val reason = response.error ?: "Daemon does not support pushed notifications"
@@ -235,7 +236,7 @@ class DaemonNotificationClient(
    */
   private fun decodeFrame(line: String): DaemonFrame? =
     try {
-      json.decodeFromString(DaemonFrame.serializer(), line)
+      json.decodeFromString(serializer<DaemonFrame>(), line)
     } catch (e: Exception) {
       // An unmodelled frame is not a reason to drop the subscription.
       LOG.debug("Ignoring unparseable daemon frame: ${e.message}")

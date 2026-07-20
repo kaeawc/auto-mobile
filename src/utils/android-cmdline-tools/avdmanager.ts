@@ -1,7 +1,6 @@
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { join, resolve } from "path";
-import { ActionableError } from "../../models";
 import { logger } from "../logger";
 import { defaultTimer } from "../SystemTimer";
 import {
@@ -13,6 +12,7 @@ import {
   validateRequiredTools,
   type AndroidToolsLocation
 } from "./detection";
+import { AvdManagerClient } from "./AvdManagerClient";
 
 // Dependencies interface for dependency injection
 export interface AvdManagerDependencies {
@@ -37,82 +37,10 @@ const createDefaultDependencies = (): AvdManagerDependencies => ({
 });
 
 const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build-tools"];
-const OLD_TOOLS_BIN_MARKER = "/tools/bin/";
-const CMDLINE_TOOLS_MARKER = "/cmdline-tools/";
-const JAXB_ERROR_MARKERS = [
-  "javax/xml/bind/annotation/XmlSchema",
-  "javax.xml.bind.annotation.XmlSchema",
-  "javax/xml/bind",
-  "javax.xml.bind"
-];
 let hasWarnedHomebrewSystemImagesMismatch = false;
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
-}
-
-function isOldAndroidToolsPath(pathValue: string): boolean {
-  const normalized = normalizePath(pathValue);
-  return normalized.includes(OLD_TOOLS_BIN_MARKER) && !normalized.includes(CMDLINE_TOOLS_MARKER);
-}
-
-function hasJaxbError(output: string): boolean {
-  if (!output) {
-    return false;
-  }
-
-  const normalized = normalizePath(output);
-  return JAXB_ERROR_MARKERS.some(marker => normalized.includes(marker));
-}
-
-function formatIncompatibleAvdManagerMessage(avdmanagerPath: string, reason: "jaxb" | "deprecated"): string {
-  const header = reason === "jaxb"
-    ? "Error: Android SDK tools are outdated and incompatible with Java 11+."
-    : "Error: Detected deprecated Android SDK Tools (tools/bin).";
-  const issue = reason === "jaxb"
-    ? "Issue: Detected javax.xml.bind (JAXB) errors. This usually means the deprecated \"Android SDK Tools\" package (tools/bin) is in use."
-    : "Issue: Old \"Android SDK Tools\" package (deprecated since 2017).";
-
-  return [
-    header,
-    "",
-    `Current avdmanager: ${avdmanagerPath}`,
-    issue,
-    "",
-    "Fix:",
-    "1. Download \"Android SDK Command-line Tools\" from:",
-    "   https://developer.android.com/studio#command-line-tools-only",
-    "2. Extract to: $ANDROID_SDK_ROOT/cmdline-tools/latest/",
-    "3. Ensure ANDROID_SDK_ROOT/ANDROID_HOME point to your SDK root and remove tools/bin from PATH."
-  ].join("\n");
-}
-
-function getIncompatibleAvdManagerMessage(avdmanagerPath: string, output: string): string | null {
-  if (hasJaxbError(output)) {
-    return formatIncompatibleAvdManagerMessage(avdmanagerPath, "jaxb");
-  }
-
-  if (isOldAndroidToolsPath(avdmanagerPath)) {
-    return formatIncompatibleAvdManagerMessage(avdmanagerPath, "deprecated");
-  }
-
-  return null;
-}
-
-function getCommandOutputForDetection(result: { stdout: string; stderr: string }): string {
-  return [result.stderr, result.stdout].filter(Boolean).join("\n");
-}
-
-function getCommandFailureSummary(result: { stdout: string; stderr: string }): string {
-  const stderr = result.stderr.trim();
-  if (stderr) {
-    return stderr;
-  }
-  const stdout = result.stdout.trim();
-  if (stdout) {
-    return stdout;
-  }
-  return "Unknown error";
 }
 
 function maybeWarnHomebrewSystemImagesMismatch(
@@ -375,22 +303,6 @@ async function ensureToolsAvailable(dependencies = createDefaultDependencies()):
 }
 
 /**
- * Get the avdmanager executable path
- */
-function getAvdManagerPath(location: AndroidToolsLocation, dependencies = createDefaultDependencies()): string {
-  const avdmanagerPath = join(location.path, "bin", "avdmanager");
-  const avdmanagerBatPath = join(location.path, "bin", "avdmanager.bat");
-
-  if (dependencies.existsSync(avdmanagerPath)) {
-    return avdmanagerPath;
-  } else if (dependencies.existsSync(avdmanagerBatPath)) {
-    return avdmanagerBatPath;
-  }
-
-  throw new Error(`AVD manager not found at ${location.path}`);
-}
-
-/**
  * Get the sdkmanager executable path
  */
 function getSdkManagerPath(location: AndroidToolsLocation, dependencies = createDefaultDependencies()): string {
@@ -503,22 +415,7 @@ export async function installSystemImage(packageName: string, acceptLicense = tr
  */
 export async function listDeviceImages(dependencies = createDefaultDependencies()): Promise<AvdInfo[]> {
   try {
-    const location = await ensureToolsAvailable(dependencies);
-    const avdmanagerPath = getAvdManagerPath(location, dependencies);
-    const env = getAndroidSdkEnv(location, dependencies);
-
-    const result = await spawnCommand(avdmanagerPath, ["list", "avd"], { env }, dependencies);
-
-    if (result.exitCode !== 0) {
-      const detectionOutput = getCommandOutputForDetection(result);
-      const compatibilityMessage = getIncompatibleAvdManagerMessage(avdmanagerPath, detectionOutput);
-      if (compatibilityMessage) {
-        throw new ActionableError(compatibilityMessage);
-      }
-      throw new Error(`Failed to list AVDs: ${getCommandFailureSummary(result)}`);
-    }
-
-    return parseAvdList(result.stdout);
+    return await createAvdManagerClient(dependencies).listDeviceImages();
   } catch (error) {
     dependencies.logger.error(`Failed to list AVDs: ${(error as Error).message}`);
     throw error;
@@ -533,78 +430,7 @@ export async function createAvd(params: CreateAvdParams, dependencies = createDe
   message: string;
   avdName?: string;
 }> {
-  try {
-    const location = await ensureToolsAvailable(dependencies);
-    const avdmanagerPath = getAvdManagerPath(location, dependencies);
-    const env = getAndroidSdkEnv(location, dependencies);
-
-    const {
-      name,
-      package: packageName,
-      device,
-      force = false,
-      path: avdPath,
-      tag,
-      abi
-    } = params;
-
-    dependencies.logger.info(`Creating AVD: ${name} with package ${packageName}`);
-
-    const args = ["create", "avd", "-n", name, "-k", packageName];
-
-    if (device) {
-      args.push("-d", device);
-    }
-
-    if (force) {
-      args.push("--force");
-    }
-
-    if (avdPath) {
-      args.push("-p", avdPath);
-    }
-
-    if (tag) {
-      args.push("-t", tag);
-    }
-
-    if (abi) {
-      args.push("--abi", abi);
-    }
-
-    const result = await spawnCommand(avdmanagerPath, args, {
-      input: "\n", // Default response to any prompts
-      timeout: 300000, // 5 minute timeout
-      env
-    }, dependencies);
-
-    if (result.exitCode === 0) {
-      dependencies.logger.info(`Successfully created AVD: ${name}`);
-      return {
-        success: true,
-        message: `AVD ${name} created successfully`,
-        avdName: name
-      };
-    }
-
-    const detectionOutput = getCommandOutputForDetection(result);
-    const compatibilityMessage = getIncompatibleAvdManagerMessage(avdmanagerPath, detectionOutput);
-    if (compatibilityMessage) {
-      return {
-        success: false,
-        message: compatibilityMessage
-      };
-    }
-
-    return {
-      success: false,
-      message: `AVD creation failed: ${getCommandFailureSummary(result)}`
-    };
-  } catch (error) {
-    const message = `Failed to create AVD ${params.name}: ${(error as Error).message}`;
-    dependencies.logger.error(message);
-    return { success: false, message };
-  }
+  return createAvdManagerClient(dependencies).createAvd(params);
 }
 
 /**
@@ -614,32 +440,7 @@ export async function deleteAvd(name: string, dependencies = createDefaultDepend
   success: boolean;
   message: string;
 }> {
-  try {
-    const location = await ensureToolsAvailable(dependencies);
-    const avdmanagerPath = getAvdManagerPath(location, dependencies);
-    const env = getAndroidSdkEnv(location, dependencies);
-
-    dependencies.logger.info(`Deleting AVD: ${name}`);
-
-    const result = await spawnCommand(avdmanagerPath, ["delete", "avd", "-n", name], { env }, dependencies);
-
-    if (result.exitCode === 0) {
-      dependencies.logger.info(`Successfully deleted AVD: ${name}`);
-      return { success: true, message: `AVD ${name} deleted successfully` };
-    }
-
-    const detectionOutput = getCommandOutputForDetection(result);
-    const compatibilityMessage = getIncompatibleAvdManagerMessage(avdmanagerPath, detectionOutput);
-    if (compatibilityMessage) {
-      return { success: false, message: compatibilityMessage };
-    }
-
-    return { success: false, message: `AVD deletion failed: ${getCommandFailureSummary(result)}` };
-  } catch (error) {
-    const message = `Failed to delete AVD ${name}: ${(error as Error).message}`;
-    dependencies.logger.error(message);
-    return { success: false, message };
-  }
+  return createAvdManagerClient(dependencies).deleteAvd(name);
 }
 
 /**
@@ -647,26 +448,19 @@ export async function deleteAvd(name: string, dependencies = createDefaultDepend
  */
 export async function listDevices(dependencies = createDefaultDependencies()): Promise<DeviceProfile[]> {
   try {
-    const location = await ensureToolsAvailable(dependencies);
-    const avdmanagerPath = getAvdManagerPath(location, dependencies);
-    const env = getAndroidSdkEnv(location, dependencies);
-
-    const result = await spawnCommand(avdmanagerPath, ["list", "device"], { env }, dependencies);
-
-    if (result.exitCode !== 0) {
-      const detectionOutput = getCommandOutputForDetection(result);
-      const compatibilityMessage = getIncompatibleAvdManagerMessage(avdmanagerPath, detectionOutput);
-      if (compatibilityMessage) {
-        throw new ActionableError(compatibilityMessage);
-      }
-      throw new Error(`Failed to list devices: ${getCommandFailureSummary(result)}`);
-    }
-
-    return parseDeviceList(result.stdout);
+    return await createAvdManagerClient(dependencies).listDevices();
   } catch (error) {
     dependencies.logger.error(`Failed to list devices: ${(error as Error).message}`);
     throw error;
   }
+}
+
+function createAvdManagerClient(dependencies: AvdManagerDependencies): AvdManagerClient {
+  return new AvdManagerClient({
+    ...dependencies,
+    timer: defaultTimer,
+    environment: process.env,
+  });
 }
 
 /**
@@ -735,76 +529,6 @@ function matchesFilter(image: SystemImage, filter: SystemImageFilter): boolean {
     return false;
   }
   return true;
-}
-
-/**
- * Parse AVD list from avdmanager output
- */
-function parseAvdList(output: string): AvdInfo[] {
-  const avds: AvdInfo[] = [];
-  const lines = output.split("\n");
-
-  let currentAvd: Partial<AvdInfo> = {};
-
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-
-    if (trimmedLine.startsWith("Name:")) {
-      // Start of new AVD entry
-      if (currentAvd.name) {
-        avds.push(currentAvd as AvdInfo);
-      }
-      currentAvd = { name: trimmedLine.substring(5).trim() };
-    } else if (trimmedLine.startsWith("Path:")) {
-      currentAvd.path = trimmedLine.substring(5).trim();
-    } else if (trimmedLine.startsWith("Target:")) {
-      currentAvd.target = trimmedLine.substring(7).trim();
-    } else if (trimmedLine.startsWith("Based on:")) {
-      currentAvd.basedOn = trimmedLine.substring(9).trim();
-    } else if (trimmedLine.startsWith("Error:")) {
-      currentAvd.error = trimmedLine.substring(6).trim();
-    }
-  }
-
-  // Add the last AVD if exists
-  if (currentAvd.name) {
-    avds.push(currentAvd as AvdInfo);
-  }
-
-  return avds;
-}
-
-/**
- * Parse device profiles from avdmanager output
- */
-function parseDeviceList(output: string): DeviceProfile[] {
-  const devices: DeviceProfile[] = [];
-  const lines = output.split("\n");
-
-  let currentDevice: Partial<DeviceProfile> = {};
-
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-
-    if (trimmedLine.startsWith("id:")) {
-      // Start of new device entry
-      if (currentDevice.id) {
-        devices.push(currentDevice as DeviceProfile);
-      }
-      currentDevice = { id: trimmedLine.substring(3).trim() };
-    } else if (trimmedLine.startsWith("Name:")) {
-      currentDevice.name = trimmedLine.substring(5).trim();
-    } else if (trimmedLine.startsWith("OEM:")) {
-      currentDevice.oem = trimmedLine.substring(4).trim();
-    }
-  }
-
-  // Add the last device if exists
-  if (currentDevice.id) {
-    devices.push(currentDevice as DeviceProfile);
-  }
-
-  return devices;
 }
 
 // Type definitions

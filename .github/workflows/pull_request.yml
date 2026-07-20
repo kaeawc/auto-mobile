@@ -1580,6 +1580,10 @@ jobs:
 
       - name: "Boot iOS Simulator (Xcode 26.5)"
         if: ${{ !cancelled() }}
+        # A wedged simulator boot has stalled this step ~30 min, pushing the job
+        # past its 45-min cap (issue #4078). Bound it well above the observed p95
+        # (~9 min) so a real slow boot still passes but a hang fails here.
+        timeout-minutes: 15
         run: ./scripts/ios/boot-simulator.sh
 
       - name: "Run videoRecording MP4 integration test"

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeToolResponse
+import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.storage.ColumnInfo
 import dev.jasonpearson.automobile.desktop.core.storage.DatabaseInfo
@@ -405,13 +406,13 @@ class RealStorageDataSource(
   }
 
   private fun buildDatabasesUri(deviceId: String, packageName: String): String {
-    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    val encodedPackage = encodeResourceUriComponent(packageName)
     return "automobile:devices/$deviceId/databases?appId=$encodedPackage"
   }
 
   private fun buildTablesUri(deviceId: String, databasePath: String, packageName: String): String {
-    val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
-    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    val encodedPath = encodeResourceUriComponent(databasePath)
+    val encodedPackage = encodeResourceUriComponent(packageName)
     return "automobile:devices/$deviceId/databases/$encodedPath/tables?appId=$encodedPackage"
   }
 
@@ -421,9 +422,9 @@ class RealStorageDataSource(
     table: String,
     packageName: String,
   ): String {
-    val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
-    val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
-    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    val encodedPath = encodeResourceUriComponent(databasePath)
+    val encodedTable = encodeResourceUriComponent(table)
+    val encodedPackage = encodeResourceUriComponent(packageName)
     return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/structure?appId=$encodedPackage"
   }
 
@@ -435,14 +436,14 @@ class RealStorageDataSource(
     limit: Int,
     offset: Int,
   ): String {
-    val encodedPath = java.net.URLEncoder.encode(databasePath, "UTF-8")
-    val encodedTable = java.net.URLEncoder.encode(table, "UTF-8")
-    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    val encodedPath = encodeResourceUriComponent(databasePath)
+    val encodedTable = encodeResourceUriComponent(table)
+    val encodedPackage = encodeResourceUriComponent(packageName)
     return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/data?appId=$encodedPackage&limit=$limit&offset=$offset"
   }
 
   private fun buildStorageFilesUri(deviceId: String, packageName: String): String {
-    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
+    val encodedPackage = encodeResourceUriComponent(packageName)
     return "automobile:devices/$deviceId/storage/$encodedPackage/files"
   }
 
@@ -451,8 +452,8 @@ class RealStorageDataSource(
     packageName: String,
     fileName: String,
   ): String {
-    val encodedPackage = java.net.URLEncoder.encode(packageName, "UTF-8")
-    val encodedFile = java.net.URLEncoder.encode(fileName, "UTF-8")
+    val encodedPackage = encodeResourceUriComponent(packageName)
+    val encodedFile = encodeResourceUriComponent(fileName)
     return "automobile:devices/$deviceId/storage/$encodedPackage/$encodedFile/entries"
   }
 

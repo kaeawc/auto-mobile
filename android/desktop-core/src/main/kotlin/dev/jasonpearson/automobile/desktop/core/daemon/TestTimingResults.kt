@@ -1,7 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
@@ -82,47 +80,27 @@ data class TestTimingQuery(
 private const val TEST_TIMING_RESOURCE_URI = "automobile:test-timings"
 
 fun TestTimingQuery.toResourceUri(): String {
-  val params = mutableListOf<Pair<String, String>>()
-  fun addParam(key: String, value: String?) {
-    if (!value.isNullOrBlank()) {
-      params.add(key to value)
+  return ResourceUriBuilder(TEST_TIMING_RESOURCE_URI)
+    .apply {
+      add("lookbackDays", lookbackDays)
+      add("limit", limit)
+      add("minSamples", minSamples)
+      add("orderBy", orderBy?.apiValue)
+      add("orderDirection", orderDirection?.apiValue)
+      add("testClass", testClass)
+      add("testMethod", testMethod)
+      add("deviceId", deviceId)
+      add("deviceName", deviceName)
+      add("devicePlatform", devicePlatform)
+      add("deviceType", deviceType)
+      add("appVersion", appVersion)
+      add("gitCommit", gitCommit)
+      add("targetSdk", targetSdk)
+      add("jdkVersion", jdkVersion)
+      add("jvmTarget", jvmTarget)
+      add("gradleVersion", gradleVersion)
+      add("isCi", isCi)
+      add("sessionUuid", sessionUuid)
     }
-  }
-  fun addInt(key: String, value: Int?) {
-    if (value != null) {
-      params.add(key to value.toString())
-    }
-  }
-
-  addInt("lookbackDays", lookbackDays)
-  addInt("limit", limit)
-  addInt("minSamples", minSamples)
-  addParam("orderBy", orderBy?.apiValue)
-  addParam("orderDirection", orderDirection?.apiValue)
-  addParam("testClass", testClass)
-  addParam("testMethod", testMethod)
-  addParam("deviceId", deviceId)
-  addParam("deviceName", deviceName)
-  addParam("devicePlatform", devicePlatform)
-  addParam("deviceType", deviceType)
-  addParam("appVersion", appVersion)
-  addParam("gitCommit", gitCommit)
-  addInt("targetSdk", targetSdk)
-  addParam("jdkVersion", jdkVersion)
-  addParam("jvmTarget", jvmTarget)
-  addParam("gradleVersion", gradleVersion)
-  if (isCi != null) {
-    params.add("isCi" to isCi.toString())
-  }
-  addParam("sessionUuid", sessionUuid)
-
-  if (params.isEmpty()) {
-    return TEST_TIMING_RESOURCE_URI
-  }
-
-  val query = params.joinToString("&") { (key, value) -> "$key=${encodeQueryParam(value)}" }
-  return "$TEST_TIMING_RESOURCE_URI?$query"
+    .build()
 }
-
-private fun encodeQueryParam(value: String): String =
-  URLEncoder.encode(value, StandardCharsets.UTF_8.name())

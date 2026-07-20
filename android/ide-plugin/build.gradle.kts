@@ -42,9 +42,8 @@ dependencies {
   compileOnly(libs.kotlinx.coroutines)
   compileOnly(libs.kotlinx.serialization)
 
-  // YAML and JSON schema validation (transitive from test-plan-validation)
+  // YAML parsing is used directly; schema validation comes from test-plan-validation.
   implementation(libs.snakeyaml)
-  implementation(libs.json.schema.validator)
 
   // Test dependencies
   testImplementation("junit:junit:4.13.2")

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenTransition
 import kotlinx.serialization.Serializable
@@ -31,7 +32,7 @@ class RealNavigationDataSource(
       // Build URI with optional appId filter
       val uri =
         if (appId != null) {
-          "automobile:navigation/graph?appId=${java.net.URLEncoder.encode(appId, "UTF-8")}"
+          "automobile:navigation/graph?appId=${encodeResourceUriComponent(appId)}"
         } else {
           "automobile:navigation/graph"
         }

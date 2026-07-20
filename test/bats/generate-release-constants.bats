@@ -234,6 +234,41 @@ PY
   [ "$nightly_video" = "$VIDEO_JAR_SHA" ]
 }
 
+@test "inserts a missing nightly videoJarSha256 with nightly indentation" {
+  python3 - "${TEST_ROOT}/src/constants/release.ts" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+before_nightly, nightly_entry = text.split('export const NIGHTLY_CHECKSUM_ENTRY', 1)
+nightly_entry, removed = re.subn(r'^  videoJarSha256: "[^"]+",\n', '', nightly_entry, count=1, flags=re.M)
+assert removed == 1
+text = before_nightly + 'export const NIGHTLY_CHECKSUM_ENTRY' + nightly_entry
+path.write_text(text)
+PY
+
+  run env \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  grep -q "^  videoJarSha256: \"${VIDEO_JAR_SHA}\",$" "${TEST_ROOT}/src/constants/release.ts"
+}
+
+@test "inserts a missing registry videoJarSha256 with registry indentation" {
+  run env \
+    RELEASE_VERSION="0.0.44" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  grep -q "^    videoJarSha256: \"${VIDEO_JAR_SHA}\",$" "${TEST_ROOT}/src/constants/release.ts"
+}
+
 @test "rejects a malformed VIDEO_JAR_SHA256" {
   run env \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \

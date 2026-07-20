@@ -65,7 +65,18 @@ describe("TalkBackTapStrategy", () => {
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
+      expect(result.screenReaderNavigation).toMatchObject({
+        reachable: true,
+        focusTrapDetected: false,
+        traversalOrder: [element]
+      });
       expect(navigateToElement).toHaveBeenCalledTimes(1);
+      expect(navigateToElement).toHaveBeenCalledWith(
+        "device-1",
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ verificationInterval: 1 })
+      );
       expect(driver.getTapCount()).toBe(2); // Double-tap to activate
     });
 
@@ -123,7 +134,31 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
       expect(result.error).toContain("Navigation failed");
+      expect(result.screenReaderNavigation).toMatchObject({
+        reachable: false,
+        focusTrapDetected: false,
+        traversalOrder: [element]
+      });
       expect(navigateToElement).toHaveBeenCalledTimes(1);
+    });
+
+    test("reports a focus trap when the convergence guard stops navigation", async () => {
+      const element = {
+        "resource-id": "test:id/button",
+        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+      } as Element;
+      driver.setElements([element], 0);
+      spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
+        new Error("Focus navigation is not converging on the target.")
+      );
+
+      const result = await strategy.executeTap("device-1", element, driver);
+
+      expect(result.screenReaderNavigation).toMatchObject({
+        reachable: false,
+        focusTrapDetected: true,
+        traversalOrder: [element]
+      });
     });
 
     test("uses ACTION_CLICK fallback if double-tap activation fails", async () => {

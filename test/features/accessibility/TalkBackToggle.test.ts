@@ -22,10 +22,8 @@ Installed Services:
   (none)
 `;
 
-const DUMPSYS_WITH_TALKBACK_NO_COMPONENT = `
-Installed Services:
-  Service[label=TalkBack]
-    Package: com.google.android.marvin.talkback
+const PACKAGE_LIST_WITH_TALKBACK = `
+package:com.google.android.marvin.talkback
 `;
 
 const DIALOG_XML_WITH_BUTTON1 = `<?xml version="1.0" encoding="UTF-8"?>
@@ -61,6 +59,10 @@ describe("TalkBackToggle", () => {
     fakeDetector = new FakeAccessibilityDetector();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    fakeAdb.setCommandResponse(
+      "pm list packages com.google.android.marvin.talkback",
+      makeExecResult(PACKAGE_LIST_WITH_TALKBACK)
+    );
   });
 
   afterEach(() => {
@@ -356,10 +358,10 @@ describe("TalkBackToggle", () => {
   });
 
   describe("TalkBack not installed", () => {
-    test("returns supported:false when dumpsys contains no TalkBack entry", async () => {
+    test("returns supported:false when package manager contains no TalkBack entry", async () => {
       fakeAdb.setCommandResponse(
-        "dumpsys accessibility",
-        makeExecResult(DUMPSYS_WITHOUT_TALKBACK)
+        "pm list packages com.google.android.marvin.talkback",
+        makeExecResult("")
       );
 
       const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
@@ -372,8 +374,8 @@ describe("TalkBackToggle", () => {
 
     test("does not run settings commands when TalkBack is not installed", async () => {
       fakeAdb.setCommandResponse(
-        "dumpsys accessibility",
-        makeExecResult(DUMPSYS_WITHOUT_TALKBACK)
+        "pm list packages com.google.android.marvin.talkback",
+        makeExecResult("")
       );
 
       const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
@@ -382,8 +384,11 @@ describe("TalkBackToggle", () => {
       expect(fakeAdb.wasCommandExecuted("accessibility_enabled")).toBe(false);
     });
 
-    test("returns supported:false when dumpsys command throws", async () => {
-      fakeAdb.setDefaultError(new Error("ADB connection failed"));
+    test("returns supported:false when package manager command throws", async () => {
+      fakeAdb.setCommandError(
+        "pm list packages com.google.android.marvin.talkback",
+        new Error("ADB connection failed")
+      );
 
       const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
       const result = await toggle.toggle(true);
@@ -415,14 +420,19 @@ describe("TalkBackToggle", () => {
     });
   });
 
-  describe("service component name detection", () => {
-    test("extracts service component from dumpsys output", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
-      fakeDetector.setDefaultResult(false);
+  describe("TalkBack service component", () => {
+    test("enables an installed but disabled TalkBack that is absent from dumpsys", async () => {
+      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITHOUT_TALKBACK));
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
 
       const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
-      await toggle.toggle(true);
+      const result = await toggle.toggle(true);
 
+      expect(result).toEqual({ supported: true, applied: true, currentState: true });
+      expect(
+        fakeAdb.wasCommandExecuted("shell pm list packages com.google.android.marvin.talkback")
+      ).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell dumpsys accessibility")).toBe(false);
       expect(
         fakeAdb.wasCommandExecuted(
           "shell settings put secure enabled_accessibility_services com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService"
@@ -430,11 +440,7 @@ describe("TalkBackToggle", () => {
       ).toBe(true);
     });
 
-    test("falls back to hardcoded component when package present but component unparseable", async () => {
-      fakeAdb.setCommandResponse(
-        "dumpsys accessibility",
-        makeExecResult(DUMPSYS_WITH_TALKBACK_NO_COMPONENT)
-      );
+    test("uses the known TalkBack service component", async () => {
       fakeDetector.setDefaultResult(false);
 
       const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);

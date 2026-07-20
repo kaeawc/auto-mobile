@@ -187,32 +187,26 @@ export class TalkBackToggle {
   }
 
   /**
-   * Run `dumpsys accessibility` to check whether TalkBack is installed on the
-   * device.  Returns the full service component name to use in settings commands,
-   * or null if TalkBack is not present.
+   * Check PackageManager for TalkBack rather than `dumpsys accessibility`.
+   * The latter only reports enabled services, so it cannot discover the
+   * installed-but-disabled TalkBack that this toggle needs to enable.
    */
   private async detectInstalledService(): Promise<string | null> {
     try {
-      const result = await this.adb.executeCommand("shell dumpsys accessibility");
-      const output = result.stdout;
+      const result = await this.adb.executeCommand(`shell pm list packages ${TALKBACK_PACKAGE}`);
+      const installed = result.stdout
+        .split("\n")
+        .some(line => line.trim() === `package:${TALKBACK_PACKAGE}`);
 
-      if (!output.includes(TALKBACK_PACKAGE) && !output.includes("TalkBackService")) {
-        logger.debug("[TalkBackToggle] TalkBack not found in dumpsys output");
+      if (!installed) {
+        logger.debug("[TalkBackToggle] TalkBack package not found");
         return null;
       }
 
-      // Prefer extracting the exact component name from the dump
-      const match = /com\.google\.android\.marvin\.talkback\/[\w.]+TalkBackService/.exec(output);
-      if (match) {
-        logger.debug(`[TalkBackToggle] Detected service component: ${match[0]}`);
-        return match[0];
-      }
-
-      // Package found but component name could not be parsed — use known fallback
-      logger.debug("[TalkBackToggle] Using hardcoded TalkBack service component name");
+      logger.debug("[TalkBackToggle] TalkBack package found; using known service component");
       return TALKBACK_SERVICE_FALLBACK;
     } catch (error) {
-      logger.error("[TalkBackToggle] Failed to detect TalkBack service via dumpsys:", error);
+      logger.error("[TalkBackToggle] Failed to detect TalkBack package:", error);
       return null;
     }
   }

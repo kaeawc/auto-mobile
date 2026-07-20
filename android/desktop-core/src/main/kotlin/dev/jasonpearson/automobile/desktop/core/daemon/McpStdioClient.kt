@@ -19,7 +19,7 @@ import kotlinx.serialization.json.put
 
 class McpStdioClient(
   private val command: String,
-  private val json: Json = Json { ignoreUnknownKeys = true },
+  private val json: Json = DaemonJson,
 ) : AutoMobileClient {
   override val transportName: String = "MCP STDIO"
   override val connectionDescription: String = command

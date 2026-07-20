@@ -78,11 +78,7 @@ interface WebRtcStreamClient {
 /** Client for `~/.auto-mobile/webrtc-stream.sock`. One request per connection. */
 class WebRtcStreamSocketClient(
   private val socketPathValue: String = AutoMobileSocketPaths.socketPath(WEBRTC_STREAM_SOCKET_FILE),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-    encodeDefaults = true
-  },
+  private val json: Json = DaemonJson,
 ) : WebRtcStreamClient {
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())

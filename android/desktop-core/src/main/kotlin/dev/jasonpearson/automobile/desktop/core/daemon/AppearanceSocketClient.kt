@@ -82,12 +82,7 @@ interface AppearanceClient {
 /** Client for `~/.auto-mobile/appearance.sock`. One request per connection. */
 class AppearanceSocketClient(
   private val socketPathValue: String = AutoMobileSocketPaths.socketPath(APPEARANCE_SOCKET_FILE),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-    // `type` and `command` are defaults on the request class but required on the wire.
-    encodeDefaults = true
-  },
+  private val json: Json = DaemonJson,
 ) : AppearanceClient {
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())

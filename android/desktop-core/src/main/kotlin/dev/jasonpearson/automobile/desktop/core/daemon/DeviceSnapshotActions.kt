@@ -1,7 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -10,7 +9,7 @@ import kotlinx.serialization.json.put
 /** MCP resource listing every captured snapshot. */
 internal const val DEVICE_SNAPSHOT_ARCHIVE_URI = "automobile:deviceSnapshots/archive"
 
-private val snapshotJson = Json { ignoreUnknownKeys = true }
+private val snapshotJson = DaemonJson
 
 /** Metadata for one captured snapshot, as listed by the archive resource. */
 @Serializable

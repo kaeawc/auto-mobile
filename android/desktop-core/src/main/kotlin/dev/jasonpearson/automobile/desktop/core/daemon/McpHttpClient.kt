@@ -21,7 +21,7 @@ import kotlinx.serialization.json.put
 
 class McpHttpClient(
   private val endpoint: String,
-  private val json: Json = Json { ignoreUnknownKeys = true },
+  private val json: Json = DaemonJson,
   private val retryPolicy: RetryPolicy = RetryPolicy(),
 ) : AutoMobileClient {
   override val transportName: String = "MCP HTTP"

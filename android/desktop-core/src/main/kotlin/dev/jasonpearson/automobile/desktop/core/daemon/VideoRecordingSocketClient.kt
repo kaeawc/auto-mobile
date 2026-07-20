@@ -73,11 +73,7 @@ interface VideoRecordingConfigClient {
 class VideoRecordingSocketClient(
   private val socketPathValue: String =
     AutoMobileSocketPaths.socketPath(VIDEO_RECORDING_SOCKET_FILE),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-    encodeDefaults = true
-  },
+  private val json: Json = DaemonJson,
 ) : VideoRecordingConfigClient {
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())

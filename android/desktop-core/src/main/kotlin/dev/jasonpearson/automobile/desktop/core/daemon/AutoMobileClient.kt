@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -281,7 +282,7 @@ data class FeatureFlagState(
 
 @Serializable
 data class JsonRpcRequest(
-  val jsonrpc: String = "2.0",
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val jsonrpc: String = "2.0",
   val id: JsonElement? = null,
   val method: String,
   val params: JsonElement? = null,

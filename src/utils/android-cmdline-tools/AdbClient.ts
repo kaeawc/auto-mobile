@@ -3,7 +3,12 @@ import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, ExecResult, AndroidUser } from "../../models";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
-import { AdbExecutor } from "./interfaces/AdbExecutor";
+import {
+  AdbExecutor,
+  type AdbExecuteOptions,
+  type AdbProcess,
+  type AdbSpawnOptions,
+} from "./interfaces/AdbExecutor";
 import { getAbortSignal } from "../AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
@@ -300,9 +305,15 @@ export class AdbClient implements AdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal
   ): Promise<ExecResult> {
+    return this.execute(this.parseCommandArgs(command), { timeoutMs, maxBuffer, noRetry, signal });
+  }
+
+  async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    const { timeoutMs, maxBuffer, noRetry, signal } = options;
     const startTime = this.timer.now();
-    const result = await this.executeCommandImpl(command, timeoutMs, maxBuffer, 0, noRetry, signal);
+    const result = await this.executeArgsImpl(args, timeoutMs, maxBuffer, noRetry, signal);
     const duration = this.timer.now() - startTime;
+    const command = args.join(" ");
 
     // Only log longer commands or ones that take significant time
     if (duration > 10 || command.includes("screencap") || command.includes("uiautomator") || command.includes("getevent")) {
@@ -311,6 +322,79 @@ export class AdbClient implements AdbExecutor {
     }
 
     return result;
+  }
+
+  async spawn(args: string[], options: AdbSpawnOptions = {}): Promise<AdbProcess> {
+    const signal = options.signal ?? getAbortSignal();
+    if (signal?.aborted) {
+      throw this.getAbortError(signal);
+    }
+
+    const { adbPath, baseArgs } = await this.getBaseCommandParts();
+    if (signal?.aborted) {
+      throw this.getAbortError(signal);
+    }
+    const fullArgs = [...baseArgs, ...args];
+    const child = this.spawnFn(adbPath, fullArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    this.activeProcesses.add(child);
+
+    let timeoutId: NodeJS.Timeout | undefined;
+    let cleaned = false;
+    let settleStart: ((error?: Error) => void) | undefined;
+    const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
+      this.activeProcesses.delete(child);
+      child.off("exit", onExit);
+      child.off("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+      if (timeoutId) {
+        this.timer.clearTimeout(timeoutId);
+      }
+    };
+    const onExit = () => cleanup();
+    const onError = (error: Error) => {
+      this.notifyMissingDeviceIfNeeded(error);
+      cleanup();
+    };
+    const onAbort = () => {
+      if (!cleaned) {
+        child.kill("SIGTERM");
+        settleStart?.(this.getAbortError(signal));
+        cleanup();
+      }
+    };
+
+    child.once("exit", onExit);
+    child.once("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.timeoutMs) {
+      timeoutId = this.timer.setTimeout(onAbort, options.timeoutMs);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const onSpawn = () => {
+        child.off("error", onInitialError);
+        settleStart = undefined;
+        resolve();
+      };
+      const onInitialError = (error: Error) => {
+        child.off("spawn", onSpawn);
+        settleStart = undefined;
+        reject(error);
+      };
+      settleStart = error => error ? reject(error) : resolve();
+      child.once("spawn", onSpawn);
+      child.once("error", onInitialError);
+      if (signal?.aborted) {
+        onAbort();
+      }
+    });
+
+    // eslint-disable-next-line auto-mobile/no-unknown-cast -- the public interface deliberately exposes only lifecycle, stdio, and kill.
+    return child as unknown as AdbProcess;
   }
 
   /**
@@ -443,17 +527,16 @@ export class AdbClient implements AdbExecutor {
    * @param noRetry - Optional flag to disable retry logic for commands expected to fail
    * @returns Promise with command output
    */
-  private async executeCommandImpl(
-    command: string,
+  private async executeArgsImpl(
+    commandArgs: string[],
     timeoutMs?: number,
     maxBuffer?: number,
-    _attempt: number = 0,
     noRetry?: boolean,
     signal?: AbortSignal
   ): Promise<ExecResult> {
     const { adbPath, baseArgs } = await this.getBaseCommandParts();
-    const commandArgs = this.parseCommandArgs(command);
     const fullArgs = [...baseArgs, ...commandArgs];
+    const command = commandArgs.join(" ");
     const startTime = this.timer.now();
     const resolvedSignal = signal ?? getAbortSignal();
 

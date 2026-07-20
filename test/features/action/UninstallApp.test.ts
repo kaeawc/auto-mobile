@@ -242,7 +242,7 @@ describe("UninstallApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([
       { userId: 0, name: "Owner", running: true },
-      { userId: 10, name: "Work", running: true }
+      { userId: 10, name: "Work", flags: 0x30, running: true }
     ]);
     // App installed under work profile (userId 10)
     setupNoApp(fakeAdb, 0);

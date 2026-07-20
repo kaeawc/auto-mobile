@@ -1,10 +1,49 @@
 import { BootedDevice, ExecResult, AndroidUser } from "../../../models";
+import type { Readable, Writable } from "node:stream";
+
+/** The intentionally small process surface exposed by ADB streaming commands. */
+export interface AdbProcess {
+  readonly stdin: Writable | null;
+  readonly stdout: Readable;
+  readonly stderr: Readable;
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  readonly killed: boolean;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  once(event: "spawn", listener: () => void): this;
+  on(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  on(event: "error", listener: (error: Error) => void): this;
+  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  once(event: "error", listener: (error: Error) => void): this;
+  off(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  off(event: "error", listener: (error: Error) => void): this;
+  off(event: "spawn", listener: () => void): this;
+  removeListener(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  removeListener(event: "error", listener: (error: Error) => void): this;
+}
+
+export interface AdbExecuteOptions {
+  timeoutMs?: number;
+  maxBuffer?: number;
+  noRetry?: boolean;
+  signal?: AbortSignal;
+}
+
+export interface AdbSpawnOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
 
 /**
  * Interface for executing ADB commands
  * Enables dependency injection and testing with fakes
  */
 export interface AdbExecutor {
+  /** Execute argv directly. Device selection and executable lookup stay internal. */
+  execute(args: string[], options?: AdbExecuteOptions): Promise<ExecResult>;
+
+  /** Spawn a long-lived ADB command. Spawned commands deliberately never retry. */
+  spawn(args: string[], options?: AdbSpawnOptions): Promise<AdbProcess>;
   /**
    * Execute an ADB command
    * @param command - The ADB command to execute (without "adb -s <device>" prefix)
@@ -43,13 +82,13 @@ export interface AdbExecutor {
    * List all Android users on the device (personal, work profiles, etc.)
    * @returns Promise with array of Android users
    */
-  listUsers(): Promise<AndroidUser[]>;
+  listUsers(signal?: AbortSignal): Promise<AndroidUser[]>;
 
   /**
    * Get the current foreground app package name and user ID
    * @returns Promise with { packageName: string, userId: number } or null if no app in foreground
    */
-  getForegroundApp(): Promise<{ packageName: string; userId: number } | null>;
+  getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null>;
 
   /**
    * Resolve and return the path to the `adb` binary without executing a command.

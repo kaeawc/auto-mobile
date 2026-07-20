@@ -1,5 +1,6 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { UninstallAppResult } from "../../models/UninstallAppResult";
 import { BootedDevice } from "../../models";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
@@ -148,33 +149,9 @@ export class UninstallApp {
   private async executeAndroid(packageName: string, keepData: boolean, userId?: number): Promise<UninstallAppResult> {
     try {
       // Auto-detect target user if not specified
-      let targetUserId = userId;
-      if (targetUserId === undefined) {
-        // Check if app is in foreground and get its user
-        const foregroundApp = await this.adb.getForegroundApp();
-        if (foregroundApp && foregroundApp.packageName === packageName) {
-          targetUserId = foregroundApp.userId;
-        } else {
-          // Get list of users and prefer work profile
-          const users = await this.adb.listUsers();
+      const targetUserId = (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: userId })).userId;
 
-          // Find first work profile (userId > 0 and running)
-          const workProfile = users.find(u => u.userId > 0 && u.running);
-          if (workProfile) {
-            targetUserId = workProfile.userId;
-          } else {
-            // Fall back to primary user
-            targetUserId = 0;
-          }
-        }
-      }
-
-      // Check if app is installed. Keep the cache disabled so the pre-uninstall
-      // check always reflects live device state (the previous executor-arg path
-      // left caching off; passing the default factory would silently enable it).
-      const listApps = new ListInstalledApps(this.device, this.adbFactory, null, { cacheEnabled: false });
-
-      const installed = (await listApps.execute()).find(app => app === packageName) !== undefined;
+      const installed = await this.isInstalledForUser(packageName, targetUserId);
 
       if (!installed) {
         return {
@@ -196,7 +173,7 @@ export class UninstallApp {
       await this.adb.executeCommand(cmd);
 
       // Verify the app was uninstalled
-      const isStillInstalled = (await listApps.execute()).find(app => app === packageName) !== undefined;
+      const isStillInstalled = await this.isInstalledForUser(packageName, targetUserId);
 
       if (isStillInstalled) {
         return {
@@ -225,5 +202,15 @@ export class UninstallApp {
         error: "Error occurred during application uninstallation"
       };
     }
+  }
+
+  private async isInstalledForUser(packageName: string, userId: number): Promise<boolean> {
+    const result = await this.adb.executeCommand(
+      `shell pm list packages --user ${userId}`,
+      undefined,
+      undefined,
+      true
+    );
+    return result.stdout.split("\n").some(line => line.trim() === `package:${packageName}`);
   }
 }

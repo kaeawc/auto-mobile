@@ -6,8 +6,8 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { H264CaptureSource } from "./H264CaptureSource";
-import { defaultProcessSpawner, type ProcessSpawner, type SpawnedProcess } from "./processSpawner";
 import {
   VIDEO_SERVER_CODEC_ID_H264,
   VIDEO_SERVER_CODEC_ID_PCM16,
@@ -59,7 +59,6 @@ export interface PersistentEncoderH264SourceOptions {
   /** Local path to the built `automobile-video.jar`. Required to run. */
   jarPath: string;
   adbFactory?: AdbClientFactory;
-  spawner?: ProcessSpawner;
   connector?: SocketConnector;
   timer?: Timer;
   /** How long to wait for the server to signal readiness (ms). */
@@ -78,17 +77,16 @@ const DEFAULT_READY_TIMEOUT_MS = 10_000;
  * Lifecycle: push the jar, launch the server, wait for its readiness line,
  * `adb forward` an ephemeral local port to the server's abstract LocalSocket,
  * connect, and parse the binary framing into Annex-B payloads. Fully injectable
- * (adb factory, spawner, socket connector, timer) for device-free unit tests.
+ * (ADB factory, socket connector, timer) for device-free unit tests.
  */
 export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly options: PersistentEncoderH264SourceOptions;
   private readonly adbFactory: AdbClientFactory;
-  private readonly spawner: ProcessSpawner;
   private readonly connector: SocketConnector;
   private readonly timer: Timer;
   private readonly readyTimeoutMs: number;
 
-  private server: SpawnedProcess | null = null;
+  private server: AdbProcess | null = null;
   private socket: StreamSocket | null = null;
   private forwardedPort: number | null = null;
   private running = false;
@@ -98,7 +96,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   constructor(options: PersistentEncoderH264SourceOptions) {
     this.options = options;
     this.adbFactory = options.adbFactory ?? defaultAdbClientFactory;
-    this.spawner = options.spawner ?? defaultProcessSpawner;
     this.connector = options.connector ?? defaultConnector;
     this.timer = options.timer ?? defaultTimer;
     this.readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
@@ -134,7 +131,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
 
   private async launch(): Promise<void> {
     const adb = this.adbFactory.create(this.options.device);
-    const adbPath = await adb.getAdbPathOnly();
     if (!this.running) {
       return;
     }
@@ -143,7 +139,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     await adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`);
 
     // Launch the persistent server as a long-lived process.
-    const server = this.spawner(adbPath, this.buildServerArgs());
+    const server = await adb.spawn(this.buildServerArgs());
     this.server = server;
     server.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();
@@ -232,9 +228,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private buildServerArgs(): string[] {
-    const baseArgs = this.options.device.deviceId ? ["-s", this.options.device.deviceId] : [];
     const args = [
-      ...baseArgs,
       "shell",
       `CLASSPATH=${VIDEO_SERVER_REMOTE_JAR_PATH}`,
       "app_process",
@@ -255,7 +249,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     return args;
   }
 
-  private waitForReady(server: SpawnedProcess): Promise<void> {
+  private waitForReady(server: AdbProcess): Promise<void> {
     return this.waitForServerLine(
       server,
       READY_MARKER,
@@ -264,7 +258,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     );
   }
 
-  private waitForStreamingStarted(server: SpawnedProcess): Promise<void> {
+  private waitForStreamingStarted(server: AdbProcess): Promise<void> {
     return this.waitForServerLine(
       server,
       STREAMING_STARTED_MARKER,
@@ -325,7 +319,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private waitForServerLine(
-    server: SpawnedProcess,
+    server: AdbProcess,
     marker: string,
     timeoutMessage: string,
     exitMessagePrefix: string

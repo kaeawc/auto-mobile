@@ -1,4 +1,5 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ClearAppDataResult, LaunchAppResult, ObserveResult } from "../../models";
 import { ActionableError } from "../../models";
@@ -514,30 +515,12 @@ export class LaunchApp extends BaseVisualChange {
     packageName: string,
     userId?: number
   ): Promise<number> {
-    if (userId !== undefined) {
-      return userId;
-    }
-
-    // Check if app is in foreground and get its user
-    const foregroundApp = await this.adb.getForegroundApp();
-    if (foregroundApp && foregroundApp.packageName === packageName) {
-      logger.info(`[LaunchApp] App is in foreground in user ${foregroundApp.userId}`);
-      return foregroundApp.userId;
-    }
-
-    // Get list of users and prefer work profile
-    const users = await this.adb.listUsers();
-
-    // Find first work profile (userId > 0 and running)
-    const workProfile = users.find(u => u.userId > 0 && u.running);
-    if (workProfile) {
-      logger.info(`[LaunchApp] Using work profile: user ${workProfile.userId}`);
-      return workProfile.userId;
-    }
-
-    // Fall back to primary user
-    logger.info(`[LaunchApp] Using primary user: user 0`);
-    return 0;
+    const target = await new AndroidUserTargetResolver(this.adb).resolve({
+      packageName,
+      explicitUserId: userId,
+    });
+    logger.info(`[LaunchApp] Using ${target.source}: user ${target.userId}`);
+    return target.userId;
   }
 
   private async listInstalledApps(): Promise<string[]> {
@@ -618,12 +601,12 @@ export class LaunchApp extends BaseVisualChange {
     if (isRunning) {
       if (clearAppData) {
         await perf.track("clearAppData", async () => {
-          return new ClearAppData(this.device).execute(packageName);
+          return new ClearAppData(this.device).execute(packageName, targetUserId);
         });
         didTerminateOrClear = true;
       } else if (coldBoot) {
         await perf.track("terminateApp", async () => {
-          return new TerminateApp(this.device).execute(packageName, { skipObservation: true });
+          return new TerminateApp(this.device).execute(packageName, { skipObservation: true, userId: targetUserId });
         });
         didTerminateOrClear = true;
       }
@@ -646,7 +629,7 @@ export class LaunchApp extends BaseVisualChange {
     } else {
       if (clearAppData) {
         await perf.track("clearAppData", async () => {
-          return new ClearAppData(this.device).execute(packageName);
+          return new ClearAppData(this.device).execute(packageName, targetUserId);
         });
         didTerminateOrClear = true;
       }

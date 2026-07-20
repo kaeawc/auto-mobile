@@ -1,5 +1,6 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BootedDevice, GrantAndroidPermissionItemResult, GrantAndroidPermissionsResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -51,22 +52,7 @@ export class GrantAndroidPermissions {
     }
 
     const targetUserId = await perf.track("detectTargetUser", async () => {
-      if (input.userId !== undefined) {
-        return input.userId;
-      }
-
-      const foregroundApp = await this.adb.getForegroundApp();
-      if (foregroundApp && foregroundApp.packageName === packageName) {
-        return foregroundApp.userId;
-      }
-
-      const users = await this.adb.listUsers();
-      const workProfile = users.find(u => u.userId > 0 && u.running);
-      if (workProfile) {
-        return workProfile.userId;
-      }
-
-      return 0;
+      return (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: input.userId })).userId;
     });
 
     const results: GrantAndroidPermissionItemResult[] = [];

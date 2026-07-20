@@ -7,7 +7,7 @@ import {
   type SocketConnector,
   type StreamSocket,
 } from "../../../src/features/webrtc/PersistentEncoderH264Source";
-import type { ProcessSpawner, SpawnedProcess } from "../../../src/features/webrtc/processSpawner";
+import type { SpawnedProcess } from "../../../src/features/webrtc/processSpawner";
 import {
   VIDEO_SERVER_CODEC_ID_AMUX,
   VIDEO_SERVER_CODEC_ID_H264,
@@ -115,15 +115,14 @@ function makeSource(overrides: Record<string, unknown> = {}) {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         },
+        spawn: async (args: string[]) => {
+          spawnArgs.push(args);
+          const process = new FakeProcess();
+          processes.push(process);
+          return process;
+        },
       } as unknown as ReturnType<AdbClientFactory["create"]>;
     },
-  };
-
-  const spawner: ProcessSpawner = (_command, args) => {
-    spawnArgs.push(args);
-    const proc = new FakeProcess();
-    processes.push(proc);
-    return proc;
   };
 
   const connector: SocketConnector = async () => {
@@ -140,7 +139,6 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     onError: error => errors.push(error),
     jarPath: "/tmp/automobile-video.jar",
     adbFactory,
-    spawner,
     connector,
     timer,
     ...overrides,
@@ -187,7 +185,7 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.commands).toContain(`forward tcp:0 localabstract:${VIDEO_SERVER_SOCKET_NAME}`);
 
     const args = ctx.spawnArgs[0].join(" ");
-    expect(args).toContain("-s emulator-5554");
+    expect(args).not.toContain("-s emulator-5554");
     expect(args).toContain("CLASSPATH=/data/local/tmp/automobile-video.jar app_process /");
     expect(args).toContain("--quality low");
     expect(args).toContain("--bit-rate 1500000");

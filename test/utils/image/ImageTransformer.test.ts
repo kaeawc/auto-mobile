@@ -137,7 +137,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
     });
 
     test("webp quality 0 falls back to the default (preserved || quirk)", async () => {
-      // `quality || DEFAULT_JPEG_QUALITY` treats 0 as falsy, so it becomes 75
+      // `quality || DEFAULT_WEBP_QUALITY` treats 0 as falsy, so it becomes 75
       // rather than throwing. Preserving this pre-existing behavior verbatim.
       await imageOf().webp({ quality: 0 }).disableCache().toBuffer();
       expect(backend.lastPipeline!.encoding).toEqual({

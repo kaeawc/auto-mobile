@@ -1,6 +1,26 @@
 @testable import CtrlProxy
 import XCTest
 
+private final class FakeVoiceOverStateProvider: VoiceOverStateProviding {
+    var isRunning = false
+
+    func isVoiceOverRunning() -> Bool {
+        return isRunning
+    }
+}
+
+private final class FakeVoiceOverDefaultsReader: VoiceOverDefaultsReading {
+    private var values: [String: Bool] = [:]
+
+    func set(_ value: Bool, forKey key: String, inDomain domain: String) {
+        values["\(domain).\(key)"] = value
+    }
+
+    func bool(forKey key: String, inDomain domain: String) -> Bool {
+        return values["\(domain).\(key)"] ?? false
+    }
+}
+
 final class CommandHandlerTests: XCTestCase {
     var fakeTimeProvider: FakeTimeProvider!
     var perfProvider: PerfProvider!
@@ -1570,6 +1590,55 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertNil(voResponse.requestId)
         XCTAssertEqual(voResponse.type, "voiceover_state_result")
         XCTAssertTrue(voResponse.success)
+    }
+
+    func testGetVoiceOverStateReportsLivenessProviderState() {
+        let voiceOverStateProvider = FakeVoiceOverStateProvider()
+        voiceOverStateProvider.isRunning = true
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            voiceOverStateProvider: voiceOverStateProvider
+        )
+
+        let request = WebSocketRequest.getVoiceOverState(RequestEnvelope(requestId: "voiceover-live"))
+
+        guard let response = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
+
+        XCTAssertTrue(response.enabled)
+    }
+
+    func testGetVoiceOverStateDoesNotTreatPreferenceBackedUIKitStateAsLiveness() {
+        let voiceOverStateProvider = FakeVoiceOverStateProvider()
+        voiceOverStateProvider.isRunning = false
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            voiceOverStateProvider: voiceOverStateProvider
+        )
+
+        let request = WebSocketRequest.getVoiceOverState(RequestEnvelope(requestId: "voiceover-stopped"))
+
+        guard let response = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
+
+        XCTAssertFalse(response.enabled)
+    }
+
+    func testDefaultVoiceOverStateProviderReadsRunningKey() {
+        let defaultsReader = FakeVoiceOverDefaultsReader()
+        defaultsReader.set(true, forKey: "VOTIsRunningKey", inDomain: "com.apple.Accessibility")
+
+        let provider = DefaultVoiceOverStateProvider(defaultsReader: defaultsReader)
+
+        XCTAssertTrue(provider.isVoiceOverRunning())
+    }
+
+    func testDefaultVoiceOverStateProviderTreatsMissingRunningKeyAsStopped() {
+        let provider = DefaultVoiceOverStateProvider(defaultsReader: FakeVoiceOverDefaultsReader())
+
+        XCTAssertFalse(provider.isVoiceOverRunning())
     }
 
     func testGetVoiceOverStateIsEncodable() throws {

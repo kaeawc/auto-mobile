@@ -90,6 +90,11 @@ describe("VoiceOverToggle", () => {
           `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
         )
       ).toBe(true);
+      expect(
+        fakeExec.wasCommandExecuted(
+          `xcrun simctl spawn ${udid} launchctl kickstart -p system/com.apple.VoiceOverTouch`
+        )
+      ).toBe(true);
     });
 
     test("always applies even when detection would report already-enabled (CtrlProxy-safe)", async () => {
@@ -131,6 +136,24 @@ describe("VoiceOverToggle", () => {
           `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
         )
       ).toBe(true);
+      expect(
+        fakeExec.wasCommandExecuted(
+          `xcrun simctl spawn ${udid} launchctl kill SIGTERM system/com.apple.VoiceOverTouch`
+        )
+      ).toBe(true);
+    });
+
+    test("treats an already-stopped VoiceOver service as a successful disable", async () => {
+      fakeExec.setCommandHandler("launchctl kill SIGTERM", () => {
+        throw new Error("Command failed: launchctl kill SIGTERM\nexit code: 3\nstderr:\nNo process to signal.");
+      });
+
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const result = await toggle.toggle(false);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(true);
+      expect(result.currentState).toBe(false);
     });
   });
 

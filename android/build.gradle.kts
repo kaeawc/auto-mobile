@@ -1,11 +1,11 @@
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
+import dev.detekt.gradle.extensions.DetektExtension
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import dev.detekt.gradle.extensions.DetektExtension
 
 buildscript {
   dependencies {

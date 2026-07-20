@@ -25,7 +25,8 @@ internal class ResourceUriBuilder(private val resourceUri: String) {
       return resourceUri
     }
 
-    val query = parameters.joinToString("&") { (name, value) -> "$name=${encodeResourceUriComponent(value)}" }
+    val query =
+      parameters.joinToString("&") { (name, value) -> "$name=${encodeResourceUriComponent(value)}" }
     return "$resourceUri?$query"
   }
 }

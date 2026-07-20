@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -370,6 +372,33 @@ class CorrelatedErrorDriftGuardTest {
     assertTrue("${CorrelatedErrorDriftScanner.CORE_FILE} must exist", core.isFile)
   }
 
+  @Test
+  fun `only the correlated-error core constructs fallback frames`() {
+    val coreDirectory =
+      requireNotNull(locateProductionSource(CorrelatedErrorDriftScanner.CORE_FILE).parentFile) {
+        "${CorrelatedErrorDriftScanner.CORE_FILE} must have a parent directory"
+      }
+    val sources =
+      Files.walk(Paths.get(coreDirectory.absolutePath)).use { paths ->
+        paths
+          .iterator()
+          .asSequence()
+          .map { it.toFile() }
+          .filter { it.isFile && it.extension == "kt" }
+          .toList()
+      }
+    val violations = sources.flatMap { source ->
+      CorrelatedErrorDriftScanner.scan(source.name, source.readText()).filter {
+        it.kind == CorrelatedErrorDriftScanner.Kind.HAND_ROLLED_ERROR_FRAME
+      }
+    }
+
+    assertTrue(
+      "Every fallback ErrorResponse must be constructed by ${CorrelatedErrorDriftScanner.CORE_FILE}: $violations",
+      violations.isEmpty(),
+    )
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -462,7 +491,7 @@ object CorrelatedErrorDriftScanner {
       if (CAUSE_DERIVATION_TOKENS.any { line.contains(it) }) {
         violations += Violation(Kind.HAND_ROLLED_CAUSE, fileName, lineNumber)
       }
-      if (line.contains(ERROR_FRAME_CONSTRUCTION)) {
+      if (ERROR_FRAME_CONSTRUCTION.containsMatchIn(line)) {
         violations += Violation(Kind.HAND_ROLLED_ERROR_FRAME, fileName, lineNumber)
       }
     }
@@ -489,7 +518,7 @@ object CorrelatedErrorDriftScanner {
       "javaClass.simpleName",
     )
 
-  private const val ERROR_FRAME_CONSTRUCTION = "ErrorResponse("
+  private val ERROR_FRAME_CONSTRUCTION = Regex("\\bErrorResponse\\s*\\(")
 
   /**
    * Delegation must be an actual *call*, not a bare mention of the type: a consumer that holds a

@@ -92,6 +92,14 @@
   grep -q "verify-release-integrity.sh" ".github/workflows/release.yml"
 }
 
+@test "release.yml runs the Bun image smoke without the retired Wasm OSR override (#4009)" {
+  smoke_block="$(sed -n '/name: Run Bun image runtime smoke/,/run: bun run test:image:bun/p' ".github/workflows/release.yml")"
+
+  [[ "$smoke_block" == *"run: bun run test:image:bun"* ]]
+  [[ "$smoke_block" != *"BUN_JSC_useWasmOSR"* ]]
+  [[ "$smoke_block" != *"@jimp/wasm-webp"* ]]
+}
+
 @test "prepare-release.yml runs the release-integrity gate" {
   grep -q "verify-release-integrity.sh" ".github/workflows/prepare-release.yml"
 }

@@ -5,7 +5,7 @@ import { defaultTimer, type Timer } from "../SystemTimer";
 import type { ImageBackend, ImageMetadata, ImagePipeline } from "./backend/ImageBackend";
 import { resolveImageBackend } from "./backend/resolveImageBackend";
 
-const DEFAULT_JPEG_QUALITY = 75;
+const DEFAULT_WEBP_QUALITY = 75;
 
 // Re-exported from the backend seam so existing importers keep the same path.
 export type { ImageMetadata };
@@ -73,7 +73,7 @@ class JimpImageTransformer {
    * @param options.nearLossless Whether to use near-lossless compression
    */
   public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): JimpImageTransformer {
-    const quality = options?.quality || DEFAULT_JPEG_QUALITY;
+    const quality = options?.quality || DEFAULT_WEBP_QUALITY;
 
     if (quality < 1 || quality > 100) {
       throw new Error("WebP quality must be between 1 and 100");

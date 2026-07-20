@@ -11,7 +11,8 @@ function directlyExecutesAvdManager(source: string): boolean {
   const constructedPath = /\b(?:join|resolve)\s*\([^;\n]*["'`]avdmanager(?:\.bat)?["'`]/i;
   const variableNames = [...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*[^;]*?(?:\b(?:join|resolve)\s*\([^;]*?)?["'`]avdmanager(?:\.bat)?["'`][^;]*;/gi)].map(match => match[1]);
   const variableLaunch = variableNames.some(name => new RegExp(`\\b(?:spawn|spawnSync|spawnCommand|exec|execFile|execFileSync)\\s*\\(\\s*${name}\\b|\\bBun\\.spawn\\s*\\(\\s*\\[\\s*${name}\\b`).test(source));
-  return directLiteral.test(source) || (launcher.test(source) && constructedPath.test(source) && variableLaunch);
+  const inlineLaunch = /\b(?:spawn|spawnSync|spawnCommand|exec|execFile|execFileSync)\s*\(\s*(?:join|resolve)\s*\([^;\n]*["'`]avdmanager|\bBun\.spawn\s*\(\s*\[\s*(?:join|resolve)\s*\([^;\n]*["'`]avdmanager/i;
+  return directLiteral.test(source) || inlineLaunch.test(source) || (launcher.test(source) && constructedPath.test(source) && variableLaunch);
 }
 
 function sourceFiles(directory: string): string[] {
@@ -51,6 +52,15 @@ describe("avdmanager execution boundary (issue #4051)", () => {
     )).toBe(true);
     expect(directlyExecutesAvdManager(
       'const tool = join(sdkRoot, "bin", "avdmanager"); Bun.spawn([tool, ...args]);'
+    )).toBe(true);
+  });
+
+  test("detects inline resolved paths passed to launch APIs", () => {
+    expect(directlyExecutesAvdManager(
+      'spawn(join(sdkRoot, "bin", "avdmanager"), args);'
+    )).toBe(true);
+    expect(directlyExecutesAvdManager(
+      'Bun.spawn([join(sdkRoot, "bin", "avdmanager"), ...args]);'
     )).toBe(true);
   });
 

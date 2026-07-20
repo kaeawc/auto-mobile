@@ -88,7 +88,7 @@ describe("AvdManagerClient", () => {
     expect(child.stdinEnded).toBe(true);
   });
 
-  test("uses the Windows batch executable when that is the resolved tool", async () => {
+  test("executes a Windows batch file through cmd without enabling a shell", async () => {
     const { client, child, calls } = createClient({
       existsSync: path => path.endsWith("avdmanager.bat") || path.endsWith("system-images"),
       platform: "win32"
@@ -98,8 +98,46 @@ describe("AvdManagerClient", () => {
     child.close(0);
 
     await expect(pending).resolves.toEqual([]);
-    expect(normalizePath(calls[0]?.command ?? "")).toBe("/sdk/cmdline-tools/latest/bin/avdmanager.bat");
-    expect(calls[0]).toMatchObject({ args: ["list", "avd"], shell: true });
+    expect(calls[0]).toMatchObject({
+      command: "cmd.exe",
+      args: ["/d", "/v:off", "/s", "/c", '"/sdk/cmdline-tools/latest/bin/avdmanager.bat" "list" "avd"'],
+      shell: false
+    });
+  });
+
+  test("quotes Windows batch arguments before passing them to cmd", async () => {
+    const { client, child, calls } = createClient({
+      existsSync: path => path.endsWith("avdmanager.bat") || path.endsWith("system-images"),
+      platform: "win32"
+    });
+    const pending = client.createAvd({
+      name: "pixel & echo injected %PATH%!",
+      package: "system-images;android-36;google_apis;x86_64",
+      path: "C:\\AVDs\\with & percent%"
+    });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    child.close(0);
+
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(calls[0]?.shell).toBe(false);
+    expect(calls[0]?.args.at(-1)).toContain('"pixel & echo injected %%PATH%%!"');
+    expect(calls[0]?.args.at(-1)).toContain('"C:\\AVDs\\with & percent%%"');
+  });
+
+  test("rejects Windows batch arguments that could terminate quoting", async () => {
+    const { client, calls } = createClient({
+      existsSync: path => path.endsWith("avdmanager.bat") || path.endsWith("system-images"),
+      platform: "win32"
+    });
+
+    await expect(client.createAvd({
+      name: 'pixel" & echo injected',
+      package: "system-images;android-36;google_apis;x86_64"
+    })).resolves.toMatchObject({
+      success: false,
+      message: expect.stringContaining("cannot contain Windows command-line quotes or newlines")
+    });
+    expect(calls).toEqual([]);
   });
 
   test("requires avdmanager without coupling AVD operations to sdkmanager", async () => {

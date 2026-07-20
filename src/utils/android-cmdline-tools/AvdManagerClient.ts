@@ -60,6 +60,13 @@ function getFailureSummary(result: CommandResult): string {
   return result.stderr.trim() || result.stdout.trim() || "Unknown error";
 }
 
+function quoteForWindowsCmd(value: string): string {
+  if (/[\r\n"]/.test(value)) {
+    throw new Error("avdmanager arguments cannot contain Windows command-line quotes or newlines");
+  }
+  return `"${value.replace(/%/g, "%%")}"`;
+}
+
 function incompatibleMessage(path: string, output: string): string | null {
   const normalized = normalizePath(output);
   const jaxb = JAXB_ERROR_MARKERS.some(marker => normalized.includes(marker));
@@ -201,12 +208,11 @@ export class AvdManagerClient {
   private async execute(path: string, args: string[], inputOptions: { input?: string; env?: NodeJS.ProcessEnv; timeoutMs: number }, options: AvdManagerExecutionOptions): Promise<CommandResult> {
     return new Promise((resolvePromise, reject) => {
       if (options.signal?.aborted) {return reject(new Error("avdmanager command cancelled"));}
-      const needsWindowsShell = this.dependencies.platform === "win32" && path.toLowerCase().endsWith(".bat");
-      const child = this.dependencies.spawn(path, args, {
+      const invocation = this.windowsBatchInvocation(path, args, inputOptions.env);
+      const child = this.dependencies.spawn(invocation.command, invocation.args, {
         env: inputOptions.env,
         stdio: ["pipe", "pipe", "pipe"],
-        // Windows cannot execute .bat files directly; retain argv at the client boundary.
-        shell: needsWindowsShell,
+        shell: false,
       });
       let settled = false;
       let stdout = "";
@@ -239,6 +245,18 @@ export class AvdManagerClient {
       child.on("error", error => settle(() => reject(new Error(`Failed to spawn avdmanager: ${error.message}`))));
       if (inputOptions.input) { child.stdin?.write(inputOptions.input); child.stdin?.end(); }
     });
+  }
+
+  private windowsBatchInvocation(path: string, args: string[], environment?: NodeJS.ProcessEnv): { command: string; args: string[] } {
+    if (this.dependencies.platform !== "win32" || !path.toLowerCase().endsWith(".bat")) {
+      return { command: path, args };
+    }
+
+    const command = [quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ");
+    return {
+      command: environment?.ComSpec ?? environment?.COMSPEC ?? "cmd.exe",
+      args: ["/d", "/v:off", "/s", "/c", command],
+    };
   }
 
   private throwIfUnsuccessful(prefix: string, path: string, result: CommandResult): void {

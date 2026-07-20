@@ -257,6 +257,16 @@ describe("IosH264Source", () => {
     await expect(started).rejects.toThrow(/exited before audio/);
   });
 
+  test("rejects audio startup when the helper errors after video but before PCM", async () => {
+    const { source, helper } = createHarness(IOS_SIMULATOR, { audioEnabled: true });
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    helper.emit("error", new Error("helper crashed"));
+
+    await expect(started).rejects.toThrow("helper crashed");
+  });
+
   test("passes explicit simulator fps to helper target and ffmpeg input", async () => {
     const helper = new FakeFrameCaptureHelper();
     const encoder = new FakeChildProcess();

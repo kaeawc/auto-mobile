@@ -298,7 +298,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       : config.outputPath;
 
     const args = [
-      "simctl",
       "io",
       device.deviceId,
       "recordVideo",
@@ -308,7 +307,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       rawOutputPath,
     ];
 
-    const process = spawn("xcrun", args, { stdio: ["ignore", "ignore", "ignore"] });
+    const process = await simctl.startCommandArgs(args, { stdio: ["ignore", "ignore", "ignore"] });
 
     try {
       await waitForSpawn(process);

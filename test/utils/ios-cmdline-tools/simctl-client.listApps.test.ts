@@ -4,7 +4,7 @@ import { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 
 describe("SimCtlClient listApps", () => {
-  test("pipes listapps through plutil and uses --all flag", async () => {
+  test("runs listapps with argv and uses --all flag", async () => {
     const device: BootedDevice = {
       deviceId: "ios-device-123",
       name: "iOS Device",
@@ -18,7 +18,7 @@ describe("SimCtlClient listApps", () => {
       if (args.join(" ") === "simctl --version") {
         return createExecResult("simctl version 1.0.0", "");
       }
-      if (cmd.includes("listapps ios-device-123 --all | plutil")) {
+      if (cmd === "xcrun simctl listapps ios-device-123 --all") {
         const payload = JSON.stringify({
           "com.apple.Preferences": { bundleName: "Settings" }
         });
@@ -30,7 +30,8 @@ describe("SimCtlClient listApps", () => {
     const simctl = new SimCtlClient(device, execAsync);
     const apps = await simctl.listApps();
 
-    expect(execCalls.some(c => c.includes("listapps ios-device-123 --all | plutil"))).toBe(true);
+    expect(execCalls).toContain("xcrun simctl listapps ios-device-123 --all");
+    expect(execCalls.some(c => c.startsWith("/bin/sh "))).toBe(false);
     expect(apps).toEqual([{ bundleId: "com.apple.Preferences", bundleName: "Settings" }]);
   });
 
@@ -48,10 +49,10 @@ describe("SimCtlClient listApps", () => {
       if (args.join(" ") === "simctl --version") {
         return createExecResult("simctl version 1.0.0", "");
       }
-      if (cmd.includes("listapps ios-device-456 --all | plutil")) {
+      if (cmd === "xcrun simctl listapps ios-device-456 --all") {
         throw new Error("unknown option: --all");
       }
-      if (cmd.includes("listapps ios-device-456 | plutil")) {
+      if (cmd === "xcrun simctl listapps ios-device-456") {
         const payload = JSON.stringify({
           "com.apple.Fitness": { bundleName: "Fitness" }
         });
@@ -63,8 +64,8 @@ describe("SimCtlClient listApps", () => {
     const simctl = new SimCtlClient(device, execAsync);
     const apps = await simctl.listApps();
 
-    expect(execCalls.some(c => c.includes("listapps ios-device-456 --all | plutil"))).toBe(true);
-    expect(execCalls.some(c => c.includes("listapps ios-device-456 | plutil") && !c.includes("--all"))).toBe(true);
+    expect(execCalls).toContain("xcrun simctl listapps ios-device-456 --all");
+    expect(execCalls).toContain("xcrun simctl listapps ios-device-456");
     expect(apps).toEqual([{ bundleId: "com.apple.Fitness", bundleName: "Fitness" }]);
   });
 });

@@ -12,7 +12,7 @@ import {
 } from "../../utils/Backoff";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 import {
   getFileSize,
@@ -282,7 +282,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private ffmpegPath: string = "ffmpeg";
   private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
 
-  constructor(private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory) {}
+  constructor(
+    private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    private readonly simctlFactory: (device: BootedDevice) => SimCtl = device => new SimCtlClient(device)
+  ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
     await this.ensureFfmpegAvailable();
@@ -436,7 +439,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     device: BootedDevice,
     config: VideoCaptureConfig
   ): Promise<RecordingHandle> {
-    const simctl = new SimCtlClient(device);
+    const simctl = this.simctlFactory(device);
     const available = await simctl.isAvailable();
     if (!available) {
       throw new ActionableError("simctl is not available. Install Xcode command line tools.");
@@ -448,14 +451,13 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     );
 
     const args = [
-      "simctl",
       "io",
       device.deviceId,
       "recordVideo",
       capturePath,
     ];
 
-    const captureProcess = spawn("xcrun", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const captureProcess = await simctl.startCommandArgs(args, { stdio: ["ignore", "ignore", "pipe"] });
 
     try {
       await waitForSpawn(captureProcess);
@@ -485,7 +487,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new ActionableError(
         this.buildProcessFailureMessage(
           `Failed to start iOS recording: ${error}${cleanupSuffix}`,
-          "xcrun",
+          "xcrun simctl",
           args,
           captureTracker
         )
@@ -524,9 +526,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new ActionableError(
         this.buildProcessFailureMessage(
           `iOS recording file missing at ${capturePath}: ${reason}`,
-          "xcrun",
+          "xcrun simctl",
           [
-            "simctl",
             "io",
             backendHandle.config.device?.deviceId ?? "(unknown-device)",
             "recordVideo",

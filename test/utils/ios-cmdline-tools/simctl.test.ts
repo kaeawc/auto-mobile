@@ -1,6 +1,7 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
@@ -160,6 +161,43 @@ describe("Simctl", function() {
         "C:\\tmp",
         "",
       ]);
+    });
+  });
+
+  describe("startCommandArgs", function() {
+    test("starts a supervised simctl command with literal argv", async function() {
+      const started: { command?: string; args?: readonly string[]; options?: SpawnOptions } = {};
+      const child = {} as ChildProcess;
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(
+        mockDevice,
+        mockExecAsync,
+        undefined,
+        undefined,
+        (command, args, options) => {
+          started.command = command;
+          started.args = args;
+          started.options = options;
+          return child;
+        }
+      );
+
+      const result = await simctl.startCommandArgs(
+        ["io", "test-ios-device-id", "recordVideo", "/tmp/a path;$(safe).mov"],
+        { stdio: ["ignore", "ignore", "pipe"] }
+      );
+
+      expect(result).toBe(child);
+      expect(started.command).toBe("xcrun");
+      expect(started.args).toEqual([
+        "simctl", "io", "test-ios-device-id", "recordVideo", "/tmp/a path;$(safe).mov"
+      ]);
+      expect(started.options).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
     });
   });
 

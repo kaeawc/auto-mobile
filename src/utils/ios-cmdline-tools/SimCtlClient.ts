@@ -1,4 +1,4 @@
-import { ChildProcess, execFile } from "child_process";
+import { ChildProcess, execFile, spawn, type SpawnOptions } from "child_process";
 import { promisify } from "util";
 import { promises as fsPromises } from "fs";
 import { tmpdir } from "os";
@@ -70,6 +70,13 @@ export interface SimCtl {
    * @returns Promise with command output
    */
   executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
+
+  /**
+   * Start a long-lived simctl command. Callers own the returned process and
+   * must stop it; recording callers should use SIGINT so simctl can finalize
+   * its output before any escalation.
+   */
+  startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess>;
 
   /**
    * Check if simctl is available
@@ -262,6 +269,10 @@ const execAsync = async (
   return createExecResult(stdout, stderr);
 };
 
+function defaultSpawnProcess(command: string, args: string[], options?: SpawnOptions): ChildProcess {
+  return spawn(command, args, options ?? {});
+}
+
 function splitCommandArgs(command: string): string[] {
   const trimmed = command.trim();
   if (!trimmed) {
@@ -356,6 +367,7 @@ export class SimCtlClient implements SimCtl {
   private timer: Timer;
   private platform: NodeJS.Platform;
   private readonly usesInjectedExecAsync: boolean;
+  private readonly spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess;
   // Cached result of the launchctl headless-session probe (null = not yet probed)
   private headlessSessionCache: boolean | null = null;
 
@@ -374,13 +386,15 @@ export class SimCtlClient implements SimCtl {
     device: BootedDevice | null = null,
     execAsyncFn: ((file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
     timer: Timer = defaultTimer,
-    platform: NodeJS.Platform = process.platform
+    platform: NodeJS.Platform = process.platform,
+    spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess = defaultSpawnProcess
   ) {
     this.device = device;
     this.usesInjectedExecAsync = execAsyncFn !== null;
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
     this.platform = platform;
+    this.spawnProcess = spawnProcess;
   }
 
   /**
@@ -406,6 +420,29 @@ export class SimCtlClient implements SimCtl {
     return this.executeCommandArgv(args, timeoutMs, args.map(arg => JSON.stringify(arg)).join(" "));
   }
 
+  async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
+    if (args.length === 0) {
+      throw new Error("Command cannot be empty");
+    }
+
+    await this.ensureAvailableForCommand();
+    const fullArgs = ["simctl", ...args];
+    logger.debug(`[iOS] Starting command: xcrun ${fullArgs.join(" ")}`);
+    return this.spawnProcess("xcrun", fullArgs, options);
+  }
+
+  private async ensureAvailableForCommand(): Promise<void> {
+    try {
+      await this.ensureLocalSimctlAvailable();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = this.platform === "darwin"
+        ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
+        : "iOS simulator tooling is only available on macOS.";
+      throw new ActionableError(message);
+    }
+  }
+
   private async executeCommandArgv(args: string[], timeoutMs?: number, displayCommand?: string): Promise<ExecResult> {
     if (args.length === 0) {
       throw new Error("Command cannot be empty");
@@ -419,15 +456,7 @@ export class SimCtlClient implements SimCtl {
 
     logger.debug(`[iOS] Executing command: ${fullCommand}`);
 
-    try {
-      await this.ensureLocalSimctlAvailable();
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      const message = this.platform === "darwin"
-        ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
-        : "iOS simulator tooling is only available on macOS.";
-      throw new ActionableError(message);
-    }
+    await this.ensureAvailableForCommand();
 
     const runCommand = (signal?: AbortSignal) => this.execAsync("xcrun", localArgs, undefined, signal);
 
@@ -908,23 +937,36 @@ export class SimCtlClient implements SimCtl {
         });
       };
 
-      // simctl listapps may return old-style plist instead of JSON (Xcode 26+).
-      // Pipe through plutil to convert plist to JSON.
-      const listAppsJson = async (args: string): Promise<string> => {
-        const result = await this.execAsync(
-          "/bin/sh",
-          ["-c", `xcrun simctl listapps ${args} | plutil -convert json -o - -- -`]
-        );
-        return result.stdout;
+      // simctl listapps may return an old-style plist instead of JSON (Xcode
+      // 26+). Keep both stages argv-based: simctl is run through this owner,
+      // then plutil converts a private temporary file without a shell pipe.
+      const listAppsJson = async (args: string[]): Promise<string> => {
+        const result = await this.executeCommandArgs(["listapps", ...args]);
+        try {
+          JSON.parse(result.stdout);
+          return result.stdout;
+        } catch (error) {
+          logger.debug(`[iOS] listapps returned plist; converting with plutil: ${error}`);
+          const directory = await fsPromises.mkdtemp(join(tmpdir(), "automobile-simctl-listapps-"));
+          const inputPath = join(directory, "listapps.plist");
+          const outputPath = join(directory, "listapps.json");
+          try {
+            await fsPromises.writeFile(inputPath, result.stdout, "utf8");
+            await this.execAsync("plutil", ["-convert", "json", "-o", outputPath, inputPath]);
+            return await fsPromises.readFile(outputPath, "utf8");
+          } finally {
+            await fsPromises.rm(directory, { recursive: true, force: true });
+          }
+        }
       };
 
       try {
-        return parseApps(await listAppsJson(`${targetDevice} --all`));
+        return parseApps(await listAppsJson([targetDevice, "--all"]));
       } catch (error) {
         logger.warn(`Failed to list iOS apps with --all: ${error}`);
       }
 
-      return parseApps(await listAppsJson(targetDevice));
+      return parseApps(await listAppsJson([targetDevice]));
     } catch (error) {
       logger.warn(`Failed to list iOS apps: ${error}`);
       return [];
@@ -1109,7 +1151,9 @@ export class SimCtlClient implements SimCtl {
     if (udid) {
       try {
         await this.execAsync("osascript", ["-e", 'tell application "Simulator" to activate']);
-      } catch { /* non-fatal */ }
+      } catch (error) {
+        logger.debug(`[iOS] Could not activate Simulator.app for ${udid}: ${error}`);
+      }
     }
   }
 

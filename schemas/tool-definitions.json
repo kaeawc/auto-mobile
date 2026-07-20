@@ -7773,6 +7773,231 @@
           ],
           "additionalProperties": {}
         },
+        "screenReaderNavigation": {
+          "type": "object",
+          "properties": {
+            "reachable": {
+              "type": "boolean",
+              "description": "Whether swipe cursor navigation reached the target"
+            },
+            "traversalOrder": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "bounds": {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "number"
+                      },
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "centerX": {
+                        "type": "number"
+                      },
+                      "centerY": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "resource-id": {
+                    "type": "string"
+                  },
+                  "view-id": {
+                    "type": "string"
+                  },
+                  "content-desc": {
+                    "type": "string"
+                  },
+                  "occlusionState": {
+                    "type": "string"
+                  },
+                  "occludedBy": {
+                    "type": "string"
+                  },
+                  "occludedByViewId": {
+                    "type": "string"
+                  },
+                  "class": {
+                    "type": "string"
+                  },
+                  "package": {
+                    "type": "string"
+                  },
+                  "checkable": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "checked": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "clickable": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "focusable": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "focused": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "accessibility-focused": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "scrollable": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  },
+                  "selected": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string",
+                        "const": "true"
+                      },
+                      {
+                        "type": "string",
+                        "const": "false"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "bounds"
+                ],
+                "additionalProperties": {}
+              },
+              "description": "Focused nodes in cursor traversal order"
+            },
+            "focusTrapDetected": {
+              "type": "boolean",
+              "description": "Whether cursor navigation got stuck or failed to converge"
+            }
+          },
+          "required": [
+            "reachable",
+            "traversalOrder",
+            "focusTrapDetected"
+          ],
+          "additionalProperties": {}
+        },
         "debug": {}
       },
       "required": [

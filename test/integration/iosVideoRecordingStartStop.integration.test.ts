@@ -10,13 +10,11 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const execFileAsync = promisify(execFile);
-// Force-disabled: flaky in CI — the simulator's simctl recording intermittently
-// produces an empty (0-byte) .mov, so stop/finalize fails after the readiness
-// probe deadline. Tracked in #3910. Re-enable by restoring the env gate:
-//   const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
-//   const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
-const describeIntegration = describe.skip;
-const DEFAULT_WAIT_MS = 4000;
+const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
+const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
+// Give a cold CI simulator enough time to render frames after the script's
+// screenshot readiness check, rather than stopping immediately after startup.
+const DEFAULT_WAIT_MS = 10000;
 const DEFAULT_TEST_TIMEOUT_MS = 420000;
 
 interface ToolTextResponse {

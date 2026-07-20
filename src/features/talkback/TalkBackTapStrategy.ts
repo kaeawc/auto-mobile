@@ -15,6 +15,17 @@ export interface TalkBackTapResult {
    */
   method: "focus-navigation" | "accessibility-action" | "coordinate-fallback";
   error?: string;
+  screenReaderNavigation?: ScreenReaderNavigationResult;
+}
+
+/** Evidence captured while the opt-in screen-reader cursor journey runs. */
+export interface ScreenReaderNavigationResult {
+  /** Whether the cursor reached the target through swipe navigation. */
+  reachable: boolean;
+  /** Focused nodes in the order the cursor visited them. */
+  traversalOrder: Element[];
+  /** Whether navigation stopped because the cursor was stuck or diverging. */
+  focusTrapDetected: boolean;
 }
 
 export type TalkBackFallbackAction = "tap" | "doubleTap" | "longPress";
@@ -74,6 +85,7 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
+    let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
     const resourceId = element?.["resource-id"] as string | undefined;
     const elementText = element.text as string | undefined;
     const elementContentDesc = element["content-desc"] as string | undefined;
@@ -82,7 +94,12 @@ export class TalkBackTapStrategy {
       return {
         success: false,
         method: "focus-navigation",
-        error: "Element has no resource-id, text, or content-desc for navigation"
+        error: "Element has no resource-id, text, or content-desc for navigation",
+        screenReaderNavigation: {
+          reachable: false,
+          traversalOrder: [],
+          focusTrapDetected: false
+        }
       };
     }
 
@@ -103,7 +120,12 @@ export class TalkBackTapStrategy {
         return {
           success: false,
           method: "focus-navigation",
-          error: `Failed to get traversal order: ${traversalResult.error}`
+          error: `Failed to get traversal order: ${traversalResult.error}`,
+          screenReaderNavigation: {
+            reachable: false,
+            traversalOrder: [],
+            focusTrapDetected: false
+          }
         };
       }
 
@@ -123,6 +145,13 @@ export class TalkBackTapStrategy {
         }
       }
 
+      const navigationResult: ScreenReaderNavigationResult = {
+        reachable: false,
+        traversalOrder: currentFocus ? [currentFocus] : [],
+        focusTrapDetected: false
+      };
+      screenReaderNavigation = navigationResult;
+
       // Calculate navigation path
       const navigationPath = this.pathCalculator.calculatePath(
         currentFocus,
@@ -134,7 +163,8 @@ export class TalkBackTapStrategy {
         return {
           success: false,
           method: "focus-navigation",
-          error: "Could not calculate navigation path to target element"
+          error: "Could not calculate navigation path to target element",
+          screenReaderNavigation: navigationResult
         };
       }
 
@@ -149,8 +179,10 @@ export class TalkBackTapStrategy {
         navigationPath,
         {
           maxSwipes: 100,
-          verificationInterval: 5,
-          swipeDelay: 100
+          // Fidelity assertions need every focused node, not periodic samples.
+          verificationInterval: 1,
+          swipeDelay: 100,
+          onFocusObserved: focus => this.appendTraversalFocus(navigationResult, focus)
         }
       );
 
@@ -158,15 +190,18 @@ export class TalkBackTapStrategy {
         return {
           success: false,
           method: "focus-navigation",
-          error: "Focus navigation did not reach target element"
+          error: "Focus navigation did not reach target element",
+          screenReaderNavigation: navigationResult
         };
       }
+
+      navigationResult.reachable = true;
 
       logger.info(`[TalkBackTapStrategy] Focus navigation successful, activating element`);
 
       // Activate the focused element with double-tap gesture
       const activationResult = await this.activateElement(element, driver);
-      return activationResult;
+      return { ...activationResult, screenReaderNavigation: navigationResult };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -174,9 +209,41 @@ export class TalkBackTapStrategy {
       return {
         success: false,
         method: "focus-navigation",
-        error: errorMessage
+        error: errorMessage,
+        screenReaderNavigation: screenReaderNavigation
+          ? { ...screenReaderNavigation, focusTrapDetected: this.isFocusTrapError(errorMessage) }
+          : { reachable: false, traversalOrder: [], focusTrapDetected: this.isFocusTrapError(errorMessage) }
       };
     }
+  }
+
+  private appendTraversalFocus(
+    result: ScreenReaderNavigationResult,
+    focus: Element | null
+  ): void {
+    if (!focus) {
+      return;
+    }
+    const last = result.traversalOrder.at(-1);
+    if (!last || this.focusSignature(last) !== this.focusSignature(focus)) {
+      result.traversalOrder.push(focus);
+    }
+  }
+
+  private focusSignature(element: Element): string {
+    const bounds = element.bounds;
+    return [
+      element["resource-id"] ?? "",
+      element["content-desc"] ?? "",
+      element.text ?? "",
+      bounds ? `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}` : ""
+    ].join("|");
+  }
+
+  private isFocusTrapError(error: string): boolean {
+    return error.includes("Focus did not move")
+      || error.includes("could not track the TalkBack cursor")
+      || error.includes("not converging on the target");
   }
 
   /**

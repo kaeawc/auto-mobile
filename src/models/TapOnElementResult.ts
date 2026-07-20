@@ -3,6 +3,7 @@ import { ElementBounds } from "./ElementBounds";
 import { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 import { BaseActionResult } from "./BaseActionResult";
 import { ToolDebugInfo } from "../utils/DebugContextBuilder";
+import type { ScreenReaderNavigationResult } from "../features/talkback/TalkBackTapStrategy";
 
 export interface TapOnSelectedElementBounds extends ElementBounds {
   centerX: number;
@@ -34,4 +35,5 @@ export interface TapOnElementResult extends BaseActionResult {
     requestCount: number;
     changeCount: number;
   };
+  screenReaderNavigation?: ScreenReaderNavigationResult;
 }

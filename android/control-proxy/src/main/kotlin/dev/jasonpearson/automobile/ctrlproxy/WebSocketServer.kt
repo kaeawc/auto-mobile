@@ -485,9 +485,9 @@ class WebSocketServer(
         Log.w(TAG, "Failed to parse client message: $message", e)
         sendErrorResponse(
           connection,
-          ErrorResponse(
+          CorrelatedErrorReporter.frame(
             requestId = extractRequestId(message),
-            error = describeDecodeFailure(message, e),
+            errorMessage = describeDecodeFailure(message, e),
           ),
         )
         return
@@ -532,9 +532,9 @@ class WebSocketServer(
       Log.e(TAG, "Error handling message via handler", e)
       sendErrorResponse(
         connection,
-        ErrorResponse(
+        CorrelatedErrorReporter.frame(
           requestId = request.requestId,
-          error = "Handler error: ${e.message ?: e::class.simpleName ?: "unknown error"}",
+          errorMessage = "Handler error: ${CorrelatedErrorReporter.causeOf(e)}",
         ),
       )
     }

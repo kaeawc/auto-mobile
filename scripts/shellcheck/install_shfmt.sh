@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-SHFMT_VERSION="3.10.0" # Change this to the desired version
-
 # Shared colors + command_exists + detect_os (issue #2822).
 # shellcheck source=scripts/lib/tool-install.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
+# shellcheck source=scripts/shellcheck/shfmt_version.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/shfmt_version.sh"
 
 # shfmt's GitHub release assets use Go's GOARCH tokens (amd64/arm/386), which
 # differ from the shared detect_arch's canonical tokens, so keep a tool-local
@@ -31,17 +31,11 @@ shfmt_release_arch() {
 
 # Install shfmt on macOS
 install_macos() {
-  echo -e "${YELLOW}Installing shfmt on macOS...${NC}"
+  install_via_brew_or_manual "shfmt" "shfmt" install_macos_binary is_pinned_shfmt_version
+}
 
-  if command_exists brew; then
-    echo -e "${GREEN}Using Homebrew to install shfmt${NC}"
-    brew install shfmt
-    return $?
-  else
-    echo -e "${YELLOW}Homebrew not found. Falling back to binary installation...${NC}"
-    install_binary "darwin"
-    return $?
-  fi
+install_macos_binary() {
+  install_binary "darwin"
 }
 
 # Install shfmt on Linux
@@ -86,6 +80,7 @@ install_binary() {
   # Create installation directory
   install_dir="$HOME/.local/bin"
   mkdir -p "$install_dir"
+  export PATH="$install_dir:$PATH"
 
   # Construct download URL
   # Format: https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_darwin_amd64

@@ -2,6 +2,52 @@
 import XCTest
 
 final class ElementLocatorTests: XCTestCase {
+    // MARK: - SpringBoard fallback lookup (#4014)
+
+    func testFirstMatchingElement_prefersForegroundApplication() {
+        var springBoardQueried = false
+
+        let result: String? = ElementLocator.firstMatchingElement(
+            foregroundLookup: { "app OK" },
+            springBoardLookup: {
+                springBoardQueried = true
+                return "SpringBoard OK"
+            }
+        )
+
+        XCTAssertEqual(result, "app OK")
+        XCTAssertFalse(springBoardQueried)
+    }
+
+    func testFirstMatchingElement_fallsBackToSpringBoardAfterForegroundMiss() {
+        var foregroundQueries = 0
+        var springBoardQueries = 0
+
+        let result: String? = ElementLocator.firstMatchingElement(
+            foregroundLookup: {
+                foregroundQueries += 1
+                return nil
+            },
+            springBoardLookup: {
+                springBoardQueries += 1
+                return "SpringBoard OK"
+            }
+        )
+
+        XCTAssertEqual(result, "SpringBoard OK")
+        XCTAssertEqual(foregroundQueries, 1)
+        XCTAssertEqual(springBoardQueries, 1)
+    }
+
+    func testFirstMatchingElement_returnsNilWhenNeitherApplicationHasMatch() {
+        let result: String? = ElementLocator.firstMatchingElement(
+            foregroundLookup: { nil },
+            springBoardLookup: { nil }
+        )
+
+        XCTAssertNil(result)
+    }
+
     // MARK: - hasUniqueIdentifyingProperties
 
     func testHasUniqueProperties_withText() {

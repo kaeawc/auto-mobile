@@ -51,6 +51,13 @@ const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
 const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 const IOS_RECORDING_START_TIMEOUT_MS = 30000;
+// A cold or loaded simulator can silently miss the very first `recordVideo`
+// start handshake (#4076): simctl produces no "Recording started" and no error,
+// and the single attempt times out. Retry the start a bounded number of times
+// before failing, capturing simulator state on each miss so a genuine wedge is
+// diagnosable rather than surfacing as a bare timeout.
+const IOS_RECORDING_START_MAX_ATTEMPTS = 2;
+const IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS = 5000;
 // `simctl` emits this only after processing its first video frame. The earlier
 // "Defaulting to display" diagnostic proves only display selection, which can
 // still produce a zero-byte capture on a cold simulator.
@@ -281,6 +288,9 @@ export async function waitForStderrMessage(
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private ffmpegPath: string = "ffmpeg";
   private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
+  // Overridable in tests so the retry path can be exercised without real waits.
+  private readonly iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
+  private readonly iosRecordingStartMaxAttempts: number = IOS_RECORDING_START_MAX_ATTEMPTS;
 
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
@@ -452,57 +462,99 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       capturePath,
     ];
 
-    const captureProcess = await simctl.startCommandArgs(args, { stdio: ["ignore", "ignore", "pipe"] });
+    const maxAttempts = Math.max(1, this.iosRecordingStartMaxAttempts);
+    const attemptFailures: string[] = [];
 
-    try {
-      await waitForSpawn(captureProcess);
-    } catch (error) {
-      throw new ActionableError(`Failed to start iOS recording: ${error}`);
-    }
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const captureProcess = await simctl.startCommandArgs(args, { stdio: ["ignore", "ignore", "pipe"] });
 
-    const captureTracker = trackProcess(captureProcess);
-
-    try {
-      await waitForStderrMessage(
-        captureTracker,
-        IOS_RECORDING_START_MESSAGES,
-        IOS_RECORDING_START_TIMEOUT_MS
-      );
-    } catch (error) {
-      let stopError: unknown;
       try {
-        await waitForExit(captureTracker.process, captureTracker.exitPromise);
-      } catch (cleanupError) {
-        stopError = cleanupError;
+        await waitForSpawn(captureProcess);
+      } catch (error) {
+        // A spawn failure is a simctl/environment problem, not a cold-simulator
+        // miss — retrying won't help, so fail fast.
+        throw new ActionableError(`Failed to start iOS recording: ${error}`);
       }
 
-      const cleanupSuffix = stopError
-        ? `; cleanup failed: ${stopError}`
-        : "";
-      throw new ActionableError(
-        this.buildProcessFailureMessage(
-          `Failed to start iOS recording: ${error}${cleanupSuffix}`,
-          "xcrun simctl",
-          args,
-          captureTracker
-        )
-      );
+      const captureTracker = trackProcess(captureProcess);
+
+      try {
+        await waitForStderrMessage(
+          captureTracker,
+          IOS_RECORDING_START_MESSAGES,
+          this.iosRecordingStartTimeoutMs
+        );
+
+        const backendHandle: FfmpegBackendHandle = {
+          kind: "ffmpeg",
+          platform: "ios",
+          captureTracker,
+          capturePath,
+          config,
+        };
+
+        return {
+          recordingId: config.recordingId,
+          outputPath: config.outputPath,
+          startedAt: config.startedAt,
+          backendHandle,
+        };
+      } catch (error) {
+        // The handshake timed out. Tear down this attempt's process, snapshot the
+        // simulator so a genuine wedge is diagnosable, then retry if budget remains.
+        let stopError: unknown;
+        try {
+          await waitForExit(captureTracker.process, captureTracker.exitPromise);
+        } catch (cleanupError) {
+          stopError = cleanupError;
+        }
+
+        const cleanupSuffix = stopError ? `; cleanup failed: ${stopError}` : "";
+        const diagnostics = await this.captureSimulatorDiagnostics(simctl, device);
+        attemptFailures.push(
+          `attempt ${attempt}/${maxAttempts}: ${error}${cleanupSuffix}; ${diagnostics}`
+        );
+        logger.warn(
+          `[FfmpegVideo] iOS recording start attempt ${attempt}/${maxAttempts} failed: ${error} (${diagnostics})`
+        );
+
+        if (attempt >= maxAttempts) {
+          throw new ActionableError(
+            this.buildProcessFailureMessage(
+              `Failed to start iOS recording after ${maxAttempts} attempt(s): ${attemptFailures.join(" | ")}`,
+              "xcrun simctl",
+              args,
+              captureTracker
+            )
+          );
+        }
+      }
     }
 
-    const backendHandle: FfmpegBackendHandle = {
-      kind: "ffmpeg",
-      platform: "ios",
-      captureTracker,
-      capturePath,
-      config,
-    };
+    // Loop always returns or throws above; this satisfies the type checker.
+    throw new ActionableError("Failed to start iOS recording: exhausted start attempts.");
+  }
 
-    return {
-      recordingId: config.recordingId,
-      outputPath: config.outputPath,
-      startedAt: config.startedAt,
-      backendHandle,
-    };
+  /**
+   * Best-effort snapshot of the target simulator's state, used only to enrich a
+   * start-timeout failure. Never throws: a diagnostics failure must not mask the
+   * original recording error.
+   */
+  private async captureSimulatorDiagnostics(
+    simctl: SimCtl,
+    device: BootedDevice
+  ): Promise<string> {
+    try {
+      const result = await simctl.executeCommandArgs(
+        ["list", "devices", device.deviceId],
+        IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS
+      );
+      const text = (result.stdout || result.stderr || "").replace(/\s+/g, " ").trim();
+      return text ? `simulator state: ${text.slice(0, 500)}` : "simulator state: (empty)";
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return `simulator state unavailable: ${reason}`;
+    }
   }
 
   private async postProcessRecording(backendHandle: FfmpegBackendHandle): Promise<void> {

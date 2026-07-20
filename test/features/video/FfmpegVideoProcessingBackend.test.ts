@@ -143,6 +143,100 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
   });
 
+  // A fake capture process: emits "spawn" then, when asked, the recordVideo start
+  // handshake. kill() emits "exit" so waitForExit's SIGINT teardown resolves.
+  function makeCaptureChild(emitHandshake: boolean): ChildProcess {
+    const stderr = new PassThrough();
+    const child = new EventEmitter() as ChildProcess;
+    Object.assign(child, {
+      stderr,
+      stdout: null,
+      stdin: null,
+      killed: false,
+      kill: () => {
+        (child as unknown as { killed: boolean }).killed = true;
+        queueMicrotask(() => child.emit("exit", 0, "SIGINT"));
+        return true;
+      },
+    });
+    defaultTimer.setTimeout(() => {
+      child.emit("spawn");
+      if (emitHandshake) {
+        stderr.write("Recording started\n");
+      }
+    }, 0);
+    return child;
+  }
+
+  function diagnosticsExecResult(state: string) {
+    return {
+      stdout: state,
+      stderr: "",
+      toString: () => state,
+      trim: () => state,
+      includes: (s: string) => state.includes(s),
+    };
+  }
+
+  test("retries the iOS recording start handshake and succeeds on a later attempt (#4076)", async function() {
+    const started: ChildProcess[] = [];
+    let diagnosticCalls = 0;
+    const simctl = {
+      isAvailable: async () => true,
+      // First attempt never emits the handshake (cold-simulator miss); the retry does.
+      startCommandArgs: async () => {
+        const child = makeCaptureChild(started.length >= 1);
+        started.push(child);
+        return child;
+      },
+      executeCommandArgs: async () => {
+        diagnosticCalls++;
+        return diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)");
+      },
+    } as unknown as SimCtl;
+
+    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartTimeoutMs = 25;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-retry-udid" };
+
+    const handle = await backend.start(mockConfig);
+
+    expect(handle.recordingId).toBe("test-recording");
+    expect(started.length).toBe(2); // one retry after the first miss
+    expect(diagnosticCalls).toBe(1); // diagnostics captured once, on the miss
+  });
+
+  test("fails after exhausting start attempts and reports simulator diagnostics (#4076)", async function() {
+    let starts = 0;
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => {
+        starts++;
+        return makeCaptureChild(false); // never emits the handshake
+      },
+      executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Shutdown)"),
+    } as unknown as SimCtl;
+
+    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartTimeoutMs = 25;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-wedge-udid" };
+
+    let error: Error | undefined;
+    try {
+      await backend.start(mockConfig);
+    } catch (caught) {
+      error = caught as Error;
+    }
+
+    expect(error).toBeDefined();
+    expect(error!.message).toContain("after 2 attempt(s)");
+    expect(error!.message).toContain("simulator state");
+    expect(error!.message).toContain("Shutdown");
+    expect(starts).toBe(2); // exhausted the bounded retry budget
+  });
+
   describe("Hardware Acceleration Detection", function() {
     test("should detect platform capabilities", async function() {
       const osPlatform = platform();

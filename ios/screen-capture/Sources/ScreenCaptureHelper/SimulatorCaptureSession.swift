@@ -16,6 +16,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     private var configuredPixelHeight: Int = 0
     private var hasReceivedFrame = false
     private var fps: Int = CommandLineOptions.defaultSimulatorFPS
+    private var audioEnabled = false
 
     init(writer: FrameWriter) {
         self.writer = writer
@@ -23,6 +24,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
 
     func start(window: SCWindow, fps: Int, audio: Bool) async throws {
         self.fps = fps
+        audioEnabled = audio
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SimulatorCaptureSession.makeConfiguration(window: window, fps: fps, audio: audio)
         configuredPixelWidth = config.width
@@ -107,6 +109,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         updated.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         updated.showsCursor = false
         updated.scalesToFit = false
+        updated.capturesAudio = audioEnabled
+        updated.sampleRate = 8_000
+        updated.channelCount = 1
 
         // Fire-and-forget: if the update fails we keep using the old config and
         // either resync on the next size change or stop with a delegate error.

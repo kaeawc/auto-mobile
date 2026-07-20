@@ -173,8 +173,8 @@ export class IosH264Source implements H264CaptureSource {
       const helper = this.createHelper({ binaryPath: helperPath, target });
       this.helper = helper;
       this.wireHelperFrames(helper);
-      const firstFrame = this.waitForFirstFrame(helper, target);
       const firstAudio = this.options.audioEnabled ? this.waitForFirstAudio(helper) : null;
+      const firstFrame = this.waitForFirstFrame(helper, target);
       helper.start();
       await Promise.all([firstFrame, firstAudio]);
     } catch (error) {
@@ -292,6 +292,16 @@ export class IosH264Source implements H264CaptureSource {
       helper.on("audio", () => {
         if (this.helper === helper && this.isActive()) {
           finish(resolve);
+        }
+      });
+      helper.on("error", error => {
+        if (this.helper === helper && this.isActive()) {
+          finish(() => reject(error));
+        }
+      });
+      helper.on("exit", info => {
+        if (this.helper === helper && this.isActive()) {
+          finish(() => reject(new Error(`screen-capture-helper exited before audio (code=${info.code}, signal=${info.signal})`)));
         }
       });
     });

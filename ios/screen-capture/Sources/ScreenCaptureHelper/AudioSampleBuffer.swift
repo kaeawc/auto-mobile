@@ -1,6 +1,7 @@
 import AudioToolbox
 import CoreMedia
 import Foundation
+import ScreenCaptureCore
 
 /// ScreenCaptureKit is configured for 8 kHz mono output. Convert its common
 /// Float32 or signed-16-bit linear PCM representation to signed PCM16LE.
@@ -27,22 +28,14 @@ func pcm16leAudio(sampleBuffer: CMSampleBuffer) -> Data? {
     guard result == noErr, let input = audioBufferList.mBuffers.mData else { return nil }
 
     let sampleCount = CMSampleBufferGetNumSamples(sampleBuffer)
-    var output = Data(count: sampleCount * 2)
-    output.withUnsafeMutableBytes { bytes in
-        guard let destination = bytes.baseAddress else { return }
-        for index in 0..<sampleCount {
-            let sample: Int16
-            if asbd.mBitsPerChannel == 16 {
-                sample = input.advanced(by: index * 2).loadUnaligned(as: Int16.self)
-            } else if asbd.mBitsPerChannel == 32,
-                      (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0 {
-                let float = input.advanced(by: index * 4).loadUnaligned(as: Float.self)
-                sample = Int16(max(-1, min(1, float)) * Float(Int16.max))
-            } else {
-                return
-            }
-            destination.advanced(by: index * 2).storeBytes(of: sample.littleEndian, as: Int16.self)
-        }
+    if asbd.mBitsPerChannel == 16 {
+        return Data(bytes: input, count: sampleCount * MemoryLayout<Int16>.size)
     }
-    return output
+    if asbd.mBitsPerChannel == 32,
+       (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0 {
+        return AudioPcm16Encoder.encodeFloat32LE(
+            Data(bytes: input, count: sampleCount * MemoryLayout<Float>.size)
+        )
+    }
+    return nil
 }

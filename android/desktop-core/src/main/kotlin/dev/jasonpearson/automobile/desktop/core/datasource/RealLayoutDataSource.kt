@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.serializer
 
 /**
  * Real layout data source that fetches from MCP. Calls the 'observe' tool to capture fresh screen
@@ -49,7 +50,7 @@ class RealLayoutDataSource(
           try {
             val viewHierarchyResult =
               json.decodeFromJsonElement(
-                ViewHierarchyResultDto.serializer(),
+                serializer<ViewHierarchyResultDto>(),
                 viewHierarchyJson,
               )
             viewHierarchyResult.hierarchy?.node?.let { nodes ->
@@ -235,7 +236,7 @@ private data class HierarchyNodeDto(
           nodeElement.mapNotNull { elem ->
             try {
               Json { ignoreUnknownKeys = true }
-                .decodeFromJsonElement(HierarchyNodeDto.serializer(), elem)
+                .decodeFromJsonElement(serializer<HierarchyNodeDto>(), elem)
             } catch (e: Exception) {
               null
             }
@@ -245,7 +246,7 @@ private data class HierarchyNodeDto(
           try {
             listOf(
               Json { ignoreUnknownKeys = true }
-                .decodeFromJsonElement(HierarchyNodeDto.serializer(), nodeElement)
+                .decodeFromJsonElement(serializer<HierarchyNodeDto>(), nodeElement)
             )
           } catch (e: Exception) {
             emptyList()

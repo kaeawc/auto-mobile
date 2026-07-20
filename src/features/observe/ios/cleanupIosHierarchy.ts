@@ -59,6 +59,9 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
     return compactedChildren[0];
   }
   const result: IosHierarchyNode = { ...node };
+  if (hasIosHeaderTrait(result.extras)) {
+    result.role = "heading";
+  }
 
   if (compactedChildren.length === 0) {
     delete result.node;
@@ -362,3 +365,4 @@ function hasNonEmptyString(value: unknown): boolean {
 function normalizedText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
+import { hasIosHeaderTrait } from "./semanticRoles";

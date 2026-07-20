@@ -200,9 +200,9 @@ iOS VoiceOver follows the same phased approach. Key differences:
 Tracked in [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md), which is the
 source of truth for remaining gaps:
 
-- **iOS focus control**: `setAccessibilityFocus` / `clearAccessibilityFocus` and cursor
-  stepping on iOS. Reading the cursor is done — the runner reports it and `observe`
-  populates `accessibilityFocusedElement` — but moving it is not.
+- **iOS focus control and stepping**: `setAccessibilityFocus` / `clearAccessibilityFocus`
+  and cursor stepping are not implemented. Cursor reporting is available only for
+  SDK-enabled foreground apps; the out-of-process CtrlProxy cannot report it without the SDK.
 - **VoiceOver Rotor commands**: two-finger rotate cannot be synthesized into VoiceOver.
   Standard headings are instead exposed as `role: "heading"` in SDK-backed iOS observations;
   custom rotors and Rotor-driven cursor navigation remain unavailable (parity doc Gap 4).

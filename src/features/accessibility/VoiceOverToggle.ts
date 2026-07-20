@@ -93,16 +93,27 @@ export class VoiceOverToggle {
    * enable is not reported as failed merely because its service is still starting.
    */
   private async waitForState(enabled: boolean, client: IOSCtrlProxyClient): Promise<boolean> {
-    const startTime = this.timer.now();
+    const deadline = this.timer.now() + VOICEOVER_CONFIRMATION_TIMEOUT_MS;
+    let confirmedEnabled = false;
 
     while (true) {
-      this.detector.invalidateCache(this.device.deviceId);
-      const confirmedEnabled = await this.detector.isVoiceOverEnabled(this.device.deviceId, client);
-      if (confirmedEnabled === enabled || this.timer.now() - startTime >= VOICEOVER_CONFIRMATION_TIMEOUT_MS) {
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs <= 0) {
         return confirmedEnabled;
       }
 
-      await this.timer.sleep(VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS);
+      this.detector.invalidateCache(this.device.deviceId);
+      confirmedEnabled = await this.detector.isVoiceOverEnabled(
+        this.device.deviceId,
+        client,
+        undefined,
+        remainingMs
+      );
+      if (confirmedEnabled === enabled || this.timer.now() >= deadline) {
+        return confirmedEnabled;
+      }
+
+      await this.timer.sleep(Math.min(VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS, deadline - this.timer.now()));
     }
   }
 

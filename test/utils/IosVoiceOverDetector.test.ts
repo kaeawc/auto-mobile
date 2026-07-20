@@ -12,9 +12,11 @@ class FakeCtrlProxyService {
   voiceOverEnabled = false;
   shouldFail = false;
   callCount = 0;
+  readonly timeoutMsArgs: number[] = [];
 
-  async requestVoiceOverState(): Promise<CtrlProxyVoiceOverResult> {
+  async requestVoiceOverState(timeoutMs: number = 5000): Promise<CtrlProxyVoiceOverResult> {
     this.callCount++;
+    this.timeoutMsArgs.push(timeoutMs);
     if (this.shouldFail) {
       return { success: false, enabled: false, error: "Fake service error" };
     }
@@ -25,6 +27,7 @@ class FakeCtrlProxyService {
     this.voiceOverEnabled = false;
     this.shouldFail = false;
     this.callCount = 0;
+    this.timeoutMsArgs.length = 0;
   }
 }
 
@@ -90,6 +93,17 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
 
       expect(enabled).toBe(false);
       expect(fakeClient.callCount).toBe(1);
+    });
+
+    test("forwards a caller-provided detection deadline to CtrlProxy", async () => {
+      await detector.isVoiceOverEnabled(
+        "device123",
+        fakeClient as unknown as IOSCtrlProxy,
+        undefined,
+        1_250
+      );
+
+      expect(fakeClient.timeoutMsArgs).toEqual([1_250]);
     });
 
     test("returns false when CtrlProxy reports failure", async () => {

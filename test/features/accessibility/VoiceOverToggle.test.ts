@@ -91,6 +91,7 @@ describe("VoiceOverToggle", () => {
         SIMULATOR_DEVICE.deviceId,
         SIMULATOR_DEVICE.deviceId
       ]);
+      expect(fakeDetector.isVoiceOverEnabledTimeoutMsArgs).toEqual([10_000, 9_500]);
       expect(fakeTimer.getSleepHistory()).toEqual([500]);
     });
 
@@ -104,7 +105,8 @@ describe("VoiceOverToggle", () => {
 
       expect(result).toMatchObject({ supported: true, applied: false, currentState: false });
       expect(fakeTimer.getCurrentTime()).toBe(10_000);
-      expect(fakeDetector.getCallCount()).toBe(21);
+      expect(fakeDetector.getCallCount()).toBe(20);
+      expect(fakeDetector.isVoiceOverEnabledTimeoutMsArgs.at(-1)).toBe(500);
     });
 
     test("runs correct xcrun simctl spawn commands when enabling", async () => {

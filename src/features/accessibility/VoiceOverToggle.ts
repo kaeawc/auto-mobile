@@ -39,6 +39,12 @@ export class VoiceOverToggle {
       await this.processExecutor.exec(
         `xcrun simctl spawn ${this.device.deviceId} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
       );
+      const serviceCommand = enabled
+        ? "launchctl kickstart -p system/com.apple.VoiceOverTouch"
+        : "launchctl kill SIGTERM system/com.apple.VoiceOverTouch";
+      await this.processExecutor.exec(
+        `xcrun simctl spawn ${this.device.deviceId} ${serviceCommand}`
+      );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.warn(`[VoiceOverToggle] Failed to ${enabled ? "enable" : "disable"} VoiceOver: ${reason}`);

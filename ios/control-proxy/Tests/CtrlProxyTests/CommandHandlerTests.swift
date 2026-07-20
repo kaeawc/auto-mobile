@@ -1,6 +1,14 @@
 @testable import CtrlProxy
 import XCTest
 
+private final class FakeVoiceOverStateProvider: VoiceOverStateProviding {
+    var isRunning = false
+
+    func isVoiceOverRunning() -> Bool {
+        return isRunning
+    }
+}
+
 final class CommandHandlerTests: XCTestCase {
     var fakeTimeProvider: FakeTimeProvider!
     var perfProvider: PerfProvider!
@@ -1570,6 +1578,40 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertNil(voResponse.requestId)
         XCTAssertEqual(voResponse.type, "voiceover_state_result")
         XCTAssertTrue(voResponse.success)
+    }
+
+    func testGetVoiceOverStateReportsLivenessProviderState() {
+        let voiceOverStateProvider = FakeVoiceOverStateProvider()
+        voiceOverStateProvider.isRunning = true
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            voiceOverStateProvider: voiceOverStateProvider
+        )
+
+        let request = WebSocketRequest.getVoiceOverState(RequestEnvelope(requestId: "voiceover-live"))
+
+        guard let response = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
+
+        XCTAssertTrue(response.enabled)
+    }
+
+    func testGetVoiceOverStateDoesNotTreatPreferenceBackedUIKitStateAsLiveness() {
+        let voiceOverStateProvider = FakeVoiceOverStateProvider()
+        voiceOverStateProvider.isRunning = false
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            voiceOverStateProvider: voiceOverStateProvider
+        )
+
+        let request = WebSocketRequest.getVoiceOverState(RequestEnvelope(requestId: "voiceover-stopped"))
+
+        guard let response = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
+
+        XCTAssertFalse(response.enabled)
     }
 
     func testGetVoiceOverStateIsEncodable() throws {

@@ -23,6 +23,7 @@ public class CommandHandler: CommandHandling {
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
     private let sdkDatabaseClient: (any SdkDatabaseFetching)?
     private let hierarchyDebouncer: (any HierarchyDebouncing)?
+    private let voiceOverStateProvider: any VoiceOverStateProviding
 
     public init(
         elementLocator: ElementLocating,
@@ -32,7 +33,8 @@ public class CommandHandler: CommandHandling {
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
-        hierarchyDebouncer: (any HierarchyDebouncing)? = nil
+        hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
+        voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider()
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -42,6 +44,7 @@ public class CommandHandler: CommandHandling {
         self.sdkHierarchyCache = sdkHierarchyCache
         self.sdkDatabaseClient = sdkDatabaseClient
         self.hierarchyDebouncer = hierarchyDebouncer
+        self.voiceOverStateProvider = voiceOverStateProvider
     }
 
     /// Factory for testing - allows injecting fakes
@@ -53,7 +56,8 @@ public class CommandHandler: CommandHandling {
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
-        hierarchyDebouncer: (any HierarchyDebouncing)? = nil
+        hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
+        voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider()
     )
         -> CommandHandler
     {
@@ -65,7 +69,8 @@ public class CommandHandler: CommandHandling {
             sdkHierarchyClient: sdkHierarchyClient,
             sdkHierarchyCache: sdkHierarchyCache,
             sdkDatabaseClient: sdkDatabaseClient,
-            hierarchyDebouncer: hierarchyDebouncer
+            hierarchyDebouncer: hierarchyDebouncer,
+            voiceOverStateProvider: voiceOverStateProvider
         )
     }
 
@@ -1133,11 +1138,7 @@ public class CommandHandler: CommandHandling {
     )
         throws -> VoiceOverStateResponse
     {
-        #if os(iOS)
-            let enabled = UIAccessibility.isVoiceOverRunning
-        #else
-            let enabled = false
-        #endif
+        let enabled = voiceOverStateProvider.isVoiceOverRunning()
 
         return VoiceOverStateResponse(
             requestId: request.requestId,

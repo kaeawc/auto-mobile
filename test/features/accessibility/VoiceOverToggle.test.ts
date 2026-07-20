@@ -90,6 +90,11 @@ describe("VoiceOverToggle", () => {
           `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
         )
       ).toBe(true);
+      expect(
+        fakeExec.wasCommandExecuted(
+          `xcrun simctl spawn ${udid} launchctl kickstart -p system/com.apple.VoiceOverTouch`
+        )
+      ).toBe(true);
     });
 
     test("always applies even when detection would report already-enabled (CtrlProxy-safe)", async () => {
@@ -129,6 +134,11 @@ describe("VoiceOverToggle", () => {
       expect(
         fakeExec.wasCommandExecuted(
           `xcrun simctl spawn ${udid} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
+        )
+      ).toBe(true);
+      expect(
+        fakeExec.wasCommandExecuted(
+          `xcrun simctl spawn ${udid} launchctl kill SIGTERM system/com.apple.VoiceOverTouch`
         )
       ).toBe(true);
     });

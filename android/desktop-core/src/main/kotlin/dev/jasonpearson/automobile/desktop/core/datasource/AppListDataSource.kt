@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponen
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 typealias InstalledApp = dev.jasonpearson.automobile.desktop.domain.InstalledApp
 
@@ -54,7 +55,7 @@ class RealAppListDataSource(
       val responseText = contents.firstOrNull()?.text ?: return Result.Success(emptyList())
 
       // Parse the MCP apps query response
-      val response = json.decodeFromString(McpAppsQueryResponse.serializer(), responseText)
+      val response = json.decodeFromString(serializer<McpAppsQueryResponse>(), responseText)
 
       // Flatten apps from all devices (usually just one)
       val apps =

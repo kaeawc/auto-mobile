@@ -409,6 +409,18 @@ export function formatRecentAppsMessage(result: { success?: boolean; error?: str
   return "Opened recent apps";
 }
 
+export function formatSwipeOnMessage(
+  result: Pick<SwipeOnToolPayload, "success" | "error" | "found" | "scrollIterations">,
+  direction: string
+): string {
+  if (!result.success) {
+    return result.error ?? `Swipe ${direction} failed`;
+  }
+  return result.found
+    ? `Swiped ${direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`
+    : `Swiped ${direction}`;
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -775,9 +787,7 @@ export function registerInteractionTools() {
     }, progress);
 
     return createStructuredToolResponse({
-      message: result.found
-        ? `Swiped ${args.direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`
-        : `Swiped ${args.direction}`,
+      message: formatSwipeOnMessage(result, args.direction),
       observation: result.observation,
       ...result
     });

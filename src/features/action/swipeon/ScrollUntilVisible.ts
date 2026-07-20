@@ -261,7 +261,7 @@ export class ScrollUntilVisible {
         }
       );
 
-      if (!swipeResult.success) {
+      if (!swipeResult.success && this.deps.device.platform === "ios") {
         perf.end();
         return {
           ...swipeResult,

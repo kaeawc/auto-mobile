@@ -125,6 +125,13 @@ export class AndroidH264Source implements H264CaptureSource {
     );
 
     const process = await adb.spawn(args);
+    // stop() may run while the async ADB boundary resolves the child. Do not
+    // retain a late stream after its owner has stopped; terminate only this
+    // host-side exec-out process, never device-wide screenrecord.
+    if (!this.running) {
+      process.kill("SIGINT");
+      return;
+    }
     this.current = process;
     this.segmentCount++;
 

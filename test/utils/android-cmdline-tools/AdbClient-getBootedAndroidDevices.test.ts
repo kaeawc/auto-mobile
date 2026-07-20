@@ -128,4 +128,26 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     expect(received?.args).toEqual(["-s", "emulator-5554", "exec-out", "screenrecord", "--output-format=h264", "-"]);
     expect(child.killCalls).toEqual(["SIGTERM"]);
   });
+
+  test("does not spawn when cancellation arrives during executable resolution", async () => {
+    let resolveBase: ((value: { adbPath: string; baseArgs: string[] }) => void) | undefined;
+    let spawnCalls = 0;
+    const adb = new AdbClient(
+      null,
+      async (): Promise<ExecResult> => createExecResult(""),
+      (() => {
+        spawnCalls++;
+        throw new Error("must not spawn");
+      }) as never
+    );
+    (adb as unknown as { getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }> }).getBaseCommandParts = () =>
+      new Promise(resolve => { resolveBase = resolve; });
+    const controller = new AbortController();
+    const pending = adb.spawn(["get-state"], { signal: controller.signal });
+    controller.abort();
+    resolveBase!({ adbPath: "adb", baseArgs: [] });
+
+    await expect(pending).rejects.toThrow("Operation cancelled");
+    expect(spawnCalls).toBe(0);
+  });
 });

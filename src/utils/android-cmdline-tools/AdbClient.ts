@@ -331,6 +331,9 @@ export class AdbClient implements AdbExecutor {
     }
 
     const { adbPath, baseArgs } = await this.getBaseCommandParts();
+    if (signal?.aborted) {
+      throw this.getAbortError(signal);
+    }
     const fullArgs = [...baseArgs, ...args];
     const child = this.spawnFn(adbPath, fullArgs, { stdio: ["ignore", "pipe", "pipe"] });
     this.activeProcesses.add(child);

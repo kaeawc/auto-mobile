@@ -176,12 +176,13 @@ describe("AndroidH264Source", () => {
 
   test("stop during adb setup aborts the spawn (no orphan process)", async () => {
     let resolveAdb: (() => void) | undefined;
+    const lateProcess = new FakeProcess();
     const adbFactory = {
       create() {
         return {
           spawn: () =>
             new Promise<SpawnedProcess>(resolve => {
-              resolveAdb = () => resolve(new FakeProcess());
+              resolveAdb = () => resolve(lateProcess);
             }),
           executeCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
         } as unknown as ReturnType<AdbClientFactory["create"]>;
@@ -195,6 +196,7 @@ describe("AndroidH264Source", () => {
     await startPromise;
 
     expect(processes).toHaveLength(0); // no screenrecord spawned
+    expect(lateProcess.killed).toEqual(["SIGINT"]);
     expect(source.isRunning).toBe(false);
   });
 

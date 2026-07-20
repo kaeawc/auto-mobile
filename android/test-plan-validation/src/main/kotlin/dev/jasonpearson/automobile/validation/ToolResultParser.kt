@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.serializer
 
 object ToolResultParser {
   val json: Json = Json {
@@ -55,13 +56,13 @@ object ToolResultParser {
   }
 
   fun parseTapOnResponse(jsonString: String): TapOnResponse =
-    json.decodeFromString(TapOnResponse.serializer(), jsonString)
+    json.decodeFromString(serializer<TapOnResponse>(), jsonString)
 
   fun parseObserveResponse(jsonString: String): ObserveResponse =
-    json.decodeFromString(ObserveResponse.serializer(), jsonString)
+    json.decodeFromString(serializer<ObserveResponse>(), jsonString)
 
   fun parseExecutePlanResponse(jsonString: String): ExecutePlanResponse =
-    json.decodeFromString(ExecutePlanResponse.serializer(), jsonString)
+    json.decodeFromString(serializer<ExecutePlanResponse>(), jsonString)
 
   private fun inferSuccess(result: JsonObject): Boolean {
     val successValue = result["success"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()

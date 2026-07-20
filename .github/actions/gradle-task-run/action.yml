@@ -2,6 +2,14 @@
 name: "gradle-task-run"
 description: ""
 inputs:
+  artifact-name-suffix:
+    description: >-
+      Disambiguator appended to this action's uploaded artifact names. Required
+      when a job invokes this action more than once with the same gradle-tasks:
+      the config-cache report name is derived from the task list and the runner
+      OS, so a second invocation would collide and fail with a 409.
+    required: "false"
+    default: ""
   gradle-flags:
     description: "Set of options we will pass to ./gradlew"
     example: '["--continue", "--stacktrace"]'
@@ -276,6 +284,6 @@ runs:
       uses: actions/upload-artifact@v7.0.1
       if: success()
       with:
-        name: config-cache-report-${{ steps.sanitize-name.outputs.sanitized_name }}-${{ runner.os }}
+        name: config-cache-report-${{ steps.sanitize-name.outputs.sanitized_name }}-${{ runner.os }}${{ inputs.artifact-name-suffix && format('-{0}', inputs.artifact-name-suffix) || '' }}
         path: |
           ${{ inputs.gradle-project-directory }}/build/reports/config-cache-report.html

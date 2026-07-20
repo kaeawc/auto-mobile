@@ -94,6 +94,23 @@ build_flags() {
   [ "$status" -ne 0 ]
 }
 
+@test "repeated gradle-task-run invocations in one job get distinct artifact names" {
+  # The config-cache report name is derived from gradle-tasks + runner.os, so a
+  # job that invokes this action twice on the same task list uploads the same
+  # artifact name twice and the second 409s -- failing the step even when the
+  # Gradle build succeeded. That masked a *green* verify in run 29750419389.
+  workflow=".github/workflows/record-screenshot-baselines.yml"
+  suffixes="$(grep -oE 'artifact-name-suffix: "[^"]+"' "$workflow" | sort)"
+  [ "$(echo "$suffixes" | wc -l)" -eq 2 ]
+  [ "$(echo "$suffixes" | sort -u | wc -l)" -eq 2 ]
+}
+
+@test "the artifact name suffix is optional and appended only when set" {
+  # Every other caller omits the input; an unconditional "-" would rename all
+  # their artifacts and break anything downloading them by name.
+  grep -q "inputs.artifact-name-suffix && format('-{0}', inputs.artifact-name-suffix) || ''" "$ACTION"
+}
+
 @test "record and verify steps pass their flags as valid JSON arrays" {
   # A caller that hand-writes a malformed array would now hard-fail the step;
   # catch it here instead.

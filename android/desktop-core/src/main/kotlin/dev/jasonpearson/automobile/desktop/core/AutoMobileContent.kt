@@ -145,8 +145,14 @@ import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCategory
 import dev.jasonpearson.automobile.desktop.core.timeline.activeLanes
 import dev.jasonpearson.automobile.desktop.core.timeline.buildTimelineSpans
 import dev.jasonpearson.automobile.desktop.core.timeline.rememberTimelineState
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -165,6 +171,54 @@ internal fun activeDeviceConnectionLostEvent(
 
 internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String?): Boolean {
   return activeDeviceId != null && deviceId == activeDeviceId
+}
+
+/**
+ * Connects a live-mirroring source for this composition and exposes only its newest decoded frame.
+ *
+ * The source already drops old decoded frames; conflation here also prevents Compose conversion
+ * from accumulating work when the relay runs faster than the UI can draw. A refused or unavailable
+ * relay clears the frame, allowing [DeviceScreenView] to continue rendering screenshot updates.
+ */
+@Composable
+internal fun rememberLiveVideoFrame(
+  source: VideoStreamSource?,
+  deviceId: String?,
+  frameConverter:
+    suspend (
+      dev.jasonpearson.automobile.desktop.core.video.DecodedFrame
+    ) -> androidx.compose.ui.graphics.ImageBitmap =
+    { frame ->
+      withContext(Dispatchers.Default) { frame.toImageBitmap() }
+    },
+): androidx.compose.ui.graphics.ImageBitmap? {
+  var liveFrame by
+    remember(source, deviceId) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+
+  DisposableEffect(source, deviceId) {
+    if (source != null && deviceId != null) source.connect(deviceId)
+    onDispose {
+      liveFrame = null
+      source?.dispose()
+    }
+  }
+
+  LaunchedEffect(source) {
+    source?.frames?.conflate()?.collect { frame ->
+      if (source.state.value is VideoStreamState.Streaming) {
+        val decodedFrame = frameConverter(frame)
+        if (source.state.value is VideoStreamState.Streaming) liveFrame = decodedFrame
+      }
+    }
+  }
+
+  LaunchedEffect(source) {
+    source?.state?.collect { state ->
+      if (state is VideoStreamState.Unavailable) liveFrame = null
+    }
+  }
+
+  return liveFrame
 }
 
 internal interface AutoMobileDeviceStreamEventSink {
@@ -281,6 +335,7 @@ fun AutoMobileContent(
   notificationHandler: NotificationHandler = NoOpNotificationHandler,
   onOpenSource: ((String, Int, String) -> Unit)? = null,
   menuBarActions: MenuBarActions? = null,
+  videoStreamSourceFactory: () -> VideoStreamSource = { VideoStreamClient() },
 ) {
   // When a MenuBarActions bridge is supplied (from Main.kt's MenuBar), delegate
   // pane-visibility and overlay state to it so the native menu items and the
@@ -395,6 +450,15 @@ fun AutoMobileContent(
 
   // Data source mode (Fake/Real) - global toggle for all dashboards
   var dataSourceMode by remember { mutableStateOf(DataSourceMode.Real) }
+  val liveVideoSource =
+    remember(activeDeviceId, dataSourceMode, isLiveLayoutMode) {
+      if (dataSourceMode == DataSourceMode.Real && isLiveLayoutMode && activeDeviceId != null) {
+        videoStreamSourceFactory()
+      } else {
+        null
+      }
+    }
+  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId)
 
   // Pending failure ID for deep linking from notifications
   var pendingFailureId by remember { mutableStateOf<String?>(null) }
@@ -1331,6 +1395,7 @@ fun AutoMobileContent(
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(
               screenshotData = layoutInspectorState.screenshotData,
+              liveFrame = liveVideoFrame,
               screenWidth = layoutInspectorState.screenWidth,
               screenHeight = layoutInspectorState.screenHeight,
               rotation = layoutInspectorState.rotation,

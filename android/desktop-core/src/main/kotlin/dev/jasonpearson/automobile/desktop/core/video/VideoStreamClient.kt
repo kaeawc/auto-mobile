@@ -58,6 +58,9 @@ interface VideoStreamSource {
 
   fun disconnect()
 
+  /** Releases any resources owned by this source. It cannot be reused afterwards. */
+  fun dispose()
+
   /** True when the daemon exposes the relay socket; false on daemons that predate it. */
   fun isAvailable(): Boolean
 }
@@ -130,7 +133,7 @@ class VideoStreamClient(
   }
 
   /** Disconnects and cancels the internal scope. The instance must not be reused afterwards. */
-  fun dispose() {
+  override fun dispose() {
     disconnect()
     scope.coroutineContext[Job]?.cancel()
   }
@@ -171,6 +174,9 @@ class VideoStreamClient(
         }
 
         pumpFrames(input, decoder)
+        if (readerJob?.isActive == true) {
+          _state.value = VideoStreamState.Unavailable("Live mirroring stopped")
+        }
       }
     } catch (e: Exception) {
       // Cancellation arrives as an exception on the blocking read; that is a normal disconnect.
@@ -294,6 +300,15 @@ class FakeVideoStreamSource(
   override fun disconnect() {
     connectedDeviceId = null
     _state.value = VideoStreamState.Idle
+  }
+
+  override fun dispose() {
+    disconnect()
+  }
+
+  /** Simulates an unavailable relay after a stream has started. */
+  fun becomeUnavailable(reason: String = "Live mirroring is unavailable on this daemon") {
+    _state.value = VideoStreamState.Unavailable(reason)
   }
 
   /** Publishes a frame to collectors, as the real client would. */

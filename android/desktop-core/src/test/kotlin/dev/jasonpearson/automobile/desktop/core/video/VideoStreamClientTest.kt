@@ -47,7 +47,8 @@ class VideoStreamClientTest {
     success: Boolean = true,
     error: String? = null,
     payload: ByteArray? = null,
-  ): FakeRelay = FakeRelay(success, error, payload).also { servers.add(it) }
+    keepOpen: Boolean = false,
+  ): FakeRelay = FakeRelay(success, error, payload, keepOpen).also { servers.add(it) }
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
@@ -71,7 +72,7 @@ class VideoStreamClientTest {
   @Test
   fun `reports the decoded size, not the advertised header size`() = runBlocking {
     // The daemon advertises 0x0 unless a hint was sent; the truth is in the SPS.
-    val server = relay(payload = sampleH264())
+    val server = relay(payload = sampleH264(), keepOpen = true)
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect(null)
@@ -152,6 +153,21 @@ class VideoStreamClientTest {
     client.dispose()
   }
 
+  @Test
+  fun `an orderly relay close reports the stream as unavailable`() = runBlocking {
+    val server = relay()
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+
+    waitUntil { client.state.value is VideoStreamState.Unavailable }
+    assertEquals(
+      "Live mirroring stopped",
+      (client.state.value as VideoStreamState.Unavailable).reason,
+    )
+    client.dispose()
+  }
+
   private suspend fun waitUntil(timeoutMs: Long = 5_000, predicate: () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
@@ -176,6 +192,7 @@ class VideoStreamClientTest {
     private val success: Boolean,
     private val error: String?,
     private val payload: ByteArray?,
+    private val keepOpen: Boolean,
   ) : AutoCloseable {
     private val tempDir: Path = Files.createTempDirectory(Path.of("/tmp"), "amvsc-")
     val socketPath: Path = tempDir.resolve("video-stream.sock")
@@ -207,6 +224,9 @@ class VideoStreamClientTest {
 
           if (success && payload != null) {
             writeStream(out, payload)
+          }
+          while (keepOpen && !Thread.currentThread().isInterrupted) {
+            Thread.sleep(1000)
           }
         }
       } catch (_: Throwable) {

@@ -77,3 +77,19 @@ SCRIPT
   [[ "$output" == *"failed to warm simulator display"* ]]
   ! grep -q -- "test test/integration/iosVideoRecordingStartStop.integration.test.ts" "$INVOCATIONS_FILE"
 }
+
+@test "fails before the integration test when the warm-up screenshot is empty" {
+  make_mock_commands
+  cat > "${MOCK_BIN}/xcrun" <<SCRIPT
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${INVOCATIONS_FILE}"
+exit 0
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+
+  run env AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID="SIM-UDID" bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"screenshot was empty"* ]]
+  ! grep -q -- "test test/integration/iosVideoRecordingStartStop.integration.test.ts" "$INVOCATIONS_FILE"
+}

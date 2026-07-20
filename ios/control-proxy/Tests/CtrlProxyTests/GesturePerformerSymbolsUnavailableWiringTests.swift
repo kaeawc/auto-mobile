@@ -58,9 +58,11 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         let functionStart = try XCTUnwrap(source.range(of: "public func " + name))
         let remainingSource = source[functionStart.upperBound...]
-        let nextFunction = remainingSource.range(of: "\n        public func ")
-            ?? remainingSource.range(of: "\n        private ")
-        let functionEnd = nextFunction?.lowerBound ?? source.endIndex
+        let nextDeclaration = [
+            remainingSource.range(of: "\n        public func ").map(\.lowerBound),
+            remainingSource.range(of: "\n        private ").map(\.lowerBound),
+        ].compactMap { $0 }.min()
+        let functionEnd = nextDeclaration ?? source.endIndex
 
         return String(source[functionStart.lowerBound..<functionEnd])
     }

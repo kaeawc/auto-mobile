@@ -65,6 +65,17 @@ subprojects {
     extensions.configure<DetektExtension> {
       config.setFrom(rootProject.files("config/detekt/detekt.yml"))
       buildUponDefaultConfig = true
+      // Analyze files across threads within a single detekt task. Gradle's
+      // org.gradle.parallel only parallelizes across projects, so without this a
+      // large module analyzes single-threaded.
+      parallel = true
+      // On Android modules `detektMain` fans out to one task per build type, so
+      // `release` re-analyzes the exact same `main` sources `debug` already
+      // covered -- no module has a `src/release` source set, and the only
+      // build-type source set in the project is `auto-mobile-sdk/src/debug`.
+      // Skipping release halves the Android analysis and, more importantly,
+      // avoids compiling the release variant classpath purely to feed detekt.
+      ignoredBuildTypes = listOf("release")
     }
   }
 

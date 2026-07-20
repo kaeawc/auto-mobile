@@ -38,6 +38,7 @@ jobs:
       ide_plugin_changed: ${{ steps.filter-ide-plugin.outputs.ide_plugin }}
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
+      kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       native_integration_changed: ${{ steps.filter-native-integration.outputs.native_integration }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
@@ -242,6 +243,22 @@ jobs:
               - 'scripts/android/**'
               - 'scripts/local-dev/hot-reload.sh'
               - '.github/workflows/android*.yml'
+
+      # Narrower than `android` above: detekt analyzes Kotlin only, so an XML
+      # resource or a doc under android/ has nothing for it to look at. The
+      # .kts glob covers module build files, which change a module's classpath
+      # and so must re-analyze it.
+      - name: "Check for Kotlin source changes"
+        id: filter-kotlin
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            kotlin:
+              - 'android/**/*.kt'
+              - 'android/**/*.kts'
+              - 'android/gradle.properties'
+              - 'android/gradle/libs.versions.toml'
+              - 'android/config/detekt/**'
 
       - name: "Check for iOS-related changes"
         id: filter-ios
@@ -628,11 +645,6 @@ jobs:
             --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
             --max-parallel 4
 
-      - name: "Run detekt"
-        shell: bash
-        working-directory: android
-        run: ./gradlew detektMain detektTest
-
       - name: "Run BATS Tests (Ubuntu)"
         shell: bash
         run: bats test/bats/
@@ -657,6 +669,68 @@ jobs:
         with:
           name: fast-validation-logs
           path: scratch/fast-validate-*/
+          retention-days: 7
+
+  # Detekt used to be a step inside Fast Validation, where its ~7 minutes of
+  # cold Gradle work dominated an otherwise ~1 minute job. It is its own job so
+  # it runs concurrently instead of serially, and so it can go through
+  # gradle-task-run for build/configuration cache reuse -- the raw `./gradlew`
+  # call it replaced had no Gradle caching at all and recompiled every module
+  # from scratch on every PR.
+  detekt:
+    name: "Detekt"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    # detekt analyzes Kotlin only, so a PR touching no .kt/.kts has nothing for
+    # it to look at. merge.yml runs the full tree post-merge as the backstop.
+    if: needs.detect-changes.outputs.kotlin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          # detekt_scope.sh diffs `git diff <base>...HEAD` to find which modules
+          # changed, so the base commit has to be in the clone. The default
+          # shallow fetch would not contain it.
+          fetch-depth: 0
+
+      # Type-resolution detekt has to compile a module's classpath before it can
+      # analyze it, so the cost scales with how many modules run. Most PRs touch
+      # one or two; this resolves the diff to just those modules' tasks and
+      # falls open to the full list whenever narrowing is not provably safe.
+      - name: "Resolve detekt scope"
+        id: scope
+        shell: bash
+        env:
+          # Empty or unresolvable (base force-pushed/rebased) makes the script
+          # fall open to the full task list rather than silently scoping to
+          # nothing -- see the fail-open note in detekt_scope.sh.
+          ONLY_CHANGED_SINCE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          tasks="$(scripts/android/detekt_scope.sh)"
+          echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
+          if [[ -z "$tasks" ]]; then
+            echo "No Kotlin module changed; skipping detekt." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Running detekt for: \`$tasks\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: ./.github/actions/gradle-task-run
+        if: steps.scope.outputs.tasks != ''
+        with:
+          gradle-tasks: ${{ steps.scope.outputs.tasks }}
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Upload Detekt Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: detekt-reports
+          path: android/**/build/reports/detekt/
+          if-no-files-found: ignore
           retention-days: 7
 
   bats-tests:

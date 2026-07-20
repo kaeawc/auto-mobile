@@ -243,10 +243,36 @@ jobs:
         run: |
           INSTALL_KTFMT_WHEN_MISSING=true ONLY_TOUCHED_FILES=false scripts/ktfmt/validate_ktfmt.sh
 
-      - name: "Run detekt"
-        shell: "bash"
-        working-directory: android
-        run: ./gradlew detektMain detektTest
+  # The full-tree backstop. PRs run detekt scoped to the modules they changed
+  # (pull_request.yml), which cannot see a violation introduced in a *consumer*
+  # of a changed module -- this unscoped post-merge run is what catches that.
+  # Its own job rather than a step in ktfmt so it does not serialize behind a
+  # 20-second format check, and so it can reuse the Gradle caches.
+  detekt:
+    name: "Detekt"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: "detektMain detektTest"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Upload Detekt Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: detekt-reports
+          path: android/**/build/reports/detekt/
+          if-no-files-found: ignore
+          retention-days: 7
 
   validate-shell-scripts:
     name: "Validate Shell Scripts"

@@ -1,5 +1,6 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
+import { optionalBoolean, optionalEnum, optionalInteger, optionalString, queryParamsToRecord } from "./queryParamValidation";
 import {
   buildTestTimingResponse,
   TEST_TIMING_LIMIT_MAX,
@@ -33,84 +34,6 @@ const TEST_TIMING_QUERY_PARAM_KEYS = new Set([
   "sessionUuid",
 ] as const);
 
-function normalizeParam(value: string | undefined): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function parseInteger(
-  value: string | undefined,
-  label: string,
-  options: { min?: number; max?: number } = {}
-): number | undefined {
-  const normalized = normalizeParam(value);
-  if (normalized === undefined) {
-    return undefined;
-  }
-
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
-    throw new Error(`Invalid ${label}: ${value}`);
-  }
-
-  const min = options.min ?? 0;
-  if (parsed < min) {
-    throw new Error(`Invalid ${label}: ${value}`);
-  }
-
-  if (options.max !== undefined && parsed > options.max) {
-    throw new Error(`Invalid ${label}: ${value}`);
-  }
-
-  return parsed;
-}
-
-function parseBoolean(value: string | undefined, label: string): boolean | undefined {
-  const normalized = normalizeParam(value);
-  if (normalized === undefined) {
-    return undefined;
-  }
-  const lowered = normalized.toLowerCase();
-  if (lowered === "true" || lowered === "1") {
-    return true;
-  }
-  if (lowered === "false" || lowered === "0") {
-    return false;
-  }
-  throw new Error(`Invalid ${label}: ${value}`);
-}
-
-function parseEnum<T extends string>(
-  value: string | undefined,
-  label: string,
-  allowed: readonly T[]
-): T | undefined {
-  const normalized = normalizeParam(value);
-  if (normalized === undefined) {
-    return undefined;
-  }
-  if (allowed.includes(normalized as T)) {
-    return normalized as T;
-  }
-  throw new Error(`Invalid ${label}: ${value}`);
-}
-
-function parseString(value: string | undefined): string | undefined {
-  return normalizeParam(value);
-}
-
-function parseQueryParams(query: string): Record<string, string> {
-  const params = new URLSearchParams(query);
-  const entries: Record<string, string> = {};
-  for (const [key, value] of params.entries()) {
-    entries[key] = value;
-  }
-  return entries;
-}
-
 function parseTestTimingParams(params: Record<string, string>): TestTimingQueryArgs {
   const unknownKeys = Object.keys(params).filter(key => !TEST_TIMING_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
@@ -118,25 +41,25 @@ function parseTestTimingParams(params: Record<string, string>): TestTimingQueryA
   }
 
   return {
-    lookbackDays: parseInteger(params.lookbackDays, "lookbackDays", { min: 1 }),
-    limit: parseInteger(params.limit, "limit", { min: 1, max: TEST_TIMING_LIMIT_MAX }),
-    minSamples: parseInteger(params.minSamples, "minSamples", { min: 0 }),
-    orderBy: parseEnum(params.orderBy, "orderBy", ["lastRun", "averageDuration", "sampleSize"]),
-    orderDirection: parseEnum(params.orderDirection, "orderDirection", ["asc", "desc"]),
-    testClass: parseString(params.testClass),
-    testMethod: parseString(params.testMethod),
-    deviceId: parseString(params.deviceId),
-    deviceName: parseString(params.deviceName),
-    devicePlatform: parseEnum(params.devicePlatform, "devicePlatform", ["android", "ios"]),
-    deviceType: parseEnum(params.deviceType, "deviceType", ["emulator", "simulator", "device"]),
-    appVersion: parseString(params.appVersion),
-    gitCommit: parseString(params.gitCommit),
-    targetSdk: parseInteger(params.targetSdk, "targetSdk", { min: 1 }),
-    jdkVersion: parseString(params.jdkVersion),
-    jvmTarget: parseString(params.jvmTarget),
-    gradleVersion: parseString(params.gradleVersion),
-    isCi: parseBoolean(params.isCi, "isCi"),
-    sessionUuid: parseString(params.sessionUuid),
+    lookbackDays: optionalInteger(params.lookbackDays, "lookbackDays", { min: 1 }),
+    limit: optionalInteger(params.limit, "limit", { min: 1, max: TEST_TIMING_LIMIT_MAX }),
+    minSamples: optionalInteger(params.minSamples, "minSamples", { min: 0 }),
+    orderBy: optionalEnum(params.orderBy, "orderBy", ["lastRun", "averageDuration", "sampleSize"]),
+    orderDirection: optionalEnum(params.orderDirection, "orderDirection", ["asc", "desc"]),
+    testClass: optionalString(params.testClass),
+    testMethod: optionalString(params.testMethod),
+    deviceId: optionalString(params.deviceId),
+    deviceName: optionalString(params.deviceName),
+    devicePlatform: optionalEnum(params.devicePlatform, "devicePlatform", ["android", "ios"]),
+    deviceType: optionalEnum(params.deviceType, "deviceType", ["emulator", "simulator", "device"]),
+    appVersion: optionalString(params.appVersion),
+    gitCommit: optionalString(params.gitCommit),
+    targetSdk: optionalInteger(params.targetSdk, "targetSdk", { min: 1 }),
+    jdkVersion: optionalString(params.jdkVersion),
+    jvmTarget: optionalString(params.jvmTarget),
+    gradleVersion: optionalString(params.gradleVersion),
+    isCi: optionalBoolean(params.isCi, "isCi"),
+    sessionUuid: optionalString(params.sessionUuid),
   };
 }
 
@@ -242,7 +165,7 @@ export function registerTestTimingResources(): void {
     "application/json",
     async params => {
       try {
-        const queryParams = parseQueryParams(params.params ?? "");
+        const queryParams = queryParamsToRecord(params.params ?? "");
         const options = parseTestTimingParams(queryParams);
         const uri = buildTestTimingUri(options);
         return getTestTimingResource(options, uri);

@@ -20,60 +20,15 @@
 #   detect_arch                - echoes x86_64|arm64|armv7|386|unknown (normalized)
 #   install_via_brew_or_manual - generic macOS brew-or-manual install helper
 
+# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/shell-core.sh"
+
 # Colors for output. Guarded so re-sourcing (or a caller that already set them)
 # does not clobber existing definitions.
 : "${RED:=$'\033[0;31m'}"
 : "${GREEN:=$'\033[0;32m'}"
 : "${YELLOW:=$'\033[1;33m'}"
 : "${NC:=$'\033[0m'}" # No Color
-
-# Check if a command exists on PATH.
-command_exists() {
-  command -v "$1" > /dev/null 2>&1
-}
-
-# Detect the operating system family. Echoes one of: macos|linux|windows|unknown.
-# The Windows (CYGWIN/MINGW/MSYS) case is included for every tool -- installers
-# that don't ship a Windows binary simply won't route to it.
-detect_os() {
-  case "$(uname -s)" in
-    Darwin*)
-      echo "macos"
-      ;;
-    Linux*)
-      echo "linux"
-      ;;
-    CYGWIN* | MINGW* | MSYS*)
-      echo "windows"
-      ;;
-    *)
-      echo "unknown"
-      ;;
-  esac
-}
-
-# Detect the CPU architecture, normalized to a canonical token. Echoes one of:
-# x86_64|arm64|armv7|386|unknown. Callers map this canonical token to the
-# per-release asset naming their tool uses (e.g. amd64, aarch64, x86_64).
-detect_arch() {
-  case "$(uname -m)" in
-    x86_64 | amd64)
-      echo "x86_64"
-      ;;
-    aarch64 | arm64)
-      echo "arm64"
-      ;;
-    armv7l)
-      echo "armv7"
-      ;;
-    i386 | i686)
-      echo "386"
-      ;;
-    *)
-      echo "unknown"
-      ;;
-  esac
-}
 
 # Generic "use Homebrew if present, else fall back to a manual installer" helper
 # for the macOS path. Consolidates the identical brew-or-manual skeleton that

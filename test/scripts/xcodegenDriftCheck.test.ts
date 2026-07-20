@@ -7,8 +7,27 @@ import { spawnSync } from "node:child_process";
 const repoRoot = join(import.meta.dir, "../..");
 const driftCheckScript = join(repoRoot, "scripts/ios/xcodegen-drift-check.sh");
 const versionScript = join(repoRoot, "scripts/ios/xcodegen_version.sh");
+const normalizeScript = join(repoRoot, "scripts/ios/pbxproj_normalize.sh");
 const workflowPath = join(repoRoot, ".github/workflows/pull_request.yml");
 const tempDirs: string[] = [];
+
+// A minimal PBXProject `targets = (...)` block in two of the orders XcodeGen
+// 2.46.0 alternates between for the same spec (issue #4080). Same members, same
+// UUIDs, different order — a pure reorder that must NOT be reported as drift.
+const declarationOrderProject = `// !$*UTF8*$!
+	targets = (
+		829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+		E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
+		61A21F82A43E4D436CD13CCD /* CtrlProxy */,
+	);
+`;
+const alphabeticalOrderProject = `// !$*UTF8*$!
+	targets = (
+		61A21F82A43E4D436CD13CCD /* CtrlProxy */,
+		829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
+		E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
+	);
+`;
 
 // The drift check sources xcodegen_version.sh and gates on the pinned version
 // before generating (issue #3975), so the sandbox must carry the real pin —
@@ -54,6 +73,8 @@ function createTempRepo(): string {
   chmodSync(join(tempDir, "scripts/ios/xcodegen-drift-check.sh"), 0o755);
   // The drift check sources this for the pin and the require_pinned gate.
   cpSync(versionScript, join(tempDir, "scripts/ios/xcodegen_version.sh"));
+  // ...and this for the #4080 target-array order normalization.
+  cpSync(normalizeScript, join(tempDir, "scripts/ios/pbxproj_normalize.sh"));
   writeFileSync(
     join(tempDir, "scripts/ios/xcodegen-generate.sh"),
     `#!/bin/bash
@@ -104,6 +125,11 @@ case "\${FAKE_XCODEGEN_BEHAVIOR:-unchanged}" in
     modify)
         printf 'regenerated project\\n' > CtrlProxy.xcodeproj/project.pbxproj
         ;;
+    reorder)
+        # Emit the committed project with only the PBXProject targets array
+        # reordered — the #4080 nondeterminism the drift check must tolerate.
+        printf '%s' "\${FAKE_REORDERED_PROJECT}" > CtrlProxy.xcodeproj/project.pbxproj
+        ;;
     recreate)
         rm -f CtrlProxy.xcodeproj/project.pbxproj
         printf 'committed project\\n' > CtrlProxy.xcodeproj/project.pbxproj
@@ -151,6 +177,23 @@ if [[ "$1" == "diff" && "\${2:-}" == "--" && "\${3:-}" == "\${tracked_path}" ]];
     echo "diff --git a/ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj b/ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"
     echo "-committed project"
     echo "+regenerated project"
+    exit 0
+fi
+
+# \`git show HEAD:<path>\` returns the committed bytes (modeled by baseline). An
+# untracked (??) path is absent from HEAD, so show must fail like real git.
+if [[ "$1" == "show" && "\${2:-}" == "HEAD:\${tracked_path}" ]]; then
+    if [[ "\${FAKE_GIT_STATUS_OUTPUT:-}" == "??"* ]]; then
+        echo "fatal: path '\${tracked_path}' does not exist in 'HEAD'" >&2
+        exit 128
+    fi
+    cat "\${baseline}"
+    exit 0
+fi
+
+# \`git checkout -- <path>\` restores the committed bytes (baseline) into the tree.
+if [[ "$1" == "checkout" && "\${2:-}" == "--" && "\${3:-}" == "\${tracked_path}" ]]; then
+    cp "\${baseline}" "\${project}"
     exit 0
 fi
 
@@ -249,6 +292,34 @@ describe("xcodegen drift check", () => {
 
     expectExitStatus(result, 0);
     expect(result.stdout + result.stderr).toContain("XcodeGen project files are in sync");
+  });
+
+  test("ctrl-proxy scope passes when only the PBXProject target order changed (#4080)", () => {
+    // XcodeGen 2.46.0 emits the targets array in one of two environment-dependent
+    // orders for the same spec + pinned version. A pure reorder is not drift, so
+    // the check must normalize it away and pass — not fail like a stale project.
+    const repoDir = createTempRepo();
+    const projectPath = join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
+    // Commit the declaration order; the fake generator emits the alphabetical one.
+    writeFileSync(projectPath, declarationOrderProject);
+    writeFileSync(join(repoDir, "baseline/project.pbxproj"), declarationOrderProject);
+
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_REPO_ROOT: repoDir,
+        FAKE_XCODEGEN_BEHAVIOR: "reorder",
+        FAKE_REORDERED_PROJECT: alphabeticalOrderProject,
+        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+      },
+    });
+
+    expectExitStatus(result, 0);
+    expect(result.stdout + result.stderr).toContain("target-array order normalized");
+    // The benign reorder must be restored to the committed bytes, not left dirty.
+    expect(readFileSync(projectPath, "utf8")).toBe(declarationOrderProject);
   });
 
   test("all scope uses the repo-wide generator for wider iOS build gates", () => {

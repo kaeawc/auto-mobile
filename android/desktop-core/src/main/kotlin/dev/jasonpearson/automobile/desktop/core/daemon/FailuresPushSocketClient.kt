@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.serializer
 
 /**
  * Client for the failures push Unix socket server. Subscribes to receive real-time failure
@@ -242,7 +243,7 @@ class FailuresPushSocketClient {
     val currentWriter = writer ?: return false
 
     return try {
-      val message = json.encodeToString(FailuresPushRequest.serializer(), request)
+      val message = json.encodeToString(serializer<FailuresPushRequest>(), request)
       currentWriter.write(message)
       currentWriter.newLine()
       currentWriter.flush()
@@ -288,7 +289,7 @@ class FailuresPushSocketClient {
   }
 
   private suspend fun handleMessage(message: String) {
-    val response = json.decodeFromString(FailuresPushResponse.serializer(), message)
+    val response = json.decodeFromString(serializer<FailuresPushResponse>(), message)
 
     when (response.type) {
       "subscription_response" -> {

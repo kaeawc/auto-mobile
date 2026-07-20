@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.serializer
 
 /**
  * Client for the telemetry push Unix socket server. Subscribes to receive real-time telemetry
@@ -240,7 +241,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
     val currentWriter = writer ?: return false
 
     return try {
-      val message = json.encodeToString(TelemetryPushRequest.serializer(), request)
+      val message = json.encodeToString(serializer<TelemetryPushRequest>(), request)
       currentWriter.write(message)
       currentWriter.newLine()
       currentWriter.flush()
@@ -285,7 +286,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
   }
 
   private suspend fun handleMessage(message: String) {
-    val response = json.decodeFromString(TelemetryPushResponse.serializer(), message)
+    val response = json.decodeFromString(serializer<TelemetryPushResponse>(), message)
 
     when (response.type) {
       "subscription_response" -> {

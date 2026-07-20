@@ -13,6 +13,7 @@ import java.nio.file.Files
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 /** Socket file the daemon binds for appearance control. */
 internal const val APPEARANCE_SOCKET_FILE = "appearance.sock"
@@ -110,12 +111,12 @@ class AppearanceSocketClient(
           OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
         )
 
-      writer.write(json.encodeToString(AppearanceSocketRequest.serializer(), request))
+      writer.write(json.encodeToString(serializer<AppearanceSocketRequest>(), request))
       writer.newLine()
       writer.flush()
 
       val line = reader.readLine() ?: throw McpConnectionException("Appearance socket closed")
-      val response = json.decodeFromString(AppearanceSocketResponse.serializer(), line)
+      val response = json.decodeFromString(serializer<AppearanceSocketResponse>(), line)
 
       if (!response.success) {
         throw McpConnectionException(response.error ?: "Appearance request failed")

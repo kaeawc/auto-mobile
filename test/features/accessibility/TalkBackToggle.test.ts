@@ -400,8 +400,7 @@ describe("TalkBackToggle", () => {
 
   describe("ADB error during apply phase", () => {
     test("returns a typed failure (not an uncaught throw) when an apply-phase ADB command fails", async () => {
-      // dumpsys succeeds so detectInstalledService() passes (TalkBack is found)
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
+      // The default PackageManager response confirms that TalkBack is installed.
       // The apply phase reads the current services list; make that command throw
       fakeAdb.setCommandError(
         "settings get secure enabled_accessibility_services",

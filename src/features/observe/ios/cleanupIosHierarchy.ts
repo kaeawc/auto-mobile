@@ -60,10 +60,7 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
   ) {
     return compactedChildren[0];
   }
-  const result: IosHierarchyNode = { ...node };
-  if (hasIosHeaderTrait(result.extras)) {
-    result.role = "heading";
-  }
+  const result = withHeadingRole(node);
 
   if (compactedChildren.length === 0) {
     delete result.node;
@@ -72,6 +69,10 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
   }
 
   return dedupeCurrentNoiseSibling(result, siblingNoiseScope);
+}
+
+function withHeadingRole(node: IosHierarchyNode): IosHierarchyNode {
+  return hasIosHeaderTrait(node.extras) ? { ...node, role: "heading" } : { ...node };
 }
 
 function normalizeChildren(node: IosHierarchyNode["node"]): IosHierarchyNode[] {

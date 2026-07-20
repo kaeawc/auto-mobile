@@ -136,7 +136,7 @@ consequences worth knowing:
 Only add **non-auto-fixable** rules to this ratchet: `lint` runs `--fix`, so an
 auto-fixable rule would rewrite `src/` on every CI run.
 
-Current ratchet rules and thresholds: `complexity` 15, `max-depth` 4,
+Current ratchet rules and thresholds: `complexity` 12, `max-depth` 3,
 `max-nested-callbacks` 3, `auto-mobile/no-accumulator-foreach` (src/ only).
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.

@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.serializer
 
 @Serializable
 data class PerformanceAuditMetrics(
@@ -83,5 +84,5 @@ internal fun decodePerformanceAuditResource(
     }
   }
 
-  return json.decodeFromJsonElement(PerformanceAuditHistoryResult.serializer(), jsonElement)
+  return json.decodeFromJsonElement(serializer<PerformanceAuditHistoryResult>(), jsonElement)
 }

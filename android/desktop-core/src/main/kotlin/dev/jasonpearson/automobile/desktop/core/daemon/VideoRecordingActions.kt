@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.serializer
 
 private val recordingJson = DaemonJson
 
@@ -84,7 +85,7 @@ class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClien
     decodeToolResponse(
       recordingJson,
       clientProvider().callTool("videoRecording", arguments),
-      VideoRecordingToolResponse.serializer(),
+      serializer<VideoRecordingToolResponse>(),
     )
 }
 

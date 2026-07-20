@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.Image
@@ -159,7 +160,7 @@ class VideoStreamClient(
 
         writer.write(
           json.encodeToString(
-            VideoStreamRequest.serializer(),
+            serializer<VideoStreamRequest>(),
             VideoStreamRequest(id = UUID.randomUUID().toString(), deviceId = deviceId),
           )
         )
@@ -167,7 +168,7 @@ class VideoStreamClient(
         writer.flush()
 
         val ackLine = readAckLine(input)
-        val ack = json.decodeFromString(VideoStreamResponse.serializer(), ackLine)
+        val ack = json.decodeFromString(serializer<VideoStreamResponse>(), ackLine)
         if (!ack.success) {
           _state.value = VideoStreamState.Unavailable(ack.error ?: "Live mirroring was refused")
           return

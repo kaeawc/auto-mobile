@@ -399,7 +399,36 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  test("setupPortForwarding reallocates when the current local port becomes busy before adb forward", async function() {
+  test("allocates an Android forwarding port while skipping the iOS SDK hierarchy server port", async function() {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    PortManager.reset();
+
+    const checkedPorts: number[] = [];
+    PortManager.setPortAvailabilityCheckerForTesting({
+      isPortAvailable: (port: number) => {
+        checkedPorts.push(port);
+        return port !== 8765;
+      },
+    });
+    try {
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createSuccessWebSocketFactory(),
+        fakeTimer
+      );
+
+      expect(checkedPorts).toEqual([8765, 8767]);
+      expect((accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
+        "ws://127.0.0.1:8767/ws"
+      );
+    } finally {
+      PortManager.setPortAvailabilityCheckerForTesting(null);
+    }
+  });
+
+  test("setupPortForwarding reallocates while preserving Android's reserved ports", async function() {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
     PortManager.reset();
@@ -426,11 +455,11 @@ describe("AndroidCtrlProxyClient", function() {
         getWebSocketUrl: () => string;
       }).setupPortForwarding();
 
-      expect(checkedPorts).toEqual([8765, 8765, 8766]);
-      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:8766");
-      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8766 tcp:8765");
+      expect(checkedPorts).toEqual([8765, 8765, 8767]);
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:8767");
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
       expect((accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
-        "ws://localhost:8766/ws"
+        "ws://127.0.0.1:8767/ws"
       );
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);

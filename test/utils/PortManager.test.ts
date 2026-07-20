@@ -152,8 +152,8 @@ describe("PortManager", () => {
     const url1 = PortManager.getWebSocketUrl("device-1");
     const url2 = PortManager.getWebSocketUrl("device-2");
 
-    expect(url1).toBe("ws://localhost:8765/ws");
-    expect(url2).toBe("ws://localhost:8766/ws");
+    expect(url1).toBe("ws://127.0.0.1:8765/ws");
+    expect(url2).toBe("ws://127.0.0.1:8766/ws");
   });
 
   test("should return allocations map", () => {

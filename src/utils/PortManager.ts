@@ -176,7 +176,7 @@ export class PortManager {
    */
   public static getWebSocketUrl(deviceId: string): string {
     const port = this.allocate(deviceId);
-    return `ws://localhost:${port}/ws`;
+    return `ws://127.0.0.1:${port}/ws`;
   }
 
   /**

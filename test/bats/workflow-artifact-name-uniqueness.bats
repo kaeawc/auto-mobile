@@ -146,11 +146,16 @@ YAML
 @test "junit-runner heap dump uploads stay failure-gated and tolerant" {
   # The rename must not disturb the surrounding step wiring: these dumps only
   # exist after a crash, so an unconditional upload would warn on every run.
+  # Tolerant now also means continue-on-error (issue #4083): a diagnostic
+  # upload flaking on a transient egress error must not red the job. The window
+  # spans the four step keys above the artifact `name:` (if / continue-on-error
+  # / uses / with).
   block="$(awk '
-    /name: junit-runner-heap-dumps/ { print prev3 "\n" prev2 "\n" prev1 "\n" $0 }
-    { prev3 = prev2; prev2 = prev1; prev1 = $0 }
+    /name: junit-runner-heap-dumps/ { print prev4 "\n" prev3 "\n" prev2 "\n" prev1 "\n" $0 }
+    { prev4 = prev3; prev3 = prev2; prev2 = prev1; prev1 = $0 }
   ' ".github/workflows/pull_request.yml")"
   [ -n "$block" ]
   [ "$(echo "$block" | grep -c 'if: failure()')" -eq 2 ]
+  [ "$(echo "$block" | grep -c 'continue-on-error: true')" -eq 2 ]
   [ "$(echo "$block" | grep -c 'uses: actions/upload-artifact@v[0-9]')" -eq 2 ]
 }

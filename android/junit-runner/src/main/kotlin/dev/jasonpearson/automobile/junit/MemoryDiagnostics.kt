@@ -38,6 +38,7 @@ internal object MemoryDiagnostics {
     )
   }
 
+  @Suppress("ExplicitGarbageCollectionCall")
   fun forceGc() {
     System.gc()
   }

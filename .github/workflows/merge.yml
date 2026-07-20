@@ -243,9 +243,10 @@ jobs:
         run: |
           INSTALL_KTFMT_WHEN_MISSING=true ONLY_TOUCHED_FILES=false scripts/ktfmt/validate_ktfmt.sh
 
-      - name: "Run Kotlin convention checks"
+      - name: "Run detekt"
         shell: "bash"
-        run: scripts/android/validate-kotlin-conventions.sh
+        working-directory: android
+        run: ./gradlew detekt
 
   validate-shell-scripts:
     name: "Validate Shell Scripts"

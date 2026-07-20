@@ -628,6 +628,11 @@ jobs:
             --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
             --max-parallel 4
 
+      - name: "Run detekt"
+        shell: bash
+        working-directory: android
+        run: ./gradlew detekt
+
       - name: "Run BATS Tests (Ubuntu)"
         shell: bash
         run: bats test/bats/

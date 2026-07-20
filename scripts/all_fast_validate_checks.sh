@@ -46,7 +46,6 @@ add_check "debug-tags" "\"$PROJECT_ROOT/scripts/validate-no-debug-log-tags.sh\""
 add_check "dependency-decisions" "\"$PROJECT_ROOT/scripts/check-stdlib-first.sh\"" "lint,dependencies" "Require a decision record for new direct dependencies"
 add_check "datetime-now-literal" "\"$PROJECT_ROOT/scripts/validate-no-datetime-now-literal.sh\"" "lint" "Reject string-literal SQL time-expression defaults in migrations"
 add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-desktop-core-unified.sh\"" "lint,android" "Reject abandoned desktop-core unified socket-client package"
-add_check "kotlin-conventions" "\"$PROJECT_ROOT/scripts/android/validate-kotlin-conventions.sh\"" "lint,kotlin,android" "Enforce Kotlin reuse and shared-implementation conventions"
 add_check "workflow-assertion-triggers" "\"$PROJECT_ROOT/scripts/ci/validate_workflow_assertion_triggers.sh\"" "config,ci" "Ensure workflow-YAML assertion tests are triggered by the paths they assert"
 
 print_usage() {

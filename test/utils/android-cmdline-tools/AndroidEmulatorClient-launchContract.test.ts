@@ -86,6 +86,34 @@ describe("AndroidEmulatorClient launch contract", () => {
     expect(spawns).toBe(0);
   });
 
+  test("does not spawn when cancellation happens during startup validation", async () => {
+    const controller = new AbortController();
+    let releaseAvdLookup: (devices: DeviceInfo[]) => void = () => {};
+    const availableAvds = new Promise<DeviceInfo[]>(resolve => {
+      releaseAvdLookup = resolve;
+    });
+    let validating = false;
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns += 1;
+      return createChild();
+    });
+    (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => {
+      validating = true;
+      return availableAvds;
+    };
+
+    const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    while (!validating) {
+      await Promise.resolve();
+    }
+    controller.abort();
+    releaseAvdLookup([{ name: "Pixel 9", platform: "android", isRunning: false }]);
+
+    await expect(launch).rejects.toThrow("cancelled");
+    expect(spawns).toBe(0);
+  });
+
   test("cancels and cleans up when aborted while startup validation is pending", async () => {
     const controller = new AbortController();
     const child = createChild();

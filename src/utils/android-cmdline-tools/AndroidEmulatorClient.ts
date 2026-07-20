@@ -874,12 +874,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     request.signal?.addEventListener("abort", dispose, { once: true });
 
     try {
-      process = await this.startEmulatorProcess(request.avdName, request.extraArgs, spawnedProcess => {
-        process = spawnedProcess;
-        if (disposed && !spawnedProcess.killed) {
-          spawnedProcess.kill();
-        }
-      });
+      process = await this.startEmulatorProcess(
+        request.avdName,
+        request.extraArgs,
+        spawnedProcess => {
+          process = spawnedProcess;
+          if (disposed && !spawnedProcess.killed) {
+            spawnedProcess.kill();
+          }
+        },
+        () => disposed,
+      );
       if (disposed) {
         if (process && !process.killed) {
           process.kill();
@@ -918,10 +923,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     };
   }
 
+  private throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void {
+    if (isCancelled?.()) {
+      throw new ActionableError(`Android emulator launch for '${avdName}' was cancelled`);
+    }
+  }
+
   private async startEmulatorProcess(
     avdName: string,
     requestedExtraArgs?: readonly string[],
     onSpawn?: (process: ChildProcess) => void,
+    isCancelled?: () => boolean,
   ): Promise<ChildProcess | null> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
@@ -977,6 +989,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
+    this.throwIfLaunchCancelled(avdName, isCancelled);
 
     return new Promise((resolve, reject) => {
       perf.startOperation("spawnEmulator");

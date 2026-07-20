@@ -52,6 +52,16 @@
       "env": ["AUTOMOBILE_TEST_MODE"],
       "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
     },
+    "check:android-emulator-boundary": {
+      "description": "Prevent Android emulator execution outside AndroidEmulatorClient",
+      "inputs": [
+        "src/**",
+        "scripts/check-android-emulator-boundary.sh",
+        "package.json"
+      ],
+      "outputs": [],
+      "outputLogs": "new-only"
+    },
     "test:coverage": {
       "description": "Run tests with coverage reporting to coverage/",
       "inputs": [

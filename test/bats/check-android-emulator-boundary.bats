@@ -31,3 +31,12 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
 }
+
+@test "rejects a direct production emulator spawn through an unrelated alias" {
+  printf '%s\n' 'const executable = "emulator"; spawn(executable, ["-avd", avdName]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}

@@ -874,7 +874,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     request.signal?.addEventListener("abort", dispose, { once: true });
 
     try {
-      process = await this.startEmulatorProcess(request.avdName, request.extraArgs);
+      process = await this.startEmulatorProcess(request.avdName, request.extraArgs, spawnedProcess => {
+        process = spawnedProcess;
+        if (disposed && !spawnedProcess.killed) {
+          spawnedProcess.kill();
+        }
+      });
       if (disposed) {
         if (process && !process.killed) {
           process.kill();
@@ -913,6 +918,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private async startEmulatorProcess(
     avdName: string,
     requestedExtraArgs?: readonly string[],
+    onSpawn?: (process: ChildProcess) => void,
   ): Promise<ChildProcess | null> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
@@ -973,6 +979,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.startOperation("spawnEmulator");
       const child = this.spawnFn(this.emulatorPath, args);
       perf.endOperation("spawnEmulator");
+      onSpawn?.(child);
 
       // Buffer to collect initial output for PANIC detection
       let initialOutput = "";

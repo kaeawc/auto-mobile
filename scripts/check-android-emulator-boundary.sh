@@ -10,11 +10,13 @@ OWNER="src/utils/android-cmdline-tools/AndroidEmulatorClient.ts"
 
 cd "$ROOT_DIR"
 
-pattern="(?:spawn|execFile|exec)\\s*\\(\\s*(?:[\\\"'\\\`][^\\\"'\\\`]*emulator[^\\\"'\\\`]*[\\\"'\\\`]|(?=[A-Za-z0-9_$]*[Ee]mulator)[A-Za-z_$][A-Za-z0-9_$]*)"
-violations="$(rg -n -P "$pattern" src \
-  --glob '*.ts' \
-  --glob "!${OWNER}" \
-  || true)"
+violations=""
+while IFS= read -r source_file; do
+  matches="$(rg -n -P '\b(?:spawn|execFile)\s*\(' "$source_file" || true)"
+  if [[ -n "$matches" ]]; then
+    violations+="${source_file#src/}: ${matches}"$'\n'
+  fi
+done < <(rg -il 'emulator' src --glob '*.ts' --glob "!${OWNER}")
 
 if [[ -n "$violations" ]]; then
   echo "error: Android emulator execution must use AndroidEmulatorClient:" >&2

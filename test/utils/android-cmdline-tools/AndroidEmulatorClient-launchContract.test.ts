@@ -100,10 +100,10 @@ describe("AndroidEmulatorClient launch contract", () => {
       await Promise.resolve();
     }
     controller.abort();
+    expect(child.killed).toBe(true);
     child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
 
     await expect(launch).rejects.toThrow("cancelled");
-    expect(child.killed).toBe(true);
   });
 
   test("disposal kills a process launched by this handle", async () => {

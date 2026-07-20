@@ -9,6 +9,7 @@ import type { ViewHierarchyResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger } from "../../../utils/logger";
+import { hasIosHeaderTrait } from "./semanticRoles";
 import type {
   HierarchyDelegateContext,
   CtrlProxyNode,
@@ -285,7 +286,11 @@ export class CtrlProxyHierarchy {
     if (node.checked) {attrs["checked"] = node.checked;}
     if (node.selected) {attrs["selected"] = node.selected;}
     if (longClickable) {attrs["long-clickable"] = longClickable;}
-    if (node.role) {attrs["role"] = node.role;}
+    if (hasIosHeaderTrait(node.extras)) {
+      attrs["role"] = "heading";
+    } else if (node.role) {
+      attrs["role"] = node.role;
+    }
     if (stateDescription) {attrs["state-description"] = stateDescription;}
     if (errorMessage) {attrs["error-message"] = errorMessage;}
     if (hintText) {attrs["hint-text"] = hintText;}

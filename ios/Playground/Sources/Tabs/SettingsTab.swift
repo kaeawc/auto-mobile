@@ -68,7 +68,7 @@ struct SettingsTab: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Link(destination: URL(string: "https://github.com")!) {
+                    Link(destination: URL(string: "https://github.com") ?? URL(fileURLWithPath: "/")) {
                         HStack {
                             Text("View Source Code")
                             Spacer()

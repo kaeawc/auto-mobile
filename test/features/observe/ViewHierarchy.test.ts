@@ -297,6 +297,39 @@ describe("ViewHierarchy", function() {
         getInstanceSpy.mockRestore();
       }
     });
+
+    test("promotes iOS SDK header traits in the public observe hierarchy", async function() {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios"
+      };
+      const fakeIosClient = {
+        getLatestHierarchy: async () => ({
+          hierarchy: {
+            updatedAt: 1750934585218,
+            hierarchy: {
+              role: "text",
+              text: "Overview",
+              extras: { "sdk.accessibilityTraits": "staticText,header" },
+            },
+          },
+          fresh: true,
+          updatedAt: 1750934585218,
+        }),
+      };
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+
+      try {
+        const viewHierarchyWithMocks = new ViewHierarchy(iosDevice, new FakeAdbClientFactory(fakeAdb), mockCtrlProxyClient);
+
+        const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
+
+        expect(result.hierarchy).toMatchObject({ role: "heading", text: "Overview" });
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
   });
 
   describe("FilterViewHierarchy Tests", function() {

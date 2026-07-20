@@ -414,6 +414,28 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     expect(field.$["actions"]).toEqual(["set_text", "clear_text"]);
   });
 
+  test("promotes an SDK header trait to a heading role", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+      node: [
+        {
+          className: "UILabel",
+          text: "Entries",
+          role: "text",
+          extras: { "sdk.accessibilityTraits": "staticText,header" },
+          bounds: { left: 16, top: 120, right: 386, bottom: 166 },
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const heading = findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Entries");
+
+    expect(heading).not.toBeNull();
+    expect(heading.$["role"]).toBe("heading");
+  });
+
   test("drops redundant static text child when actionable parent already has the same text", () => {
     const root: CtrlProxyNode = {
       className: "XCUIApplication",

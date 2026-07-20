@@ -1,3 +1,5 @@
+import { hasIosHeaderTrait } from "./semanticRoles";
+
 const GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type IosHierarchyNode = Record<string, unknown> & {
@@ -58,7 +60,7 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
   ) {
     return compactedChildren[0];
   }
-  const result: IosHierarchyNode = { ...node };
+  const result = withHeadingRole(node);
 
   if (compactedChildren.length === 0) {
     delete result.node;
@@ -67,6 +69,10 @@ function cleanupNode(node: IosHierarchyNode, siblingNoiseScope?: NoiseSiblingSco
   }
 
   return dedupeCurrentNoiseSibling(result, siblingNoiseScope);
+}
+
+function withHeadingRole(node: IosHierarchyNode): IosHierarchyNode {
+  return hasIosHeaderTrait(node.extras) ? { ...node, role: "heading" } : { ...node };
 }
 
 function normalizeChildren(node: IosHierarchyNode["node"]): IosHierarchyNode[] {

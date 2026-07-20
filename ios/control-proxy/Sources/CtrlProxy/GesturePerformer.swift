@@ -703,10 +703,9 @@ public class GesturePerformer: GesturePerforming {
                     app.searchFields,
                 ]
                 for query in queries {
-                    let count = query.count
-                    guard count > 0 else { continue }
-                    for i in 0 ..< count {
-                        let candidate = query.element(boundBy: i)
+                    let candidates = query.allElementsBoundByIndex
+                    guard !candidates.isEmpty else { continue }
+                    for candidate in candidates {
                         guard let snap = try? candidate.snapshot() else { continue }
                         if snap.hasFocus { return candidate }
                     }

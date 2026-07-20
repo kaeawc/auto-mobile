@@ -40,7 +40,7 @@ import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigatio
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
-import { PortManager } from "../../../utils/PortManager";
+import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import {
@@ -959,7 +959,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
     this.deviceConnectionLostNotifier =
       deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
-    this.localPort = PortManager.allocate(device.deviceId);
+    this.localPort = PortManager.allocate(device.deviceId, {
+      reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
+    });
     AndroidCtrlProxyManager.getInstance(device);
   }
 
@@ -1206,7 +1208,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   protected getWebSocketUrl(): string {
-    return `ws://localhost:${this.localPort}/ws`;
+    return `ws://127.0.0.1:${this.localPort}/ws`;
   }
 
   protected async handleMessage(data: WebSocket.Data): Promise<void> {
@@ -2129,7 +2131,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const additionalReservedPorts = currentPortIsAvailable ? [] : [this.localPort];
     PortManager.release(this.device.deviceId);
     const nextPort = PortManager.allocate(this.device.deviceId, {
-      reservedPorts: additionalReservedPorts,
+      reservedPorts: [
+        ...IOS_CTRL_PROXY_RESERVED_PORTS,
+        ...additionalReservedPorts,
+      ],
     });
     if (nextPort !== this.localPort) {
       logger.info(

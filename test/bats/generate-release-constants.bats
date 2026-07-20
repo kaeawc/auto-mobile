@@ -234,6 +234,39 @@ PY
   [ "$nightly_video" = "$VIDEO_JAR_SHA" ]
 }
 
+@test "inserts missing videoJarSha256 using the entry's existing indentation" {
+  python3 - "${TEST_ROOT}/src/constants/release.ts" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text()
+text = re.sub(r'\n\s+videoJarSha256: "[^"]+",', '', text)
+path.write_text(text)
+PY
+
+  run env \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  [ "$status" -eq 0 ]
+
+  grep -q '^  videoJarSha256: "' "${TEST_ROOT}/src/constants/release.ts"
+  ! grep -q '^    videoJarSha256: "' "${TEST_ROOT}/src/constants/release.ts"
+
+  run env \
+    RELEASE_VERSION="0.0.44" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  [ "$status" -eq 0 ]
+
+  grep -q '^    videoJarSha256: "' "${TEST_ROOT}/src/constants/release.ts"
+}
+
 @test "rejects a malformed VIDEO_JAR_SHA256" {
   run env \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \

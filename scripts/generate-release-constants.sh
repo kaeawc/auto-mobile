@@ -138,8 +138,8 @@ field_re = re.compile(r'(^\s+' + re.escape(field) + r': ")[^"]*(",?$)', re.M)
 if field_re.search(entry):
     updated_entry = field_re.sub(r'\g<1>' + value + r'\2', entry, count=1)
 else:
-    ipa_re = re.compile(r'(^\s+ipaSha256: "[^"]+",\n)', re.M)
-    updated_entry = ipa_re.sub(r'\1    ' + field + f': "{value}",\n', entry, count=1)
+    ipa_re = re.compile(r'(^(\s+)ipaSha256: "[^"]+",\n)', re.M)
+    updated_entry = ipa_re.sub(lambda m: m.group(1) + m.group(2) + f'{field}: "{value}",\n', entry, count=1)
 
 path.write_text(text[:match.start(1)] + updated_entry + text[match.end(1):])
 PY

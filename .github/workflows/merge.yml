@@ -1006,6 +1006,10 @@ jobs:
     needs:
       - validate-xml
       - ktfmt
+      # detekt used to be a step inside the ktfmt job, so this list covered it
+      # transitively. It is its own job now -- without this entry, Android
+      # library snapshots would publish to Maven Central with detekt red.
+      - detekt
       - validate-shell-scripts
       - validate-claude-plugin
       - validate-mkdocs-nav

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -48,7 +49,7 @@ class RealAppListDataSource(
       val client = provider()
 
       // Read from MCP resource
-      val uri = "automobile:apps?deviceId=${java.net.URLEncoder.encode(device, "UTF-8")}"
+      val uri = "automobile:apps?deviceId=${encodeResourceUriComponent(device)}"
       val contents = client.readResource(uri)
       val responseText = contents.firstOrNull()?.text ?: return Result.Success(emptyList())
 

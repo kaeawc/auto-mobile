@@ -38,6 +38,7 @@ internal object MemoryDiagnostics {
     )
   }
 
+  @Suppress("ExplicitGarbageCollectionCall")
   fun forceGc() {
     System.gc()
   }
@@ -285,13 +286,7 @@ internal object MemoryDiagnostics {
     file.writeText(content)
   }
 
-  private fun formatBytes(bytes: Long): String {
-    if (bytes < 0) {
-      return "unknown"
-    }
-    val mb = bytes / (1024.0 * 1024.0)
-    return String.format("%.2f MiB", mb)
-  }
+  private fun formatBytes(bytes: Long): String = formatMebibytes(bytes)
 
   private data class ToolOutput(val exitCode: Int, val stdout: String, val stderr: String)
 }

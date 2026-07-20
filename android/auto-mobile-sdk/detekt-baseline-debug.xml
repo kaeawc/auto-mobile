@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>UnnecessarySafeCall:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$response.body?.contentLength()</ID>
+    <ID>UnnecessarySafeCall:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$extras?.getLong("sinceSequence", 0L)</ID>
+    <ID>UnsafeCallOnNullableType:AutoMobileSDK.kt:AutoMobileSDK$this.context!!</ID>
+    <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:DatabaseInspector$_driver!!</ID>
+    <ID>UnsafeCallOnNullableType:SharedPreferencesInspector.kt:SharedPreferencesInspector$_driver!!</ID>
+  </CurrentIssues>
+</SmellBaseline>

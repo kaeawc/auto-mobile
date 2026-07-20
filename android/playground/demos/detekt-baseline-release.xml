@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>UnsafeCallOnNullableType:HandledExceptionDemoScreen.kt:nullString!!</ID>
+  </CurrentIssues>
+</SmellBaseline>

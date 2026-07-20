@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and AutoMobileRed.toArgb())</ID>
+    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and PromoBlue.toArgb())</ID>
+    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and PromoOrange.toArgb())</ID>
+    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and backgroundColor.toArgb())</ID>
+    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and textColor.toArgb())</ID>
+  </CurrentIssues>
+</SmellBaseline>

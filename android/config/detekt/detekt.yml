@@ -1,0 +1,19 @@
+complexity:
+  active: false
+coroutines:
+  active: false
+empty-blocks:
+  active: false
+exceptions:
+  active: false
+naming:
+  active: false
+performance:
+  active: false
+style:
+  active: false
+
+# Start with the built-in correctness rules. Additional rule sets can be enabled
+# after their existing findings have been deliberately baselined or fixed.
+potential-bugs:
+  active: true

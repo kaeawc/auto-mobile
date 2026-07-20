@@ -1,7 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -58,27 +56,14 @@ internal fun buildPerformanceResultsUri(
   limit: Int?,
   offset: Int?,
 ): String {
-  val params = mutableListOf<Pair<String, String>>()
-  if (!startTime.isNullOrBlank()) {
-    params.add("startTime" to startTime)
-  }
-  if (!endTime.isNullOrBlank()) {
-    params.add("endTime" to endTime)
-  }
-  if (limit != null) {
-    params.add("limit" to limit.toString())
-  }
-  if (offset != null) {
-    params.add("offset" to offset.toString())
-  }
-  if (params.isEmpty()) {
-    return PERFORMANCE_RESULTS_RESOURCE_URI
-  }
-  val query =
-    params.joinToString("&") { (key, value) ->
-      "$key=${URLEncoder.encode(value, StandardCharsets.UTF_8)}"
+  return ResourceUriBuilder(PERFORMANCE_RESULTS_RESOURCE_URI)
+    .apply {
+      add("startTime", startTime)
+      add("endTime", endTime)
+      add("limit", limit)
+      add("offset", offset)
     }
-  return "$PERFORMANCE_RESULTS_RESOURCE_URI?$query"
+    .build()
 }
 
 internal fun decodePerformanceAuditResource(

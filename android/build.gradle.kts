@@ -1,4 +1,5 @@
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
+import dev.detekt.gradle.extensions.DetektExtension
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.jvm.toolchain.JavaLanguageVersion
@@ -24,6 +25,7 @@ plugins {
   alias(libs.plugins.compose.hot.reload) apply false
   alias(libs.plugins.mavenPublish) apply false
   alias(libs.plugins.metro) apply false
+  alias(libs.plugins.detekt) apply false
 }
 
 // Read version from gradle.properties
@@ -55,6 +57,17 @@ plugins.withId(libs.plugins.mavenPublish.get().pluginId) {
 val gradleWorkerJvmArgs = providers.gradleProperty("org.gradle.testWorker.jvmargs").get()
 
 subprojects {
+  pluginManager.withPlugin("org.jetbrains.kotlin.jvm") { apply(plugin = "dev.detekt") }
+  pluginManager.withPlugin("org.jetbrains.kotlin.android") { apply(plugin = "dev.detekt") }
+  pluginManager.withPlugin("com.android.application") { apply(plugin = "dev.detekt") }
+  pluginManager.withPlugin("com.android.library") { apply(plugin = "dev.detekt") }
+  pluginManager.withPlugin("dev.detekt") {
+    extensions.configure<DetektExtension> {
+      config.setFrom(rootProject.files("config/detekt/detekt.yml"))
+      buildUponDefaultConfig = true
+    }
+  }
+
   tasks.withType<Test>().configureEach {
     jvmArgs(gradleWorkerJvmArgs.split(" ").filter { it.isNotBlank() })
   }

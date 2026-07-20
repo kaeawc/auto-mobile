@@ -29,6 +29,12 @@ Closes #
 - [ ] New generic code reuses the standard library or an existing project helper; any new direct dependency has a decision record under `docs/decisions/`
 - [ ] Rebased onto latest `main`, conflicts resolved
 
+## Kotlin Reuse Check
+
+<!-- Delete when this PR does not modify Kotlin. -->
+- [ ] Checked Kotlin stdlib/JDK/AndroidX, existing module dependencies, and dependency-compatible AutoMobile modules before adding helpers, wrappers, `*Util` files, or dependencies
+- [ ] Any intentional custom implementation or new dependency exception is explained in the summary
+
 ## Device Verification
 
 <!-- For changes that affect on-device behavior (observe, gestures, hierarchy, tools). Delete if N/A. -->

@@ -124,8 +124,5 @@ internal object MemoryMonitor {
     threadLabel.remove()
   }
 
-  private fun formatBytes(bytes: Long): String {
-    val mb = bytes.toDouble() / BYTES_PER_MB
-    return String.format("%.2f MiB", mb)
-  }
+  private fun formatBytes(bytes: Long): String = formatMebibytes(bytes, showNegative = true)
 }

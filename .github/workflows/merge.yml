@@ -243,6 +243,11 @@ jobs:
         run: |
           INSTALL_KTFMT_WHEN_MISSING=true ONLY_TOUCHED_FILES=false scripts/ktfmt/validate_ktfmt.sh
 
+      - name: "Run detekt"
+        shell: "bash"
+        working-directory: android
+        run: ./gradlew detektMain detektTest
+
   validate-shell-scripts:
     name: "Validate Shell Scripts"
     runs-on: ubuntu-latest

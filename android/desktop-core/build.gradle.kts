@@ -49,9 +49,32 @@ val generateDesktopBuildInfo =
 
 kotlin { sourceSets.named("main") { kotlin.srcDir(generateDesktopBuildInfo) } }
 
+/**
+ * Native classifier for the host platform, used to pull only the ffmpeg natives this build will
+ * package. Pulling `ffmpeg-platform` instead would drag in every platform (~150-200MB).
+ */
+val hostJavacppPlatform: String by lazy {
+  val os = System.getProperty("os.name").lowercase()
+  val arch = System.getProperty("os.arch").lowercase()
+  val arm = arch == "aarch64" || arch == "arm64"
+  when {
+    os.contains("mac") || os.contains("darwin") ->
+      if (arm) "macosx-arm64" else "macosx-x86_64"
+    os.contains("win") -> "windows-x86_64"
+    else -> if (arm) "linux-arm64" else "linux-x86_64"
+  }
+}
+
 dependencies {
   // Domain module
   api(project(":desktop-domain"))
+
+  // H.264 decoding for the live device view (video-stream.sock). Natives are restricted to the
+  // host platform; see hostJavacppPlatform above.
+  implementation(libs.bytedeco.javacpp)
+  implementation(libs.bytedeco.ffmpeg)
+  runtimeOnly(variantOf(libs.bytedeco.javacpp) { classifier(hostJavacppPlatform) })
+  runtimeOnly(variantOf(libs.bytedeco.ffmpeg) { classifier(hostJavacppPlatform) })
 
   // Shared modules
   implementation(project(":protocol"))

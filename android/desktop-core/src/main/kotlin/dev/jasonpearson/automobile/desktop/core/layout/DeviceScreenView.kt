@@ -44,6 +44,8 @@ import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -141,6 +143,11 @@ private fun PointerEvent.isZoomModifierPressed(): Boolean =
 @Composable
 fun DeviceScreenView(
   screenshotData: ByteArray?,
+  /**
+   * A decoded live-mirroring frame. When present it renders instead of [screenshotData], so the
+   * caller can fall back to polled screenshots simply by passing null.
+   */
+  liveFrame: ImageBitmap? = null,
   screenWidth: Int,
   screenHeight: Int,
   rotation: Int = 0,
@@ -175,8 +182,9 @@ fun DeviceScreenView(
   var prevViewportWidth by remember { mutableFloatStateOf(0f) }
   var prevViewportHeight by remember { mutableFloatStateOf(0f) }
 
-  // Decode raw screenshot without rotation
-  val rawBitmap =
+  // Decode raw screenshot without rotation. A live frame is already decoded and already in
+  // display orientation, so it short-circuits both this and the rotation correction below.
+  val decodedScreenshot =
     remember(screenshotData) {
       screenshotData?.let {
         try {
@@ -186,6 +194,7 @@ fun DeviceScreenView(
         }
       }
     }
+  val rawBitmap = liveFrame ?: decodedScreenshot
 
   // Detect rotation needed to align the screenshot with the hierarchy coordinate system.
   // iOS screenshots arrive in native pixel orientation (portrait) even when the device
@@ -240,7 +249,9 @@ fun DeviceScreenView(
         val newW = if (swapDims) h else w
         val newH = if (swapDims) w else h
 
-        val skiaImage = Image.makeFromEncoded(screenshotData!!)
+        // Reuse the bitmap decoded above rather than decoding the bytes a second time. This is
+        // also what makes rotation work for live frames, which have no encoded bytes at all.
+        val skiaImage = Image.makeFromBitmap(original.asSkiaBitmap())
         val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(newW, newH)
         val canvas = surface.canvas
         canvas.translate(newW / 2f, newH / 2f)

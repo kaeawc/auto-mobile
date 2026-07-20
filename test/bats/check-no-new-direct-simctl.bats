@@ -10,10 +10,12 @@ setup() {
   touch "$repo_dir/src/existing.ts"
   git -C "$repo_dir" add .
   git -C "$repo_dir" commit -qm baseline
+  git -C "$repo_dir" commit --allow-empty -qm head
 }
 
 teardown() {
   rm -rf "$repo_dir"
+  rm -rf "${remote_dir:-}" "${shallow_dir:-}"
 }
 
 @test "rejects a new argv-form xcrun execution" {
@@ -24,4 +26,57 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects a multiline argv-form xcrun simctl execution" {
+  printf '%s\n' 'execFile(' '  "xcrun",' '  [' '    "simctl",' '    "list",' '    "devices",' '  ],' ');' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects a variable argv-form xcrun simctl execution" {
+  printf '%s\n' 'const args = ["simctl", "list", "devices"];' 'execFile("xcrun", args);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "fails closed when the base ref is absent" {
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh origin/main' _ "$repo_dir"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"base ref origin/main does not exist"* ]]
+}
+
+@test "fetches the GitHub Actions PR base from a depth-one checkout" {
+  remote_dir="$(mktemp -d)"
+  shallow_dir="$(mktemp -d)"
+  git -C "$repo_dir" branch -M main
+  git -C "$repo_dir" remote add origin "$remote_dir"
+  git -C "$remote_dir" init --bare -q
+  git -C "$repo_dir" push -q origin main
+  git -C "$repo_dir" checkout -qb feature
+  printf '%s\n' 'export const noop = true;' > "$repo_dir/src/change.ts"
+  git -C "$repo_dir" add src/change.ts
+  git -C "$repo_dir" commit -qm feature
+  git -C "$repo_dir" push -q origin feature
+  rmdir "$shallow_dir"
+  git clone --depth 1 --branch feature -q "file://$remote_dir" "$shallow_dir"
+
+  run git -C "$shallow_dir" rev-parse --verify --quiet 'HEAD^1^{commit}'
+  [ "$status" -ne 0 ]
+  run git -C "$shallow_dir" rev-parse --verify --quiet 'origin/main^{commit}'
+  [ "$status" -ne 0 ]
+
+  run bash -c 'cd "$1" && GITHUB_ACTIONS=true GITHUB_BASE_REF=main bash scripts/check-no-new-direct-simctl.sh' _ "$shallow_dir"
+
+  [ "$status" -eq 0 ]
+  git -C "$shallow_dir" rev-parse --verify --quiet 'origin/main^{commit}'
 }

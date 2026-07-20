@@ -8,22 +8,37 @@ set -euo pipefail
 base_ref="${1:-origin/main}"
 owner="src/utils/ios-cmdline-tools/SimCtlClient.ts"
 violations=()
-# An argv-form xcrun execution is also forbidden outside the owner. The strict
-# xcrun match deliberately covers future simctl calls even when the argv array
-# is split across multiple added lines.
-pattern='(spawn\([[:space:]]*"xcrun"|execFile\([^)]*"xcrun"|exec\([^)]*"xcrun simctl|"/bin/sh".*xcrun simctl)'
+
+if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
+  # pull_request checkouts are shallow by default, so neither origin/main nor
+  # HEAD^1 is guaranteed to exist. Fetch the actual PR base before comparing.
+  if [[ "$base_ref" == 'origin/main' && "${GITHUB_ACTIONS:-}" == 'true' && -n "${GITHUB_BASE_REF:-}" ]]; then
+    base_ref="origin/$GITHUB_BASE_REF"
+    git fetch --no-tags --depth=1 origin \
+      "refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
+  fi
+
+  if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
+    printf 'Cannot check new simctl calls: base ref %s does not exist.\n' "$base_ref" >&2
+    exit 2
+  fi
+fi
+
+# Newlines are normalized below so argv calls formatted over multiple lines are
+# checked as one expression. Block all direct xcrun argv calls outside the
+# owner: variable argv values cannot be proven to be non-simctl statically,
+# and the conservative boundary prevents an easy bypass.
+pattern='((spawn|execFile)\([[:space:]]*"xcrun"|exec\([^)]*"xcrun simctl|"/bin/sh".*xcrun simctl)'
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" ]] && continue
   [[ "$file" == test/* ]] && continue
 
-  added_lines="$(git diff --unified=0 "$base_ref" -- "$file" | awk '/^\+[^+]/ { print substr($0, 2) }')"
+  added_lines="$(git diff --unified=0 "$base_ref" -- "$file" | awk '/^\+[^+]/ { printf "%s ", substr($0, 2) }')"
   [[ -z "$added_lines" ]] && continue
 
-  if grep -nE "$pattern" <<<"$added_lines" >/dev/null; then
-    while IFS= read -r match; do
-      violations+=("$file:$match")
-    done < <(grep -nE "$pattern" <<<"$added_lines")
+  if grep -Eq "$pattern" <<<"$added_lines"; then
+    violations+=("$file")
   fi
 done < <(git diff --name-only "$base_ref" -- src)
 

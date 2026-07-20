@@ -40,3 +40,20 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
 }
+
+@test "rejects a shell-based ProcessExecutor emulator launch" {
+  printf '%s\n' 'const processExecutor: ProcessExecutor = {} as ProcessExecutor; processExecutor.exec("emulator -avd Pixel");' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "allows unrelated RegExp exec calls in an emulator-related file" {
+  printf '%s\n' 'const match = /emulator/.exec(deviceId);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+}

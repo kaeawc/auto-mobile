@@ -26,7 +26,7 @@ describe("AndroidUserTargetResolver", () => {
     const adb = new FakeAdbExecutor();
     adb.setUsers([
       { userId: 11, name: "Paused work", flags: 0x30, running: false },
-      { userId: 12, name: "Work", flags: 0x30, running: true },
+      { userId: 12, name: "Work", flags: 0x20, running: true },
       { userId: 13, name: "Other work", flags: 0x30, running: true },
     ]);
     const resolver = new AndroidUserTargetResolver(adb);

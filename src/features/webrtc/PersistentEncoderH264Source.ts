@@ -228,9 +228,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private buildServerArgs(): string[] {
-    const baseArgs = this.options.device.deviceId ? ["-s", this.options.device.deviceId] : [];
     const args = [
-      ...baseArgs,
       "shell",
       `CLASSPATH=${VIDEO_SERVER_REMOTE_JAR_PATH}`,
       "app_process",

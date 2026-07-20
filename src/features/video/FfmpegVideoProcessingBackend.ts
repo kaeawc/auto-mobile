@@ -381,7 +381,6 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     });
 
     try {
-      await waitForSpawn(captureProcess);
       logger.info(`[FfmpegVideo] screenrecord process spawned`);
     } catch (error) {
       logger.error(`[FfmpegVideo] Failed to spawn screenrecord: ${error}`);

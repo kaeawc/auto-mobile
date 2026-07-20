@@ -35,7 +35,7 @@ export class AndroidUserTargetResolver {
     }
 
     const users = await this.adb.listUsers(request.signal);
-    const managedProfile = users.find(user => user.running && (user.flags & 0x30) === 0x30);
+    const managedProfile = users.find(user => user.running && (user.flags & 0x20) !== 0);
     if (managedProfile) {
       return { userId: managedProfile.userId, source: "managedProfile" };
     }

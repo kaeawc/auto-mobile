@@ -252,12 +252,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     const process = await adb.spawn(args);
 
-    try {
-      await waitForSpawn(process);
-    } catch (error) {
-      throw new ActionableError(`Failed to start Android recording: ${error}`);
-    }
-
     const stderr: string[] = [];
     const { exitState, exitPromise } = createExitTracker(process, stderr);
 

@@ -51,10 +51,10 @@ const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
 const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 const IOS_RECORDING_START_TIMEOUT_MS = 30000;
-const IOS_RECORDING_START_MESSAGES = [
-  "Recording started",
-  "Defaulting to display:",
-];
+// `simctl` emits this only after processing its first video frame. The earlier
+// "Defaulting to display" diagnostic proves only display selection, which can
+// still produce a zero-byte capture on a cold simulator.
+const IOS_RECORDING_START_MESSAGES = ["Recording started"];
 
 interface HardwareAccelInfo {
   encoder: string;

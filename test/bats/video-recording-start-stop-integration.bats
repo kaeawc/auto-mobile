@@ -58,8 +58,8 @@ SCRIPT
   run env AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID="SIM-UDID" bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  grep -q -- "simctl io SIM-UDID screenshot" "$INVOCATIONS_FILE"
-  grep -q -- "test test/integration/iosVideoRecordingStartStop.integration.test.ts" "$INVOCATIONS_FILE"
+  [[ "$(sed -n '1p' "$INVOCATIONS_FILE")" == "simctl io SIM-UDID screenshot "* ]]
+  [ "$(sed -n '2p' "$INVOCATIONS_FILE")" = "test test/integration/iosVideoRecordingStartStop.integration.test.ts" ]
 }
 
 @test "fails before the integration test when the simulator cannot produce a warm-up frame" {

@@ -113,6 +113,16 @@ struct DemosTab: View {
                             icon: "accessibility.fill"
                         )
                     }
+
+                    NavigationLink {
+                        AccessibilityRotorDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Custom Rotors",
+                            description: "VoiceOver rotor navigation",
+                            icon: "dial.medium.fill"
+                        )
+                    }
                 }
 
                 Section("View Hierarchy") {

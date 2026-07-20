@@ -262,14 +262,14 @@ describe("VoiceOverSwipeExecutor", () => {
       const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("container selector");
+      expect(result.error).toContain("not supported");
       expect(result.fallbackReason).toContain("do not reach VoiceOver");
       expect(calls).toHaveLength(0);
       expect(fakeIosClient.getActionHistory()).toHaveLength(0);
       expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
     });
 
-    test("uses requestAction with resource-id when container has resource-id", async () => {
+    test("does not report a VoiceOver scroll when the container has a resource-id", async () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       const container = makeContainerElement({ "resource-id": "com.example:id/list" });
@@ -283,19 +283,14 @@ describe("VoiceOverSwipeExecutor", () => {
 
       const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "down", container, { duration: 300 }, perf);
 
-      expect(result.success).toBe(true);
-      // Standard swipe and 3-finger swipe should NOT be called
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not supported");
       expect(calls).toHaveLength(0);
       expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
-      // Accessibility action should be called with resource-id
-      const actionHistory = fakeIosClient.getActionHistory();
-      expect(actionHistory).toHaveLength(1);
-      expect(actionHistory[0].action).toBe("scroll_forward");
-      expect(actionHistory[0].resourceId).toBe("com.example:id/list");
-      expect(actionHistory[0].label).toBeUndefined();
+      expect(fakeIosClient.getActionHistory()).toHaveLength(0);
     });
 
-    test("uses requestAction with label when container has content-desc but no resource-id", async () => {
+    test("does not report a VoiceOver scroll when the container has a content-desc", async () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       const container = makeContainerElement({ "content-desc": "My Scrollable List" });
@@ -309,17 +304,14 @@ describe("VoiceOverSwipeExecutor", () => {
 
       const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "up", container, { duration: 300 }, perf);
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not supported");
       expect(calls).toHaveLength(0);
       expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
-      const actionHistory = fakeIosClient.getActionHistory();
-      expect(actionHistory).toHaveLength(1);
-      expect(actionHistory[0].action).toBe("scroll_backward");
-      expect(actionHistory[0].resourceId).toBeUndefined();
-      expect(actionHistory[0].label).toBe("My Scrollable List");
+      expect(fakeIosClient.getActionHistory()).toHaveLength(0);
     });
 
-    test("returns the accessibility action failure instead of falling back to synthesized touches", async () => {
+    test("does not invoke a configured container action while VoiceOver is active", async () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       fakeIosClient.setActionResult({ success: false, error: "Element not found" });
@@ -335,13 +327,14 @@ describe("VoiceOverSwipeExecutor", () => {
       const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "down", container, { duration: 300 }, perf);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Element not found");
+      expect(result.error).toContain("not supported");
       expect(result.fallbackReason).toContain("do not reach VoiceOver");
       expect(calls).toHaveLength(0);
       expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
+      expect(fakeIosClient.getActionHistory()).toHaveLength(0);
     });
 
-    test("returns an actionable failure when the accessibility action throws", async () => {
+    test("does not invoke a throwing container action while VoiceOver is active", async () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       fakeIosClient.setFailureMode("action", new Error("Connection lost"));
@@ -358,10 +351,11 @@ describe("VoiceOverSwipeExecutor", () => {
       const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "up", container, { duration: 300 }, perf);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Connection lost");
+      expect(result.error).toContain("not supported");
       expect(result.fallbackReason).toContain("do not reach VoiceOver");
       expect(calls).toHaveLength(0);
       expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
+      expect(fakeIosClient.getActionHistory()).toHaveLength(0);
     });
 
     test("does not report a successful VoiceOver boomerang from synthesized touches", async () => {
@@ -389,76 +383,5 @@ describe("VoiceOverSwipeExecutor", () => {
       expect(fakeTimer.getSleepCallCount()).toBe(0);
     });
 
-    test("maps 'down' direction to scroll_forward", async () => {
-      const { executor } = makeFakeGestureExecutor();
-      fakeVoiceOverDetector.setVoiceOverEnabled(true);
-      const container = makeContainerElement({ "resource-id": "com.example:id/list" });
-
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
-        executor,
-        fakeIosClient as any,
-        fakeVoiceOverDetector
-      );
-
-      await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "down", container, undefined, perf);
-
-      const actionHistory = fakeIosClient.getActionHistory();
-      expect(actionHistory[0].action).toBe("scroll_forward");
-    });
-
-    test("maps 'up' direction to scroll_backward", async () => {
-      const { executor } = makeFakeGestureExecutor();
-      fakeVoiceOverDetector.setVoiceOverEnabled(true);
-      const container = makeContainerElement({ "resource-id": "com.example:id/list" });
-
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
-        executor,
-        fakeIosClient as any,
-        fakeVoiceOverDetector
-      );
-
-      await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "up", container, undefined, perf);
-
-      const actionHistory = fakeIosClient.getActionHistory();
-      expect(actionHistory[0].action).toBe("scroll_backward");
-    });
-
-    test("maps 'right' direction to scroll_forward", async () => {
-      const { executor } = makeFakeGestureExecutor();
-      fakeVoiceOverDetector.setVoiceOverEnabled(true);
-      const container = makeContainerElement({ "resource-id": "com.example:id/list" });
-
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
-        executor,
-        fakeIosClient as any,
-        fakeVoiceOverDetector
-      );
-
-      await voiceOverExecutor.executeSwipeGesture(100, 200, 200, 200, "right", container, undefined, perf);
-
-      const actionHistory = fakeIosClient.getActionHistory();
-      expect(actionHistory[0].action).toBe("scroll_forward");
-    });
-
-    test("maps 'left' direction to scroll_backward", async () => {
-      const { executor } = makeFakeGestureExecutor();
-      fakeVoiceOverDetector.setVoiceOverEnabled(true);
-      const container = makeContainerElement({ "resource-id": "com.example:id/list" });
-
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
-        executor,
-        fakeIosClient as any,
-        fakeVoiceOverDetector
-      );
-
-      await voiceOverExecutor.executeSwipeGesture(200, 200, 100, 200, "left", container, undefined, perf);
-
-      const actionHistory = fakeIosClient.getActionHistory();
-      expect(actionHistory[0].action).toBe("scroll_backward");
-    });
   });
 });

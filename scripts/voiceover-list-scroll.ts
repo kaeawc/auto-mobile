@@ -1,20 +1,17 @@
 #!/usr/bin/env bun
 /**
- * VoiceOver List Scroll - AutoMobile MCP Tool Demonstration
+ * VoiceOver List Scroll - Unsupported Behavior Demonstration
  *
- * This script demonstrates how an agent scrolls a UITableView/UICollectionView
- * to find an off-screen item while VoiceOver is active on iOS.
+ * This script demonstrates the result when an agent attempts to scroll a
+ * UITableView/UICollectionView to find an off-screen item while VoiceOver is
+ * active on iOS.
  *
- * Key insight: swipeOn with a lookFor argument causes AutoMobile to issue
- * an accessibility scroll_forward action on the container's AXUIElement rather
- * than injecting a single-finger swipe gesture. Real single-finger VoiceOver
- * gestures navigate the cursor rather than scroll the list, while
- * XCTest-synthesized coordinate touches do not reach VoiceOver at all. The
- * accessibility scroll action scrolls the list without either limitation.
+ * Key insight: neither a container selector nor CtrlProxy's scroll endpoints
+ * provide a VoiceOver-aware scroll. Those endpoints synthesize XCTest swipes;
+ * synthesized coordinate touches do not reach VoiceOver at all.
  *
- * When no container can be identified, synthesized touches cannot invoke
- * VoiceOver's three-finger content-scroll gesture. Provide an explicit container
- * selector so AutoMobile can use the accessibility scroll action.
+ * AutoMobile returns an actionable unsupported result instead of falsely
+ * reporting that the list has scrolled.
  *
  * This script is a demonstration — it uses simulated responses to show the
  * expected call sequence and response shapes without requiring a real device.
@@ -99,120 +96,20 @@ function makeInitialListObserve(): ObserveResult {
   };
 }
 
-function makeAfterScrollObserve(): ObserveResult {
-  // After accessibility scroll_forward, the list has scrolled and item 27
-  // is now visible on screen.
-  const listContainer: Element = {
-    "bounds": { left: 0, top: 59, right: 390, bottom: 810 },
-    "text": "",
-    "content-desc": "",
-    "resource-id": "itemList",
-    "class": "UITableView",
-    "clickable": false,
-    "focusable": false,
-    "scrollable": true,
-    "enabled": true,
-  };
-
-  // Items 22–31 are now visible
-  const visibleItems: Element[] = Array.from({ length: 10 }, (_, i) => ({
-    "bounds": { left: 0, top: 59 + i * 75, right: 390, bottom: 59 + (i + 1) * 75 },
-    "text": `Item ${i + 22}`,
-    "content-desc": `Item ${i + 22}`,
-    "resource-id": `item_${i + 22}`,
-    "class": "UITableViewCell",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
-  }));
-
-  return {
-    updatedAt: Date.now(),
-    screenSize: { width: 390, height: 844 },
-    systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
-    accessibilityState: {
-      enabled: true,
-      service: "voiceover",
-    },
-    elements: {
-      clickable: visibleItems,
-      scrollable: [listContainer],
-      text: visibleItems,
-    },
-    activeWindow: {
-      packageName: "com.example.app",
-      activityName: "ItemListViewController",
-      windowId: 1,
-    },
-  };
-}
-
-function makeItemDetailObserve(): ObserveResult {
-  const titleLabel: Element = {
-    "bounds": { left: 16, top: 100, right: 374, bottom: 140 },
-    "text": "Item 27",
-    "content-desc": "Item 27",
-    "resource-id": "detailTitle",
-    "class": "UILabel",
-    "clickable": false,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
-  };
-
-  return {
-    updatedAt: Date.now(),
-    screenSize: { width: 390, height: 844 },
-    systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
-    accessibilityState: {
-      enabled: true,
-      service: "voiceover",
-    },
-    elements: {
-      clickable: [],
-      scrollable: [],
-      text: [titleLabel],
-    },
-    activeWindow: {
-      packageName: "com.example.app",
-      activityName: "ItemDetailViewController",
-      windowId: 2,
-    },
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Simulated MCP client
 // ---------------------------------------------------------------------------
 
 function createMockClient(): MockClient {
-  let observeCallCount = 0;
-
   return {
     async observe(): Promise<ObserveResult> {
-      observeCallCount++;
-      if (observeCallCount === 1) {
-        return makeInitialListObserve();
-      } else if (observeCallCount === 2) {
-        return makeAfterScrollObserve();
-      } else {
-        return makeItemDetailObserve();
-      }
+      return makeInitialListObserve();
     },
 
     async swipeOn(args: SwipeOnArgs): Promise<{ success: boolean; message: string }> {
-      // Under VoiceOver, swipeOn with a container uses scroll_forward/backward
-      // accessibility actions on the container's AXUIElement.
-      if (!("container" in args)) {
-        return {
-          success: false,
-          message: "VoiceOver scrolling needs a container selector for an accessibility scroll action",
-        };
-      }
       return {
-        success: true,
-        message: `Scrolled (VoiceOver: accessibility scroll_forward on container): ${JSON.stringify(args)}`,
+        success: false,
+        message: `VoiceOver scrolling is unsupported: CtrlProxy only provides XCTest-synthesized touches, which do not reach VoiceOver. Request: ${JSON.stringify(args)}`,
       };
     },
 
@@ -246,11 +143,11 @@ function printResult(label: string, value: unknown): void {
 
 async function main(): Promise<void> {
   console.log("=".repeat(60));
-  console.log("VoiceOver List Scroll - AutoMobile MCP Tool Demonstration");
+  console.log("VoiceOver List Scroll - Unsupported Behavior Demonstration");
   console.log("=".repeat(60));
   console.log();
   console.log("Scenario: Scroll a UITableView to find Item 27 while VoiceOver");
-  console.log("is active on iOS. The agent's call sequence is unchanged.");
+  console.log("is active on iOS. This shows the explicit unsupported result.");
 
   const client = createMockClient();
 
@@ -271,22 +168,11 @@ async function main(): Promise<void> {
   console.log(`Item 27 already visible: ${item27Visible}`);
 
   // -------------------------------------------------------------------------
-  // Step 2: Scroll the list to find Item 27.
-  //
-  // swipeOn with a container and lookFor causes AutoMobile to:
-  //   1. Locate the container element by elementId
-  //   2. Issue scroll_forward accessibility actions on the container
-  //      (not single-finger swipe gestures, which VoiceOver intercepts)
-  //   3. Repeat until Item 27 appears in the view hierarchy
-  //
-  // Providing an explicit container is required when VoiceOver is active:
-  // synthesized touches do not invoke VoiceOver's three-finger scroll gesture.
+  // Step 2: Attempt to scroll the list to find Item 27.
   // -------------------------------------------------------------------------
-  printStep(2, "Scroll list to find Item 27");
-  console.log("Note: Under VoiceOver, swipeOn with a container uses accessibility");
-  console.log("      scroll_forward on the AXUIElement — not a single-finger swipe.");
-  console.log("      Real single-finger VoiceOver gestures navigate the cursor, while");
-  console.log("      synthesized coordinate touches do not reach VoiceOver at all.");
+  printStep(2, "Attempt to scroll list to find Item 27");
+  console.log("Note: A container selector cannot turn CtrlProxy's synthesized");
+  console.log("      XCTest swipe into VoiceOver's three-finger scroll gesture.");
 
   const scrollResult = await client.swipeOn({
     container: { elementId: "itemList" },
@@ -296,60 +182,20 @@ async function main(): Promise<void> {
   printResult("swipeOn result", scrollResult);
 
   // -------------------------------------------------------------------------
-  // Step 3: Observe to verify Item 27 is now visible.
-  // -------------------------------------------------------------------------
-  printStep(3, "Observe to confirm Item 27 is visible");
-
-  const afterScrollObserve = await client.observe();
-  const afterScrollTexts = afterScrollObserve.elements?.text?.map(el => el.text) ?? [];
-  console.log(`\nVisible items after scroll: ${afterScrollTexts.join(", ")}`);
-
-  const item27NowVisible = afterScrollObserve.elements?.clickable?.some(
-    el => el.text === "Item 27"
-  ) ?? false;
-  console.log(`Item 27 now visible: ${item27NowVisible}`);
-
-  // -------------------------------------------------------------------------
-  // Step 4: Tap Item 27 to open its detail view.
-  // -------------------------------------------------------------------------
-  printStep(4, "Tap Item 27");
-
-  const tapResult = await client.tapOn({ text: "Item 27" });
-  printResult("tapOn result", tapResult);
-
-  // -------------------------------------------------------------------------
-  // Step 5: Observe to verify navigation to the detail view.
-  // -------------------------------------------------------------------------
-  printStep(5, "Observe detail view after tap");
-
-  const detailObserve = await client.observe();
-  printResult("activeWindow", detailObserve.activeWindow);
-
-  const navigatedToDetail =
-    detailObserve.activeWindow?.activityName === "ItemDetailViewController";
-  console.log(`\nNavigated to detail view: ${navigatedToDetail}`);
-
-  const detailTitle = detailObserve.elements?.text?.find(
-    el => el["resource-id"] === "detailTitle"
-  );
-  console.log(`Detail title: "${detailTitle?.text ?? "not found"}"`);
-
-  // -------------------------------------------------------------------------
   // Summary
   // -------------------------------------------------------------------------
   console.log("\n" + "=".repeat(60));
-  console.log("Demonstration complete.");
+  console.log("Unsupported behavior demonstrated.");
   console.log("=".repeat(60));
   console.log();
   console.log("Key takeaways:");
-  console.log("  - swipeOn with container uses accessibility scroll_forward.");
-  console.log("  - Real single-finger VoiceOver gestures move the cursor, while");
-  console.log("    synthesized coordinate touches do not reach VoiceOver.");
-  console.log("  - Provide a container elementId for VoiceOver scrolling; there is");
-  console.log("    no synthesized three-finger VoiceOver fallback.");
+  console.log("  - swipeOn returns an unsupported result while VoiceOver is active.");
+  console.log("  - CtrlProxy scroll endpoints use synthesized XCTest touches, which");
+  console.log("    do not reach VoiceOver.");
+  console.log("  - A container elementId does not provide a VoiceOver scroll fallback.");
   console.log("  - SDK-enabled apps also expose the VoiceOver cursor through");
   console.log("    observe().accessibilityFocusedElement.");
-  console.log("  - tapOn uses accessibility activation (transparent to agent).");
+  console.log("  - tapOn still uses accessibility activation (transparent to agent).");
 }
 
 main().catch(error => {

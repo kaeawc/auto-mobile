@@ -12,7 +12,7 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 | Detection overhead <50ms | ✅ | ✅ | Validated by benchmarks |
 | Feature flag override | ✅ | ✅ | `force-accessibility-mode` |
 | `tapOn` adaptation | ✅ `ACTION_CLICK` | ✅ Accessibility activation | Transparent to agent |
-| `swipeOn` / scroll adaptation | ✅ `ACTION_SCROLL_FORWARD/BACKWARD` | ✅ Accessibility scroll action | Fallback differs |
+| `swipeOn` / scroll adaptation | ✅ `ACTION_SCROLL_FORWARD/BACKWARD` | ❌ Unsupported | CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver |
 | `inputText` / `clearText` | ✅ Unchanged | ✅ Unchanged | Both use text injection |
 | `pressButton` | ✅ Unchanged | ✅ Unchanged | Device/navigation buttons |
 | `accessibilityState` in observe | ✅ `service: "talkback"` | ✅ `service: "voiceover"` | |

@@ -1,5 +1,4 @@
 import { BootedDevice, Element, GestureOptions, SwipeDirection } from "../../../models";
-import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { BoomerangConfig, GestureExecutor, VoiceOverSwipeRunner } from "./types";
@@ -12,11 +11,9 @@ import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
  * VoiceOverSwipeExecutor handles iOS swipes while VoiceOver is enabled.
  *
  * When VoiceOver is active on iOS, single-finger swipes navigate accessibility
- * focus rather than scrolling content. This executor uses the following routing:
- *
- * 1. If a container element with resource-id is provided → accessibility scroll action
- * 2. If a container element with content-desc is provided → accessibility scroll action (label)
- * 3. If accessibility action fails or no container → return an actionable failure
+ * focus rather than scrolling content. AutoMobile has no VoiceOver-aware scroll
+ * mechanism, so it returns an actionable failure rather than reporting coordinate
+ * touch synthesis as a successful VoiceOver scroll.
  *
  * XCTest-synthesized touches are delivered below VoiceOver's gesture layer, so
  * neither multi-finger nor single-finger coordinate synthesis can substitute for
@@ -38,8 +35,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
    * Execute a swipe gesture with VoiceOver awareness.
    *
    * If VoiceOver is enabled and the platform is iOS:
-   *   - Tries accessibility scroll action via resource-id or content-desc
-   *   - Returns an actionable failure if no accessibility action can be performed
+   *   - Returns an actionable unsupported result for scroll and boomerang gestures
    *
    * When boomerang is provided, performs a forward swipe, optional apex pause,
    * then a return swipe. Boomerang gestures are not supported while VoiceOver is active.
@@ -48,7 +44,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
    * @param y1 - Start Y coordinate
    * @param x2 - End X coordinate
    * @param y2 - End Y coordinate
-   * @param direction - Swipe direction for mapping to scroll action
+   * @param direction - Swipe direction
    * @param containerElement - The scrollable container element, or null for screen swipe
    * @param gestureOptions - Optional gesture options (duration, scrollMode)
    * @param perf - Optional performance tracker
@@ -59,8 +55,8 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     y1: number,
     x2: number,
     y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
+    _direction: SwipeDirection,
+    _containerElement: Element | null,
     gestureOptions?: GestureOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     boomerang?: BoomerangConfig
@@ -92,56 +88,14 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       return this.voiceOverScrollFailure(
         x1, y1, x2, y2,
         gestureOptions?.duration ?? 300,
-        "VoiceOver boomerang gestures cannot be synthesized; use an accessibility action instead"
+        "VoiceOver boomerang gestures are not supported because they require XCTest-synthesized touches, which do not reach VoiceOver"
       );
-    }
-
-    // VoiceOver is enabled: try accessibility scroll action first
-    const scrollAction = (direction === "down" || direction === "right")
-      ? "scroll_forward"
-      : "scroll_backward";
-
-    if (containerElement) {
-      const resourceId = containerElement["resource-id"];
-      const contentDesc = containerElement["content-desc"];
-
-      if (resourceId || contentDesc) {
-        const identifier = resourceId ?? contentDesc;
-        logger.info(`[VoiceOverSwipeExecutor] VoiceOver enabled, attempting accessibility scroll (${scrollAction}) on: ${identifier}`);
-
-        try {
-          const result = await this.iosClient.requestAction(
-            scrollAction,
-            resourceId || undefined,
-            !resourceId && contentDesc ? contentDesc : undefined
-          );
-
-          if (result.success) {
-            return {
-              success: true,
-              x1,
-              y1,
-              x2,
-              y2,
-              duration: gestureOptions?.duration ?? 300,
-            };
-          }
-
-          const error = result.error ?? "unknown error";
-          logger.warn(`[VoiceOverSwipeExecutor] Accessibility scroll failed: ${error}`);
-          return this.voiceOverScrollFailure(x1, y1, x2, y2, gestureOptions?.duration ?? 300, error);
-        } catch (error) {
-          const message = String(error);
-          logger.warn(`[VoiceOverSwipeExecutor] Accessibility scroll error: ${message}`);
-          return this.voiceOverScrollFailure(x1, y1, x2, y2, gestureOptions?.duration ?? 300, message);
-        }
-      }
     }
 
     return this.voiceOverScrollFailure(
       x1, y1, x2, y2,
       gestureOptions?.duration ?? 300,
-      "VoiceOver scrolling requires a container selector for an accessibility scroll action"
+      "VoiceOver scrolling is not supported: CtrlProxy only provides XCTest-synthesized touches, which do not reach VoiceOver"
     );
   }
 

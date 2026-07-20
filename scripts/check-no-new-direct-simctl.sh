@@ -10,14 +10,22 @@ owner="src/utils/ios-cmdline-tools/SimCtlClient.ts"
 violations=()
 
 if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
-  printf 'Cannot check new simctl calls: base ref %s does not exist.\n' "$base_ref" >&2
-  exit 2
+  # GitHub Actions checks out a PR merge commit without retaining origin/main.
+  # Its first parent is the checked-out base, so retain the ratchet in CI
+  # instead of silently skipping it. Non-CI callers still fail closed.
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]] && git rev-parse --verify --quiet 'HEAD^1^{commit}' >/dev/null; then
+    base_ref='HEAD^1'
+  else
+    printf 'Cannot check new simctl calls: base ref %s does not exist.\n' "$base_ref" >&2
+    exit 2
+  fi
 fi
 
 # Newlines are normalized below so argv calls formatted over multiple lines are
-# checked as one expression. `execFile`/`spawn` only match when their xcrun argv
-# begins with `simctl`, avoiding unrelated xcrun tools such as `devicectl`.
-pattern='((spawn|execFile)\([[:space:]]*"xcrun"[[:space:]]*,[[:space:]]*\[[[:space:]]*"simctl"|exec\([^)]*"xcrun simctl|"/bin/sh".*xcrun simctl)'
+# checked as one expression. Block all direct xcrun argv calls outside the
+# owner: variable argv values cannot be proven to be non-simctl statically,
+# and the conservative boundary prevents an easy bypass.
+pattern='((spawn|execFile)\([[:space:]]*"xcrun"|exec\([^)]*"xcrun simctl|"/bin/sh".*xcrun simctl)'
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" ]] && continue

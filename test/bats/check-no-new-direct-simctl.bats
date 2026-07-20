@@ -10,6 +10,7 @@ setup() {
   touch "$repo_dir/src/existing.ts"
   git -C "$repo_dir" add .
   git -C "$repo_dir" commit -qm baseline
+  git -C "$repo_dir" commit --allow-empty -qm head
 }
 
 teardown() {
@@ -36,9 +37,25 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "rejects a variable argv-form xcrun simctl execution" {
+  printf '%s\n' 'const args = ["simctl", "list", "devices"];' 'execFile("xcrun", args);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "fails closed when the base ref is absent" {
   run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh origin/main' _ "$repo_dir"
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"base ref origin/main does not exist"* ]]
+}
+
+@test "uses the PR merge base in GitHub Actions when origin main is absent" {
+  run bash -c 'cd "$1" && GITHUB_ACTIONS=true bash scripts/check-no-new-direct-simctl.sh' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
 }

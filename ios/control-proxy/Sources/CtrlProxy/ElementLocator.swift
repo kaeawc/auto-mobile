@@ -1184,10 +1184,7 @@ public class ElementLocator: ElementLocating {
                     },
                     springBoardLookup: {
                         guard self.foregroundBundleId != "com.apple.springboard" else { return nil }
-                        return Self.findElement(
-                            in: XCUIApplication(bundleIdentifier: "com.apple.springboard"),
-                            byResourceId: resourceId
-                        )
+                        return self.findSpringBoardAlertElement(byResourceId: resourceId)
                     }
                 )
             }, fallback: nil) else {
@@ -1208,10 +1205,7 @@ public class ElementLocator: ElementLocating {
                     },
                     springBoardLookup: {
                         guard self.foregroundBundleId != "com.apple.springboard" else { return nil }
-                        return Self.findElement(
-                            in: XCUIApplication(bundleIdentifier: "com.apple.springboard"),
-                            byText: text
-                        )
+                        return self.findSpringBoardAlertElement(byText: text)
                     }
                 )
             }, fallback: nil)
@@ -1243,6 +1237,83 @@ public class ElementLocator: ElementLocating {
             let match = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label == %@", text)).firstMatch
             return match.exists ? match : nil
+        }
+
+        /// Finds a SpringBoard element only when it belongs to an alert snapshot that
+        /// `getAlertsFromSpringboard` would expose through `observe` (#4014).
+        private func findSpringBoardAlertElement(byResourceId resourceId: String) -> XCUIElement? {
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            guard let snapshot = try? springboard.snapshot() else { return nil }
+            let matchingFrames = Self.matchingFrames(
+                in: collectAlertElements(from: snapshot),
+                matches: { $0.identifier == resourceId }
+            )
+            return Self.findElement(in: springboard, byResourceId: resourceId, constrainedTo: matchingFrames)
+        }
+
+        private func findSpringBoardAlertElement(byText text: String) -> XCUIElement? {
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            guard let snapshot = try? springboard.snapshot() else { return nil }
+            let matchingFrames = Self.matchingFrames(
+                in: collectAlertElements(from: snapshot),
+                matches: { $0.label == text }
+            )
+            return Self.findElement(in: springboard, byText: text, constrainedTo: matchingFrames)
+        }
+
+        private static func findElement(
+            in app: XCUIApplication,
+            byResourceId resourceId: String,
+            constrainedTo frames: [CGRect]
+        ) -> XCUIElement?
+        {
+            guard !frames.isEmpty else {
+                return nil
+            }
+            let matches = app.descendants(matching: .any)
+                .matching(identifier: resourceId)
+                .allElementsBoundByIndex
+            return matches.first { element in
+                frames.contains { frame in
+                    frame.equalTo(element.frame)
+                }
+            }
+        }
+
+        private static func findElement(
+            in app: XCUIApplication,
+            byText text: String,
+            constrainedTo frames: [CGRect]
+        ) -> XCUIElement?
+        {
+            guard !frames.isEmpty else {
+                return nil
+            }
+            let matches = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", text))
+                .allElementsBoundByIndex
+            return matches.first { element in
+                frames.contains { frame in
+                    frame.equalTo(element.frame)
+                }
+            }
+        }
+
+        private static func matchingFrames(
+            in alertSnapshots: [XCUIElementSnapshot],
+            matches: (XCUIElementSnapshot) -> Bool
+        ) -> [CGRect]
+        {
+            alertSnapshots.flatMap { alertSnapshot in
+                descendants(of: alertSnapshot).compactMap { snapshot in
+                    matches(snapshot) ? snapshot.frame : nil
+                }
+            }
+        }
+
+        private static func descendants(of snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot]
+        {
+            [snapshot] + snapshot.children.flatMap(descendants)
         }
 
         public func getCachedElement(_ resourceId: String) -> XCUIElement? {

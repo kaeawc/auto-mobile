@@ -41,7 +41,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun errorCardLight() =
-    screenshotTest("error_card_light", pending = true) {
+    screenshotTest("error_card_light") {
       ThemedSurface(dark = false) {
         ErrorCard(title = "Something went wrong", message = "Please try again later.")
       }
@@ -49,7 +49,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun errorCardDark() =
-    screenshotTest("error_card_dark", pending = true) {
+    screenshotTest("error_card_dark") {
       ThemedSurface(dark = true) {
         ErrorCard(title = "Something went wrong", message = "Please try again later.")
       }
@@ -57,7 +57,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun errorCardWithActions() =
-    screenshotTest("error_card_with_actions", pending = true) {
+    screenshotTest("error_card_with_actions") {
       ThemedSurface(dark = true) {
         ErrorCard(
           title = "Connection lost",
@@ -70,13 +70,13 @@ class ComponentScreenshotTest {
 
   @Test
   fun searchBarEmpty() =
-    screenshotTest("search_bar_empty", pending = true) {
+    screenshotTest("search_bar_empty") {
       ThemedSurface(dark = true) { SearchBar(query = "", onQueryChange = {}) }
     }
 
   @Test
   fun searchBarWithQuery() =
-    screenshotTest("search_bar_with_query", pending = true) {
+    screenshotTest("search_bar_with_query") {
       ThemedSurface(dark = true) {
         SearchBar(
           query = "MainActivity",
@@ -90,7 +90,7 @@ class ComponentScreenshotTest {
 
   @Test
   fun statusBarBadge() =
-    screenshotTest("status_bar_badge", pending = true) {
+    screenshotTest("status_bar_badge") {
       ThemedSurface(dark = true) {
         StatusBarBadge(count = 12, label = "Crashes", color = Color(0xFFF28B82))
       }

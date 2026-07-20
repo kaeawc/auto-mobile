@@ -52,10 +52,11 @@ class ResultBroadcaster(
   suspend fun guard(requestId: String?, action: String, block: suspend () -> Unit) {
     reporter.guarding(
       requestId = requestId,
-      failureLogMessage = "Error broadcasting $action (requestId=$requestId)",
-      errorMessagePrefix = "Broadcast failed for $action",
-      doubleFailureLogMessage =
-        "Failed to broadcast fallback error for $action (requestId=$requestId)",
+      failureLogMessage = { "Error broadcasting $action (requestId=$requestId)" },
+      errorMessagePrefix = { "Broadcast failed for $action" },
+      doubleFailureLogMessage = {
+        "Failed to broadcast fallback error for $action (requestId=$requestId)"
+      },
       block = block,
     )
   }

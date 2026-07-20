@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -131,6 +132,27 @@ class CorrelatedErrorConsumerContractTest {
 
     assertSame("the block must receive the launched coroutine's Job", job, receivedJob)
     assertTrue("it must not be the outer scope's Job", receivedJob !== outerJob)
+  }
+
+  @Test
+  fun `genuinely cancelling a suspended action emits no error frame`() = runTest {
+    // The other cancellation tests throw a synthetic CancellationException from the block. This one
+    // cancels the Job while the block is really suspended, so the cancellation unwinds through the
+    // added `guarding` frame the way production shutdown does.
+    val runner =
+      AsyncActionRunner(
+        scope = this,
+        broadcastResponse = { broadcasts += it },
+        logError = { message, _ -> logs += message },
+      )
+
+    val job = runner.launch(requestId = "req-1", action = "screenshot") { delay(60_000) }
+    advanceUntilIdle()
+    job.cancel()
+    job.join()
+
+    assertTrue("a cancelled action must not emit a frame: $broadcasts", broadcasts.isEmpty())
+    assertTrue("nor log a failure: $logs", logs.isEmpty())
   }
 
   @Test

@@ -78,8 +78,9 @@ class ServiceScopeGuard(
       reporter.emit(
         requestId = requestId,
         errorMessage = "Uncaught async failure: $cause",
-        doubleFailureLogMessage =
-          "Failed to broadcast uncaught-exception error frame (requestId=$requestId)",
+        doubleFailureLogMessage = {
+          "Failed to broadcast uncaught-exception error frame (requestId=$requestId)"
+        },
       )
     }
   }

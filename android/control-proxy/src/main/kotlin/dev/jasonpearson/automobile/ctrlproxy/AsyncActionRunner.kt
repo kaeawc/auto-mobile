@@ -66,10 +66,11 @@ class AsyncActionRunner(
       val launchScope = this
       reporter.guarding(
         requestId = requestId,
-        failureLogMessage = "Async action '$action' failed (requestId=$requestId)",
-        errorMessagePrefix = "Action '$action' failed",
-        doubleFailureLogMessage =
-          "Failed to broadcast async error for action '$action' (requestId=$requestId)",
+        failureLogMessage = { "Async action '$action' failed (requestId=$requestId)" },
+        errorMessagePrefix = { "Action '$action' failed" },
+        doubleFailureLogMessage = {
+          "Failed to broadcast async error for action '$action' (requestId=$requestId)"
+        },
       ) {
         block(launchScope)
       }

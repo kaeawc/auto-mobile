@@ -34,9 +34,9 @@ class CorrelatedErrorReporterTest {
   fun `guarding emits a correlated frame when the block throws`() = runTest {
     reporter().guarding(
       requestId = "req-1",
-      failureLogMessage = "failure log",
-      errorMessagePrefix = "Action 'foo' failed",
-      doubleFailureLogMessage = "double failure log",
+      failureLogMessage = { "failure log" },
+      errorMessagePrefix = { "Action 'foo' failed" },
+      doubleFailureLogMessage = { "double failure log" },
     ) {
       throw IllegalStateException("boom")
     }
@@ -52,9 +52,9 @@ class CorrelatedErrorReporterTest {
   fun `guarding emits nothing when the block succeeds`() = runTest {
     reporter().guarding(
       requestId = "req-1",
-      failureLogMessage = "failure log",
-      errorMessagePrefix = "Action 'foo' failed",
-      doubleFailureLogMessage = "double failure log",
+      failureLogMessage = { "failure log" },
+      errorMessagePrefix = { "Action 'foo' failed" },
+      doubleFailureLogMessage = { "double failure log" },
     ) {
       // no-op
     }
@@ -68,9 +68,9 @@ class CorrelatedErrorReporterTest {
     try {
       reporter().guarding(
         requestId = "req-1",
-        failureLogMessage = "failure log",
-        errorMessagePrefix = "Action 'foo' failed",
-        doubleFailureLogMessage = "double failure log",
+        failureLogMessage = { "failure log" },
+        errorMessagePrefix = { "Action 'foo' failed" },
+        doubleFailureLogMessage = { "double failure log" },
       ) {
         throw CancellationException("shutting down")
       }
@@ -87,9 +87,9 @@ class CorrelatedErrorReporterTest {
   fun `guarding carries a null requestId through to the frame`() = runTest {
     reporter().guarding(
       requestId = null,
-      failureLogMessage = "failure log",
-      errorMessagePrefix = "Action 'foo' failed",
-      doubleFailureLogMessage = "double failure log",
+      failureLogMessage = { "failure log" },
+      errorMessagePrefix = { "Action 'foo' failed" },
+      doubleFailureLogMessage = { "double failure log" },
     ) {
       throw IllegalStateException("boom")
     }
@@ -105,9 +105,9 @@ class CorrelatedErrorReporterTest {
   fun `a failure raised while emitting the frame is logged and swallowed`() = runTest {
     reporter(broadcastError = { throw IllegalStateException("sink down") }).guarding(
       requestId = "req-1",
-      failureLogMessage = "failure log",
-      errorMessagePrefix = "Action 'foo' failed",
-      doubleFailureLogMessage = "double failure log",
+      failureLogMessage = { "failure log" },
+      errorMessagePrefix = { "Action 'foo' failed" },
+      doubleFailureLogMessage = { "double failure log" },
     ) {
       throw IllegalStateException("boom")
     }
@@ -121,9 +121,9 @@ class CorrelatedErrorReporterTest {
     try {
       reporter(broadcastError = { throw CancellationException("scope died") }).guarding(
         requestId = "req-1",
-        failureLogMessage = "failure log",
-        errorMessagePrefix = "Action 'foo' failed",
-        doubleFailureLogMessage = "double failure log",
+        failureLogMessage = { "failure log" },
+        errorMessagePrefix = { "Action 'foo' failed" },
+        doubleFailureLogMessage = { "double failure log" },
       ) {
         throw IllegalStateException("boom")
       }
@@ -168,7 +168,7 @@ class CorrelatedErrorReporterTest {
       .emit(
         requestId = "req-1",
         errorMessage = "Uncaught async failure: boom",
-        doubleFailureLogMessage = "double failure log",
+        doubleFailureLogMessage = { "double failure log" },
       )
 
     assertEquals("Uncaught async failure: boom", broadcasts.single().error)
@@ -182,7 +182,7 @@ class CorrelatedErrorReporterTest {
       .emit(
         requestId = null,
         errorMessage = "Uncaught async failure: boom",
-        doubleFailureLogMessage = "double failure log",
+        doubleFailureLogMessage = { "double failure log" },
       )
 
     assertNull(broadcasts.single().requestId)
@@ -195,7 +195,7 @@ class CorrelatedErrorReporterTest {
       .emit(
         requestId = "req-1",
         errorMessage = "Uncaught async failure: boom",
-        doubleFailureLogMessage = "double failure log",
+        doubleFailureLogMessage = { "double failure log" },
       )
 
     assertEquals(listOf("double failure log"), logs.map { it.first })
@@ -208,7 +208,7 @@ class CorrelatedErrorReporterTest {
         .emit(
           requestId = "req-1",
           errorMessage = "Uncaught async failure: boom",
-          doubleFailureLogMessage = "double failure log",
+          doubleFailureLogMessage = { "double failure log" },
         )
       fail("expected the cancellation to propagate")
     } catch (expected: CancellationException) {

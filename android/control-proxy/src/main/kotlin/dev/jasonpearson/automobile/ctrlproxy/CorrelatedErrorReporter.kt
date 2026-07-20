@@ -49,6 +49,12 @@ class CorrelatedErrorReporter(
    * shutting down, and converting it into a client-facing error frame would report a shutdown as a
    * request failure.
    *
+   * The three message parameters are lambdas so that nothing is built on the success path. Every
+   * call site passes an interpolated string, and the guarded block succeeds on all but a vanishing
+   * fraction of the ~70 calls routed through here — taking them by value would allocate three
+   * strings per broadcast for the sole benefit of the failure case. Before the extraction these
+   * lived inside the `catch` and cost nothing when the block succeeded; this keeps that property.
+   *
    * @param requestId correlation id from the originating request; null when the request carried
    *   none (the frame then carries a null requestId, exactly as the synchronous decode path does —
    *   `resolveError` no-ops on an absent id).
@@ -59,9 +65,9 @@ class CorrelatedErrorReporter(
    */
   suspend fun guarding(
     requestId: String?,
-    failureLogMessage: String,
-    errorMessagePrefix: String,
-    doubleFailureLogMessage: String,
+    failureLogMessage: () -> String,
+    errorMessagePrefix: () -> String,
+    doubleFailureLogMessage: () -> String,
     block: suspend () -> Unit,
   ) {
     try {
@@ -83,24 +89,30 @@ class CorrelatedErrorReporter(
    * Log [throwable] and emit a best-effort [ErrorResponse] correlated by [requestId], so the
    * awaiting client fails fast instead of hanging to its `RequestManager` timeout.
    *
-   * Best-effort is load-bearing: a failure raised while *reporting* the failure must not escape.
-   * Letting it out would defeat the entire guarantee — it would bubble to the launched coroutine
-   * (or, for [ServiceScopeGuard], re-enter the handler and loop). It is logged and swallowed; the
-   * client then falls back to its timeout, but only for this genuinely-unrecoverable double-failure
-   * tail. A [CancellationException] from the fallback still propagates, for the same reason as in
-   * [guarding].
+   * Best-effort is load-bearing: an `Exception` raised while *reporting* the failure must not
+   * escape. Letting it out would defeat the entire guarantee — it would bubble to the launched
+   * coroutine (or, for [ServiceScopeGuard], re-enter the handler and loop). It is logged and
+   * swallowed; the client then falls back to its timeout, but only for this genuinely-unrecoverable
+   * double-failure tail. A [CancellationException] from the fallback still propagates, for the same
+   * reason as in [guarding].
+   *
+   * Scoped to `Exception` deliberately, matching the three bodies this replaced: a non-`Exception`
+   * `Throwable` from the sink (an `Error`, realistically OOM) still escapes, and for
+   * [ServiceScopeGuard] can re-enter its handler. Widening to `Throwable` would swallow errors that
+   * should kill the process, so the pre-existing behavior is kept rather than quietly changed by a
+   * refactor whose contract is byte-identical behavior.
    */
   private suspend fun report(
     requestId: String?,
     throwable: Throwable,
-    failureLogMessage: String,
-    errorMessagePrefix: String,
-    doubleFailureLogMessage: String,
+    failureLogMessage: () -> String,
+    errorMessagePrefix: () -> String,
+    doubleFailureLogMessage: () -> String,
   ) {
-    logError(failureLogMessage, throwable)
+    logError(failureLogMessage(), throwable)
     emit(
       requestId = requestId,
-      errorMessage = "$errorMessagePrefix: ${causeOf(throwable)}",
+      errorMessage = "${errorMessagePrefix()}: ${causeOf(throwable)}",
       doubleFailureLogMessage = doubleFailureLogMessage,
     )
   }
@@ -114,13 +126,17 @@ class CorrelatedErrorReporter(
    * Emits a best-effort [ErrorResponse] correlated by [requestId]. Best-effort is load-bearing: see
    * [report].
    */
-  suspend fun emit(requestId: String?, errorMessage: String, doubleFailureLogMessage: String) {
+  suspend fun emit(
+    requestId: String?,
+    errorMessage: String,
+    doubleFailureLogMessage: () -> String,
+  ) {
     try {
       broadcastError(ErrorResponse(requestId = requestId, error = errorMessage))
     } catch (fallbackError: CancellationException) {
       throw fallbackError
     } catch (fallbackError: Exception) {
-      logError(doubleFailureLogMessage, fallbackError)
+      logError(doubleFailureLogMessage(), fallbackError)
     }
   }
 

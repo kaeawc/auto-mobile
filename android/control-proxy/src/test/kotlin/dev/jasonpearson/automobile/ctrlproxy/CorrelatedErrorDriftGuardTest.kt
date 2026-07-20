@@ -66,7 +66,7 @@ class CorrelatedErrorDriftGuardTest {
       class Example(private val reporter: CorrelatedErrorReporter) {
         suspend fun guard(e: Exception) {
           val cause = e.message ?: e::class.simpleName ?: "unknown error"
-          reporter.emit(null, cause, "double failure")
+          reporter.guarding(null, { "a" }, { "b" }, { "c" }) {}
         }
       }
       """
@@ -87,7 +87,7 @@ class CorrelatedErrorDriftGuardTest {
       class Example(private val reporter: CorrelatedErrorReporter) {
         suspend fun guard(requestId: String?) {
           broadcastError(ErrorResponse(requestId = requestId, error = "boom"))
-          reporter.emit(requestId, "x", "y")
+          reporter.guarding(requestId, { "a" }, { "b" }, { "c" }) {}
         }
       }
       """
@@ -110,7 +110,7 @@ class CorrelatedErrorDriftGuardTest {
       class Example(private val reporter: CorrelatedErrorReporter) {
         suspend fun guard(e: Exception, requestId: String?) {
           val cause = e.message ?: e::class.simpleName ?: "unspecified failure"
-          reporter.emit(requestId, cause, "double failure")
+          reporter.guarding(requestId, { "a" }, { "b" }, { "c" }) {}
         }
       }
       """
@@ -119,6 +119,78 @@ class CorrelatedErrorDriftGuardTest {
     assertEquals(
       listOf(CorrelatedErrorDriftScanner.Kind.HAND_ROLLED_CAUSE),
       scan(source).map { it.kind },
+    )
+  }
+
+  @Test
+  fun `the Java-interop spellings of the cause rule are flagged too`() {
+    // `javaClass.simpleName` is at least as idiomatic in Android code as the Kotlin spelling, so
+    // matching only `::class.simpleName` would let the most likely drift through untouched.
+    listOf(
+        "e.message ?: e.javaClass.simpleName ?: \"boom\"",
+        "e.message ?: e::class.java.simpleName ?: \"boom\"",
+      )
+      .forEach { derivation ->
+        val source =
+          """
+          package dev.jasonpearson.automobile.ctrlproxy
+
+          class Example(private val reporter: CorrelatedErrorReporter) {
+            suspend fun guard(e: Exception, requestId: String?) {
+              val cause = $derivation
+              reporter.guarding(requestId, "a", "b", "c") {}
+            }
+          }
+          """
+            .trimIndent()
+
+        assertEquals(
+          "must flag: $derivation",
+          listOf(CorrelatedErrorDriftScanner.Kind.HAND_ROLLED_CAUSE),
+          scan(source).map { it.kind },
+        )
+      }
+  }
+
+  @Test
+  fun `renaming the reporter field does not break a correctly delegating consumer`() {
+    // A guard that fails CI on a pure rename is a guard that gets deleted.
+    val source =
+      """
+      package dev.jasonpearson.automobile.ctrlproxy
+
+      class Example(private val errorReporter: CorrelatedErrorReporter) {
+        suspend fun guard(requestId: String?, action: String, block: suspend () -> Unit) {
+          errorReporter.guarding(requestId, "a", "b", "c", block)
+        }
+      }
+      """
+        .trimIndent()
+
+    assertTrue("a renamed field still delegates: ${scan(source)}", scan(source).isEmpty())
+  }
+
+  @Test
+  fun `a nested block comment stays fully commented out`() {
+    // Kotlin block comments nest. Commenting out an old implementation that carries its own KDoc
+    // must not leak the disabled body back into the scan.
+    val source =
+      """
+      package dev.jasonpearson.automobile.ctrlproxy
+
+      class Example(private val reporter: CorrelatedErrorReporter) {
+        /* old path, kept for reference:
+         /** derives the cause */
+         val cause = e.message ?: e::class.simpleName ?: "unknown error"
+        */
+        suspend fun guard(requestId: String?) = reporter.guarding(requestId, "a", "b", "c") {}
+      }
+      """
+        .trimIndent()
+
+    assertTrue(
+      "commented-out code must not be scanned as live: ${scan(source)}",
+      scan(source).isEmpty(),
     )
   }
 
@@ -158,7 +230,7 @@ class CorrelatedErrorDriftGuardTest {
         "\n" +
         "  suspend fun guard(requestId: String?) {\n" +
         "    broadcastError(ErrorResponse(requestId = requestId, error = \"boom\"))\n" +
-        "    reporter.emit(requestId, \"x\", \"y\")\n" +
+        "    reporter.guarding(requestId, { \"a\" }) {}\n" +
         "  }\n" +
         "}\n"
 
@@ -177,7 +249,7 @@ class CorrelatedErrorDriftGuardTest {
 
       class Example(private val reporter: CorrelatedErrorReporter) {
         val quote = '"' // the reporter owns the "unknown error" fallback
-        suspend fun guard(requestId: String?) = reporter.emit(requestId, "x", "y")
+        suspend fun guard(requestId: String?) = reporter.guarding(requestId) {}
       }
       """
         .trimIndent()
@@ -343,9 +415,16 @@ class CorrelatedErrorDriftGuardTest {
  * Kotlin source as text and reports correlated-error-core drift. Test-only (lives in the test
  * source set) — ships no scanning code in the app.
  *
- * The contract is deliberately blunt: the cause derivation and the fallback [ErrorResponse]
- * construction may appear in exactly one production file, and every consumer must name the core. A
- * blunt contract is what makes it hard to drift past by accident.
+ * The contract is deliberately blunt: within the three enumerated [CONSUMER_FILES], the cause
+ * derivation and the fallback [ErrorResponse] construction may not appear at all, and each file
+ * must both name the core and call it. A blunt contract is what makes it hard to drift past by
+ * accident.
+ *
+ * Note the scope precisely — this is *not* "the cause rule exists in exactly one file in the
+ * package". It does not: `WebSocketServer.kt`, `HierarchyExtractErrorFrames.kt` and `CtrlProxy.kt`
+ * each derive a cause on paths this scanner does not police. See the class KDoc on
+ * [CorrelatedErrorDriftGuardTest] for why the scan stops at three files, and issue #3992 for the
+ * residual.
  */
 object CorrelatedErrorDriftScanner {
 
@@ -387,7 +466,8 @@ object CorrelatedErrorDriftScanner {
       }
     }
 
-    if (DELEGATION_CALLS.none { code.contains(it) }) {
+    val delegates = code.contains(CORE_TYPE) && DELEGATION_CALLS.any { code.contains(it) }
+    if (!delegates) {
       violations += Violation(Kind.MISSING_DELEGATION, fileName, 0)
     }
 
@@ -395,25 +475,37 @@ object CorrelatedErrorDriftScanner {
   }
 
   /**
-   * Both halves of the cause rule, so that drift which *changes* the fallback constant is caught
-   * too. Matching only the literal would miss `?: e::class.simpleName ?: "unspecified failure"` —
-   * and a body that differs from today's is exactly what drift looks like.
+   * Every spelling of the cause rule, not just today's. Drift means the copy *differs*: matching
+   * only the literal would miss `?: e::class.simpleName ?: "unspecified failure"`, and matching
+   * only `::class.simpleName` would miss the Java-interop spellings that are at least as idiomatic
+   * in Android code as the Kotlin one.
    */
-  private val CAUSE_DERIVATION_TOKENS = listOf("\"unknown error\"", "::class.simpleName")
+  private val CAUSE_DERIVATION_TOKENS =
+    listOf(
+      "\"unknown error\"",
+      "::class.simpleName",
+      "::class.java",
+      "javaClass.simpleName",
+    )
 
   private const val ERROR_FRAME_CONSTRUCTION = "ErrorResponse("
 
   /**
    * Delegation must be an actual *call*, not a bare mention of the type: a consumer that holds a
    * `CorrelatedErrorReporter` field, never invokes it, and hand-rolls the body beside it would
-   * otherwise satisfy the check by construction.
+   * otherwise satisfy the check by construction. Both halves are required — the type must be named
+   * *and* one of these called.
    *
-   * The receiver is spelled out rather than matching a bare `.emit(` — the package is full of
-   * `Flow.emit(` calls (`WebSocketServer`, `HierarchyDebouncer`), any of which would otherwise pass
-   * for delegation.
+   * Deliberately receiver-agnostic. An earlier version required a literal `reporter.` prefix, which
+   * would have failed CI on correct code the moment someone renamed the field to `errorReporter` or
+   * wrapped the call in `with(reporter) { … }` — and a test that breaks on a pure rename is a test
+   * that gets deleted. `.emit(` is excluded because the package is full of `Flow.emit(` calls
+   * (`WebSocketServer`, `HierarchyDebouncer`) that would pass for delegation; `ServiceScopeGuard`
+   * qualifies through `causeOf` instead.
    */
-  private val DELEGATION_CALLS =
-    listOf("reporter.guarding(", "reporter.emit(", "CorrelatedErrorReporter.causeOf(")
+  private val DELEGATION_CALLS = listOf(".guarding(", ".causeOf(")
+
+  private const val CORE_TYPE = "CorrelatedErrorReporter"
 
   /**
    * Blank out `//` line comments and `/* … */` block comments (including KDoc) so prose describing
@@ -426,7 +518,10 @@ object CorrelatedErrorDriftScanner {
    */
   private fun stripComments(source: String): String {
     val out = StringBuilder(source.length)
-    var inBlockComment = false
+    // Kotlin block comments nest, so this is a depth counter rather than a flag: commenting out an
+    // old implementation that contains its own KDoc must stay fully commented out, or the disabled
+    // code gets scanned as live and fails CI on something that isn't even compiled.
+    var blockCommentDepth = 0
     var inLineString = false
     var inRawString = false
     var inCharLiteral = false
@@ -438,13 +533,20 @@ object CorrelatedErrorDriftScanner {
       val isRawDelimiter = char == '"' && next == '"' && source.getOrNull(index + 2) == '"'
 
       when {
-        inBlockComment -> {
-          if (char == '*' && next == '/') {
-            inBlockComment = false
-            index += 2
-          } else {
-            if (char == '\n') out.append(char)
-            index++
+        blockCommentDepth > 0 -> {
+          when {
+            char == '/' && next == '*' -> {
+              blockCommentDepth++
+              index += 2
+            }
+            char == '*' && next == '/' -> {
+              blockCommentDepth--
+              index += 2
+            }
+            else -> {
+              if (char == '\n') out.append(char)
+              index++
+            }
           }
         }
         // A raw string spans lines and honors no escapes; only `"""` closes it.
@@ -480,7 +582,7 @@ object CorrelatedErrorDriftScanner {
           }
         }
         char == '/' && next == '*' -> {
-          inBlockComment = true
+          blockCommentDepth++
           index += 2
         }
         char == '/' && next == '/' -> {

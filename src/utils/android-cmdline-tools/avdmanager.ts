@@ -460,6 +460,7 @@ function createAvdManagerClient(dependencies: AvdManagerDependencies): AvdManage
     ...dependencies,
     timer: defaultTimer,
     environment: process.env,
+    platform: process.platform,
   });
 }
 

@@ -29,6 +29,7 @@ export interface AvdManagerClientDependencies {
   validateRequiredTools: typeof validateRequiredTools;
   timer: Timer;
   environment: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
 }
 
 const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build-tools"];
@@ -47,6 +48,7 @@ function defaults(): AvdManagerClientDependencies {
     validateRequiredTools,
     timer: defaultTimer,
     environment: process.env,
+    platform: process.platform,
   };
 }
 
@@ -177,9 +179,9 @@ export class AvdManagerClient {
 
   private typicalSdkPaths(): string[] {
     const home = this.dependencies.environment.HOME ?? this.dependencies.environment.USERPROFILE;
-    if (process.platform === "darwin") {return [...(home ? [join(home, "Library/Android/sdk")] : []), "/opt/android-sdk", "/usr/local/android-sdk"];}
-    if (process.platform === "linux") {return [...(home ? [join(home, "Android/Sdk")] : []), "/opt/android-sdk", "/usr/local/android-sdk"];}
-    if (process.platform === "win32") {return [...(home ? [join(home, "AppData/Local/Android/Sdk")] : []), "C:/Android/Sdk", "C:/android-sdk"];}
+    if (this.dependencies.platform === "darwin") {return [...(home ? [join(home, "Library/Android/sdk")] : []), "/opt/android-sdk", "/usr/local/android-sdk"];}
+    if (this.dependencies.platform === "linux") {return [...(home ? [join(home, "Android/Sdk")] : []), "/opt/android-sdk", "/usr/local/android-sdk"];}
+    if (this.dependencies.platform === "win32") {return [...(home ? [join(home, "AppData/Local/Android/Sdk")] : []), "C:/Android/Sdk", "C:/android-sdk"];}
     return [];
   }
 
@@ -199,7 +201,13 @@ export class AvdManagerClient {
   private async execute(path: string, args: string[], inputOptions: { input?: string; env?: NodeJS.ProcessEnv; timeoutMs: number }, options: AvdManagerExecutionOptions): Promise<CommandResult> {
     return new Promise((resolvePromise, reject) => {
       if (options.signal?.aborted) {return reject(new Error("avdmanager command cancelled"));}
-      const child = this.dependencies.spawn(path, args, { env: inputOptions.env, stdio: ["pipe", "pipe", "pipe"] });
+      const needsWindowsShell = this.dependencies.platform === "win32" && path.toLowerCase().endsWith(".bat");
+      const child = this.dependencies.spawn(path, args, {
+        env: inputOptions.env,
+        stdio: ["pipe", "pipe", "pipe"],
+        // Windows cannot execute .bat files directly; retain argv at the client boundary.
+        shell: needsWindowsShell,
+      });
       let settled = false;
       let stdout = "";
       let stderr = "";

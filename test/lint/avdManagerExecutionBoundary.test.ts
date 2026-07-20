@@ -6,9 +6,12 @@ const ROOT = join(import.meta.dir, "..", "..");
 const CLIENT = "src/utils/android-cmdline-tools/AvdManagerClient.ts";
 
 function directlyExecutesAvdManager(source: string): boolean {
-  const executesProcess = /\b(?:spawn|spawnCommand)\s*\(/.test(source);
-  const avdmanagerPath = /(?:\b(?:const|let|var)\s+(?:\w*(?:path|command|executable)\w*)\s*=\s*[^;\n]*["'`]avdmanager(?:\.bat)?["'`]|\b(?:join|resolve)\s*\([^\n]*["'`]avdmanager(?:\.bat)?["'`]|\b(?:spawn|spawnCommand)\s*\(\s*["'`][^"'`]*avdmanager)/i.test(source);
-  return executesProcess && avdmanagerPath;
+  const launcher = /\b(?:spawn|spawnSync|spawnCommand|exec|execFile|execFileSync|Bun\.spawn)\s*\(/;
+  const directLiteral = /\b(?:spawn|spawnSync|spawnCommand|exec|execFile|execFileSync)\s*\(\s*["'`][^"'`]*avdmanager/i;
+  const constructedPath = /\b(?:join|resolve)\s*\([^;\n]*["'`]avdmanager(?:\.bat)?["'`]/i;
+  const variableNames = [...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*[^;]*?(?:\b(?:join|resolve)\s*\([^;]*?)?["'`]avdmanager(?:\.bat)?["'`][^;]*;/gi)].map(match => match[1]);
+  const variableLaunch = variableNames.some(name => new RegExp(`\\b(?:spawn|spawnSync|spawnCommand|exec|execFile|execFileSync)\\s*\\(\\s*${name}\\b|\\bBun\\.spawn\\s*\\(\\s*\\[\\s*${name}\\b`).test(source));
+  return directLiteral.test(source) || (launcher.test(source) && constructedPath.test(source) && variableLaunch);
 }
 
 function sourceFiles(directory: string): string[] {
@@ -39,6 +42,15 @@ describe("avdmanager execution boundary (issue #4051)", () => {
   test("detects a resolved avdmanager path passed to spawn", () => {
     expect(directlyExecutesAvdManager(
       'const command = join(sdkRoot, "bin", "avdmanager"); spawn(command, args);'
+    )).toBe(true);
+  });
+
+  test("detects arbitrary path variable names and alternate launch APIs", () => {
+    expect(directlyExecutesAvdManager(
+      'const binary = join(sdkRoot, "bin", "avdmanager"); execFile(binary, args);'
+    )).toBe(true);
+    expect(directlyExecutesAvdManager(
+      'const tool = join(sdkRoot, "bin", "avdmanager"); Bun.spawn([tool, ...args]);'
     )).toBe(true);
   });
 

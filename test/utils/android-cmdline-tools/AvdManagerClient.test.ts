@@ -38,7 +38,7 @@ class FakeChild {
 function createClient(overrides: Partial<ConstructorParameters<typeof AvdManagerClient>[0]> = {}) {
   const child = new FakeChild();
   const timer = new FakeTimer();
-  const calls: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }> = [];
+  const calls: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv; shell?: string | boolean }> = [];
   const client = new AvdManagerClient({
     detectAndroidCommandLineTools: async () => [{
       path: "/sdk/cmdline-tools/latest",
@@ -49,12 +49,13 @@ function createClient(overrides: Partial<ConstructorParameters<typeof AvdManager
     validateRequiredTools: () => ({ valid: true, missing: [] }),
     existsSync: path => path.endsWith("avdmanager") || path.endsWith("system-images"),
     spawn: (command, args, options) => {
-      calls.push({ command, args, env: options.env });
+      calls.push({ command, args, env: options.env, shell: options.shell });
       return child as unknown as ChildProcess;
     },
     logger: { info() {}, warn() {}, error() {} },
     timer,
     environment: { ANDROID_HOME: "/sdk" },
+    platform: "linux",
     ...overrides
   });
   return { client, child, timer, calls };
@@ -86,7 +87,8 @@ describe("AvdManagerClient", () => {
 
   test("uses the Windows batch executable when that is the resolved tool", async () => {
     const { client, child, calls } = createClient({
-      existsSync: path => path.endsWith("avdmanager.bat") || path.endsWith("system-images")
+      existsSync: path => path.endsWith("avdmanager.bat") || path.endsWith("system-images"),
+      platform: "win32"
     });
     const pending = client.listDeviceImages();
     await new Promise<void>(resolve => setImmediate(resolve));
@@ -94,6 +96,7 @@ describe("AvdManagerClient", () => {
 
     await expect(pending).resolves.toEqual([]);
     expect(calls[0]?.command).toBe("/sdk/cmdline-tools/latest/bin/avdmanager.bat");
+    expect(calls[0]).toMatchObject({ args: ["list", "avd"], shell: true });
   });
 
   test("requires avdmanager without coupling AVD operations to sdkmanager", async () => {

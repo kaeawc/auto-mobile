@@ -12,11 +12,11 @@ cd "$ROOT_DIR"
 
 violations=""
 while IFS= read -r source_file; do
-  matches="$(rg -n -e 'spawn[[:space:]]*\(' -e 'execFile[[:space:]]*\(' "$source_file" || true)"
+  matches="$(grep -nE 'spawn[[:space:]]*\(|execFile[[:space:]]*\(' "$source_file" || true)"
   if [[ -n "$matches" ]]; then
     violations+="${source_file#src/}: ${matches}"$'\n'
   fi
-done < <(rg -il 'emulator' src --glob '*.ts' --glob "!${OWNER}")
+done < <(find src -type f -name '*.ts' ! -path "$OWNER" -exec grep -il 'emulator' {} +)
 
 if [[ -n "$violations" ]]; then
   echo "error: Android emulator execution must use AndroidEmulatorClient:" >&2

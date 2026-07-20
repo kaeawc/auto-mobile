@@ -352,11 +352,7 @@ data class FailureOccurrenceDto(
 /** Socket client for failures streaming */
 class FailuresStreamSocketClient(
   private val socketPathValue: String = FailuresStreamSocketPaths.socketPath(),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-    encodeDefaults = true // Required to include command field with default value
-  },
+  private val json: Json = DaemonJson,
 ) : FailuresStreamClient {
 
   override fun pollNotifications(

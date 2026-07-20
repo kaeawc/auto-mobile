@@ -26,10 +26,7 @@ interface TestRecordingClient {
 
 class TestRecordingSocketClient(
   private val socketPathValue: String = TestRecordingSocketPaths.socketPath(),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-  },
+  private val json: Json = DaemonJson,
 ) : TestRecordingClient {
   override fun startTestRecording(platform: String?): TestRecordingStartResult {
     val response = sendRequest(TestRecordingSocketCommand(command = "start", platform = platform))

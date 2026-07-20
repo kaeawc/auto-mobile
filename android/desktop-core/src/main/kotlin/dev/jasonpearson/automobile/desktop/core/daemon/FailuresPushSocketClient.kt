@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 /**
  * Client for the failures push Unix socket server. Subscribes to receive real-time failure
@@ -44,7 +43,7 @@ class FailuresPushSocketClient {
   }
 
   private val log = LoggerFactory.getLogger(FailuresPushSocketClient::class.java)
-  private val json = Json { ignoreUnknownKeys = true }
+  private val json = DaemonJson
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
   private var channel: SocketChannel? = null

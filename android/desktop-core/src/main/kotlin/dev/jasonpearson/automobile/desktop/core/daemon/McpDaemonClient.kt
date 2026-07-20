@@ -25,7 +25,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
-  private val json: Json = Json { ignoreUnknownKeys = true },
+  private val json: Json = DaemonJson,
 ) : AutoMobileClient {
   val socketPath: String
     get() = socketPathValue

@@ -6,12 +6,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
 
 class ObservationStreamClientTest {
-  // Mirrors the Json config used by ObservationStreamClient.sendRequest so the serialized subscribe
-  // payload asserted here matches what is written to the socket.
-  private val wireJson = Json { ignoreUnknownKeys = true }
+  // Uses the same configuration as ObservationStreamClient so these assertions match the socket.
+  private val wireJson = DaemonJson
 
   @Test
   fun `subscribe request carries requested cadence when provided`() {

@@ -85,13 +85,7 @@ interface DeviceSnapshotConfigClient {
 class DeviceSnapshotSocketClient(
   private val socketPathValue: String =
     AutoMobileSocketPaths.socketPath(DEVICE_SNAPSHOT_SOCKET_FILE),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-    // The daemon requires `type` and `method` on every request; kotlinx omits properties left at
-    // their default, so without this the envelope would go out incomplete.
-    encodeDefaults = true
-  },
+  private val json: Json = DaemonJson,
 ) : DeviceSnapshotConfigClient {
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())

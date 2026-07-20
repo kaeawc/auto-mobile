@@ -28,7 +28,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -49,7 +48,7 @@ class ObservationStreamClient {
   }
 
   private val log = LoggerFactory.getLogger(ObservationStreamClient::class.java)
-  private val json = Json { ignoreUnknownKeys = true }
+  private val json = DaemonJson
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
   private var channel: SocketChannel? = null

@@ -32,7 +32,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 
 /**
  * Client for the telemetry push Unix socket server. Subscribes to receive real-time telemetry
@@ -48,7 +47,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
   }
 
   private val log = LoggerFactory.getLogger(TelemetryPushSocketClient::class.java)
-  private val json = Json { ignoreUnknownKeys = true }
+  private val json = DaemonJson
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
   private var channel: SocketChannel? = null

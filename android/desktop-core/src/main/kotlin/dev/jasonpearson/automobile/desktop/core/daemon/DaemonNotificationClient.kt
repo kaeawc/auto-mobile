@@ -93,12 +93,7 @@ interface DaemonNotificationSource {
  */
 class DaemonNotificationClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    // `type` is a default on the request class but the daemon routes on it; without this the
-    // subscribe goes out untyped.
-    encodeDefaults = true
-  },
+  private val json: Json = DaemonJson,
   private val initialBackoffMs: Long = 1_000,
   private val maxBackoffMs: Long = 30_000,
 ) : DaemonNotificationSource {

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 /**
  * Serializer for converting SdkEvent sealed classes to/from JSON strings.
@@ -77,7 +78,7 @@ object SdkEventSerializer {
    * @return JSON string representation
    */
   fun toJson(event: SdkEvent): String {
-    return json.encodeToString(SdkEvent.serializer(), event)
+    return json.encodeToString(serializer<SdkEvent>(), event)
   }
 
   /**
@@ -88,7 +89,7 @@ object SdkEventSerializer {
    */
   fun fromJson(jsonString: String): SdkEvent? {
     return try {
-      json.decodeFromString(SdkEvent.serializer(), jsonString)
+      json.decodeFromString(serializer<SdkEvent>(), jsonString)
     } catch (e: Exception) {
       null
     }
@@ -102,7 +103,7 @@ object SdkEventSerializer {
    * @throws kotlinx.serialization.SerializationException if parsing fails
    */
   fun fromJsonOrThrow(jsonString: String): SdkEvent {
-    return json.decodeFromString(SdkEvent.serializer(), jsonString)
+    return json.decodeFromString(serializer<SdkEvent>(), jsonString)
   }
 
   /**

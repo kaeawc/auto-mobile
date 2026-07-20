@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.protocol
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 /**
  * Protocol types for SharedPreferences inspection via ContentProvider.
@@ -252,13 +253,13 @@ object StorageProtocolSerializer {
 
   /** Serialize a StorageRequest to JSON string. */
   fun requestToJson(request: StorageRequest): String {
-    return json.encodeToString(StorageRequest.serializer(), request)
+    return json.encodeToString(serializer<StorageRequest>(), request)
   }
 
   /** Deserialize a StorageRequest from JSON string. */
   fun requestFromJson(jsonString: String): StorageRequest? {
     return try {
-      json.decodeFromString(StorageRequest.serializer(), jsonString)
+      json.decodeFromString(serializer<StorageRequest>(), jsonString)
     } catch (e: Exception) {
       null
     }
@@ -266,13 +267,13 @@ object StorageProtocolSerializer {
 
   /** Serialize a StorageResponse to JSON string. */
   fun responseToJson(response: StorageResponse): String {
-    return json.encodeToString(StorageResponse.serializer(), response)
+    return json.encodeToString(serializer<StorageResponse>(), response)
   }
 
   /** Deserialize a StorageResponse from JSON string. */
   fun responseFromJson(jsonString: String): StorageResponse? {
     return try {
-      json.decodeFromString(StorageResponse.serializer(), jsonString)
+      json.decodeFromString(serializer<StorageResponse>(), jsonString)
     } catch (e: Exception) {
       null
     }

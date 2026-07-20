@@ -500,8 +500,8 @@ async function main(): Promise<void> {
   console.log("    (TalkBack uses 'not checked'/'checked').");
   console.log("  - inputText is unchanged in VoiceOver mode.");
   console.log("  - tapOn uses accessibility activation (transparent to agent).");
-  console.log("  - accessibilityFocusedElement is absent on iOS; use focusedElement");
-  console.log("    to verify input focus, and observe().elements to confirm state.");
+  console.log("  - SDK-enabled iOS apps expose the VoiceOver cursor through");
+  console.log("    accessibilityFocusedElement; use focusedElement to verify input focus.");
 }
 
 main().catch(error => {

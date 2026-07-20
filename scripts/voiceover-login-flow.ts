@@ -101,9 +101,8 @@ function makeLoginScreenObserve(): ObserveResult {
       enabled: true,
       service: "voiceover",
     },
-    // Note: accessibilityFocusedElement is NOT present for iOS.
-    // The VoiceOver cursor position is not tracked via CtrlProxy.
-    // Use observe().elements to find elements regardless of VoiceOver cursor.
+    // This mock omits SDK hierarchy data. SDK-enabled iOS apps expose the
+    // VoiceOver cursor through accessibilityFocusedElement.
     elements: {
       clickable: [usernameField, passwordField, loginButton],
       scrollable: [],
@@ -278,8 +277,8 @@ async function main(): Promise<void> {
   // service: "voiceover" confirms iOS VoiceOver is active.
   printResult("accessibilityState", initialObserve.accessibilityState);
 
-  console.log("\nNote: accessibilityFocusedElement is not present for iOS.");
-  console.log("      VoiceOver cursor position is not yet tracked via CtrlProxy.");
+  console.log("\nNote: SDK-enabled iOS apps expose the VoiceOver cursor through");
+  console.log("      accessibilityFocusedElement. This mock omits SDK hierarchy data.");
   console.log("      Use observe().elements to find elements regardless of cursor.");
 
   console.log("\nClickable elements on screen:");
@@ -314,8 +313,8 @@ async function main(): Promise<void> {
 
   // -------------------------------------------------------------------------
   // Step 3: Observe to verify the username field received focus.
-  // Under VoiceOver, verify by checking focusedElement (input focus),
-  // not accessibilityFocusedElement (which is not tracked on iOS).
+  // Verify input focus through focusedElement. SDK-enabled apps also report
+  // the VoiceOver cursor through accessibilityFocusedElement.
   // -------------------------------------------------------------------------
   printStep(3, "Observe after tapping username (verify input focus)");
 
@@ -391,7 +390,8 @@ async function main(): Promise<void> {
   console.log("Key takeaways:");
   console.log("  - The agent's call sequence is identical to standard mode.");
   console.log("  - accessibilityState.service = 'voiceover' signals iOS VoiceOver.");
-  console.log("  - accessibilityFocusedElement is absent on iOS (not yet tracked).");
+  console.log("  - SDK-enabled iOS apps expose the VoiceOver cursor through");
+  console.log("    accessibilityFocusedElement.");
   console.log("  - tapOn uses accessibility activation internally (transparent).");
   console.log("  - inputText is unchanged in VoiceOver mode.");
   console.log("  - Use focusedElement (input focus) to verify field activation.");

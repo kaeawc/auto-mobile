@@ -7,15 +7,14 @@
  *
  * Key insight: swipeOn with a lookFor argument causes AutoMobile to issue
  * an accessibility scroll_forward action on the container's AXUIElement rather
- * than injecting a single-finger swipe gesture. Under VoiceOver, single-finger
- * swipes are intercepted by the screen reader for cursor navigation, so a
- * gesture-based scroll would move the VoiceOver cursor rather than scroll
- * the list. The accessibility scroll action is not intercepted by VoiceOver
- * and scrolls the list correctly.
+ * than injecting a single-finger swipe gesture. Real single-finger VoiceOver
+ * gestures navigate the cursor rather than scroll the list, while
+ * XCTest-synthesized coordinate touches do not reach VoiceOver at all. The
+ * accessibility scroll action scrolls the list without either limitation.
  *
- * When no container can be identified, AutoMobile falls back to a three-finger
- * swipe, which is VoiceOver's content-scroll gesture. Providing an explicit
- * container selector avoids this fallback and is more reliable.
+ * When no container can be identified, synthesized touches cannot invoke
+ * VoiceOver's three-finger content-scroll gesture. Provide an explicit container
+ * selector so AutoMobile can use the accessibility scroll action.
  *
  * This script is a demonstration — it uses simulated responses to show the
  * expected call sequence and response shapes without requiring a real device.
@@ -205,13 +204,15 @@ function createMockClient(): MockClient {
     async swipeOn(args: SwipeOnArgs): Promise<{ success: boolean; message: string }> {
       // Under VoiceOver, swipeOn with a container uses scroll_forward/backward
       // accessibility actions on the container's AXUIElement.
-      // Without a container, it falls back to a three-finger swipe.
-      const strategy = "container" in args
-        ? "accessibility scroll_forward on container"
-        : "3-finger swipe fallback";
+      if (!("container" in args)) {
+        return {
+          success: false,
+          message: "VoiceOver scrolling needs a container selector for an accessibility scroll action",
+        };
+      }
       return {
         success: true,
-        message: `Scrolled (VoiceOver: ${strategy}): ${JSON.stringify(args)}`,
+        message: `Scrolled (VoiceOver: accessibility scroll_forward on container): ${JSON.stringify(args)}`,
       };
     },
 
@@ -278,15 +279,14 @@ async function main(): Promise<void> {
   //      (not single-finger swipe gestures, which VoiceOver intercepts)
   //   3. Repeat until Item 27 appears in the view hierarchy
   //
-  // Providing an explicit container is recommended when VoiceOver is active.
-  // Without it, AutoMobile falls back to a three-finger swipe which may be
-  // less reliable in nested scroll views.
+  // Providing an explicit container is required when VoiceOver is active:
+  // synthesized touches do not invoke VoiceOver's three-finger scroll gesture.
   // -------------------------------------------------------------------------
   printStep(2, "Scroll list to find Item 27");
   console.log("Note: Under VoiceOver, swipeOn with a container uses accessibility");
   console.log("      scroll_forward on the AXUIElement — not a single-finger swipe.");
-  console.log("      Single-finger swipes are intercepted by VoiceOver for cursor");
-  console.log("      navigation and would not scroll the list.");
+  console.log("      Real single-finger VoiceOver gestures navigate the cursor, while");
+  console.log("      synthesized coordinate touches do not reach VoiceOver at all.");
 
   const scrollResult = await client.swipeOn({
     container: { elementId: "itemList" },
@@ -343,11 +343,12 @@ async function main(): Promise<void> {
   console.log();
   console.log("Key takeaways:");
   console.log("  - swipeOn with container uses accessibility scroll_forward.");
-  console.log("  - Single-finger swipes would move VoiceOver cursor, not scroll.");
-  console.log("  - Providing a container elementId is preferred over relying on");
-  console.log("    the three-finger swipe fallback.");
-  console.log("  - Locate the target in observe().elements (not accessibilityFocusedElement,");
-  console.log("    which is absent on iOS).");
+  console.log("  - Real single-finger VoiceOver gestures move the cursor, while");
+  console.log("    synthesized coordinate touches do not reach VoiceOver.");
+  console.log("  - Provide a container elementId for VoiceOver scrolling; there is");
+  console.log("    no synthesized three-finger VoiceOver fallback.");
+  console.log("  - SDK-enabled apps also expose the VoiceOver cursor through");
+  console.log("    observe().accessibilityFocusedElement.");
   console.log("  - tapOn uses accessibility activation (transparent to agent).");
 }
 

@@ -107,7 +107,7 @@ When VoiceOver is enabled, `observe` includes an additional field in its result:
 - `enabled`: `true` when VoiceOver is active.
 - `service`: `"voiceover"` when VoiceOver is the active service, `"unknown"` for other accessibility services.
 
-> **Note:** Unlike Android TalkBack, iOS VoiceOver does not expose the current VoiceOver cursor position (the focused accessibility element) via CtrlProxy at this time. The `accessibilityFocusedElement` field will not be present in iOS observe results. See the [parity review](../design-docs/mcp/a11y/voiceover-talkback-parity.md) for details on this gap.
+> **Note:** When the foreground app includes the AutoMobile iOS SDK, `observe` reports the VoiceOver cursor through `accessibilityFocusedElement`. The out-of-process CtrlProxy runner cannot read that cursor for apps without the SDK. See the [parity review](../design-docs/mcp/a11y/voiceover-talkback-parity.md) for details.
 
 ---
 
@@ -163,6 +163,6 @@ Use **Simulator > Features > Toggle VoiceOver** again, or **Option + Command + F
 
 **Private XCTest multi-touch limitation.** `executeGesture` multi-touch uses private XCTest event-synthesis APIs because public `XCUICoordinate` gestures only drive one pointer. Those synthesized touches do not reach VoiceOver, so they cannot invoke VoiceOver's gesture vocabulary. AutoMobile returns a descriptive CtrlProxy error if the private symbols are unavailable on the active Xcode/iOS version.
 
-**VoiceOver cursor position not tracked.** Unlike Android TalkBack, AutoMobile does not currently report which element the VoiceOver cursor is on (`accessibilityFocusedElement` is absent in iOS results). Validate interactions by checking whether the expected element appears in `observe().elements` and whether the expected navigation or state change occurred.
+**VoiceOver cursor requires the iOS SDK.** For SDK-enabled apps, `observe().accessibilityFocusedElement` identifies the VoiceOver cursor. For apps without the SDK, validate interactions by checking the expected navigation or state change.
 
 **CtrlProxy required.** VoiceOver detection and accessibility actions require the CtrlProxy runner to be connected. If the CtrlProxy is unavailable, AutoMobile falls back to standard (non-VoiceOver) behavior with a warning logged.

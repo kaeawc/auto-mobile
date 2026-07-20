@@ -5,7 +5,7 @@
 > **Current state:** Screen-reader detection and the core tool adaptations are **implemented on both platforms**.
 >
 > - **Android (TalkBack):** detection via ADB secure settings; TalkBack-aware `tapOn` (direct `ACTION_CLICK` activation, with opt-in cursor navigation behind the `screen-reader-navigation` feature flag) and `swipeOn` (`ACTION_SCROLL_FORWARD`/`BACKWARD` with a two-finger fallback).
-> - **iOS (VoiceOver):** detection via CtrlProxy; VoiceOver-aware tap (label-based accessibility activation) and swipe (accessibility scroll action with a three-finger fallback). The runner reports the VoiceOver cursor, so `observe` populates `accessibilityFocusedElement`.
+> - **iOS (VoiceOver):** detection via CtrlProxy and VoiceOver-aware tap (label-based accessibility activation). VoiceOver scrolling is unsupported: XCTest-synthesized touches do not reach VoiceOver, and there is no functional three-finger gesture fallback. The runner reports the VoiceOver cursor when the foreground app supplies SDK-enriched hierarchy data.
 >
 > **Still open:** iOS focus *control* (set/clear focus, cursor stepping), VoiceOver Rotor, Magic Tap, and physical-device VoiceOver toggle. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
 

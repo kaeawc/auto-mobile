@@ -6,6 +6,12 @@ ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 # Shared git file-selection + install-when-missing helpers (issue #2823).
 # shellcheck source=scripts/lib/file-selection.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
+# shellcheck source=scripts/swiftlint/swiftlint_version.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/swiftlint_version.sh"
+
+# The installer runs in a child process, so make its manual-install location
+# visible when ensure_tool re-checks the binary in this parent process.
+export PATH="$HOME/.local/bin:$PATH"
 
 # Per-tool file regex for the shared collectors (issue #2823).
 SWIFT_FILE_REGEX='^ios/.*\.swift$'
@@ -30,6 +36,9 @@ echo -e "${YELLOW}Checking for required commands...${NC}"
 
 # Check if swiftlint is installed (install-when-missing gate + re-verify).
 if ! ensure_tool swiftlint "$PROJECT_ROOT/scripts/swiftlint/install_swiftlint.sh" "${INSTALL_SWIFTLINT_WHEN_MISSING}"; then
+    exit 1
+fi
+if ! require_pinned_swiftlint_version; then
     exit 1
 fi
 

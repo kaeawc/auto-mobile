@@ -34,28 +34,40 @@ source "$(dirname "${BASH_SOURCE[0]}")/shell-core.sh"
 # for the macOS path. Consolidates the identical brew-or-manual skeleton that
 # swiftformat/swiftlint/hadolint each hand-rolled.
 #
-#   install_via_brew_or_manual <display-name> <brew-formula> <manual-install-fn>
+#   install_via_brew_or_manual <display-name> <brew-formula> <manual-install-fn> [is-pinned-fn]
 #
 # The manual-install function is invoked by name when brew is absent or the
-# `brew install` itself fails, and this helper returns that function's status.
+# `brew install` itself fails, or when the optional is-pinned function rejects
+# Homebrew's installed version. The latter matters for tools that rewrite
+# committed files: Homebrew resolves its current formula, not this repository's
+# declared pin. The manual installer is then re-checked before success.
 install_via_brew_or_manual() {
   local display_name="$1"
   local brew_formula="$2"
   local manual_fn="$3"
+  local is_pinned_fn="${4:-}"
 
   echo -e "${YELLOW}Installing ${display_name} on macOS...${NC}"
 
   if command_exists brew; then
     echo -e "${GREEN}Using Homebrew to install ${display_name}${NC}"
     if brew install "$brew_formula"; then
-      return 0
+      if [[ -z "$is_pinned_fn" ]] || "$is_pinned_fn"; then
+        return 0
+      fi
+      echo -e "${YELLOW}Homebrew installed a version that does not match this repository's pin. Falling back to manual installation...${NC}"
+    else
+      echo -e "${YELLOW}Homebrew installation failed. Falling back to manual installation...${NC}"
     fi
-    echo -e "${YELLOW}Homebrew installation failed. Falling back to manual installation...${NC}"
-    "$manual_fn"
-    return $?
+  else
+    echo -e "${YELLOW}Homebrew not found. Falling back to manual installation...${NC}"
   fi
 
-  echo -e "${YELLOW}Homebrew not found. Falling back to manual installation...${NC}"
-  "$manual_fn"
-  return $?
+  "$manual_fn" || return $?
+  if [[ -z "$is_pinned_fn" ]] || "$is_pinned_fn"; then
+    return 0
+  fi
+
+  echo -e "${RED}Manual installation did not provide the pinned ${display_name} version.${NC}"
+  return 1
 }

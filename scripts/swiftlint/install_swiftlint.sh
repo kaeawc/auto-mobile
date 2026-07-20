@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 
-SWIFTLINT_VERSION="0.57.0" # Change this to the desired version
-
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
 # Note: SwiftLint intentionally ships only macOS/Linux paths; detect_os may
 # return "windows" but main() routes that to the unsupported branch.
 # shellcheck source=scripts/lib/tool-install.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
+# shellcheck source=scripts/swiftlint/swiftlint_version.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/swiftlint_version.sh"
 
 # Install SwiftLint on macOS
 install_macos() {
-    install_via_brew_or_manual "SwiftLint" "swiftlint" install_manual
+    install_via_brew_or_manual "SwiftLint" "swiftlint" install_manual is_pinned_swiftlint_version
     return $?
 }
 
@@ -29,6 +29,7 @@ install_manual() {
     # Create installation directory
     install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
+    export PATH="$install_dir:$PATH"
 
     os=$(detect_os)
 

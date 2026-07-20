@@ -6,6 +6,12 @@ ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-true}
 # Shared git file-selection + install-when-missing helpers (issue #2823).
 # shellcheck source=scripts/lib/file-selection.sh disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
+# shellcheck source=scripts/shellcheck/shfmt_version.sh disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/shfmt_version.sh"
+
+# The installer runs in a child process, so make its manual-install location
+# visible when ensure_tool re-checks the binary in this parent process.
+export PATH="$HOME/.local/bin:$PATH"
 
 # Per-tool file regex for the shared collectors (issue #2823).
 SHELL_FILE_REGEX='^.*\.sh$'
@@ -30,6 +36,9 @@ echo -e "${YELLOW}Checking for required commands...${NC}"
 
 # Check if shfmt is installed (install-when-missing gate + re-verify).
 if ! ensure_tool shfmt "$PROJECT_ROOT/scripts/shellcheck/install_shfmt.sh" "${INSTALL_SHFMT_WHEN_MISSING}"; then
+  exit 1
+fi
+if ! require_pinned_shfmt_version; then
   exit 1
 fi
 

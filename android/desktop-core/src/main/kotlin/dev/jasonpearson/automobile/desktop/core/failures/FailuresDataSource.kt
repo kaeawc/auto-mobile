@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.desktop.core.time.Clock
 import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 typealias TimelineData = dev.jasonpearson.automobile.desktop.domain.TimelineData
 
@@ -78,7 +79,7 @@ class McpFailuresDataSource(private val clientProvider: () -> AutoMobileClient) 
     return try {
       val client = clientProvider()
       val contents = client.readResource("automobile:failures")
-      val response = decodeResourceResponse(json, contents, FailuresResponse.serializer())
+      val response = decodeResourceResponse(json, contents, serializer<FailuresResponse>())
       Result.Success(response.groups.map { it.toModel() })
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
@@ -96,7 +97,7 @@ class McpFailuresDataSource(private val clientProvider: () -> AutoMobileClient) 
       val uri =
         "automobile:failures/timeline?dateRange=${dateRange.toQueryParam()}&aggregation=${aggregation.toQueryParam()}"
       val contents = client.readResource(uri)
-      val response = decodeResourceResponse(json, contents, TimelineResponse.serializer())
+      val response = decodeResourceResponse(json, contents, serializer<TimelineResponse>())
       Result.Success(
         TimelineData(
           dataPoints =

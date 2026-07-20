@@ -18,6 +18,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.serializer
 
 class McpHttpClient(
   private val endpoint: String,
@@ -40,7 +41,7 @@ class McpHttpClient(
   override fun listResources(): List<McpResource> {
     ensureInitialized()
     val response = sendRequest("resources/list")
-    val result = json.decodeFromJsonElement(ListResourcesResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ListResourcesResult>(), response.result!!)
     return result.resources
   }
 
@@ -48,14 +49,14 @@ class McpHttpClient(
     ensureInitialized()
     val response = sendRequest("resources/list-templates")
     val result =
-      json.decodeFromJsonElement(ListResourceTemplatesResult.serializer(), response.result!!)
+      json.decodeFromJsonElement(serializer<ListResourceTemplatesResult>(), response.result!!)
     return result.resourceTemplates
   }
 
   override fun listTools(): List<McpTool> {
     ensureInitialized()
     val response = sendRequest("tools/list")
-    val result = json.decodeFromJsonElement(ListToolsResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
     return result.tools
   }
 
@@ -66,7 +67,7 @@ class McpHttpClient(
         "resources/read",
         buildJsonObject { put("uri", JsonPrimitive(uri)) },
       )
-    val result = json.decodeFromJsonElement(ReadResourceResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ReadResourceResult>(), response.result!!)
     return result.contents
   }
 
@@ -81,7 +82,7 @@ class McpHttpClient(
 
   override fun listFeatureFlags(): List<FeatureFlagState> {
     val response = callTool("listFeatureFlags", JsonObject(emptyMap()))
-    val result = decodeToolResponse(json, response, FeatureFlagListResult.serializer())
+    val result = decodeToolResponse(json, response, serializer<FeatureFlagListResult>())
     return result.flags
   }
 
@@ -101,7 +102,7 @@ class McpHttpClient(
           }
         },
       )
-    return decodeToolResponse(json, response, FeatureFlagState.serializer())
+    return decodeToolResponse(json, response, serializer<FeatureFlagState>())
   }
 
   override fun listPerformanceAuditResults(
@@ -117,12 +118,12 @@ class McpHttpClient(
 
   override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {
     val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, TestTimingSummary.serializer())
+    return decodeResourceResponse(json, contents, serializer<TestTimingSummary>())
   }
 
   override fun getTestRuns(query: TestRunQuery): TestRunSummary {
     val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, TestRunSummary.serializer())
+    return decodeResourceResponse(json, contents, serializer<TestRunSummary>())
   }
 
   override fun startTestRecording(platform: String): TestRecordingStartResult {
@@ -157,7 +158,7 @@ class McpHttpClient(
           }
         },
       )
-    return decodeToolResponse(json, response, ExecutePlanResult.serializer())
+    return decodeToolResponse(json, response, serializer<ExecutePlanResult>())
   }
 
   override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
@@ -178,7 +179,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, StartDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
@@ -195,7 +196,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, SetActiveDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<SetActiveDeviceResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       SetActiveDeviceResult(success = false, message = e.message ?: "Failed to set active device")
@@ -211,7 +212,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, ObserveResult.serializer())
+      decodeToolResponse(json, response, serializer<ObserveResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       ObserveResult()
@@ -234,7 +235,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, KillDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<KillDeviceResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
@@ -253,7 +254,7 @@ class McpHttpClient(
       decodeToolResponse(
         json,
         response,
-        dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
+        serializer<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse>(),
       )
     } catch (e: Exception) {
       if (e is CancellationException) throw e
@@ -283,7 +284,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, SetKeyValueResult.serializer())
+      decodeToolResponse(json, response, serializer<SetKeyValueResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       SetKeyValueResult(success = false, message = e.message ?: "Failed to set key value")
@@ -308,7 +309,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, RemoveKeyValueResult.serializer())
+      decodeToolResponse(json, response, serializer<RemoveKeyValueResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       RemoveKeyValueResult(success = false, message = e.message ?: "Failed to remove key value")
@@ -331,7 +332,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, ClearKeyValueResult.serializer())
+      decodeToolResponse(json, response, serializer<ClearKeyValueResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       ClearKeyValueResult(success = false, message = e.message ?: "Failed to clear key value file")
@@ -348,7 +349,7 @@ class McpHttpClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, UpdateServiceResult.serializer())
+      decodeToolResponse(json, response, serializer<UpdateServiceResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
       UpdateServiceResult(success = false, message = e.message ?: "Failed to update service")
@@ -451,7 +452,7 @@ class McpHttpClient(
     includeSession: Boolean,
     expectResponse: Boolean,
   ): JsonRpcResponse {
-    val requestBody = json.encodeToString(JsonRpcRequest.serializer(), request)
+    val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
     val builder =
       HttpRequest.newBuilder(URI.create(endpoint)).header("Content-Type", "application/json")
 
@@ -486,7 +487,7 @@ class McpHttpClient(
         throw McpConnectionException("MCP HTTP response was empty")
       }
 
-      val rpcResponse = json.decodeFromString(JsonRpcResponse.serializer(), body)
+      val rpcResponse = json.decodeFromString(serializer<JsonRpcResponse>(), body)
       if (rpcResponse.error != null) {
         throw McpConnectionException(
           "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"

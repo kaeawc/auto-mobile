@@ -13,6 +13,7 @@ import java.nio.file.Files
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 /** Socket file the daemon binds for video-recording configuration. */
 internal const val VIDEO_RECORDING_SOCKET_FILE = "video-recording.sock"
@@ -102,12 +103,12 @@ class VideoRecordingSocketClient(
           OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
         )
 
-      writer.write(json.encodeToString(VideoRecordingSocketRequest.serializer(), request))
+      writer.write(json.encodeToString(serializer<VideoRecordingSocketRequest>(), request))
       writer.newLine()
       writer.flush()
 
       val line = reader.readLine() ?: throw McpConnectionException("Video recording socket closed")
-      val response = json.decodeFromString(VideoRecordingSocketResponse.serializer(), line)
+      val response = json.decodeFromString(serializer<VideoRecordingSocketResponse>(), line)
 
       if (!response.success) {
         throw McpConnectionException(response.error ?: "Video recording request failed")

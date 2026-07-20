@@ -16,6 +16,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.serializer
 
 class McpStdioClient(
   private val command: String,
@@ -38,7 +39,7 @@ class McpStdioClient(
   override fun listResources(): List<McpResource> {
     ensureInitialized()
     val response = sendRequest("resources/list")
-    val result = json.decodeFromJsonElement(ListResourcesResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ListResourcesResult>(), response.result!!)
     return result.resources
   }
 
@@ -46,14 +47,14 @@ class McpStdioClient(
     ensureInitialized()
     val response = sendRequest("resources/list-templates")
     val result =
-      json.decodeFromJsonElement(ListResourceTemplatesResult.serializer(), response.result!!)
+      json.decodeFromJsonElement(serializer<ListResourceTemplatesResult>(), response.result!!)
     return result.resourceTemplates
   }
 
   override fun listTools(): List<McpTool> {
     ensureInitialized()
     val response = sendRequest("tools/list")
-    val result = json.decodeFromJsonElement(ListToolsResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
     return result.tools
   }
 
@@ -64,7 +65,7 @@ class McpStdioClient(
         "resources/read",
         buildJsonObject { put("uri", JsonPrimitive(uri)) },
       )
-    val result = json.decodeFromJsonElement(ReadResourceResult.serializer(), response.result!!)
+    val result = json.decodeFromJsonElement(serializer<ReadResourceResult>(), response.result!!)
     return result.contents
   }
 
@@ -79,7 +80,7 @@ class McpStdioClient(
 
   override fun listFeatureFlags(): List<FeatureFlagState> {
     val response = callTool("listFeatureFlags", JsonObject(emptyMap()))
-    val result = decodeToolResponse(json, response, FeatureFlagListResult.serializer())
+    val result = decodeToolResponse(json, response, serializer<FeatureFlagListResult>())
     return result.flags
   }
 
@@ -99,7 +100,7 @@ class McpStdioClient(
           }
         },
       )
-    return decodeToolResponse(json, response, FeatureFlagState.serializer())
+    return decodeToolResponse(json, response, serializer<FeatureFlagState>())
   }
 
   override fun listPerformanceAuditResults(
@@ -115,12 +116,12 @@ class McpStdioClient(
 
   override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {
     val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, TestTimingSummary.serializer())
+    return decodeResourceResponse(json, contents, serializer<TestTimingSummary>())
   }
 
   override fun getTestRuns(query: TestRunQuery): TestRunSummary {
     val contents = readResource(query.toResourceUri())
-    return decodeResourceResponse(json, contents, TestRunSummary.serializer())
+    return decodeResourceResponse(json, contents, serializer<TestRunSummary>())
   }
 
   override fun startTestRecording(platform: String): TestRecordingStartResult {
@@ -155,7 +156,7 @@ class McpStdioClient(
           }
         },
       )
-    return decodeToolResponse(json, response, ExecutePlanResult.serializer())
+    return decodeToolResponse(json, response, serializer<ExecutePlanResult>())
   }
 
   override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
@@ -176,7 +177,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, StartDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
       StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
     }
@@ -192,7 +193,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, SetActiveDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<SetActiveDeviceResult>())
     } catch (e: Exception) {
       SetActiveDeviceResult(success = false, message = e.message ?: "Failed to set active device")
     }
@@ -207,7 +208,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, ObserveResult.serializer())
+      decodeToolResponse(json, response, serializer<ObserveResult>())
     } catch (e: Exception) {
       ObserveResult()
     }
@@ -229,7 +230,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, KillDeviceResult.serializer())
+      decodeToolResponse(json, response, serializer<KillDeviceResult>())
     } catch (e: Exception) {
       KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
     }
@@ -246,7 +247,7 @@ class McpStdioClient(
       decodeToolResponse(
         json,
         response,
-        dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
+        serializer<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse>(),
       )
     } catch (e: Exception) {
       dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse()
@@ -263,7 +264,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, UpdateServiceResult.serializer())
+      decodeToolResponse(json, response, serializer<UpdateServiceResult>())
     } catch (e: Exception) {
       UpdateServiceResult(success = false, message = e.message ?: "Failed to update service")
     }
@@ -294,7 +295,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, SetKeyValueResult.serializer())
+      decodeToolResponse(json, response, serializer<SetKeyValueResult>())
     } catch (e: Exception) {
       SetKeyValueResult(success = false, message = e.message ?: "Failed to set key value")
     }
@@ -318,7 +319,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, RemoveKeyValueResult.serializer())
+      decodeToolResponse(json, response, serializer<RemoveKeyValueResult>())
     } catch (e: Exception) {
       RemoveKeyValueResult(success = false, message = e.message ?: "Failed to remove key value")
     }
@@ -340,7 +341,7 @@ class McpStdioClient(
         },
       )
     return try {
-      decodeToolResponse(json, response, ClearKeyValueResult.serializer())
+      decodeToolResponse(json, response, serializer<ClearKeyValueResult>())
     } catch (e: Exception) {
       ClearKeyValueResult(success = false, message = e.message ?: "Failed to clear key value file")
     }
@@ -454,7 +455,7 @@ class McpStdioClient(
       val currentWriter = writer ?: throw McpConnectionException("MCP stdio writer unavailable")
       val currentReader = reader ?: throw McpConnectionException("MCP stdio reader unavailable")
 
-      val requestBody = json.encodeToString(JsonRpcRequest.serializer(), request)
+      val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
       currentWriter.write(requestBody)
       currentWriter.newLine()
       currentWriter.flush()
@@ -469,7 +470,7 @@ class McpStdioClient(
         if (line.isBlank()) {
           continue
         }
-        val response = json.decodeFromString(JsonRpcResponse.serializer(), line)
+        val response = json.decodeFromString(serializer<JsonRpcResponse>(), line)
         val responseId = response.id?.jsonPrimitive?.content
         if (expectedId != null && responseId != expectedId) {
           continue

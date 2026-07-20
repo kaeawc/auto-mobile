@@ -20,6 +20,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.serializer
 
 /**
  * Component responsible for parsing AccessibilityNodeInfo trees and converting them into
@@ -285,7 +286,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               val wrapped = wrapOptimizedElements(optimizedList)
               // Debug: Check if Tab elements have text children
               if (wrapped != null && window.isActive) {
-                val wrappedJson = json.encodeToString(UIElementInfo.serializer(), wrapped)
+                val wrappedJson = json.encodeToString(serializer<UIElementInfo>(), wrapped)
                 val hasTabText = wrappedJson.contains("\"text\":\"Tap\"")
                 Log.d(TAG, "[WRAP-ACTIVE] Has Tap text after wrap: $hasTabText")
               }
@@ -410,7 +411,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       // Debug: Check if Tab text survives occlusion filtering
       mainHierarchy?.let {
-        val filteredJson = json.encodeToString(UIElementInfo.serializer(), it)
+        val filteredJson = json.encodeToString(serializer<UIElementInfo>(), it)
         val hasTabText = filteredJson.contains("\"text\":\"Tap\"")
         Log.d(TAG, "[OCCLUSION-FILTERED] Has Tap text after filtering: $hasTabText")
       }
@@ -925,8 +926,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val nodeElement =
         when {
           children.isEmpty() -> null
-          children.size == 1 -> json.encodeToJsonElement(UIElementInfo.serializer(), children[0])
-          else -> json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
+          children.size == 1 -> json.encodeToJsonElement(serializer<UIElementInfo>(), children[0])
+          else -> json.encodeToJsonElement(ListSerializer(serializer<UIElementInfo>()), children)
         }
 
       val className =
@@ -1068,14 +1069,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val children =
         when {
           nodeElement is JsonObject -> {
-            val child = json.decodeFromJsonElement(UIElementInfo.serializer(), nodeElement)
+            val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement)
             listOf(child)
           }
 
           nodeElement is JsonArray -> {
             nodeElement.jsonArray.mapNotNull { childJson ->
               try {
-                json.decodeFromJsonElement(UIElementInfo.serializer(), childJson)
+                json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
               } catch (e: Exception) {
                 null
               }
@@ -1219,7 +1220,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     return when {
       nodeElement is JsonObject -> {
         try {
-          listOf(json.decodeFromJsonElement(UIElementInfo.serializer(), nodeElement))
+          listOf(json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement))
         } catch (e: Exception) {
           null
         }
@@ -1229,7 +1230,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         for (childJson in nodeElement.jsonArray) {
           val child =
             try {
-              json.decodeFromJsonElement(UIElementInfo.serializer(), childJson)
+              json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
             } catch (e: Exception) {
               return null
             }
@@ -1322,7 +1323,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     return when (nodeElement) {
       is JsonObject -> {
         try {
-          val element = json.decodeFromJsonElement(UIElementInfo.serializer(), nodeElement)
+          val element = json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement)
           !element.text.isNullOrBlank() || hasTextInNode(element.node)
         } catch (e: Exception) {
           false
@@ -1343,7 +1344,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         when (node) {
           is JsonObject -> {
             try {
-              val child = json.decodeFromJsonElement(UIElementInfo.serializer(), node)
+              val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), node)
               countTextNodes(child)
             } catch (e: Exception) {
               0
@@ -1352,7 +1353,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           is JsonArray -> {
             node.jsonArray.sumOf { childJson ->
               try {
-                val child = json.decodeFromJsonElement(UIElementInfo.serializer(), childJson)
+                val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
                 countTextNodes(child)
               } catch (e: Exception) {
                 0
@@ -1369,9 +1370,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   private fun optimizeNode(nodeElement: JsonElement): JsonElement? {
     fun optimizeChild(childJson: JsonElement): List<JsonElement> {
       return try {
-        val child = json.decodeFromJsonElement(UIElementInfo.serializer(), childJson)
+        val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
         val optimizedChildren = optimizeHierarchy(child)
-        optimizedChildren.map { json.encodeToJsonElement(UIElementInfo.serializer(), it) }
+        optimizedChildren.map { json.encodeToJsonElement(serializer<UIElementInfo>(), it) }
       } catch (e: Exception) {
         listOf(childJson)
       }
@@ -1754,13 +1755,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     return try {
       when {
         nodeElement is JsonObject -> {
-          val child = json.decodeFromJsonElement(UIElementInfo.serializer(), nodeElement)
+          val child = json.decodeFromJsonElement(serializer<UIElementInfo>(), nodeElement)
           listOf(child)
         }
         nodeElement is JsonArray -> {
           nodeElement.jsonArray.mapNotNull { childJson ->
             try {
-              json.decodeFromJsonElement(UIElementInfo.serializer(), childJson)
+              json.decodeFromJsonElement(serializer<UIElementInfo>(), childJson)
             } catch (e: Exception) {
               null
             }
@@ -1776,8 +1777,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   private fun encodeChildrenToNodeElement(children: List<UIElementInfo>): JsonElement? {
     return when {
       children.isEmpty() -> null
-      children.size == 1 -> json.encodeToJsonElement(UIElementInfo.serializer(), children[0])
-      else -> json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
+      children.size == 1 -> json.encodeToJsonElement(serializer<UIElementInfo>(), children[0])
+      else -> json.encodeToJsonElement(ListSerializer(serializer<UIElementInfo>()), children)
     }
   }
 

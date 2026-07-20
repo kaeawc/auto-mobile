@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.serializer
 
 @Serializable
 internal data class TestTimingStatusCounts(
@@ -124,13 +125,13 @@ internal object TestTimingCache {
         return
       }
 
-      val element = json.decodeFromString(JsonElement.serializer(), payload)
+      val element = json.decodeFromString(serializer<JsonElement>(), payload)
       val error = (element as? JsonObject)?.get("error")?.jsonPrimitive?.content
       if (!error.isNullOrBlank()) {
         return
       }
 
-      val parsed = json.decodeFromJsonElement(TestTimingSummary.serializer(), element)
+      val parsed = json.decodeFromJsonElement(serializer<TestTimingSummary>(), element)
       summary = parsed
       timingMap = parsed.testTimings.associateBy { TestTimingKey(it.testClass, it.testMethod) }
     } catch (e: Exception) {}

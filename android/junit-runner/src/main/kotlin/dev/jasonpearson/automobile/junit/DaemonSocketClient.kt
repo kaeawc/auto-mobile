@@ -30,6 +30,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.serializer
 
 internal object DaemonSocketClientManager {
   // Use ThreadLocal to give each thread its own socket connection
@@ -1103,7 +1104,7 @@ internal class DaemonSocketClient(
           continue
         }
         try {
-          val response = json.decodeFromString(DaemonResponse.serializer(), line)
+          val response = json.decodeFromString(serializer<DaemonResponse>(), line)
           handleResponse(response)
         } catch (e: Exception) {
           println("Failed to parse daemon response: ${e.message}")

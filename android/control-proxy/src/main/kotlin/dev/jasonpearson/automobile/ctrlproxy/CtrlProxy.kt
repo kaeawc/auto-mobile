@@ -99,6 +99,7 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
+import kotlinx.serialization.serializer
 
 /**
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
@@ -428,7 +429,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
         val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT) ?: return
         try {
-          val snapshot = jsonLenient.decodeFromString(RecompositionSnapshot.serializer(), payload)
+          val snapshot = jsonLenient.decodeFromString(serializer<RecompositionSnapshot>(), payload)
           recompositionStore.updateSnapshot(snapshot)
         } catch (e: Exception) {
           Log.e(TAG, "Failed to parse recomposition snapshot", e)
@@ -5496,7 +5497,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
           append(""","totalTimeMs":$totalTimeMs""")
           if (focusedElement != null) {
-            val elementJson = jsonCompact.encodeToString(UIElementInfo.serializer(), focusedElement)
+            val elementJson =
+              jsonCompact.encodeToString(serializer<UIElementInfo>(), focusedElement)
             append(""","focusedElement":$elementJson""")
           } else {
             append(""","focusedElement":null""")
@@ -5565,7 +5567,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(""","totalTimeMs":$totalTimeMs""")
           val resultJson =
             jsonCompact.encodeToString(
-              dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult.serializer(),
+              serializer<dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult>(),
               traversalResult,
             )
           append(""","result":$resultJson""")

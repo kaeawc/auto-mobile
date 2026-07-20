@@ -17,6 +17,7 @@ export interface AdbProcess {
   once(event: "error", listener: (error: Error) => void): this;
   off(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
   off(event: "error", listener: (error: Error) => void): this;
+  off(event: "spawn", listener: () => void): this;
   removeListener(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
   removeListener(event: "error", listener: (error: Error) => void): this;
 }

@@ -185,7 +185,7 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.commands).toContain(`forward tcp:0 localabstract:${VIDEO_SERVER_SOCKET_NAME}`);
 
     const args = ctx.spawnArgs[0].join(" ");
-    expect(args).toContain("-s emulator-5554");
+    expect(args).not.toContain("-s emulator-5554");
     expect(args).toContain("CLASSPATH=/data/local/tmp/automobile-video.jar app_process /");
     expect(args).toContain("--quality low");
     expect(args).toContain("--bit-rate 1500000");

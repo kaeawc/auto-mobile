@@ -340,6 +340,7 @@ export class AdbClient implements AdbExecutor {
 
     let timeoutId: NodeJS.Timeout | undefined;
     let cleaned = false;
+    let settleStart: ((error?: Error) => void) | undefined;
     const cleanup = () => {
       if (cleaned) {
         return;
@@ -361,6 +362,7 @@ export class AdbClient implements AdbExecutor {
     const onAbort = () => {
       if (!cleaned) {
         child.kill("SIGTERM");
+        settleStart?.(this.getAbortError(signal));
         cleanup();
       }
     };
@@ -371,6 +373,25 @@ export class AdbClient implements AdbExecutor {
     if (options.timeoutMs) {
       timeoutId = this.timer.setTimeout(onAbort, options.timeoutMs);
     }
+
+    await new Promise<void>((resolve, reject) => {
+      const onSpawn = () => {
+        child.off("error", onInitialError);
+        settleStart = undefined;
+        resolve();
+      };
+      const onInitialError = (error: Error) => {
+        child.off("spawn", onSpawn);
+        settleStart = undefined;
+        reject(error);
+      };
+      settleStart = error => error ? reject(error) : resolve();
+      child.once("spawn", onSpawn);
+      child.once("error", onInitialError);
+      if (signal?.aborted) {
+        onAbort();
+      }
+    });
 
     // eslint-disable-next-line auto-mobile/no-unknown-cast -- the public interface deliberately exposes only lifecycle, stdio, and kill.
     return child as unknown as AdbProcess;

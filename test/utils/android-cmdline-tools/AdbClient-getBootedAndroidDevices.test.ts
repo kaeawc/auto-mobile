@@ -117,9 +117,11 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     );
     const controller = new AbortController();
 
-    const process = await adb.spawn(["exec-out", "screenrecord", "--output-format=h264", "-"], {
+    const pending = adb.spawn(["exec-out", "screenrecord", "--output-format=h264", "-"], {
       signal: controller.signal,
     });
+    setTimeout(() => child.emit("spawn"), 0);
+    const process = await pending;
     controller.abort();
     child.emit("exit", null, "SIGTERM");
 

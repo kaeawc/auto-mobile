@@ -3,14 +3,15 @@ set -euo pipefail
 
 # Prevent newly added production callers from bypassing SimCtlClient. Existing
 # migration debt is intentionally not treated as a failure here: this check is
-# a ratchet, while issue #4049 migrates callers incrementally. Tests and
-# diagnostics may opt out with an adjacent `simctl-boundary-exception:` comment
-# that explains why the direct invocation is necessary.
+# a ratchet, while issue #4049 migrates callers incrementally.
 
 base_ref="${1:-origin/main}"
 owner="src/utils/ios-cmdline-tools/SimCtlClient.ts"
 violations=()
-pattern='(spawn\([[:space:]]*"xcrun"|exec\([^)]*"xcrun simctl|"/bin/sh".*xcrun simctl)'
+# An argv-form xcrun execution is also forbidden outside the owner. The strict
+# xcrun match deliberately covers future simctl calls even when the argv array
+# is split across multiple added lines.
+pattern='(spawn\([[:space:]]*"xcrun"|execFile\([^)]*"xcrun"|exec\([^)]*"xcrun simctl|"/bin/sh".*xcrun simctl)'
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" ]] && continue

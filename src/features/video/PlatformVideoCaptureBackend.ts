@@ -7,7 +7,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 import {
   createExitTracker,
@@ -61,7 +61,8 @@ function clampBitrateKbps(config: VideoCaptureConfig): number {
 export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
+    private readonly simctlFactory: (device: BootedDevice) => SimCtl = device => new SimCtlClient(device)
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -287,7 +288,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     device: BootedDevice,
     config: VideoCaptureConfig
   ): Promise<RecordingHandle> {
-    const simctl = new SimCtlClient(device);
+    const simctl = this.simctlFactory(device);
     const available = await simctl.isAvailable();
     if (!available) {
       throw new ActionableError("simctl is not available. Install Xcode command line tools.");

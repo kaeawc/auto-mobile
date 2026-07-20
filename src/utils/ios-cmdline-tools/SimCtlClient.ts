@@ -43,6 +43,20 @@ export interface AppleDeviceType {
   productFamily: string;
 }
 
+export interface SimCtlFileSystem {
+  mkdtemp(prefix: string): Promise<string>;
+  writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
+  readFile(path: string, encoding: "utf8"): Promise<string>;
+  rm(path: string, options: { recursive: boolean; force: boolean }): Promise<void>;
+}
+
+const defaultSimCtlFileSystem: SimCtlFileSystem = {
+  mkdtemp: prefix => fsPromises.mkdtemp(prefix),
+  writeFile: (path, data, encoding) => fsPromises.writeFile(path, data, encoding),
+  readFile: (path, encoding) => fsPromises.readFile(path, encoding),
+  rm: (path, options) => fsPromises.rm(path, options),
+};
+
 /**
  * Interface for iOS simulator control using simctl
  * Provides methods to manage and interact with iOS simulators
@@ -368,6 +382,7 @@ export class SimCtlClient implements SimCtl {
   private platform: NodeJS.Platform;
   private readonly usesInjectedExecAsync: boolean;
   private readonly spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess;
+  private readonly fileSystem: SimCtlFileSystem;
   // Cached result of the launchctl headless-session probe (null = not yet probed)
   private headlessSessionCache: boolean | null = null;
 
@@ -387,7 +402,8 @@ export class SimCtlClient implements SimCtl {
     execAsyncFn: ((file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
     timer: Timer = defaultTimer,
     platform: NodeJS.Platform = process.platform,
-    spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess = defaultSpawnProcess
+    spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess = defaultSpawnProcess,
+    fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem
   ) {
     this.device = device;
     this.usesInjectedExecAsync = execAsyncFn !== null;
@@ -395,6 +411,7 @@ export class SimCtlClient implements SimCtl {
     this.timer = timer;
     this.platform = platform;
     this.spawnProcess = spawnProcess;
+    this.fileSystem = fileSystem;
   }
 
   /**
@@ -947,15 +964,15 @@ export class SimCtlClient implements SimCtl {
           return result.stdout;
         } catch (error) {
           logger.debug(`[iOS] listapps returned plist; converting with plutil: ${error}`);
-          const directory = await fsPromises.mkdtemp(join(tmpdir(), "automobile-simctl-listapps-"));
+          const directory = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-simctl-listapps-"));
           const inputPath = join(directory, "listapps.plist");
           const outputPath = join(directory, "listapps.json");
           try {
-            await fsPromises.writeFile(inputPath, result.stdout, "utf8");
+            await this.fileSystem.writeFile(inputPath, result.stdout, "utf8");
             await this.execAsync("plutil", ["-convert", "json", "-o", outputPath, inputPath]);
-            return await fsPromises.readFile(outputPath, "utf8");
+            return await this.fileSystem.readFile(outputPath, "utf8");
           } finally {
-            await fsPromises.rm(directory, { recursive: true, force: true });
+            await this.fileSystem.rm(directory, { recursive: true, force: true });
           }
         }
       };

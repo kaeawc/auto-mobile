@@ -25,3 +25,20 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"bypass.ts"* ]]
 }
+
+@test "rejects a multiline argv-form xcrun simctl execution" {
+  printf '%s\n' 'execFile(' '  "xcrun",' '  [' '    "simctl",' '    "list",' '    "devices",' '  ],' ');' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "fails closed when the base ref is absent" {
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh origin/main' _ "$repo_dir"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"base ref origin/main does not exist"* ]]
+}

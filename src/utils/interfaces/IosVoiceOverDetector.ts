@@ -15,9 +15,10 @@ export interface IosVoiceOverDetector {
    * @returns Promise resolving to true if VoiceOver is enabled
    */
   isVoiceOverEnabled(
-    deviceId: string,
-    client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService
+   deviceId: string,
+   client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number
   ): Promise<boolean>;
 
   /**

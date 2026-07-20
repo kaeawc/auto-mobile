@@ -36,7 +36,8 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
   async isVoiceOverEnabled(
     deviceId: string,
     client: IOSCtrlProxy,
-    featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number
   ): Promise<boolean> {
     // Check feature flag override first
     if (featureFlags?.isEnabled("force-accessibility-mode")) {
@@ -60,7 +61,7 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
     // Detect current state
     logger.debug(`[IosVoiceOverDetector] Detecting VoiceOver state for device ${deviceId}`);
     const startTime = this.timer.now();
-    const detected = await this.detectVoiceOverState(deviceId, client);
+    const detected = await this.detectVoiceOverState(deviceId, client, timeoutMs);
     const detectionTime = this.timer.now() - startTime;
 
     if (detectionTime > 50) {
@@ -102,9 +103,13 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    * completed (connection failure, timeout, or error response from CtrlProxy).
    * Null results are not cached so the next call will retry.
    */
-  private async detectVoiceOverState(deviceId: string, client: IOSCtrlProxy): Promise<boolean | null> {
+  private async detectVoiceOverState(
+    deviceId: string,
+    client: IOSCtrlProxy,
+    timeoutMs?: number
+  ): Promise<boolean | null> {
     try {
-      const result = await client.requestVoiceOverState();
+      const result = await client.requestVoiceOverState(timeoutMs);
       if (!result.success) {
         logger.warn(`[IosVoiceOverDetector] VoiceOver detection failed for ${deviceId}: ${result.error}`);
         return null;

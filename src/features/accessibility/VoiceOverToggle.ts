@@ -6,13 +6,18 @@ import { iosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
 import type { ProcessExecutor } from "../../utils/ProcessExecutor";
 import { DefaultProcessExecutor } from "../../utils/ProcessExecutor";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
+
+const VOICEOVER_CONFIRMATION_TIMEOUT_MS = 10_000;
+const VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS = 500;
 
 export class VoiceOverToggle {
   constructor(
     private readonly device: BootedDevice,
     private readonly detector: IosVoiceOverDetector = iosVoiceOverDetector,
-    private readonly processExecutor: ProcessExecutor = new DefaultProcessExecutor()
+    private readonly processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
+    private readonly timer: Timer = defaultTimer
   ) {}
 
   async toggle(enabled: boolean): Promise<VoiceOverResult> {
@@ -67,10 +72,9 @@ export class VoiceOverToggle {
     // did not land, `applied` reflects the real post-apply state rather than the
     // requested one (#3921). Detection failure maps to `false`, so a confirmation
     // that cannot be read reports the toggle as not-applied (conservative).
-    this.detector.invalidateCache(this.device.deviceId);
     // Resolve lazily so the iOS singleton is only touched on the iOS path.
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const confirmedEnabled = await this.detector.isVoiceOverEnabled(this.device.deviceId, client);
+    const confirmedEnabled = await this.waitForState(enabled, client);
 
     return {
       supported: true,
@@ -81,6 +85,36 @@ export class VoiceOverToggle {
 
   private isSimulator(): boolean {
     return isIosSimulatorUdid(this.device.deviceId);
+  }
+
+  /**
+   * CtrlProxy can observe VoiceOver before its launchctl job has fully started.
+   * Poll the post-apply confirmation through the injectable timer so a successful
+   * enable is not reported as failed merely because its service is still starting.
+   */
+  private async waitForState(enabled: boolean, client: IOSCtrlProxyClient): Promise<boolean> {
+    const deadline = this.timer.now() + VOICEOVER_CONFIRMATION_TIMEOUT_MS;
+    let confirmedEnabled = false;
+
+    while (true) {
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs <= 0) {
+        return confirmedEnabled;
+      }
+
+      this.detector.invalidateCache(this.device.deviceId);
+      confirmedEnabled = await this.detector.isVoiceOverEnabled(
+        this.device.deviceId,
+        client,
+        undefined,
+        remainingMs
+      );
+      if (confirmedEnabled === enabled || this.timer.now() >= deadline) {
+        return confirmedEnabled;
+      }
+
+      await this.timer.sleep(Math.min(VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS, deadline - this.timer.now()));
+    }
   }
 
   private isServiceAlreadyStopped(error: unknown): boolean {

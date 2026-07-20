@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { VoiceOverToggle } from "../../../src/features/accessibility/VoiceOverToggle";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice } from "../../../src/models";
 
 const SIMULATOR_DEVICE: BootedDevice = {
@@ -65,8 +66,10 @@ describe("VoiceOverToggle", () => {
       // simctl write ran but the confirmation re-detect still reports off — the
       // toggle must not claim success optimistically (#3921).
       fakeDetector.setVoiceOverEnabled(false);
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -74,8 +77,41 @@ describe("VoiceOverToggle", () => {
       expect(result.currentState).toBe(false);
     });
 
+    test("retries confirmation until VoiceOver becomes detectable", async () => {
+      fakeDetector.enqueueVoiceOverEnabledResults(false, true);
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const result = await toggle.toggle(true);
+
+      expect(result).toMatchObject({ supported: true, applied: true, currentState: true });
+      expect(fakeDetector.getCallCount()).toBe(2);
+      expect(fakeDetector.getInvalidatedDevices()).toEqual([
+        SIMULATOR_DEVICE.deviceId,
+        SIMULATOR_DEVICE.deviceId
+      ]);
+      expect(fakeDetector.isVoiceOverEnabledTimeoutMsArgs).toEqual([10_000, 9_500]);
+      expect(fakeTimer.getSleepHistory()).toEqual([500]);
+    });
+
+    test("returns the conservative result after the bounded confirmation timeout", async () => {
+      fakeDetector.setVoiceOverEnabled(false);
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const result = await toggle.toggle(true);
+
+      expect(result).toMatchObject({ supported: true, applied: false, currentState: false });
+      expect(fakeTimer.getCurrentTime()).toBe(10_000);
+      expect(fakeDetector.getCallCount()).toBe(20);
+      expect(fakeDetector.isVoiceOverEnabledTimeoutMsArgs.at(-1)).toBe(500);
+    });
+
     test("runs correct xcrun simctl spawn commands when enabling", async () => {
       const udid = SIMULATOR_DEVICE.deviceId;
+      fakeDetector.setVoiceOverEnabled(true);
 
       const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
       await toggle.toggle(true);
@@ -112,12 +148,15 @@ describe("VoiceOverToggle", () => {
 
   describe("disable VoiceOver on simulator", () => {
     test("returns supported:true applied:true", async () => {
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
       const result = await toggle.toggle(false);
 
       expect(result.supported).toBe(true);
       expect(result.applied).toBe(true);
       expect(result.currentState).toBe(false);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
     test("runs correct xcrun simctl spawn commands when disabling", async () => {
@@ -176,6 +215,7 @@ describe("VoiceOverToggle", () => {
 
   describe("cache invalidation", () => {
     test("invalidates detector cache after applying", async () => {
+      fakeDetector.setVoiceOverEnabled(true);
       const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
       await toggle.toggle(true);
 

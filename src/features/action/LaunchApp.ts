@@ -601,12 +601,12 @@ export class LaunchApp extends BaseVisualChange {
     if (isRunning) {
       if (clearAppData) {
         await perf.track("clearAppData", async () => {
-          return new ClearAppData(this.device).execute(packageName);
+          return new ClearAppData(this.device).execute(packageName, targetUserId);
         });
         didTerminateOrClear = true;
       } else if (coldBoot) {
         await perf.track("terminateApp", async () => {
-          return new TerminateApp(this.device).execute(packageName, { skipObservation: true });
+          return new TerminateApp(this.device).execute(packageName, { skipObservation: true, userId: targetUserId });
         });
         didTerminateOrClear = true;
       }
@@ -629,7 +629,7 @@ export class LaunchApp extends BaseVisualChange {
     } else {
       if (clearAppData) {
         await perf.track("clearAppData", async () => {
-          return new ClearAppData(this.device).execute(packageName);
+          return new ClearAppData(this.device).execute(packageName, targetUserId);
         });
         didTerminateOrClear = true;
       }

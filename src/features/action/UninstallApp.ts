@@ -151,12 +151,7 @@ export class UninstallApp {
       // Auto-detect target user if not specified
       const targetUserId = (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: userId })).userId;
 
-      // Check if app is installed. Keep the cache disabled so the pre-uninstall
-      // check always reflects live device state (the previous executor-arg path
-      // left caching off; passing the default factory would silently enable it).
-      const listApps = new ListInstalledApps(this.device, this.adbFactory, null, { cacheEnabled: false });
-
-      const installed = (await listApps.execute()).find(app => app === packageName) !== undefined;
+      const installed = await this.isInstalledForUser(packageName, targetUserId);
 
       if (!installed) {
         return {
@@ -178,7 +173,7 @@ export class UninstallApp {
       await this.adb.executeCommand(cmd);
 
       // Verify the app was uninstalled
-      const isStillInstalled = (await listApps.execute()).find(app => app === packageName) !== undefined;
+      const isStillInstalled = await this.isInstalledForUser(packageName, targetUserId);
 
       if (isStillInstalled) {
         return {
@@ -207,5 +202,15 @@ export class UninstallApp {
         error: "Error occurred during application uninstallation"
       };
     }
+  }
+
+  private async isInstalledForUser(packageName: string, userId: number): Promise<boolean> {
+    const result = await this.adb.executeCommand(
+      `shell pm list packages --user ${userId}`,
+      undefined,
+      undefined,
+      true
+    );
+    return result.stdout.split("\n").some(line => line.trim() === `package:${packageName}`);
   }
 }

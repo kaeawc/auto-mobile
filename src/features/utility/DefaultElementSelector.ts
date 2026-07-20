@@ -4,6 +4,7 @@ import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import { defaultRandom } from "../../utils/Random";
 import { DefaultElementFinder } from "./ElementFinder";
 
 export class DefaultElementSelector implements ElementSelector {
@@ -12,7 +13,7 @@ export class DefaultElementSelector implements ElementSelector {
 
   constructor(
     finder: ElementFinder = new DefaultElementFinder(),
-    random: () => number = Math.random
+    random: () => number = () => defaultRandom.next()
   ) {
     this.finder = finder;
     this.random = random;

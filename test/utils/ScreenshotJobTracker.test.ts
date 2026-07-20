@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 describe("ScreenshotJobTracker", () => {
   let fakeTimer: FakeTimer;
@@ -9,11 +10,13 @@ describe("ScreenshotJobTracker", () => {
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     ScreenshotJobTracker.setTimer(fakeTimer);
+    ScreenshotJobTracker.setIdGenerator(new CountingIdGenerator("job"));
   });
 
   afterEach(() => {
     ScreenshotJobTracker.clear();
     ScreenshotJobTracker.resetTimer();
+    ScreenshotJobTracker.resetIdGenerator();
   });
 
   test("cancels the previous job for the same device", async () => {
@@ -45,6 +48,15 @@ describe("ScreenshotJobTracker", () => {
     expect(result1.error).toContain(OPERATION_CANCELLED_MESSAGE);
     expect(result2.success).toBe(true);
     expect(result2.path).toBe("job2");
+  });
+
+  test("uses the injected ID generator when jobs start in the same tick", async () => {
+    const first = ScreenshotJobTracker.startJob("device-id-1", async () => ({ success: true }));
+    const second = ScreenshotJobTracker.startJob("device-id-2", async () => ({ success: true }));
+
+    expect(first.jobId).toBe("screenshot_0_job-1");
+    expect(second.jobId).toBe("screenshot_0_job-2");
+    await Promise.all([first.promise, second.promise]);
   });
 
   test("waitForCompletion resolves with result when job completes", async () => {

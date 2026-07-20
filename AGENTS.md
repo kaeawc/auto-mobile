@@ -11,6 +11,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail.
 - For Swift, prefer an existing standard-library or Foundation API before adding an extension, helper, or package. Use `URLComponents` plus `URLQueryItem` for query values and `Codable` for AutoMobile-owned stable schemas. Keep `JSONSerialization` only at documented dynamic/bridge boundaries. A convenience dependency requires a stated platform-API gap, deployment-target check, and tests using interfaces/fakes.
+- For TypeScript changes, prefer the JavaScript/Node standard library, then an existing AutoMobile seam, before adding a local generic helper or direct dependency. Keep time, randomness, I/O, concurrency, and process access injectable when tests need control; justify any new direct dependency in `docs/decisions/`.
 
 # Project Structure
 

@@ -26,6 +26,7 @@ Closes #
 - [ ] `bun run typecheck` reports no new errors (baseline gate)
 - [ ] Android/iOS changes: ran the matching `scripts/` validation
 - [ ] New code uses interfaces + fakes + FakeTimer; unit tests run in <100ms
+- [ ] New generic code reuses the standard library or an existing project helper; any new direct dependency has a decision record under `docs/decisions/`
 - [ ] Rebased onto latest `main`, conflicts resolved
 
 ## Device Verification

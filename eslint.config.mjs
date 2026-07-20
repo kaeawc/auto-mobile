@@ -559,8 +559,8 @@ export default [
 		plugins,
 		languageOptions,
 		rules: {
-			"max-depth": ["error", 4],
-			"complexity": ["error", 15],
+			"max-depth": ["error", 3],
+			"complexity": ["error", 12],
 			// The deepest callback nest in src/ is currently 3, so 3 is the tightest
 			// cap that still baselines clean; 4 would have no bite.
 			"max-nested-callbacks": ["error", 3],

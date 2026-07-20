@@ -1386,22 +1386,15 @@ export class NavigationGraphManager implements NavigationGraphService {
       timestamp: edge.timestamp,
     }));
 
-    const nodeNames = new Set<string>();
-    if (dbEdges.length > 0) {
-      nodeNames.add(dbEdges[0].from_screen);
-      dbEdges.forEach(edge => nodeNames.add(edge.to_screen));
-    }
-
-    const nodeIdMap = new Map<string, number>();
-    if (nodeNames.size > 0) {
-      const dbNodes = await this.repository.getNodesByScreenNames(
-        this.currentAppId,
-        Array.from(nodeNames)
-      );
-      dbNodes.forEach(node => {
-        nodeIdMap.set(node.screen_name, node.id);
-      });
-    }
+    const nodeNames =
+      dbEdges.length > 0
+        ? new Set([dbEdges[0].from_screen, ...dbEdges.map(edge => edge.to_screen)])
+        : new Set<string>();
+    const dbNodes =
+      nodeNames.size > 0
+        ? await this.repository.getNodesByScreenNames(this.currentAppId, Array.from(nodeNames))
+        : [];
+    const nodeIdMap = new Map(dbNodes.map(node => [node.screen_name, node.id] as const));
 
     const historyNodes: NavigationGraphHistoryNode[] = [];
     if (dbEdges.length > 0) {
@@ -1412,14 +1405,14 @@ export class NavigationGraphManager implements NavigationGraphService {
         timestamp: firstEdge.timestamp,
         edgeId: null,
       });
-      dbEdges.forEach(edge => {
-        historyNodes.push({
+      historyNodes.push(
+        ...dbEdges.map(edge => ({
           id: nodeIdMap.get(edge.to_screen) ?? null,
           screenName: edge.to_screen,
           timestamp: edge.timestamp,
           edgeId: edge.id,
-        });
-      });
+        }))
+      );
     } else if (this.currentScreen) {
       const node = await this.repository.getNode(this.currentAppId, this.currentScreen);
       if (node) {

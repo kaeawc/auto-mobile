@@ -519,6 +519,23 @@ describe("NavigationGraphManager", () => {
     });
   });
 
+  describe("exportGraphHistory", () => {
+    test("should preserve the ordered nodes and edges for a navigation history", async () => {
+      await manager.recordNavigationEvent(createEvent("Home", 1000));
+      await manager.recordNavigationEvent(createEvent("Settings", 2000));
+      await manager.recordNavigationEvent(createEvent("Profile", 3000));
+
+      const history = await manager.exportGraphHistory();
+
+      expect(history.nodes.map(node => node.screenName)).toEqual(["Home", "Settings", "Profile"]);
+      expect(history.edges.map(edge => [edge.from, edge.to])).toEqual([
+        ["Home", "Settings"],
+        ["Settings", "Profile"],
+      ]);
+      expect(history.nodes.every(node => node.id !== null)).toBe(true);
+    });
+  });
+
   describe("clearCurrentGraph", () => {
     test("should clear the current app's graph", async () => {
       await manager.recordNavigationEvent(createEvent("Screen1"));

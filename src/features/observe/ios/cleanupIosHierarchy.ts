@@ -1,3 +1,5 @@
+import { hasIosHeaderTrait } from "./semanticRoles";
+
 const GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type IosHierarchyNode = Record<string, unknown> & {
@@ -365,4 +367,3 @@ function hasNonEmptyString(value: unknown): boolean {
 function normalizedText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
-import { hasIosHeaderTrait } from "./semanticRoles";

@@ -24,7 +24,7 @@ Unlike Android (which requires a shell-user JAR running on device), iOS devices 
 | Requires app on device | Yes (video server) | No |
 | Transport | ADB socket → MCP server | Direct macOS API |
 | Encoding | MediaCodec H.264 on device | Already decoded frames from macOS |
-| Decoding | Klarity in IDE plugin | Not needed (raw frames) |
+| Decoding | bytedeco FFmpeg on desktop | Not needed (raw frames) |
 
 ## Physical iOS Devices (USB)
 
@@ -194,7 +194,7 @@ Poll `simctl io screenshot` at target frame rate. Simple but:
 xcrun simctl io booted recordVideo --codec=h264 -
 ```
 
-Pipe to ffmpeg or Klarity for decoding. However:
+Pipe to ffmpeg for decoding. However:
 - `recordVideo` doesn't support stdout piping well
 - Designed for file output, not streaming
 
@@ -250,9 +250,9 @@ Use **ScreenCaptureKit** to capture simulator window:
 3. Raw frames sent to Unix socket
 4. IDE plugin receives frames directly
 
-### Why Not Klarity for iOS?
+### Why No Decoder for iOS?
 
-Klarity is an H.264 decoder. iOS capture provides **raw frames** (CVPixelBuffer/BGRA), not encoded video. We can send these directly to the IDE plugin without encoding/decoding overhead.
+The Android path needs an H.264 decoder because the device encodes on-device. iOS capture provides **raw frames** (CVPixelBuffer/BGRA), not encoded video, so they go straight to the desktop with no encode/decode round trip.
 
 ## Protocol
 
@@ -288,7 +288,7 @@ Followed by `height * bytesPerRow` bytes of BGRA pixel data.
 - [ ] Unix-socket fan-out (shared with Milestone 1 follow-up)
 
 ### Milestone 3: IDE Plugin Integration
-- [ ] Add raw frame receiver (simpler than Klarity H.264 path)
+- [ ] Add raw frame receiver (simpler than the Android H.264 decode path)
 - [ ] Convert BGRA to ImageBitmap for Compose
 - [ ] Unify with Android video stream UI
 

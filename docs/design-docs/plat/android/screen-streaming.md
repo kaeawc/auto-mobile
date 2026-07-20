@@ -4,7 +4,9 @@
 
 > **Current state:** The Android `video-server` module (`android/video-server/`) is fully implemented — `VideoServer.kt` captures via VirtualDisplay, encodes H.264 with MediaCodec, and streams over a LocalSocket. The `videoRecording` MCP tool (record-to-file) uses this server and is <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>.
 >
-> The **live IDE screen mirroring** pipeline (MCP video-stream relay → IDE DeviceScreenView with Klarity decoder) is in progress. Milestone 1 (video-server JAR) is complete; Milestones 2–5 are ongoing. See implementation plan below.
+> The **live screen mirroring** pipeline (daemon `video-stream.sock` relay → desktop `DeviceScreenView`) is in progress. Milestones 1–3 are complete: the video-server JAR, the daemon relay (#3994), and the desktop decoder and stream client (#4008). Milestone 4 is outstanding — nothing supplies a live frame to the device view yet, so behaviour is unchanged for users. Tracked in #3995.
+>
+> Note the decoder is **bytedeco FFmpeg**, not Klarity as originally designed; see [Video Decoder](#video-decoder-bytedeco-ffmpeg) for why.
 >
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
@@ -71,10 +73,10 @@ The accessibility service can only do on-demand `takeScreenshot()` or request `M
    - Streams binary data to new Unix socket
    - Handles reconnection and device switching
 
-3. **Video Stream Client** (new IDE plugin component)
-   - Klarity library for H.264 decoding (FFmpeg via JNI)
-   - Decodes frames directly to Skia Pixmap
-   - Renders to Compose Canvas (no SwingPanel needed)
+3. **Video Stream Client** (desktop component, `core/video/`)
+   - `org.bytedeco:ffmpeg` for H.264 decoding (FFmpeg via JNI)
+   - Decodes frames to tightly packed BGRA
+   - Copied into a Skia raster image and drawn by Compose (no SwingPanel needed)
 
 ## Protocol Specification
 
@@ -151,11 +153,21 @@ val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width
 
 USB 2.0: ~30 MB/s theoretical, ~20 MB/s practical - all quality levels supported.
 
-## Video Decoder: Klarity
+## Video Decoder: bytedeco FFmpeg
 
-We chose [Klarity](https://github.com/numq/Klarity) for H.264 decoding in the IDE plugin. It renders directly to Skiko Surface (Compose-native, no SwingPanel), supports composable overlays on video content, and bundles at ~20-30MB per platform.
+We use [`org.bytedeco:ffmpeg`](https://github.com/bytedeco/javacpp-presets/tree/master/ffmpeg) for H.264 decoding on the desktop (`H264Decoder`, issue #3995).
 
-Klarity decodes H.264 via FFmpeg/JNI, interprets frame data directly as Skia Pixmap via pointer (zero-copy), and renders to Compose Canvas.
+Depend on `org.bytedeco:ffmpeg` with the **host platform's classifier**, resolved at build time:
+
+- **not** `ffmpeg-platform`, which pulls every platform's natives (~150–200 MB)
+- **not** `javacv-platform`, which drags in OpenCV
+- **not** the `-gpl` artifact — only the x264/x265 *encoders* require it, and we decode, so the LGPL build is correct
+
+That keeps the installer growth to ~20–30 MB per platform. The decoder reads a raw Annex-B elementary stream from memory (an `AVCodecParserContext` reassembles access units, so callers may feed arbitrary chunk boundaries) and yields tightly packed BGRA that copies straight into a Skia raster image — no AWT/Swing surface involved.
+
+### Why not Klarity
+
+[Klarity](https://github.com/numq/Klarity) was the original choice on the strength of its zero-copy Skia rendering. It cannot be used here: **its API accepts file paths only**, with no way to feed a live stream, which is disqualifying regardless of anything else. Secondarily, it is not published to Maven Central — JitPack builds it, but that artifact is API classes with no native libraries, so the per-platform natives from GitHub releases would still need hand-managing.
 
 ## Implementation Plan
 
@@ -164,19 +176,22 @@ Klarity decodes H.264 via FFmpeg/JNI, interprets frame data directly as Skia Pix
 - [ ] Test manual execution via `adb shell`
 - [ ] Verify H.264 stream output with ffplay
 
-### Milestone 2: MCP Integration
-- [ ] Add video stream socket server to daemon
-- [ ] Implement ADB forward management
-- [ ] Add start/stop video streaming commands
+### Milestone 2: MCP Integration ✅ (#3994)
+- [x] Add video stream socket server to daemon (`video-stream.sock`)
+- [x] Implement ADB forward management (reuses the existing H.264 capture sources)
+- [x] Add start/stop video streaming commands (JSON subscribe handshake, then binary framing)
 
-### Milestone 3: IDE Plugin Decoder
-- [ ] Add Klarity dependency
-- [ ] Implement VideoStreamClient
-- [ ] Create frame-to-ImageBitmap pipeline
-- [ ] Benchmark decode performance
+### Milestone 3: Desktop Decoder ✅ (#4008)
+- [x] Add decoder dependency (`org.bytedeco:ffmpeg`, host-platform classifier)
+- [x] Implement VideoStreamClient
+- [x] Create frame-to-ImageBitmap pipeline (`DecodedFrame.toImageBitmap()`)
+- [ ] Benchmark decode performance — not yet measured against a real device
 
-### Milestone 4: Compose Integration
-- [ ] Update DeviceScreenView for live frames
+### Milestone 4: Compose Integration (#3995)
+- [x] `DeviceScreenView` accepts an optional `liveFrame` that renders instead of the polled screenshot
+- [ ] Supply that frame: `LayoutInspectorDashboard` must construct a client and collect its frames
+- [ ] Choose live vs screenshot at runtime and fall back on `VideoStreamState.Unavailable`
+- [ ] Frame-rate policy — the existing screenshot flow is `replay = 1` with no conflation and will not survive 60fps
 - [ ] Add FPS counter overlay
 - [ ] Implement latency measurement
 - [ ] Add quality/resolution controls
@@ -197,5 +212,6 @@ Klarity decodes H.264 via FFmpeg/JNI, interprets frame data directly as Skia Pix
 - [Android 14 MediaProjection requirements](https://developer.android.com/about/versions/14/changes/fgs-types-required)
 
 ### Video Decoding (Desktop)
-- [Klarity](https://github.com/numq/Klarity) - Compose Desktop video player (chosen solution)
+- [bytedeco javacpp-presets: ffmpeg](https://github.com/bytedeco/javacpp-presets/tree/master/ffmpeg) - chosen solution
+- [Klarity](https://github.com/numq/Klarity) - evaluated and rejected; file-path-only API cannot consume a live stream
 - [JetBrains Skiko](https://github.com/JetBrains/skiko) - Skia bindings for Kotlin

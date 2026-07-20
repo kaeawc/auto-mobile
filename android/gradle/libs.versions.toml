@@ -17,6 +17,11 @@ build-kotlin-consumer = "2.2.21"           # Published runner/test-plan consumer
 build-kotlin-consumer-api = "2.2"          # API surface supported by older Kotlin consumers
 build-kotlin-coroutines = "1.11.0"
 
+# Video decoding (live device mirroring). ffmpeg natives ship as per-platform classifier
+# artifacts on Maven Central; only the host platform's is packaged into an installer.
+bytedeco-ffmpeg = "8.0.1-1.5.13"
+bytedeco-javacpp = "1.5.13"
+
 # Java versions
 build-java-target = "21"                   # Used in root build.gradle.kts and playground
 
@@ -85,6 +90,12 @@ compose-hot-reload = { id = "org.jetbrains.compose.hot-reload", version.ref = "c
 metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
 
 [libraries]
+# H.264 decoding for the live device view. Deliberately org.bytedeco:ffmpeg and NOT
+# ffmpeg-platform (which pulls every platform's natives, ~150-200MB) nor javacv-platform
+# (which drags in OpenCV). The non-gpl artifact is LGPL and sufficient: only the x264/x265
+# *encoders* need the GPL build, and we decode.
+bytedeco-ffmpeg = { module = "org.bytedeco:ffmpeg", version.ref = "bytedeco-ffmpeg" }
+bytedeco-javacpp = { module = "org.bytedeco:javacpp", version.ref = "bytedeco-javacpp" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "core-splashscreen" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter-api" }

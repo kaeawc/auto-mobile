@@ -21,12 +21,6 @@ class AutoMobileContentDecompositionTest {
             "fun saveDeviceFilter",
           ),
         "DeviceIcon.kt" to listOf("fun DeviceIcon", "fun AndroidDeviceIcon", "fun AppleDeviceIcon"),
-        "DeviceManagementPanel.kt" to
-          listOf(
-            "fun DeviceManagementPanel",
-            "fun DeviceSectionHeader",
-            "fun DeviceListItem",
-          ),
         "McpProcessesPanel.kt" to
           listOf("fun McpProcessesPanel", "fun ProcessSection", "fun McpProcessItem"),
         "DevicesSection.kt" to

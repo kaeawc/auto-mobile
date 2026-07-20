@@ -90,6 +90,11 @@ describe("AvdManagerClient", () => {
 
   test("executes a Windows batch file through cmd without enabling a shell", async () => {
     const { client, child, calls } = createClient({
+      detectAndroidCommandLineTools: async () => [{
+        path: "/Program Files/Android/Sdk/cmdline-tools/latest",
+        source: "manual",
+        available_tools: ["avdmanager"]
+      }],
       existsSync: path => path.endsWith("avdmanager.bat") || path.endsWith("system-images"),
       platform: "win32"
     });
@@ -98,7 +103,7 @@ describe("AvdManagerClient", () => {
     child.close(0);
 
     await expect(pending).resolves.toEqual([]);
-    expect(normalizePath(calls[0]?.args[4] ?? "")).toBe('"/sdk/cmdline-tools/latest/bin/avdmanager.bat" "list" "avd"');
+    expect(normalizePath(calls[0]?.args[4] ?? "")).toBe('""/Program Files/Android/Sdk/cmdline-tools/latest/bin/avdmanager.bat" "list" "avd""');
     expect(calls[0]).toMatchObject({
       command: "cmd.exe",
       shell: false

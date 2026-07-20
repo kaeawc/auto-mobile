@@ -203,7 +203,9 @@ source of truth for remaining gaps:
 - **iOS focus control**: `setAccessibilityFocus` / `clearAccessibilityFocus` and cursor
   stepping on iOS. Reading the cursor is done — the runner reports it and `observe`
   populates `accessibilityFocusedElement` — but moving it is not.
-- **VoiceOver Rotor**: two-finger rotate to change navigation mode (parity doc Gap 4).
+- **VoiceOver Rotor commands**: two-finger rotate cannot be synthesized into VoiceOver.
+  Standard headings are instead exposed as `role: "heading"` in SDK-backed iOS observations;
+  custom rotors and Rotor-driven cursor navigation remain unavailable (parity doc Gap 4).
 - **VoiceOver Magic Tap**: two-finger double-tap for an app's primary action (parity doc Gap 5).
 - **Physical-device VoiceOver toggle**: simulator-only today; no known `idevice` equivalent.
 - **Announcement control**: trigger screen-reader announcements for user testing.

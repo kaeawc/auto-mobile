@@ -69,15 +69,15 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 
 ---
 
-### Gap 4: VoiceOver Rotor not supported
+### Gap 4: VoiceOver Rotor command not supported; headings are queryable
 
 **TalkBack:** No equivalent.
 
-**VoiceOver:** The Rotor is a two-finger rotate gesture that changes the VoiceOver navigation mode (e.g., navigate by heading, by word, by character). VoiceOver users rely on the Rotor for efficient navigation in text-heavy views. AutoMobile does not implement Rotor interaction.
+**VoiceOver:** The Rotor is a two-finger rotate gesture that changes the VoiceOver navigation mode (e.g., navigate by heading, by word, by character). AutoMobile cannot drive that command: XCTest touch synthesis does not reach VoiceOver's command vocabulary, so there is deliberately no `requestRotor` protocol command or MCP tool.
 
-**Impact:** AutoMobile cannot test apps that depend on Rotor navigation for their expected VoiceOver interaction patterns. Accessibility audits that include heading navigation or character-by-character text editing are incomplete.
+**Available alternative:** For apps embedding AutoMobileSDK, iOS observations promote the native `UIAccessibilityTraits.header` trait to `role: "heading"`. Agents can deterministically query the observed hierarchy for headings and use the result to guide their workflow. This does not move the VoiceOver cursor and does not emulate the Rotor.
 
-**Resolution path:** Add `requestRotor` to the CtrlProxy protocol, with a `mode` parameter for the desired Rotor setting. Expose via an MCP tool or as an adaptation in `swipeOn` when navigating text fields with VoiceOver active.
+**Remaining limitation:** Custom application rotors, character/word granularity, and Rotor-driven cursor navigation remain unsupported. They require an in-app accessibility API or a bridge that exposes VoiceOver's command vocabulary.
 
 ---
 

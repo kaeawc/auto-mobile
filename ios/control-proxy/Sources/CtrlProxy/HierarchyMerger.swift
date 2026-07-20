@@ -288,7 +288,7 @@ public enum HierarchyMerger {
             selected: element.selected,
             longClickable: element.longClickable,
             testTag: element.testTag,
-            role: element.role,
+            role: semanticRole(for: sdkNode) ?? element.role,
             stateDescription: element.stateDescription,
             errorMessage: element.errorMessage,
             hintText: element.hintText,
@@ -341,6 +341,14 @@ public enum HierarchyMerger {
         extras["sdk.isUserInteractionEnabled"] = String(node.isUserInteractionEnabled)
 
         return extras.isEmpty ? nil : extras
+    }
+
+    /// Promote the in-app SDK's semantic traits into the public hierarchy role
+    /// when XCTest exposes only a generic text element. This supports querying
+    /// headings without claiming that AutoMobile can drive the VoiceOver Rotor.
+    private static func semanticRole(for sdkNode: SdkViewNode?) -> String? {
+        guard let sdkNode else { return nil }
+        return sdkNode.accessibilityTraits.contains("header") ? "heading" : nil
     }
 
     // MARK: - Pass 2: SDK-Only Node Injection
@@ -510,6 +518,7 @@ public enum HierarchyMerger {
         // Must have an accessibility identifier, label, custom actions, or be interactive
         if node.accessibilityIdentifier != nil { return true }
         if node.accessibilityLabel != nil { return true }
+        if node.accessibilityTraits.contains("header") { return true }
         if !node.accessibilityCustomActions.isEmpty { return true }
         if node.hasTapTarget { return true }
         if node.accessibilityElementsHidden { return true }
@@ -588,6 +597,7 @@ public enum HierarchyMerger {
             // Preserve the VoiceOver cursor flag on SDK-only nodes that are injected
             // into the tree without an XCUITest counterpart (#3924).
             accessibilityFocused: node.isAccessibilityFocused ? "true" : nil,
+            role: semanticRole(for: node),
             extras: extras,
             node: convertedChildren?.isEmpty == true ? nil : convertedChildren
         )

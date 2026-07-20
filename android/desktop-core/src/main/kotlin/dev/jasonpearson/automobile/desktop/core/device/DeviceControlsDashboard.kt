@@ -35,6 +35,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingArtifact
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClient
+import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamDescriptor
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
@@ -44,18 +46,24 @@ import kotlinx.coroutines.withContext
 private val LOG = LoggerFactory.getLogger("DeviceControlsDashboard")
 
 /**
- * Device appearance and video recording.
+ * Device appearance, video recording, and screen sharing.
  *
  * Appearance is a *global* control: `appearance.sock` takes no device id and applies to every
  * pooled device, so it is presented that way rather than as a per-device toggle. Recording is
  * per-device and spans two transports -- the start/stop verbs are MCP tool calls, while quality and
  * retention live on `video-recording.sock`.
+ *
+ * Screen sharing starts the daemon's WebRTC publisher, which pushes the device's screen to a
+ * coordination server for browsers and CI dashboards to watch over WHEP. There is deliberately no
+ * preview here: the daemon publishes rather than serves, so there is no local playback URL. Local
+ * live mirroring is a separate socket entirely.
  */
 @Composable
 fun DeviceControlsDashboard(
   appearanceClient: AppearanceClient?,
   recordingActions: VideoRecordingActions?,
   recordingConfigClient: VideoRecordingConfigClient?,
+  streamClient: WebRtcStreamClient?,
   activeDeviceId: String?,
   modifier: Modifier = Modifier,
 ) {
@@ -71,6 +79,18 @@ fun DeviceControlsDashboard(
   var busy by remember { mutableStateOf(false) }
   var notice by remember { mutableStateOf<String?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
+  var streams by remember { mutableStateOf<List<WebRtcStreamDescriptor>>(emptyList()) }
+
+  LaunchedEffect(streamClient) {
+    if (streamClient?.isAvailable() != true) return@LaunchedEffect
+    streams =
+      try {
+        withContext(Dispatchers.IO) { streamClient.listStreams() }
+      } catch (e: Exception) {
+        LOG.warn("Could not list WebRTC streams: ${e.message}", e)
+        emptyList()
+      }
+  }
 
   LaunchedEffect(appearanceClient, recordingConfigClient) {
     withContext(Dispatchers.IO) {
@@ -226,6 +246,60 @@ fun DeviceControlsDashboard(
 
     notice?.let { Hint(it, Color(0xFF4CAF50)) }
     error?.let { Hint(it, Color(0xFFE53935)) }
+    // -- Remote viewing --
+    Text(
+      "Remote viewing",
+      fontSize = 12.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = colors.text.normal,
+    )
+
+    if (streamClient?.isAvailable() != true) {
+      Hint("Screen sharing is unavailable on this daemon.", colors.text.normal)
+    } else {
+      Text(
+        // The daemon publishes to a coordination server; viewers watch it there, not here. Saying
+        // otherwise would imply this window is about to show the video.
+        "Publishes this device's screen to the configured coordination server, " +
+          "where browsers and CI dashboards can watch it.",
+        fontSize = 9.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+      )
+
+      val publishing = streams.isNotEmpty()
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Chip(
+          label = if (publishing) "Stop sharing" else "Share screen",
+          accent = if (publishing) Color(0xFFE53935) else Color(0xFF7E57C2),
+          enabled = activeDeviceId != null && !busy,
+        ) {
+          val deviceId = activeDeviceId ?: return@Chip
+          if (publishing) {
+            run("Stop sharing") {
+              streamClient.stopStream(streams.firstOrNull()?.streamId)
+              streams = streamClient.listStreams()
+              "Stopped sharing"
+            }
+          } else {
+            run("Share screen") {
+              val started = streamClient.startStream(deviceId)
+              streams = streamClient.listStreams()
+              "Sharing to ${started?.whipEndpoint ?: "the coordination server"}"
+            }
+          }
+        }
+      }
+
+      streams.forEach { stream ->
+        Text(
+          "${stream.streamId} · ${stream.state} · ${stream.framesSent} frames sent" +
+            (stream.whipEndpoint.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+          fontSize = 9.sp,
+          color = colors.text.normal.copy(alpha = 0.6f),
+        )
+      }
+    }
+
     manifestPath?.let {
       Hint("Segment manifest: $it", colors.text.normal.copy(alpha = 0.6f))
     }

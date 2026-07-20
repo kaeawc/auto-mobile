@@ -46,4 +46,25 @@ final class TestTimingCacheTests: XCTestCase {
     func testBuildTimingMapEmpty() {
         XCTAssertTrue(TestTimingCache.buildTimingMap(from: []).isEmpty)
     }
+
+    func testBuildRequestUriKeepsQueryValueAsSingleItem() throws {
+        let sessionUuid = "session+plus&unexpected=value space 🐶"
+        let uri = TestTimingCache.buildRequestUri(parameters: [
+            "devicePlatform": "ios",
+            "sessionUuid": sessionUuid,
+        ])
+        let components = try XCTUnwrap(URLComponents(string: uri))
+        let queryItems = try XCTUnwrap(components.queryItems)
+
+        XCTAssertEqual(components.scheme, "automobile")
+        XCTAssertEqual(components.path, "test-timings")
+        XCTAssertEqual(queryItems.count, 2)
+        XCTAssertEqual(queryItems.first(where: { $0.name == "sessionUuid" })?.value, sessionUuid)
+        XCTAssertTrue(uri.contains("sessionUuid=session%2Bplus"))
+        XCTAssertFalse(uri.contains("sessionUuid=session+plus&unexpected=value"))
+    }
+
+    func testBuildRequestUriWithoutParametersUsesBaseResourceUri() {
+        XCTAssertEqual(TestTimingCache.buildRequestUri(parameters: [:]), "automobile:test-timings")
+    }
 }

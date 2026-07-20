@@ -120,7 +120,9 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const pending = adb.spawn(["exec-out", "screenrecord", "--output-format=h264", "-"], {
       signal: controller.signal,
     });
-    setTimeout(() => child.emit("spawn"), 0);
+    await Promise.resolve();
+    await Promise.resolve();
+    child.emit("spawn");
     const process = await pending;
     controller.abort();
     child.emit("exit", null, "SIGTERM");

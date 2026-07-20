@@ -97,6 +97,55 @@ SCRIPT
   grep -q '.identifier' "$SCRIPT"
 }
 
+@test "fails when bootstatus reports a wedged boot (Status=4294967295) but exits 0" {
+  # Regression for #4078: a stalled boot can print a terminal error status and
+  # still exit 0. The script must not report "Booted:" and press on.
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.2"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.2.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-2":[{"name":"iPhone 17 Pro","udid":"WEDGED-UDID","state":"Shutdown"}]}}'
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  # Wedged boot: prints a terminal failure status yet exits 0.
+  echo "[2026-07-20 15:00:16 +0000] Status=4294967295, isTerminal=YES, Elapsed=32:06."
+  echo "	Finished"
+  exit 0
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --ios-version 26.2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"failed to boot"* ]]
+  [[ "$output" != *"Booted: "* ]]
+}
+
+@test "fails when bootstatus exits non-zero" {
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.2"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.2.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-2":[{"name":"iPhone 17 Pro","udid":"FAIL-UDID","state":"Shutdown"}]}}'
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  echo "bootstatus: device failed to boot" >&2
+  exit 164
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --ios-version 26.2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"failed to boot"* ]]
+}
+
 @test "uses bootstatus -b so already-booted simulators are accepted" {
   cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
 #!/bin/sh

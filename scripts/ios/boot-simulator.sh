@@ -126,7 +126,23 @@ DEVICE_NAME=$(xcrun simctl list devices available -j \
     ')
 
 echo "Ensuring ${DEVICE_NAME} (${UDID}) is booted..." >&2
-xcrun simctl bootstatus "${UDID}" -b >&2
+
+# bootstatus can "Finish" with an internal failure status -- e.g. it stalls in
+# "Waiting on System App" for tens of minutes and then reports
+# "Status=4294967295, isTerminal=YES" -- while still exiting 0. Pressing on
+# would print "Booted:" for a wedged simulator that hangs every downstream step
+# (issue #4078). Capture the outcome and treat a failing exit OR that terminal
+# error status as a hard boot failure.
+set +e
+boot_log="$(xcrun simctl bootstatus "${UDID}" -b 2>&1)"
+boot_rc=$?
+set -e
+printf '%s\n' "${boot_log}" >&2
+
+if [[ ${boot_rc} -ne 0 ]] || printf '%s' "${boot_log}" | grep -q 'Status=4294967295'; then
+  echo "error: simulator ${UDID} failed to boot (bootstatus rc=${boot_rc})" >&2
+  exit 1
+fi
 
 echo "Booted: ${DEVICE_NAME} (${UDID})" >&2
 

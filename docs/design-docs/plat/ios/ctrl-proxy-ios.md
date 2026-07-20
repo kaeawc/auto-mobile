@@ -79,12 +79,14 @@ simulator-only: XCTest does not expose a public shake API for physical iOS devic
 ignored because the simulator shake path does not accept intensity.
 
 Multi-finger swipes use XCTest's private event-synthesis classes
-(`XCPointerEventPath` and `XCSynthesizedEventRecord`) so VoiceOver three-finger
-scrolls and `executeGesture` `FingerPath[]` input can produce simultaneous
-touches. The wrapper checks for the private classes/selectors at runtime and
-converts synthesis failures or Objective-C exceptions into normal CtrlProxy
-error responses. These APIs are undocumented by Apple, so Xcode or iOS updates
-can still change their behavior.
+(`XCPointerEventPath` and `XCSynthesizedEventRecord`) so `executeGesture`
+`FingerPath[]` input can produce simultaneous touches. Synthesized touches are
+delivered below VoiceOver's gesture layer, so VoiceOver does not observe them:
+the runner cannot drive VoiceOver's own gesture vocabulary, including Rotor,
+Magic Tap, screen curtain, or cursor flicks. The wrapper checks for the private
+classes/selectors at runtime and converts synthesis failures or Objective-C
+exceptions into normal CtrlProxy error responses. These APIs are undocumented
+by Apple, so Xcode or iOS updates can still change their behavior.
 
 > Caveat: on the Simulator the post-drop `thenHoldForDuration:` hold may be a no-op; press
 > and drag are reliable. Verify hold-dependent flows on a physical device.

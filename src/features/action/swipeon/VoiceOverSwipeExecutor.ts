@@ -9,15 +9,19 @@ import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 /**
- * VoiceOverSwipeExecutor handles iOS VoiceOver-compatible swipe gestures.
+ * VoiceOverSwipeExecutor handles iOS swipes while VoiceOver is enabled.
  *
  * When VoiceOver is active on iOS, single-finger swipes navigate accessibility
  * focus rather than scrolling content. This executor uses the following fallback chain:
  *
  * 1. If a container element with resource-id is provided → accessibility scroll action
  * 2. If a container element with content-desc is provided → accessibility scroll action (label)
- * 3. If accessibility action fails or no container → 3-finger coordinate swipe
- * 4. If 3-finger swipe fails → standard single-finger swipe
+ * 3. If accessibility action fails or no container → legacy 3-finger coordinate swipe
+ * 4. If that request fails → standard single-finger swipe
+ *
+ * XCTest-synthesized touches are delivered below VoiceOver's gesture layer, so
+ * step 3 cannot invoke VoiceOver's three-finger scroll gesture. Its transport
+ * success is not evidence of a VoiceOver scroll; see issue #4013.
  *
  * Parallel to TalkBackSwipeExecutor for Android TalkBack.
  */
@@ -36,11 +40,13 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
    *
    * If VoiceOver is enabled and the platform is iOS:
    *   - Tries accessibility scroll action via resource-id or content-desc
-   *   - Falls back to 3-finger swipe on failure
-   *   - Falls back to standard single-finger swipe if 3-finger also fails
+   *   - Attempts a legacy 3-finger coordinate swipe on failure
+   *   - Falls back to a standard single-finger swipe if that request fails
+   *
+   * The synthesized multi-touch attempt does not reach VoiceOver; see #4013.
    *
    * When boomerang is provided, performs a forward swipe, optional apex pause,
-   * then a return swipe — using 3-finger swipes when VoiceOver is active.
+   * then a return swipe — using legacy three-finger synthesis when VoiceOver is active.
    *
    * @param x1 - Start X coordinate
    * @param y1 - Start Y coordinate
@@ -134,14 +140,14 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       }
     }
 
-    // Fall back to 3-finger swipe to scroll content
+    // Legacy multi-touch attempt. It does not invoke VoiceOver's scroll gesture (#4013).
     const duration = gestureOptions?.duration ?? 300;
-    logger.info("[VoiceOverSwipeExecutor] VoiceOver enabled, using 3-finger swipe");
+    logger.info("[VoiceOverSwipeExecutor] VoiceOver enabled, attempting legacy 3-finger synthesis");
 
     try {
       const result = await this.iosClient.requestMultiFingerSwipe(
         x1, y1, x2, y2,
-        3, // 3 fingers for VoiceOver scrolling
+        3,
         duration
       );
 
@@ -223,10 +229,10 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
   }
 
   /**
-   * Execute a boomerang gesture using 3-finger swipes (VoiceOver enabled).
-   * Performs a forward 3-finger swipe, optional apex pause, then a return 3-finger swipe.
-   * Falls back to executeBoomerangGesture (standard swipes) if the forward stroke fails or throws,
-   * mirroring the non-boomerang VoiceOver fallback behavior.
+   * Execute a boomerang gesture using legacy three-finger synthesis (VoiceOver enabled).
+   * Performs a forward synthesized stroke, optional apex pause, then a return stroke.
+   * Synthesized touches do not reach VoiceOver, so this cannot invoke a VoiceOver gesture (#4013).
+   * Falls back to executeBoomerangGesture (standard swipes) if the forward stroke fails or throws.
    */
   private async executeVoiceOverBoomerangGesture(
     x1: number,
@@ -241,7 +247,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
     const totalDuration = forwardDuration + boomerang.apexPauseMs + returnDuration;
 
-    logger.info("[VoiceOverSwipeExecutor] VoiceOver enabled, using 3-finger boomerang swipe");
+    logger.info("[VoiceOverSwipeExecutor] VoiceOver enabled, attempting legacy 3-finger boomerang synthesis");
 
     let forwardResult: Awaited<ReturnType<typeof this.iosClient.requestMultiFingerSwipe>>;
     try {

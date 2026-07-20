@@ -76,10 +76,10 @@ FOUNDATION_EXPORT NSException * _Nullable ObjCExceptionCatcher_tryBlock(void (NS
 /// touch. `scroll(byDeltaX:deltaY:)` IS available on iOS (15.0+) but belongs to the
 /// `XCUIElementMouseEvents` category and emits a pointer/scroll-wheel event, not
 /// synthesized touches. Substituting a one-finger swipe would perform a semantically
-/// different gesture (VoiceOver multi-finger commands, map pan vs. drag), which is
-/// worse than a clear failure. The flag therefore selects a distinct, actionable
-/// error message — see `MultiFingerSwipeDiagnostics` for the full rationale and its
-/// scope (`fingerCount >= 2`).
+/// different gesture (for example, map pan vs. drag), which is worse than a clear
+/// failure. The flag therefore selects a distinct, actionable error message — see
+/// `MultiFingerSwipeDiagnostics` for the full rationale and its scope
+/// (`fingerCount >= 2`).
 FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
     CGFloat startX,
     CGFloat startY,

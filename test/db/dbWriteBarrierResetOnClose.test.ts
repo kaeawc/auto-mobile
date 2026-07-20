@@ -29,10 +29,11 @@ import { runExclusiveResetTest } from "./resetTestSerialLock";
  * restart-without-exit) without also cold-starting the barrier, the reopened DB
  * would silently skip every tracked best-effort write. `closeDatabase()` now
  * clears the barrier via `resetDbWriteBarrier()` so the cold-start contract holds
- * for consumers that resolve `getDbWriteBarrier()` at use-time; the three
- * construction-captured consumers (`TelemetryRecorder`, `FailureAnalyticsRepository`,
- * `SessionManager`) pin the barrier at construction and never observe the identity
- * swap, and remain the documented reopen exception (#2912).
+ * for consumers that resolve `getDbWriteBarrier()` at use-time. #2912 removed the
+ * last exceptions: `TelemetryRecorder`, `FailureAnalyticsRepository` and
+ * `SessionManager` were the three construction-captured consumers, and PR #2925
+ * converted them to resolve per write, so every consumer now observes the identity
+ * swap. `test/db/dbWriteBarrierReopenConsumers.test.ts` is the per-consumer proof.
  *
  * These assertions are about `getDbWriteBarrier()` **identity** and
  * `isDraining()` across the `getDatabase()`/`closeDatabase()` lifecycle — they

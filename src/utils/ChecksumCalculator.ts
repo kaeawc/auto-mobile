@@ -1,10 +1,5 @@
-import { execFile } from "child_process";
-import { createReadStream } from "fs";
-import crypto from "crypto";
-import { promisify } from "util";
-import { logger } from "./logger";
-
-const execFileAsync = promisify(execFile);
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 
 export type Sha256Source = "sha256sum" | "shasum" | "node";
 
@@ -14,17 +9,7 @@ export interface ChecksumCalculator {
 
 export class DefaultChecksumCalculator implements ChecksumCalculator {
   public async computeFileSha256(filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
-    const sha256sum = await this.tryChecksumCommand([filePath], "sha256sum");
-    if (sha256sum) {
-      return { checksum: sha256sum, source: "sha256sum" };
-    }
-
-    const shasum = await this.tryChecksumCommand(["-a", "256", filePath], "shasum");
-    if (shasum) {
-      return { checksum: shasum, source: "shasum" };
-    }
-
-    const hash = crypto.createHash("sha256");
+    const hash = createHash("sha256");
     await new Promise<void>((resolve, reject) => {
       const stream = createReadStream(filePath);
       stream.on("data", chunk => hash.update(chunk));
@@ -32,27 +17,5 @@ export class DefaultChecksumCalculator implements ChecksumCalculator {
       stream.on("end", () => resolve());
     });
     return { checksum: hash.digest("hex"), source: "node" };
-  }
-
-  private async tryChecksumCommand(args: string[], tool: string): Promise<string | null> {
-    try {
-      const { stdout } = await execFileAsync(tool, args, {
-        timeout: 120000,
-        maxBuffer: 10 * 1024 * 1024
-      });
-      // On Windows, sha256sum prefixes output with \ when the path contains backslashes
-      const checksum = stdout.trim().split(/\s+/)[0]?.replace(/^\\/, "");
-      if (!checksum) {
-        logger.warn("[ChecksumCalculator] checksum tool returned no output", { tool });
-        return null;
-      }
-      return checksum;
-    } catch (error) {
-      logger.info("[ChecksumCalculator] checksum tool unavailable, falling back", {
-        tool,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      return null;
-    }
   }
 }

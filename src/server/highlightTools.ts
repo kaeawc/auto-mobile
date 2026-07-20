@@ -22,6 +22,7 @@ import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { createTimestampedId } from "../utils/IdGenerator";
 import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
@@ -31,9 +32,7 @@ import {
 import { boundsEqual } from "../utils/bounds";
 
 const generateHighlightId = (timer: Timer = defaultTimer): string => {
-  const timestamp = timer.now();
-  const random = Math.random().toString(36).substring(2, 10);
-  return `highlight_${timestamp}_${random}`;
+  return createTimestampedId("highlight", timer);
 };
 
 const highlightBaseSchema = z.object({

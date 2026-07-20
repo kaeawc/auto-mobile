@@ -30,6 +30,7 @@
     "profile:memory": "bun --expose-gc --inspect scripts/detect-memory-leaks.ts --mode=profile",
     "profile:heap": "bun --expose-gc --heap-prof scripts/stress-test.ts",
     "validate:yaml": "bun scripts/validate-yaml.ts",
+    "check:stdlib-first": "bash scripts/check-stdlib-first.sh",
     "dead-code:ts": "bash scripts/detect-dead-code-ts.sh",
     "dead-code:ts:prune": "bash -o pipefail -c 'bunx ts-prune --project tsconfig.dead-code.json -i src/db/migrations | (grep -v \"(used in module)\" || true) | bash scripts/filter-ts-prune-allowlist.sh'",
     "dead-code:ts:knip": "bunx knip",

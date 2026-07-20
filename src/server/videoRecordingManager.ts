@@ -20,6 +20,7 @@ import {
 import { serverConfig } from "../utils/ServerConfig";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { createTimestampedId } from "../utils/IdGenerator";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
   VideoRecordingRepository,
@@ -332,9 +333,7 @@ function highlightAnimationDurationMs(platform: BootedDevice["platform"]): numbe
 }
 
 function generateHighlightId(timer: Timer = defaultTimer): string {
-  const timestamp = timer.now();
-  const random = Math.random().toString(36).substring(2, 10);
-  return `highlight_${timestamp}_${random}`;
+  return createTimestampedId("highlight", timer);
 }
 
 function finalizeHighlightSession(

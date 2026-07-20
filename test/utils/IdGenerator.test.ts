@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CountingIdGenerator, NodeIdGenerator } from "../../src/utils/IdGenerator";
+import { CountingIdGenerator, createTimestampedId, NodeIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 describe("NodeIdGenerator", function() {
@@ -49,5 +49,15 @@ describe("FakeIdGenerator", function() {
 
     expect(generator.next()).toBe("x");
     expect(generator.next()).toBe("fake-1");
+  });
+});
+
+describe("createTimestampedId", function() {
+  test("keeps an observable timestamp while injecting deterministic uniqueness", function() {
+    const timer = { now: () => 1234 };
+    const ids = new CountingIdGenerator("test");
+
+    expect(createTimestampedId("highlight", timer, ids)).toBe("highlight_1234_test-1");
+    expect(createTimestampedId("highlight", timer, ids)).toBe("highlight_1234_test-2");
   });
 });

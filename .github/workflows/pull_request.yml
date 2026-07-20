@@ -625,7 +625,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
+            --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
             --max-parallel 4
 
       - name: "Run BATS Tests (Ubuntu)"
@@ -1047,6 +1047,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          # The stdlib-first gate compares package.json with the PR base SHA.
+          # Keep that commit locally available instead of relying on checkout's
+          # default one-commit shallow clone.
+          fetch-depth: 0
 
       - name: "Cache Bun dependencies"
         uses: actions/cache@v5
@@ -1078,6 +1082,12 @@ jobs:
           DO_NOT_TRACK: "1"
           NO_COLOR: "1"
         run: turbo run lint --output-logs=errors-only --log-order=grouped
+
+      - name: "Check stdlib-first dependency decisions"
+        if: needs.detect-changes.outputs.ts_changed == 'true'
+        env:
+          STDLIB_FIRST_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: bun run check:stdlib-first
 
       # Scoped `tsc --noEmit` gate (issue #3001). Bun's bundler skips type
       # checking, so the build/test steps cannot catch type errors. A repo-wide

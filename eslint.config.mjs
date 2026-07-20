@@ -518,6 +518,25 @@ export default [
 		rules: {
 			"auto-mobile/catch-convention": 2,
 			"auto-mobile/no-unknown-cast": 2,
+			"no-restricted-properties": [
+				"error",
+				{
+					object: "Math",
+					property: "random",
+					message: "Use an injected Random or IdGenerator. Math.random() makes production behavior non-deterministic and bypasses the project's test seams.",
+				},
+			],
+			"@typescript-eslint/no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: ["lodash", "lodash/*"],
+							message: "Prefer the JavaScript/Node standard library or an existing AutoMobile helper. Do not add a direct lodash dependency.",
+						},
+					],
+				},
+			],
 		},
 	},
 	{

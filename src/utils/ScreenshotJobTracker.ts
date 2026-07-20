@@ -1,6 +1,7 @@
 import { logger } from "./logger";
 import { ScreenshotResult } from "../models/ScreenshotResult";
 import { Timer, defaultTimer } from "./SystemTimer";
+import { defaultIdGenerator, type IdGenerator, createTimestampedId } from "./IdGenerator";
 
 export interface ScreenshotJobHandle {
   jobId: string;
@@ -41,6 +42,7 @@ interface ScreenshotJobEntry {
 export class ScreenshotJobTracker {
   private static jobs: Map<string, ScreenshotJobEntry> = new Map();
   private static timer: Timer = defaultTimer;
+  private static idGenerator: IdGenerator = defaultIdGenerator;
 
   static setTimer(timer: Timer): void {
     ScreenshotJobTracker.timer = timer;
@@ -48,6 +50,14 @@ export class ScreenshotJobTracker {
 
   static resetTimer(): void {
     ScreenshotJobTracker.timer = defaultTimer;
+  }
+
+  static setIdGenerator(idGenerator: IdGenerator): void {
+    ScreenshotJobTracker.idGenerator = idGenerator;
+  }
+
+  static resetIdGenerator(): void {
+    ScreenshotJobTracker.idGenerator = defaultIdGenerator;
   }
 
   static startJob(
@@ -85,7 +95,11 @@ export class ScreenshotJobTracker {
       }
     }
 
-    const jobId = `screenshot_${ScreenshotJobTracker.timer.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const jobId = createTimestampedId(
+      "screenshot",
+      ScreenshotJobTracker.timer,
+      ScreenshotJobTracker.idGenerator
+    );
     const promise = Promise.resolve()
       .then(() => runner(abortController.signal))
       .catch(error => {

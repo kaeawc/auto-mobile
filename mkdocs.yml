@@ -198,7 +198,9 @@ nav:
               - 'Overview': design-docs/plat/ios/ide-plugin/overview.md
               - 'Test Recording': design-docs/plat/ios/ide-plugin/test-recording.md
               - 'Feature Flags': design-docs/plat/ios/ide-plugin/feature-flags.md
-  - 'Contributing': contributing.md
+  - 'Contributing':
+      - 'Overview': contributing.md
+      - 'Standard Library First': contributing/stdlib-first.md
   - 'GitHub Discussions': https://github.com/kaeawc/auto-mobile/discussions
   - 'FAQ': faq.md
   - 'Change Log': changelog.md

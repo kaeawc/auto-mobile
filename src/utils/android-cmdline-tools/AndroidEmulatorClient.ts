@@ -888,6 +888,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
     } catch (error) {
       request.signal?.removeEventListener("abort", dispose);
+      if (disposed) {
+        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+      }
       throw error;
     }
     if (process && request.deviceId) {

@@ -106,6 +106,29 @@ describe("AndroidEmulatorClient launch contract", () => {
     await expect(launch).rejects.toThrow("cancelled");
   });
 
+  test("reports cancellation when aborting causes the child to exit during startup validation", async () => {
+    const controller = new AbortController();
+    const child = createChild();
+    child.kill = (() => {
+      child.killed = true;
+      child.emit("exit", null);
+      return true;
+    }) as ChildProcess["kill"];
+    let spawned = false;
+    const client = createClient(() => {
+      spawned = true;
+      return child;
+    });
+
+    const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    while (!spawned) {
+      await Promise.resolve();
+    }
+    controller.abort();
+
+    await expect(launch).rejects.toThrow("cancelled");
+  });
+
   test("disposal kills a process launched by this handle", async () => {
     const child = createChild();
     const client = createClient(() => {

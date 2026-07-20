@@ -7,10 +7,9 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * Structural backstop for issue #3086. Enforces that the three seams which emit a correlated
- * `type:"error"` frame on a throw — [ResultBroadcaster], [AsyncActionRunner] and
- * [ServiceScopeGuard] — keep delegating to the single [CorrelatedErrorReporter] core instead of
- * hand-rolling it.
+ * Structural backstop for issues #3086 and #3992. Enforces that the known seams which emit a
+ * correlated `type:"error"` frame on a throw keep delegating to the single
+ * [CorrelatedErrorReporter] core instead of hand-rolling it.
  *
  * #3086 was filed as a deliberate YAGNI defer while only two consumers existed, tracking one
  * specific risk: nothing *forced* the duplicated catch-bodies to stay in lock-step, so a future fix
@@ -25,14 +24,14 @@ import org.junit.Test
  * real-file assertions then prove the live sources comply.
  *
  * **Scope, and why it stops where it does.** [CorrelatedErrorDriftScanner.CONSUMER_FILES] is a
- * hand-maintained list of three, so a *fourth* seam that hand-rolls the body is not caught.
- * Widening the scan to every file in the package was considered and rejected: `WebSocketServer.kt`
- * (the decode path, #2985) and `HierarchyExtractErrorFrames.kt` both construct `ErrorResponse` for
- * legitimate non-fallback reasons, so a package-wide rule would fire on correct code. This is the
- * same limit [BroadcastGuardAdoptionTest] documents for raw `serviceScope.launch` — it "cannot
- * distinguish such an action from the ~30 legitimate raw launches without false positives" — and it
- * is why [ServiceScopeGuard] closed that gap *by construction* rather than by scanning. A text
- * scanner is a backstop against reintroducing a known body, not a proof of absence.
+ * hand-maintained list of the confirmed correlated-error consumers. Widening the scan to every file
+ * in the package was considered and rejected: `WebSocketServer.kt` (the decode path, #2985)
+ * constructs `ErrorResponse` for legitimate non-fallback reasons, so a package-wide rule would fire
+ * on correct code. This is the same limit [BroadcastGuardAdoptionTest] documents for raw
+ * `serviceScope.launch` — it "cannot distinguish such an action from the ~30 legitimate raw
+ * launches without false positives" — and it is why [ServiceScopeGuard] closed that gap *by
+ * construction* rather than by scanning. A text scanner is a backstop against reintroducing a known
+ * body, not a proof of absence.
  */
 class CorrelatedErrorDriftGuardTest {
 
@@ -415,16 +414,13 @@ class CorrelatedErrorDriftGuardTest {
  * Kotlin source as text and reports correlated-error-core drift. Test-only (lives in the test
  * source set) — ships no scanning code in the app.
  *
- * The contract is deliberately blunt: within the three enumerated [CONSUMER_FILES], the cause
- * derivation and the fallback [ErrorResponse] construction may not appear at all, and each file
- * must both name the core and call it. A blunt contract is what makes it hard to drift past by
- * accident.
+ * The contract is deliberately blunt: within the enumerated [CONSUMER_FILES], the cause derivation
+ * and the fallback [ErrorResponse] construction may not appear at all, and each file must both name
+ * the core and call it. A blunt contract is what makes it hard to drift past by accident.
  *
  * Note the scope precisely — this is *not* "the cause rule exists in exactly one file in the
- * package". It does not: `WebSocketServer.kt`, `HierarchyExtractErrorFrames.kt` and `CtrlProxy.kt`
- * each derive a cause on paths this scanner does not police. See the class KDoc on
- * [CorrelatedErrorDriftGuardTest] for why the scan stops at three files, and issue #3992 for the
- * residual.
+ * package". `WebSocketServer.kt` retains a distinct decode-path cause rule that this scanner does
+ * not police. See the class KDoc on [CorrelatedErrorDriftGuardTest] for why the scan is targeted.
  */
 object CorrelatedErrorDriftScanner {
 
@@ -433,7 +429,12 @@ object CorrelatedErrorDriftScanner {
 
   /** The seams that must delegate to [CORE_FILE] rather than hand-roll the body. */
   val CONSUMER_FILES =
-    listOf("ResultBroadcaster.kt", "AsyncActionRunner.kt", "ServiceScopeGuard.kt")
+    listOf(
+      "ResultBroadcaster.kt",
+      "AsyncActionRunner.kt",
+      "ServiceScopeGuard.kt",
+      "HierarchyExtractErrorFrames.kt",
+    )
 
   enum class Kind {
     /** The `message ?: simpleName ?: "unknown error"` fallback re-implemented outside the core. */

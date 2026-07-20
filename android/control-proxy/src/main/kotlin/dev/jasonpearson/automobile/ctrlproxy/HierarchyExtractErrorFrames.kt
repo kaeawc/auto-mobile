@@ -31,8 +31,7 @@ object HierarchyExtractErrorFrames {
    * no WebSocket frame is produced).
    */
   fun nullResultFrame(uuid: String?): ErrorResponse? =
-    if (uuid.isNullOrBlank()) null
-    else ErrorResponse(requestId = uuid, error = NULL_HIERARCHY_ERROR)
+    if (uuid.isNullOrBlank()) null else CorrelatedErrorReporter.frame(uuid, NULL_HIERARCHY_ERROR)
 
   /**
    * The correlated error frame to broadcast when `extractHierarchy` throws [error]. Returns `null`
@@ -43,7 +42,9 @@ object HierarchyExtractErrorFrames {
   fun thrownFrame(uuid: String?, error: Throwable): ErrorResponse? {
     if (error is CancellationException) return null
     if (uuid.isNullOrBlank()) return null
-    val cause = error.message ?: error::class.simpleName ?: "unknown error"
-    return ErrorResponse(requestId = uuid, error = THROWN_PREFIX + cause)
+    return CorrelatedErrorReporter.frame(
+      requestId = uuid,
+      errorMessage = THROWN_PREFIX + CorrelatedErrorReporter.causeOf(error),
+    )
   }
 }

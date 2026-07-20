@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenTransition
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 
 /**
  * Real navigation data source that fetches from MCP resources. Adapts the MCP navigation/graph
@@ -46,7 +47,7 @@ class RealNavigationDataSource(
           )
 
       // Parse the MCP navigation graph response
-      val response = json.decodeFromString(McpNavigationGraphResponse.serializer(), graphText)
+      val response = json.decodeFromString(serializer<McpNavigationGraphResponse>(), graphText)
 
       // Count outgoing edges per screen for transitionCount
       val outgoingEdgeCounts = response.edges.groupBy { it.from }.mapValues { it.value.size }

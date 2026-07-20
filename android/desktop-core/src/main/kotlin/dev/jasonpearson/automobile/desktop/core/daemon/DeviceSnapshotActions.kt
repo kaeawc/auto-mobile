@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.serializer
 
 /** MCP resource listing every captured snapshot. */
 internal const val DEVICE_SNAPSHOT_ARCHIVE_URI = "automobile:deviceSnapshots/archive"
@@ -66,7 +67,7 @@ class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClien
       decodeResourceResponse(
         snapshotJson,
         client.readResource(DEVICE_SNAPSHOT_ARCHIVE_URI),
-        DeviceSnapshotArchive.serializer(),
+        serializer<DeviceSnapshotArchive>(),
       )
     return archive.snapshots
   }
@@ -107,7 +108,7 @@ class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClien
     return decodeToolResponse(
       snapshotJson,
       client.callTool("deviceSnapshot", arguments),
-      DeviceSnapshotToolResponse.serializer(),
+      serializer<DeviceSnapshotToolResponse>(),
     )
   }
 }

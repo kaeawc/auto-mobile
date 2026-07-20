@@ -53,6 +53,15 @@ describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
 });
 
 describe("tool output artifact metadata schema (#3480)", () => {
+  test("advertises screen-reader navigation fidelity assertions (#3963)", () => {
+    const json = JSON.stringify(toJSONSchema(tapOnResultSchema));
+
+    expect(json).toContain("screenReaderNavigation");
+    expect(json).toContain("reachable");
+    expect(json).toContain("traversalOrder");
+    expect(json).toContain("focusTrapDetected");
+  });
+
   const metadata = {
     artifact: {
       path: "/tmp/auto-mobile/123-tapOn-id.json",

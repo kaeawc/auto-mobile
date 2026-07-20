@@ -38,7 +38,7 @@ import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
-import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
+import { TalkBackTapStrategy, type ScreenReaderNavigationResult } from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory
@@ -1159,12 +1159,13 @@ export class TapOnElement extends BaseVisualChange {
           const preTapHash = options.retryIfNoChange
             ? this.hashViewHierarchy(viewHierarchy)
             : null;
+          let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
           // Platform-specific tap execution
           await perf.track("executeTap", async () => {
             switch (this.device.platform) {
               case "android":
-                await this.executeAndroidTap(
+                screenReaderNavigation = await this.executeAndroidTap(
                   action,
                   tapPoint.x,
                   tapPoint.y,
@@ -1204,6 +1205,7 @@ export class TapOnElement extends BaseVisualChange {
             element: tapElement,
             selectedElement: selectedElementMetadata,
             searchUntil: searchOutcome.stats,
+            ...(screenReaderNavigation ? { screenReaderNavigation } : {}),
           };
         },
         {
@@ -1303,7 +1305,7 @@ export class TapOnElement extends BaseVisualChange {
     signal?: AbortSignal,
     options?: TapOnElementOptions,
     isTalkBackEnabled?: boolean
-  ): Promise<void> {
+  ): Promise<ScreenReaderNavigationResult | undefined> {
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled = typeof isTalkBackEnabled === "boolean"
       ? isTalkBackEnabled
@@ -1311,10 +1313,11 @@ export class TapOnElement extends BaseVisualChange {
 
     if (talkBackEnabled) {
       // TalkBack mode: Use accessibility actions with coordinate fallback
-      await this.executeAndroidTapWithAccessibility(action, x, y, element, durationMs, options, signal);
+      return this.executeAndroidTapWithAccessibility(action, x, y, element, durationMs, options, signal);
     } else {
       // Standard mode: Use coordinate-based taps
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+      return undefined;
     }
   }
 
@@ -1446,8 +1449,9 @@ export class TapOnElement extends BaseVisualChange {
     durationMs: number,
     options?: TapOnElementOptions,
     signal?: AbortSignal
-  ): Promise<void> {
+  ): Promise<ScreenReaderNavigationResult | undefined> {
     const driver = this.talkBackDriverFactory.createDriver(this.device);
+    let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
     if (action === "longPress") {
       // Long press: try ACTION_LONG_CLICK first, then coordinate gesture fallback
@@ -1466,7 +1470,7 @@ export class TapOnElement extends BaseVisualChange {
         );
         await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
       }
-      return;
+      return undefined;
     }
 
     if (action === "tap" || action === "doubleTap") {
@@ -1480,13 +1484,14 @@ export class TapOnElement extends BaseVisualChange {
         );
 
         if (result.success) {
-          return;
+          return result.screenReaderNavigation;
         }
 
         logger.warn(
           `[TapOnElement] Focus navigation failed (${result.error}), ` +
           `falling back to coordinate-based tap at (${x}, ${y})`
         );
+        screenReaderNavigation = result.screenReaderNavigation;
       } else if (action === "tap") {
         // Default (#3936): directly activate the target node via ACTION_CLICK,
         // without moving the cursor. doubleTap has no single accessibility action,
@@ -1494,7 +1499,7 @@ export class TapOnElement extends BaseVisualChange {
         const result = await this.talkBackStrategy.executeDirectActivation(element, driver);
 
         if (result.success) {
-          return;
+          return undefined;
         }
 
         logger.warn(
@@ -1521,6 +1526,7 @@ export class TapOnElement extends BaseVisualChange {
       );
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
     }
+    return screenReaderNavigation;
   }
 
   /**

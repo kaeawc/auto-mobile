@@ -15,6 +15,7 @@ interface NavigationOptions {
   maxSwipes?: number;
   verificationInterval?: number;
   swipeDelay?: number;
+  onFocusObserved?: (element: Element | null) => void;
 }
 
 export interface FocusNavigationDriver {
@@ -164,8 +165,10 @@ export class FocusNavigationExecutor {
         targetSelector
       );
       if (initialVerification.reachedTarget) {
+        options.onFocusObserved?.(initialVerification.currentFocus);
         return true;
       }
+      options.onFocusObserved?.(initialVerification.currentFocus);
       if (initialVerification.targetIndex === null) {
         throw new ActionableError(
           `Target not found (${this.describeSelector(targetSelector)}). ` +
@@ -210,16 +213,25 @@ export class FocusNavigationExecutor {
         await this.timer.sleep(swipeDelay);
       }
 
-      const shouldVerify =
-        remainingSwipes === 0 || totalSwipes % verificationInterval === 0;
+      const shouldVerify = remainingSwipes === 0 || totalSwipes % verificationInterval === 0;
+      // Fidelity reporting observes each cursor step, but keeps path
+      // recalculation and the non-convergence guard at their configured cadence.
+      // A TalkBack focus event can lag several swipes; counting every sample as
+      // a failed verification would turn that normal delay into a false trap.
+      let verification: NavigationVerification | undefined;
+      if (options.onFocusObserved) {
+        verification = await this.verifyNavigationState(driver, targetSelector);
+        options.onFocusObserved(verification.currentFocus);
+        if (verification.reachedTarget) {
+          return true;
+        }
+      }
       if (!shouldVerify) {
         continue;
       }
 
-      const verification = await this.verifyNavigationState(
-        driver,
-        targetSelector
-      );
+      verification ??= await this.verifyNavigationState(driver, targetSelector);
+      options.onFocusObserved?.(verification.currentFocus);
 
       if (verification.reachedTarget) {
         return true;
@@ -296,6 +308,7 @@ export class FocusNavigationExecutor {
       driver,
       targetSelector
     );
+    options.onFocusObserved?.(finalVerification.currentFocus);
     return finalVerification.reachedTarget;
   }
 

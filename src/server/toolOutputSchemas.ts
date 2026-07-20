@@ -167,6 +167,12 @@ const tapOnSearchUntilSchema = z.object({
   changeCount: z.number().int()
 }).passthrough();
 
+const screenReaderNavigationSchema = z.object({
+  reachable: z.boolean().describe("Whether swipe cursor navigation reached the target"),
+  traversalOrder: z.array(elementSchema).describe("Focused nodes in cursor traversal order"),
+  focusTrapDetected: z.boolean().describe("Whether cursor navigation got stuck or failed to converge")
+}).passthrough();
+
 export const tapOnResultSchema = z.object({
   success: z.boolean(),
   action: z.string().optional(),
@@ -181,6 +187,7 @@ export const tapOnResultSchema = z.object({
   contextMenuOpened: z.boolean().optional(),
   selectionStarted: z.boolean().optional(),
   searchUntil: tapOnSearchUntilSchema.optional(),
+  screenReaderNavigation: screenReaderNavigationSchema.optional(),
   debug: z.any().optional()
 }).passthrough();
 

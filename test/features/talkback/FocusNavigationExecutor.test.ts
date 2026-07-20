@@ -342,4 +342,47 @@ describe("FocusNavigationExecutor", () => {
     // Bailed after a couple of no-progress checks, nowhere near the 50 swipes.
     expect(driver.getSwipeCount()).toBeLessThan(10);
   });
+
+  test("reports every swipe without treating delayed focus updates as a trap", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const elements = [
+      makeElement("a", 0),
+      makeElement("b", 1),
+      makeElement("c", 2),
+      makeElement("d", 3),
+      makeElement("e", 4)
+    ];
+    driver.setElements(elements, 0);
+    driver.autoAdvanceOnSwipe = false;
+    driver.onSwipe = () => {
+      if (driver.getSwipeCount() === 4) {
+        driver.focusedIndex = 4;
+      }
+    };
+    const observed: Element[] = [];
+    const executor = new FocusNavigationExecutor({
+      timer,
+      driverFactory: { createDriver: () => driver }
+    });
+
+    const result = await executor.navigateToElement(
+      "device-1",
+      { resourceId: "e" },
+      { currentFocusIndex: 0, targetFocusIndex: 4, swipeCount: 5, direction: "forward" },
+      {
+        verificationInterval: 5,
+        swipeDelay: 0,
+        onFocusObserved: element => {
+          if (element) {
+            observed.push(element);
+          }
+        }
+      }
+    );
+
+    expect(result).toBe(true);
+    expect(driver.getSwipeCount()).toBe(4);
+    expect(observed).toEqual([elements[0], elements[0], elements[0], elements[4]]);
+  });
 });

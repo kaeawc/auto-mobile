@@ -560,9 +560,18 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
     const navOptions = { screenReaderNavigation: true } as any;
 
     test("tap drives the cursor via executeTap", async () => {
+      fakeTalkBackStrategy.setTapResult({
+        success: true,
+        method: "focus-navigation",
+        screenReaderNavigation: {
+          reachable: true,
+          traversalOrder: [makeElement()],
+          focusTrapDetected: false
+        }
+      });
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      const result = await (tapOnElement as any).executeAndroidTapWithAccessibility(
         "tap", 50, 50, element, 500, navOptions, undefined
       );
 
@@ -571,6 +580,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.tapCalls[0].element).toBe(element);
       expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
       expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
+      expect(result).toMatchObject({ reachable: true, focusTrapDetected: false });
     });
 
     test("doubleTap also drives the cursor via executeTap (activation is always double-tap)", async () => {
@@ -697,5 +707,78 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("longPress", 50, 50, 1000, element, undefined);
     });
+  });
+});
+
+describe("TapOnElement screen-reader navigation result", () => {
+  const element = {
+    "resource-id": "test:id/button",
+    "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+    "clickable": true
+  } as any;
+
+  const journey = {
+    reachable: true,
+    traversalOrder: [element],
+    focusTrapDetected: false
+  };
+
+  const createCommand = (tapResult: any) => {
+    const accessibilityDetector = new FakeAccessibilityDetector();
+    accessibilityDetector.setTalkBackEnabled(true);
+    const strategy = new FakeTalkBackTapStrategy();
+    strategy.setTapResult(tapResult);
+    const command = new TapOnElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
+      new FakeAdbClient() as any,
+      {
+        accessibilityDetector,
+        timer: new FakeTimer(),
+        talkBackStrategy: strategy,
+        featureFlags: { isEnabled: (key: string) => key === "screen-reader-navigation" } as FeatureFlagService
+      }
+    );
+    const observation = {
+      viewHierarchy: { hierarchy: {} },
+      screenSize: { width: 100, height: 100 }
+    } as any;
+    spyOn(command as any, "observedInteraction").mockImplementation(async (block: any) => ({
+      ...(await block(observation)),
+      observation
+    }));
+    spyOn(command as any, "searchForElement").mockResolvedValue({
+      selection: { element, indexInMatches: 0, totalMatches: 1, strategy: "first" },
+      viewHierarchy: observation.viewHierarchy,
+      containerFound: true,
+      stats: { durationMs: 0, requestCount: 0, changeCount: 0 }
+    });
+    spyOn(command as any, "resolveTapTargetElement").mockReturnValue({ element, usedParent: false });
+    spyOn((command as any).selectionStateTracker, "prepare").mockResolvedValue(null);
+    spyOn((command as any).selectionStateTracker, "finalize").mockResolvedValue([]);
+    return command;
+  };
+
+  test("returns the successful cursor journey from public execute", async () => {
+    const command = createCommand({ success: true, method: "focus-navigation", screenReaderNavigation: journey });
+
+    const result = await command.execute({ action: "tap", elementId: "test:id/button" });
+
+    expect(result.success).toBe(true);
+    expect(result.screenReaderNavigation).toEqual(journey);
+  });
+
+  test("keeps failed reachability evidence after coordinate fallback succeeds", async () => {
+    const failedJourney = { ...journey, reachable: false, focusTrapDetected: true };
+    const command = createCommand({
+      success: false,
+      method: "focus-navigation",
+      error: "Focus navigation is not converging on the target.",
+      screenReaderNavigation: failedJourney
+    });
+
+    const result = await command.execute({ action: "tap", elementId: "test:id/button" });
+
+    expect(result.success).toBe(true);
+    expect(result.screenReaderNavigation).toEqual(failedJourney);
   });
 });

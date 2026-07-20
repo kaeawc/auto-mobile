@@ -1,0 +1,135 @@
+import { describe, expect, test } from "bun:test";
+import { EventEmitter } from "node:events";
+import { Readable } from "node:stream";
+import type { ChildProcess } from "node:child_process";
+import {
+  AndroidEmulatorClient,
+  parseExtraEmulatorArguments,
+} from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { DeviceInfo, ExecResult } from "../../../src/models";
+import { FakeTimer } from "../../fakes/FakeTimer";
+
+const execResult = (stdout = ""): ExecResult => ({
+  stdout,
+  stderr: "",
+  toString: () => stdout,
+  trim: () => stdout.trim(),
+  includes: value => stdout.includes(value),
+});
+
+function createChild(): ChildProcess & EventEmitter {
+  const child = new EventEmitter() as ChildProcess & EventEmitter;
+  child.stdout = new Readable({ read() {} }) as never;
+  child.stderr = new Readable({ read() {} }) as never;
+  child.killed = false;
+  child.kill = (() => {
+    child.killed = true;
+    return true;
+  }) as ChildProcess["kill"];
+  return child;
+}
+
+function createClient(spawnFn: (command: string, args: string[]) => ChildProcess): AndroidEmulatorClient {
+  const client = new AndroidEmulatorClient(
+    async () => execResult(),
+    spawnFn as never,
+    new FakeTimer(),
+  );
+  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath = async () => "emulator";
+  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+    { name: "Pixel 9", platform: "android", isRunning: false },
+  ];
+  (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
+  (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () => false;
+  (client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }).checkArchitectureCompatibility = async () => ({ compatible: true });
+  return client;
+}
+
+describe("AndroidEmulatorClient launch contract", () => {
+  test("uses a JSON argv array so values containing spaces remain one argument", () => {
+    expect(parseExtraEmulatorArguments('["-gpu", "swiftshader indirect"]')).toEqual([
+      "-gpu",
+      "swiftshader indirect",
+    ]);
+  });
+
+  test("rejects the legacy whitespace-delimited extra-argument value", () => {
+    expect(() => parseExtraEmulatorArguments("-gpu swiftshader_indirect")).toThrow(
+      "AUTOMOBILE_EMULATOR_ARGS must be a JSON array",
+    );
+  });
+
+  test("returns a typed launch handle correlated to the requested adb serial", async () => {
+    const child = createChild();
+    const client = createClient(() => {
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    });
+
+    const handle = await client.launchEmulator({ avdName: "Pixel 9", deviceId: "emulator-5560" });
+
+    expect(handle.avdName).toBe("Pixel 9");
+    expect(handle.targetDeviceId).toBe("emulator-5560");
+    expect(handle.process).toBe(child);
+  });
+
+  test("does not spawn when launch has already been cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns += 1;
+      return createChild();
+    });
+
+    await expect(client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal })).rejects.toThrow("cancelled");
+    expect(spawns).toBe(0);
+  });
+
+  test("cancels and cleans up when aborted while startup validation is pending", async () => {
+    const controller = new AbortController();
+    const child = createChild();
+    let spawned = false;
+    const client = createClient(() => {
+      spawned = true;
+      return child;
+    });
+
+    const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    while (!spawned) {
+      await Promise.resolve();
+    }
+    controller.abort();
+    child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+
+    await expect(launch).rejects.toThrow("cancelled");
+    expect(child.killed).toBe(true);
+  });
+
+  test("disposal kills a process launched by this handle", async () => {
+    const child = createChild();
+    const client = createClient(() => {
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    });
+
+    const handle = await client.launchEmulator({ avdName: "Pixel 9" });
+    handle.dispose();
+
+    expect(child.killed).toBe(true);
+  });
+
+  test("cancellation after launch disposes the owned process", async () => {
+    const controller = new AbortController();
+    const child = createChild();
+    const client = createClient(() => {
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    });
+
+    await client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    controller.abort();
+
+    expect(child.killed).toBe(true);
+  });
+});

@@ -40,7 +40,7 @@ actionable message instead of `code: null`, pointing you at
 | Variable | Values | Effect |
 |----------|--------|--------|
 | `AUTOMOBILE_EMULATOR_HEADLESS` | `true` / `false` / unset | Force headless (`-no-window -no-audio`), force windowed, or auto-detect (default). |
-| `AUTOMOBILE_EMULATOR_ARGS` | space-separated args | Extra arguments appended to the `emulator` command (e.g. `-gpu swiftshader_indirect`). |
+| `AUTOMOBILE_EMULATOR_ARGS` | JSON argv array | Extra arguments appended to the `emulator` command (e.g. `["-gpu", "swiftshader_indirect"]`). Each JSON entry is one literal argument; whitespace is never shell-split. |
 
 ### Running emulators in CI
 
@@ -50,5 +50,5 @@ explicitly for clarity:
 ```bash
 export AUTOMOBILE_EMULATOR_HEADLESS=true
 # optionally, for software rendering on hosts without a GPU:
-export AUTOMOBILE_EMULATOR_ARGS="-gpu swiftshader_indirect -no-snapshot"
+export AUTOMOBILE_EMULATOR_ARGS='["-gpu", "swiftshader_indirect", "-no-snapshot"]'
 ```

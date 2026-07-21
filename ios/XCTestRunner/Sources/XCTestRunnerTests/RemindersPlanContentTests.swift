@@ -1005,8 +1005,6 @@ private func assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
     }
 
     for stepName in [
-        "Select Xcode 26.5",
-        "Ensure iOS Simulator runtime (Xcode 26.5)",
         "Boot iOS Simulator (Xcode 26.5)",
         "Ensure AutoMobile daemon ready (Xcode 26.5)",
     ] {

@@ -1541,15 +1541,9 @@ jobs:
         if: always()
         run: xcrun simctl shutdown all || true
 
-      - name: "Select Xcode 26.5"
-        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: "26.5"
-
-      - name: "Ensure iOS Simulator runtime (Xcode 26.5)"
-        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
-        uses: ./.github/actions/ensure-ios-simulator-runtime
+      # No Xcode re-selection here: the job selects 26.5 up front and, since the
+      # 26.2 leg was dropped (#4110), nothing switches the toolchain afterwards.
+      # Re-selecting and re-ensuring the runtime were pure no-ops (#4114).
 
       - name: "Boot iOS Simulator (Xcode 26.5)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}

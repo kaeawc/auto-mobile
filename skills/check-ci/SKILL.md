@@ -13,10 +13,15 @@ Use this for PR health checks and failure triage.
 ## Workflow
 
 1. Resolve the PR number from an argument or the current branch with `gh pr view --json number`.
-2. Inspect checks with `gh pr checks <pr>` and save verbose output to `scratch/check-ci-<pr>.log` when needed.
-3. If checks failed, fetch failed-job logs with `gh run view <run-id> --log-failed`.
+2. Inspect checks with `gh pr checks <pr> --json name,state,bucket,link` and branch on `bucket`: `pass`, `fail`, `pending`, `skipping`, `cancel`. Only `fail` is a failure — `skipping` and `cancel` are not. Save verbose output to `scratch/` when needed.
+3. If checks failed, fetch **per-job** logs: `gh api repos/kaeawc/auto-mobile/actions/runs/<run-id>/jobs`
+   to find the failed job ids, then `gh api repos/kaeawc/auto-mobile/actions/jobs/<job-id>/logs`.
+   A finished job's log is readable while sibling jobs are still running, so this does not
+   wait on the slowest leg. For a job still executing, `gh api .../actions/jobs/<job-id>`
+   returns per-step status instead. `gh run view --log-failed` only works once the whole run
+   has finished.
 4. Check mergeability and branch drift with `gh pr view --json mergeable,mergeStateStatus` plus local `git fetch origin`.
-5. Gather review comments and unresolved feedback that may explain the failing state.
+5. Gather review comments and unresolved feedback. Resolution state is GraphQL-only (`reviewThreads { isResolved }`); REST and `gh pr view --json comments` do not expose it.
 6. Reproduce the most likely failure locally using the narrowest relevant command.
 7. Summarize current state, root cause, local repro status, and next fix steps.
 

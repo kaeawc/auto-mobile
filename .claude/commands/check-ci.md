@@ -10,93 +10,87 @@ Use the following bash script to check CI status. If an argument is provided, us
 
 ```bash
 #!/usr/bin/env bash
+set -uo pipefail
 
-# Step 1: Determine PR number
-if [ -n "$1" ]; then
-    PR_NUM="$1"
-else
-    PR_NUM=$(gh pr view --json number -q .number 2>/dev/null || echo "")
-fi
+REPO=kaeawc/auto-mobile
+PR_NUM="${1:-$(gh pr view --json number -q .number 2>/dev/null)}"
 
 if [ -z "$PR_NUM" ]; then
-    echo "❌ Error: No PR found for current branch"
-    echo "Usage: /check-ci [PR_NUMBER]"
-    exit 1
+  echo "No PR found for the current branch. Usage: /check-ci [PR_NUMBER]" >&2
+  exit 1
 fi
 
-echo "=== CI Status for PR #${PR_NUM} ==="
-echo ""
+echo "=== CI status for PR #${PR_NUM} ==="
 
-# Step 2: Get CI check status
-CHECKS_OUTPUT=$(gh pr checks ${PR_NUM} 2>&1)
+# Bucket is gh's normalized state: pass | fail | pending | skipping | cancel.
+# Branch on it rather than grepping the human-readable output.
+CHECKS_JSON=$(gh pr checks "$PR_NUM" --json name,state,bucket,link 2>/dev/null)
 
-# Count statuses using simple grep
-PASSED_COUNT=$(echo "$CHECKS_OUTPUT" | grep -c "pass" || true)
-PENDING_COUNT=$(echo "$CHECKS_OUTPUT" | grep -c "pending" || true)
-FAILED_COUNT=$(echo "$CHECKS_OUTPUT" | grep -c "fail" || true)
+printf '%s' "$CHECKS_JSON" | jq -r '
+  group_by(.bucket) | map({bucket: .[0].bucket, n: length})
+  | sort_by(-.n)[] | "  \(.bucket): \(.n)"'
 
-# Calculate total
-if [ -z "$PASSED_COUNT" ]; then PASSED_COUNT=0; fi
-if [ -z "$PENDING_COUNT" ]; then PENDING_COUNT=0; fi
-if [ -z "$FAILED_COUNT" ]; then FAILED_COUNT=0; fi
+echo
+echo "--- not passing ---"
+printf '%s' "$CHECKS_JSON" | jq -r '
+  .[] | select(.bucket != "pass" and .bucket != "skipping")
+  | "  \(.bucket)\t\(.name)\t\(.link)"'
 
-TOTAL=$((PASSED_COUNT + PENDING_COUNT + FAILED_COUNT))
+# skipping and cancel are NOT failures. Only fail is.
+FAILED=$(printf '%s' "$CHECKS_JSON" | jq -r '[.[] | select(.bucket == "fail")] | length')
 
-# Display summary
-echo "📊 Summary: ${PASSED_COUNT}/${TOTAL} checks passed"
-echo ""
-if [ "$PASSED_COUNT" -gt 0 ]; then
-    echo "  ✅ Passed: ${PASSED_COUNT}"
+if [ "$FAILED" -eq 0 ]; then
+  PENDING=$(printf '%s' "$CHECKS_JSON" | jq -r '[.[] | select(.bucket == "pending")] | length')
+  [ "$PENDING" -gt 0 ] && echo "Waiting on ${PENDING} check(s)." || echo "All checks passed."
+  exit 0
 fi
-if [ "$PENDING_COUNT" -gt 0 ]; then
-    echo "  ⚠️  Pending: ${PENDING_COUNT}"
-fi
-if [ "$FAILED_COUNT" -gt 0 ]; then
-    echo "  ❌ Failed: ${FAILED_COUNT}"
-fi
-echo ""
 
-# Show all checks
-echo "$CHECKS_OUTPUT"
-echo ""
+# Resolve run ids from the check links, then walk run -> jobs -> the failed job's log.
+# grep -oE (POSIX-ish) rather than grep -oP: macOS /usr/bin/grep has no -P.
+RUN_IDS=$(printf '%s' "$CHECKS_JSON" \
+  | jq -r '.[] | select(.bucket == "fail") | .link' \
+  | grep -oE 'runs/[0-9]+' | cut -d/ -f2 | sort -u)
 
-# Step 3 & 4: Handle different states
-if [ "$FAILED_COUNT" -gt 0 ]; then
-    echo "=== Failure Details ==="
-    echo ""
-
-    # Extract unique run IDs from failed checks
-    RUN_IDS=$(echo "$CHECKS_OUTPUT" | grep "fail" | grep -oP 'runs/\K[0-9]+' | sort -u || true)
-
-    if [ -n "$RUN_IDS" ]; then
-        for RUN_ID in $RUN_IDS; do
-            echo "----------------------------------------"
-            echo "📋 Fetching failure logs for run ${RUN_ID}..."
-            echo "🔗 https://github.com/kaeawc/auto-mobile/actions/runs/${RUN_ID}"
-            echo ""
-
-            # Get failed logs (last 100 lines)
-            gh run view ${RUN_ID} --log-failed 2>&1 | tail -100
-            echo ""
-        done
-    fi
-elif [ "$PENDING_COUNT" -gt 0 ]; then
-    echo "⏳ Waiting for ${PENDING_COUNT} check(s) to complete..."
-    echo ""
-    echo "Pending checks:"
-    echo "$CHECKS_OUTPUT" | grep "pending" || true
-else
-    echo "✅ All checks passed! PR is ready to merge."
-fi
+mkdir -p scratch
+for RUN_ID in $RUN_IDS; do
+  echo
+  echo "=== run ${RUN_ID} — https://github.com/${REPO}/actions/runs/${RUN_ID} ==="
+  gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" --paginate \
+    --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"' \
+  | while IFS=$'\t' read -r JOB_ID JOB_NAME; do
+      echo "--- job ${JOB_ID}: ${JOB_NAME} ---"
+      LOG="scratch/job-${JOB_ID}.log"
+      # A finished job's log is readable even while sibling jobs still run.
+      if gh api "repos/${REPO}/actions/jobs/${JOB_ID}/logs" > "$LOG" 2>/dev/null; then
+        grep -nE '##\[error\]|not ok |FAIL|error:|Error:' "$LOG" | head -30
+        echo "  (full log: ${LOG})"
+      else
+        # Job has not finished; show which step it is on instead.
+        gh api "repos/${REPO}/actions/jobs/${JOB_ID}" \
+          --jq '.steps[] | select(.status != "completed" or .conclusion == "failure")
+                | "  step \(.number)\t\(.status)\t\(.conclusion // "-")\t\(.name)"'
+      fi
+    done
+done
 ```
 
-## How it works:
+## How it works
 
-1. **PR Detection**: Accepts optional PR number argument, otherwise auto-detects from current branch
-2. **Status Counting**: Uses grep to count passed/pending/failed checks
-3. **Summary Display**: Shows visual summary with emojis (✅/⚠️/❌)
-4. **Failure Handling**: Extracts run IDs from failed checks and fetches last 100 lines of logs
-5. **Clear Output**: Provides clickable GitHub Actions URLs for detailed investigation
+1. **PR detection** — takes the PR number as an argument, otherwise resolves it from the current branch.
+2. **Bucketing** — reads `gh pr checks --json` and branches on `bucket`, gh's normalized
+   state. `skipping` and `cancel` are **not** failures; only `fail` is. A `cancelled` check
+   is usually a superseded run from a rapid push, though it can still wedge the `green-main`
+   ruleset — re-run that run rather than debugging the code.
+3. **Run → jobs → job log** — resolves run ids from the failing checks' links, then fetches
+   only the failed jobs' logs. A finished job's log is readable **while sibling jobs are
+   still running**, so this does not wait on the slowest leg.
+4. **Live jobs** — when a job hasn't finished, its log 404s, so the script falls back to
+   per-step status and shows which step it is on.
+5. **Logs land in `scratch/`** — each is ~100KB+; read the extracted error lines and open the
+   file only when you need more.
+
+See the `github-cli` skill for the underlying commands, including review-thread resolution
+state, which REST does not expose.
 
 ## Additional Analysis Steps
 
@@ -124,13 +118,22 @@ git merge-tree $(git merge-base HEAD origin/main) HEAD origin/main
 
 ### Step 2: Check PR Comments and Feedback
 
-```bash
-# Get all PR comments
-gh pr view ${PR_NUM} --json comments -q '.comments[].body'
+Resolution state lives only in GraphQL — `gh pr view --json comments` and the REST
+`/pulls/N/comments` endpoint both omit it, so they cannot tell you what is still outstanding:
 
-# Get review comments (inline code comments)
-gh api repos/:owner/:repo/pulls/${PR_NUM}/comments --jq '.[] | {file: .path, line: .line, comment: .body}'
+```bash
+gh api graphql -f query='
+query($owner:String!,$repo:String!,$pr:Int!){
+  repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
+    reviewThreads(first:100){ nodes{ id isResolved isOutdated path line
+      comments(first:5){ nodes{ author{login} body } } } } } } }' \
+  -F owner=kaeawc -F repo=auto-mobile -F pr=${PR_NUM} \
+  --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+        | select(.isResolved|not)
+        | "\(.path):\(.line)\t\(.comments.nodes[0].author.login)"'
 ```
+
+`isOutdated` only means the anchored line moved — not that the finding was addressed.
 
 **Analyze comments**:
 - Identify unresolved feedback

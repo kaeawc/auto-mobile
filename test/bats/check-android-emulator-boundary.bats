@@ -14,6 +14,25 @@ teardown() {
   [[ "$output" == *"no direct production emulator invocations"* ]]
 }
 
+@test "a comment mentioning the emulator does not opt a file into the rule" {
+  # Regression: the scope pre-filter tested the RAW source for /emulator/i, so
+  # prose alone pulled a file in. A doc comment on the iOS SimCtlClient that
+  # merely referenced the Android emulator path was enough to flag that file's
+  # long-standing, legitimate spawn() in defaultSpawnProcess. The pre-filter must
+  # reflect what a file DOES, not what it talks about.
+  printf '%s\n' \
+    '/** Mirrors the readiness proof the Android emulator path performs. */' \
+    'import { spawn } from "child_process";' \
+    'export const run = () => spawn("xcrun", ["simctl", "list"]);' \
+    '// emulator mentioned in a line comment too' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no direct production emulator invocations"* ]]
+}
+
 @test "rejects a direct production emulator spawn outside the owner" {
   printf '%s\n' 'spawn("emulator", ["-list-avds"]);' > "$FIXTURE"
 

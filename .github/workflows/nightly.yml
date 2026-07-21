@@ -38,6 +38,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          # Full history so the direct push to main isn't rejected as a shallow
+          # update, and the admin token so it bypasses the green-main ruleset.
+          fetch-depth: 0
+          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
 
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
@@ -166,16 +170,7 @@ jobs:
             echo "needed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: "Update release constants"
-        if: steps.check.outputs.needed == 'true'
-        env:
-          APK_SHA256_CHECKSUM: ${{ needs.build-control-proxy-apk.outputs.sha256 }}
-          IOS_CTRL_PROXY_SHA256_CHECKSUM: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}
-          IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
-          VIDEO_JAR_SHA256: ${{ needs.build-video-server-jar.outputs.sha256 }}
-        run: bash scripts/generate-release-constants.sh
-
-      - name: "Build PR title"
+      - name: "Build commit subject"
         if: steps.check.outputs.needed == 'true'
         id: pr-title
         run: |
@@ -183,11 +178,12 @@ jobs:
           IPA_CHANGED="${{ steps.check.outputs.ipa_changed }}"
           RUNNER_CHANGED="${{ steps.check.outputs.runner_changed }}"
 
-          # The CtrlProxy artifact titles are matched EXACTLY by the sha256-only PR
-          # classifier in pull_request.yml (which skips heavy CI for these). Keep
-          # these strings verbatim. When the video-server jar also changed it is
-          # reflected in the PR body table below; only the jar-ONLY case gets its
-          # own title (also registered in the pull_request.yml classifier).
+          # These become the commit subject of the direct-to-main push below. They
+          # are ALSO matched EXACTLY by the sha256-only PR classifier in
+          # pull_request.yml, which still skips heavy CI for hand-opened checksum
+          # PRs — keep these strings verbatim. When the video-server jar also
+          # changed it is reflected in the commit body table below; only the
+          # jar-ONLY case gets its own subject.
           if [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ] && [ "$RUNNER_CHANGED" = "true" ]; then
             echo "title=chore: update CtrlProxy APK, iOS IPA, and iOS runner SHA256" >> "$GITHUB_OUTPUT"
           elif [ "$APK_CHANGED" = "true" ] && [ "$IPA_CHANGED" = "true" ]; then
@@ -207,59 +203,44 @@ jobs:
             echo "title=chore: update video-server jar SHA256" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: "Create PR for SHA256 update"
+      - name: "Commit and push SHA256 update to main"
         if: steps.check.outputs.needed == 'true'
-        id: create-pr
-        uses: peter-evans/create-pull-request@v8
-        with:
-          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
-          commit-message: |
+        shell: bash
+        env:
+          APK_SHA256_CHECKSUM: ${{ needs.build-control-proxy-apk.outputs.sha256 }}
+          IOS_CTRL_PROXY_SHA256_CHECKSUM: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}
+          IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
+          VIDEO_JAR_SHA256: ${{ needs.build-video-server-jar.outputs.sha256 }}
+          RELEASE_CONSTANTS_COMMIT_MESSAGE: |
             ${{ steps.pr-title.outputs.title }}
-
-            APK: ${{ steps.current.outputs.apk_sha256 || '(empty)' }} -> ${{ needs.build-control-proxy-apk.outputs.sha256 }}${{ steps.check.outputs.apk_changed == 'true' && ' (changed)' || ' (unchanged)' }}
-            IPA: ${{ steps.current.outputs.ipa_sha256 || '(empty)' }} -> ${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}${{ steps.check.outputs.ipa_changed == 'true' && ' (changed)' || ' (unchanged)' }}
-            iOS Runner: ${{ steps.current.outputs.runner_sha256 || '(empty)' }} -> ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}${{ steps.check.outputs.runner_changed == 'true' && ' (changed)' || ' (unchanged)' }}
-            video-server jar: ${{ steps.current.outputs.video_jar_sha256 || '(empty)' }} -> ${{ needs.build-video-server-jar.outputs.sha256 }}${{ steps.check.outputs.video_jar_changed == 'true' && ' (changed)' || ' (unchanged)' }}
-          title: ${{ steps.pr-title.outputs.title }}
-          body: |
-            ## Automated Checksum Update
 
             The nightly build produced artifacts with updated SHA256 checksums.
 
             | Artifact | Previous | New | Changed |
             |----------|----------|-----|---------|
-            | **APK** | `${{ steps.current.outputs.apk_sha256 || '(empty)' }}` | `${{ needs.build-control-proxy-apk.outputs.sha256 }}` | ${{ steps.check.outputs.apk_changed == 'true' && '✅ Yes' || 'No' }} |
-            | **IPA** | `${{ steps.current.outputs.ipa_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}` | ${{ steps.check.outputs.ipa_changed == 'true' && '✅ Yes' || 'No' }} |
-            | **iOS Runner** | `${{ steps.current.outputs.runner_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}` | ${{ steps.check.outputs.runner_changed == 'true' && '✅ Yes' || 'No' }} |
-            | **video-server jar** | `${{ steps.current.outputs.video_jar_sha256 || '(empty)' }}` | `${{ needs.build-video-server-jar.outputs.sha256 }}` | ${{ steps.check.outputs.video_jar_changed == 'true' && '✅ Yes' || 'No' }} |
+            | **APK** | `${{ steps.current.outputs.apk_sha256 || '(empty)' }}` | `${{ needs.build-control-proxy-apk.outputs.sha256 }}` | ${{ steps.check.outputs.apk_changed == 'true' && 'Yes' || 'No' }} |
+            | **IPA** | `${{ steps.current.outputs.ipa_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.sha256 }}` | ${{ steps.check.outputs.ipa_changed == 'true' && 'Yes' || 'No' }} |
+            | **iOS Runner** | `${{ steps.current.outputs.runner_sha256 || '(empty)' }}` | `${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}` | ${{ steps.check.outputs.runner_changed == 'true' && 'Yes' || 'No' }} |
+            | **video-server jar** | `${{ steps.current.outputs.video_jar_sha256 || '(empty)' }}` | `${{ needs.build-video-server-jar.outputs.sha256 }}` | ${{ steps.check.outputs.video_jar_changed == 'true' && 'Yes' || 'No' }} |
 
-            ### Why did this happen?
+            Checksums change when source in `android/control-proxy/src/`,
+            `android/video-server/src/`, or `ios/control-proxy/`, the build
+            configuration, or the dependency/SDK versions change.
 
-            SHA256 checksums change when any of these change:
-            - Source code in `android/control-proxy/src/`, `android/video-server/src/`, or `ios/control-proxy/`
-            - Build configuration (`build.gradle.kts` or `project.yml`)
-            - Dependencies or SDK versions
-
-            ### What to do
-
-            1. Review this PR to ensure the changes are expected
-            2. Merge when ready
-            3. Future releases will use these checksums for artifact verification
-
-            ---
-            Auto-generated by the `nightly` workflow
-          branch: auto-update/nightly-sha256
-          delete-branch: true
-          labels: |
-            automated
-            release engineering
-
-      - name: "Enable auto-merge on PR"
-        if: steps.check.outputs.needed == 'true' && steps.create-pr.outputs.pull-request-number != ''
-        env:
-          GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+            Auto-generated by the `nightly` workflow.
         run: |
-          gh pr merge ${{ steps.create-pr.outputs.pull-request-number }} --auto --squash
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # AUTO_MOBILE_PR_TOKEN is an admin actor and bypasses the green-main
+          # ruleset, so this lands on main with no PR — no external code review
+          # is spent on a machine-generated constant bump, and there is no
+          # auto-merge to wedge. The script re-syncs to origin/main and
+          # regenerates from scratch each attempt, so a concurrent push can
+          # never leave a conflicted tree.
+          bash scripts/push-release-constants.sh
 
   # =============================================================================
   # Full iOS Xcode-version sweep

@@ -92,6 +92,37 @@ done
 See the `github-cli` skill for the underlying commands, including review-thread resolution
 state, which REST does not expose.
 
+## Triage workflow
+
+1. Resolve the PR number and snapshot `headRefOid`, `baseRefOid`, mergeability, and merge
+   state. Use that SHA for every subsequent query. An empty legacy combined status is
+   inconclusive, not green.
+2. Collect `gh pr checks <pr> --json name,state,bucket,link,workflow` plus paginated
+   `repos/<owner>/<repo>/commits/<head-sha>/check-runs`. Branch on `bucket`: only `fail` is a
+   failure — `skipping` and `cancel` are not. Flag duplicate check names with different
+   conclusions on the same head (a cancelled older run beside a successful newer one); the
+   stale one is what parks automerge.
+3. Enumerate runs for that head SHA, then each run's jobs. Ignore runs for older SHAs.
+   Queued and in-progress jobs stay pending — they are never implicitly green.
+4. For a completed failed job: `gh run view <run-id> --job <job-id> --log-failed`, or
+   `gh api repos/<owner>/<repo>/actions/jobs/<job-id>/logs` — the latter works as soon as
+   that job finishes, even while sibling jobs still run, so it does not wait on the slowest
+   leg. For a job still executing, `gh api .../actions/jobs/<job-id>` returns per-step status
+   naming the running or failed step. `gh api --follow` does not exist; use `--paginate`.
+5. If the log is truncated or lacks the failure body, list the run's artifacts and read the
+   relevant one. If `gh run download` is unauthorized, state that exact blocker — do not
+   infer a root cause from partial evidence.
+6. Classify every red result as PR-caused, pre-existing on main, transient/infrastructure, or
+   unproven, grounded in the job log, the changed paths, and current `origin/main`. Re-run a
+   job only when the evidence supports transience. Never change code for an unrelated or
+   unproven failure.
+7. Reproduce a PR-caused failure locally with the narrowest authoritative command.
+8. After any push, restart at step 1 — every check, thread, and comment was scoped to the
+   previous SHA.
+
+For PR discussion and review-thread triage, use `github-pr-feedback`; for the underlying gh
+and GraphQL mechanics, `github-cli`.
+
 ## Additional Analysis Steps
 
 After running the bash script above, continue with these analysis steps:
@@ -134,6 +165,10 @@ query($owner:String!,$repo:String!,$pr:Int!){
 ```
 
 `isOutdated` only means the anchored line moved — not that the finding was addressed.
+
+For the full ledger — all four paginated feedback surfaces, disposition vocabulary, and the
+conditions under which a thread may be resolved — use the `github-pr-feedback` skill rather
+than hand-rolling it here.
 
 **Analyze comments**:
 - Identify unresolved feedback

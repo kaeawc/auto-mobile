@@ -132,6 +132,7 @@ not visible even though they are present in the shade.
 
 ### Workflow Skills
 - check-ci: Inspect PR checks, fetch failing logs, reproduce likely failures locally, and summarize next steps. Path: `skills/check-ci/SKILL.md`.
+- github-pr-feedback: Collect every PR discussion and review thread, triage it, and safely resolve feedback after verified fixes without posting comments. Path: `skills/github-pr-feedback/SKILL.md`.
 - dead-code: Detect and remove dead code using repo scripts and targeted validation. Path: `skills/dead-code/SKILL.md`.
 - observe: Inspect the current connected device state through AutoMobile observation tooling. Path: `skills/observe/SKILL.md`.
 - test: Run targeted or full test suites with the narrowest relevant command first. Path: `skills/test/SKILL.md`.

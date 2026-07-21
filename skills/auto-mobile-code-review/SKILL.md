@@ -76,6 +76,14 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
 When a check is red, pull that job's log rather than the whole run — a finished job's log is
 readable while the rest of the run is still going. See the `github-cli` skill.
 
+Then **classify each red result before treating it as a finding**: PR-caused, pre-existing on
+main, transient/infrastructure, or unproven. Ground it in the job log, the changed paths, and
+current `origin/main`. A failing check on a subsystem the diff never touches is usually not
+this PR's, and reporting it as such wastes the author's time — but "not this PR's" still
+belongs in the summary. Never recommend a code change for an unrelated or unproven failure.
+Also flag the same check name appearing twice on the head SHA with different conclusions: a
+stale cancelled run beside a fresh green one is what silently parks automerge.
+
 ## Step 2 — Scope and size the diff
 
 - `git fetch origin main` first — always review against **latest main**, not a stale base.
@@ -361,17 +369,25 @@ TS layer routes is a real bug), and plan/criticalSection execution resolves via
 When the argument names a PR **we** authored and are actively iterating on, the review is
 part of a cycle rather than a one-shot read. In that mode only:
 
-1. Load the `github-cli` skill for the exact commands.
-2. Read every review thread with its resolution state (GraphQL `reviewThreads`, since REST
-   does not expose `isResolved`), plus failing checks. Prefer per-job logs
-   (`gh api …/actions/jobs/<id>/logs`) — a finished job's log is readable while the rest of
-   the run is still going. `skipping` and `cancel` buckets are not failures.
-3. Triage each unresolved thread against the code. Codex bot findings carry a `P1`/`P2`
-   badge; P1 claims to block. Verify the mechanism yourself before acting — and equally,
-   before dismissing.
-4. Fix what's real. Then **resolve** the thread (`resolveReviewThread`) once the fix is
-   pushed. If a finding doesn't apply, reply in-thread with the reason and resolve it.
-   Never resolve a thread you haven't actually addressed.
+1. Use the `github-pr-feedback` skill to build the feedback ledger, and `check-ci` for
+   workflow state. Do not hand-roll either — feedback lives on **four** separate paginated
+   surfaces (conversation comments, review submissions, inline comments, and GraphQL review
+   threads), and only the last carries resolution state.
+2. Scope everything to the PR's `headRefOid`. Record it. Checks, threads, and comments are
+   all relative to the SHA they were made against, so after any push you must re-collect from
+   the new head before resolving anything or calling CI green.
+3. Triage each unresolved thread against the code, with a disposition per the ledger: `fix`,
+   `already addressed`, `not actionable`, `duplicate`, `ambiguous`, or `out of scope`. Codex
+   bot findings carry a `P1`/`P2` badge; P1 claims to block. Verify the mechanism yourself
+   before acting — and equally, before dismissing. An `isOutdated` thread is a prompt to
+   check whether the current head fixed the underlying behavior, not a reason to discard it.
+4. Fix what's real, then **resolve** the thread (`resolveReviewThread`) only once *all* of
+   these hold: the fix is committed **and pushed**, targeted validation passed, the fresh PR
+   head still contains the fix, the PR is open and authored by the authenticated user
+   (`gh api user -q .login`), and the resolution directly answers *that* thread. Leave
+   ambiguous, conflicting, or out-of-scope threads unresolved and say why. If the PR is
+   already merged or closed, treat unresolved threads as historical dispositions — do not
+   push, resolve, or re-run without asking first.
 5. Run the lenses as usual. Report their findings to the user — do **not** post them as
    review comments. Your own findings are for the session; only the *existing* threads get
    resolved.

@@ -39,11 +39,11 @@ Two phases are hard STOP gates; do not cross them without the stated condition.
 6. **PR.** Verify isolation with `git diff --name-only origin/main...HEAD` (intended paths
    only). Create the PR with the repo template if present, linking `Closes #<n>`.
    Do not enable auto-merge yet.
-7. **Review (triage).** Run `auto-mobile-code-review`; spawn three review lenses
-   (regression, test adequacy, API/interface contract) given the diff + criteria;
-   read all PR/inline comments and failing CI (`check-ci`). Triage each finding —
-   fix confirmed, reject artifacts with a reason, defer out-of-scope. Never blanket
-   "address all"; never grow scope to satisfy a suggestion.
+7. **Review (triage).** Run `auto-mobile-code-review` in follow-through mode. It owns the
+   diff-sized review lenses, the full PR/thread feedback ledger (`github-pr-feedback`), and
+   exact-head CI triage (`check-ci`). Triage each finding — fix confirmed, reject artifacts
+   with a reason, defer out-of-scope. Never blanket "address all"; never grow scope to
+   satisfy a suggestion.
 8. **Merge (conditional).** Push all review edits first; only then, on green CI,
    touch auto-merge. Auto-merge only low-risk changes; for DB/migration/runner/
    schema surfaces, STOP and hand the merge decision to the user.

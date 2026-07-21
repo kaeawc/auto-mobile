@@ -15,6 +15,28 @@ Use `gh` for GitHub work in this repo. Treat this as a shared dependency for
 - When command output is long, write it to `scratch/` and summarize. Job logs are ~100KB+
   each; never let one into the conversation whole.
 
+## PR feedback: four separate surfaces
+
+There is no single endpoint that returns all PR feedback. Collect all four, each paginated,
+or you will miss entire categories:
+
+```bash
+# 1. conversation comments (the PR timeline)
+gh api --paginate "repos/kaeawc/auto-mobile/issues/<PR>/comments?per_page=100"
+# 2. review submissions (approve / request-changes bodies)
+gh api --paginate "repos/kaeawc/auto-mobile/pulls/<PR>/reviews?per_page=100"
+# 3. inline comments (flat, no resolution state)
+gh api --paginate "repos/kaeawc/auto-mobile/pulls/<PR>/comments?per_page=100"
+# 4. review threads (the only source of resolution state) — see below
+```
+
+Scope everything to the PR's `headRefOid`. After any push, re-collect from the new head:
+checks, threads, and comments are all scoped to the SHA they were made against.
+
+For the full triage workflow — the action ledger, disposition vocabulary, and the conditions
+under which a thread may be resolved — use the `github-pr-feedback` skill. This section is
+just the mechanics.
+
 ## Review threads: reading resolution state
 
 `GET /pulls/{n}/comments` (and `gh pr view --json comments`) returns comment bodies but
@@ -33,6 +55,21 @@ query($owner:String!,$repo:String!,$pr:Int!){
   --jq '.data.repository.pullRequest.reviewThreads.nodes[]
         | select(.isResolved|not)
         | "\(.id)\t\(.path):\(.line)\t\(.comments.nodes[0].author.login)"'
+```
+
+`first: 100` is **not** pagination — a PR with more than 100 threads truncates silently, with
+no error. When a PR is large, page it properly:
+
+```bash
+gh api graphql --paginate -f query='
+query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){
+    pullRequest(number:$pr){
+      reviewThreads(first:100, after:$endCursor){
+        pageInfo{ hasNextPage endCursor }
+        nodes{ id isResolved isOutdated path line originalLine diffSide
+          comments(first:20){ nodes{ author{login} body url createdAt } } } } } } }' \
+  -F owner=kaeawc -F repo=auto-mobile -F pr=<PR>
 ```
 
 `isOutdated` means the anchored line has since changed — it does **not** mean the finding
@@ -82,6 +119,19 @@ gh pr checks <PR> --json name,state,bucket,link
 A `cancelled` check on the head SHA is usually a superseded run from a rapid push, not a
 defect — but it can still wedge the `green-main` ruleset, in which case re-run that run
 rather than debugging the code.
+
+Cross-check against the head SHA's check-runs, which is where duplicates show up:
+
+```bash
+gh api --paginate "repos/kaeawc/auto-mobile/commits/<HEAD_SHA>/check-runs?per_page=100" \
+  --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.completed_at)"' \
+  | sort
+```
+
+Watch for the **same check name appearing twice with different conclusions** — typically a
+cancelled older run alongside a successful newer one. Take the newest; the stale one is what
+parks automerge. An empty legacy combined status is *inconclusive*, not green, and a
+`queued`/`in_progress` job is never implicitly green.
 
 ## Actions: runs, jobs, and logs
 
@@ -136,7 +186,21 @@ grep -nE '##\[error\]|FAIL|✗|Error:|error:' scratch/job-<JOB_ID>.log | head -4
 ```
 
 `##[error]` is the Actions-native failure marker and is the highest-signal pattern.
-`gh run view <RUN_ID> --log-failed` also works, but only once the **whole run** is finished.
+`gh run view <RUN_ID> --log-failed` also works, but only once the **whole run** is finished;
+`gh run view <RUN_ID> --job <JOB_ID> --log-failed` narrows it to one job.
+
+`gh api --follow` does **not** exist in the installed CLI — use `--paginate`. If console
+output is truncated or the failure body isn't in the log, list the run's artifacts and read
+the relevant log artifact. When `gh run download` returns an authorization error, report that
+exact blocker rather than inferring a root cause from partial evidence.
+
+### Classify before you fix
+
+Every red result is one of: **PR-caused**, **pre-existing on main**, **transient or
+infrastructure**, or **unproven**. Ground the call in the job log, the changed paths, and
+current `origin/main` — a failing check on an unrelated subsystem is usually not this PR's.
+Re-run a job only when the evidence says transient. Never change code for an unrelated or
+unproven failure.
 
 ## Portability
 

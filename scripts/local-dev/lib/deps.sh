@@ -298,6 +298,7 @@ ensure_dependencies() {
 
   log_info "Running install.sh --preset local-dev..."
   if ! bash "${PROJECT_ROOT}/scripts/install.sh" \
+    --contributor \
     --preset local-dev \
     --non-interactive \
     --env-file "${env_file}"; then

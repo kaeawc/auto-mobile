@@ -473,7 +473,7 @@ jobs:
           set -uo pipefail
           mkdir -p ci-logs
           set +e
-          bash ./scripts/install.sh --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
+          bash ./scripts/install.sh --contributor --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
           install_status=${PIPESTATUS[0]}
           set -e
           echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"

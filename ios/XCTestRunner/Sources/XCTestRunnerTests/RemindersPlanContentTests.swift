@@ -792,6 +792,8 @@ private func assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(
     }
 
     let jobBlock = workflow[jobRange.lowerBound ..< runRange.lowerBound]
+    // Deliberately exact: this is a boolean switch, and "true" is the only value
+    // that means "skip the release-IPA download". There is no narrower property.
     XCTAssertTrue(
         jobBlock.contains("AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: \"true\""),
         "The PR XCTestRunner job must use the locally built CtrlProxy artifacts instead of downloading a release IPA",
@@ -873,6 +875,9 @@ private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
     let nextStepRange = workflow[runRange.upperBound...].range(of: "\n      - name:")
     let runBlockEnd = nextStepRange?.lowerBound ?? workflow.endIndex
     let runBlock = workflow[runRange.lowerBound ..< runBlockEnd]
+    // Deliberately exact: 10 minutes is the number
+    // `assertRemindersTimeoutFitsWorkflowStepCap` computes its 600s budget
+    // against. A looser matcher would let the two drift apart silently.
     XCTAssertTrue(
         runBlock.contains("timeout-minutes: 10"),
         "\(runStepName) must keep the Reminders step cap aligned with the retry timeout guard",
@@ -935,6 +940,9 @@ private func assertWorkflowRetriesRemindersRunOnce(
     line: UInt = #line
 ) {
     let runBlock = workflowStepBlock(workflow, stepName: runStepName, file: file, line: line)
+    // Deliberately exact: the whole point of this assertion is that the retry
+    // budget is exactly one. `2` or `0` are both regressions, so any looser
+    // matcher (prefix/contains) would defeat the test rather than harden it.
     XCTAssertTrue(
         stepBlockHasActiveEnvValue(runBlock, key: "AUTOMOBILE_TEST_RETRY_COUNT", value: "\"1\""),
         "\(runStepName) must enable exactly one bounded retry for cold first-leg bring-up flakes",
@@ -951,12 +959,9 @@ private func assertWorkflowRunsGuardedRemindersTest(
 ) {
     let runBlock = workflowStepBlock(workflow, stepName: runStepName, file: file, line: line)
     XCTAssertTrue(
-        stepBlockHasActiveTopLevelValue(
-            runBlock,
-            key: "run",
-            value: "./scripts/ci/run-reminders-launch-plan-tests.sh"
-        ),
-        "\(runStepName) must fail when the filtered Reminders test command executes zero XCTest cases",
+        stepBlockRunsScript(runBlock, script: "./scripts/ci/run-reminders-launch-plan-tests.sh"),
+        "\(runStepName) must run the guarded Reminders runner, which fails when the filtered "
+            + "Reminders test command executes zero XCTest cases",
         file: file,
         line: line
     )
@@ -1072,8 +1077,25 @@ private func stepBlockActiveTopLevelValue(_ stepBlock: Substring, key: String) -
     return nil
 }
 
-private func stepBlockHasActiveTopLevelValue(_ stepBlock: Substring, key: String, value: String) -> Bool {
-    return stepBlockActiveTopLevelValue(stepBlock, key: key) == value
+/// Whether a step's `run:` invokes `script` as its command.
+///
+/// Pinning the whole `run:` value by equality was a landmine (#4102): adding any
+/// flag or argument to the invocation broke every call site at once, even though
+/// the property under test -- that this step shells out to the guarded Reminders
+/// runner -- was unchanged. That is the same shape of false failure #4088 caused
+/// for `if:` conditions.
+///
+/// So match the invocation instead of the literal: the script must be the *first*
+/// token of the command. Arguments stay free to come and go, while repointing the
+/// step at a different script, or merely mentioning this script as an argument to
+/// something else, still fails. Callers that care about a specific argument should
+/// assert that argument explicitly rather than widening this matcher.
+///
+/// A multi-line `run: |` block is deliberately not accepted: these are
+/// single-command steps, and the value of a block scalar is `|`, not a command.
+private func stepBlockRunsScript(_ stepBlock: Substring, script: String) -> Bool {
+    guard let command = stepBlockActiveTopLevelValue(stepBlock, key: "run") else { return false }
+    return command.split(separator: " ", maxSplits: 1).first.map(String.init) == script
 }
 
 /// Whether a step's `if:` guarantees cancellation skips it.

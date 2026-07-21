@@ -8,6 +8,8 @@ SCRIPT="scripts/ios/boot-simulator.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIG_PATH="$PATH"
+  # Exercise the retry path without real sleeps (#4095).
+  export BOOT_SIMULATOR_RETRY_DELAY_SECONDS=0
 }
 
 teardown() {
@@ -127,6 +129,67 @@ SCRIPT
   [ "$status" -eq 0 ]
   [[ "$output" == *"HEALTHY-UDID"* ]]
   [[ "$output" != *"failed to boot"* ]]
+}
+
+@test "retries a wedged boot and succeeds on the second attempt (#4095)" {
+  # A wedge is usually transient runner state: the first bootstatus leaves the
+  # device Shutdown, the retry brings it up. The build must not go red for that.
+  cat > "${MOCK_BIN}/state" <<'STATE'
+Shutdown
+STATE
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+STATE_FILE="$(dirname "$0")/state"
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.5"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.5.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo "{\"devices\":{\"com.apple.CoreSimulator.SimRuntime.iOS-26-5\":[{\"name\":\"iPhone 17 Pro\",\"udid\":\"RETRY-UDID\",\"state\":\"$(cat "$STATE_FILE")\"}]}}"
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  # First attempt leaves it Shutdown; after the shutdown/erase cycle it comes up.
+  if [ "$(cat "$STATE_FILE")" = "Shutdown" ]; then
+    echo "[..] Status=4294967295, isTerminal=YES, Elapsed=32:06."
+    echo "	Finished"
+  fi
+  exit 0
+elif [ "$1" = "simctl" ] && [ "$2" = "erase" ]; then
+  echo "Booted" > "$STATE_FILE"
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --ios-version 26.5
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RETRY-UDID"* ]]
+  [[ "$output" == *"boot attempt 1/2 failed"* ]]
+  [[ "$output" == *"Booted: "* ]]
+}
+
+@test "gives up after the bounded attempt budget and reports the last state" {
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.5"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.5.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"name":"iPhone 17 Pro","udid":"DEAD-UDID","state":"Shutdown"}]}}'
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  exit 0
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  BOOT_SIMULATOR_MAX_ATTEMPTS=3 run bash "$SCRIPT" --ios-version 26.5
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"after 3 attempt(s)"* ]]
+  [[ "$output" == *"last state=Shutdown"* ]]
+  [[ "$output" == *"boot attempt 3/3 failed"* ]]
 }
 
 @test "fails when bootstatus exits 0 but the device never reaches Booted (wedge)" {

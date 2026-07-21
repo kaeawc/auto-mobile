@@ -29,10 +29,17 @@ DRY_RUN=false
 DRY_RUN_LOG=()
 NON_INTERACTIVE=false
 RECORD_MODE=false
+CONTRIBUTOR_MODE=false
 PRESET=""
 CONFIGURE_MCP_CLIENTS=false
 RUN_NPM_INSTALL=false
 ENV_FILE=""
+INVOCATION_DIR="$(pwd)"
+INVOKED_IN_GIT_REPO=false
+MCP_CONFIG_SCOPE=""
+MCP_PROJECT_ROOT=""
+INSTALL_STEPS=()
+CURRENT_INSTALL_STEP=0
 
 # Gum bundling configuration
 GUM_VERSION="0.17.0"
@@ -87,6 +94,92 @@ fi
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Detect the Git project containing the directory where the installer was run.
+# This is intentionally separate from PROJECT_ROOT, which is used to locate
+# this repository when contributors run the script from a checkout.
+detect_invocation_project() {
+    INVOKED_IN_GIT_REPO=false
+    MCP_PROJECT_ROOT=""
+
+    if ! command -v git >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local git_root
+    if git_root=$(git -C "${INVOCATION_DIR}" rev-parse --show-toplevel 2>/dev/null); then
+        INVOKED_IN_GIT_REPO=true
+        MCP_PROJECT_ROOT="${git_root}"
+    fi
+}
+
+# Choose where the user's MCP configuration belongs before selecting agents.
+select_mcp_config_scope() {
+    # Dry-run and record mode use the same safe defaults as non-interactive
+    # installs so neither mode waits for a scope-selection prompt.
+    if [[ "${NON_INTERACTIVE}" == "true" || "${DRY_RUN}" == "true" || "${RECORD_MODE}" == "true" ]]; then
+        if [[ "${INVOKED_IN_GIT_REPO}" == "true" ]]; then
+            MCP_CONFIG_SCOPE="project"
+        else
+            MCP_CONFIG_SCOPE="global"
+        fi
+        return 0
+    fi
+
+    if [[ "${INVOKED_IN_GIT_REPO}" == "true" ]]; then
+        local choice
+        choice=$(printf '%s\n' \
+            "Project — configure this Git project (${MCP_PROJECT_ROOT})" \
+            "Global — configure all of your projects" | \
+            command gum choose --header "Where should AutoMobile be configured?"
+            true)
+
+        if [[ "${choice}" == Project* ]]; then
+            MCP_CONFIG_SCOPE="project"
+        elif [[ "${choice}" == Global* ]]; then
+            MCP_CONFIG_SCOPE="global"
+        else
+            echo ""
+            echo "Installation cancelled."
+            exit 130
+        fi
+        return 0
+    fi
+
+    if gum confirm "This command was not run inside a Git project. Install AutoMobile globally?" --default=false; then
+        MCP_CONFIG_SCOPE="global"
+        return 0
+    fi
+
+    log_info "Run this installer from within a Git project to configure AutoMobile for that project."
+    exit 0
+}
+
+# Keep the installer plan visible so users can see both what will happen and
+# which phase is currently running.
+set_installation_steps() {
+    INSTALL_STEPS=("$@")
+}
+
+show_installation_progress() {
+    local current_step="$1"
+    CURRENT_INSTALL_STEP="${current_step}"
+
+    echo ""
+    gum style --bold "Installation plan"
+
+    local index=1
+    local step
+    for step in "${INSTALL_STEPS[@]}"; do
+        if [[ "${index}" -eq "${CURRENT_INSTALL_STEP}" ]]; then
+            gum style --bold --foreground 212 "  ${index}. → ${step}"
+        else
+            gum style --faint "  ${index}.   ${step}"
+        fi
+        index=$((index + 1))
+    done
+    echo ""
 }
 
 # ============================================================================
@@ -167,7 +260,11 @@ android_platform_install_advice() {
     local libs_toml="$2"
 
     local compile_sdk
-    compile_sdk=$(read_required_compile_sdk "${libs_toml}") || return 1
+    if compile_sdk=$(read_required_compile_sdk "${libs_toml}"); then
+        :
+    else
+        return 1
+    fi
 
     if android_platform_installed "${android_home}" "${compile_sdk}"; then
         return 0
@@ -326,22 +423,25 @@ Usage: ./scripts/install.sh [OPTIONS]
 Options:
   --dry-run           Show what would happen without making changes
   --record-mode       Auto-select defaults and run (for demo recording)
-  --preset NAME       Use preset configuration (minimal, development, local-dev)
+  --preset NAME       Use an installation preset (minimal; contributor-only: development, local-dev)
+  --contributor       Use contributor defaults (automatically selects the development preset)
   --non-interactive   Skip interactive prompts, use defaults
   --env-file PATH     Write environment state (PATH, NVM_DIR, ANDROID_HOME) to file
   -h, --help          Show this help message
 
 Presets:
-  minimal      - CLI + MCP client configuration only
-  development  - Full setup with debug flags and IDE plugin (if available)
-  local-dev    - Dependencies for hot-reload development (bun install)
+  minimal      - Configure an installed MCP client to run AutoMobile (default)
+
+Contributor presets (require --contributor):
+  development  - Install contributor tools, enable debug logging, and configure MCP clients
+  local-dev    - Install dependencies for a local checkout and hot reload
 
 Examples:
   ./scripts/install.sh --dry-run
   ./scripts/install.sh --record-mode
-  ./scripts/install.sh --preset development
-  ./scripts/install.sh --preset development --non-interactive
-  ./scripts/install.sh --preset local-dev --non-interactive --env-file /tmp/env
+  ./scripts/install.sh
+  ./scripts/install.sh --contributor
+  ./scripts/install.sh --contributor --preset local-dev --non-interactive --env-file /tmp/env
 
 EOF
 }
@@ -369,6 +469,10 @@ parse_args() {
                 RECORD_MODE=true
                 shift
                 ;;
+            --contributor)
+                CONTRIBUTOR_MODE=true
+                shift
+                ;;
             --env-file)
                 if [[ -z "${2:-}" ]]; then
                     plain_error "Missing value for --env-file"
@@ -389,7 +493,8 @@ parse_args() {
         esac
     done
 
-    # Validate preset if provided
+    # Validate preset if provided. Development presets are intentionally gated so
+    # the public installer stays focused on the end-user setup path.
     if [[ -n "${PRESET}" ]]; then
         case "${PRESET}" in
             minimal|development|local-dev)
@@ -399,6 +504,15 @@ parse_args() {
                 exit 1
                 ;;
         esac
+
+        if [[ ( "${PRESET}" == "development" || "${PRESET}" == "local-dev" ) && "${CONTRIBUTOR_MODE}" != "true" ]]; then
+            plain_error "The ${PRESET} preset is for contributors. Re-run with --contributor."
+            exit 1
+        fi
+    elif [[ "${CONTRIBUTOR_MODE}" == "true" ]]; then
+        # Contributors should not need to select a development route from an
+        # end-user menu; the flag itself opts into the full contributor setup.
+        PRESET="development"
     fi
 }
 
@@ -1247,9 +1361,9 @@ is_claude_code_installed() {
 is_claude_desktop_installed() {
     local os
     os=$(detect_os)
-    if [[ "${os}" == "macos" ]]; then
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" && "${os}" == "macos" ]]; then
         [[ -d "${HOME}/Library/Application Support/Claude" ]] || [[ -d "/Applications/Claude.app" ]]
-    elif [[ "${os}" == "linux" ]]; then
+    elif [[ "${MCP_CONFIG_SCOPE}" != "project" && "${os}" == "linux" ]]; then
         [[ -d "${HOME}/.config/Claude" ]]
     else
         return 1
@@ -1282,46 +1396,14 @@ is_vscode_installed() {
 
 # Check if Codex (OpenAI) is installed
 is_codex_installed() {
-    [[ -d "${HOME}/.codex" ]] || command_exists codex
+    [[ -d "${HOME}/.codex" ]] || [[ -d "${MCP_PROJECT_ROOT}/.codex" ]] || command_exists codex
 }
 
-# Check if Firebender IntelliJ plugin is installed
-is_firebender_installed() {
-    # Check for Firebender config directory
-    if [[ -d "${HOME}/.firebender" ]]; then
-        return 0
-    fi
-
-    # Check for Firebender plugin in IntelliJ-based IDEs
-    local plugin_dirs=(
-        "${HOME}/Library/Application Support/Google/AndroidStudio"*"/plugins"
-        "${HOME}/Library/Application Support/JetBrains/IntelliJIdea"*"/plugins"
-        "${HOME}/Library/Application Support/JetBrains/IdeaIC"*"/plugins"
-        "${HOME}/.local/share/Google/AndroidStudio"*"/plugins"
-        "${HOME}/.local/share/JetBrains/IntelliJIdea"*"/plugins"
-        "${HOME}/.local/share/JetBrains/IdeaIC"*"/plugins"
-    )
-
-    # Use ripgrep to search for firebender in plugin directories
-    for pattern in "${plugin_dirs[@]}"; do
-        # shellcheck disable=SC2086 # Glob expansion is intentional
-        for dir in ${pattern}; do
-            if [[ -d "${dir}" ]]; then
-                if rg -q -i "firebender" "${dir}" 2>/dev/null; then
-                    return 0
-                fi
-                # Also check directory names using glob pattern
-                # shellcheck disable=SC2231 # Glob in loop is intentional
-                for plugin in "${dir}"/*[Ff]irebender* "${dir}"/*[Ff]ire[Bb]ender*; do
-                    if [[ -e "${plugin}" ]]; then
-                        return 0
-                    fi
-                done
-            fi
-        done
-    done
-
-    return 1
+# A user-scoped Codex configuration is useful only when Codex itself is
+# available to that user. A project .codex directory alone should expose the
+# project choice, not create an unrelated user configuration.
+is_codex_user_installed() {
+    [[ -d "${HOME}/.codex" ]] || command_exists codex
 }
 
 # Check if Goose is installed
@@ -1350,39 +1432,43 @@ detect_mcp_clients() {
 
     MCP_CLIENT_LIST=()
 
-    # Claude Code - uses ~/.claude.json for global, .mcp.json for project
-    if [[ -d "${HOME}/.claude" ]]; then
-        add_mcp_client "Claude Code (Global)" "${HOME}/.claude.json" "json" "global"
+    # Claude Code uses ~/.claude.json for user scope and .mcp.json for the
+    # shared project scope. .claude/settings*.json configures Claude behavior,
+    # not MCP servers, so the installer deliberately leaves those files alone.
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && is_claude_code_installed; then
+        add_mcp_client "Claude Code (User)" "${HOME}/.claude.json" "json" "global"
     fi
-    # Always offer project-local option if in a directory
-    if [[ -d "${PROJECT_ROOT}" ]]; then
-        add_mcp_client "Claude Code (Project)" "${PROJECT_ROOT}/.mcp.json" "json" "local"
+    if [[ "${MCP_CONFIG_SCOPE}" == "project" ]] && [[ -n "${MCP_PROJECT_ROOT}" ]] && is_claude_code_installed; then
+        add_mcp_client "Claude Code (Project)" "${MCP_PROJECT_ROOT}/.mcp.json" "json" "local"
     fi
 
-    # Claude Desktop - platform-specific
-    local claude_desktop_config=""
-    if [[ "${os}" == "macos" ]]; then
-        claude_desktop_config="${HOME}/Library/Application Support/Claude/claude_desktop_config.json"
-        if [[ -d "${HOME}/Library/Application Support/Claude" ]] || [[ -f "${claude_desktop_config}" ]]; then
-            add_mcp_client "Claude Desktop" "${claude_desktop_config}" "json" "global"
-        fi
-    elif [[ "${os}" == "linux" ]]; then
-        claude_desktop_config="${HOME}/.config/Claude/claude_desktop_config.json"
-        if [[ -d "${HOME}/.config/Claude" ]] || [[ -f "${claude_desktop_config}" ]]; then
-            add_mcp_client "Claude Desktop" "${claude_desktop_config}" "json" "global"
+    # Claude Desktop has only a user-scoped configuration file, so it must not
+    # appear after the user selected project-only setup.
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]]; then
+        local claude_desktop_config=""
+        if [[ "${os}" == "macos" ]]; then
+            claude_desktop_config="${HOME}/Library/Application Support/Claude/claude_desktop_config.json"
+            if [[ -d "${HOME}/Library/Application Support/Claude" ]] || [[ -f "${claude_desktop_config}" ]]; then
+                add_mcp_client "Claude Desktop" "${claude_desktop_config}" "json" "global"
+            fi
+        elif [[ "${os}" == "linux" ]]; then
+            claude_desktop_config="${HOME}/.config/Claude/claude_desktop_config.json"
+            if [[ -d "${HOME}/.config/Claude" ]] || [[ -f "${claude_desktop_config}" ]]; then
+                add_mcp_client "Claude Desktop" "${claude_desktop_config}" "json" "global"
+            fi
         fi
     fi
 
     # Cursor - ~/.cursor/mcp.json for global, .cursor/mcp.json for project
-    if [[ -d "${HOME}/.cursor" ]]; then
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && [[ -d "${HOME}/.cursor" ]]; then
         add_mcp_client "Cursor (Global)" "${HOME}/.cursor/mcp.json" "json" "global"
     fi
-    if [[ -d "${PROJECT_ROOT}" ]]; then
-        add_mcp_client "Cursor (Project)" "${PROJECT_ROOT}/.cursor/mcp.json" "json" "local"
+    if [[ "${MCP_CONFIG_SCOPE}" == "project" ]] && [[ -n "${MCP_PROJECT_ROOT}" ]] && { [[ -d "${HOME}/.cursor" ]] || [[ -d "${MCP_PROJECT_ROOT}/.cursor" ]] || command -v cursor >/dev/null 2>&1; }; then
+        add_mcp_client "Cursor (Project)" "${MCP_PROJECT_ROOT}/.cursor/mcp.json" "json" "local"
     fi
 
     # Windsurf (Codeium) - ~/.codeium/windsurf/mcp_config.json
-    if [[ -d "${HOME}/.codeium/windsurf" ]] || [[ -d "${HOME}/.codeium" ]]; then
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && { [[ -d "${HOME}/.codeium/windsurf" ]] || [[ -d "${HOME}/.codeium" ]]; }; then
         add_mcp_client "Windsurf" "${HOME}/.codeium/windsurf/mcp_config.json" "json" "global"
     fi
 
@@ -1396,29 +1482,27 @@ detect_mcp_clients() {
         vscode_installed=true
     fi
 
-    if [[ "${vscode_installed}" == "true" ]]; then
-        if [[ -d "${PROJECT_ROOT}" ]]; then
-            add_mcp_client "VS Code (Project)" "${PROJECT_ROOT}/.vscode/mcp.json" "json" "local"
-        fi
+    if [[ "${vscode_installed}" == "true" && "${MCP_CONFIG_SCOPE}" == "project" && -n "${MCP_PROJECT_ROOT}" ]]; then
+        add_mcp_client "VS Code (Project)" "${MCP_PROJECT_ROOT}/.vscode/mcp.json" "json" "local"
     fi
 
-    # Codex (OpenAI) - ~/.codex/config.toml (TOML format!)
-    if [[ -d "${HOME}/.codex" ]]; then
-        add_mcp_client "Codex" "${HOME}/.codex/config.toml" "toml" "global"
+    # Codex (OpenAI) supports both user and trusted project config layers.
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && is_codex_user_installed; then
+        add_mcp_client "Codex (User)" "${HOME}/.codex/config.toml" "toml" "global"
     fi
-
-    # Firebender - ~/.firebender/firebender.json for global, firebender.json for project
-    if [[ -d "${HOME}/.firebender" ]]; then
-        add_mcp_client "Firebender (Global)" "${HOME}/.firebender/firebender.json" "json" "global"
-    fi
-    if [[ -d "${PROJECT_ROOT}" ]]; then
-        add_mcp_client "Firebender (Project)" "${PROJECT_ROOT}/firebender.json" "json" "local"
+    if [[ "${MCP_CONFIG_SCOPE}" == "project" ]] && [[ -n "${MCP_PROJECT_ROOT}" ]] && is_codex_installed; then
+        add_mcp_client "Codex (Project)" "${MCP_PROJECT_ROOT}/.codex/config.toml" "toml" "local"
     fi
 
     # Goose - ~/.config/goose/config.yaml (YAML format!)
-    if [[ -d "${HOME}/.config/goose" ]]; then
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && [[ -d "${HOME}/.config/goose" ]]; then
         add_mcp_client "Goose" "${HOME}/.config/goose/config.yaml" "yaml" "global"
     fi
+
+    # Detection is informational: no available client is a valid result that
+    # the caller handles, rather than a failure under the installer's strict
+    # shell mode.
+    return 0
 }
 
 # Get list of detected client names for display
@@ -1431,6 +1515,13 @@ get_detected_client_names() {
 # Find client entry by name
 find_client_entry() {
     local name="$1"
+
+    # Bash 3 on macOS can treat an empty array expansion as unset under
+    # `set -u`; no detected clients is an expected lookup miss.
+    if [[ -z "${MCP_CLIENT_LIST[*]:-}" ]]; then
+        return 1
+    fi
+
     for entry in "${MCP_CLIENT_LIST[@]}"; do
         local entry_name
         entry_name=$(echo "${entry}" | cut -d'|' -f1)
@@ -1501,7 +1592,7 @@ select_mcp_clients() {
     local available_clients
     available_clients=$(get_detected_client_names)
 
-    if [[ -z "${available_clients}" ]]; then
+    if [[ -z "${available_clients}" && ( "${MCP_CONFIG_SCOPE}" == "project" || "${CLAUDE_CLI_INSTALLED}" != "true" ) ]]; then
         log_warn "No MCP clients detected. Manual configuration may be required."
         return 1
     fi
@@ -2097,8 +2188,25 @@ update_mcp_client_config() {
     # Reset terminal after colored output
     printf '%s' "${RESET}"
 
+    # A dry run must never create a config directory, a backup, or the config
+    # file itself. Keep this guard before every filesystem mutation below.
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        DRY_RUN_LOG+=("[DRY-RUN] Configure ${client_name}: ${config_path}")
+        log_info "[DRY-RUN] Would configure ${client_name}: ${config_path}"
+        return 0
+    fi
+
+    # Both interactive and non-interactive setup can create new scoped config
+    # files (notably .codex/config.toml). Calculate the parent now, but create
+    # it only after non-interactive selection or interactive confirmation.
+    local parent_dir
+    parent_dir=$(dirname "${config_path}")
+
     # In non-interactive mode, just apply
     if [[ "${NON_INTERACTIVE}" == "true" ]]; then
+        if [[ ! -d "${parent_dir}" ]]; then
+            mkdir -p "${parent_dir}"
+        fi
         backup_config "${config_path}"
         printf '%s\n' "${new_content}" > "${config_path}"
         log_info "${client_name} configured successfully"
@@ -2120,14 +2228,10 @@ update_mcp_client_config() {
     fi
 
     # Backup and write (skip confirmation since we already confirmed above)
-    backup_config "${config_path}"
-
-    # Create parent directory if needed
-    local parent_dir
-    parent_dir=$(dirname "${config_path}")
     if [[ ! -d "${parent_dir}" ]]; then
         mkdir -p "${parent_dir}"
     fi
+    backup_config "${config_path}"
 
     printf '%s\n' "${new_content}" > "${config_path}"
     log_info "${client_name} configured successfully"
@@ -2141,25 +2245,9 @@ configure_selected_mcp_clients() {
         return 0
     fi
 
-    # Determine which preset config to use
+    # The selected installation path determines the MCP configuration. Do not
+    # offer debug flags during an end-user install.
     local config_preset="${PRESET:-minimal}"
-    if [[ -z "${PRESET}" ]] && [[ "${NON_INTERACTIVE}" != "true" ]]; then
-        # Ask user which preset to use for MCP config
-        local preset_choice
-        preset_choice=$(gum choose \
-            "Minimal (basic setup)" \
-            "Development (debug flags enabled)" \
-            --header "Select configuration preset for MCP servers:")
-
-        case "${preset_choice}" in
-            "Minimal"*)
-                config_preset="minimal"
-                ;;
-            "Development"*)
-                config_preset="development"
-                ;;
-        esac
-    fi
 
     local auto_mobile_config_json
     auto_mobile_config_json=$(generate_auto_mobile_config "${config_preset}")
@@ -2168,7 +2256,7 @@ configure_selected_mcp_clients() {
     local auto_mobile_config_yaml
     auto_mobile_config_yaml=$(generate_auto_mobile_config_yaml "${config_preset}")
 
-    gum style --bold "Using ${config_preset} preset configuration"
+    gum style --bold "Configuring AutoMobile with the ${config_preset} setup"
     echo ""
 
     for client in "${SELECTED_MCP_CLIENTS[@]}"; do
@@ -3653,102 +3741,63 @@ select_preset() {
     local options=()
     local has_existing_config=false
 
-    # Check if any AI agent already has auto-mobile configured
-    if [[ "${CLAUDE_MARKETPLACE_INSTALLED}" == "true" ]]; then
-        has_existing_config=true
+    detect_mcp_clients
+    local available_clients
+    available_clients=$(get_detected_client_names)
+
+    if [[ -z "${available_clients}" ]]; then
+        if [[ "${MCP_CONFIG_SCOPE}" == "project" ]]; then
+            log_error "No supported project MCP configurations are available. Install Claude Code, Codex, Cursor, or VS Code, then run this installer again."
+        else
+            log_error "No supported MCP client was detected. Install one, then run this installer again."
+        fi
+        return 1
     fi
-    if [[ "${has_existing_config}" != "true" ]]; then
-        for agent in "Claude Code (Global)" "Claude Desktop" "Cursor" "Windsurf" "VS Code" "Codex" "Firebender" "Goose"; do
-            if client_base_has_config "${agent}"; then
-                has_existing_config=true
-                break
-            fi
-        done
-    fi
+
+    while IFS= read -r client; do
+        if client_has_auto_mobile "${client}"; then
+            has_existing_config=true
+            break
+        fi
+    done <<< "${available_clients}"
 
     # Keep current setup option first (only if there are existing configs)
     if [[ "${has_existing_config}" == "true" ]]; then
-        options+=("Keep current AI agent setup")
+        options+=("Leave existing AutoMobile configurations unchanged")
     fi
 
-    # Claude marketplace option if Claude CLI is installed
-    if [[ "${CLAUDE_CLI_INSTALLED}" == "true" ]]; then
+    # The Claude Marketplace is user-scoped, so it is not offered for a
+    # project-only installation.
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" && "${CLAUDE_CLI_INSTALLED}" == "true" ]]; then
         if [[ "${CLAUDE_MARKETPLACE_INSTALLED}" == "true" ]]; then
-            options+=("Claude Marketplace (configured)")
+            options+=("Claude Marketplace — already configured")
         else
-            options+=("Claude Marketplace")
+            options+=("Claude Marketplace — install the AutoMobile plugin for Claude Code")
         fi
     fi
 
-    # AI Agent MCP client options - only show installed agents with config status
-    if is_claude_code_installed; then
-        if client_base_has_config "Claude Code (Global)"; then
-            options+=("Claude Code (configured)")
-        else
-            options+=("Claude Code")
+    while IFS= read -r client; do
+        local config_path
+        config_path=$(get_client_config_path "${client}")
+        local recommendation=""
+        if [[ "${client}" == "Claude Code"* || "${client}" == "Codex"* ]]; then
+            recommendation=" — recommended"
         fi
-    fi
-    if is_claude_desktop_installed; then
-        if client_base_has_config "Claude Desktop"; then
-            options+=("Claude Desktop (configured)")
-        else
-            options+=("Claude Desktop")
-        fi
-    fi
-    if is_cursor_installed; then
-        if client_base_has_config "Cursor"; then
-            options+=("Cursor (configured)")
-        else
-            options+=("Cursor")
-        fi
-    fi
-    if is_windsurf_installed; then
-        if client_base_has_config "Windsurf"; then
-            options+=("Windsurf (configured)")
-        else
-            options+=("Windsurf")
-        fi
-    fi
-    if is_vscode_installed; then
-        if client_base_has_config "VS Code"; then
-            options+=("VS Code (configured)")
-        else
-            options+=("VS Code")
-        fi
-    fi
-    if is_codex_installed; then
-        if client_base_has_config "Codex"; then
-            options+=("Codex (configured)")
-        else
-            options+=("Codex")
-        fi
-    fi
-    if is_firebender_installed; then
-        if client_base_has_config "Firebender"; then
-            options+=("Firebender (configured)")
-        else
-            options+=("Firebender")
-        fi
-    fi
-    if is_goose_installed; then
-        if client_base_has_config "Goose"; then
-            options+=("Goose (configured)")
-        else
-            options+=("Goose")
-        fi
-    fi
 
-    # Development option (red color via ANSI)
-    options+=($'\033[31mDevelopment\033[0m')
+        if client_has_auto_mobile "${client}"; then
+            options+=("${client}${recommendation} — already configured")
+        else
+            options+=("${client}${recommendation} — add AutoMobile to ${config_path}")
+        fi
+    done <<< "${available_clients}"
 
-    # In dry-run or record mode, auto-select Claude Marketplace for demo recording
+    # In dry-run or record mode, take the same safe path without interaction.
     if [[ "${DRY_RUN}" == "true" || "${RECORD_MODE}" == "true" ]]; then
-        gum style --bold "Select installation preset:"
-        sleep 0.3
-        echo ""
-        gum style --foreground 212 "> Claude Marketplace"
-        sleep 0.2
-        choice="Claude Marketplace"
+        if [[ "${MCP_CONFIG_SCOPE}" != "project" && "${CLAUDE_CLI_INSTALLED}" == "true" ]]; then
+            choice="Claude Marketplace"
+        else
+            choice=$(printf '%s\n' "${available_clients}" | head -1)
+        fi
     else
         choice=$(printf '%s\n' "${options[@]}" | gum filter --header "Select installation preset:" --placeholder "Type to filter...") || true
     fi
@@ -3761,7 +3810,7 @@ select_preset() {
     fi
 
     case "${choice}" in
-        "Keep current AI agent setup")
+        "Leave existing AutoMobile configurations unchanged")
             log_info "Keeping current AI agent setup"
             log_info "No changes necessary"
             exit 0
@@ -3771,17 +3820,12 @@ select_preset() {
             apply_preset "marketplace"
             return 0
             ;;
-        "Claude Code"*|"Claude Desktop"*|"Cursor"*|"Windsurf"*|"VS Code"*|"Codex"*|"Firebender"*|"Goose"*)
+        "Claude Code"*|"Claude Desktop"*|"Cursor"*|"Windsurf"*|"VS Code"*|"Codex"*|"Goose"*)
             # Configure specific AI agent
             PRESET="minimal"
             apply_preset "minimal"
             # Extract base client name - strip " (configured)" suffix if present
-            PRESET_CLIENT_FILTER="${choice% (configured)}"
-            return 0
-            ;;
-        *"Development"*)
-            PRESET="development"
-            apply_preset "development"
+            PRESET_CLIENT_FILTER="${choice%% —*}"
             return 0
             ;;
     esac
@@ -4044,19 +4088,37 @@ main() {
 
     echo ""
 
+    # Decide whether this run configures a Git project or user-wide agent
+    # settings before showing any agent-specific choices.
+    detect_invocation_project
+    set_installation_steps \
+        "Choose project or global setup" \
+        "Select AI agent configurations" \
+        "Prepare the Bun runtime" \
+        "Apply the selected AutoMobile configuration" \
+        "Offer optional video-recording support" \
+        "Configure optional device support" \
+        "Complete the selected integration"
+    show_installation_progress 1
+    select_mcp_config_scope
+
     # =========================================================================
     # Handle preset mode
     # =========================================================================
     if [[ -n "${PRESET}" ]]; then
+        show_installation_progress 2
         apply_preset "${PRESET}"
     elif [[ "${NON_INTERACTIVE}" == "true" ]]; then
         # Default to minimal in non-interactive mode without preset
+        show_installation_progress 2
         apply_preset "minimal"
     else
         # Interactive mode - offer preset selection
+        show_installation_progress 2
         if ! select_preset; then
-            # User chose "Custom" - continue to interactive selection
-            :
+            # A missing MCP client is a terminal condition; continuing would
+            # present unrelated platform and CLI prompts after this error.
+            exit 1
         fi
     fi
 
@@ -4126,6 +4188,7 @@ main() {
     fi
 
     # Bun setup — must happen before MCP config writing since configs reference bunx
+    show_installation_progress 3
     handle_bun_setup
 
     # Check npm registry reachability — prompt for custom registry if blocked
@@ -4141,6 +4204,7 @@ main() {
 
     # MCP Client Configuration (new feature!)
     if [[ "${CONFIGURE_MCP_CLIENTS}" == "true" ]]; then
+        show_installation_progress 4
         echo ""
         gum style --bold "MCP Client Configuration"
         echo ""
@@ -4167,15 +4231,29 @@ main() {
                 log_info "Install ${PRESET_CLIENT_FILTER} first, then run this installer again."
             fi
         elif [[ "${NON_INTERACTIVE}" == "true" ]]; then
-            # In non-interactive mode, auto-detect and configure Claude Code
+            # In non-interactive mode, configure the preferred client for the
+            # selected scope: Claude Code first, then Codex.
             detect_mcp_clients
+            local claude_code_target="Claude Code (User)"
+            local codex_target="Codex (User)"
+            if [[ "${MCP_CONFIG_SCOPE}" == "project" ]]; then
+                claude_code_target="Claude Code (Project)"
+                codex_target="Codex (Project)"
+            fi
             local claude_code_entry
-            claude_code_entry=$(find_client_entry "Claude Code (Global)" 2>/dev/null || echo "")
+            claude_code_entry=$(find_client_entry "${claude_code_target}" 2>/dev/null || echo "")
             if [[ -n "${claude_code_entry}" ]]; then
-                SELECTED_MCP_CLIENTS=("Claude Code (Global)")
+                SELECTED_MCP_CLIENTS=("${claude_code_target}")
                 configure_selected_mcp_clients
             else
-                log_info "No MCP clients auto-detected in non-interactive mode"
+                local codex_entry
+                codex_entry=$(find_client_entry "${codex_target}" 2>/dev/null || echo "")
+                if [[ -n "${codex_entry}" ]]; then
+                    SELECTED_MCP_CLIENTS=("${codex_target}")
+                    configure_selected_mcp_clients
+                else
+                    log_info "No supported MCP clients auto-detected in non-interactive mode"
+                fi
             fi
         else
             if select_mcp_clients; then
@@ -4192,6 +4270,7 @@ main() {
     fi
 
     # Runtime dependencies (needed for AutoMobile features)
+    show_installation_progress 5
     install_runtime_deps
 
     # Development tools (shellcheck, jq, ripgrep, etc.)
@@ -4200,6 +4279,7 @@ main() {
     fi
 
     # Platform-specific setup
+    show_installation_progress 6
     case "${platform_choice}" in
         Android)
             # Only run setup if not already detected as ready
@@ -4237,6 +4317,7 @@ main() {
     esac
 
     # CLI installation
+    show_installation_progress 7
     if [[ "${INSTALL_AUTOMOBILE_CLI}" == "true" ]]; then
         install_auto_mobile_cli
     fi

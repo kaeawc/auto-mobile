@@ -13,8 +13,15 @@ else
     SCRIPT_DIR="$(pwd)"
 fi
 
-# Detect project root (for project-level configs)
+# Detect the Git project root for project-level configs. This matches the
+# installer's project scope, including when either script runs from a nested
+# directory in the repository.
 PROJECT_ROOT="$(pwd)"
+if command -v git >/dev/null 2>&1; then
+    if git_root=$(git -C "${PROJECT_ROOT}" rev-parse --show-toplevel 2>/dev/null); then
+        PROJECT_ROOT="${git_root}"
+    fi
+fi
 
 # ============================================================================
 # Global State
@@ -172,8 +179,9 @@ detect_mcp_configs() {
     # Define all possible config locations
     local configs=()
 
-    # Claude Code
-    configs+=("Claude Code (Global)|${HOME}/.claude.json|json")
+    # Claude Code user and shared project config
+    configs+=("Claude Code (User)|${HOME}/.claude.json|json")
+    configs+=("Claude Code (Project)|${PROJECT_ROOT}/.mcp.json|json")
 
     # Claude Desktop
     if [[ "${os}" == "macos" ]]; then
@@ -188,11 +196,12 @@ detect_mcp_configs() {
     # Windsurf
     configs+=("Windsurf|${HOME}/.codeium/windsurf/mcp_config.json|json")
 
-    # Codex
-    configs+=("Codex|${HOME}/.codex/config.toml|toml")
+    # Codex user and project config
+    configs+=("Codex (User)|${HOME}/.codex/config.toml|toml")
+    configs+=("Codex (Project)|${PROJECT_ROOT}/.codex/config.toml|toml")
 
-    # Firebender
-    configs+=("Firebender (Global)|${HOME}/.firebender/firebender.json|json")
+    # Firebender config locations remain removable for existing users.
+    configs+=("Firebender (User)|${HOME}/.firebender/firebender.json|json")
     configs+=("Firebender (Project)|${PROJECT_ROOT}/firebender.json|json")
 
     # Goose

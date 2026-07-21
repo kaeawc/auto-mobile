@@ -1009,8 +1009,14 @@ private func assertWorkflowStepRunsWhenNotCancelled(
         file: file,
         line: line
     )
+    // Assert the clause this helper is about -- `!cancelled()`, i.e. the step runs
+    // after an earlier leg FAILS but is skipped on cancellation -- rather than the
+    // whole condition. #4082 conjoined a shared-prerequisite guard
+    // (`&& steps.build-ctrlproxy.outcome == 'success'`) which does not change the
+    // failure-vs-cancellation semantics under test here; that guard has its own
+    // coverage in test/bats/xctest-shared-prereq-gate.bats.
     XCTAssertTrue(
-        stepBlockHasActiveTopLevelValue(stepBlock, key: "if", value: "${{ !cancelled() }}"),
+        stepBlockHasActiveTopLevelValueContaining(stepBlock, key: "if", substring: "!cancelled()"),
         "\(stepName) must run after an earlier Reminders leg fails, but still respect cancellation",
         file: file,
         line: line
@@ -1063,6 +1069,25 @@ private func stepBlockHasActiveTopLevelValue(_ stepBlock: Substring, key: String
     return stepBlockActiveLines(stepBlock).contains { line in
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return line.hasPrefix("        \(key):") && trimmed == "\(key): \(value)"
+    }
+}
+
+/// Like `stepBlockHasActiveTopLevelValue`, but matches a *substring* of the value.
+///
+/// Step conditions legitimately grow extra conjuncts (issue #4082 added a
+/// shared-prerequisite guard, making the 26.5 leg
+/// `${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}`). An
+/// exact-equality assertion turns any such addition into a false failure even
+/// when the semantics under test are unchanged, so assertions about *one* clause
+/// should match that clause rather than the whole expression.
+private func stepBlockHasActiveTopLevelValueContaining(
+    _ stepBlock: Substring,
+    key: String,
+    substring: String
+) -> Bool {
+    return stepBlockActiveLines(stepBlock).contains { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return line.hasPrefix("        \(key):") && trimmed.contains(substring)
     }
 }
 

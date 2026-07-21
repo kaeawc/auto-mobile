@@ -1054,12 +1054,17 @@ export class SimCtlClient implements SimCtl {
     logger.debug(`Booting iOS simulator ${udid}`);
     const perf = createGlobalPerformanceTracker();
 
+    // Route through the shared verifier so the SESSION AUTO-START path gets the
+    // same post-condition check and bounded retry as startSimulator. This is the
+    // default path when an MCP session begins with no booted simulator
+    // (DeviceSessionManager.findOrStartIosDevice -> bootSimulator), so leaving it
+    // on the old behaviour would have meant #4094 missed the very scenario it is
+    // about. The old code ran a bare `simctl boot`, which does not wait for the
+    // boot to finish, then slept a fixed 1s and asked whether the device had
+    // shown up in the booted list -- neither a wait nor a proof of readiness.
     perf.startOperation("simctlBoot");
-    await this.executeCommand(`boot ${udid}`);
+    await this.bootAndVerify(udid);
     perf.endOperation("simctlBoot");
-
-    // Wait a moment for the simulator to register as booted
-    await this.timer.sleep(1000);
 
     perf.startOperation("bootRegistration");
     const bootedSimulators = await this.getBootedSimulators();

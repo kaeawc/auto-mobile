@@ -165,6 +165,33 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getSleepCallCount()).toBe(0);
   });
 
+  // The session auto-start path (DeviceSessionManager.findOrStartIosDevice ->
+  // SimCtlClient.bootSimulator) is the default when an MCP session begins with no
+  // booted simulator. It previously ran a bare `simctl boot` plus a fixed 1s
+  // sleep, so it bypassed verification entirely -- the very scenario #4094 is
+  // about. These pin it to the same verifier.
+  test("bootSimulator rejects a wedged boot instead of returning a device", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 10 });
+    harness.setStates(["Shutdown"]);
+
+    await expect(harness.simctl.bootSimulator(UDID)).rejects.toThrow(/not Booted/);
+    // It must go through bootstatus, not a bare `simctl boot`.
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+    expect(harness.calls).not.toContain(`xcrun simctl boot ${UDID}`);
+  });
+
+  test("bootSimulator retries a wedged boot and returns the device once Booted", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Shutdown", "Booted"]);
+
+    // FakeTimer: the retry backoff must be driven, as in the startSimulator case.
+    const device = await harness.timer.resolvePromise(harness.simctl.bootSimulator(UDID));
+
+    expect(device.deviceId).toBe(UDID);
+    expect(bootstatusCalls(harness.calls).length).toBe(2);
+    expect(shutdownCalls(harness.calls).length).toBe(1);
+  });
+
   test("waitForSimulatorReady rejects a wedged boot instead of returning a device", async () => {
     const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 10 });
 

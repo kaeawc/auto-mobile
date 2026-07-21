@@ -114,6 +114,41 @@ Regenerate the fixture by re-running the `observe` MCP tool against an Android
 home screen and re-committing the pretty-printed JSON; treat it as a frozen
 baseline and only refresh it deliberately when the observe output format changes.
 
+## CI Failure-Rate and Step-Duration Measurement
+
+`scripts/ci/measure-ci.sh` turns the ad-hoc "how flaky is this job / how long
+does that step take" analysis into a reproducible command (issue #4122). Over a
+bounded window of workflow runs it reports per-job outcome tallies ranked by
+failure rate, per-step duration percentiles (min / median / p90 / p95 / max),
+and the rerun-success rate — a job that failed and then passed unchanged on a
+later attempt of the same head SHA.
+
+```bash
+scripts/ci/measure-ci.sh --limit 60                    # human summary
+scripts/ci/measure-ci.sh --limit 100 --json > win.json # diffable JSON
+scripts/ci/measure-ci.sh --limit 100 --cache /tmp/ci.json  # resumable fetch
+```
+
+Two properties matter and are pinned by `test/bats/measure-ci.bats`:
+
+- **Repeated steps keep their ordinal.** A job that boots a simulator three
+  times reports `Boot #1`, `Boot #2`, `Boot #3` separately. Grouping by name
+  alone destroys the signal that justified dropping the Xcode 26.2 leg
+  ("all 9 boots >= 300s were the *third* boot").
+- **Percentiles are nearest-rank**, not interpolated: `index = ceil(p/100 * n)`.
+
+The script is two separable layers. `--fetch-only` emits the normalized bundle
+JSON from the Actions jobs API; `--from-file` aggregates a pre-fetched bundle
+with no network access at all, which is how the BATS suite drives it. Step
+conclusions and timestamps come from the structured jobs API; the only log-text
+path is the opt-in `--sentinel` / `--sentinel-job` pair, for strings that appear
+solely in job output (e.g. `Status=4294967295`).
+
+`--limit` is bounded by `--max-runs` (default 200) and exceeding it is a loud
+error rather than a silent truncation. `gh api --paginate` over workflow runs is
+deliberately avoided — it hangs and returns nothing; pages are requested
+explicitly with a cap.
+
 ## Startup Benchmark
 
 Measure MCP server and daemon startup time (cold/warm) with optional baseline comparison:

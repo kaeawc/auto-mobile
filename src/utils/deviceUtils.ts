@@ -303,7 +303,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     switch (device.platform) {
       case "android":
-        return this.emulator.startEmulator(device.name);
+        return (await this.emulator.launchEmulator({
+          avdName: device.name,
+          deviceId: device.deviceId,
+        })).process;
       case "ios":
         return this.simctl.startSimulator(device.deviceId ?? device.name, timeoutMs);
       default:

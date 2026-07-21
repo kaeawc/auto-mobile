@@ -16,7 +16,30 @@ import type { FormFactor } from "../../models/DeviceMatchCriteria";
  * Interface for Android Emulator (AVD) management
  * Provides emulator lifecycle and control capabilities
  */
-interface AndroidEmulator {
+export interface AndroidEmulatorLaunchRequest {
+  /** The configured Android Virtual Device to launch. */
+  avdName: string;
+  /**
+   * The expected ADB serial, when the caller already knows it. This remains
+   * authoritative during readiness checks instead of relying on AVD-name
+   * discovery from a concurrently starting emulator.
+   */
+  deviceId?: string;
+  /** Additional, already-tokenized emulator arguments. */
+  extraArgs?: readonly string[];
+  /** Cancels a launch that has not begun, or disposes a completed launch. */
+  signal?: AbortSignal;
+}
+
+export interface AndroidEmulatorLaunchHandle {
+  readonly avdName: string;
+  readonly process: ChildProcess | null;
+  readonly targetDeviceId?: string;
+  /** Stops the emulator only when this launch created its process. */
+  dispose(): void;
+}
+
+export interface AndroidEmulator {
   /**
    * Execute an emulator command
    * @param command - The command to execute
@@ -57,6 +80,9 @@ interface AndroidEmulator {
    * @returns Promise with the spawned child process
    */
   startEmulator(avdName: string): Promise<ChildProcess | null>;
+
+  /** Launch an AVD with structured context and an owned lifecycle handle. */
+  launchEmulator(request: AndroidEmulatorLaunchRequest): Promise<AndroidEmulatorLaunchHandle>;
 
   /**
    * Kill a running emulator
@@ -132,6 +158,33 @@ export function resolveHeadlessMode(
   }
 
   return { headless: false, reason: "usable display detected" };
+}
+
+/**
+ * Parse `AUTOMOBILE_EMULATOR_ARGS` as a JSON argv array.
+ *
+ * This deliberately does not split on whitespace: a value such as
+ * `"swiftshader indirect"` must remain a single argv member, and shell-style
+ * quoting is not a portable or safe configuration language. Callers that
+ * construct launches programmatically should use `extraArgs` instead.
+ */
+export function parseExtraEmulatorArguments(raw: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new ActionableError(
+      "AUTOMOBILE_EMULATOR_ARGS must be a JSON array of emulator arguments, for example [\"-gpu\", \"swiftshader_indirect\"]"
+    );
+  }
+
+  if (!Array.isArray(parsed) || parsed.some(argument => typeof argument !== "string" || argument.length === 0)) {
+    throw new ActionableError(
+      "AUTOMOBILE_EMULATOR_ARGS must be a JSON array containing non-empty string arguments"
+    );
+  }
+
+  return [...parsed];
 }
 
 const execAsync = async (file: string, args: string[], signal?: AbortSignal): Promise<ExecResult> => {
@@ -798,8 +851,89 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdName - The AVD name to start
    * @returns Promise with the spawned child process
    */
-  async startEmulator(
+  async startEmulator(avdName: string): Promise<ChildProcess | null> {
+    return (await this.launchEmulator({ avdName })).process;
+  }
+
+  async launchEmulator(request: AndroidEmulatorLaunchRequest): Promise<AndroidEmulatorLaunchHandle> {
+    if (request.signal?.aborted) {
+      throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+    }
+
+    let process: ChildProcess | null = null;
+    let disposed = false;
+    const dispose = () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      if (process && !process.killed) {
+        process.kill();
+      }
+    };
+    request.signal?.addEventListener("abort", dispose, { once: true });
+
+    try {
+      process = await this.startEmulatorProcess(
+        request.avdName,
+        request.extraArgs,
+        spawnedProcess => {
+          process = spawnedProcess;
+          if (disposed && !spawnedProcess.killed) {
+            spawnedProcess.kill();
+          }
+        },
+        () => disposed,
+      );
+      if (disposed) {
+        if (process && !process.killed) {
+          process.kill();
+        }
+        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+      }
+    } catch (error) {
+      request.signal?.removeEventListener("abort", dispose);
+      if (disposed) {
+        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+      }
+      throw error;
+    }
+    if (process && request.deviceId) {
+      this.launchTargetDeviceIds.set(process, request.deviceId);
+    }
+
+    const release = () => {
+      if (!disposed) {
+        disposed = true;
+      }
+      request.signal?.removeEventListener("abort", dispose);
+    };
+
+    const client = this;
+    return {
+      avdName: request.avdName,
+      process,
+      get targetDeviceId() {
+        return process ? client.launchTargetDeviceIds.get(process) : request.deviceId;
+      },
+      dispose: () => {
+        dispose();
+        release();
+      },
+    };
+  }
+
+  private throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void {
+    if (isCancelled?.()) {
+      throw new ActionableError(`Android emulator launch for '${avdName}' was cancelled`);
+    }
+  }
+
+  private async startEmulatorProcess(
     avdName: string,
+    requestedExtraArgs?: readonly string[],
+    onSpawn?: (process: ChildProcess) => void,
+    isCancelled?: () => boolean,
   ): Promise<ChildProcess | null> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
@@ -848,16 +982,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       args.push("-no-window", "-no-audio");
     }
     const extraArgsRaw = process.env.AUTOMOBILE_EMULATOR_ARGS;
-    if (extraArgsRaw) {
-      args.push(...extraArgsRaw.split(/\s+/).filter(Boolean));
+    if (requestedExtraArgs) {
+      args.push(...requestedExtraArgs);
+    } else if (extraArgsRaw) {
+      args.push(...parseExtraEmulatorArguments(extraArgsRaw));
     }
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
+    this.throwIfLaunchCancelled(avdName, isCancelled);
 
     return new Promise((resolve, reject) => {
       perf.startOperation("spawnEmulator");
       const child = this.spawnFn(this.emulatorPath, args);
       perf.endOperation("spawnEmulator");
+      onSpawn?.(child);
 
       // Buffer to collect initial output for PANIC detection
       let initialOutput = "";

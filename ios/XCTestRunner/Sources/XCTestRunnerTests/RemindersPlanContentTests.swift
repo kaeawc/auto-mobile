@@ -250,11 +250,6 @@ final class RemindersPlanContentTests: XCTestCase {
         assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(workflow)
         assertWorkflowWarmsTargetAppBeforeRemindersRun(
             workflow,
-            warmupStepName: "Warm up Reminders target app (Xcode 26.2)",
-            runStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowWarmsTargetAppBeforeRemindersRun(
-            workflow,
             warmupStepName: "Warm up Reminders target app (Xcode 26.5)",
             runStepName: "Run Reminders integration tests (Xcode 26.5)"
         )
@@ -270,12 +265,6 @@ final class RemindersPlanContentTests: XCTestCase {
 
         assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
             workflow,
-            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.2)",
-            afterCtrlProxyStepName: "Warm up iOS CtrlProxy",
-            warmupStepName: "Warm up Reminders target app (Xcode 26.2)"
-        )
-        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
-            workflow,
             preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.5)",
             afterCtrlProxyStepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
             warmupStepName: "Warm up Reminders target app (Xcode 26.5)"
@@ -287,15 +276,7 @@ final class RemindersPlanContentTests: XCTestCase {
 
         assertWorkflowRetriesRemindersRunOnce(
             workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowRetriesRemindersRunOnce(
-            workflow,
             runStepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-        assertWorkflowRunsGuardedRemindersTest(
-            workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.2)"
         )
         assertWorkflowRunsGuardedRemindersTest(
             workflow,
@@ -303,25 +284,51 @@ final class RemindersPlanContentTests: XCTestCase {
         )
     }
 
-    func testPullRequestWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
+    /// The PR job dropped its Xcode 26.2 Reminders leg (#4078), so the 26.5 leg is now the
+    /// only one. Its `!cancelled()` guards still matter: they keep the Reminders segment
+    /// independent of the CtrlProxy UI test that runs earlier in the same job, while still
+    /// skipping on cancellation (and, via #4082, on a doomed shared CtrlProxy build).
+    func testPullRequestWorkflowRunsRemindersLegAfterEarlierFailureUnlessCancelled() throws {
         let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
 
-        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(workflow)
+        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
+            workflow,
+            afterStepName: pullRequestRemindersLegAnchorStep
+        )
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
             stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+            afterStepName: pullRequestRemindersLegAnchorStep
         )
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
             stepName: "Warm up Reminders target app (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+            afterStepName: pullRequestRemindersLegAnchorStep
         )
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
             stepName: "Run Reminders integration tests (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
+            afterStepName: pullRequestRemindersLegAnchorStep
         )
+    }
+
+    /// The PR workflow must not reintroduce the Xcode 26.2 leg that #4078 removed: it made
+    /// the 26.5 Reminders run the job's third simulator boot, which owned the job's entire
+    /// slow tail. 26.2 coverage lives in nightly.yml, which does not gate merges.
+    func testPullRequestWorkflowHasNoXcode262RemindersLeg() throws {
+        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
+
+        for stepName in [
+            "iOS simulator bring-up (Xcode 26.2)",
+            "Pre-build Reminders XCTest bundle (Xcode 26.2)",
+            "Warm up Reminders target app (Xcode 26.2)",
+            "Run Reminders integration tests (Xcode 26.2)",
+        ] {
+            XCTAssertFalse(
+                workflowHasStep(workflow, stepName: stepName),
+                "pull_request.yml must not reintroduce the Xcode 26.2 Reminders leg (step: \(stepName))"
+            )
+        }
     }
 
     /// Xcode 26.5 can turn a filtered SwiftPM XCTest run into "Executed 0 tests" when the custom
@@ -786,8 +793,8 @@ private func assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(
         XCTFail("Workflow is missing the XCTestRunner simulator job", file: file, line: line)
         return
     }
-    guard let runRange = workflow.range(of: #"name: "Run Reminders integration tests (Xcode 26.2)""#) else {
-        XCTFail("Workflow is missing the Xcode 26.2 Reminders run step", file: file, line: line)
+    guard let runRange = workflow.range(of: #"name: "Run Reminders integration tests (Xcode 26.5)""#) else {
+        XCTFail("Workflow is missing the Xcode 26.5 Reminders run step", file: file, line: line)
         return
     }
 
@@ -967,12 +974,25 @@ private func assertWorkflowRunsGuardedRemindersTest(
     )
 }
 
+/// Scan anchor for the PR workflow's Reminders leg.
+///
+/// Several step names occur twice in `ios-xctest-runner-simulator-tests` (e.g. "Select Xcode
+/// 26.5" is both the job's initial toolchain selection, which has no `if:`, and the Reminders
+/// leg's re-selection, which does), so the assertions below must start scanning after the leg
+/// begins. This was "Run Reminders integration tests (Xcode 26.2)" until #4078 dropped that
+/// leg; the unique `if: always()` teardown directly above the leg replaces it. Mirrors
+/// ANCHOR_STEP in test/bats/xctest-shared-prereq-gate.bats.
+private let pullRequestRemindersLegAnchorStep = "Shutdown iOS Simulators"
+
+/// `afterStepName` defaults to the Xcode 26.2 Reminders run step, which nightly.yml still has
+/// (it deliberately keeps both legs — the coverage is free there because it does not gate
+/// merges). pull_request.yml passes `pullRequestRemindersLegAnchorStep` instead.
 private func assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
     _ workflow: String,
+    afterStepName: String = "Run Reminders integration tests (Xcode 26.2)",
     file: StaticString = #filePath,
     line: UInt = #line
 ) {
-    let afterStepName = "Run Reminders integration tests (Xcode 26.2)"
     if workflowHasStep(workflow, stepName: "iOS simulator bring-up (Xcode 26.5)", afterStepName: afterStepName) {
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,

@@ -27,7 +27,11 @@ gh api --paginate "repos/kaeawc/auto-mobile/pulls/<PR>/comments?per_page=100"   
 ```
 
 These three return **top-level JSON arrays**, and `--paginate` merges the pages into one flat
-array, so redirecting to a file and parsing it with `jq` is safe. Do **not** add `--slurp`
+array, so redirecting to a file and parsing it with `jq` is safe. Verified on gh 2.96 against
+PR #4117 with `per_page=2`: five GET requests, one top-level document, element count matching
+the unpaginated result. (The `gh api` manual describes pages as separate documents — true for
+GraphQL and for object-shaped responses, but not for these array endpoints on this version. If
+you are on an older gh, re-check before relying on it.) Do **not** add `--slurp`
 here: on an array endpoint it produces an array *of pages* (`[[…],[…]]`), and it is rejected
 outright when combined with `--jq` (`the --slurp option is not supported with --jq or
 --template`). GraphQL is the opposite case — see below.
@@ -85,7 +89,9 @@ mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved
 ```
 
 Only resolve on a PR **we** authored and are actively working, once the finding is genuinely
-handled — fixed in a pushed commit, or answered with a reason. Resolving claims it is done.
+handled — fixed in a pushed commit, or verified and declined. Both count: resolving claims the
+thread is dealt with, not that the reviewer was right. Leave it open only when you could not
+determine whether the finding is real.
 Replying instead takes the *comment* id, not the thread id:
 
 ```bash
@@ -119,7 +125,8 @@ but it can still wedge the `green-main` ruleset — re-run it rather than debugg
 Cross-check the head SHA's check-runs, where duplicates surface:
 
 ```bash
-gh api --paginate "repos/kaeawc/auto-mobile/commits/<HEAD_SHA>/check-runs?per_page=100" \
+# filter defaults to `latest`, which hides exactly the stale duplicate you are looking for.
+gh api --paginate "repos/kaeawc/auto-mobile/commits/<HEAD_SHA>/check-runs?per_page=100&filter=all" \
   --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.completed_at)"' | sort
 ```
 

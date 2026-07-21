@@ -41,7 +41,20 @@ FAILED=$(printf '%s' "$CHECKS_JSON" | jq -r '[.[] | select(.bucket == "fail")] |
 
 if [ "$FAILED" -eq 0 ]; then
   PENDING=$(printf '%s' "$CHECKS_JSON" | jq -r '[.[] | select(.bucket == "pending")] | length')
-  [ "$PENDING" -gt 0 ] && echo "Waiting on ${PENDING} check(s)." || echo "All checks passed."
+  # cancel is not a failure, but it is not success either: a cancelled run on the head
+  # SHA can park automerge. Only pass/skipping counts as green.
+  CANCELLED=$(printf '%s' "$CHECKS_JSON" | jq -r '[.[] | select(.bucket == "cancel")] | length')
+  if [ "$PENDING" -gt 0 ]; then
+    echo "Waiting on ${PENDING} check(s)."
+    exit 0
+  fi
+  if [ "$CANCELLED" -gt 0 ]; then
+    echo "No failures, but ${CANCELLED} cancelled check(s) on the head SHA — not green."
+    echo "A stale cancelled run can park automerge; re-run it rather than debugging the code."
+    printf '%s' "$CHECKS_JSON" | jq -r '.[] | select(.bucket == "cancel") | "  cancelled\t\(.name)"'
+    exit 1
+  fi
+  echo "All checks passed."
   exit 0
 fi
 

@@ -13,8 +13,9 @@ needs a deliberate disposition. See `github-cli` for the underlying command mech
 
 1. Snapshot the PR:
    ```bash
-   gh pr view <pr> --json number,url,state,mergedAt,mergeCommit,title,body,author,\
-   headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,reviewDecision,closingIssuesReferences
+   # Keep the field list on ONE line: a backslash-newline plus indentation turns the
+   # remainder into a second positional argument, which `gh pr view` rejects.
+   gh pr view <pr> --json number,url,state,mergedAt,mergeCommit,title,body,author,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,reviewDecision,closingIssuesReferences
    gh api user -q .login    # is this an open PR authored by the authenticated user?
    ```
    Record `headRefOid`; never apply a disposition to a later head without a fresh snapshot.
@@ -69,10 +70,17 @@ exists to prevent.
   disposition; adjacent code changing in a later PR does not address it.
 - **Never post a conversation comment, reply, inline comment, or review.** Return dispositions
   and evidence to the user.
-- Resolve only once all hold: the in-scope fix is committed **and pushed**, targeted validation
-  passed, the fresh head still contains the fix, the PR is open and authored by the
-  authenticated user, and the resolution directly answers *that* thread. Leave ambiguous,
-  conflicting, or out-of-scope threads unresolved and report why.
+- **A triaged thread gets resolved — that is what addressing it means.** Resolution is the
+  disposition made durable, not a reward reserved for fixes. Two routes:
+  - Disposition `fix`: resolve once the fix is committed **and pushed**, targeted validation
+    passed, and the fresh head still contains the fix.
+  - Disposition `already addressed`, `not actionable`, `duplicate`, or `out of scope`:
+    resolve too. A finding you verified and declined is handled; leaving it open only makes
+    the next reader re-derive your reasoning. Report the reason to the user in-session.
+  In both cases the PR must be open and authored by the authenticated user, and the
+  resolution must answer *that* thread rather than a neighbouring one.
+- The single exception is `ambiguous`: if you could not determine whether the finding is real,
+  leave it open, say so, and ask. Never resolve to make a queue look clean.
 - Resolve via GraphQL, never by guessing from a flat comment id:
   ```bash
   gh api graphql -f query='

@@ -16,6 +16,29 @@ Review against the author's intent and the issue the change serves, not the diff
 Ask rather than assert when genuinely unsure — sometimes you missed something. Name what's
 genuinely good in a sentence; never manufacture it.
 
+## Step 0 — Resolve the diff base
+
+Everything below reuses `$BASE`, so establish it first. Which base is correct depends on the
+mode, and getting it wrong silently scopes the review to the wrong commits:
+
+```bash
+git fetch origin main
+# PR mode — the local checkout is usually NOT the PR branch, so HEAD is unrelated to it.
+git fetch origin "pull/<PR>/head:refs/remotes/pr/<PR>"
+HEADREF="refs/remotes/pr/<PR>"
+BASE=$(git merge-base "$HEADREF" origin/main)
+
+# Branch mode — merge-base covers committed AND uncommitted work here, and excludes
+# main's newer commits.
+HEADREF=HEAD
+BASE=$(git merge-base HEAD origin/main)
+```
+
+Both obvious branch-mode alternatives are wrong in a common case: `origin/main...HEAD` (three
+dots) is committed work only and reports **zero files** against a dirty tree, silently scoping
+the review to nothing; `git diff origin/main` (no dots) picks up uncommitted work but, when the
+branch is behind main, folds main's newer commits in as reverse-diffs.
+
 ## Step 1 — Establish the change's real state, before reading code
 
 Most escaped defects here were already red on the PR itself. These checks take seconds and
@@ -49,11 +72,10 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
   detekt gate at 05:48, #4016 auto-merged at 05:49 — reddening main. Its `Fast Validation` job
   had no `Run detekt` step at all.
 - **Run the tests the diff changed.** #4070 landed a deterministically-red assertion because a
-  refactor moved argv construction and updated one of two sibling tests. Use `$BASE` from
-  Step 2, so uncommitted test edits are included, and guard the empty case explicitly rather
+  refactor moved argv construction and updated one of two sibling tests. Use the Step 0 `$BASE`, so uncommitted test edits are included, and guard the empty case explicitly rather
   than relying on `xargs -r` (GNU-only on older macOS and other BSDs):
   ```bash
-  changed_tests=$(git diff --name-only "$BASE" -- 'test/**/*.test.ts')
+  changed_tests=$(git diff --name-only "$BASE" "$HEADREF" -- 'test/**/*.test.ts')
   [ -n "$changed_tests" ] && bun test $changed_tests
   ```
 
@@ -75,14 +97,11 @@ squash-**merged**, and a "fix" PR can merge test-only, so check `git log origin/
 actually landed. With no argument, review committed *and* uncommitted work; read changed files
 in full, since the hunk lies by omission.
 
-Both obvious diff bases are wrong in a common case: `origin/main...HEAD` (three dots) is
-committed work only and reports **zero files** against a dirty tree, silently scoping the review
-to nothing; `git diff origin/main` (no dots) picks up uncommitted work but, when the branch is
-behind main, folds main's newer commits in as reverse-diffs. Use the merge-base:
+Size the diff with the Step 0 `$BASE` and `$HEADREF`, excluding lockfiles and generated
+artifacts:
 
 ```bash
-BASE=$(git merge-base HEAD origin/main)
-git diff --numstat "$BASE" -- . \
+git diff --numstat "$BASE" "$HEADREF" -- . \
   ':(exclude)**/*.lock' ':(exclude)bun.lockb' ':(exclude)schemas/**' \
   ':(exclude)**/project.pbxproj' ':(exclude)eslint-suppressions.json' \
   | awk '{a+=$1; d+=$2} END {print a+d" changed lines across "NR" files"}'
@@ -129,8 +148,9 @@ git show refs/remotes/pr/<N>:<path>                  # any file at the PR head
 A lens needing a populated tree makes its own and removes it:
 
 ```bash
-git worktree add "$SCRATCH/lens-<N>" refs/remotes/pr/<N>
-git worktree remove --force "$SCRATCH/lens-<N>"
+mkdir -p scratch
+git worktree add "scratch/lens-<N>" refs/remotes/pr/<N>
+git worktree remove --force "scratch/lens-<N>"
 ```
 
 A fresh worktree has **no `node_modules`**, so anything resolving an npm dependency (the
@@ -186,7 +206,7 @@ routinely ships nothing.
   pinned released runner. Unless `src/constants/release.ts` checksums change in the same PR (or
   a re-cut is explicitly sequenced), the feature is **undeliverable** and the issue is not
   closed. Blocking. Check with the Step 2 `$BASE`, not `origin/main...HEAD`, so an uncommitted
-  runner edit still trips it: `git diff --name-only "$BASE" | grep -E
+  runner edit still trips it: `git diff --name-only "$BASE" "$HEADREF" | grep -E
   '^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
 - **New Swift file ⇒ regenerate the Xcode project.** A file under `ios/control-proxy/Sources/**`
   absent from the committed `ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj` is not
@@ -332,18 +352,22 @@ When the argument names a PR **we** authored and are actively iterating on:
    badge; P1 claims to block. Verify the mechanism before acting *and* before dismissing. An
    `isOutdated` thread is a prompt to check whether the current head fixed the behavior, not a
    reason to discard it.
-4. Resolve (`resolveReviewThread`) only once all hold: the fix is committed **and pushed**,
-   targeted validation passed, the fresh head still contains the fix, the PR is open and authored
-   by the authenticated user (`gh api user -q .login`), and the resolution answers *that* thread.
-   Leave ambiguous, conflicting, or out-of-scope threads unresolved and say why. On a
-   merged/closed PR, treat unresolved threads as historical dispositions — don't push, resolve,
-   or re-run without asking.
+4. **Resolve every thread you triaged** (`resolveReviewThread`) — that is what addressing one
+   means. A finding you fixed and a finding you verified and declined are both handled; only
+   the reason differs, and the reason goes to the user in-session, not to GitHub. For a `fix`,
+   resolve once it is committed **and pushed**, validation passed, and the fresh head still
+   contains it. For `already addressed`, `not actionable`, `duplicate`, or `out of scope`,
+   resolve directly. Either way the PR must be open, authored by the authenticated user
+   (`gh api user -q .login`), and the resolution must answer *that* thread. The one exception
+   is `ambiguous` — if you could not tell whether the finding is real, leave it open and ask.
+   On a merged/closed PR, treat unresolved threads as historical dispositions — don't push,
+   resolve, or re-run without asking.
 5. Run the lenses as usual and report their findings to the user. Never post them. Only
    *existing* threads get resolved.
-6. Close the loop: re-run the unresolved-threads query and account for every remaining one. Over
+6. Close the loop: re-run the unresolved-threads query and expect it to come back empty. Over
    one recent week, 46 of 94 codex threads here merged unresolved, several P1 — so "I read them"
-   is not the bar. Every thread ends fixed-and-resolved, declined-with-a-reason-and-resolved, or
-   named in your summary as deliberately open.
+   is not the bar. Anything still open at the end is a thread you genuinely could not resolve,
+   and it needs a sentence in your summary saying why.
 
 Only for a PR we authored. On someone else's, read freely and resolve nothing.
 

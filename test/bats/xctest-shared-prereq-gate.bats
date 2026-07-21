@@ -32,8 +32,84 @@ WORKFLOW=".github/workflows/pull_request.yml"
   [ -z "$bare" ]
 }
 
-@test "the 26.5 leg gates on steps.build-ctrlproxy.outcome == success" {
-  # The eight 26.5-leg steps that were !cancelled() now carry the shared-build guard.
-  count="$(grep -c "!cancelled() && steps.build-ctrlproxy.outcome == 'success'" "$WORKFLOW")"
-  [ "$count" -ge 8 ]
+# Print the active `if:` value for a named step, or nothing when the step has none.
+#
+# Scanning starts only AFTER the 26.2 leg's final step: several step names occur
+# twice in the job (e.g. "Select Xcode 26.5" is both the job's initial toolchain
+# selection, which has no `if:`, and the 26.5 leg's re-selection, which does).
+# Without the anchor the first, unguarded occurrence matches and the assertion
+# reports a false violation. This mirrors `afterStepName` in the Swift helper.
+#
+# awk, not sed -- BSD sed lacks the range forms this needs. A step block runs from
+# its `- name: "<step>"` line to the next step start or a step-indent comment.
+ANCHOR_STEP='Run Reminders integration tests (Xcode 26.2)'
+
+step_if_condition() {
+  awk -v want="      - name: \"$1\"" -v anchor="      - name: \"$ANCHOR_STEP\"" '
+    !past && $0 == anchor { past = 1; next }
+    !past { next }
+    $0 == want { inblock = 1; next }
+    inblock && /^      [-#]/ { exit }
+    inblock && /^        if:/ {
+      sub(/^        if:[[:space:]]*/, "")
+      print
+      exit
+    }
+  ' "$WORKFLOW"
+}
+
+# Every Xcode 26.5 leg step that must not run on a doomed shared prerequisite.
+# Named explicitly: a global count cannot tell "each of these is guarded" from
+# "the total happens to add up", so one step could lose its guard while an
+# unrelated step gained one and the suite would stay green.
+xcode_265_leg_steps() {
+  cat <<'STEPS'
+Select Xcode 26.5
+Ensure iOS Simulator runtime (Xcode 26.5)
+Boot iOS Simulator (Xcode 26.5)
+Ensure AutoMobile daemon ready (Xcode 26.5)
+Warm up iOS CtrlProxy (Xcode 26.5)
+Pre-build Reminders XCTest bundle (Xcode 26.5)
+Warm up Reminders target app (Xcode 26.5)
+Run Reminders integration tests (Xcode 26.5)
+STEPS
+}
+
+@test "every 26.5-leg step individually gates on steps.build-ctrlproxy.outcome == success" {
+  local offenders=""
+  while IFS= read -r step; do
+    [ -n "$step" ] || continue
+    condition="$(step_if_condition "$step")"
+    if [ -z "$condition" ]; then
+      offenders="${offenders}${step}: no 'if:' condition"$'\n'
+    elif [[ "$condition" != *"steps.build-ctrlproxy.outcome == 'success'"* ]]; then
+      offenders="${offenders}${step}: ${condition}"$'\n'
+    fi
+  done < <(xcode_265_leg_steps)
+
+  if [ -n "$offenders" ]; then
+    echo "26.5-leg steps missing the shared-build guard:" >&2
+    echo "$offenders" >&2
+  fi
+  [ -z "$offenders" ]
+}
+
+@test "every 26.5-leg step still respects cancellation" {
+  # The other half of the condition. RemindersPlanContentTests owns this too (via
+  # stepBlockRespectsCancellation); asserted here so a Swift-only or bats-only run
+  # cannot lose the property silently.
+  local offenders=""
+  while IFS= read -r step; do
+    [ -n "$step" ] || continue
+    condition="$(step_if_condition "$step")"
+    if [[ "$condition" != *"!cancelled()"* ]] || [[ "$condition" == *"||"* ]]; then
+      offenders="${offenders}${step}: ${condition:-<none>}"$'\n'
+    fi
+  done < <(xcode_265_leg_steps)
+
+  if [ -n "$offenders" ]; then
+    echo "26.5-leg steps that do not skip on cancellation:" >&2
+    echo "$offenders" >&2
+  fi
+  [ -z "$offenders" ]
 }

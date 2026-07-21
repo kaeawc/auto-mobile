@@ -1462,10 +1462,11 @@ jobs:
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
-      # These two installs are independent, network/I/O-bound, and neither the
-      # Bun setup nor the npm-package install below consumes them — so background
-      # them and let the Bun pair overlap. The `wait` barrier re-syncs before the
-      # first consumer (the drift check needs xcodegen; the build needs both).
+      # These installs are independent, network/I/O-bound, and neither the Bun
+      # setup nor the npm-package install below consumes them — so background
+      # them and let the Bun pair overlap. Each `wait` barrier re-syncs before
+      # that install's first consumer (the drift check needs xcodegen; the build
+      # needs xcodegen + xcpretty; the videoRecording test needs ffmpeg).
       # Validated by the #3779 spike: outputs unused here, `- wait: [ids]` list
       # barrier works, and an install failure surfaces loudly at the wait.
       - name: "Install XcodeGen"
@@ -1477,6 +1478,18 @@ jobs:
         run: gem install xcpretty
         background: true
         id: install-xcpretty
+
+      # ffmpeg is consumed only by the videoRecording test far below, so it gets
+      # the widest possible window: it overlaps the drift check, the CtrlProxy
+      # build, the UI test, and the Xcode 26.5 simulator boot. Previously this
+      # ran inline in that test step, charging a cold multi-minute brew install
+      # against the step's own 10-minute cap and the test's 180s budget — a known
+      # intermittent timeout (#4124). No brew-lock contention: install-xcodegen.sh
+      # deliberately avoids Homebrew (#3975) and nothing else here shells to brew.
+      - name: "Install ffmpeg"
+        run: brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+        background: true
+        id: install-ffmpeg
 
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
@@ -1559,11 +1572,13 @@ jobs:
         timeout-minutes: 15
         run: ./scripts/ios/boot-simulator.sh
 
+      # Re-sync the backgrounded ffmpeg install before its only consumer. With the
+      # install hoisted out, this step's 10-minute cap now covers the test alone.
+      - wait: install-ffmpeg
+
       - name: "Run videoRecording MP4 integration test"
         timeout-minutes: 10
-        run: |
-          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-          ./scripts/ios/video-recording-start-stop-integration.sh
+        run: ./scripts/ios/video-recording-start-stop-integration.sh
 
       # This is a freshly-booted sim, so bring the daemon to ready and warm
       # CtrlProxy before the Reminders run. Pre-starting the daemon and waiting

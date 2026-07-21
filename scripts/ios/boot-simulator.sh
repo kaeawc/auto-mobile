@@ -127,20 +127,32 @@ DEVICE_NAME=$(xcrun simctl list devices available -j \
 
 echo "Ensuring ${DEVICE_NAME} (${UDID}) is booted..." >&2
 
-# bootstatus can "Finish" with an internal failure status -- e.g. it stalls in
-# "Waiting on System App" for tens of minutes and then reports
-# "Status=4294967295, isTerminal=YES" -- while still exiting 0. Pressing on
-# would print "Booted:" for a wedged simulator that hangs every downstream step
-# (issue #4078). Capture the outcome and treat a failing exit OR that terminal
-# error status as a hard boot failure.
+# `bootstatus` alone is not a trustworthy success signal, in BOTH directions:
+#
+#   * It can exit 0 on a wedged boot (the case #4078 set out to catch), and
+#   * on macOS 26 / Xcode 26 a perfectly HEALTHY boot ends with
+#     "Status=4294967295, isTerminal=YES" followed by "Finished" -- that code is
+#     just how CoreSimulator reports its terminal state here. It appears in 100%
+#     of boots, so it cannot distinguish a good boot from a bad one. Keying on it
+#     rejected healthy 17-71s boots and failed every iOS PR.
+#
+# So verify the post-condition instead: the device must actually be in the
+# "Booted" state. This mirrors how the Android emulator path proves readiness
+# (independent signals rather than one command's exit code).
 set +e
 boot_log="$(xcrun simctl bootstatus "${UDID}" -b 2>&1)"
 boot_rc=$?
 set -e
 printf '%s\n' "${boot_log}" >&2
 
-if [[ ${boot_rc} -ne 0 ]] || printf '%s' "${boot_log}" | grep -q 'Status=4294967295'; then
-  echo "error: simulator ${UDID} failed to boot (bootstatus rc=${boot_rc})" >&2
+BOOT_STATE="$(xcrun simctl list devices -j \
+  | jq -r --arg udid "${UDID}" '
+      .devices | to_entries[] | .value[]
+      | select(.udid == $udid) | .state
+    ' | head -1)"
+
+if [[ ${boot_rc} -ne 0 ]] || [[ "${BOOT_STATE}" != "Booted" ]]; then
+  echo "error: simulator ${UDID} failed to boot (bootstatus rc=${boot_rc}, state=${BOOT_STATE:-unknown})" >&2
   exit 1
 fi
 

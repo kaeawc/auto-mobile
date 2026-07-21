@@ -71,9 +71,12 @@ elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
     echo "iOS 26.4 (26.4 - 23D1) - com.apple.CoreSimulator.SimRuntime.iOS-26-4"
   fi
 elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
-  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-4":[{"name":"iPhone 16","udid":"FAKE-UDID","state":"Shutdown"}]}}'
+  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-4":[{"name":"iPhone 16","udid":"FAKE-UDID","state":"Booted"}]}}'
 elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
   [ "$4" = "-b" ] || exit 2
+  # Real simctl on macOS 26 prints this terminal line on a HEALTHY boot.
+  echo "[2026-07-20 13:11:14 +0000] Status=4294967295, isTerminal=YES, Elapsed=01:04."
+  echo "	Finished"
   exit 0
 fi
 SCRIPT
@@ -97,9 +100,39 @@ SCRIPT
   grep -q '.identifier' "$SCRIPT"
 }
 
-@test "fails when bootstatus reports a wedged boot (Status=4294967295) but exits 0" {
-  # Regression for #4078: a stalled boot can print a terminal error status and
-  # still exit 0. The script must not report "Booted:" and press on.
+@test "REGRESSION: a healthy boot that prints Status=4294967295 is NOT rejected" {
+  # The first #4078 attempt keyed on the literal string "Status=4294967295" as a
+  # wedge sentinel. On macOS 26 / Xcode 26 that terminal status is printed by
+  # EVERY boot, including healthy ones (observed in 106/106 CI boots, 102 of
+  # which booted fine), so the gate failed 100% of iOS PRs and killed boots as
+  # fast as 17s. A healthy boot must pass even though it prints that line.
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.5"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.5.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"name":"iPhone 17 Pro","udid":"HEALTHY-UDID","state":"Booted"}]}}'
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  echo "[2026-07-20 13:11:14 +0000] Status=4294967295, isTerminal=YES, Elapsed=01:04."
+  echo "	Finished"
+  exit 0
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --ios-version 26.5
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"HEALTHY-UDID"* ]]
+  [[ "$output" != *"failed to boot"* ]]
+}
+
+@test "fails when bootstatus exits 0 but the device never reaches Booted (wedge)" {
+  # Regression for #4078: a stalled boot exits 0 and prints the same terminal
+  # status line a healthy boot does. Only the device STATE distinguishes them,
+  # so the script must verify the post-condition, not the status code.
   cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
 #!/bin/sh
 if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
@@ -109,7 +142,6 @@ elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
 elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
   echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-2":[{"name":"iPhone 17 Pro","udid":"WEDGED-UDID","state":"Shutdown"}]}}'
 elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
-  # Wedged boot: prints a terminal failure status yet exits 0.
   echo "[2026-07-20 15:00:16 +0000] Status=4294967295, isTerminal=YES, Elapsed=32:06."
   echo "	Finished"
   exit 0
@@ -121,6 +153,7 @@ SCRIPT
   run bash "$SCRIPT" --ios-version 26.2
   [ "$status" -eq 1 ]
   [[ "$output" == *"failed to boot"* ]]
+  [[ "$output" == *"state=Shutdown"* ]]
   [[ "$output" != *"Booted: "* ]]
 }
 
@@ -161,6 +194,8 @@ elif [ "$1" = "simctl" ] && [ "$2" = "boot" ]; then
 elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
   [ "$3" = "BOOTED-UDID" ] || exit 2
   [ "$4" = "-b" ] || exit 2
+  echo "[2026-07-20 13:11:14 +0000] Status=4294967295, isTerminal=YES, Elapsed=01:04."
+  echo "	Finished"
   exit 0
 fi
 SCRIPT

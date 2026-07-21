@@ -67,19 +67,27 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
     --jq '.check_runs[] | "\(.name)\t\(.conclusion)\t\(.completed_at)"'
   ```
   Any `completed_at` at or after `mergedAt` means the gate did not gate.
-- **Green is only as current as the base it ran on.** `baseRefOid` is the base the PR was
-  actually tested against, not current main — verified on [#4106](https://github.com/kaeawc/auto-mobile/pull/4106),
-  whose `baseRefOid` sits 11 commits behind. Cross-check it against GitHub's own count, which
-  needs no interpretation:
+- **Green is only as current as the base it ran on.** Use the Step 0 `$BASE` — the merge-base
+  — rather than `baseRefOid`. `$BASE` is computed from the commit graph, so it answers the
+  question that actually matters (what was this head built on top of?) without depending on
+  when GitHub refreshes a metadata field, it stays correct when a branch integrates main via a
+  *merge* rather than a rebase, and it works identically in branch mode, where there is no
+  `baseRefOid` at all. In practice the two agree — measured on
+  [#4106](https://github.com/kaeawc/auto-mobile/pull/4106) (both `abd432675`, 11 behind) and
+  [#4041](https://github.com/kaeawc/auto-mobile/pull/4041) (both `333c9923e`, 15 behind) — but
+  only one of them is correct by construction.
+
+  Cross-check against GitHub's own count, which needs no interpretation at all:
   ```bash
   gh api "repos/kaeawc/auto-mobile/compare/main...<headRefOid>" --jq '.behind_by'
   ```
-  If `baseRefOid` differs from `origin/main` (equivalently, `behind_by > 0`):
+  If `$BASE` differs from `origin/main` (equivalently, `behind_by > 0`):
   ```bash
-  git log <baseRefOid>..origin/main --name-only -- \
+  # --format= suppresses commit messages, so only paths print.
+  git log "$BASE"..origin/main --name-only --format= -- \
     .github/workflows scripts/all_fast_validate_checks.sh \
     android/build.gradle.kts android/gradle/libs.versions.toml \
-    eslint.config.* scripts/typecheck-baseline.txt eslint-suppressions.json
+    eslint.config.* scripts/typecheck-baseline.txt eslint-suppressions.json | sort -u
   ```
   Any hit means rebase-and-re-run, not approval. [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) went green at 05:44, [#4005](https://github.com/kaeawc/auto-mobile/pull/4005) turned on the
   detekt gate at 05:48, [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) auto-merged at 05:49 — reddening main. Its `Fast Validation` job

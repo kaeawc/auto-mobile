@@ -5,6 +5,20 @@ import ts from "typescript";
 const SOURCE_ROOT = "src";
 const OWNER = "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts";
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
+const CHILD_PROCESS_FUNCTIONS = new Set([
+  "spawn",
+  "spawnSync",
+  "exec",
+  "execSync",
+  "execFile",
+  "execFileSync",
+]);
+const DIRECT_CHILD_PROCESS_FUNCTIONS = new Set([
+  "spawn",
+  "spawnSync",
+  "execFile",
+  "execFileSync",
+]);
 
 interface Violation {
   readonly file: string;
@@ -53,6 +67,15 @@ function receiverName(
   return null;
 }
 
+function isChildProcessNamespace(
+  expression: ts.Expression,
+  childProcessNamespaces: Set<string>,
+): boolean {
+  return (
+    ts.isIdentifier(expression) && childProcessNamespaces.has(expression.text)
+  );
+}
+
 function findViolations(file: string): Violation[] {
   const source = readFileSync(file, "utf8");
   if (!/emulator/i.test(source)) {
@@ -70,6 +93,21 @@ function findViolations(file: string): Violation[] {
   const childProcessNamespaces = new Set<string>();
   const childProcessFunctions = new Set<string>();
   const violations: Violation[] = [];
+
+  const isChildProcessRequire = (expression: ts.Expression): boolean =>
+    ts.isCallExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "require" &&
+    expression.arguments.length === 1 &&
+    ts.isStringLiteral(expression.arguments[0]) &&
+    CHILD_PROCESS_MODULES.has(expression.arguments[0].text);
+
+  const isChildProcessFunction = (expression: ts.Expression): boolean =>
+    (ts.isIdentifier(expression) &&
+      childProcessFunctions.has(expression.text)) ||
+    (ts.isPropertyAccessExpression(expression) &&
+      CHILD_PROCESS_FUNCTIONS.has(expression.name.text) &&
+      isChildProcessNamespace(expression.expression, childProcessNamespaces));
 
   const record = (node: ts.CallExpression): void => {
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(
@@ -96,14 +134,36 @@ function findViolations(file: string): Violation[] {
       if (bindings && ts.isNamedImports(bindings)) {
         for (const specifier of bindings.elements) {
           const imported = specifier.propertyName?.text ?? specifier.name.text;
-          if (
-            imported === "spawn" ||
-            imported === "execFile" ||
-            imported === "exec"
-          ) {
+          if (CHILD_PROCESS_FUNCTIONS.has(imported)) {
             childProcessFunctions.add(specifier.name.text);
           }
         }
+      }
+    }
+
+    if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      node.moduleReference.expression &&
+      ts.isStringLiteral(node.moduleReference.expression) &&
+      CHILD_PROCESS_MODULES.has(node.moduleReference.expression.text)
+    ) {
+      childProcessNamespaces.add(node.name.text);
+    }
+
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
+    ) {
+      if (
+        isChildProcessRequire(node.initializer) ||
+        isChildProcessNamespace(node.initializer, childProcessNamespaces)
+      ) {
+        childProcessNamespaces.add(node.name.text);
+      }
+      if (isChildProcessFunction(node.initializer)) {
+        childProcessFunctions.add(node.name.text);
       }
     }
 
@@ -121,24 +181,21 @@ function findViolations(file: string): Violation[] {
       const expression = node.expression;
       if (
         ts.isIdentifier(expression) &&
-        (expression.text === "spawn" ||
-          expression.text === "execFile" ||
+        (DIRECT_CHILD_PROCESS_FUNCTIONS.has(expression.text) ||
           childProcessFunctions.has(expression.text))
       ) {
         record(node);
       } else if (ts.isPropertyAccessExpression(expression)) {
-        if (
-          expression.name.text === "spawn" ||
-          expression.name.text === "execFile"
-        ) {
+        if (DIRECT_CHILD_PROCESS_FUNCTIONS.has(expression.name.text)) {
           record(node);
         } else if (
-          expression.name.text === "exec" &&
-          receiverName(
-            expression.expression,
-            processExecutors,
-            childProcessNamespaces,
-          )
+          (expression.name.text === "exec" &&
+            receiverName(
+              expression.expression,
+              processExecutors,
+              childProcessNamespaces,
+            )) ||
+          isChildProcessFunction(expression)
         ) {
           record(node);
         }

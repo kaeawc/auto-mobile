@@ -78,6 +78,35 @@ describe("pickIosDeviceType", () => {
   });
 });
 
+describe("pickAndroidSystemImage tag preference", () => {
+  // Play Store images refuse `adb root`, and AutoMobile needs a root shell for the
+  // root-backed system-locale path (AndroidSystemConfigurationAdapter). Auto-creating
+  // one would hand the user a device that cannot run changeLocalization on the API
+  // levels that require root, so it must rank BELOW google_apis and default.
+  it("prefers a rootable google_apis image over a same-API playstore image", () => {
+    const images = [
+      systemImage(35, "google_apis_playstore", "arm64-v8a"),
+      systemImage(35, "google_apis", "arm64-v8a"),
+      systemImage(35, "default", "arm64-v8a"),
+    ];
+
+    expect(pickAndroidSystemImage(images, {}, "arm64").packageName).toBe(
+      "system-images;android-35;google_apis;arm64-v8a"
+    );
+  });
+
+  it("prefers default over playstore when google_apis is unavailable", () => {
+    const images = [
+      systemImage(35, "google_apis_playstore", "arm64-v8a"),
+      systemImage(35, "default", "arm64-v8a"),
+    ];
+
+    expect(pickAndroidSystemImage(images, {}, "arm64").packageName).toBe(
+      "system-images;android-35;default;arm64-v8a"
+    );
+  });
+});
+
 describe("pickAndroidSystemImage", () => {
   const images = [
     systemImage(33, "default", "arm64-v8a"),

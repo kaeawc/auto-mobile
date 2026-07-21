@@ -147,8 +147,20 @@ export function pickIosDeviceType(
 // Android selection
 // ---------------------------------------------------------------------------
 
-/** Preferred system-image tags, best first. */
-const ANDROID_TAG_PREFERENCE = ["google_apis_playstore", "google_apis", "default"];
+/**
+ * Preferred system-image tags, best first.
+ *
+ * `google_apis_playstore` is ranked LAST on purpose: Play Store images refuse
+ * `adb root`, and AutoMobile needs a root shell for the root-backed system-locale
+ * path (see AndroidSystemConfigurationAdapter, which fails with "the target
+ * emulator is not root-capable or does not allow root ADB"). Auto-provisioning a
+ * Play Store image would therefore hand the user a device that silently cannot
+ * run `changeLocalization` on the API levels that require it.
+ *
+ * `google_apis` is preferred over `default` because it is rootable AND carries
+ * the Google APIs some flows expect.
+ */
+const ANDROID_TAG_PREFERENCE = ["google_apis", "default", "google_apis_playstore"];
 
 function tagRank(tag: string): number {
   const index = ANDROID_TAG_PREFERENCE.indexOf(tag);

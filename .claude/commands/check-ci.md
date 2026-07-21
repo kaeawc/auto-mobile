@@ -1,12 +1,12 @@
 ---
-description: Check CI status, analyze failures, reproduce locally, and provide next steps
+description: PR CI triage — inspect pending and failed checks for the exact PR head, read live or completed job logs, classify causality, reproduce likely failures locally, and summarize the safe next step
 allowed-tools: Bash, Read, Grep, Glob
 argument-hint: [PR number (optional)]
 ---
 
-Check the CI status for a pull request, analyze failures, check for merge conflicts and PR comments, attempt to reproduce issues locally, and provide an analysis of next steps.
-
-Use the following bash script to check CI status. If an argument is provided, use it as the PR number. Otherwise, auto-detect from the current branch.
+Triage a PR's CI: head-scoped check state, failing-job logs (live or complete), causal
+classification, local reproduction, and the safe next step. Takes a PR number, or resolves one
+from the current branch.
 
 ```bash
 #!/usr/bin/env bash
@@ -74,23 +74,13 @@ for RUN_ID in $RUN_IDS; do
 done
 ```
 
-## How it works
+## What the script does
 
-1. **PR detection** — takes the PR number as an argument, otherwise resolves it from the current branch.
-2. **Bucketing** — reads `gh pr checks --json` and branches on `bucket`, gh's normalized
-   state. `skipping` and `cancel` are **not** failures; only `fail` is. A `cancelled` check
-   is usually a superseded run from a rapid push, though it can still wedge the `green-main`
-   ruleset — re-run that run rather than debugging the code.
-3. **Run → jobs → job log** — resolves run ids from the failing checks' links, then fetches
-   only the failed jobs' logs. A finished job's log is readable **while sibling jobs are
-   still running**, so this does not wait on the slowest leg.
-4. **Live jobs** — when a job hasn't finished, its log 404s, so the script falls back to
-   per-step status and shows which step it is on.
-5. **Logs land in `scratch/`** — each is ~100KB+; read the extracted error lines and open the
-   file only when you need more.
-
-See the `github-cli` skill for the underlying commands, including review-thread resolution
-state, which REST does not expose.
+Branches on `bucket` (gh's normalized state) rather than grepping human-readable output, then
+walks run → jobs → each failed job's log. A finished job's log is readable **while sibling jobs
+still run**, so it never waits on the slowest leg; when a job hasn't finished its log 404s and
+the script falls back to per-step status. Logs land in `scratch/` at ~100KB each — read the
+extracted error lines first.
 
 ## Triage workflow
 
@@ -123,227 +113,48 @@ state, which REST does not expose.
 For PR discussion and review-thread triage, use `github-pr-feedback`; for the underlying gh
 and GraphQL mechanics, `github-cli`.
 
-## Additional Analysis Steps
-
-After running the bash script above, continue with these analysis steps:
-
-### Step 1: Check for Merge Conflicts
+## Merge conflicts and branch drift
 
 ```bash
-# Check if branch is behind main
 gh pr view ${PR_NUM} --json mergeable,mergeStateStatus -q '.mergeable, .mergeStateStatus'
-
-# If behind, check details
 git fetch origin main
 git log HEAD..origin/main --oneline
-
-# Check for merge conflicts
 git merge-tree $(git merge-base HEAD origin/main) HEAD origin/main
 ```
 
-**If conflicts exist**:
-- List conflicting files
-- Show conflict markers
-- Recommend resolution strategy (rebase vs merge)
-- Provide commands to resolve
+Report conflicting files and whether rebase or merge is the right resolution. A branch behind
+main may also predate a gate it never ran against — see step 1 of the triage workflow.
 
-### Step 2: Check PR Comments and Feedback
+## Feedback
 
-Resolution state lives only in GraphQL — `gh pr view --json comments` and the REST
-`/pulls/N/comments` endpoint both omit it, so they cannot tell you what is still outstanding:
+Resolution state lives only in GraphQL; `gh pr view --json comments` and REST
+`/pulls/N/comments` both omit it, so neither can tell you what is outstanding. Use the
+`github-pr-feedback` skill for the full ledger — all four paginated surfaces, the disposition
+vocabulary, and the conditions under which a thread may be resolved — rather than hand-rolling
+it here.
 
-```bash
-gh api graphql -f query='
-query($owner:String!,$repo:String!,$pr:Int!){
-  repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
-    reviewThreads(first:100){ nodes{ id isResolved isOutdated path line
-      comments(first:5){ nodes{ author{login} body } } } } } } }' \
-  -F owner=kaeawc -F repo=auto-mobile -F pr=${PR_NUM} \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[]
-        | select(.isResolved|not)
-        | "\(.path):\(.line)\t\(.comments.nodes[0].author.login)"'
-```
+## Local reproduction
 
-`isOutdated` only means the anchored line moved — not that the finding was addressed.
+Reproduce a **PR-caused** failure with the narrowest authoritative command:
 
-For the full ledger — all four paginated feedback surfaces, disposition vocabulary, and the
-conditions under which a thread may be resolved — use the `github-pr-feedback` skill rather
-than hand-rolling it here.
+| Failure | Command |
+| --- | --- |
+| TS lint / build | `bun run lint` · `bun run build` |
+| TS types | `bun run typecheck` (gate: new errors vs `scripts/typecheck-baseline.txt`) |
+| Tests | `bun test <file>` first, `bun test` only if needed |
+| Fast Validation | `bash scripts/all_fast_validate_checks.sh` (`--only <check>` to narrow) |
+| Shell / BATS | `shellcheck <script>` · `bats test/bats/<file>.bats` |
+| Android | `(cd android && ./gradlew <task>)` — Robolectric needs JDK 21 |
+| iOS | `bash scripts/ios/swift-build.sh` · `bash scripts/ios/swift-test.sh` |
 
-**Analyze comments**:
-- Identify unresolved feedback
-- Categorize by type (bug report, suggestion, question, approval)
-- Highlight actionable items
-- Note if any reviewers requested changes
+A fresh worktree has no `node_modules`, so anything resolving an npm dependency fails there for
+environmental reasons that look like real findings. Reproduce in a populated checkout.
 
-### Step 3: Reproduce Failures Locally
+## Output
 
-For each failed CI check, provide commands to reproduce:
-
-**Lint failures**:
-```bash
-bun run lint
-```
-
-**Build failures**:
-```bash
-bun run build
-```
-
-**Test failures**:
-```bash
-# Run all tests
-bun test
-
-# Run specific test file mentioned in logs
-bun test <test-file-path>
-
-# Run with coverage
-bun test --coverage
-```
-
-**TypeScript errors**:
-```bash
-# Check types
-bun run typecheck
-# or
-tsc --noEmit
-```
-
-**Docker build failures**:
-```bash
-# Rebuild locally
-docker build -t auto-mobile .
-
-# Check specific stage
-docker build --target <stage> -t auto-mobile .
-```
-
-**Android/Gradle failures**:
-```bash
-cd android
-./gradlew clean build
-
-# Run specific task mentioned in logs
-./gradlew <task-name>
-```
-
-**Attempt to run the commands** that match the failure type and report results.
-
-### Step 4: Analyze Failures
-
-For each failure found:
-
-1. **Identify root cause**:
-   - Parse error messages from CI logs
-   - Search codebase for related code using Grep
-   - Read relevant files to understand context
-
-2. **Categorize the issue**:
-   - Syntax error (typo, missing import)
-   - Type error (TypeScript)
-   - Test failure (assertion failed)
-   - Flaky test (timing issue)
-   - Integration issue (dependency problem)
-   - Configuration issue (CI-specific)
-
-3. **Determine reproducibility**:
-   - Can reproduce locally → Direct fix possible
-   - Cannot reproduce locally → CI environment issue
-   - Intermittent → Flaky test or race condition
-
-### Step 5: Provide Next Steps Analysis
-
-Generate a summary report:
-
-```markdown
-## CI Status Report for PR #[number]
-
-### Current State
-- **Status**: [All passing / X failing / X pending]
-- **Merge conflicts**: [Yes/No]
-- **Unresolved comments**: [count]
-
-### Failures Analysis
-
-#### Failure 1: [Check name]
-- **Type**: [lint/build/test/etc]
-- **Root cause**: [description]
-- **Reproducible locally**: [Yes/No]
-- **Files affected**: [list]
-- **Recommended fix**: [specific action]
-
-#### Failure 2: [Check name]
-...
-
-### PR Comments Summary
-- **Total comments**: [count]
-- **Actionable feedback**: [list key items]
-- **Requested changes**: [list]
-
-### Merge Conflicts
-- **Status**: [clean / conflicts in X files]
-- **Affected files**: [list]
-- **Resolution strategy**: [rebase / merge / manual]
-
-### Recommended Next Steps
-
-1. [Priority 1 action with commands]
-2. [Priority 2 action with commands]
-3. [Priority 3 action with commands]
-
-### Commands to Execute
-
-```bash
-# Fix merge conflicts (if any)
-git fetch origin main
-git rebase origin/main
-# [resolve conflicts]
-
-# Apply feedback from PR comments
-# [specific changes based on comments]
-
-# Fix failing checks
-[specific commands based on failures]
-
-# Validate locally
-bun run lint
-bun run build
-bun test
-
-# Push fixes
-git push --force-with-lease
-```
-```
-
-### Step 6: Execute Fixes (Optional)
-
-If user confirms, execute the recommended fixes:
-- Resolve merge conflicts
-- Apply PR feedback
-- Fix failing checks
-- Run local validation
-- Commit and push changes
-
-## Usage Examples:
-
-**Simple check**:
-```
-/check-ci
-```
-Output: Shows CI status, then analyzes failures, checks conflicts, reviews comments, and provides next steps
-
-**Check specific PR**:
-```
-/check-ci 83
-```
-
-**Typical workflow** (from prompt analysis):
-```
-/check-ci                    # Analyze current state
-[Review analysis]
-[Make fixes based on recommendations]
-/validate                    # Run local validation
-/push                        # Push fixes
-/check-ci                    # Verify fixes resolved issues
-```
+- Current CI state, scoped to the head SHA
+- Run/job ledger, including pending jobs and duplicate or stale checks
+- Failing checks, the evidence, and the causal classification
+- Mergeability or conflict status
+- Artifact or authorization limitations
+- Recommended next action

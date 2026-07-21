@@ -385,7 +385,20 @@ fetch_bundle() {
   local have_cache=0
   if [ -n "$CACHE_FILE" ] && [ -f "$CACHE_FILE" ]; then
     have_cache=1
-    echo "Cache: $(jq '(.runs // []) | length' "$CACHE_FILE") runs available for reuse from ${CACHE_FILE}" >&2
+    # Sentinel flags are computed at fetch time and stored per job, so a cache
+    # built under a different sentinel config cannot be reused: the run id and
+    # attempt would still match while every cached job carried a stale (usually
+    # null) sentinel value. The bundle would then claim meta.sentinel while
+    # reporting no hits -- a measurement that looks valid and is not.
+    local cached_sentinel cached_sentinel_job
+    cached_sentinel="$(jq -r '.meta.sentinel // ""' "$CACHE_FILE")"
+    cached_sentinel_job="$(jq -r '.meta.sentinel_job // ""' "$CACHE_FILE")"
+    if [ "$cached_sentinel" != "$SENTINEL" ] || [ "$cached_sentinel_job" != "$SENTINEL_JOB" ]; then
+      have_cache=0
+      echo "Cache: sentinel config differs from ${CACHE_FILE}; refetching rather than serving stale sentinel values" >&2
+    else
+      echo "Cache: $(jq '(.runs // []) | length' "$CACHE_FILE") runs available for reuse from ${CACHE_FILE}" >&2
+    fi
   fi
 
   local run_ids run_id total idx=0 attempt reused=0
@@ -421,10 +434,12 @@ fetch_bundle() {
     --arg workflow "$WORKFLOW" \
     --arg branch "$BRANCH" \
     --arg sentinel "$SENTINEL" \
+    --arg sentinel_job "$SENTINEL_JOB" \
     --argjson limit "$LIMIT" \
     --slurpfile runs "$out_jsonl" \
     '{ meta: { repo: $repo, workflow: $workflow, branch: (if $branch == "" then null else $branch end),
                limit: $limit, sentinel: (if $sentinel == "" then null else $sentinel end),
+               sentinel_job: (if $sentinel_job == "" then null else $sentinel_job end),
                fetched_at: (now | todateiso8601) },
        runs: $runs }' > "$out_bundle"
 }
@@ -471,7 +486,9 @@ def round3: (. * 1000 | round) / 1000;
     | $steps[$i] as $s
     | { job: $job.name,
         step: $s.name,
-        ordinal: ( [ $steps[0:$i][] | select(.name == $s.name) ] | length ) + 1,
+        # Parenthesized as a whole: jq 1.7 (Ubuntu runners) rejects a top-level
+        # binary operator in an object value, while 1.8 (local macOS) accepts it.
+        ordinal: (( [ $steps[0:$i][] | select(.name == $s.name) ] | length ) + 1),
         conclusion: $s.conclusion,
         run_id: $run.id,
         run_attempt: $job.run_attempt,

@@ -438,6 +438,42 @@ bundle_from_durations() {
   [[ "$output" == *"2/3 jobs matched"* ]]
 }
 
+@test "a cache built without a sentinel is not reused for a sentinel run" {
+  # Sentinel flags are computed at fetch time and stored per job. Reusing a cache
+  # keyed only on run id + attempt produced a bundle that claimed meta.sentinel
+  # while every job's sentinel stayed null -- a measurement that looks valid and
+  # is not.
+  mkdir -p "${TEST_ROOT}/bin"
+  cat > "${TEST_ROOT}/bin/gh" <<'SHIM'
+#!/bin/sh
+case "$*" in
+  *"run list"*) echo '[{"databaseId":111,"headSha":"abc","createdAt":"2026-07-21T00:00:00Z","conclusion":"success","status":"completed","headBranch":"m","displayTitle":"t","attempt":1}]' ;;
+  # /logs BEFORE /jobs: the log URL is /actions/jobs/<id>/logs and would
+  # otherwise be swallowed by the /jobs pattern, silently serving jobs JSON
+  # as the log body.
+  *"/logs"*)    echo "line with SENTINEL here" ;;
+  *"/jobs"*)    echo '{"jobs":[{"id":9,"name":"iOS","status":"completed","conclusion":"success","run_attempt":1,"started_at":"2026-07-21T00:00:00Z","completed_at":"2026-07-21T00:01:00Z","steps":[]}]}' ;;
+  *"repo view"*) echo "o/r" ;;
+  *) echo "" ;;
+esac
+SHIM
+  chmod +x "${TEST_ROOT}/bin/gh"
+
+  run env PATH="${TEST_ROOT}/bin:$PATH" bash "$SCRIPT" \
+    --cache "${TEST_ROOT}/c.json" --fetch-only --limit 1
+  assert_ok
+
+  # stdout only: bats merges stderr into $output, and the fetch layer logs
+  # progress there, so parse the bundle from a file rather than $output.
+  run env PATH="${TEST_ROOT}/bin:$PATH" bash -c \
+    "bash '$SCRIPT' --cache '${TEST_ROOT}/c.json' --sentinel SENTINEL --sentinel-job iOS --fetch-only --limit 1 > '${TEST_ROOT}/b2.json'"
+  assert_ok
+
+  # The sentinel must actually have been measured, not inherited as null.
+  [ "$(jq -r '.meta.sentinel' "${TEST_ROOT}/b2.json")" = "SENTINEL" ]
+  [ "$(jq -r '.runs[0].jobs[0].sentinel' "${TEST_ROOT}/b2.json")" = "true" ]
+}
+
 @test "an empty window aggregates without crashing" {
   echo '{"meta":{"repo":"o/r","workflow":"Pull Request","branch":null,"limit":0,"sentinel":null,"fetched_at":"2026-07-21T00:00:00Z"},"runs":[]}' \
     > "${TEST_ROOT}/b.json"

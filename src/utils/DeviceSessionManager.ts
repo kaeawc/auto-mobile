@@ -10,6 +10,8 @@ import { IOSCtrlProxyManager, CtrlProxyIosManager } from "./IOSCtrlProxyManager"
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "./interfaces/DeviceUtils";
+import { getDeviceCreationGate } from "./deviceCreationGate";
+import { createDefaultDeviceProvisioner } from "./deviceProvisioning";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -876,6 +878,23 @@ export class DeviceSessionManager implements DeviceSessionManager {
     allDevices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
 
     if (allDevices.length === 0) {
+      // No CLI flag reaches this path, so the opt-in is env-var only here.
+      const gate = getDeviceCreationGate();
+      if (gate.isCreationAllowed()) {
+        logger.info(
+          `[DeviceSessionManager] No iOS simulators found; creating one (gate: ${gate.describeSource()})`
+        );
+        const provisioner = createDefaultDeviceProvisioner(() => this.simctl);
+        const provisioned = await provisioner.provision({ platform: "ios" });
+        perf.startOperation("bootSimulator");
+        const createdDevice = await this.simctl.bootSimulator(provisioned.deviceId!);
+        perf.endOperation("bootSimulator");
+        perf.startOperation("verifyDevice");
+        await this.verifyIosDevice(provisioned.deviceId!, options);
+        perf.endOperation("verifyDevice");
+        return createdDevice;
+      }
+
       throw new ActionableError(
         "No iOS simulators are available. Please create an iOS simulator using Xcode or the Simulator app."
       );

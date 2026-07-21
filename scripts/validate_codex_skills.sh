@@ -34,12 +34,25 @@ is_quoted() {
 # Strip one layer of matching surrounding quotes so a quoted and an unquoted
 # frontmatter description compare equal by VALUE. Representation may differ
 # (a description containing ': ' must be quoted); the value must not.
+# Decode a YAML scalar to its VALUE, so two spellings of the same string compare
+# equal. Only the two quoted styles YAML defines are handled, per spec:
+#   double-quoted: backslash escapes (\" \\ \/ \n \t)
+#   single-quoted: no escapes except a doubled '' meaning one '
+# Plain scalars are returned as-is. Inline the quote test rather than calling
+# is_quoted: a function invoked in an `if` condition has set -e disabled for the
+# call (SC2310, #3637/#3640).
 unquote() {
   local value="$1"
-  # Inline the quote test rather than calling is_quoted: a function invoked in
-  # an `if` condition has set -e disabled for the call (SC2310, #3637/#3640).
-  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
+  if [[ "$value" == \"*\" ]]; then
     value="${value:1:${#value}-2}"
+    value="${value//\\n/$'\n'}"
+    value="${value//\\t/$'\t'}"
+    value="${value//\\\"/\"}"
+    value="${value//\\\//\/}"
+    value="${value//\\\\/\\}"
+  elif [[ "$value" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+    value="${value//\'\'/\'}"
   fi
   printf '%s' "$value"
 }

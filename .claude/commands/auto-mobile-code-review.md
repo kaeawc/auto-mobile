@@ -1,6 +1,6 @@
 ---
 description: AutoMobile code review — ground every finding in file:line, reproduce before asserting, and run diff-sized review lenses (two fixed, one generated) that target this repo's real defect classes. Reviews a PR number or the current branch diff. Never posts to GitHub; resolves threads only on our own PR.
-allowed-tools: Bash, Read, Grep, Glob, WebFetch, Skill, Agent
+allowed-tools: Bash, Read, Grep, Glob, WebFetch, Skill, Task
 argument-hint: [PR number (optional; default = current branch diff vs origin/main)]
 ---
 
@@ -24,16 +24,22 @@ mode, and getting it wrong silently scopes the review to the wrong commits:
 
 ```bash
 git fetch origin main
-# PR mode — the local checkout is usually NOT the PR branch, so HEAD is unrelated to it.
-git fetch origin "pull/<PR>/head:refs/remotes/pr/<PR>"
-HEADREF="refs/remotes/pr/<PR>"
-BASE=$(git merge-base "$HEADREF" origin/main)
 
-# Branch mode — merge-base covers committed AND uncommitted work here, and excludes
-# main's newer commits.
-HEADREF=HEAD
+# PR mode — the local checkout is usually NOT the PR branch, so HEAD is unrelated to it.
+# The leading + forces the update: without it, re-fetching after a force-push is rejected
+# non-fast-forward and Step 0 fails before refreshing anything.
+git fetch origin "+pull/<PR>/head:refs/remotes/pr/<PR>"
+BASE=$(git merge-base "refs/remotes/pr/<PR>" origin/main)
+DIFF_ARGS=("$BASE" "refs/remotes/pr/<PR>")   # two endpoints: the PR head, not your tree
+
+# Branch mode — one endpoint, so the diff includes uncommitted work. Naming HEAD as a
+# second endpoint would silently drop every working-tree edit.
 BASE=$(git merge-base HEAD origin/main)
+DIFF_ARGS=("$BASE")
 ```
+
+Use `"${DIFF_ARGS[@]}"` for every diff below. The distinction is not cosmetic: in branch mode a
+two-endpoint diff omits exactly the uncommitted changes the review is supposed to cover.
 
 Both obvious branch-mode alternatives are wrong in a common case: `origin/main...HEAD` (three
 dots) is committed work only and reports **zero files** against a dirty tree, silently scoping
@@ -51,10 +57,10 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
 ```
 
 - **Any `failure` blocks — required or not.** Automerge lands PRs over non-required failures:
-  #3969 auto-merged with `Build Xcode Projects`, `XCTestRunner Simulator Tests`, and `iOS Build`
+  [#3969](https://github.com/kaeawc/auto-mobile/pull/3969) auto-merged with `Build Xcode Projects`, `XCTestRunner Simulator Tests`, and `iOS Build`
   red, the pbxproj drift check having worked exactly as designed while the merge gate never
   consulted it.
-- **Unfinished checks with automerge armed block equally.** #4088 merged five seconds before
+- **Unfinished checks with automerge armed block equally.** [#4088](https://github.com/kaeawc/auto-mobile/pull/4088) merged five seconds before
   `Swift Packages (Xcode 26.5)` concluded failure. For a merged PR, verify gates concluded
   *before* the merge:
   ```bash
@@ -69,14 +75,14 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
     android/build.gradle.kts android/gradle/libs.versions.toml \
     eslint.config.* scripts/typecheck-baseline.txt eslint-suppressions.json
   ```
-  Any hit means rebase-and-re-run, not approval. #4016 went green at 05:44, #4005 turned on the
-  detekt gate at 05:48, #4016 auto-merged at 05:49 — reddening main. Its `Fast Validation` job
+  Any hit means rebase-and-re-run, not approval. [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) went green at 05:44, [#4005](https://github.com/kaeawc/auto-mobile/pull/4005) turned on the
+  detekt gate at 05:48, [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) auto-merged at 05:49 — reddening main. Its `Fast Validation` job
   had no `Run detekt` step at all.
-- **Run the tests the diff changed.** #4070 landed a deterministically-red assertion because a
+- **Run the tests the diff changed.** [#4070](https://github.com/kaeawc/auto-mobile/pull/4070) landed a deterministically-red assertion because a
   refactor moved argv construction and updated one of two sibling tests. Use the Step 0 `$BASE`, so uncommitted test edits are included, and guard the empty case explicitly rather
   than relying on `xargs -r` (GNU-only on older macOS and other BSDs):
   ```bash
-  changed_tests=$(git diff --name-only "$BASE" "$HEADREF" -- 'test/**/*.test.ts')
+  changed_tests=$(git diff --name-only "${DIFF_ARGS[@]}" -- 'test/**/*.test.ts')
   [ -n "$changed_tests" ] && bun test $changed_tests
   ```
 
@@ -98,17 +104,17 @@ squash-**merged**, and a "fix" PR can merge test-only, so check `git log origin/
 actually landed. With no argument, review committed *and* uncommitted work; read changed files
 in full, since the hunk lies by omission.
 
-Size the diff with the Step 0 `$BASE` and `$HEADREF`, excluding lockfiles and generated
+Size the diff with the Step 0 `${DIFF_ARGS[@]}`, excluding lockfiles and generated
 artifacts:
 
 ```bash
-git diff --numstat "$BASE" "$HEADREF" -- . \
+git diff --numstat "${DIFF_ARGS[@]}" -- . \
   ':(exclude)**/*.lock' ':(exclude)bun.lockb' ':(exclude)schemas/**' \
   ':(exclude)**/project.pbxproj' ':(exclude)eslint-suppressions.json' \
   | awk '{a+=$1; d+=$2} END {print a+d" changed lines across "NR" files"}'
 ```
 
-Reuse `$BASE` for every later diff, sanity-check the file count, and report how far behind main
+Reuse `${DIFF_ARGS[@]}` for every later diff, sanity-check the file count, and report how far behind main
 the branch is (`git rev-list --count HEAD..origin/main`) — Step 1's stale-base check applies to
 branch reviews too.
 
@@ -192,7 +198,7 @@ head, and restore that file immediately.
   of preserving argv boundaries, so any dynamic value — an AVD name, a path — can carry shell
   syntax. Recurred all week across Windows `.bat`/`cmd` paths. Prefer a non-shell executable
   path; otherwise quote explicitly.
-- **Relative paths under the detached daemon.** The daemon `chdir`s to a stable cwd (#2564), so
+- **Relative paths under the detached daemon.** The daemon `chdir`s to a stable cwd ([#2564](https://github.com/kaeawc/auto-mobile/pull/2564)), so
   user-supplied relative paths must go through `resolvePathFromDaemonLaunchWorkingDirectory`.
   Grep for raw `fs.stat`/`readFile`/`copyFile` on an argument-derived path — this caught
   `putAppFile`'s `sourcePath`.
@@ -207,7 +213,7 @@ routinely ships nothing.
   pinned released runner. Unless `src/constants/release.ts` checksums change in the same PR (or
   a re-cut is explicitly sequenced), the feature is **undeliverable** and the issue is not
   closed. Blocking. Check with the Step 2 `$BASE`, not `origin/main...HEAD`, so an uncommitted
-  runner edit still trips it: `git diff --name-only "$BASE" "$HEADREF" | grep -E
+  runner edit still trips it: `git diff --name-only "${DIFF_ARGS[@]}" | grep -E
   '^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
 - **New Swift file ⇒ regenerate the Xcode project.** A file under `ios/control-proxy/Sources/**`
   absent from the committed `ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj` is not
@@ -251,7 +257,7 @@ routinely ships nothing.
     argument.
   - **A new path filter can silently un-gate a job.** When a job gains `if:
     needs.detect-changes.outputs.<x> == 'true'`, compare the `dorny/paths-filter` globs against
-    the paths the script *it runs* treats as significant. #4026 gated detekt on a filter omitting
+    the paths the script *it runs* treats as significant. [#4026](https://github.com/kaeawc/auto-mobile/pull/4026) gated detekt on a filter omitting
     `android/gradle/wrapper/**`, which `scripts/android/detekt_scope.sh` treats as a full-scope
     trigger — so a wrapper bump skipped detekt entirely instead of failing open.
 - **Post-merge-only workflows are invisible to PR CI**: `merge.yml`, `nightly.yml`,
@@ -315,7 +321,7 @@ Give this to every lens subagent.
 2. **Reproduce before asserting.** If you can't, label it **unverified** and state exactly how to
    verify.
 3. **Separate real bugs from environment artifacts.** `Session not found` is almost always the
-   daemon-restart session wedge (#2599) — confirm with a second, unrelated tool first.
+   daemon-restart session wedge ([#2599](https://github.com/kaeawc/auto-mobile/issues/2599)) — confirm with a second, unrelated tool first.
 4. **Check provenance.** `git blame` the lines; don't blame the PR for pre-existing code.
    `git log origin/main -- <file>` to see if it's already fixed or superseded.
 5. **For a fix PR, verify it closes the ISSUE, not the symptom — and name the false negative it

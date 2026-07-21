@@ -28,7 +28,7 @@ gh api --paginate "repos/kaeawc/auto-mobile/pulls/<PR>/comments?per_page=100"   
 
 These three return **top-level JSON arrays**, and `--paginate` merges the pages into one flat
 array, so redirecting to a file and parsing it with `jq` is safe. Verified on gh 2.96 against
-PR #4117 with `per_page=2`: five GET requests, one top-level document, element count matching
+PR [#4117](https://github.com/kaeawc/auto-mobile/pull/4117) with `per_page=2`: five GET requests, one top-level document, element count matching
 the unpaginated result. (The `gh api` manual describes pages as separate documents — true for
 GraphQL and for object-shaped responses, but not for these array endpoints on this version. If
 you are on an older gh, re-check before relying on it.) Do **not** add `--slurp`
@@ -63,7 +63,7 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
 **GraphQL `--paginate` does not merge.** Unlike the REST array endpoints above, it emits one
 complete JSON *document per page*, concatenated. The `--jq` form above is safe because jq
 streams every document — but redirecting the same query to a file and parsing it afterwards
-reads **only the first page**, silently, with no error. Verified on PR #4098 with `first: 2`
+reads **only the first page**, silently, with no error. Verified on PR [#4098](https://github.com/kaeawc/auto-mobile/pull/4098) with `first: 2`
 against 4 threads: the saved file yields `nodes | length` = 2, and `pageInfo` appears twice.
 
 So when you need the whole result as a file, add `--slurp` (which cannot be combined with
@@ -76,6 +76,18 @@ jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]]' scratch/threads.jso
 
 Otherwise keep `--jq` and consume the stream directly. Never save a non-slurped GraphQL
 `--paginate` result and parse it as one document.
+
+`--paginate` advances the **outer** `reviewThreads` connection only. The nested
+`comments(first:20)` is a separate connection: a thread with more replies than that silently
+truncates, and the later replies are exactly where a rebuttal or fix-evidence lives. For a
+thread you are about to resolve on the strength of its discussion, read the full comment list
+from REST instead, which paginates properly:
+
+```bash
+gh api --paginate "repos/kaeawc/auto-mobile/pulls/<PR>/comments?per_page=100" \
+  --jq '.[] | select(.in_reply_to_id == <root_comment_id> or .id == <root_comment_id>)
+        | "\(.user.login): \(.body)"'
+```
 
 `isOutdated` means the anchored line changed, **not** that the finding was addressed — judge
 outdated threads on content.
@@ -109,8 +121,9 @@ gh api repos/kaeawc/auto-mobile/pulls/<PR>/comments --paginate \
 ```
 
 P1 claims to block. Codex is usually right about mechanism and sometimes wrong about
-reachability — verify before acting, and reply with the reason when declining rather than
-leaving the thread silently open.
+reachability — verify before acting and equally before dismissing. When you decline a finding,
+**report the reason in-session and resolve the thread**; do not post a reply. `github-pr-feedback`
+and `auto-mobile-code-review` both forbid posting, and a decline is not an exception.
 
 ## Checks
 

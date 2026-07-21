@@ -93,6 +93,28 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "YAML escaping differences are not drift" {
+  # Both spellings decode to: Use "demo" safely.
+  # A double-quoted scalar escapes the inner quotes; a single-quoted one does not.
+  # Comparing the raw text reported drift and blocked the validator (#4117 review).
+  make_skill_pair '"Use \"demo\" safely."' "'Use \"demo\" safely.'"
+
+  cd "$WORK_DIR"
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "doubled single quotes decode to one quote" {
+  # YAML single-quoted style: '' is the only escape, and means one '.
+  make_skill_pair "'It''s fine.'" '"It'"'"'s fine."'
+
+  cd "$WORK_DIR"
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "fails when wrapper openai.yaml differs from canonical" {
   make_skill_pair 'A demo skill.' 'A demo skill.'
 

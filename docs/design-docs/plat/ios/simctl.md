@@ -52,9 +52,8 @@ For `terminateApp` specifically:
 
 <kbd>✅ Implemented</kbd>
 
-The `changeLocalization` MCP tool supports live locale changes on iOS simulators and
-physical iOS devices. Simulators use `simctl` plus `defaults`; physical devices use the
-lockdownd `com.apple.international` domain for language/locale reads and writes.
+The `changeLocalization` MCP tool supports live locale changes on iOS simulators using
+`simctl` plus `defaults`. Physical iOS device system configuration is not supported.
 
 ### How it works
 
@@ -78,24 +77,6 @@ lockdownd `com.apple.international` domain for language/locale reads and writes.
    (running apps cache locale at launch). The bundle ID is validated against a strict
    reverse-DNS pattern to prevent shell injection.
 
-### Physical iOS devices
-
-Physical devices cannot be targeted with `simctl spawn`. AutoMobile reads and writes the
-lockdownd `com.apple.international` domain instead:
-
-- `Language` — the primary language code, e.g. `ja`.
-- `Locale` — the ICU locale identifier, e.g. `ja_JP`.
-
-The device must be USB-connected, unlocked, paired, and trusted. Reads use
-`ideviceinfo`; writes use a lockdownd setter backend. The default command backend expects
-`pymobiledevice3` for `SetValueForDomain` writes and reports an actionable setup error if
-that command is unavailable. The adapter verifies every physical-device locale write by
-reading `Locale` back through lockdownd.
-
-Changing language/region on a real device restarts SpringBoard as part of iOS applying
-the setting, so AutoMobile does not run simulator SpringBoard restart commands on
-physical devices. `restartApp` is simulator-only.
-
 ### MCP tool parameters (iOS-specific)
 
 | Parameter | Description |
@@ -108,18 +89,11 @@ physical devices. `restartApp` is simulator-only.
 
 ### Limitations
 
-- On physical iOS devices, only `locale` is writable through the lockdownd language/region
-  path.
-- `timeZone` is not supported on physical iOS devices; iOS exposes no known lockdownd key
-  for this setting.
-- `timeFormat` is not supported as an independent physical-device write; 12h/24h behavior
-  is locale-derived unless changed manually in Settings.
-- `calendarSystem` is not supported as an independent physical-device write. When a
-  calendar is encoded in the locale string, AutoMobile can read it back from that locale.
+- Physical iOS device system configuration is not supported.
 - Text direction (`textDirection` parameter) is not applicable on iOS — RTL layout is
   driven by the app's language; set an RTL locale instead.
 - Running apps cache locale at launch. Use the `restartApp` parameter or manually
-  relaunch the app for it to pick up new settings; `restartApp` is simulator-only.
+  relaunch the app for it to pick up new settings.
 
 ## Biometric simulation
 

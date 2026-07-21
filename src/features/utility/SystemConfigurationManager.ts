@@ -7,7 +7,6 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "./system-configuration/createSystemConfigurationAdapter";
 import { buildAppleLanguages, iosSpawnCommand, isIosSimulator } from "./system-configuration/iosHelpers";
-import type { LockdownLocaleClient } from "./system-configuration/IosLockdownLocaleClient";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -39,8 +38,7 @@ export class SystemConfigurationManager {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
-    timer: Timer = defaultTimer,
-    lockdownLocaleClient?: LockdownLocaleClient
+    timer: Timer = defaultTimer
   ) {
     this.device = device;
     this.processExecutor = processExecutor;
@@ -48,8 +46,7 @@ export class SystemConfigurationManager {
     this.adapter = createSystemConfigurationAdapter(
       device,
       adbFactory.create(device),
-      processExecutor,
-      lockdownLocaleClient
+      processExecutor
     );
   }
 

@@ -5,10 +5,6 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, ExecResult } from "../../../src/models";
-import type {
-  IosLanguageConfig,
-  LockdownLocaleClient,
-} from "../../../src/features/utility/system-configuration/IosLockdownLocaleClient";
 
 const IOS_SIMULATOR: BootedDevice = {
   deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
@@ -36,25 +32,6 @@ function execResult(stdout: string, stderr = ""): ExecResult {
     trim: () => stdout.trim(),
     includes: (s: string) => stdout.includes(s)
   };
-}
-
-class FakeLockdownLocaleClient implements LockdownLocaleClient {
-  languageConfig: IosLanguageConfig = { language: "en", locale: "en_US" };
-  setLanguageConfigAfterWrite: IosLanguageConfig | null = null;
-  getLanguageCalls: string[] = [];
-  setLanguageCalls: Array<{ udid: string; language: string | null; locale: string | null }> = [];
-
-  async getLanguage(udid: string): Promise<IosLanguageConfig> {
-    this.getLanguageCalls.push(udid);
-    if (this.setLanguageCalls.length > 0 && this.setLanguageConfigAfterWrite) {
-      return this.setLanguageConfigAfterWrite;
-    }
-    return this.languageConfig;
-  }
-
-  async setLanguage(udid: string, language: string | null, locale: string | null): Promise<void> {
-    this.setLanguageCalls.push({ udid, language, locale });
-  }
 }
 
 describe("SystemConfigurationManager", () => {
@@ -135,18 +112,12 @@ describe("SystemConfigurationManager", () => {
       expect(result.error).toBe("languageTag must be a non-empty string");
     });
 
-    test("sets locale on physical iOS device through lockdown", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.languageConfig = { language: "en", locale: "en_US", supportedLanguages: ["ja"] };
-      lockdown.setLanguageConfigAfterWrite = { language: "ja", locale: "ja_JP" };
-      const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer, lockdown);
+    test("rejects locale changes on physical iOS devices", async () => {
+      const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.setLocale("ja-JP");
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("lockdown com.apple.international Language+Locale");
-      expect(lockdown.setLanguageCalls).toEqual([
-        { udid: IOS_PHYSICAL.deviceId, language: "ja", locale: "ja_JP" },
-      ]);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
       expect(fakeExec.getExecutedCommands()).toHaveLength(0);
     });
 
@@ -230,12 +201,12 @@ describe("SystemConfigurationManager", () => {
       expect(result.error).toBe("zoneId must be a non-empty string");
     });
 
-    test("returns error for physical iOS device", async () => {
+    test("returns unsupported error for physical iOS device", async () => {
       const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe("Time zone changes are not supported on physical iOS devices because iOS exposes no lockdown key for this setting.");
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
     });
   });
 
@@ -290,12 +261,12 @@ describe("SystemConfigurationManager", () => {
       expect(result.error).toContain("Read-back verification failed");
     });
 
-    test("returns error for physical iOS device", async () => {
+    test("returns unsupported error for physical iOS device", async () => {
       const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.set24HourFormat(true);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe("24-hour format changes are not supported on physical iOS devices because iOS exposes no lockdown key for this setting.");
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
     });
   });
 
@@ -329,14 +300,12 @@ describe("SystemConfigurationManager", () => {
       expect(result.textDirection).toBeNull();
     });
 
-    test("reads default localization values for physical iOS device", async () => {
+    test("rejects localization reads for physical iOS devices", async () => {
       const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.getLocalizationSettings();
 
-      expect(result.success).toBe(true);
-      expect(result.locale).toBeNull();
-      expect(result.languages).toBeNull();
-      expect(result.calendarSystem).toBe("gregory");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
     });
 
     test("handles missing values gracefully", async () => {
@@ -395,12 +364,12 @@ describe("SystemConfigurationManager", () => {
       expect(result.error).toBe("calendarSystem must be a non-empty string");
     });
 
-    test("returns error for physical iOS device", async () => {
+    test("returns unsupported error for physical iOS device", async () => {
       const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.setCalendarSystem("japanese");
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe("Calendar system changes are not supported as an independent setting on physical iOS devices; encode calendar in the locale when supported.");
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
       expect(fakeExec.getExecutedCommands()).toHaveLength(0);
     });
 
@@ -443,13 +412,12 @@ describe("SystemConfigurationManager", () => {
       expect(result.source).toBe("default");
     });
 
-    test("reads default calendar for physical iOS device when locale has no calendar", async () => {
+    test("rejects calendar reads for physical iOS devices", async () => {
       const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.getCalendarSystem();
 
-      expect(result.success).toBe(true);
-      expect(result.calendarSystem).toBe("gregory");
-      expect(result.source).toBe("default");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
     });
   });
 

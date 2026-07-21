@@ -3,11 +3,6 @@ import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurat
 import { AndroidSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/AndroidSystemConfigurationAdapter";
 import { IosSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/IosSystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/createSystemConfigurationAdapter";
-import {
-  CommandLineLockdownLocaleClient,
-  type IosLanguageConfig,
-  type LockdownLocaleClient,
-} from "../../../src/features/utility/system-configuration/IosLockdownLocaleClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import type { BootedDevice, ExecResult } from "../../../src/models";
@@ -43,35 +38,6 @@ describe("SystemConfigurationAdapter", () => {
     trim: () => stdout.trim(),
     includes: (s: string) => stdout.includes(s),
   });
-
-  class FakeLockdownLocaleClient implements LockdownLocaleClient {
-    languageConfig: IosLanguageConfig = {
-      language: "en",
-      locale: "en_US",
-      supportedLanguages: ["en", "ja"],
-      supportedLocales: ["en_US", "ja_JP"],
-    };
-
-    setLanguageConfigAfterWrite: IosLanguageConfig | null = null;
-    getLanguageCalls: string[] = [];
-    setLanguageCalls: Array<{ udid: string; language: string | null; locale: string | null }> = [];
-    setError: Error | null = null;
-
-    async getLanguage(udid: string): Promise<IosLanguageConfig> {
-      this.getLanguageCalls.push(udid);
-      if (this.setLanguageCalls.length > 0 && this.setLanguageConfigAfterWrite) {
-        return this.setLanguageConfigAfterWrite;
-      }
-      return this.languageConfig;
-    }
-
-    async setLanguage(udid: string, language: string | null, locale: string | null): Promise<void> {
-      this.setLanguageCalls.push({ udid, language, locale });
-      if (this.setError) {
-        throw this.setError;
-      }
-    }
-  }
 
   describe("FakeSystemConfigurationAdapter", () => {
     let fake: FakeSystemConfigurationAdapter;
@@ -497,135 +463,44 @@ describe("SystemConfigurationAdapter", () => {
   });
 
   describe("IosSystemConfigurationAdapter behavior", () => {
-    it("sets locale on physical devices through lockdown and verifies read-back", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.setLanguageConfigAfterWrite = { language: "ja", locale: "ja_JP" };
+    it("rejects physical iOS system configuration without executing commands", async () => {
       const exec = new FakeProcessExecutor();
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, exec, lockdown);
-      const result = await adapter.setLocale("ja-JP", {});
+      const adapter = new IosSystemConfigurationAdapter(iosPhysical, exec);
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("lockdown com.apple.international Language+Locale");
-      expect(result.previousLanguageTag).toBe("en_US");
-      expect(result.appliedLanguages).toEqual(["ja-JP", "ja"]);
-      expect(lockdown.setLanguageCalls).toEqual([
-        { udid: iosPhysical.deviceId, language: "ja", locale: "ja_JP" },
-      ]);
-      expect(lockdown.getLanguageCalls).toEqual([iosPhysical.deviceId, iosPhysical.deviceId]);
+      await expect(adapter.setLocale("ja-JP", {})).resolves.toMatchObject({
+        success: false,
+        error: "System configuration is not supported on physical iOS devices.",
+      });
+      await expect(adapter.getLocalizationSettings()).resolves.toMatchObject({
+        success: false,
+        error: "System configuration is not supported on physical iOS devices.",
+      });
+      await expect(adapter.getCalendarSystem()).resolves.toMatchObject({
+        success: false,
+        error: "System configuration is not supported on physical iOS devices.",
+      });
       expect(exec.getExecutedCommands()).toHaveLength(0);
-    });
-
-    it("preserves the best supported script-specific language for physical locale changes", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.languageConfig = {
-        language: "en",
-        locale: "en_US",
-        supportedLanguages: ["zh-Hans", "zh-Hant", "zh"],
-      };
-      lockdown.setLanguageConfigAfterWrite = { language: "zh-Hant", locale: "zh_Hant_TW" };
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
-
-      const result = await adapter.setLocale("zh-Hant-TW", {});
-
-      expect(result.success).toBe(true);
-      expect(lockdown.setLanguageCalls).toEqual([
-        { udid: iosPhysical.deviceId, language: "zh-Hant", locale: "zh_Hant_TW" },
-      ]);
-    });
-
-    it("uses the full requested language tag when physical supported languages are unavailable", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.languageConfig = { language: "en", locale: "en_US" };
-      lockdown.setLanguageConfigAfterWrite = { language: "pt-BR", locale: "pt_BR" };
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
-
-      const result = await adapter.setLocale("pt-BR", {});
-
-      expect(result.success).toBe(true);
-      expect(lockdown.setLanguageCalls).toEqual([
-        { udid: iosPhysical.deviceId, language: "pt-BR", locale: "pt_BR" },
-      ]);
-    });
-
-    it("returns a verification error when physical locale read-back does not match", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.setLanguageConfigAfterWrite = { language: "ja", locale: "fr_FR" };
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
-      const result = await adapter.setLocale("ja-JP", {});
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Read-back verification failed");
-      expect(result.error).toContain("expected \"ja_JP\"");
-    });
-
-    it("returns a verification error when physical language read-back does not match", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.setLanguageConfigAfterWrite = { language: "en", locale: "ja_JP" };
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
-      const result = await adapter.setLocale("ja-JP", {});
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Read-back verification failed");
-      expect(result.error).toContain("Language");
-      expect(result.error).toContain("expected \"ja\"");
-    });
-
-    it("surfaces pairing or lockdown write failures for physical locale changes", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.setError = new Error("device is not paired or trusted");
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
-      const result = await adapter.setLocale("ja-JP", {});
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("Failed to set locale on physical iOS device: device is not paired or trusted");
-    });
-
-    it("reads localization settings from lockdown on physical devices", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.languageConfig = { language: "fa", locale: "fa_IR@calendar=persian" };
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
-      const result = await adapter.getLocalizationSettings();
-
-      expect(result.success).toBe(true);
-      expect(result.locale).toBe("fa_IR@calendar=persian");
-      expect(result.languages).toBe("fa");
-      expect(result.calendarSystem).toBe("persian");
-      expect(result.timeZone).toBeNull();
-      expect(result.timeFormat).toBeNull();
-      expect(result.textDirection).toBeNull();
-    });
-
-    it("derives physical calendar settings from the lockdown locale", async () => {
-      const lockdown = new FakeLockdownLocaleClient();
-      lockdown.languageConfig = { language: "th", locale: "th_TH-u-ca-buddhist" };
-      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
-      const result = await adapter.getCalendarSystem();
-
-      expect(result.success).toBe(true);
-      expect(result.calendarSystem).toBe("buddhist");
-      expect(result.locale).toBe("th_TH-u-ca-buddhist");
-      expect(result.source).toBe("locale");
     });
 
     it("rejects time-zone changes on physical devices", async () => {
       const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor());
       const result = await adapter.setTimeZone("Asia/Tokyo");
       expect(result.success).toBe(false);
-      expect(result.error).toBe("Time zone changes are not supported on physical iOS devices because iOS exposes no lockdown key for this setting.");
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
     });
 
     it("rejects 24-hour format changes on physical devices with a capability-specific error", async () => {
       const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor());
       const result = await adapter.set24HourFormat(true);
       expect(result.success).toBe(false);
-      expect(result.error).toBe("24-hour format changes are not supported on physical iOS devices because iOS exposes no lockdown key for this setting.");
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
     });
 
     it("rejects calendar changes on physical devices with a capability-specific error", async () => {
       const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor());
       const result = await adapter.setCalendarSystem("japanese");
       expect(result.success).toBe(false);
-      expect(result.error).toBe("Calendar system changes are not supported as an independent setting on physical iOS devices; encode calendar in the locale when supported.");
+      expect(result.error).toBe("System configuration is not supported on physical iOS devices.");
     });
 
     it("setTextDirection returns the iOS-specific error regardless of simulator state", async () => {
@@ -644,8 +519,7 @@ describe("SystemConfigurationAdapter", () => {
     it("writes AppleLocale via xcrun simctl spawn defaults", async () => {
       const exec = new FakeProcessExecutor();
       exec.setCommandResponse("defaults read .GlobalPreferences AppleLocale", execResult("ja_JP\n"));
-      const lockdown = new FakeLockdownLocaleClient();
-      const adapter = new IosSystemConfigurationAdapter(iosSimulator, exec, lockdown);
+      const adapter = new IosSystemConfigurationAdapter(iosSimulator, exec);
       const result = await adapter.setLocale("ja-JP", {});
 
       expect(result.success).toBe(true);
@@ -654,90 +528,6 @@ describe("SystemConfigurationAdapter", () => {
           `xcrun simctl spawn ${iosSimulator.deviceId} defaults write .GlobalPreferences AppleLocale ja_JP`
         )
       ).toBe(true);
-      expect(lockdown.getLanguageCalls).toHaveLength(0);
-      expect(lockdown.setLanguageCalls).toHaveLength(0);
-    });
-  });
-
-  describe("CommandLineLockdownLocaleClient", () => {
-    it("reads language and locale from the com.apple.international lockdown domain", async () => {
-      const exec = new FakeProcessExecutor();
-      exec.setCommandResponse("Language", execResult("ja\n"));
-      exec.setCommandResponse("Locale", execResult("ja_JP\n"));
-      const client = new CommandLineLockdownLocaleClient(exec);
-
-      const result = await client.getLanguage(iosPhysical.deviceId);
-
-      expect(result.language).toBe("ja");
-      expect(result.locale).toBe("ja_JP");
-      expect(exec.wasCommandExecuted("ideviceinfo")).toBe(true);
-      expect(exec.wasCommandExecuted("-q 'com.apple.international'")).toBe(true);
-      expect(exec.wasCommandExecuted("-k 'Language'")).toBe(true);
-      expect(exec.wasCommandExecuted("-k 'Locale'")).toBe(true);
-    });
-
-    it("strips ideviceinfo indexes from supported language lists", async () => {
-      const exec = new FakeProcessExecutor();
-      exec.setCommandResponse("SupportedLanguages", execResult("0: zh-Hans\n1: zh-Hant\n2: zh\n"));
-      exec.setCommandResponse("Language", execResult("en\n"));
-      exec.setCommandResponse("Locale", execResult("en_US\n"));
-      const client = new CommandLineLockdownLocaleClient(exec);
-
-      const result = await client.getLanguage(iosPhysical.deviceId);
-
-      expect(result.supportedLanguages).toEqual(["zh-Hans", "zh-Hant", "zh"]);
-    });
-
-    it("writes language and locale with pymobiledevice3 after pairing validation", async () => {
-      const exec = new FakeProcessExecutor();
-      exec.setCommandResponse("command -v pymobiledevice3", execResult("/opt/homebrew/bin/pymobiledevice3\n"));
-      const client = new CommandLineLockdownLocaleClient(exec);
-
-      await client.setLanguage(iosPhysical.deviceId, "ja", "ja_JP");
-
-      const commands = exec.getExecutedCommands();
-      expect(commands[0]).toContain("idevicepair");
-      expect(exec.wasCommandExecuted("pymobiledevice3 lockdown language --udid")).toBe(true);
-      expect(exec.wasCommandExecuted("pymobiledevice3 lockdown locale --udid")).toBe(true);
-      expect(exec.wasCommandExecuted("--udid '00008130-001234567890abcd' 'ja'")).toBe(true);
-      expect(exec.wasCommandExecuted("--udid '00008130-001234567890abcd' 'ja_JP'")).toBe(true);
-    });
-
-    it("returns an actionable error when no lockdown setter command is installed", async () => {
-      const exec = new FakeProcessExecutor();
-      const client = new CommandLineLockdownLocaleClient(exec);
-
-      await expect(client.setLanguage(iosPhysical.deviceId, "ja", "ja_JP")).rejects.toThrow(
-        "physical iOS locale writes require pymobiledevice3"
-      );
-    });
-
-    it("normalizes command lookup failures for the lockdown setter", async () => {
-      const exec = new FakeProcessExecutor();
-      const originalExec = exec.exec.bind(exec);
-      exec.exec = async (command, options) => {
-        if (command === "command -v pymobiledevice3") {
-          throw new Error("pymobiledevice3 not found");
-        }
-        return originalExec(command, options);
-      };
-      const client = new CommandLineLockdownLocaleClient(exec);
-
-      await expect(client.setLanguage(iosPhysical.deviceId, "ja", "ja_JP")).rejects.toThrow(
-        "physical iOS locale writes require pymobiledevice3"
-      );
-    });
-
-    it("returns an actionable pairing error when lockdown reads fail", async () => {
-      const exec = new FakeProcessExecutor();
-      exec.exec = async () => {
-        throw new Error("ERROR: Device is not paired");
-      };
-      const client = new CommandLineLockdownLocaleClient(exec);
-
-      await expect(client.getLanguage(iosPhysical.deviceId)).rejects.toThrow(
-        "connected, unlocked, paired, and trusted"
-      );
     });
   });
 

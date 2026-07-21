@@ -31,9 +31,6 @@ is_quoted() {
   [[ "$value" == \"*\" || "$value" == \'*\' ]]
 }
 
-# Strip one layer of matching surrounding quotes so a quoted and an unquoted
-# frontmatter description compare equal by VALUE. Representation may differ
-# (a description containing ': ' must be quoted); the value must not.
 # Validate a Codex interface metadata file (agents/openai.yaml).
 # Args: <openai_yaml_path> <skill_name>. Sets `errors=1` on any failure.
 validate_openai_yaml() {
@@ -243,8 +240,6 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
         NR > 1 && $0 == "---" { exit }
         NR > 1' "${PROJECT_ROOT}/${canonical_path}" \
         | sed -n 's/^description:[[:space:]]*//p' | head -n 1)"
-      # Invoke unquote separately, never inside an `if` condition: that
-      # disables set -e for the call (SC2310, see #3637/#3640).
       # Byte-identical, not semantically-equal. Decoding YAML scalars by hand kept
       # producing false drift (escaped quotes, bash 3.2 replacement semantics,
       # literal \n ordering), and the repo bans hand-rolled parsing of structured

@@ -120,7 +120,10 @@ async function startWithFrame(
   await started;
 }
 
-function createHarness(device: BootedDevice = IOS_DEVICE) {
+function createHarness(
+  device: BootedDevice = IOS_DEVICE,
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+) {
   const helper = new FakeFrameCaptureHelper();
   const encoder = new FakeChildProcess();
   const helperTargets: CaptureTarget[] = [];
@@ -144,6 +147,7 @@ function createHarness(device: BootedDevice = IOS_DEVICE) {
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
+    ...overrides,
   });
 
   return { source, helper, encoder, helperTargets, encoderSpawns, chunks, errors };
@@ -209,6 +213,78 @@ describe("IosH264Source", () => {
     await startWithFrame(source, helper, frame(1, 1, 0x11));
 
     expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 5 }]);
+  });
+
+  test("requests simulator audio and forwards its PCM16LE chunks unchanged", async () => {
+    const audio: Buffer[] = [];
+    const { source, helper, helperTargets } = createHarness(IOS_SIMULATOR, {
+      audioEnabled: true,
+      onAudioData: chunk => audio.push(chunk),
+    });
+
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    helper.emit("audio", { pcm16le: Buffer.from([0x34, 0x12]) });
+    await started;
+
+    expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 5, audio: true }]);
+    expect(audio).toEqual([Buffer.from([0x34, 0x12])]);
+  });
+
+  test("rejects audio startup when the Simulator never produces PCM", async () => {
+    const timer = new FakeTimer();
+    const { source, helper } = createHarness(IOS_SIMULATOR, {
+      audioEnabled: true,
+      timer,
+      firstFrameTimeoutMs: 1,
+    });
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    timer.advanceTime(1);
+
+    await expect(started).rejects.toThrow(/did not produce PCM audio/);
+  });
+
+  test("rejects audio startup when the helper exits after video but before PCM", async () => {
+    const { source, helper } = createHarness(IOS_SIMULATOR, { audioEnabled: true });
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    helper.emit("exit", { code: 1, signal: null });
+
+    await expect(started).rejects.toThrow(/exited before audio/);
+  });
+
+  test("rejects audio startup when the helper errors after video but before PCM", async () => {
+    const { source, helper } = createHarness(IOS_SIMULATOR, { audioEnabled: true });
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    helper.emit("error", new Error("helper crashed"));
+
+    await expect(started).rejects.toThrow("helper crashed");
+  });
+
+  test("rejects audio startup when the encoder exits after video but before PCM", async () => {
+    const { source, helper, encoder } = createHarness(IOS_SIMULATOR, { audioEnabled: true });
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    encoder.emit("exit", 1, null);
+
+    await expect(started).rejects.toThrow(/ffmpeg exited/);
+  });
+
+  test("rejects audio startup when the encoder errors after video but before PCM", async () => {
+    const { source, helper, encoder } = createHarness(IOS_SIMULATOR, { audioEnabled: true });
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    encoder.emit("error", new Error("encoder crashed"));
+
+    await expect(started).rejects.toThrow("encoder crashed");
   });
 
   test("passes explicit simulator fps to helper target and ffmpeg input", async () => {
@@ -480,6 +556,38 @@ describe("IosH264Source", () => {
     });
 
     await expect(source.start()).rejects.toThrow(/No visible iOS Simulator window matched iPhone 16/);
+    expect(helper.started).toBe(false);
+  });
+
+  test("rejects audio startup before spawning the helper when multiple Simulator windows are visible", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      audioEnabled: true,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          return {
+            stdout: JSON.stringify({
+              windows: [
+                { windowID: 42, title: "iPhone 16", applicationName: "Simulator" },
+                { windowID: 99, title: "iPad Pro", applicationName: "Simulator" },
+              ],
+            }),
+            stderr: "",
+            exitCode: 0,
+            signal: null,
+          };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    await expect(source.start()).rejects.toThrow(/exactly one visible Simulator window/);
     expect(helper.started).toBe(false);
   });
 

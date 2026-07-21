@@ -2,6 +2,7 @@ export {
   FRAME_HEADER_SIZE,
   FrameDecoder,
   type DecodedFrame,
+  type DecodedAudio,
   type FrameHeader,
   type MalformedFrameError,
 } from "./frameProtocol";

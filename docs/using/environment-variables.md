@@ -118,7 +118,7 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` | Path to the built `screen-capture-helper` binary for iOS WebRTC capture. Build with `swift build` in `ios/screen-capture` from a repo checkout, or in `dist/ios/screen-capture` from a package install. | repo/package-local debug/release build output when present |
 | `AUTOMOBILE_IOS_WEBRTC_FFMPEG` | Path to the `ffmpeg` binary used to encode iOS helper BGRA frames into H.264 Annex-B. | `ffmpeg` on `PATH` |
 | `AUTOMOBILE_WEBRTC_TRICKLE_ICE` | Enable trickle ICE: publish the WHIP offer immediately and PATCH candidates incrementally instead of blocking on ICE gathering. Requires an ingest server supporting the WHIP trickle extension. | `false` |
-| `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional audio alongside video. Android only; requires the persistent `video-server` jar and captures shell-privileged `REMOTE_SUBMIX` PCM16 audio, sent over WebRTC as PCMU. | `false` |
+| `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional audio alongside video. Android requires the persistent `video-server` jar and captures shell-privileged `REMOTE_SUBMIX`; iOS supports Simulator-window audio through ScreenCaptureKit. Both emit 8 kHz mono PCM16LE and publish as PCMU. Physical iOS playback capture is unavailable through public APIs. | `false` |
 
 ### `automobile-video.jar` resolution
 

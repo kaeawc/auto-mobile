@@ -41,6 +41,11 @@ public final class FrameWriter {
         )
         sink.write(payload)
     }
+
+    public func writeAudio(pcm16le: Data) {
+        sink.write(FrameProtocol.encodeAudioHeader(payloadLength: pcm16le.count))
+        sink.write(pcm16le)
+    }
 }
 
 /// Sink that writes to a `FileHandle` (e.g. `FileHandle.standardOutput`).

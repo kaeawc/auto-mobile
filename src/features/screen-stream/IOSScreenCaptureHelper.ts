@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { logger } from "../../utils/logger";
 import {
   type DecodedFrame,
+  type DecodedAudio,
   FrameDecoder,
   type MalformedFrameError,
 } from "./frameProtocol";
@@ -21,7 +22,7 @@ export type HelperSpawner = (
  */
 export type CaptureTarget =
   | { kind: "device"; deviceId?: string }
-  | { kind: "simulator"; windowID: number; fps?: number };
+  | { kind: "simulator"; windowID: number; fps?: number; audio?: boolean };
 
 /** Valid range for the simulator capture frame rate, mirrors the Swift CLI. */
 export const SIMULATOR_FPS_MIN = 5;
@@ -38,6 +39,7 @@ export interface IosScreenCaptureHelperOptions {
 
 export interface IosScreenCaptureHelperEvents {
   frame: (frame: DecodedFrame) => void;
+  audio: (audio: DecodedAudio) => void;
   malformed: (error: MalformedFrameError) => void;
   stderr: (line: string) => void;
   exit: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
@@ -103,7 +105,11 @@ export class IOSScreenCaptureHelper extends EventEmitter {
 
     proc.stdout.on("data", chunk => {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const frames = this.decoder.push(buf, err => this.emit("malformed", err));
+      const frames = this.decoder.push(
+        buf,
+        err => this.emit("malformed", err),
+        audio => this.emit("audio", audio)
+      );
       for (const frame of frames) {
         this.emit("frame", frame);
       }
@@ -185,6 +191,9 @@ function buildArgs(target: CaptureTarget): string[] {
           );
         }
         args.push("--simulator-fps", String(target.fps));
+      }
+      if (target.audio === true) {
+        args.push("--audio");
       }
       return args;
     }

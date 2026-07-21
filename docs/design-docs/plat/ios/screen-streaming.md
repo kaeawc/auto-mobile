@@ -268,6 +268,11 @@ Since iOS provides raw frames (not H.264), use a simpler protocol:
 Followed by `height * bytesPerRow` bytes of BGRA pixel data.
 ```
 
+For explicitly enabled Simulator audio, the same transport reserves `width =
+0`; `height = 8000`, `bytesPerRow = 1`, and `timestamp = payload length`.
+The following payload is 8 kHz mono PCM16LE. Video-only capture never emits
+these records.
+
 ## Implementation Plan
 
 ### Milestone 1: Physical Device Capture

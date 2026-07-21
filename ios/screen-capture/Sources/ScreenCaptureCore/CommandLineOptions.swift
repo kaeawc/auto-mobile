@@ -6,7 +6,7 @@ public struct CommandLineOptions: Equatable {
         case listDevices
         case capture(deviceID: String?)
         case listSimulators
-        case captureSimulator(windowID: UInt32, fps: Int)
+        case captureSimulator(windowID: UInt32, fps: Int, audio: Bool)
         case help
     }
 
@@ -36,6 +36,7 @@ public struct CommandLineOptions: Equatable {
         var listSimulators = false
         var simulatorWindowID: UInt32?
         var simulatorFPS: Int?
+        var audio = false
         var help = false
 
         while let arg = iterator.next() {
@@ -69,6 +70,8 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
                 simulatorFPS = parsed
+            case "--audio":
+                audio = true
             case "-h", "--help":
                 help = true
             default:
@@ -97,6 +100,9 @@ public struct CommandLineOptions: Equatable {
                 "--simulator-fps requires --simulator-window"
             )
         }
+        if audio && simulatorWindowID == nil {
+            throw ParseError.conflictingFlags("--audio requires --simulator-window")
+        }
 
         if listDevices {
             return CommandLineOptions(mode: .listDevices)
@@ -108,7 +114,8 @@ public struct CommandLineOptions: Equatable {
             return CommandLineOptions(
                 mode: .captureSimulator(
                     windowID: windowID,
-                    fps: simulatorFPS ?? defaultSimulatorFPS
+                    fps: simulatorFPS ?? defaultSimulatorFPS,
+                    audio: audio
                 )
             )
         }
@@ -121,7 +128,7 @@ public struct CommandLineOptions: Equatable {
     USAGE:
         screen-capture-helper [--device-id <id>]
         screen-capture-helper --list-devices
-        screen-capture-helper --simulator-window <windowID> [--simulator-fps <n>]
+        screen-capture-helper --simulator-window <windowID> [--simulator-fps <n>] [--audio]
         screen-capture-helper --list-simulators
 
     DEVICE OPTIONS (USB-connected iOS devices via AVFoundation):
@@ -134,6 +141,7 @@ public struct CommandLineOptions: Equatable {
         --simulator-window <n>  CGWindowID of the simulator window to capture.
         --simulator-fps <n>     Target frame rate (5-60, default 5). Higher
                                 values waste CPU for typical MCP workloads.
+        --audio                 Capture Simulator window audio as 8 kHz mono PCM16LE.
 
         -h, --help              Show this help.
 

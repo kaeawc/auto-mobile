@@ -132,6 +132,7 @@ export class IosH264Source implements H264CaptureSource {
   private teardownPromise: Promise<void> | null = null;
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
+  private rejectFirstAudioWait: ((error: Error) => void) | null = null;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -282,13 +283,18 @@ export class IosH264Source implements H264CaptureSource {
         if (this.cancelFirstAudioWait === cancel) {
           this.cancelFirstAudioWait = null;
         }
+        if (this.rejectFirstAudioWait === rejectWait) {
+          this.rejectFirstAudioWait = null;
+        }
         callback();
       };
       const cancel = (): void => finish(resolve);
+      const rejectWait = (error: Error): void => finish(() => reject(error));
       const timeout = this.timer.setTimeout(() => {
         finish(() => reject(new ActionableError("iOS Simulator audio capture did not produce PCM audio before startup timed out.")));
       }, this.firstFrameTimeoutMs);
       this.cancelFirstAudioWait = cancel;
+      this.rejectFirstAudioWait = rejectWait;
       helper.on("audio", () => {
         if (this.helper === helper && this.isActive()) {
           finish(resolve);
@@ -431,6 +437,7 @@ export class IosH264Source implements H264CaptureSource {
     if (this.phase !== "running") {
       return;
     }
+    this.rejectFirstAudioWait?.(error);
     this.phase = "stopping";
     void this.beginTeardown();
     this.options.onError?.(error);

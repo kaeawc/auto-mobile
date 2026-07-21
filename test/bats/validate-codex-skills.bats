@@ -71,70 +71,30 @@ EOF
   run bash "$SCRIPT"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"description has drifted"* ]]
+  [[ "$output" == *"description differs from"* ]]
 }
 
-@test "quoting alone is not drift when the value is identical" {
-  # A description containing ': ' must be quoted, so the canonical and the
-  # wrapper can legitimately differ in representation. Comparison is by value.
+@test "a different spelling of the same value is still drift" {
+  # The comparison is byte-identical, deliberately. Hand-decoding YAML scalars to
+  # compare values produced three separate false-drift bugs (escaped quotes, bash
+  # 3.2 replacement semantics, literal \n ordering), and the repo bans hand-rolled
+  # parsing of structured formats. The wrapper is generated from the canonical, so
+  # requiring the exact line is achievable — and stricter.
+  make_skill_pair 'Demo does a thing.' '"Demo does a thing."'
+
+  cd "$WORK_DIR"
+  run bash "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"differs from"* ]]
+  [[ "$output" == *"verbatim"* ]]
+}
+
+@test "an identical quoted line passes" {
   make_skill_pair '"Demo: does a thing."' '"Demo: does a thing."'
 
   cd "$WORK_DIR"
   run bash "$SCRIPT"
-
-  [ "$status" -eq 0 ]
-
-  # Same value, but the wrapper quoted and the canonical not (canonical has no
-  # ': ' so it needs no quotes) must also pass.
-  make_skill_pair 'Demo does a thing.' '"Demo does a thing."'
-
-  run bash "$SCRIPT"
-
-  [ "$status" -eq 0 ]
-}
-
-@test "YAML escaping differences are not drift" {
-  # Both spellings decode to: Use "demo" safely.
-  # A double-quoted scalar escapes the inner quotes; a single-quoted one does not.
-  # Comparing the raw text reported drift and blocked the validator (#4117 review).
-  make_skill_pair '"Use \"demo\" safely."' "'Use \"demo\" safely.'"
-
-  cd "$WORK_DIR"
-  run bash "$SCRIPT"
-
-  [ "$status" -eq 0 ]
-}
-
-@test "doubled single quotes decode to one quote" {
-  # YAML single-quoted style: '' is the only escape, and means one '.
-  make_skill_pair "'It''s fine.'" '"It'"'"'s fine."'
-
-  cd "$WORK_DIR"
-  run bash "$SCRIPT"
-
-  [ "$status" -eq 0 ]
-}
-
-@test "REGRESSION: YAML scalar decoding is identical on bash 3.2" {
-  # Tests 4 and 5 run under PATH bash, which is 5.x on most dev machines, so they
-  # passed locally while the macos-latest leg (system bash 3.2) failed. The
-  # divergence: in 3.2 a replacement written as \' keeps its backslash, and a
-  # quoted replacement inserts the quotes literally. Both spellings must decode
-  # the same under BOTH shells, so pin the old one explicitly.
-  if [ ! -x /bin/bash ]; then
-    skip "no /bin/bash on this host"
-  fi
-
-  make_skill_pair "'It''s fine.'" '"It'"'"'s fine."'
-
-  cd "$WORK_DIR"
-  run /bin/bash "$SCRIPT"
-
-  [ "$status" -eq 0 ]
-
-  make_skill_pair '"Use \"demo\" safely."' "'Use \"demo\" safely.'"
-
-  run /bin/bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
 }

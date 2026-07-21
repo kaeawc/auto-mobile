@@ -34,33 +34,6 @@ is_quoted() {
 # Strip one layer of matching surrounding quotes so a quoted and an unquoted
 # frontmatter description compare equal by VALUE. Representation may differ
 # (a description containing ': ' must be quoted); the value must not.
-# Decode a YAML scalar to its VALUE, so two spellings of the same string compare
-# equal. Only the two quoted styles YAML defines are handled, per spec:
-#   double-quoted: backslash escapes (\" \\ \/ \n \t)
-#   single-quoted: no escapes except a doubled '' meaning one '
-# Plain scalars are returned as-is. Inline the quote test rather than calling
-# is_quoted: a function invoked in an `if` condition has set -e disabled for the
-# call (SC2310, #3637/#3640).
-unquote() {
-  local value="$1"
-  if [[ "$value" == \"*\" ]]; then
-    value="${value:1:${#value}-2}"
-    value="${value//\\n/$'\n'}"
-    value="${value//\\t/$'\t'}"
-    value="${value//\\\"/\"}"
-    value="${value//\\\//\/}"
-    value="${value//\\\\/\\}"
-  elif [[ "$value" == \'*\' ]]; then
-    value="${value:1:${#value}-2}"
-    # Hold the quote in a variable: bash 3.2 (macOS /bin/bash) keeps the backslash
-    # when a replacement is written as \' , so the escape must not appear here.
-    local sq="'"
-    # shellcheck disable=SC2295  # bash 3.2 inserts the quotes literally if they are quoted here
-    value="${value//$sq$sq/$sq}"
-  fi
-  printf '%s' "$value"
-}
-
 # Validate a Codex interface metadata file (agents/openai.yaml).
 # Args: <openai_yaml_path> <skill_name>. Sets `errors=1` on any failure.
 validate_openai_yaml() {
@@ -272,14 +245,18 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
         | sed -n 's/^description:[[:space:]]*//p' | head -n 1)"
       # Invoke unquote separately, never inside an `if` condition: that
       # disables set -e for the call (SC2310, see #3637/#3640).
-      canonical_desc_trimmed="$(trim "$canonical_desc_line")"
-      canonical_description="$(unquote "$canonical_desc_trimmed")"
-      wrapper_description_value="$(unquote "$wrapper_description")"
+      # Byte-identical, not semantically-equal. Decoding YAML scalars by hand kept
+      # producing false drift (escaped quotes, bash 3.2 replacement semantics,
+      # literal \n ordering), and the repo bans hand-rolled parsing of structured
+      # formats. The wrapper is generated from the canonical, so requiring the
+      # exact same line is both achievable and stricter.
+      canonical_description="$(trim "$canonical_desc_line")"
       if [[ -n "$canonical_description" ]] \
-        && [[ "$wrapper_description_value" != "$canonical_description" ]]; then
-        echo "[ERROR] ${rel_path}: frontmatter description has drifted from ${canonical_path}" >&2
+        && [[ "$wrapper_description" != "$canonical_description" ]]; then
+        echo "[ERROR] ${rel_path}: frontmatter description differs from ${canonical_path}" >&2
+        echo "        copy the canonical description line verbatim, including its quoting" >&2
         echo "        canonical: ${canonical_description}" >&2
-        echo "        wrapper:   ${wrapper_description_value}" >&2
+        echo "        wrapper:   ${wrapper_description}" >&2
         errors=1
       fi
     fi

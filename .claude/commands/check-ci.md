@@ -24,7 +24,20 @@ echo "=== CI status for PR #${PR_NUM} ==="
 
 # Bucket is gh's normalized state: pass | fail | pending | skipping | cancel.
 # Branch on it rather than grepping the human-readable output.
-CHECKS_JSON=$(gh pr checks "$PR_NUM" --json name,state,bucket,link 2>/dev/null)
+#
+# Fail CLOSED: an auth/network/CLI error, or a response that is not a non-empty
+# JSON array, means CI state is UNKNOWN. Swallowing that and continuing lets the
+# script report "All checks passed" for a PR whose checks were never read.
+if ! CHECKS_JSON=$(gh pr checks "$PR_NUM" --json name,state,bucket,link 2>&1); then
+  echo "Could not read checks for PR #${PR_NUM}; CI state is unknown." >&2
+  printf '%s\n' "$CHECKS_JSON" >&2
+  exit 1
+fi
+
+if ! printf '%s' "$CHECKS_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  echo "No check entries returned for PR #${PR_NUM}; CI state is unknown, not green." >&2
+  exit 1
+fi
 
 printf '%s' "$CHECKS_JSON" | jq -r '
   group_by(.bucket) | map({bucket: .[0].bucket, n: length})

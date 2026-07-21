@@ -67,7 +67,14 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
     --jq '.check_runs[] | "\(.name)\t\(.conclusion)\t\(.completed_at)"'
   ```
   Any `completed_at` at or after `mergedAt` means the gate did not gate.
-- **Green is only as current as the base it ran on.** If `baseRefOid` differs from `origin/main`:
+- **Green is only as current as the base it ran on.** `baseRefOid` is the base the PR was
+  actually tested against, not current main — verified on [#4106](https://github.com/kaeawc/auto-mobile/pull/4106),
+  whose `baseRefOid` sits 11 commits behind. Cross-check it against GitHub's own count, which
+  needs no interpretation:
+  ```bash
+  gh api "repos/kaeawc/auto-mobile/compare/main...<headRefOid>" --jq '.behind_by'
+  ```
+  If `baseRefOid` differs from `origin/main` (equivalently, `behind_by > 0`):
   ```bash
   git log <baseRefOid>..origin/main --name-only -- \
     .github/workflows scripts/all_fast_validate_checks.sh \

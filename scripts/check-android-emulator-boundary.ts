@@ -5,6 +5,20 @@ import ts from "typescript";
 const SOURCE_ROOT = "src";
 const OWNER = "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts";
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
+const CHILD_PROCESS_FUNCTIONS = new Set([
+  "spawn",
+  "spawnSync",
+  "exec",
+  "execSync",
+  "execFile",
+  "execFileSync",
+]);
+const DIRECT_CHILD_PROCESS_FUNCTIONS = new Set([
+  "spawn",
+  "spawnSync",
+  "execFile",
+  "execFileSync",
+]);
 
 interface Violation {
   readonly file: string;
@@ -53,6 +67,15 @@ function receiverName(
   return null;
 }
 
+function isChildProcessNamespace(
+  expression: ts.Expression,
+  childProcessNamespaces: Set<string>,
+): boolean {
+  return (
+    ts.isIdentifier(expression) && childProcessNamespaces.has(expression.text)
+  );
+}
+
 function findViolations(file: string): Violation[] {
   const source = readFileSync(file, "utf8");
   if (!/emulator/i.test(source)) {
@@ -96,11 +119,7 @@ function findViolations(file: string): Violation[] {
       if (bindings && ts.isNamedImports(bindings)) {
         for (const specifier of bindings.elements) {
           const imported = specifier.propertyName?.text ?? specifier.name.text;
-          if (
-            imported === "spawn" ||
-            imported === "execFile" ||
-            imported === "exec"
-          ) {
+          if (CHILD_PROCESS_FUNCTIONS.has(imported)) {
             childProcessFunctions.add(specifier.name.text);
           }
         }
@@ -121,24 +140,25 @@ function findViolations(file: string): Violation[] {
       const expression = node.expression;
       if (
         ts.isIdentifier(expression) &&
-        (expression.text === "spawn" ||
-          expression.text === "execFile" ||
+        (DIRECT_CHILD_PROCESS_FUNCTIONS.has(expression.text) ||
           childProcessFunctions.has(expression.text))
       ) {
         record(node);
       } else if (ts.isPropertyAccessExpression(expression)) {
-        if (
-          expression.name.text === "spawn" ||
-          expression.name.text === "execFile"
-        ) {
+        if (DIRECT_CHILD_PROCESS_FUNCTIONS.has(expression.name.text)) {
           record(node);
         } else if (
-          expression.name.text === "exec" &&
-          receiverName(
-            expression.expression,
-            processExecutors,
-            childProcessNamespaces,
-          )
+          (expression.name.text === "exec" &&
+            receiverName(
+              expression.expression,
+              processExecutors,
+              childProcessNamespaces,
+            )) ||
+          (expression.name.text === "execSync" &&
+            isChildProcessNamespace(
+              expression.expression,
+              childProcessNamespaces,
+            ))
         ) {
           record(node);
         }

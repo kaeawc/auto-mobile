@@ -50,6 +50,42 @@ teardown() {
   [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
 }
 
+@test "rejects a synchronous child_process exec emulator launch" {
+  printf '%s\n' 'import { execSync } from "node:child_process"; execSync("emulator -avd Pixel");' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "rejects a synchronous child_process execFile emulator launch" {
+  printf '%s\n' 'import { execFileSync } from "node:child_process"; execFileSync("emulator", ["-avd", "Pixel"]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "rejects a synchronous child_process spawn emulator launch" {
+  printf '%s\n' 'import { spawnSync } from "node:child_process"; spawnSync("emulator", ["-avd", "Pixel"]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "rejects a synchronous child_process namespace emulator launch" {
+  printf '%s\n' 'import * as childProcess from "node:child_process"; childProcess.execSync("emulator -avd Pixel");' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
 @test "allows unrelated RegExp exec calls in an emulator-related file" {
   printf '%s\n' 'const match = /emulator/.exec(deviceId);' > "$FIXTURE"
 

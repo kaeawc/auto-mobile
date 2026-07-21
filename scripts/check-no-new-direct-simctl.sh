@@ -28,7 +28,7 @@ fi
 # checked as one expression. Block all direct xcrun argv calls outside the
 # owner: variable argv values cannot be proven to be non-simctl statically,
 # and the conservative boundary prevents an easy bypass.
-pattern='((spawn|spawnSync|execFile|execFileSync)\([[:space:]]*"xcrun"|exec(Sync)?\([^)]*"xcrun simctl|"/bin/sh".*xcrun simctl)'
+pattern='((spawn|spawnSync|execFile|execFileSync)\([[:space:]]*"xcrun"|exec(Sync)?\([^)]*("|`)xcrun simctl|"/bin/sh".*xcrun simctl)'
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" ]] && continue

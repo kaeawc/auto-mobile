@@ -12,6 +12,18 @@
 # and fails in the full run.
 SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ci/measure-ci.sh"
 
+# Assert the run succeeded, and on failure surface the script's status AND output.
+# Bare `assert_ok` reports only the assertion line, which made a CI-only
+# failure undiagnosable from the logs (the whole point of #4077).
+assert_ok() {
+  if [ "$status" -ne 0 ]; then
+    echo "--- command failed: status=$status ---" >&2
+    echo "$output" >&2
+    echo "--- env: PWD=$PWD jq=$(command -v jq || echo MISSING) bash=$BASH_VERSION ---" >&2
+    return 1
+  fi
+}
+
 setup() {
   TEST_ROOT="$(mktemp -d)"
 }
@@ -72,7 +84,7 @@ bundle_from_durations() {
 
 @test "--help prints usage and exits 0" {
   run bash "$SCRIPT" --help
-  [ "$status" -eq 0 ]
+  assert_ok
   [[ "$output" == *"--from-file"* ]]
   [[ "$output" == *"--max-runs"* ]]
 }
@@ -122,14 +134,14 @@ bundle_from_durations() {
   chmod +x "${TEST_ROOT}/bin/gh"
   bundle_from_durations '[10,20,30]' > "${TEST_ROOT}/b.json"
   run env PATH="${TEST_ROOT}/bin:$PATH" bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1
-  [ "$status" -eq 0 ]
+  assert_ok
   [[ "$output" != *"gh was called"* ]]
 }
 
 @test "reads a bundle from stdin with --from-file -" {
   bundle_from_durations '[10,20,30]' > "${TEST_ROOT}/b.json"
   run bash -c "cat '${TEST_ROOT}/b.json' | bash '$SCRIPT' --from-file - --min-samples 1"
-  [ "$status" -eq 0 ]
+  assert_ok
   [[ "$output" == *"iOS / Boot #1"* ]]
 }
 
@@ -154,7 +166,7 @@ bundle_from_durations() {
                 job("Never"; "skipped") ] } ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.jobs[0].job')" = "Flaky" ]
   [ "$(echo "$output" | jq -r '.jobs[0].executed')" = "2" ]
   [ "$(echo "$output" | jq -r '.jobs[0].passed')" = "1" ]
@@ -170,7 +182,7 @@ bundle_from_durations() {
 @test "human summary prints the per-job table" {
   bundle_from_durations '[10,20,30]' > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1
-  [ "$status" -eq 0 ]
+  assert_ok
   [[ "$output" == *"Per-job outcomes"* ]]
   [[ "$output" == *"iOS"* ]]
 }
@@ -186,7 +198,7 @@ bundle_from_durations() {
   # off-by-one index would give 80 / 90 — both fail this assertion.
   bundle_from_durations '[10,20,30,40,50,60,70,80,90,100]' > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.steps[0].samples')" = "10" ]
   [ "$(echo "$output" | jq -r '.steps[0].min')" = "10" ]
   [ "$(echo "$output" | jq -r '.steps[0].median')" = "50" ]
@@ -198,7 +210,7 @@ bundle_from_durations() {
 @test "percentiles are order-independent (input sorted before ranking)" {
   bundle_from_durations '[100,30,70,10,90,50,20,80,40,60]' > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.steps[0].median')" = "50" ]
   [ "$(echo "$output" | jq -r '.steps[0].p90')" = "90" ]
   [ "$(echo "$output" | jq -r '.steps[0].p95')" = "100" ]
@@ -207,7 +219,7 @@ bundle_from_durations() {
 @test "a single sample collapses every percentile to that value" {
   bundle_from_durations '[42]' > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1 --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.steps[0].min')" = "42" ]
   [ "$(echo "$output" | jq -r '.steps[0].p95')" = "42" ]
   [ "$(echo "$output" | jq -r '.steps[0].max')" = "42" ]
@@ -233,7 +245,7 @@ bundle_from_durations() {
                   steps: [ $s1, $s2, $s3 ] } ] } ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1 --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq '[.steps[] | select(.step == "Boot")] | length')" = "3" ]
   [ "$(echo "$output" | jq -r '.steps[] | select(.ordinal == 1) | .max')" = "20" ]
   [ "$(echo "$output" | jq -r '.steps[] | select(.ordinal == 2) | .max')" = "90" ]
@@ -254,7 +266,7 @@ bundle_from_durations() {
                   steps: [ $s1, $s2 ] } ] } ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1
-  [ "$status" -eq 0 ]
+  assert_ok
   [[ "$output" == *"iOS / Boot #1"* ]]
   [[ "$output" == *"iOS / Boot #2"* ]]
 }
@@ -280,7 +292,7 @@ bundle_from_durations() {
     [ run(1; [ $a1, $a2 ]), run(2; [ $b0, $b1, $b2 ]) ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 2 --json
-  [ "$status" -eq 0 ]
+  assert_ok
   # Both boots pair up across runs: two buckets of two samples each.
   [ "$(echo "$output" | jq '[.steps[] | select(.step == "Boot")] | length')" = "2" ]
   [ "$(echo "$output" | jq -r '.steps[] | select(.step == "Boot" and .ordinal == 1) | .samples')" = "2" ]
@@ -300,7 +312,7 @@ bundle_from_durations() {
                   steps: [ $s1, $s2 ] } ] } ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1 --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq '[.steps[] | select(.step == "Boot")] | length')" = "1" ]
   [ "$(echo "$output" | jq -r '.steps[0].ordinal')" = "1" ]
 }
@@ -322,7 +334,7 @@ bundle_from_durations() {
         jobs: [ job(1; "failure"), job(2; "success") ] } ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.reruns.retried_units')" = "1" ]
   [ "$(echo "$output" | jq -r '.reruns.rerun_passed')" = "1" ]
   [ "$(echo "$output" | jq -r '.reruns.rerun_success_rate')" = "1" ]
@@ -343,7 +355,7 @@ bundle_from_durations() {
         jobs: [ job(1; "failure"), job(2; "failure") ] } ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.reruns.retried_units')" = "1" ]
   [ "$(echo "$output" | jq -r '.reruns.rerun_passed')" = "0" ]
   [ "$(echo "$output" | jq -r '.reruns.rerun_success_rate')" = "0" ]
@@ -360,7 +372,7 @@ bundle_from_durations() {
                   steps: [] } ] } ]' | mk_bundle > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.reruns.retried_units')" = "0" ]
   [ "$(echo "$output" | jq -r '.reruns.rerun_success_rate')" = "null" ]
 }
@@ -372,25 +384,25 @@ bundle_from_durations() {
 @test "--min-samples hides thin step buckets" {
   bundle_from_durations '[10]' > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 3 --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq '.steps | length')" = "0" ]
 }
 
 @test "--step-filter and --job-filter narrow the report" {
   bundle_from_durations '[10,20,30]' > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1 --step-filter "Nothing" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq '.steps | length')" = "0" ]
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1 --job-filter "iOS" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq '.jobs | length')" = "1" ]
 }
 
 @test "--json emits a stable top-level shape for diffing across windows" {
   bundle_from_durations '[10,20,30]' > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --min-samples 1 --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r 'keys | join(",")')" = "jobs,reruns,sentinel,steps,window" ]
   [ "$(echo "$output" | jq -r '.window.runs')" = "3" ]
   [ "$(echo "$output" | jq -r '.window.workflow')" = "Pull Request" ]
@@ -414,14 +426,14 @@ bundle_from_durations() {
     > "${TEST_ROOT}/b.json"
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json" --json
-  [ "$status" -eq 0 ]
+  assert_ok
   [ "$(echo "$output" | jq -r '.sentinel.observed')" = "3" ]
   [ "$(echo "$output" | jq -r '.sentinel.hits')" = "2" ]
   [ "$(echo "$output" | jq -r '.sentinel.hit_rate')" = "0.667" ]
   [ "$(echo "$output" | jq -r '.sentinel.pattern')" = "Status=4294967295" ]
 
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json"
-  [ "$status" -eq 0 ]
+  assert_ok
   [[ "$output" == *"Log sentinel"* ]]
   [[ "$output" == *"2/3 jobs matched"* ]]
 }
@@ -430,6 +442,6 @@ bundle_from_durations() {
   echo '{"meta":{"repo":"o/r","workflow":"Pull Request","branch":null,"limit":0,"sentinel":null,"fetched_at":"2026-07-21T00:00:00Z"},"runs":[]}' \
     > "${TEST_ROOT}/b.json"
   run bash "$SCRIPT" --from-file "${TEST_ROOT}/b.json"
-  [ "$status" -eq 0 ]
+  assert_ok
   [[ "$output" == *"Runs: 0"* ]]
 }

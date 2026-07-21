@@ -36,7 +36,9 @@ is_quoted() {
 # (a description containing ': ' must be quoted); the value must not.
 unquote() {
   local value="$1"
-  if is_quoted "$value"; then
+  # Inline the quote test rather than calling is_quoted: a function invoked in
+  # an `if` condition has set -e disabled for the call (SC2310, #3637/#3640).
+  if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
     value="${value:1:${#value}-2}"
   fi
   printf '%s' "$value"
@@ -251,12 +253,16 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
         NR > 1 && $0 == "---" { exit }
         NR > 1' "${PROJECT_ROOT}/${canonical_path}" \
         | sed -n 's/^description:[[:space:]]*//p' | head -n 1)"
-      canonical_description="$(unquote "$(trim "$canonical_desc_line")")"
+      # Invoke unquote separately, never inside an `if` condition: that
+      # disables set -e for the call (SC2310, see #3637/#3640).
+      canonical_desc_trimmed="$(trim "$canonical_desc_line")"
+      canonical_description="$(unquote "$canonical_desc_trimmed")"
+      wrapper_description_value="$(unquote "$wrapper_description")"
       if [[ -n "$canonical_description" ]] \
-        && [[ "$(unquote "$wrapper_description")" != "$canonical_description" ]]; then
+        && [[ "$wrapper_description_value" != "$canonical_description" ]]; then
         echo "[ERROR] ${rel_path}: frontmatter description has drifted from ${canonical_path}" >&2
         echo "        canonical: ${canonical_description}" >&2
-        echo "        wrapper:   $(unquote "$wrapper_description")" >&2
+        echo "        wrapper:   ${wrapper_description_value}" >&2
         errors=1
       fi
     fi

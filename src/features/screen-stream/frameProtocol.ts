@@ -73,9 +73,7 @@ export class FrameDecoder {
         this.pendingHeader = header;
       }
 
-      const expected = isAudioHeader(this.pendingHeader)
-        ? this.pendingHeader.timestampMs
-        : this.pendingHeader.height * this.pendingHeader.bytesPerRow;
+      const expected = payloadSize(this.pendingHeader);
       if (this.buffer.length < expected) {break;}
 
       // Copy pixels to release the underlying chunk allocation; otherwise
@@ -96,6 +94,12 @@ export class FrameDecoder {
 
 function isAudioHeader(header: FrameHeader): boolean {
   return header.width === 0 && header.height === 8_000 && header.bytesPerRow === 1;
+}
+
+function payloadSize(header: FrameHeader): number {
+  return isAudioHeader(header)
+    ? header.timestampMs
+    : header.height * header.bytesPerRow;
 }
 
 function parseHeader(buffer: Buffer): FrameHeader {

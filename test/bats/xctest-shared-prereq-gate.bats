@@ -73,8 +73,6 @@ step_if_condition() {
 # unrelated step gained one and the suite would stay green.
 xcode_265_leg_steps() {
   cat <<'STEPS'
-Select Xcode 26.5
-Ensure iOS Simulator runtime (Xcode 26.5)
 Boot iOS Simulator (Xcode 26.5)
 Ensure AutoMobile daemon ready (Xcode 26.5)
 Warm up iOS CtrlProxy (Xcode 26.5)

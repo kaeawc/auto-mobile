@@ -31,6 +31,17 @@ is_quoted() {
   [[ "$value" == \"*\" || "$value" == \'*\' ]]
 }
 
+# Strip one layer of matching surrounding quotes so a quoted and an unquoted
+# frontmatter description compare equal by VALUE. Representation may differ
+# (a description containing ': ' must be quoted); the value must not.
+unquote() {
+  local value="$1"
+  if is_quoted "$value"; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
 # Validate a Codex interface metadata file (agents/openai.yaml).
 # Args: <openai_yaml_path> <skill_name>. Sets `errors=1` on any failure.
 validate_openai_yaml() {
@@ -230,6 +241,25 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
       errors=1
     fi
 
+    # The wrapper duplicates the canonical description rather than pointing at
+    # it, so it drifts silently: Codex surfaces the wrapper's copy while the
+    # canonical skill says something else. Compare by value, not by raw line.
+    if [[ -f "${PROJECT_ROOT}/${canonical_path}" ]]; then
+      canonical_desc_line="$(awk '
+        NR == 1 && $0 != "---" { exit }
+        NR > 1 && $0 == "---" { exit }
+        NR > 1' "${PROJECT_ROOT}/${canonical_path}" \
+        | sed -n 's/^description:[[:space:]]*//p' | head -n 1)"
+      canonical_description="$(unquote "$(trim "$canonical_desc_line")")"
+      if [[ -n "$canonical_description" ]] \
+        && [[ "$(unquote "$wrapper_description")" != "$canonical_description" ]]; then
+        echo "[ERROR] ${rel_path}: frontmatter description has drifted from ${canonical_path}" >&2
+        echo "        canonical: ${canonical_description}" >&2
+        echo "        wrapper:   $(unquote "$wrapper_description")" >&2
+        errors=1
+      fi
+    fi
+
     # Codex reads interface metadata next to the discoverable wrapper, not the
     # canonical source skill. If the canonical skill ships agents/openai.yaml,
     # the wrapper must colocate an equivalent one so the display name/default
@@ -245,6 +275,11 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
         errors=1
       else
         validate_openai_yaml "$wrapper_openai_yaml" "$dir_name"
+        # Same drift class as the description above: two copies, no pointer.
+        if ! cmp -s "$canonical_openai_yaml" "$wrapper_openai_yaml"; then
+          echo "[ERROR] ${wrapper_openai_yaml#"${PROJECT_ROOT}/"}: differs from ${canonical_openai_yaml#"${PROJECT_ROOT}/"}" >&2
+          errors=1
+        fi
       fi
     fi
   done

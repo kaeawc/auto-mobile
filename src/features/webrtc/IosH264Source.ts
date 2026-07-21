@@ -53,7 +53,8 @@ export type IosFrameCaptureHelperFactory = (
 ) => IosFrameCaptureHelper;
 export type IosSimulatorWindowResolver = (
   helperPath: string,
-  device: BootedDevice
+  device: BootedDevice,
+  audioEnabled: boolean
 ) => Promise<number>;
 
 interface CommandResult {
@@ -150,8 +151,8 @@ export class IosH264Source implements H264CaptureSource {
     this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? DEFAULT_FIRST_FRAME_TIMEOUT_MS;
     this.simulatorWindowResolver =
       options.simulatorWindowResolver ??
-      ((helperPath, device) =>
-        defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner));
+      ((helperPath, device, audioEnabled) =>
+        defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner, audioEnabled));
   }
 
   async start(): Promise<void> {
@@ -200,7 +201,11 @@ export class IosH264Source implements H264CaptureSource {
     if (isIosSimulatorUdid(this.options.device.deviceId)) {
       return {
         kind: "simulator",
-        windowID: await this.simulatorWindowResolver(helperPath, this.options.device),
+        windowID: await this.simulatorWindowResolver(
+          helperPath,
+          this.options.device,
+          this.options.audioEnabled === true
+        ),
         fps: this.fps,
         ...(this.options.audioEnabled === true ? { audio: true } : {}),
       };
@@ -608,7 +613,8 @@ async function validateFfmpegAvailability(
 async function defaultResolveSimulatorWindowId(
   helperPath: string,
   device: BootedDevice,
-  commandRunner: CommandRunner
+  commandRunner: CommandRunner,
+  audioEnabled: boolean
 ): Promise<number> {
   const result = await commandRunner(helperPath, ["--list-simulators"]);
   if (result.exitCode !== 0) {
@@ -622,6 +628,12 @@ async function defaultResolveSimulatorWindowId(
     windows = (JSON.parse(result.stdout) as { windows?: SimulatorWindowInfo[] }).windows ?? [];
   } catch (error) {
     throw new ActionableError(`Unable to parse iOS Simulator window list: ${error}`);
+  }
+
+  if (audioEnabled && windows.length > 1) {
+    throw new ActionableError(
+      "iOS Simulator audio capture requires exactly one visible Simulator window because ScreenCaptureKit cannot isolate audio to a selected Simulator window. Close other Simulator windows and try again."
+    );
   }
 
   const deviceName = device.name.toLowerCase();

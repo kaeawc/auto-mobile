@@ -559,6 +559,38 @@ describe("IosH264Source", () => {
     expect(helper.started).toBe(false);
   });
 
+  test("rejects audio startup before spawning the helper when multiple Simulator windows are visible", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      audioEnabled: true,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          return {
+            stdout: JSON.stringify({
+              windows: [
+                { windowID: 42, title: "iPhone 16", applicationName: "Simulator" },
+                { windowID: 99, title: "iPad Pro", applicationName: "Simulator" },
+              ],
+            }),
+            stderr: "",
+            exitCode: 0,
+            signal: null,
+          };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    await expect(source.start()).rejects.toThrow(/exactly one visible Simulator window/);
+    expect(helper.started).toBe(false);
+  });
+
   test("rejects startup when ffmpeg is missing", async () => {
     const { source, helper } = createHarnessWithOverrides({
       commandRunner: async () => {

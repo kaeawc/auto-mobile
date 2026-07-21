@@ -18,19 +18,51 @@
 # This test pins the invariant in both directions: the install must be
 # backgrounded and start before the boot, the barrier must precede the consumer,
 # and the test step must no longer carry the install inline.
+#
+# Every assertion is scoped to the job under test, not the whole workflow. A
+# whole-file search would let an unrelated earlier job that happens to contain an
+# `Install ffmpeg` step satisfy the ordering assertions while THIS job regressed
+# — the same duplicate-step-name trap `xctest-shared-prereq-gate.bats` anchors
+# around.
 
 WORKFLOW=".github/workflows/pull_request.yml"
+JOB="ios-xctest-runner-simulator-tests"
 
-# Line number of the first line matching a fixed string, or empty when absent.
-# The pattern is passed with -e because one of the searched strings begins with
-# "-" (the `- wait:` barrier), which every grep implementation would otherwise
-# parse as an option.
-line_of() {
-  grep -n -F -m1 -e "$1" "$WORKFLOW" 2>/dev/null | cut -d: -f1
+setup() {
+  JOB_BLOCK="$(mktemp)"
+  # Extract just this job: from its key up to the next top-level job key (a
+  # 2-space-indented bare `name:` line). Job-level keys sit at 4 spaces, so they
+  # cannot terminate the block early.
+  awk -v job="  ${JOB}:" '
+    $0 == job { injob = 1; next }
+    injob && /^  [a-zA-Z][a-zA-Z0-9_-]*:[[:space:]]*$/ { exit }
+    injob { print }
+  ' "$WORKFLOW" > "$JOB_BLOCK"
 }
 
-@test "an Install ffmpeg step exists, backgrounded, with the install-ffmpeg id" {
-  run grep -A3 -F 'name: "Install ffmpeg"' "$WORKFLOW"
+teardown() {
+  [ -n "${JOB_BLOCK:-}" ] && rm -f "$JOB_BLOCK"
+}
+
+# Line number (within the job block) of the first line matching a fixed string,
+# or empty when absent. The pattern is passed with -e because one of the searched
+# strings begins with "-" (the `- wait:` barrier), which every grep
+# implementation would otherwise parse as an option.
+line_of() {
+  grep -n -F -m1 -e "$1" "$JOB_BLOCK" 2>/dev/null | cut -d: -f1
+}
+
+@test "the job under test is extractable (guards the scoping itself)" {
+  # If the job is ever renamed, every other assertion here would vacuously pass
+  # against an empty block. Fail loudly instead.
+  [ -s "$JOB_BLOCK" ] || {
+    echo "job '$JOB' not found in $WORKFLOW — scoped assertions would pass vacuously" >&2
+    false
+  }
+}
+
+@test "an Install ffmpeg step exists in this job, backgrounded, with the install-ffmpeg id" {
+  run grep -A3 -F -e 'name: "Install ffmpeg"' "$JOB_BLOCK"
   [ "$status" -eq 0 ]
   [[ "$output" == *"background: true"* ]]
   [[ "$output" == *"id: install-ffmpeg"* ]]
@@ -38,15 +70,15 @@ line_of() {
 
 @test "the ffmpeg install starts before the Xcode 26.5 simulator boot" {
   # AC1: the install must run *concurrently with* the boot, which means its step
-  # has to appear earlier in the step list than the boot it overlaps.
+  # has to appear earlier in this job's step list than the boot it overlaps.
   install_line="$(line_of 'name: "Install ffmpeg"')"
   boot_line="$(line_of 'name: "Boot iOS Simulator (Xcode 26.5)"')"
 
-  [ -n "$install_line" ] || { echo "Install ffmpeg step not found" >&2; false; }
-  [ -n "$boot_line" ] || { echo "Xcode 26.5 boot step not found" >&2; false; }
+  [ -n "$install_line" ] || { echo "Install ffmpeg step not found in $JOB" >&2; false; }
+  [ -n "$boot_line" ] || { echo "Xcode 26.5 boot step not found in $JOB" >&2; false; }
 
   if [ "$install_line" -ge "$boot_line" ]; then
-    echo "Install ffmpeg (line $install_line) must precede the 26.5 boot (line $boot_line)" >&2
+    echo "Install ffmpeg (job line $install_line) must precede the 26.5 boot (job line $boot_line)" >&2
     false
   fi
 }
@@ -57,11 +89,11 @@ line_of() {
   wait_line="$(line_of '- wait: install-ffmpeg')"
   test_line="$(line_of 'name: "Run videoRecording MP4 integration test"')"
 
-  [ -n "$wait_line" ] || { echo "'- wait: install-ffmpeg' barrier not found" >&2; false; }
-  [ -n "$test_line" ] || { echo "videoRecording test step not found" >&2; false; }
+  [ -n "$wait_line" ] || { echo "'- wait: install-ffmpeg' barrier not found in $JOB" >&2; false; }
+  [ -n "$test_line" ] || { echo "videoRecording test step not found in $JOB" >&2; false; }
 
   if [ "$wait_line" -ge "$test_line" ]; then
-    echo "wait barrier (line $wait_line) must precede the video test (line $test_line)" >&2
+    echo "wait barrier (job line $wait_line) must precede the video test (job line $test_line)" >&2
     false
   fi
 }
@@ -73,9 +105,9 @@ line_of() {
     /name: "Run videoRecording MP4 integration test"/ { inblock = 1; next }
     inblock && /^      - (name|wait|uses):/ { exit }
     inblock { print }
-  ' "$WORKFLOW")"
+  ' "$JOB_BLOCK")"
 
-  [ -n "$block" ] || { echo "videoRecording test step block not found" >&2; false; }
+  [ -n "$block" ] || { echo "videoRecording test step block not found in $JOB" >&2; false; }
 
   if echo "$block" | grep -q "brew"; then
     echo "videoRecording test step still installs ffmpeg inline:" >&2

@@ -177,8 +177,18 @@ git worktree remove --force "scratch/lens-<N>"
 A fresh worktree has **no `node_modules`**, so anything resolving an npm dependency (the
 TypeScript-AST guards under `scripts/`, `bun test`) fails there for environmental reasons that
 look exactly like real findings; symlinking `node_modules` in is not reliably enough either.
-When a check needs deps, run it in the primary worktree against a single file copied from the PR
-head, and restore that file immediately.
+Install them in the throwaway worktree instead:
+
+```bash
+git worktree add "scratch/lens-<N>" refs/remotes/pr/<N>
+(cd "scratch/lens-<N>" && bun install --frozen-lockfile)
+```
+
+Do **not** copy a PR-head file into the caller's checkout and restore it afterwards. That
+mutates a tree you do not own — it can clobber uncommitted work in branch mode, and if the check
+aborts partway the file is left modified — which is the very thing this section exists to
+prevent. If installing is too slow for the check at hand, label the finding **unverified** and
+give the exact command to run, rather than mutating someone else's worktree to get an answer.
 
 ## Step 4 — Lens A: Runtime Behavior
 

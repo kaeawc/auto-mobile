@@ -28,8 +28,12 @@ echo "=== CI status for PR #${PR_NUM} ==="
 # Fail CLOSED: an auth/network/CLI error, or a response that is not a non-empty
 # JSON array, means CI state is UNKNOWN. Swallowing that and continuing lets the
 # script report "All checks passed" for a PR whose checks were never read.
-if ! CHECKS_JSON=$(gh pr checks "$PR_NUM" --json name,state,bucket,link 2>&1); then
-  echo "Could not read checks for PR #${PR_NUM}; CI state is unknown." >&2
+# gh pr checks exits 8 for "Checks pending" (see `gh pr checks --help`) while still
+# emitting the JSON we need, and exits 0 even when checks have FAILED. So only a code
+# that is neither 0 nor 8 is a real collection failure.
+CHECKS_JSON=$(gh pr checks "$PR_NUM" --json name,state,bucket,link 2>&1); gh_rc=$?
+if [ "$gh_rc" -ne 0 ] && [ "$gh_rc" -ne 8 ]; then
+  echo "Could not read checks for PR #${PR_NUM} (gh exit ${gh_rc}); CI state is unknown." >&2
   printf '%s\n' "$CHECKS_JSON" >&2
   exit 1
 fi

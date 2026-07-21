@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub PR Feedback"
+  short_description: "Read and safely clear PR feedback"
+  default_prompt: "Use $github-pr-feedback to collect and safely resolve eligible pull-request feedback without posting comments."

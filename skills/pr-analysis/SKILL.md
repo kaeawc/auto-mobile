@@ -10,8 +10,11 @@ Perform a read-only PR review that covers intent, correctness, regression risk, 
 ## Workflow
 
 1. Resolve the PR with `gh pr view <pr> --json ...` and capture the head branch, base branch, title, and body.
-2. Gather context with `gh pr diff`, `gh pr diff --stat`, `gh pr checks`, review comments, conversation comments, and review verdicts.
-3. Use `gh api graphql` only when you need unresolved review thread state.
+2. Gather context with `gh pr diff`, `gh pr diff --stat`, `gh pr checks`, all
+   paginated review/inline/conversation comments, and review verdicts.
+3. Always collect GraphQL review-thread state for PR analysis: unresolved and
+   outdated threads are not represented reliably by flat comment views. Reuse
+   `github-pr-feedback` for the collection and ledger.
 4. Read full changed files from the PR branch and the base branch, not just diff hunks.
 5. Find related callers, interfaces, and tests in the local codebase.
 6. If validation is warranted, run the lightest relevant repo validation rather than a blanket heavy build.

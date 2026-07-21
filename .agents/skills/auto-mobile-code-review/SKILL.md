@@ -1,6 +1,6 @@
 ---
 name: auto-mobile-code-review
-description: "Use this workflow skill to review an AutoMobile change (a PR number or the current branch diff) the way this repo demands: ground every finding in file:line, reproduce before asserting, separate real bugs from daemon-session/environment artifacts, prefer reusing existing repo helpers and conventions over new code, and catch the regression or false-negative a fix can introduce."
+description: "Review and follow through an AutoMobile PR or branch diff: collect all GitHub feedback and exact-head CI evidence, apply two stable baseline review lenses plus one diff-specific lens, verify findings in code, address authorized in-scope issues, and resolve only truly addressed threads without posting review comments."
 ---
 
 # AutoMobile Code Review

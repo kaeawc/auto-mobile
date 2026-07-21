@@ -1009,14 +1009,8 @@ private func assertWorkflowStepRunsWhenNotCancelled(
         file: file,
         line: line
     )
-    // Assert the clause this helper is about -- `!cancelled()`, i.e. the step runs
-    // after an earlier leg FAILS but is skipped on cancellation -- rather than the
-    // whole condition. #4082 conjoined a shared-prerequisite guard
-    // (`&& steps.build-ctrlproxy.outcome == 'success'`) which does not change the
-    // failure-vs-cancellation semantics under test here; that guard has its own
-    // coverage in test/bats/xctest-shared-prereq-gate.bats.
     XCTAssertTrue(
-        stepBlockHasActiveTopLevelValueContaining(stepBlock, key: "if", substring: "!cancelled()"),
+        stepBlockRespectsCancellation(stepBlock),
         "\(stepName) must run after an earlier Reminders leg fails, but still respect cancellation",
         file: file,
         line: line
@@ -1065,30 +1059,38 @@ private func workflowStepBlock(
     return workflow[stepRange.lowerBound ..< stepBlockEnd]
 }
 
-private func stepBlockHasActiveTopLevelValue(_ stepBlock: Substring, key: String, value: String) -> Bool {
-    return stepBlockActiveLines(stepBlock).contains { line in
+/// The value of an active top-level `key:` in a step block, or nil when absent.
+/// Single place that knows the step-key indent, so the matchers below cannot
+/// drift apart.
+private func stepBlockActiveTopLevelValue(_ stepBlock: Substring, key: String) -> String? {
+    let prefix = "\(key): "
+    for line in stepBlockActiveLines(stepBlock) where line.hasPrefix("        \(key):") {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return line.hasPrefix("        \(key):") && trimmed == "\(key): \(value)"
+        guard trimmed.hasPrefix(prefix) else { continue }
+        return String(trimmed.dropFirst(prefix.count))
     }
+    return nil
 }
 
-/// Like `stepBlockHasActiveTopLevelValue`, but matches a *substring* of the value.
+private func stepBlockHasActiveTopLevelValue(_ stepBlock: Substring, key: String, value: String) -> Bool {
+    return stepBlockActiveTopLevelValue(stepBlock, key: key) == value
+}
+
+/// Whether a step's `if:` guarantees cancellation skips it.
 ///
-/// Step conditions legitimately grow extra conjuncts (issue #4082 added a
+/// Asserting the whole condition by equality is too strict -- #4082 conjoined a
 /// shared-prerequisite guard, making the 26.5 leg
-/// `${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}`). An
-/// exact-equality assertion turns any such addition into a false failure even
-/// when the semantics under test are unchanged, so assertions about *one* clause
-/// should match that clause rather than the whole expression.
-private func stepBlockHasActiveTopLevelValueContaining(
-    _ stepBlock: Substring,
-    key: String,
-    substring: String
-) -> Bool {
-    return stepBlockActiveLines(stepBlock).contains { line in
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return line.hasPrefix("        \(key):") && trimmed.contains(substring)
-    }
+/// `${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}`, which does
+/// not change the failure-vs-cancellation semantics. But a bare `contains` is too
+/// loose: it is operator-blind, and `${{ !cancelled() || X }}` evaluates to `X`
+/// when cancelled, so the step can still run -- exactly what callers forbid.
+///
+/// So require `!cancelled()` as the leading term of a `${{ ... }}` expression
+/// (the braces were pinned by the old equality assertion and are kept) and reject
+/// any disjunction. Extra `&&` conjuncts remain free to come and go.
+private func stepBlockRespectsCancellation(_ stepBlock: Substring) -> Bool {
+    guard let condition = stepBlockActiveTopLevelValue(stepBlock, key: "if") else { return false }
+    return condition.hasPrefix("${{ !cancelled()") && !condition.contains("||")
 }
 
 private func stepBlockHasActiveEnvValue(_ stepBlock: Substring, key: String, value: String) -> Bool {

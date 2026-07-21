@@ -4,7 +4,6 @@ import type { ProcessExecutor } from "../../../utils/ProcessExecutor";
 import type { SystemConfigurationAdapter } from "../../../utils/interfaces/SystemConfigurationAdapter";
 import { AndroidSystemConfigurationAdapter } from "./AndroidSystemConfigurationAdapter";
 import { IosSystemConfigurationAdapter } from "./IosSystemConfigurationAdapter";
-import type { LockdownLocaleClient } from "./IosLockdownLocaleClient";
 
 /**
  * Build the platform-appropriate {@link SystemConfigurationAdapter}
@@ -14,11 +13,10 @@ import type { LockdownLocaleClient } from "./IosLockdownLocaleClient";
 export function createSystemConfigurationAdapter(
   device: BootedDevice,
   adb: AdbExecutor,
-  processExecutor: ProcessExecutor,
-  lockdownLocaleClient?: LockdownLocaleClient
+  processExecutor: ProcessExecutor
 ): SystemConfigurationAdapter {
   if (device.platform === "ios") {
-    return new IosSystemConfigurationAdapter(device, processExecutor, lockdownLocaleClient);
+    return new IosSystemConfigurationAdapter(device, processExecutor);
   }
   return new AndroidSystemConfigurationAdapter(device, adb);
 }

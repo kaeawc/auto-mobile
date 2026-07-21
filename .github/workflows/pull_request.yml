@@ -1000,9 +1000,11 @@ jobs:
         if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.bun/install/cache
-            node_modules
+          # Restoring node_modules is notably expensive on Windows because the
+          # archive contains thousands of small files. Bun can materialize it
+          # from its package store with platform-native links, so cache only
+          # that smaller store.
+          path: ~/.bun/install/cache
           key: bun-${{ matrix.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
             bun-${{ matrix.os }}-

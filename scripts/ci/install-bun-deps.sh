@@ -7,7 +7,11 @@
 
 set -euo pipefail
 
-bun install --frozen-lockfile --force || {
+# Do not use --force on the normal path: CI may have restored a valid
+# node_modules tree, and --force reinstalls every dependency even when it is
+# already present. A normal frozen install verifies that tree and only repairs
+# what is missing. Keep the forced rebuild as the corruption-recovery path.
+bun install --frozen-lockfile || {
   bun pm cache rm
   bun install --frozen-lockfile --force
 }

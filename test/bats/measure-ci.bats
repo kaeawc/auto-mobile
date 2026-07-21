@@ -6,7 +6,11 @@
 # bundle, so nothing here touches the network or the GitHub API. The fetch layer
 # is deliberately separable for exactly this reason.
 
-SCRIPT="scripts/ci/measure-ci.sh"
+# Absolute path: several bats files in this directory `cd` inside a test body
+# without a subshell, and they sort before this one. A relative SCRIPT path then
+# resolves against whatever cwd they left behind -- the suite passes in isolation
+# and fails in the full run.
+SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ci/measure-ci.sh"
 
 setup() {
   TEST_ROOT="$(mktemp -d)"

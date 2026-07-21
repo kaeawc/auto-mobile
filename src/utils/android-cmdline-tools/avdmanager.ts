@@ -376,6 +376,35 @@ export async function listSystemImages(filter?: SystemImageFilter, dependencies 
 }
 
 /**
+ * List system images that are already **installed** in the SDK.
+ *
+ * {@link listSystemImages} deliberately reports the downloadable "Available
+ * Packages" catalogue. AVD creation needs the installed set instead: passing
+ * `avdmanager create avd -k` a package that is not on disk fails.
+ */
+export async function listInstalledSystemImages(
+  filter?: SystemImageFilter,
+  dependencies = createDefaultDependencies()
+): Promise<SystemImage[]> {
+  try {
+    const location = await ensureToolsAvailable(dependencies);
+    const sdkmanagerPath = getSdkManagerPath(location, dependencies);
+    const env = getAndroidSdkEnv(location, dependencies);
+
+    const result = await spawnCommand(sdkmanagerPath, ["--list"], { env }, dependencies);
+
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to list installed system images: ${result.stderr}`);
+    }
+
+    return parseSystemImages(result.stdout, filter, "installed");
+  } catch (error) {
+    dependencies.logger.error(`Failed to list installed system images: ${(error as Error).message}`);
+    throw error;
+  }
+}
+
+/**
  * Download and install a system image
  */
 export async function installSystemImage(packageName: string, acceptLicense = true, dependencies = createDefaultDependencies()): Promise<{
@@ -467,27 +496,38 @@ function createAvdManagerClient(dependencies: AvdManagerDependencies): AvdManage
 /**
  * Parse system images from sdkmanager output
  */
-function parseSystemImages(output: string, filter?: SystemImageFilter): SystemImage[] {
+export function parseSystemImages(
+  output: string,
+  filter?: SystemImageFilter,
+  section: SdkManagerSection = "available"
+): SystemImage[] {
   const lines = output.split("\n");
   const images: SystemImage[] = [];
-  let inSystemImagesSection = false;
+  let currentSection: SdkManagerSection | null = null;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
 
     if (trimmedLine.includes("Available Packages:")) {
-      inSystemImagesSection = true;
+      currentSection = "available";
       continue;
     }
 
     if (trimmedLine.includes("Installed packages:")) {
-      inSystemImagesSection = false;
+      currentSection = "installed";
       continue;
     }
 
-    if (inSystemImagesSection && trimmedLine.startsWith("system-images;")) {
+    if (trimmedLine.includes("Available Updates:")) {
+      currentSection = null;
+      continue;
+    }
+
+    if (currentSection === section && trimmedLine.startsWith("system-images;")) {
+      // The "Installed packages" table is pipe-delimited, the "Available Packages"
+      // listing is whitespace-delimited; split on either so both shapes parse.
       const parts = trimmedLine.split(/\s+/);
-      const packageName = parts[0];
+      const packageName = parts[0].split("|")[0];
       const versionInfo = parts.slice(1).join(" ");
 
       // Parse package name: system-images;android-XX;tag;abi
@@ -539,6 +579,9 @@ export interface SystemImageFilter {
   tag?: string;
   abi?: string;
 }
+
+/** Which `sdkmanager --list` section a parse should read from. */
+export type SdkManagerSection = "available" | "installed";
 
 export interface SystemImage {
   packageName: string;

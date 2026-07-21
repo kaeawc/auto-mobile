@@ -5996,6 +5996,10 @@
         "timeoutMs": {
           "description": "Boot timeout in ms",
           "type": "number"
+        },
+        "createIfMissing": {
+          "description": "Create a device when nothing matches (CLI: --create-if-missing). Default off; AUTOMOBILE_ALLOW_DEVICE_CREATE=1 enables it when this flag is not supplied, and the flag wins.",
+          "type": "boolean"
         }
       },
       "required": [

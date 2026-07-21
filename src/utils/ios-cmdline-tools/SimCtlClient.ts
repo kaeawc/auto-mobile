@@ -1122,8 +1122,18 @@ export class SimCtlClient implements SimCtl {
       throw new ActionableError(`Failed to create iOS simulator ${name}`);
     }
 
+    // A freshly created simulator must be visible to the very next
+    // listSimulatorImages() call, otherwise the provisioning path boots off a
+    // snapshot that predates the device it just created.
+    SimCtlClient.invalidateDeviceListCache();
+
     logger.debug(`Created iOS simulator ${name} with UDID: ${simulatorUdid}`);
     return simulatorUdid;
+  }
+
+  /** Drop the shared device-list snapshot so the next list re-reads simctl. */
+  static invalidateDeviceListCache(): void {
+    SimCtlClient.deviceListCache = null;
   }
 
   /**

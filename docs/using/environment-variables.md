@@ -73,6 +73,31 @@ here for discoverability; most are diagnostic or for advanced testing.
 | `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` | Skips Android and iOS CtrlProxy downloads/prefetches when set to `1` or `true`. |
 | `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` | Skips the accessibility service download when it is already installed. |
 
+## Device provisioning opt-in
+
+AutoMobile never creates a simulator or emulator by default — spawning devices on
+a developer's machine is a side effect they did not ask for. Turn it on
+explicitly, per run or per environment.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `AUTOMOBILE_ALLOW_DEVICE_CREATE` | When `1` or `true`, `startDevice` creates a device (iOS: `simctl create`; Android: `avdmanager create avd`) instead of failing when nothing matches the requested criteria. | unset (off) |
+
+The equivalent per-call flag is `--create-if-missing` on the device-start path:
+
+```bash
+auto-mobile --cli startDevice --platform ios --create-if-missing
+```
+
+**Precedence:** an explicit flag wins over the env var, in *both* directions —
+`--create-if-missing false` disables creation even when
+`AUTOMOBILE_ALLOW_DEVICE_CREATE=1`. With no flag, the env var decides. With
+neither, creation is off.
+
+Created devices are named `AutoMobile-<model>-<id>` so they are easy to find and
+clean up (`xcrun simctl delete <udid>` / `avdmanager delete avd -n <name>`), and
+the resolved device type and runtime are logged at creation time.
+
 ## WebRTC screen streaming (`AUTOMOBILE_WEBRTC_*`)
 
 Defaults for pushing a device's screen to a coordination server over WebRTC/WHIP.

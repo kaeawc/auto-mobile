@@ -17,6 +17,8 @@ import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { platformSchema } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "./deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate } from "../utils/deviceCreationGate";
+import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
@@ -41,6 +43,10 @@ const startDeviceParametersSchema = z.object({
   deviceId: z.string().optional(),
   preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
   timeoutMs: z.number().optional().describe("Boot timeout in ms"),
+  createIfMissing: z.boolean().optional().describe(
+    `Create a device when nothing matches (CLI: --create-if-missing). Default off; ` +
+    `${DEVICE_CREATE_ENV_VAR}=1 enables it when this flag is not supplied, and the flag wins.`
+  ),
 });
 
 export const startDeviceSchema = z.preprocess(input => {
@@ -81,6 +87,7 @@ export interface StartDeviceArgs {
   deviceId?: string;
   preferRunning?: boolean;
   timeoutMs?: number;
+  createIfMissing?: boolean;
   __mcpSessionId?: string;
 }
 
@@ -101,6 +108,8 @@ export interface DeviceToolsDependencies {
   deviceMatcherFactory: () => DeviceMatcher;
   notifyResourcesChanged: () => Promise<void>;
   ensureCtrlProxyReady?: (device: BootedDevice, perf: ReturnType<typeof createPerformanceTracker>) => Promise<void>;
+  deviceCreationGateFactory: () => DeviceCreationGate;
+  deviceProvisionerFactory: () => DeviceProvisioner;
 }
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
@@ -117,6 +126,8 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       notifyResourcesChanged: defaultNotifyResourcesChanged,
+      deviceCreationGateFactory: () => getDeviceCreationGate(),
+      deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
     };
   }
   return moduleDependencies;
@@ -129,6 +140,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
     notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
+    deviceCreationGateFactory: deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
+    deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
   };
 }
 
@@ -278,7 +291,25 @@ export function registerDeviceTools() {
         return await bootAndRespond(imageMatch, deviceUtils, perf, progress, args);
       }
 
-      // No match at all
+      // No match at all — provision one only when the opt-in gate is on.
+      const gate = deps.deviceCreationGateFactory();
+      if (gate.isCreationAllowed(args.createIfMissing)) {
+        logger.info(
+          `[startDevice] No ${args.platform} device matched; creating one ` +
+          `(gate: ${gate.describeSource(args.createIfMissing)})`
+        );
+        const provisioned = await deps.deviceProvisionerFactory().provision(criteria);
+        const createdImage: DeviceInfo = {
+          name: provisioned.name,
+          platform: provisioned.platform,
+          deviceId: provisioned.deviceId,
+          isRunning: false,
+          formFactor: args.formFactor,
+        } as DeviceInfo;
+        await getDeviceToolsDependencies().notifyResourcesChanged();
+        return await bootAndRespond(createdImage, deviceUtils, perf, progress, args);
+      }
+
       throw new ActionableError(
         `No ${args.platform} device matching criteria found. ` +
         (args.minOsVersion ? `minOsVersion>=${args.minOsVersion} ` : "") +

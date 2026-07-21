@@ -352,6 +352,7 @@ Examples:
   bunx ${installSpecifier} --cli observe
   bunx ${installSpecifier} --cli tapOn --text "Submit"
   bunx ${installSpecifier} --cli startDevice --avdName "pixel_7_api_34"
+  bunx ${installSpecifier} --cli startDevice --platform ios --create-if-missing
   bunx ${installSpecifier} --cli --session-uuid abc-123-uuid observe
   bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
 

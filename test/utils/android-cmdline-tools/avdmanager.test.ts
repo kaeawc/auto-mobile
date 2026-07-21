@@ -237,6 +237,61 @@ Available Packages:
     });
   });
 
+  describe("listInstalledSystemImages", () => {
+    const SDKMANAGER_LIST_OUTPUT = `
+Installed packages:
+  Path                                           | Version | Description
+  -------                                        | ------- | -------
+  system-images;android-34;google_apis;arm64-v8a | 12      | Google APIs ARM 64 v8a System Image
+  platform-tools                                 | 35.0.0  | Android SDK Platform-Tools
+
+Available Packages:
+  system-images;android-35;google_apis;x86_64    | 5
+  system-images;android-36;google_apis;x86_64    | 2
+`;
+
+    function respondWithList(mockDeps: any, fakeTimer: any): void {
+      const originalSpawn = mockDeps.spawn;
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStdout(Buffer.from(SDKMANAGER_LIST_OUTPUT));
+          child.triggerClose(0);
+        }, 0);
+        return child;
+      };
+    }
+
+    test("returns only the installed section", async () => {
+      const mockDeps = createDependencies();
+      const fakeTimer = createFakeTimer();
+      respondWithList(mockDeps, fakeTimer);
+
+      const result = await resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.listInstalledSystemImages(undefined, mockDeps)
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].packageName).toBe("system-images;android-34;google_apis;arm64-v8a");
+      expect(result[0].apiLevel).toBe(34);
+      expect(result[0].abi).toBe("arm64-v8a");
+    });
+
+    test("listSystemImages still returns only the available section", async () => {
+      const mockDeps = createDependencies();
+      const fakeTimer = createFakeTimer();
+      respondWithList(mockDeps, fakeTimer);
+
+      const result = await resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.listSystemImages(undefined, mockDeps)
+      );
+
+      expect(result.map((image: any) => image.apiLevel)).toEqual([35, 36]);
+    });
+  });
+
   describe("createAvd", () => {
     test("should create AVD successfully", async () => {
       const mockDeps = createDependencies();

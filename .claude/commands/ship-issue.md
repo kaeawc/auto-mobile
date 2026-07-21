@@ -74,18 +74,14 @@ If anything here is red, fix it before proceeding. Do not open a PR on red.
 
 ## Phase 6 — Review (triage, not obey)
 
-1. Run `/auto-mobile-code-review` on the PR.
-2. Spawn **three review subagents as orthogonal lenses** (not personalities),
-   each given the diff and the acceptance criteria:
-   - **Regression / behavioral compatibility** — what existing behavior could this
-     break?
-   - **Test adequacy** — do the tests actually pin each acceptance criterion, and
-     do they fail without the change?
-   - **API-contract / interface surface** — tool schemas, public interfaces, and
-     the Interface+Fake seams.
-3. Read all PR review comments, inline comments, and any failing CI
-   (delegate to `/check-ci`).
-4. **Triage every finding** — do not blanket "address all." For each one:
+1. Run `/auto-mobile-code-review` on the PR. **It owns lens selection** — two fixed
+   lenses plus a generated one, sized to the diff — so do not hand-pick lenses
+   here; pass it the acceptance criteria and let it choose.
+2. Read all PR feedback and any failing CI. Delegate: `github-pr-feedback` for the
+   thread ledger (feedback lives on four separate paginated surfaces, and only
+   GraphQL review threads carry resolution state), `/check-ci` for head-scoped
+   workflow state.
+3. **Triage every finding** — do not blanket "address all." For each one:
    reproduce/verify it against the diff and the acceptance criteria, then:
    - **Fix** confirmed issues.
    - **Reject** false positives / session-or-env artifacts with a one-line reason.

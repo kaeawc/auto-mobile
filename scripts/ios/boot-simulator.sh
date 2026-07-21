@@ -139,20 +139,57 @@ echo "Ensuring ${DEVICE_NAME} (${UDID}) is booted..." >&2
 # So verify the post-condition instead: the device must actually be in the
 # "Booted" state. This mirrors how the Android emulator path proves readiness
 # (independent signals rather than one command's exit code).
-set +e
-boot_log="$(xcrun simctl bootstatus "${UDID}" -b 2>&1)"
-boot_rc=$?
-set -e
-printf '%s\n' "${boot_log}" >&2
+# A wedge is usually transient runner state, not a broken simulator definition, so
+# a single failure should not red the build (issue #4095). Retry a bounded number
+# of times: shut the device down, and before the final attempt erase it to clear
+# corrupt per-device state. Both knobs are env-tunable so the tests can exercise
+# the retry path without real sleeps.
+MAX_BOOT_ATTEMPTS="${BOOT_SIMULATOR_MAX_ATTEMPTS:-2}"
+RETRY_DELAY_SECONDS="${BOOT_SIMULATOR_RETRY_DELAY_SECONDS:-5}"
 
-BOOT_STATE="$(xcrun simctl list devices -j \
-  | jq -r --arg udid "${UDID}" '
-      .devices | to_entries[] | .value[]
-      | select(.udid == $udid) | .state
-    ' | head -1)"
+device_state() {
+  xcrun simctl list devices -j \
+    | jq -r --arg udid "$1" '
+        .devices | to_entries[] | .value[]
+        | select(.udid == $udid) | .state
+      ' \
+    | head -1
+}
 
-if [[ ${boot_rc} -ne 0 ]] || [[ "${BOOT_STATE}" != "Booted" ]]; then
-  echo "error: simulator ${UDID} failed to boot (bootstatus rc=${boot_rc}, state=${BOOT_STATE:-unknown})" >&2
+booted=0
+BOOT_STATE=""
+for attempt in $(seq 1 "${MAX_BOOT_ATTEMPTS}"); do
+  set +e
+  boot_log="$(xcrun simctl bootstatus "${UDID}" -b 2>&1)"
+  boot_rc=$?
+  set -e
+  printf '%s\n' "${boot_log}" >&2
+
+  BOOT_STATE="$(device_state "${UDID}")"
+  if [[ ${boot_rc} -eq 0 && "${BOOT_STATE}" == "Booted" ]]; then
+    booted=1
+    break
+  fi
+
+  echo "warning: boot attempt ${attempt}/${MAX_BOOT_ATTEMPTS} failed for ${UDID} (bootstatus rc=${boot_rc}, state=${BOOT_STATE:-unknown})" >&2
+  # Diagnostics: without these a recurrence is only ever inferred from the bare
+  # timeout, which is what made the original wedge so hard to characterize.
+  xcrun simctl list devices 2>/dev/null | grep -F "${UDID}" >&2 || true
+
+  if [[ ${attempt} -lt ${MAX_BOOT_ATTEMPTS} ]]; then
+    xcrun simctl shutdown "${UDID}" >/dev/null 2>&1 || true
+    if [[ ${attempt} -eq $((MAX_BOOT_ATTEMPTS - 1)) ]]; then
+      echo "Erasing ${UDID} to clear per-device state before the final attempt..." >&2
+      xcrun simctl erase "${UDID}" >/dev/null 2>&1 || true
+    fi
+    if [[ "${RETRY_DELAY_SECONDS}" -gt 0 ]]; then
+      sleep "${RETRY_DELAY_SECONDS}"
+    fi
+  fi
+done
+
+if [[ ${booted} -ne 1 ]]; then
+  echo "error: simulator ${UDID} failed to boot after ${MAX_BOOT_ATTEMPTS} attempt(s) (last state=${BOOT_STATE:-unknown})" >&2
   exit 1
 fi
 

@@ -356,6 +356,28 @@ function normalizeIosVersion(runtimeId: string | undefined, osVersion: string | 
   return match[1].replace(/_/g, ".").replace(/-/g, ".");
 }
 
+/** Numeric, component-wise comparison of dotted version strings. */
+function compareVersions(a: string, b: string): number {
+  const left = a.split(".").map(part => Number.parseInt(part, 10) || 0);
+  const right = b.split(".").map(part => Number.parseInt(part, 10) || 0);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    const diff = (left[index] ?? 0) - (right[index] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
+}
+
+/** Highest-versioned runtime whose version starts with `prefix`, if any. */
+function pickHighestRuntime(runtimes: AppleDeviceRuntime[], prefix: string): AppleDeviceRuntime | undefined {
+  return runtimes
+    .filter(runtime => typeof runtime.version === "string" && runtime.version.startsWith(prefix))
+    .sort((a, b) => compareVersions(a.version, b.version))
+    .pop();
+}
+
 function inferIosFormFactor(deviceTypeId: string | undefined): "phone" | "tablet" | undefined {
   if (!deviceTypeId) {return undefined;}
   if (deviceTypeId.includes("iPad")) {return "tablet";}
@@ -375,6 +397,23 @@ interface SimulatorList {
   devicetypes?: AppleDeviceType[];
 }
 
+/**
+ * Tuning knobs for the self-verifying boot loop. Injected so unit tests can
+ * exercise the retry path without real waits (the backoff runs through the
+ * injected {@link Timer}).
+ */
+export interface SimCtlBootOptions {
+  /** Total boot attempts, including the first one. Minimum 1. */
+  maxAttempts: number;
+  /** Delay between a failed verification and the next boot attempt. */
+  retryBackoffMs: number;
+}
+
+export const DEFAULT_SIMCTL_BOOT_OPTIONS: SimCtlBootOptions = {
+  maxAttempts: 2,
+  retryBackoffMs: 2000,
+};
+
 export class SimCtlClient implements SimCtl {
   device: BootedDevice | null;
   execAsync: (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>;
@@ -383,6 +422,7 @@ export class SimCtlClient implements SimCtl {
   private readonly usesInjectedExecAsync: boolean;
   private readonly spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess;
   private readonly fileSystem: SimCtlFileSystem;
+  private readonly bootOptions: SimCtlBootOptions;
   // Cached result of the launchctl headless-session probe (null = not yet probed)
   private headlessSessionCache: boolean | null = null;
 
@@ -403,7 +443,8 @@ export class SimCtlClient implements SimCtl {
     timer: Timer = defaultTimer,
     platform: NodeJS.Platform = process.platform,
     spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess = defaultSpawnProcess,
-    fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem
+    fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem,
+    bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS
   ) {
     this.device = device;
     this.usesInjectedExecAsync = execAsyncFn !== null;
@@ -412,6 +453,10 @@ export class SimCtlClient implements SimCtl {
     this.platform = platform;
     this.spawnProcess = spawnProcess;
     this.fileSystem = fileSystem;
+    this.bootOptions = {
+      maxAttempts: Math.max(1, bootOptions.maxAttempts),
+      retryBackoffMs: Math.max(0, bootOptions.retryBackoffMs),
+    };
   }
 
   /**
@@ -608,9 +653,15 @@ export class SimCtlClient implements SimCtl {
 
     // `bootstatus -b` is idempotent: it boots shutdown simulators, accepts
     // already-booted simulators, and waits until CoreSimulator reports ready.
+    // Its exit code alone is not trustworthy, so the post-condition (device
+    // state == Booted) is verified and a wedge is retried. See
+    // {@link bootAndVerify}.
     perf.startOperation("bootstatus");
-    await this.executeCommand(`bootstatus ${udid} -b`, timeoutMs);
-    perf.endOperation("bootstatus");
+    try {
+      await this.bootAndVerify(udid, timeoutMs);
+    } finally {
+      perf.endOperation("bootstatus");
+    }
 
     // Open Simulator.app focused on this specific device (no-op on headless hosts)
     try {
@@ -670,9 +721,8 @@ export class SimCtlClient implements SimCtl {
     // This is far more reliable than polling `simctl list devices` for state.
     perf.startOperation("bootstatus");
     try {
-      await this.executeCommand(`bootstatus ${udid} -b`, timeoutMs);
+      await this.bootAndVerify(udid, timeoutMs);
     } catch (error) {
-      perf.endOperation("bootstatus");
       const message = error instanceof Error ? error.message : String(error);
       // "Invalid device" means the UDID doesn't exist at all
       if (message.includes("Invalid device")) {
@@ -681,10 +731,165 @@ export class SimCtlClient implements SimCtl {
       throw new ActionableError(
         `Simulator with UDID ${udid} failed to become ready: ${message}`
       );
+    } finally {
+      perf.endOperation("bootstatus");
     }
-    perf.endOperation("bootstatus");
 
     return this.resolveReadySimulator(udid);
+  }
+
+  /**
+   * Boot `udid` and prove it actually reached the `Booted` state, retrying a
+   * bounded number of times.
+   *
+   * `simctl bootstatus -b` is not a trustworthy success signal on its own: a
+   * wedged boot can exit 0 while the device is still `Shutdown`, and the
+   * trailing `Status=4294967295` line is printed by *healthy* boots on
+   * macOS 26 / Xcode 26 (issue #4092) so it cannot be used as a sentinel
+   * either. Device state is the signal that actually differs, which is what
+   * `scripts/ios/boot-simulator.sh` checks — this keeps the product boot and
+   * the script converged, and mirrors the multi-signal readiness proof the
+   * Android emulator path already performs.
+   *
+   * On a failed verification the device is shut down, a bounded backoff is
+   * awaited through the injected {@link Timer}, and the boot is retried.
+   */
+  private async bootAndVerify(udid: string, timeoutMs?: number): Promise<void> {
+    const { maxAttempts, retryBackoffMs } = this.bootOptions;
+    let lastFailure = "";
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // A bootstatus failure (nonexistent UDID, timeout, simctl error) already
+      // reports itself and has consumed the caller's timeout budget, so it
+      // propagates unchanged rather than being retried. The retry here exists
+      // for the silent case: exit 0 with a device that never became Booted.
+      await this.executeCommand(`bootstatus ${udid} -b`, timeoutMs);
+
+      const state = await this.readSimulatorState(udid);
+      if (state === "Booted") {
+        return;
+      }
+
+      lastFailure = `bootstatus exited 0 but device state is ${state ?? "unknown"}, not Booted`;
+      logger.warn(`[iOS] Boot verification failed for ${udid} on attempt ${attempt}/${maxAttempts}: ${lastFailure}`);
+
+      if (attempt < maxAttempts) {
+        // Best-effort: shutting down an already-shutdown device errors, and that
+        // is fine — the next attempt re-boots from whatever state it is in.
+        try {
+          await this.executeCommand(`shutdown ${udid}`);
+        } catch (error) {
+          logger.debug(`[iOS] shutdown before boot retry failed for ${udid}: ${error}`);
+        }
+        await this.timer.sleep(retryBackoffMs);
+      }
+    }
+
+    throw new ActionableError(
+      `Simulator ${udid} did not reach the Booted state after ${maxAttempts} boot attempt(s): ${lastFailure}. ` +
+      "The simulator is likely wedged. Try 'xcrun simctl shutdown all' (or erase the device with " +
+      `'xcrun simctl erase ${udid}') and start it again.`
+    );
+  }
+
+  /**
+   * Resolve the simulator runtime identifier to target, mirroring the 3-tier
+   * fallback in `scripts/ios/boot-simulator.sh`:
+   *   1. exact version prefix (SDK "26.3" matches runtime "26.3.0")
+   *   2. major.minor prefix (SDK "26.3.1" matches runtime "26.3.x")
+   *   3. highest runtime in the same major (SDK 26.3 → 26.4 when 26.3 is absent)
+   *
+   * The identifier is looked up rather than constructed because its format
+   * varies across Xcode versions (iOS-26-3 vs iOS-26-3-0).
+   *
+   * Divergence from the script, deliberately: candidates are ordered by numeric
+   * version components, where the script's `jq sort_by(.version)` compares
+   * strings (so it would rank "26.9" above "26.10").
+   *
+   * @param requestedVersion - iOS version to target; defaults to the active
+   *                           Xcode iphonesimulator SDK version.
+   */
+  async resolveRuntimeIdentifier(requestedVersion?: string): Promise<string> {
+    const version = (requestedVersion ?? await this.detectIosSdkVersion()).trim();
+    if (!version) {
+      throw new ActionableError(
+        "Could not determine an iOS version to target. Ensure Xcode is installed and " +
+        "'xcrun --sdk iphonesimulator --show-sdk-version' returns a version."
+      );
+    }
+
+    const runtimes = await this.listIosRuntimes();
+    const majorMinor = version.split(".").slice(0, 2).join(".");
+    const major = version.split(".")[0];
+
+    const prefixes = [version, `${majorMinor}.`, `${major}.`];
+    for (const prefix of prefixes) {
+      const match = pickHighestRuntime(runtimes, prefix);
+      if (match) {
+        logger.debug(`[iOS] Resolved runtime ${match.identifier} for iOS ${version} (prefix "${prefix}")`);
+        return match.identifier;
+      }
+    }
+
+    const available = runtimes.map(runtime => `${runtime.name} (${runtime.version})`).join(", ") || "<none>";
+    throw new ActionableError(
+      `No iOS simulator runtime found for iOS ${version} (tried ${version}, ${majorMinor}.x, ${major}.x). ` +
+      `Available runtimes: ${available}. Install one via Xcode > Settings > Components.`
+    );
+  }
+
+  /** Read the active Xcode iphonesimulator SDK version. */
+  private async detectIosSdkVersion(): Promise<string> {
+    try {
+      const result = await this.execAsync("xcrun", ["--sdk", "iphonesimulator", "--show-sdk-version"]);
+      return result.stdout.trim();
+    } catch (error) {
+      throw new ActionableError(
+        "Could not detect the iOS SDK version from Xcode " +
+        `('xcrun --sdk iphonesimulator --show-sdk-version' failed: ${error instanceof Error ? error.message : String(error)}). ` +
+        "Ensure Xcode and its command line tools are installed and selected via xcode-select."
+      );
+    }
+  }
+
+  /** List installed iOS simulator runtimes that are actually available. */
+  private async listIosRuntimes(): Promise<AppleDeviceRuntime[]> {
+    const result = await this.executeCommand("list runtimes iOS --json");
+    try {
+      const parsed = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
+      return (parsed.runtimes ?? []).filter(runtime => runtime.isAvailable !== false);
+    } catch (error) {
+      throw new ActionableError(
+        "Failed to parse iOS simulator runtimes from 'xcrun simctl list runtimes iOS --json': " +
+        `${error instanceof Error ? error.message : String(error)}. ` +
+        `stdout (first 300 chars): ${result.stdout.trim().slice(0, 300) || "<empty>"}.`
+      );
+    }
+  }
+
+  /**
+   * Read the current CoreSimulator state for a device, bypassing the device
+   * list cache so boot verification never trusts a stale snapshot.
+   * @returns the state string (e.g. "Booted", "Shutdown"), or undefined when
+   *          the device is absent or discovery failed.
+   */
+  private async readSimulatorState(udid: string): Promise<string | undefined> {
+    try {
+      const simulatorList = await this.listSimulators();
+      for (const runtimeDevices of Object.values(simulatorList.devices)) {
+        const match = runtimeDevices.find(device => device.udid === udid);
+        if (match) {
+          return match.state;
+        }
+      }
+      return undefined;
+    } catch (error) {
+      logger.warn(
+        `[iOS] Could not read simulator state for ${udid}: ${error instanceof Error ? error.message : String(error)}`,
+        error
+      );
+      return undefined;
+    }
   }
 
   /**

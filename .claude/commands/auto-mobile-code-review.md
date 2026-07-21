@@ -335,16 +335,33 @@ Give this to every lens subagent.
    assert from diff text or memory.
 2. **Reproduce before asserting.** If you can't, label it **unverified** and state exactly how to
    verify.
-3. **Separate real bugs from environment artifacts.** `Session not found` is almost always the
+3. **Before you call a claim refuted, check that your test could have found it.** Two questions,
+   both of which have burned this repo:
+   - *Does the test discriminate?* If both the claim and its negation predict what you observed,
+     you learned nothing. A sample of three PRs that were all rebased cannot distinguish
+     `baseRefOid` from the merge-base, because those only diverge when a branch integrates main
+     via a merge.
+   - *Does your environment match the claim's scope?* A claim about "macOS/BSD" is not tested by
+     one macOS 15.6 laptop, and a claim about a CLI's behavior is not settled by the one version
+     you happen to have. State the version or platform you tested, so the limit is visible.
+4. **Refuting costs more than accepting, so it carries the higher burden.** Wrongly rejecting a
+   real finding leaves a live bug; wrongly accepting a bad one costs a small unnecessary change.
+   When the evidence is thin, take the change.
+5. **A wrong mechanism does not make a wrong suggestion.** Verify the claim and evaluate the
+   recommendation *separately* — a reviewer can be wrong about why and right about what. Twice
+   this week a finding's stated mechanism was demonstrably false while its proposed change was
+   the better design anyway (`xargs -r`, `baseRefOid`). If the suggestion stands on its own
+   reasoning, take it and say plainly that the stated reason did not hold.
+6. **Separate real bugs from environment artifacts.** `Session not found` is almost always the
    daemon-restart session wedge ([#2599](https://github.com/kaeawc/auto-mobile/issues/2599)) — confirm with a second, unrelated tool first.
-4. **Check provenance.** `git blame` the lines; don't blame the PR for pre-existing code.
+7. **Check provenance.** `git blame` the lines; don't blame the PR for pre-existing code.
    `git log origin/main -- <file>` to see if it's already fixed or superseded.
-5. **For a fix PR, verify it closes the ISSUE, not the symptom — and name the false negative it
+8. **For a fix PR, verify it closes the ISSUE, not the symptom — and name the false negative it
    introduces.** Ask what the change stops catching: a daemon-dedup fix narrowed to the pid-file
    PID kills the false positive but stops detecting a live cross-worktree rogue daemon.
-6. **Prefer existing helpers.** One canonical primitive per concern: `IdGenerator`, `Random`,
+9. **Prefer existing helpers.** One canonical primitive per concern: `IdGenerator`, `Random`,
    `Backoff`.
-7. **Don't paste raw hierarchies** — `observe` results run ~25k tokens. Summarize.
+10. **Don't paste raw hierarchies** — `observe` results run ~25k tokens. Summarize.
 
 ## Architecture
 
@@ -369,16 +386,19 @@ When `$ARGUMENTS` names a PR **we** authored and are actively iterating on:
 2. Scope everything to `headRefOid` and record it. Checks, threads, and comments are all relative
    to the SHA they were made against, so after any push, re-collect from the new head before
    resolving anything or calling CI green.
-3. Triage each unresolved thread with a disposition: `fix`, `already addressed`, `not
-   actionable`, `duplicate`, `ambiguous`, or `out of scope`. Codex findings carry a `P1`/`P2`
-   badge; P1 claims to block. Verify the mechanism before acting *and* before dismissing. An
-   `isOutdated` thread is a prompt to check whether the current head fixed the behavior, not a
-   reason to discard it.
+3. Triage each unresolved thread with a disposition: `fix`, `wrong reason, right change`,
+   `already addressed`, `not actionable`, `duplicate`, `ambiguous`, or `out of scope`. Codex
+   findings carry a `P1`/`P2` badge; P1 claims to block. Verify the mechanism before acting
+   *and* before dismissing — but keep the two judgements apart: `wrong reason, right change`
+   exists because a false mechanism and a good suggestion arrive together often enough that
+   collapsing them into `not actionable` loses real fixes. An `isOutdated` thread is a prompt to
+   check whether the current head fixed the behavior, not a reason to discard it.
 4. **Resolve every thread you triaged** (`resolveReviewThread`) — that is what addressing one
    means. A finding you fixed and a finding you verified and declined are both handled; only
-   the reason differs, and the reason goes to the user in-session, not to GitHub. For a `fix`,
-   resolve once it is committed **and pushed**, validation passed, and the fresh head still
-   contains it. For `already addressed`, `not actionable`, `duplicate`, or `out of scope`,
+   the reason differs, and the reason goes to the user in-session, not to GitHub. For a `fix` or
+   a `wrong reason, right change`, resolve once it is committed **and pushed**, validation
+   passed, and the fresh head still contains it — and for the latter, say which part of the
+   stated reasoning did not hold, so a bad rationale does not become precedent. For `already addressed`, `not actionable`, `duplicate`, or `out of scope`,
    resolve directly. Either way the PR must be open, authored by the authenticated user
    (`gh api user -q .login`), and the resolution must answer *that* thread. The one exception
    is `ambiguous` — if you could not tell whether the finding is real, leave it open and ask.

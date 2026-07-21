@@ -41,8 +41,9 @@ needs a deliberate disposition. See `github-cli` for the underlying command mech
    one looks complete and is not.
 4. Build the ledger — one row per unresolved thread, review request, inline comment, and
    conversation comment: source URL, head SHA, requested behavior, file/line, disposition
-   (`fix`, `already addressed`, `not actionable`, `duplicate`, `ambiguous`, `out of scope`),
-   evidence, targeted validation, and whether resolution is allowed.
+   (`fix`, `wrong reason, right change`, `already addressed`, `not actionable`, `duplicate`,
+   `ambiguous`, `out of scope`), evidence, targeted validation, and whether resolution is
+   allowed.
 
 ### Bot findings
 
@@ -64,6 +65,14 @@ exists to prevent.
 
 - Verify each claim against current source and PR intent. Neither an automated reviewer nor a
   stale diff position is proof by itself.
+- **Judge the mechanism and the suggestion separately.** A reviewer can be wrong about *why* and
+  right about *what*; that is what `wrong reason, right change` is for. Collapsing it into
+  `not actionable` is how real fixes get closed — it happened twice in one week here.
+- **Refutation carries the higher burden.** Wrongly rejecting a real finding leaves a live bug;
+  wrongly accepting a bad one costs a small unnecessary change. Before calling something refuted,
+  confirm your test could actually have found it: that it discriminates between the claim and its
+  negation, and that your environment or sample matches the claim's stated scope. Record the
+  version or platform you tested against, so the limit of the evidence is visible.
 - An unresolved, non-outdated thread is actionable until evidence says otherwise. An outdated
   thread is a prompt to check whether the current head fixed the underlying behavior — never a
   reason to silently discard it. On a merged/closed PR, keep it as an explicit historical
@@ -72,8 +81,10 @@ exists to prevent.
   and evidence to the user.
 - **A triaged thread gets resolved — that is what addressing it means.** Resolution is the
   disposition made durable, not a reward reserved for fixes. Two routes:
-  - Disposition `fix`: resolve once the fix is committed **and pushed**, targeted validation
-    passed, and the fresh head still contains the fix.
+  - Disposition `fix` or `wrong reason, right change`: resolve once the change is committed
+    **and pushed**, targeted validation passed, and the fresh head still contains it. For
+    `wrong reason, right change`, also tell the user which part of the stated reasoning did not
+    hold — otherwise it reads as agreement and the bad rationale becomes precedent.
   - Disposition `already addressed`, `not actionable`, `duplicate`, or `out of scope`:
     resolve too. A finding you verified and declined is handled; leaving it open only makes
     the next reader re-derive your reasoning. Report the reason to the user in-session.

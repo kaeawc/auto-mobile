@@ -121,9 +121,12 @@ gh api repos/kaeawc/auto-mobile/pulls/<PR>/comments --paginate \
 ```
 
 P1 claims to block. Codex is usually right about mechanism and sometimes wrong about
-reachability — verify before acting and equally before dismissing. When you decline a finding,
-**report the reason in-session and resolve the thread**; do not post a reply. `github-pr-feedback`
-and `auto-mobile-code-review` both forbid posting, and a decline is not an exception.
+reachability — verify before acting and equally before dismissing, and keep those two judgements
+apart: a false mechanism often arrives attached to a good suggestion, so evaluate the proposed
+change on its own reasoning before rejecting it. Refuting also carries the higher burden than
+accepting, since a wrong rejection leaves a live bug. When you do decline, **report the reason
+in-session and resolve the thread**; do not post a reply. `github-pr-feedback` and
+`auto-mobile-code-review` both forbid posting, and a decline is not an exception.
 
 ## Checks
 

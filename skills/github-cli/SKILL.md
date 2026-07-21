@@ -26,6 +26,12 @@ gh api --paginate "repos/kaeawc/auto-mobile/pulls/<PR>/comments?per_page=100"   
 # review threads — the only source of resolution state — below
 ```
 
+These three return **top-level JSON arrays**, and `--paginate` merges the pages into one flat
+array, so redirecting to a file and parsing it with `jq` is safe. Do **not** add `--slurp`
+here: on an array endpoint it produces an array *of pages* (`[[…],[…]]`), and it is rejected
+outright when combined with `--jq` (`the --slurp option is not supported with --jq or
+--template`). GraphQL is the opposite case — see below.
+
 Scope everything to the PR's `headRefOid`; after any push, re-collect from the new head. For
 the triage workflow — ledger, dispositions, resolution conditions — use `github-pr-feedback`.
 This is just the mechanics.
@@ -49,6 +55,23 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not)
         | "\(.id)\t\(.path):\(.line)\t\(.comments.nodes[0].author.login)"'
 ```
+
+**GraphQL `--paginate` does not merge.** Unlike the REST array endpoints above, it emits one
+complete JSON *document per page*, concatenated. The `--jq` form above is safe because jq
+streams every document — but redirecting the same query to a file and parsing it afterwards
+reads **only the first page**, silently, with no error. Verified on PR #4098 with `first: 2`
+against 4 threads: the saved file yields `nodes | length` = 2, and `pageInfo` appears twice.
+
+So when you need the whole result as a file, add `--slurp` (which cannot be combined with
+`--jq`) and index through the page array:
+
+```bash
+gh api graphql --paginate --slurp -f query='…' -F pr=<PR> > scratch/threads.json
+jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]]' scratch/threads.json
+```
+
+Otherwise keep `--jq` and consume the stream directly. Never save a non-slurped GraphQL
+`--paginate` result and parse it as one document.
 
 `isOutdated` means the anchored line changed, **not** that the finding was addressed — judge
 outdated threads on content.

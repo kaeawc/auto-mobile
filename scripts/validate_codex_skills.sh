@@ -191,7 +191,8 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
     agents_skill_files+=("$wrapper_file")
   done < <(find "${AGENTS_SKILLS_DIR}" -mindepth 1 -maxdepth 1 | sort)
 
-  for file in "${agents_skill_files[@]}"; do
+  # bash 3.2 errors on "${arr[@]}" for an empty array under `set -u`.
+  for file in ${agents_skill_files[@]+"${agents_skill_files[@]}"}; do
     rel_path="${file#"${PROJECT_ROOT}/"}"
     dir_name="$(basename "$(dirname "$file")")"
 
@@ -285,7 +286,7 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
   done
 fi
 
-for skill_name in "${skills_with_openai_metadata[@]}"; do
+for skill_name in ${skills_with_openai_metadata[@]+"${skills_with_openai_metadata[@]}"}; do
   wrapper_path="${AGENTS_SKILLS_DIR}/${skill_name}/SKILL.md"
   if [[ ! -f "$wrapper_path" ]]; then
     echo "[ERROR] .agents/skills: missing Codex discovery wrapper for ${skill_name}" >&2
@@ -346,14 +347,14 @@ done < <(
   ' "${AGENTS_FILE}"
 )
 
-for path in "${skill_paths[@]}"; do
+for path in ${skill_paths[@]+"${skill_paths[@]}"}; do
   if ! grep -Fxq "$path" <<< "$(printf '%s\n' "${agents_entries[@]-}")"; then
     echo "[ERROR] AGENTS.md: missing skill entry for ${path}" >&2
     errors=1
   fi
 done
 
-for path in "${agents_entries[@]}"; do
+for path in ${agents_entries[@]+"${agents_entries[@]}"}; do
   if ! grep -Fxq "$path" <<< "$(printf '%s\n' "${skill_paths[@]-}")"; then
     echo "[ERROR] AGENTS.md: references non-local or missing skill ${path}" >&2
     errors=1

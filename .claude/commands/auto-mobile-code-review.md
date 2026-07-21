@@ -50,9 +50,12 @@ gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,
   detekt gate at 05:48, #4016 auto-merged at 05:49 — reddening main. Its `Fast Validation` job
   had no `Run detekt` step at all.
 - **Run the tests the diff changed.** #4070 landed a deterministically-red assertion because a
-  refactor moved argv construction and updated one of two sibling tests.
+  refactor moved argv construction and updated one of two sibling tests. Use `$BASE` from
+  Step 2, so uncommitted test edits are included, and guard the empty case explicitly rather
+  than relying on `xargs -r` (GNU-only on older macOS and other BSDs):
   ```bash
-  git diff --name-only origin/main...HEAD -- 'test/**/*.test.ts' | xargs -r bun test
+  changed_tests=$(git diff --name-only "$BASE" -- 'test/**/*.test.ts')
+  [ -n "$changed_tests" ] && bun test $changed_tests
   ```
 
 Pull the failing *job's* log, not the whole run — a finished job's log is readable while the run
@@ -183,7 +186,8 @@ routinely ships nothing.
   `ios/control-proxy/Sources/**` or `android/control-proxy/**`, the daemon still downloads the
   pinned released runner. Unless `src/constants/release.ts` checksums change in the same PR (or
   a re-cut is explicitly sequenced), the feature is **undeliverable** and the issue is not
-  closed. Blocking. Check `git diff origin/main...HEAD --name-only | grep -E
+  closed. Blocking. Check with the Step 2 `$BASE`, not `origin/main...HEAD`, so an uncommitted
+  runner edit still trips it: `git diff --name-only "$BASE" | grep -E
   '^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
 - **New Swift file ⇒ regenerate the Xcode project.** A file under `ios/control-proxy/Sources/**`
   absent from the committed `ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj` is not

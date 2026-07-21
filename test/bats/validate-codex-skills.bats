@@ -134,3 +134,41 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"must not be symlinks"* ]]
 }
+
+@test "REGRESSION: runs under bash 3.2 when .agents/skills is empty" {
+  # macOS ships bash 3.2 as /bin/bash, and CI's macos-latest leg runs the
+  # validator with it. Under `set -u`, bash 3.2 treats "${arr[@]}" on an EMPTY
+  # array as an unbound variable, so the script died with
+  #   agents_skill_files[@]: unbound variable
+  # before reaching any real check — surfacing as a wrong-message failure
+  # rather than an obvious crash. Every possibly-empty array is now expanded
+  # as ${arr[@]+"${arr[@]}"}.
+  if [ ! -x /bin/bash ]; then
+    skip "no /bin/bash on this host"
+  fi
+
+  make_skill_pair 'A demo skill.' 'A demo skill.'
+  rm -rf "$WORK_DIR/.agents/skills/demo"
+
+  cd "$WORK_DIR"
+  run /bin/bash "$SCRIPT"
+
+  [[ "$output" != *"unbound variable"* ]]
+  [[ "$output" == *"missing Codex discovery wrapper"* ]]
+}
+
+@test "REGRESSION: bash 3.2 with no AGENTS.md skill entries does not crash" {
+  # Exercises the agents_entries / skill_paths expansions on the same path.
+  if [ ! -x /bin/bash ]; then
+    skip "no /bin/bash on this host"
+  fi
+
+  make_skill_pair 'A demo skill.' 'A demo skill.'
+  printf '# Test\n\n## Skills\n\n' > "$WORK_DIR/AGENTS.md"
+
+  cd "$WORK_DIR"
+  run /bin/bash "$SCRIPT"
+
+  [[ "$output" != *"unbound variable"* ]]
+  [ "$status" -ne 0 ]
+}

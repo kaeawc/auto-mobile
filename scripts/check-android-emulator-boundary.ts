@@ -94,6 +94,21 @@ function findViolations(file: string): Violation[] {
   const childProcessFunctions = new Set<string>();
   const violations: Violation[] = [];
 
+  const isChildProcessRequire = (expression: ts.Expression): boolean =>
+    ts.isCallExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "require" &&
+    expression.arguments.length === 1 &&
+    ts.isStringLiteral(expression.arguments[0]) &&
+    CHILD_PROCESS_MODULES.has(expression.arguments[0].text);
+
+  const isChildProcessFunction = (expression: ts.Expression): boolean =>
+    (ts.isIdentifier(expression) &&
+      childProcessFunctions.has(expression.text)) ||
+    (ts.isPropertyAccessExpression(expression) &&
+      CHILD_PROCESS_FUNCTIONS.has(expression.name.text) &&
+      isChildProcessNamespace(expression.expression, childProcessNamespaces));
+
   const record = (node: ts.CallExpression): void => {
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(
       node.getStart(sourceFile),
@@ -127,6 +142,32 @@ function findViolations(file: string): Violation[] {
     }
 
     if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      node.moduleReference.expression &&
+      ts.isStringLiteral(node.moduleReference.expression) &&
+      CHILD_PROCESS_MODULES.has(node.moduleReference.expression.text)
+    ) {
+      childProcessNamespaces.add(node.name.text);
+    }
+
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer
+    ) {
+      if (
+        isChildProcessRequire(node.initializer) ||
+        isChildProcessNamespace(node.initializer, childProcessNamespaces)
+      ) {
+        childProcessNamespaces.add(node.name.text);
+      }
+      if (isChildProcessFunction(node.initializer)) {
+        childProcessFunctions.add(node.name.text);
+      }
+    }
+
+    if (
       (ts.isVariableDeclaration(node) ||
         ts.isParameter(node) ||
         ts.isPropertyDeclaration(node)) &&
@@ -154,11 +195,7 @@ function findViolations(file: string): Violation[] {
               processExecutors,
               childProcessNamespaces,
             )) ||
-          (expression.name.text === "execSync" &&
-            isChildProcessNamespace(
-              expression.expression,
-              childProcessNamespaces,
-            ))
+          isChildProcessFunction(expression)
         ) {
           record(node);
         }

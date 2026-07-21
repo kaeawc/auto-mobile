@@ -86,6 +86,42 @@ teardown() {
   [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
 }
 
+@test "rejects a local alias of a synchronous child_process function" {
+  printf '%s\n' 'import { execFileSync } from "node:child_process"; const launch = execFileSync; launch("emulator", ["-avd", "Pixel"]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "rejects a local alias of a synchronous child_process namespace method" {
+  printf '%s\n' 'import * as childProcess from "node:child_process"; const launch = childProcess.execSync; launch("emulator -avd Pixel");' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "rejects a CommonJS child_process namespace launch" {
+  printf '%s\n' 'const childProcess = require("node:child_process"); childProcess.execSync("emulator -avd Pixel");' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "rejects an import-equals child_process namespace launch" {
+  printf '%s\n' 'import childProcess = require("node:child_process"); childProcess.execSync("emulator -avd Pixel");' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
 @test "allows unrelated RegExp exec calls in an emulator-related file" {
   printf '%s\n' 'const match = /emulator/.exec(deviceId);' > "$FIXTURE"
 

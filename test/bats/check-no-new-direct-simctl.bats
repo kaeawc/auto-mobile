@@ -58,6 +58,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "rejects a single-quoted shell-form xcrun simctl execution" {
+  printf '%s\n' "execSync('xcrun simctl list devices');" > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-simctl.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "rejects a multiline argv-form xcrun simctl execution" {
   printf '%s\n' 'execFile(' '  "xcrun",' '  [' '    "simctl",' '    "list",' '    "devices",' '  ],' ');' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts

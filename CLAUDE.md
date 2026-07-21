@@ -4,6 +4,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 
 ## Key Rules
 - TypeScript only (no JavaScript)
+- Always write GitHub issue and pull request references as clickable Markdown links.
 - After implementation changes, run relevant validation commands
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation

@@ -115,6 +115,30 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "REGRESSION: YAML scalar decoding is identical on bash 3.2" {
+  # Tests 4 and 5 run under PATH bash, which is 5.x on most dev machines, so they
+  # passed locally while the macos-latest leg (system bash 3.2) failed. The
+  # divergence: in 3.2 a replacement written as \' keeps its backslash, and a
+  # quoted replacement inserts the quotes literally. Both spellings must decode
+  # the same under BOTH shells, so pin the old one explicitly.
+  if [ ! -x /bin/bash ]; then
+    skip "no /bin/bash on this host"
+  fi
+
+  make_skill_pair "'It''s fine.'" '"It'"'"'s fine."'
+
+  cd "$WORK_DIR"
+  run /bin/bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+
+  make_skill_pair '"Use \"demo\" safely."' "'Use \"demo\" safely.'"
+
+  run /bin/bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "fails when wrapper openai.yaml differs from canonical" {
   make_skill_pair 'A demo skill.' 'A demo skill.'
 

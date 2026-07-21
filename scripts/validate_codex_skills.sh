@@ -52,7 +52,11 @@ unquote() {
     value="${value//\\\\/\\}"
   elif [[ "$value" == \'*\' ]]; then
     value="${value:1:${#value}-2}"
-    value="${value//\'\'/\'}"
+    # Hold the quote in a variable: bash 3.2 (macOS /bin/bash) keeps the backslash
+    # when a replacement is written as \' , so the escape must not appear here.
+    local sq="'"
+    # shellcheck disable=SC2295  # bash 3.2 inserts the quotes literally if they are quoted here
+    value="${value//$sq$sq/$sq}"
   fi
   printf '%s' "$value"
 }

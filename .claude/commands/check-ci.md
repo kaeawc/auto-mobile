@@ -98,6 +98,14 @@ for RUN_ID in $RUN_IDS; do
       fi
     done
 done
+
+# Fail closed on red. Without this the script falls off the end with the status of
+# the last loop — 0 when no run ids were found, and usually 0 after a successful log
+# fetch — so a PR with failing checks would report success to any caller that reads
+# the exit status.
+echo
+echo "${FAILED} check(s) failing on PR #${PR_NUM}."
+exit 1
 ```
 
 ## What the script does

@@ -79,6 +79,19 @@ case .listSimulators:
     }
 
 case .captureSimulator(let windowID, let fps, let audio):
+    if audio {
+        switch runBlocking({ try await SimulatorWindowDiscovery.discover() }) {
+        case .success(let windows):
+            if let error = SimulatorAudioCaptureAvailability.errorMessage(for: windows) {
+                logError("error: \(error)")
+                exit(1)
+            }
+        case .failure(let error):
+            logError("error: failed to query simulator windows: \(error)")
+            exit(1)
+        }
+    }
+
     let window: SCWindow
     switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
     case .success(.some(let resolved)):

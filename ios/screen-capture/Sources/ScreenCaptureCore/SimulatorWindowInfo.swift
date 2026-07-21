@@ -40,3 +40,12 @@ public struct SimulatorWindowListResponse: Codable, Equatable {
 
 /// Bundle identifier of the iOS Simulator host application on macOS.
 public let simulatorBundleIdentifier = "com.apple.iphonesimulator"
+
+/// ScreenCaptureKit cannot isolate a single Simulator window's audio from the
+/// Simulator host application, so audio capture is safe only with one window.
+public enum SimulatorAudioCaptureAvailability {
+    public static func errorMessage(for visibleSimulatorWindows: [SimulatorWindowInfo]) -> String? {
+        guard visibleSimulatorWindows.count > 1 else { return nil }
+        return "iOS Simulator audio capture requires exactly one visible Simulator window because ScreenCaptureKit cannot isolate audio to a selected Simulator window. Close other Simulator windows and try again."
+    }
+}

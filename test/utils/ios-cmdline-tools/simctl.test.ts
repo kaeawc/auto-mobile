@@ -30,6 +30,12 @@ function simulatorListPayload(devices: unknown[]): string {
   });
 }
 
+function bootedListPayload(udid: string): string {
+  return simulatorListPayload([
+    { udid, name: "iPhone 17", state: "Booted", isAvailable: true }
+  ]);
+}
+
 describe("Simctl", function() {
   let simctl: Simctl;
   let mockDevice: BootedDevice;
@@ -212,6 +218,16 @@ describe("Simctl", function() {
         if (file === "xcrun" && args.join(" ") === "simctl boot test-ios-device-id") {
           throw new Error("raw boot should not be called");
         }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          // Boot is self-verifying: it requires the device to actually be Booted.
+          return createExecResult(JSON.stringify({
+            devices: {
+              "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+                { udid: "test-ios-device-id", name: "iPhone 17", state: "Booted", isAvailable: true }
+              ]
+            }
+          }), "");
+        }
         return createExecResult("command executed", "");
       };
 
@@ -328,6 +344,9 @@ describe("Simctl", function() {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
         }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(bootedListPayload("iphone-udid"), "");
+        }
         return createExecResult("", "");
       };
       simctl = new Simctl(mockDevice, mockExecAsync);
@@ -344,6 +363,9 @@ describe("Simctl", function() {
         commands.push([file, ...args]);
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(bootedListPayload("iphone-udid"), "");
         }
         return createExecResult("", "");
       };

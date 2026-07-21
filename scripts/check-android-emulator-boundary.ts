@@ -76,9 +76,24 @@ function isChildProcessNamespace(
   );
 }
 
+/**
+ * Strip comments so the scope pre-filter below reflects what a file DOES, not
+ * what it talks about. Without this, prose alone opts a file into the rule: a
+ * doc comment on the iOS `SimCtlClient` that merely referenced the Android
+ * emulator path pulled that file in and flagged its long-standing, legitimate
+ * `spawn` in `defaultSpawnProcess`.
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
 function findViolations(file: string): Violation[] {
   const source = readFileSync(file, "utf8");
-  if (!/emulator/i.test(source)) {
+  // Scope: only files that actually execute emulator processes. This is a cheap
+  // pre-filter, not the rule itself -- the AST walk below is what decides.
+  if (!/emulator/i.test(stripComments(source))) {
     return [];
   }
 

@@ -11,6 +11,16 @@
 # Options:
 #   --ios-version VERSION  iOS runtime version to target (default: auto-detect from Xcode SDK)
 #
+# Kept in sync with the product boot path (issue #4094):
+#   * runtime resolution + 3-tier fallback -> SimCtlClient.resolveRuntimeIdentifier()
+#   * boot post-condition (state == Booted) -> SimCtlClient.bootAndVerify()
+#   * bounded retry of a wedged boot        -> SimCtlClient.bootAndVerify()
+# Change one, change the other.
+#
+# Known divergence: the product orders runtime candidates numerically, while
+# jq's sort_by(.version) here is a string sort, so this script would rank
+# "26.9" above "26.10". Harmless today (single-digit minors) but not equivalent.
+#
 # Outputs:
 #   stdout     - UDID of the booted simulator
 #   GITHUB_OUTPUT (if set) - simulator_udid=<udid>

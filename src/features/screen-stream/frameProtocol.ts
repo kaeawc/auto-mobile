@@ -31,7 +31,7 @@ export const FRAME_HEADER_SIZE = 16;
  * re-lock onto garbage almost immediately.
  */
 /** Largest plausible display dimension, in pixels. */
-export const MAX_FRAME_DIMENSION = 16_384;
+const MAX_FRAME_DIMENSION = 16_384;
 /**
  * Largest row padding accepted beyond the visible `width * 4` BGRA bytes.
  * `CVPixelBufferGetBytesPerRow` aligns rows to a small boundary (real captures
@@ -40,11 +40,11 @@ export const MAX_FRAME_DIMENSION = 16_384;
  * ties two of the four header words together, which arbitrary payload bytes
  * almost never satisfy.
  */
-export const MAX_ROW_PADDING_BYTES = 4096;
+const MAX_ROW_PADDING_BYTES = 4096;
 /** Largest plausible single-frame pixel payload (256 MiB). */
-export const MAX_FRAME_PAYLOAD_BYTES = 256 * 1024 * 1024;
+const MAX_FRAME_PAYLOAD_BYTES = 256 * 1024 * 1024;
 /** Largest plausible audio record (16 MiB ≈ 17 minutes of 8 kHz PCM16LE). */
-export const MAX_AUDIO_PAYLOAD_BYTES = 16 * 1024 * 1024;
+const MAX_AUDIO_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
 export interface FrameHeader {
   width: number;
@@ -62,7 +62,7 @@ export interface DecodedAudio {
   pcm16le: Buffer;
 }
 
-export type MalformedFrameReason =
+type MalformedFrameReason =
   | "header_width_zero"
   | "header_height_zero"
   | "header_bytes_per_row_too_small"
@@ -110,19 +110,21 @@ export class FrameDecoder {
         const outcome = this.takeHeader(onMalformed);
         if (outcome === "starved") {break;}
         if (outcome === "malformed") {continue;}
+        this.pendingHeader = outcome;
       }
 
-      const expected = payloadSize(this.pendingHeader);
+      const pending = this.pendingHeader;
+      const expected = payloadSize(pending);
       if (this.buffer.length < expected) {break;}
 
       // Copy pixels to release the underlying chunk allocation; otherwise
       // every emitted frame pins the entire upstream buffer in memory.
       const payload = Buffer.from(this.buffer.subarray(0, expected));
       this.buffer = this.buffer.subarray(expected);
-      if (isAudioHeader(this.pendingHeader)) {
+      if (isAudioHeader(pending)) {
         onAudio?.({ pcm16le: payload });
       } else {
-        frames.push({ header: this.pendingHeader, pixels: payload });
+        frames.push({ header: pending, pixels: payload });
       }
       this.pendingHeader = null;
     }
@@ -138,7 +140,7 @@ export class FrameDecoder {
    */
   private takeHeader(
     onMalformed?: (error: MalformedFrameError) => void
-  ): "ok" | "starved" | "malformed" {
+  ): FrameHeader | "starved" | "malformed" {
     if (this.buffer.length < FRAME_HEADER_SIZE) {return "starved";}
     const header = parseHeader(this.buffer, 0);
     const malformed = headerError(header);
@@ -148,8 +150,7 @@ export class FrameDecoder {
       return "malformed";
     }
     this.buffer = this.buffer.subarray(FRAME_HEADER_SIZE);
-    this.pendingHeader = header;
-    return "ok";
+    return header;
   }
 
   /**
@@ -180,14 +181,23 @@ export class FrameDecoder {
       if (verdict === "unsettled" && firstUnsettled < 0) {firstUnsettled = offset;}
     }
 
-    // Keep the earliest candidate that more bytes could still confirm;
-    // otherwise keep only what could be a header straddling the chunk
-    // boundary. Copy so the discarded chunk allocation can be freed.
+    // A corroborated candidate outranks an earlier unproven one — payload
+    // bytes one byte before a real boundary can spell a valid header, and only
+    // corroboration tells the two apart. So the scan runs to the end before
+    // falling back to the earliest candidate more bytes could still confirm;
+    // failing that, keep only what could be a header straddling the chunk
+    // boundary. The retained region is rescanned when the next chunk arrives,
+    // which is bounded in practice: post-validation a random offset is a
+    // plausible header with probability ~2^-38, so the fallback is virtually
+    // always the genuine next frame, settled as soon as its payload lands.
     const keepFrom =
       firstUnsettled >= 0
         ? firstUnsettled
         : Math.max(0, this.buffer.length - (FRAME_HEADER_SIZE - 1));
-    this.buffer = Buffer.from(this.buffer.subarray(keepFrom));
+    if (keepFrom > 0) {
+      // Copy so the discarded chunk allocation can be freed.
+      this.buffer = Buffer.from(this.buffer.subarray(keepFrom));
+    }
     return false;
   }
 

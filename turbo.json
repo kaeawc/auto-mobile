@@ -45,7 +45,8 @@
         "schemas/**",
         "scripts/**",
         "package.json",
-        "bunfig.toml"
+        "bunfig.toml",
+        ".github/workflows/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",

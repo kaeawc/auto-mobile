@@ -365,6 +365,36 @@ describe("MemoryAudit - Unit Tests", function() {
       expect(diagnostics).toContain("Count: 500");
     });
 
+    test("renders a non-empty Top contributors section for anomaly-only violations", function() {
+      // javaHeapAnomaly (0.5) and gcCountAnomaly (0.4) are the weights assigned by
+      // MemoryAudit.validateMetrics for baseline anomalies. Neither cleared the old
+      // `> 0.5` filter, so a baseline-anomaly-only audit rendered an empty section
+      // (same defect class as issue #4167).
+      const metrics: MemoryMetrics = {
+        preSnapshot: { javaHeapMb: 50, nativeHeapMb: 30, totalPssMb: 100, timestamp: Date.now(), raw: "" },
+        postSnapshot: { javaHeapMb: 65, nativeHeapMb: 32, totalPssMb: 115, timestamp: Date.now(), raw: "" },
+        javaHeapGrowthMb: 15,
+        nativeHeapGrowthMb: 2,
+        totalPssGrowthMb: 15,
+        gcEvents: [],
+        gcCount: 3,
+        gcTotalDurationMs: 40,
+      };
+
+      const violations = [
+        { metric: "javaHeapAnomaly", threshold: 40, actual: 65, severity: "warning" as const, contributionWeight: 0.5 },
+        { metric: "gcCountAnomaly", threshold: 2, actual: 3, severity: "warning" as const, contributionWeight: 0.4 },
+      ];
+
+      const diagnostics = (audit as any).generateDiagnostics(metrics, violations);
+
+      const start = diagnostics.indexOf("Top contributors:\n") + "Top contributors:\n".length;
+      const section = diagnostics.slice(start, diagnostics.indexOf("\nMemory snapshots:"));
+      expect(section.split("\n").filter((line: string) => line.length > 0)).toEqual([
+        "- javaHeapAnomaly: 65.00 (threshold: 40.00) [warning]",
+      ]);
+    });
+
     test("should return no issues message when no violations", function() {
       const metrics: MemoryMetrics = {
         preSnapshot: {

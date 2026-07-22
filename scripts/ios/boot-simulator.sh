@@ -31,7 +31,10 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" && "${CI:-}" == "true" ]]; then
   if [[ -n "${ios_version}" ]]; then
     ci_args+=(--ios-version "${ios_version}")
   fi
-  ci_args+=("${ci_extra[@]}")
+  # `${arr[@]+"${arr[@]}"}` keeps an empty ci_extra expanding to nothing under
+  # `set -u` on bash 3.2 (the macos-latest runner's /bin/bash), where a bare
+  # "${ci_extra[@]}" aborts with "unbound variable" (#4212).
+  ci_args+=(${ci_extra[@]+"${ci_extra[@]}"})
   result="$(cd "${repo_root}" && bun run src/ci/bootIosSimulatorCli.ts "${ci_args[@]}")"
 else
   if [[ -z "${ios_version}" ]]; then

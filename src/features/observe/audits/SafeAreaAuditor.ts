@@ -155,9 +155,16 @@ function categoriesFor(node: Node): LayoutWarning["categories"] {
   const interaction = isTruthy(node.clickable as boolean | string | undefined)
     || isTruthy(node["long-clickable"] as boolean | string | undefined)
     || isTruthy(node.checkable as boolean | string | undefined)
-    || (Array.isArray(node.actions) && node.actions.length > 0);
+    || (Array.isArray(node.actions) && node.actions.length > 0)
+    || hasSdkInteraction(node.extras);
   return [text ? "text" : undefined, interaction ? "interaction" : undefined]
     .filter((category): category is "text" | "interaction" => category !== undefined);
+}
+
+function hasSdkInteraction(value: unknown): boolean {
+  if (!isNode(value)) {return false;}
+  return isTruthy(value["sdk.hasTapTarget"] as boolean | string | undefined)
+    || stringValue(value["sdk.accessibilityCustomActions"]) !== undefined;
 }
 
 function isSystemNode(node: Node): boolean {

@@ -92,4 +92,25 @@ describe("SafeAreaAuditor", () => {
       { element: { viewId: "ios-title" }, insetTypes: ["safeArea"], sides: ["top"] },
     ]);
   });
+
+  test("reports iOS SDK-only tap targets as interactions", () => {
+    const result = observation();
+    result.insets = {
+      available: true,
+      source: "ios-sdk-safe-area",
+      units: "points",
+      safeArea: { top: 30, right: 0, bottom: 30, left: 0 },
+    };
+    result.viewHierarchy!.hierarchy.node = [{
+      $: {
+        "view-id": "sdk-only-target",
+        "bounds": { left: 10, top: 8, right: 60, bottom: 28 },
+      },
+      extras: { "sdk.hasTapTarget": "true" },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+      { element: { viewId: "sdk-only-target" }, categories: ["interaction"], insetTypes: ["safeArea"] },
+    ]);
+  });
 });

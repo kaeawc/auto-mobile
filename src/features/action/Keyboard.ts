@@ -44,7 +44,11 @@ type KeyboardDetection = {
 
 export class Keyboard {
   private static readonly INPUT_METHOD_WINDOW_TYPE = 2;
-  private static readonly POST_ACTION_DELAY_MS = 100;
+  // The IME show/hide animation runs ~200-400ms on typical devices, so a single
+  // fixed post-action sleep always sampled the stale state (#4238). Poll instead:
+  // return as soon as the observed state matches, bounded by the timeout below.
+  private static readonly STATE_CONFIRMATION_TIMEOUT_MS = 2_000;
+  private static readonly STATE_CONFIRMATION_POLL_INTERVAL_MS = 100;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private hierarchyProvider: KeyboardHierarchyProvider;
@@ -190,9 +194,8 @@ export class Keyboard {
     }
 
     await this.tapOnElement(focusedInput, signal);
-    await this.timer.sleep(Keyboard.POST_ACTION_DELAY_MS);
 
-    const { state: afterState } = await this.getHierarchyWithState(signal);
+    const afterState = await this.waitForKeyboardState(true, signal);
     const success = afterState.open && !afterState.error;
     const message = success
       ? "Keyboard opened"
@@ -228,9 +231,8 @@ export class Keyboard {
     }
 
     await this.adb.executeCommand("shell input keyevent KEYCODE_BACK", undefined, undefined, undefined, signal);
-    await this.timer.sleep(Keyboard.POST_ACTION_DELAY_MS);
 
-    const { state: afterState } = await this.getHierarchyWithState(signal);
+    const afterState = await this.waitForKeyboardState(false, signal);
     const success = !afterState.open && !afterState.error;
     const message = success
       ? "Keyboard closed"
@@ -243,6 +245,38 @@ export class Keyboard {
       message,
       ...(afterState.error ? { error: afterState.error } : {})
     };
+  }
+
+  /**
+   * Re-read the keyboard state until it matches `expectedOpen` or the bounded
+   * confirmation window expires. A fixed post-action sleep raced the IME
+   * show/hide animation and always reported the pre-action state (#4238); this
+   * mirrors the confirmation poll VoiceOverToggle uses for the same defect class
+   * (#4045). Time comes from the injected Timer so tests stay deterministic.
+   */
+  private async waitForKeyboardState(
+    expectedOpen: boolean,
+    signal?: AbortSignal
+  ): Promise<KeyboardDetection> {
+    const deadline = this.timer.now() + Keyboard.STATE_CONFIRMATION_TIMEOUT_MS;
+    let state: KeyboardDetection = { open: !expectedOpen };
+
+    for (;;) {
+      ({ state } = await this.getHierarchyWithState(signal));
+      if (!state.error && state.open === expectedOpen) {
+        return state;
+      }
+
+      const remainingMs = deadline - this.timer.now();
+      if (signal?.aborted || remainingMs <= 0) {
+        return state;
+      }
+
+      await this.timer.sleep(Math.min(Keyboard.STATE_CONFIRMATION_POLL_INTERVAL_MS, remainingMs));
+      if (signal?.aborted) {
+        return state;
+      }
+    }
   }
 
   private async getHierarchyWithState(

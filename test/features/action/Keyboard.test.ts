@@ -130,6 +130,110 @@ describe("Keyboard", () => {
     expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_BACK")).toBe(true);
   });
 
+  test("open succeeds when the IME animation settles after several polls", async () => {
+    // Tap read, then three stale reads (IME still animating), then open.
+    fakeHierarchy.setResults([
+      focusedInputHierarchy(),
+      baseHierarchy(),
+      baseHierarchy(),
+      baseHierarchy(),
+      keyboardWindowHierarchy()
+    ]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("open");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(true);
+    expect(fakeHierarchy.getCallCount()).toBe(5);
+    expect(fakeTimer.getSleepHistory()).toEqual([100, 100, 100]);
+  });
+
+  test("close succeeds when the IME animation settles after several polls", async () => {
+    fakeHierarchy.setResults([
+      keyboardWindowHierarchy(),
+      keyboardWindowHierarchy(),
+      baseHierarchy()
+    ]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(false);
+    expect(fakeTimer.getSleepHistory()).toEqual([100]);
+  });
+
+  test("open gives up within the bounded timeout when state never settles", async () => {
+    fakeHierarchy.setResults([focusedInputHierarchy()]);
+    fakeHierarchy.setDefaultResult(baseHierarchy());
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("open");
+
+    expect(result.success).toBe(false);
+    expect(result.open).toBe(false);
+    expect(result.message).toBe("Failed to open keyboard");
+    const slept = fakeTimer.getSleepHistory();
+    expect(slept.reduce((total, ms) => total + ms, 0)).toBe(2000);
+    expect(fakeTimer.getCurrentTime()).toBe(2000);
+  });
+
+  test("close gives up within the bounded timeout when state never settles", async () => {
+    fakeHierarchy.setResults([keyboardWindowHierarchy()]);
+    fakeHierarchy.setDefaultResult(keyboardWindowHierarchy());
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close");
+
+    expect(result.success).toBe(false);
+    expect(result.open).toBe(true);
+    expect(result.message).toBe("Failed to close keyboard");
+    expect(fakeTimer.getCurrentTime()).toBe(2000);
+  });
+
+  test("close is idempotent when keyboard is already closed", async () => {
+    fakeHierarchy.setResults([baseHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(false);
+    expect(result.message).toBe("Keyboard already closed");
+    expect(fakeAdb.getExecutedCommands().length).toBe(0);
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test("open stops polling promptly once the signal aborts", async () => {
+    const controller = new AbortController();
+    fakeHierarchy.setResults([focusedInputHierarchy()]);
+    fakeHierarchy.setDefaultResult(baseHierarchy());
+    controller.abort();
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("open", controller.signal);
+
+    expect(result.success).toBe(false);
+    expect(result.open).toBe(false);
+    // One post-action read, then the abort short-circuits before any sleep.
+    expect(fakeHierarchy.getCallCount()).toBe(2);
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test("detect does not poll or sleep", async () => {
+    fakeHierarchy.setResults([baseHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("detect");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(false);
+    expect(result.message).toBe("Keyboard is closed");
+    expect(fakeHierarchy.getCallCount()).toBe(1);
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
   test("ios detect delegates to CtrlProxy keyboard request", async () => {
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       requestKeyboard: async (action: string) => ({

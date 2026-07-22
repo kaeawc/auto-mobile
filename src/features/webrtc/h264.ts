@@ -8,6 +8,10 @@
  * (one displayed frame) so every fragment of a frame shares an RTP timestamp,
  * and (3) packetize each NAL unit into RTP payloads per RFC 6184.
  *
+ * Specification: https://www.rfc-editor.org/rfc/rfc6184.html
+ * - single-NAL and FU-A payload structures: §§5.2, 5.6, and 5.8
+ * - RTP marker use for an access unit: §5.1
+ *
  * All functions here are pure / library-agnostic so they can be unit-tested
  * without werift or a device. The publisher (`WebRtcPublisher`) owns RTP header
  * assignment (sequence numbers, timestamps, SSRC, marker bit).
@@ -29,6 +33,7 @@ export const FU_A_TYPE = 28;
 /**
  * Default RTP payload MTU. 1200 bytes leaves headroom under a 1500-byte
  * Ethernet MTU for IP/UDP/RTP/SRTP/DTLS overhead, matching common WebRTC stacks.
+ * This value is an AutoMobile operational choice, not an RFC 6184 requirement.
  */
 export const DEFAULT_RTP_MTU = 1200;
 

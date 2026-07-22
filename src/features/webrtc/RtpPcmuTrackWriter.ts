@@ -1,7 +1,10 @@
 import { RtpHeader, RtpPacket } from "werift";
 import type { RtpPacketSink } from "./RtpH264TrackWriter";
 
-/** PCMU/G.711 RTP clock rate. */
+/**
+ * PCMU/G.711 RTP clock rate and static payload type 0.
+ * RFC 3551 §6: https://www.rfc-editor.org/rfc/rfc3551.html#section-6
+ */
 export const PCMU_CLOCK_RATE = 8_000;
 export const PCMU_PAYLOAD_TYPE = 0;
 const DEFAULT_AUDIO_MTU = 1200;

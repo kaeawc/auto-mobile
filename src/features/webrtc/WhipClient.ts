@@ -45,10 +45,16 @@ export interface WhipSession {
 }
 
 /**
- * Client for the WebRTC-HTTP Ingestion Protocol (WHIP, draft-ietf-wish-whip).
+ * Client for the WebRTC-HTTP Ingestion Protocol (WHIP, RFC 9725).
  * The publisher POSTs an SDP offer and receives an SDP answer plus a resource
  * URL; DELETE on that URL tears the session down. Reconnection is a fresh
  * `publish()` (optionally after DELETEing the stale resource).
+ *
+ * Specification: https://www.rfc-editor.org/rfc/rfc9725.html
+ * - setup and `201 Created` / `Location`: §4.2
+ * - trickle-ICE PATCH: §4.3
+ * - DELETE session termination: §4.2
+ * - bearer authentication: §4.7
  */
 export class WhipClient {
   private readonly endpoint: string;

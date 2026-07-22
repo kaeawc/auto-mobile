@@ -2,10 +2,14 @@
  * Trickle-ICE helpers for the WHIP publisher.
  *
  * WHIP's trickle extension exchanges ICE candidates incrementally as
- * `application/trickle-ice-sdpfrag` bodies (RFC 8840) via HTTP PATCH to the
- * session resource, instead of blocking on ICE gathering before the offer is
- * POSTed. These functions are pure/serialization-only so they can be unit-tested
- * without a peer connection or HTTP.
+ * `application/trickle-ice-sdpfrag` bodies via HTTP PATCH to the session
+ * resource, instead of blocking on ICE gathering before the offer is POSTed.
+ *
+ * Standards: [Trickle ICE (RFC 8838)](https://www.rfc-editor.org/rfc/rfc8838.html),
+ * [SDP fragments (RFC 8840)](https://www.rfc-editor.org/rfc/rfc8840.html), and
+ * [WHIP §4.3 (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html#section-4.3).
+ * These functions are pure/serialization-only so they can be unit-tested without
+ * a peer connection or HTTP.
  */
 
 /** Minimal candidate shape (matches the fields werift's RTCIceCandidate exposes). */

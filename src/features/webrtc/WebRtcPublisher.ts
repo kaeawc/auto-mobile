@@ -15,7 +15,13 @@ import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
 import { TrickleIceForwarder } from "./trickleIce";
 import { WhipClient, type WhipClientOptions } from "./WhipClient";
 
-/** How long to wait for ICE gathering before publishing the offer. */
+/**
+ * How long to wait for ICE gathering before publishing the offer.
+ *
+ * Protocol background: [ICE (RFC 8445)](https://www.rfc-editor.org/rfc/rfc8445.html).
+ * AutoMobile's bounded non-trickle wait is an implementation choice; enable
+ * `trickleIce` for the WHIP extension described in `trickleIce.ts`.
+ */
 export const ICE_GATHERING_TIMEOUT_MS = 5000;
 
 export interface WebRtcPublisherConfig {
@@ -79,6 +85,13 @@ export interface WebRtcStreamDescriptor {
  * publisher packetizes it to RTP and sends it over a sendonly WebRTC track.
  * Connection loss triggers automatic reconnection (fresh WHIP publish) with
  * backoff via {@link ReconnectController}.
+ *
+ * Standards: [W3C WebRTC](https://www.w3.org/TR/webrtc/),
+ * [JSEP (RFC 9429)](https://www.rfc-editor.org/rfc/rfc9429.html),
+ * [WHIP (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html), and
+ * [H.264 over RTP (RFC 6184)](https://www.rfc-editor.org/rfc/rfc6184.html).
+ * See `docs/design-docs/mcp/observe/webrtc-standards-map.md` for the full
+ * implementation-to-spec mapping.
  */
 export class WebRtcPublisher {
   private readonly config: WebRtcPublisherConfig;
@@ -266,6 +279,9 @@ export class WebRtcPublisher {
       // Flush candidates gathered during the WHIP round-trip and stream the rest.
       this.trickle?.setResource(session.resourceUrl);
       await pc.setRemoteDescription({ type: "answer", sdp: session.answerSdp });
+      // WHIP forbids a misleading partially successful ingest session: reject
+      // an answer that did not accept each requested media section.
+      // RFC 9725 §4.4.3: https://www.rfc-editor.org/rfc/rfc9725.html#section-4.4.3
       assertWhipAnswerAcceptsMedia(session.answerSdp, "video", "h264");
       if (this.audioEnabled) {
         assertWhipAnswerAcceptsMedia(session.answerSdp, "audio", "pcmu");

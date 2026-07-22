@@ -17,6 +17,11 @@ import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
  * subscriber of that stream. `listStreams()` / `getStream()` back the reconnect
  * API a frontend uses to discover streams and (re)connect.
  *
+ * WHEP reference: https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep
+ * RTP forwarding and H.264 packet semantics: RFC 3550 and RFC 6184
+ * (https://www.rfc-editor.org/rfc/rfc3550.html and
+ * https://www.rfc-editor.org/rfc/rfc6184.html).
+ *
  * This is intentionally minimal (single-server, in-memory) — for production use
  * a hardened SFU such as MediaMTX, LiveKit, or Janus that also speaks WHIP/WHEP.
  */
@@ -362,7 +367,10 @@ function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
   const payload = rtp.payload;
   const nalType = payload[0] & 0x1f;
   // SPS/PPS are normally single RTP packets. Preserve the most recent pair so a
-  // new decoder can configure itself before its first IDR access unit.
+  // new decoder can configure itself before its first IDR access unit. RFC 6184
+  // §8 documents parameter-set transport; caching/replay is our late-viewer
+  // policy, not a replacement for RTCP feedback.
+  // https://www.rfc-editor.org/rfc/rfc6184.html#section-8
   if (nalType === 7 || nalType === 8) {
     entry.videoConfig = [...entry.videoConfig.filter(packet => (packet.payload[0] & 0x1f) !== nalType), rtp.clone()];
   }

@@ -16,6 +16,11 @@ class RequestBodyTooLargeError extends Error {}
 /**
  * HTTP/WHIP/WHEP front end for {@link CoordinationServer}.
  *
+ * WHIP setup, resource `Location`, DELETE, trickle PATCH, and bearer auth are
+ * implemented from RFC 9725: https://www.rfc-editor.org/rfc/rfc9725.html.
+ * WHEP remains an Internet-Draft:
+ * https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep
+ *
  * Routes:
  *   POST   /whip[?streamId=]         WHIP ingest (from AutoMobile)   -> 201 + Location
  *   DELETE /whip/:streamId           terminate ingest

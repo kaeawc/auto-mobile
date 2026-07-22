@@ -173,6 +173,27 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(out.map(f => f.header.timestampMs)).toEqual([88]);
   });
 
+  test("a sustained garbage stream stays quiet instead of amplifying", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    // 1 MiB of noise arriving in realistic chunks, then a real frame. The old
+    // decoder failed this two ways depending on the bytes: a callback per 16
+    // discarded bytes, or a silent stall once it locked onto a bogus header
+    // claiming a huge payload. Quiet is only half the requirement — the stream
+    // has to come back.
+    const noise = pseudoRandomPayload(1024 * 1024);
+    const frames: number[] = [];
+    const stream = Buffer.concat([noise, makeFrameBytes(4, 4, 16, 909, 0x0f)]);
+    for (let offset = 0; offset < stream.length; offset += 65_536) {
+      const out = decoder.push(stream.subarray(offset, offset + 65_536), err =>
+        errors.push(err)
+      );
+      frames.push(...out.map(f => f.header.timestampMs));
+    }
+    expect(errors.length).toBeLessThanOrEqual(4);
+    expect(frames).toEqual([909]);
+  });
+
   test("implausible dimensions are rejected so payload bytes rarely look like headers", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];

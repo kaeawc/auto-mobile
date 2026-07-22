@@ -129,14 +129,10 @@ export class SetUIState extends BaseVisualChange {
     let scrollsWithoutProgress = 0;
     let currentDirection: "up" | "down" = scrollDirection;
     let triedReverse = false;
-    const searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
+    let searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
     let budgetSpent = false;
 
     while (processed.size < options.fields.length) {
-      if (this.timer.now() >= searchDeadline) {
-        budgetSpent = true;
-        break;
-      }
       // Find all unprocessed fields visible in the current hierarchy, sorted by bounds.top
       const visibleFields = this.findVisibleFieldsInScreenOrder(
         options.fields,
@@ -161,6 +157,10 @@ export class SetUIState extends BaseVisualChange {
         fieldResults[fieldIndex] = result;
         processed.add(fieldIndex);
         totalAttempts += result.attempts;
+        // The budget bounds futile searching, not successful work: a form with
+        // many fields legitimately takes longer than one scroll search, and the
+        // next field may already be on screen (#4252 review).
+        searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
 
         // Refresh observation after each success
         if (result.success) {
@@ -183,6 +183,11 @@ export class SetUIState extends BaseVisualChange {
         }
       } else {
         // No visible matches — scroll to find more
+        if (this.timer.now() >= searchDeadline) {
+          budgetSpent = true;
+          break;
+        }
+
         scrollsWithoutProgress++;
 
         if (scrollsWithoutProgress > MAX_FUTILE_SCROLLS) {

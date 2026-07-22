@@ -804,3 +804,69 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
     expect(result.totalAttempts).toBeLessThanOrEqual(1);
   });
 });
+
+describe("SetUIState budget bounds searching, not successful work (#4252 review)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+
+  let fakeTap: FakeTapOnElement;
+  let fakeInput: FakeInputText;
+  let fakeClear: FakeClearText;
+  let fakeSwipe: FakeSwipeOn;
+  let fakeObserve: FakeObserveScreenForSetUIState;
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeTap = new FakeTapOnElement();
+    fakeInput = new FakeInputText();
+    fakeClear = new FakeClearText();
+    fakeSwipe = new FakeSwipeOn();
+    fakeObserve = new FakeObserveScreenForSetUIState();
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  const build = () => new SetUIState(device, null, {
+    tapOnElement: fakeTap, inputText: fakeInput, clearText: fakeClear,
+    swipeOn: fakeSwipe, observeScreen: fakeObserve,
+    fieldTypeDetector: fakeFieldTypeDetector, timer: fakeTimer
+  });
+
+  test("a visible field is still set even after earlier fields consumed the budget", async () => {
+    // Both fields are on screen the whole time. Setting the first is slow, which
+    // must not make the second -- still visible -- be reported as not found.
+    const twoFields = {
+      hierarchy: {
+        node: [
+          { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "first", "class": "android.widget.EditText" } },
+          { $: { "bounds": { left: 0, top: 60, right: 100, bottom: 110 }, "resource-id": "second", "class": "android.widget.EditText" } }
+        ]
+      }
+    } as unknown as ViewHierarchyResult;
+
+    // Verification would need the fake hierarchy to echo the typed value; that is
+    // orthogonal to what this test pins, so skip it for both fields.
+    fakeFieldTypeDetector.setSkipVerification("first", true);
+    fakeFieldTypeDetector.setSkipVerification("second", true);
+
+    fakeObserve.setResultFactory(() => {
+      fakeTimer.advanceTime(9_000);
+      return {
+        updatedAt: fakeTimer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: twoFields
+      };
+    });
+
+    const result = await build().execute({
+      fields: [
+        { selector: { elementId: "first" }, value: "a" },
+        { selector: { elementId: "second" }, value: "b" }
+      ]
+    });
+
+    expect(result.error ?? "").not.toContain("not found");
+    expect(result.success).toBe(true);
+  });
+});

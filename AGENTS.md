@@ -5,6 +5,11 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 ## Key Rules
 - TypeScript only (no JavaScript)
 - Always write GitHub issue and pull request references as clickable Markdown links.
+  This governs prose surfaces — issue and PR bodies, review comments, commit
+  messages, and Markdown docs. It does NOT apply to references inside source
+  code comments, where the bare `#NNNN` form is the established convention
+  (625 bare references in `src/`, zero linked). Linking there renders as noise
+  in an editor and would make the touched file the only inconsistent one.
 - After implementation changes, run relevant validation commands
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation

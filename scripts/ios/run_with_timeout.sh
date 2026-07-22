@@ -30,9 +30,9 @@ run_with_timeout() {
   local secs="$1"
   shift
   if command -v timeout > /dev/null 2>&1; then
-    timeout "${secs}" "$@"
+    timeout -k 2 "${secs}" "$@"
   elif command -v gtimeout > /dev/null 2>&1; then
-    gtimeout "${secs}" "$@"
+    gtimeout -k 2 "${secs}" "$@"
   else
     # The watchdog runs in a subshell and so cannot assign to a variable in this
     # scope; a marker file is how it reports back that it fired.
@@ -74,10 +74,17 @@ run_with_timeout() {
 
     local status=0
     wait "${cmd_pid}" 2> /dev/null || status=$?
-    kill "${watcher_pid}" 2> /dev/null || true
-    wait "${watcher_pid}" 2> /dev/null || true
-
-    if [ -s "${fired_marker}" ]; then status=124; fi
+    if [ -s "${fired_marker}" ]; then
+      # The deadline fired. Let the watcher finish its TERM-to-KILL escalation:
+      # the direct child can exit on TERM while a descendant keeps the caller's
+      # command substitution open by ignoring it and retaining stdout.
+      wait "${watcher_pid}" 2> /dev/null || true
+      status=124
+    else
+      kill "${watcher_pid}" 2> /dev/null || true
+      wait "${watcher_pid}" 2> /dev/null || true
+      if [ -s "${fired_marker}" ]; then status=124; fi
+    fi
     rm -f "${fired_marker}"
     return "${status}"
   fi

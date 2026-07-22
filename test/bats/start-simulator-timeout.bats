@@ -97,8 +97,12 @@ run_helper() {
   # surviving descendant holds open regardless of the shell's fate.
   cat > "$WORK_DIR/stallwrap" << 'EOS'
 #!/bin/sh
-# Deliberately no `exec`: the sleep is a descendant that inherits stdout.
-sleep 20 &
+# Deliberately no `exec` in the wrapper: its descendant inherits stdout and
+# ignores TERM, so only the watchdog's KILL escalation can close the capture.
+(
+  trap '' TERM
+  exec sleep 20
+) &
 wait
 EOS
   chmod +x "$WORK_DIR/stallwrap"

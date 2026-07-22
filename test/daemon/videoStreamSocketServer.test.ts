@@ -171,7 +171,7 @@ describe("VideoStreamSocketServer", () => {
     const { binary } = await subscribe(h.socketPath);
     await waitFor(() => binary().length >= 12);
 
-    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0xaa, 0xbb]));
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0xaa, 0xbb, 0x00, 0x00, 0x00, 0x01, 0x01]));
     await waitFor(() => binary().length > 12);
 
     expect(h.sources).toHaveLength(1);
@@ -180,6 +180,21 @@ describe("VideoStreamSocketServer", () => {
     const packet = binary().subarray(12);
     expect(packet.readInt32BE(8)).toBe(7); // payload length
     expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0xaa, 0xbb]));
+  });
+
+  test("does not mistake arbitrary source chunks for complete H.264 NAL units", async () => {
+    const h = await startHarness();
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+
+    h.emit(Buffer.from([0x00, 0x00]));
+    h.emit(Buffer.from([0x00, 0x01, 0x05, 0xaa, 0xbb, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    await waitFor(() => binary().length > 12);
+
+    const packet = binary().subarray(12);
+    expect(packet.readInt32BE(8)).toBe(7);
+    expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]));
+    expect(packet.readBigInt64BE(0) & (1n << 62n)).toBe(1n << 62n); // IDR sets key-frame.
   });
 
   test("a second viewer of the same device shares the capture", async () => {
@@ -193,13 +208,126 @@ describe("VideoStreamSocketServer", () => {
     expect(h.sources).toHaveLength(1);
   });
 
+  test("stops a capture source that resolves after its only subscriber disconnects", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "amvs-late-source-"));
+    const socketPath = path.join(dir, "video-stream.sock");
+    const source = new FakeCaptureSource();
+    let resolveSource: ((source: H264CaptureSource) => void) | undefined;
+    const sourceCreated = new Promise<void>(resolve => {
+      const server = new VideoStreamSocketServer(
+        {
+          resolveDevice: async () => DEVICE,
+          createCaptureSource: async () => {
+            resolve();
+            return await new Promise<H264CaptureSource>(sourceResolve => { resolveSource = sourceResolve; });
+          },
+          nowUs: () => 1_000n,
+        },
+        socketPath
+      );
+      void server.start().then(() => {
+        harnesses.push({
+          server,
+          socketPath,
+          sources: [source],
+          emit: () => {},
+          cleanup: async () => {
+            await server.close();
+            rmSync(dir, { recursive: true, force: true });
+          },
+        });
+      });
+    });
+
+    await waitFor(() => harnesses.some(h => h.socketPath === socketPath));
+    const harness = harnesses.find(h => h.socketPath === socketPath)!;
+    const socket = net.createConnection(socketPath);
+    await new Promise<void>(resolve => socket.once("connect", resolve));
+    socket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
+    await sourceCreated;
+    socket.destroy();
+    await waitFor(() => harness.server.activeDeviceIds().length === 0);
+    resolveSource?.(source);
+
+    await waitFor(() => source.stopped);
+    expect(source.started).toBe(false);
+  });
+
+  test("keeps a replacement capture when an abandoned startup later fails", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "amvs-replacement-capture-"));
+    const socketPath = path.join(dir, "video-stream.sock");
+    const abandonedSource = new FakeCaptureSource();
+    const replacementSource = new FakeCaptureSource();
+    let resolveAbandonedSource: ((source: H264CaptureSource) => void) | undefined;
+    let sourceCalls = 0;
+    const server = new VideoStreamSocketServer(
+      {
+        resolveDevice: async () => DEVICE,
+        createCaptureSource: async () => {
+          sourceCalls++;
+          if (sourceCalls === 1) {
+            return await new Promise<H264CaptureSource>(resolve => { resolveAbandonedSource = resolve; });
+          }
+          return replacementSource;
+        },
+        nowUs: () => 1_000n,
+      },
+      socketPath
+    );
+    await server.start();
+    harnesses.push({
+      server,
+      socketPath,
+      sources: [abandonedSource, replacementSource],
+      emit: () => {},
+      cleanup: async () => {
+        await server.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    });
+
+    const abandonedSocket = net.createConnection(socketPath);
+    await new Promise<void>(resolve => abandonedSocket.once("connect", resolve));
+    abandonedSocket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
+    await waitFor(() => resolveAbandonedSource !== undefined);
+    abandonedSocket.destroy();
+    await waitFor(() => server.activeDeviceIds().length === 0);
+
+    const replacement = await subscribe(socketPath);
+    expect(replacement.ack.success).toBe(true);
+    expect(server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
+
+    resolveAbandonedSource?.(abandonedSource);
+    await waitFor(() => abandonedSource.stopped);
+    expect(server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
+    expect(server.subscriberCount(DEVICE.deviceId)).toBe(1);
+  });
+
+  test("uses the shared capture dimensions for every viewer", async () => {
+    const h = await startHarness();
+    await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      size: { width: 640, height: 360 },
+    });
+    const later = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      size: { width: 1920, height: 1080 },
+    });
+    await waitFor(() => later.binary().length >= 12);
+
+    expect(later.binary().readInt32BE(4)).toBe(640);
+    expect(later.binary().readInt32BE(8)).toBe(360);
+  });
+
   test("both viewers receive the same packet", async () => {
     const h = await startHarness();
     const first = await subscribe(h.socketPath);
     const second = await subscribe(h.socketPath);
     await waitFor(() => first.binary().length >= 12 && second.binary().length >= 12);
 
-    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0x42]));
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0x42, 0x00, 0x00, 0x00, 0x01, 0x01]));
     await waitFor(() => first.binary().length > 12 && second.binary().length > 12);
 
     expect(first.binary().subarray(12)).toEqual(second.binary().subarray(12));
@@ -227,7 +355,7 @@ describe("VideoStreamSocketServer", () => {
 
     // SPS arrives before the second viewer connects.
     const sps = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x07, 0x64, 0x00]);
-    h.emit(sps);
+    h.emit(Buffer.concat([sps, Buffer.from([0x00, 0x00, 0x00, 0x01, 0x08])]));
 
     const late = await subscribe(h.socketPath);
     await waitFor(() => late.binary().length > 12);
@@ -237,6 +365,22 @@ describe("VideoStreamSocketServer", () => {
     expect(packet.readInt32BE(8)).toBe(sps.length);
     expect(packet.subarray(12, 12 + sps.length)).toEqual(sps);
     expect(packet.readBigInt64BE(0)).toBeLessThan(0n); // CONFIG flag is bit 63
+  });
+
+  test("forwards a PPS that arrives after a late viewer's replayed SPS", async () => {
+    const h = await startHarness();
+    await subscribe(h.socketPath);
+    const sps = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x07, 0x64]);
+    const pps = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x08, 0xee]);
+    const idr = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa]);
+    h.emit(Buffer.concat([sps, pps]));
+
+    const late = await subscribe(h.socketPath);
+    h.emit(Buffer.concat([idr, Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01])]));
+    await waitFor(() => late.binary().includes(pps) && late.binary().includes(idr));
+
+    expect(late.binary().includes(pps)).toBe(true);
+    expect(late.binary().includes(idr)).toBe(true);
   });
 
   test("a failed capture start is reported and starts nothing", async () => {

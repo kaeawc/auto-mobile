@@ -1,0 +1,60 @@
+# WebRTC standards map
+
+This page connects AutoMobile's WebRTC implementation choices to the public
+standards that define the interoperable wire protocol. It is intended as a
+reading guide, not as a replacement for the specifications.
+
+## Scope and reading order
+
+The standards below govern the WebRTC session, signalling, secure media, and
+RTP payloads. Android capture (`video-server` / `screenrecord`), iOS capture
+(ScreenCaptureKit helper / FFmpeg), the local Unix-socket control protocol, and
+request-size or timeout limits are AutoMobile or platform implementation
+choices; they are not WebRTC standards.
+
+For a first pass, read the [W3C WebRTC API](https://www.w3.org/TR/webrtc/),
+[JSEP (RFC 9429)](https://www.rfc-editor.org/rfc/rfc9429.html),
+[WHIP (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html), and
+[ICE (RFC 8445)](https://www.rfc-editor.org/rfc/rfc8445.html). Then use the
+row for the feature being investigated.
+
+## Implementation-to-spec map
+
+| AutoMobile functionality | Implementation choice and boundary | Standards basis |
+| --- | --- | --- |
+| Peer connection and media directions | `WebRtcPublisher` creates a WebRTC peer connection with sendonly H.264 video and optional sendonly PCMU audio. The peer-connection state is the lifecycle signal; AutoMobile does not invent a separate media-session protocol. | [W3C WebRTC: `RTCPeerConnection` and transceivers](https://www.w3.org/TR/webrtc/#rtcpeerconnection-interface), [JSEP (RFC 9429)](https://www.rfc-editor.org/rfc/rfc9429.html), and [SDP offer/answer (RFC 3264)](https://www.rfc-editor.org/rfc/rfc3264.html). |
+| Offer/answer validation | Before accepting an answer, AutoMobile checks the expected media sections, negotiated codecs, and directions. A malformed or partially compatible answer fails the session rather than being treated as a working stream. | [SDP (RFC 8866)](https://www.rfc-editor.org/rfc/rfc8866.html) defines SDP syntax; [RFC 3264](https://www.rfc-editor.org/rfc/rfc3264.html) defines matching media sections and format intersection; [WHIP section 4.4](https://www.rfc-editor.org/rfc/rfc9725.html#section-4.4) adds WHIP-specific media constraints. |
+| WHIP ingest and teardown | `WhipClient` POSTs an `application/sdp` offer, accepts the server SDP answer and `Location` resource URL, and DELETEs that URL on stop or failed startup. Retaining and deleting the resource avoids leaking server-side sessions. | [WHIP sections 4.2 and 4.6 (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html#section-4.2). |
+| WHIP bearer token | When configured, `whipToken` is sent as an HTTP `Authorization: Bearer` credential on WHIP requests. Supplying the token and protecting it are deployment responsibilities; AutoMobile only applies the configured request authentication. | [WHIP authentication and bearer-token rules (RFC 9725 section 4.7)](https://www.rfc-editor.org/rfc/rfc9725.html#section-4.7) and [OAuth 2.0 bearer-token usage (RFC 6750)](https://www.rfc-editor.org/rfc/rfc6750.html). |
+| WHEP viewing | The bundled coordination server accepts a viewer's offer and returns an answer, then forwards the publisher's RTP to that viewer. WHEP is still an Internet-Draft, so its behavior is an interoperability target rather than an RFC guarantee. | [WebRTC-HTTP Egress Protocol (WHEP) Internet-Draft](https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep). |
+| ICE candidate gathering and STUN/TURN | By default AutoMobile waits for ICE gathering before its WHIP POST. `iceServers` can supply STUN or TURN servers. This conservative non-trickle default favors simple WHIP interoperability; it is not a different ICE protocol. | [ICE (RFC 8445)](https://www.rfc-editor.org/rfc/rfc8445.html), [STUN (RFC 8489)](https://www.rfc-editor.org/rfc/rfc8489.html), and [TURN (RFC 8656)](https://www.rfc-editor.org/rfc/rfc8656.html). |
+| Opt-in trickle ICE | With `trickleIce: true`, AutoMobile sends the initial offer and PATCHes later candidates as `application/trickle-ice-sdpfrag`. The ingest server must advertise/support this extension. | [Trickle ICE (RFC 8838)](https://www.rfc-editor.org/rfc/rfc8838.html), [SDP fragments (RFC 8840)](https://www.rfc-editor.org/rfc/rfc8840.html), and [WHIP section 4.3 (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html#section-4.3). |
+| Secure media readiness | Capture packets are only sent after the peer connection reaches a connected state. That is AutoMobile's lifecycle guard around the standard ICE + DTLS-SRTP establishment performed by werift; it prevents an old source from sending into a failed session. | [W3C connection state](https://www.w3.org/TR/webrtc/#dom-rtcpeerconnectionstate), [ICE (RFC 8445)](https://www.rfc-editor.org/rfc/rfc8445.html), and [DTLS-SRTP (RFC 5764)](https://www.rfc-editor.org/rfc/rfc5764.html). |
+| H.264 Annex-B to RTP packetization | `VideoServerStreamParser` accepts arbitrary input chunks, reconstructs Annex-B NAL units/access units, and packetizes them as single-NAL or FU-A RTP payloads. The RTP marker marks the final packet of an access unit. Chunk tolerance is an AutoMobile transport boundary; the payload layout is standards-defined. | [RTP (RFC 3550)](https://www.rfc-editor.org/rfc/rfc3550.html) and [H.264 RTP payload format, especially sections 5.1, 5.2, 5.6, and 5.8 (RFC 6184)](https://www.rfc-editor.org/rfc/rfc6184.html#section-5.2). |
+| Late WHEP viewers and decoder configuration | The coordination server caches the most recent SPS/PPS and a complete IDR access unit, then replays them after a viewer's peer connection is ready. This is an implementation policy so a new decoder has configuration and a decodable refresh point; it does not substitute for a generic RTCP keyframe-request implementation. | [RFC 6184 parameter sets and payload parameters](https://www.rfc-editor.org/rfc/rfc6184.html#section-8) and the public [ITU-T H.264 recommendation](https://www.itu.int/rec/T-REC-H.264). |
+| RTP forwarding to several viewers | RTP packets are copied before each WHEP subscriber receives them, so a writable packet buffer owned by one peer cannot corrupt another peer's media. Per-subscriber copying is an AutoMobile memory-ownership safeguard; RTP sequence/timestamp/SSRC semantics remain the standards contract. | [RTP header and source semantics (RFC 3550)](https://www.rfc-editor.org/rfc/rfc3550.html#section-5). |
+| Optional PCMU audio | AutoMobile encodes 8 kHz mono PCM16 as G.711 mu-law (PCMU) and offers it as RTP payload type 0. Audio capture availability is platform-specific; the codec clock rate and payload mapping are interoperable RTP choices. | [RTP A/V Profile: PCMU and static payload type 0 (RFC 3551)](https://www.rfc-editor.org/rfc/rfc3551.html#section-6). |
+| Reconnect, stop, and consent loss | On connection failure, AutoMobile tears down the old WHIP resource, backs off, and starts a fresh capture/session so a new keyframe follows. The retry schedule and source restart are implementation policy; deleting a WHIP resource and ceasing media when peer consent is lost are protocol-aligned. | [WHIP session termination (RFC 9725 section 4.6)](https://www.rfc-editor.org/rfc/rfc9725.html#section-4.6) and [ICE consent freshness (RFC 7675)](https://www.rfc-editor.org/rfc/rfc7675.html). |
+| BUNDLE and RTCP multiplexing | AutoMobile delegates SDP generation and transport details to werift. It does not add custom BUNDLE or RTCP-mux rules; those are negotiated as part of the WebRTC/WHIP session. | [WHIP section 4.4 (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html#section-4.4), [JSEP (RFC 9429)](https://www.rfc-editor.org/rfc/rfc9429.html), and [W3C WebRTC](https://www.w3.org/TR/webrtc/). |
+
+## Deliberately non-standardized choices
+
+- **Capture source selection and encoder lifecycle:** selecting Android
+  `video-server` versus `screenrecord`, or iOS ScreenCaptureKit plus FFmpeg,
+  is a platform integration choice. Their output contract is H.264 Annex-B,
+  which is consumed at the RFC 6184 boundary.
+- **Stream IDs and the Unix socket:** reserving IDs before asynchronous start,
+  cancellation during source resolution, and bounded local framing prevent
+  daemon races and denial-of-service conditions. They do not appear on the
+  WebRTC wire.
+- **Safety limits and retries:** HTTP body limits, timeouts, packet copies, and
+  reconnect backoff make the reference server predictable. They must preserve
+  the negotiated WebRTC session semantics but are not required parameter values
+  in a WebRTC specification.
+- **Keyframe replay policy:** replaying cached SPS/PPS plus a complete IDR is
+  chosen for fast late-viewer startup. Future RTCP feedback support should be
+  documented against its own specification when it is implemented.
+
+For the architecture and operational configuration, see
+[WebRTC Screen Streaming](./webrtc-streaming.md). For a CI-worker walkthrough,
+see [Streaming a device's screen from a CI worker](../../../webrtc-streaming-ci-worker.md).

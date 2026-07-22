@@ -12,10 +12,23 @@ import { DEFAULT_RTP_MTU } from "./h264";
 import { ReconnectController, type ReconnectState } from "./ReconnectController";
 import { RtpH264TrackWriter } from "./RtpH264TrackWriter";
 import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
-import { TrickleIceForwarder } from "./trickleIce";
+import {
+  h264SpsProfileLevelId,
+  h264SpsLevelIdc,
+  isCompatibleConstrainedBaselineProfile,
+  WEBRTC_H264_LEVEL_IDC,
+  WEBRTC_H264_PROFILE_LEVEL_ID,
+} from "./h264Level";
+import { parseTrickleIceMediaContexts, TrickleIceForwarder } from "./trickleIce";
 import { WhipClient, type WhipClientOptions } from "./WhipClient";
 
-/** How long to wait for ICE gathering before publishing the offer. */
+/**
+ * How long to wait for ICE gathering before publishing the offer.
+ *
+ * Protocol background: [ICE (RFC 8445)](https://www.rfc-editor.org/rfc/rfc8445.html).
+ * AutoMobile's bounded non-trickle wait is an implementation choice; enable
+ * `trickleIce` for the WHIP extension described in `trickleIce.ts`.
+ */
 export const ICE_GATHERING_TIMEOUT_MS = 5000;
 
 export interface WebRtcPublisherConfig {
@@ -79,6 +92,13 @@ export interface WebRtcStreamDescriptor {
  * publisher packetizes it to RTP and sends it over a sendonly WebRTC track.
  * Connection loss triggers automatic reconnection (fresh WHIP publish) with
  * backoff via {@link ReconnectController}.
+ *
+ * Standards: [W3C WebRTC](https://www.w3.org/TR/webrtc/),
+ * [JSEP (RFC 9429)](https://www.rfc-editor.org/rfc/rfc9429.html),
+ * [WHIP (RFC 9725)](https://www.rfc-editor.org/rfc/rfc9725.html), and
+ * [H.264 over RTP (RFC 6184)](https://www.rfc-editor.org/rfc/rfc6184.html).
+ * See `docs/design-docs/mcp/observe/webrtc-standards-map.md` for the full
+ * implementation-to-spec mapping.
  */
 export class WebRtcPublisher {
   private readonly config: WebRtcPublisherConfig;
@@ -96,6 +116,7 @@ export class WebRtcPublisher {
   private writer: RtpH264TrackWriter | null = null;
   private audioWriter: RtpPcmuTrackWriter | null = null;
   private resourceUrl: string | null = null;
+  private activeWhipEtag: string | null = null;
   private state: ReconnectState = "idle";
   private closed = false;
   private establishing = false;
@@ -115,9 +136,13 @@ export class WebRtcPublisher {
       (iceServers =>
         new RTCPeerConnection({
           iceServers,
+          // RFC 9725 §4.4.1 requires the WHIP client to use max-bundle. Besides
+          // sharing one transport, this ensures only the offerer-tagged m-line
+          // gathers/trickles ICE candidates (RFC 9725 §4.3.2).
+          bundlePolicy: "max-bundle",
           codecs: this.audioEnabled
-            ? { video: [useH264()], audio: [usePCMU()] }
-            : { video: [useH264()] },
+            ? { video: [useH264({ parameters: h264CodecParameters() })], audio: [usePCMU()] }
+            : { video: [useH264({ parameters: h264CodecParameters() })] },
         }));
     const createWhip = deps.createWhipClient ?? (options => new WhipClient(options));
     this.whip = createWhip({
@@ -149,7 +174,14 @@ export class WebRtcPublisher {
 
   /** Feed a chunk of the raw H.264 (Annex-B) elementary stream. */
   writeH264Chunk(chunk: Buffer): void {
-    this.writer?.writeChunk(chunk);
+    try {
+      this.writer?.writeChunk(chunk);
+    } catch (error) {
+      logger.warn(
+        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${error instanceof Error ? error.message : String(error)}`
+      );
+      this.notifySourceFailed();
+    }
   }
 
   /** Feed 8 kHz mono PCM16LE audio; ignored when audio is not enabled. */
@@ -209,21 +241,42 @@ export class WebRtcPublisher {
     await this.teardownActiveSession();
 
     await this.onBeforeEstablish?.();
+    // stop() can race an asynchronous pre-establish hook (for example, source
+    // setup). Do not allocate a peer connection or POST a WHIP offer after the
+    // caller has explicitly stopped this publisher.
+    if (this.closed) {
+      throw new Error("Publisher closed during pre-establish.");
+    }
 
     const pc = this.createPeerConnection(this.config.iceServers ?? []);
     this.pc = pc;
 
     try {
-      const track = new MediaStreamTrack({ kind: "video" });
+      // WHIP permits exactly one MediaStream; both media tracks share its id.
+      const track = new MediaStreamTrack({ kind: "video", streamId: this.config.streamId });
       const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
       this.writer = new RtpH264TrackWriter({
         sink: track,
         ssrc: transceiver.sender.ssrc,
         mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
         timer: this.timer,
+        onSps: sps => {
+          const profileLevelId = h264SpsProfileLevelId(sps);
+          if (profileLevelId && !isCompatibleConstrainedBaselineProfile(profileLevelId)) {
+            throw new Error(
+              `H.264 SPS profile ${profileLevelId.slice(0, 4)} is incompatible with negotiated constrained baseline.`
+            );
+          }
+          const levelIdc = h264SpsLevelIdc(sps);
+          if (levelIdc !== undefined && levelIdc > WEBRTC_H264_LEVEL_IDC) {
+            throw new Error(
+              `H.264 SPS level ${levelIdc} exceeds negotiated level ${WEBRTC_H264_LEVEL_IDC}.`
+            );
+          }
+        },
       });
       if (this.audioEnabled) {
-        const audioTrack = new MediaStreamTrack({ kind: "audio" });
+        const audioTrack = new MediaStreamTrack({ kind: "audio", streamId: this.config.streamId });
         const audioTransceiver = pc.addTransceiver(audioTrack, { direction: "sendonly" });
         this.audioWriter = new RtpPcmuTrackWriter({
           sink: audioTrack,
@@ -248,7 +301,10 @@ export class WebRtcPublisher {
         throw new Error("Failed to produce a local SDP offer.");
       }
 
-      const session = await this.whip.publish(localSdp);
+      // werift implements rtcp-mux but does not serialize the WHIP-required
+      // rtcp-mux-only attribute. It is an SDP signalling constraint; werift's
+      // transport remains multiplexed after local description is installed.
+      const session = await this.whip.publish(addWhipRtcpMuxOnly(localSdp));
 
       // stop() may have run while we were awaiting ICE/WHIP. The WHIP session now
       // exists on the server but teardown already happened (before resourceUrl was
@@ -263,9 +319,20 @@ export class WebRtcPublisher {
       }
 
       this.resourceUrl = session.resourceUrl;
+      this.activeWhipEtag = session.etag;
+      if (this.trickleIce && !session.etag) {
+        throw new Error("WHIP server did not return the ETag required for Trickle ICE.");
+      }
       // Flush candidates gathered during the WHIP round-trip and stream the rest.
       this.trickle?.setResource(session.resourceUrl);
       await pc.setRemoteDescription({ type: "answer", sdp: session.answerSdp });
+      // WHIP forbids a misleading partially successful ingest session: reject
+      // an answer that did not accept each requested media section.
+      // RFC 9725 §4.4.3: https://www.rfc-editor.org/rfc/rfc9725.html#section-4.4.3
+      assertWhipAnswerAcceptsMedia(session.answerSdp, "video", "h264");
+      if (this.audioEnabled) {
+        assertWhipAnswerAcceptsMedia(session.answerSdp, "audio", "pcmu");
+      }
 
       this.establishing = false;
       this.watchConnectionState(pc);
@@ -284,6 +351,9 @@ export class WebRtcPublisher {
       // reconnect attempt to tear it down, so close it here. Guard on identity so
       // we never close a pc a concurrent teardown/establish already replaced.
       if (this.pc === pc) {
+        const resourceUrl = this.resourceUrl;
+        this.resourceUrl = null;
+        this.activeWhipEtag = null;
         this.pc = null;
         this.writer = null;
         this.audioWriter = null;
@@ -291,6 +361,9 @@ export class WebRtcPublisher {
         this.trickle = null;
         this.candidateSub?.unSubscribe();
         this.candidateSub = null;
+        if (resourceUrl) {
+          await this.whip.delete(resourceUrl).catch(() => {});
+        }
         await pc.close().catch(() => {});
       }
       throw error;
@@ -314,6 +387,11 @@ export class WebRtcPublisher {
         this.controller.notifyConnectionLost();
       }
     });
+    // An ICE/DTLS failure can arrive before the subscription above is installed.
+    // werift does not replay prior state changes, so inspect the current state too.
+    if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      this.controller.notifyConnectionLost();
+    }
   }
 
   /** Start capture (once per session) now that media can actually flow. */
@@ -322,7 +400,7 @@ export class WebRtcPublisher {
       return;
     }
     this.connectedFired = true;
-    void Promise.resolve(this.onConnected?.()).catch(error => {
+    void Promise.resolve().then(() => this.onConnected?.()).catch(error => {
       // Capture failed to start (e.g. adb/screenrecord spawn failed) even though
       // the peer connected. Without this the stream would report connected with
       // no media and never recover — route it through the reconnect path.
@@ -337,21 +415,29 @@ export class WebRtcPublisher {
    * after publish), then PATCHed as `application/trickle-ice-sdpfrag`.
    */
   private startTrickle(pc: RTCPeerConnection): void {
+    const contexts = parseTrickleIceMediaContexts(pc.localDescription?.sdp ?? "");
     const forwarder = new TrickleIceForwarder((resourceUrl, fragment) => {
-      void this.whip.patchCandidate(resourceUrl, fragment).catch(error => {
+      const etag = this.activeWhipEtag;
+      if (!etag) {
+        return;
+      }
+      void this.whip.patchCandidate(resourceUrl, etag, fragment).catch(error => {
         logger.debug(`[WebRTC] trickle candidate PATCH failed: ${error}`);
       });
-    });
+    }, contexts);
     this.trickle = forwarder;
     this.candidateSub = pc.onIceCandidate.subscribe(candidate => {
-      // Ignore the end-of-candidates signal (undefined) and any candidate from a
-      // peer connection a concurrent teardown/establish already replaced.
-      if (candidate && this.pc === pc) {
+      if (this.pc !== pc) {
+        return;
+      }
+      if (candidate) {
         forwarder.addCandidate({
           candidate: candidate.candidate,
           sdpMid: candidate.sdpMid,
           sdpMLineIndex: candidate.sdpMLineIndex,
         });
+      } else {
+        forwarder.completeGathering();
       }
     });
   }
@@ -379,6 +465,7 @@ export class WebRtcPublisher {
     this.writer = null;
     this.audioWriter = null;
     this.resourceUrl = null;
+    this.activeWhipEtag = null;
 
     // Stop forwarding candidates and detach the listener before the pc closes.
     this.trickle?.stop();
@@ -401,6 +488,129 @@ export class WebRtcPublisher {
       }
     }
   }
+}
+
+function assertWhipAnswerAcceptsMedia(
+  answerSdp: string,
+  kind: "audio" | "video",
+  codec: "h264" | "pcmu"
+): void {
+  const section = findSdpMediaSection(answerSdp, kind);
+  if (!section) {
+    throw new Error(`WHIP answer did not include a ${kind} m-line.`);
+  }
+
+  const { mediaLine, attributeLines, sessionDirection } = section;
+  const mediaParts = mediaLine.split(/\s+/);
+  const port = Number(mediaParts[1]);
+  const formats = new Set(mediaParts.slice(3));
+  if (!Number.isFinite(port) || port === 0) {
+    throw new Error(`WHIP answer rejected the requested ${kind} m-line.`);
+  }
+
+  const direction =
+    attributeLines
+      .map(line => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
+      .find((value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined) ??
+    sessionDirection ?? "sendrecv";
+  // WHIP is unidirectional ingest: an accepting endpoint MUST answer recvonly
+  // (RFC 9725 §4.2). Accepting sendrecv would make AutoMobile interoperate with
+  // a non-conforming endpoint and hide an invalid session contract.
+  if (direction !== "recvonly") {
+    throw new Error(`WHIP answer did not accept receiving ${kind} (direction=${direction}).`);
+  }
+
+  const staticPayloadType = codec === "pcmu" ? "0" : undefined;
+  const accepted =
+    (staticPayloadType !== undefined && formats.has(staticPayloadType)) ||
+    attributeLines.some(line => isAcceptedCodecRtpMap(line, formats, codec, attributeLines));
+  if (!accepted) {
+    throw new Error(`WHIP answer did not accept ${codec.toUpperCase()} ${kind}.`);
+  }
+}
+
+function findSdpMediaSection(sdp: string, kind: "audio" | "video"): {
+  mediaLine: string;
+  attributeLines: string[];
+  sessionDirection?: "sendrecv" | "sendonly" | "recvonly" | "inactive";
+} | null {
+  const lines = sdp.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const firstMedia = lines.findIndex(line => line.startsWith("m="));
+  const sessionDirection = lines
+    .slice(0, firstMedia < 0 ? lines.length : firstMedia)
+    .map(line => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
+    .find((value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined);
+  for (let index = 0; index < lines.length; index++) {
+    if (!lines[index].startsWith(`m=${kind} `)) {
+      continue;
+    }
+    const attributeLines: string[] = [];
+    for (let sectionIndex = index + 1; sectionIndex < lines.length; sectionIndex++) {
+      if (lines[sectionIndex].startsWith("m=")) {
+        break;
+      }
+      attributeLines.push(lines[sectionIndex]);
+    }
+    return { mediaLine: lines[index], attributeLines, sessionDirection };
+  }
+  return null;
+}
+
+function isAcceptedCodecRtpMap(
+  line: string,
+  formats: Set<string>,
+  codec: string,
+  attributeLines: string[]
+): boolean {
+  const match = line.match(/^a=rtpmap:(\S+)\s+([^/\s]+)\/(\d+)/i);
+  if (!match || !formats.has(match[1]) || match[2].toLowerCase() !== codec) {
+    return false;
+  }
+  if (codec !== "h264") {
+    return true;
+  }
+  // AutoMobile packetizes H.264 at the RFC 6184 fixed 90 kHz clock rate and
+  // uses FU-A, which requires packetization-mode=1. The local werift codec is
+  // constrained-baseline 42e0xx; level may differ when asymmetry is negotiated.
+  return match[3] === "90000" && attributeLines.some(fmtp => {
+    if (!fmtp.startsWith(`a=fmtp:${match[1]} `)) {
+      return false;
+    }
+    const parameters = fmtp.slice(fmtp.indexOf(" ") + 1);
+    const packetizationMode = /(?:^|;)\s*packetization-mode\s*=\s*1(?:;|$)/i.test(parameters);
+    const profileLevelId = /(?:^|;)\s*profile-level-id\s*=\s*([0-9a-f]{6})(?:;|$)/i.exec(parameters)?.[1];
+    return packetizationMode && profileLevelId !== undefined && acceptsLocalH264Send(parameters, profileLevelId);
+  });
+}
+
+function h264CodecParameters(): string {
+  return `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1`;
+}
+
+function acceptsLocalH264Send(parameters: string, profileLevelId: string): boolean {
+  if (!isCompatibleConstrainedBaselineProfile(profileLevelId)) {
+    return false;
+  }
+  const answerLevelIdc = Number.parseInt(profileLevelId.slice(4, 6), 16);
+  if (answerLevelIdc >= WEBRTC_H264_LEVEL_IDC) {
+    return true;
+  }
+  // With level asymmetry, the answer's profile-level-id describes its sending
+  // level; max-recv-level is its separately advertised receive ceiling (RFC
+  // 6184 §8.2.2). Do not send a Level 4.2 stream unless that ceiling permits it.
+  const asymmetric = /(?:^|;)\s*level-asymmetry-allowed\s*=\s*1(?:;|$)/i.test(parameters);
+  const maxReceiveLevel = /(?:^|;)\s*max-recv-level\s*=\s*([0-9a-f]{4})(?:;|$)/i.exec(parameters)?.[1];
+  // RFC 6184 §8.2.2 encodes max-recv-level as the two hexadecimal bytes after
+  // profile_idc in an SPS: profile-iop followed by level_idc (for example,
+  // e02a for constrained-baseline Level 4.2). It is not a decimal level number.
+  const maxReceiveLevelIdc = maxReceiveLevel
+    ? Number.parseInt(maxReceiveLevel.slice(2), 16)
+    : Number.NaN;
+  return asymmetric && maxReceiveLevelIdc >= WEBRTC_H264_LEVEL_IDC;
+}
+
+function addWhipRtcpMuxOnly(sdp: string): string {
+  return sdp.replace(/a=rtcp-mux\r?\n/g, match => `${match}a=rtcp-mux-only\r\n`);
 }
 
 /**

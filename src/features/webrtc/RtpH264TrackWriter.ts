@@ -8,7 +8,10 @@ import {
   packetizeAccessUnit,
 } from "./h264";
 
-/** H.264 RTP clock rate (fixed by RFC 6184). */
+/**
+ * H.264 RTP clock rate (90 kHz, fixed by RFC 6184 §6).
+ * https://www.rfc-editor.org/rfc/rfc6184.html#section-6
+ */
 export const H264_CLOCK_RATE = 90_000;
 
 /**
@@ -31,13 +34,17 @@ export interface RtpH264TrackWriterOptions {
   timer?: Timer;
   /** Initial 16-bit sequence number (defaults to 0). */
   initialSequenceNumber?: number;
+  /** Observes each complete SPS before it can be sent to the negotiated peer. */
+  onSps?: (nal: Buffer) => void;
 }
 
 /**
  * Consumes an Annex-B H.264 elementary stream and writes RFC 6184 RTP packets
  * to a sink. Access units are timestamped from a wall clock (90 kHz), so RTP
  * pacing tracks real capture time regardless of the encoder's nominal frame
- * rate. The marker bit is set on the last packet of each frame.
+ * rate. The marker bit is set on the last packet of each frame, as required
+ * for an H.264 access unit by RFC 6184 §5.1:
+ * https://www.rfc-editor.org/rfc/rfc6184.html#section-5.1
  */
 export class RtpH264TrackWriter {
   private readonly sink: RtpPacketSink;
@@ -45,6 +52,7 @@ export class RtpH264TrackWriter {
   private readonly payloadType: number;
   private readonly mtu: number;
   private readonly timer: Timer;
+  private readonly onSps?: (nal: Buffer) => void;
   private readonly parser = new H264AnnexBParser();
   private readonly assembler = new H264AccessUnitAssembler();
 
@@ -60,7 +68,11 @@ export class RtpH264TrackWriter {
     this.ssrc = options.ssrc >>> 0;
     this.payloadType = options.payloadType ?? 102;
     this.mtu = options.mtu ?? DEFAULT_RTP_MTU;
+    if (!Number.isSafeInteger(this.mtu) || this.mtu < 3) {
+      throw new Error("H.264 RTP MTU must be an integer of at least 3 bytes.");
+    }
     this.timer = options.timer ?? defaultTimer;
+    this.onSps = options.onSps;
     this.sequenceNumber = (options.initialSequenceNumber ?? 0) & 0xffff;
   }
 
@@ -91,6 +103,9 @@ export class RtpH264TrackWriter {
   }
 
   private consumeNal(nal: Buffer): void {
+    if ((nal[0] & 0x1f) === 7) {
+      this.onSps?.(nal);
+    }
     if (isKeyFrameNal(nal)) {
       this.sawKeyFrame = true;
     }

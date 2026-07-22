@@ -83,6 +83,26 @@ describe("createAndroidH264CaptureSource", () => {
     expect(persistent.stopped).toBe(0);
   });
 
+  test("stops the selected source when stop races its startup", async () => {
+    let releaseStart: (() => void) | undefined;
+    const persistent = new FakeSource(
+      () => new Promise<void>(resolve => { releaseStart = resolve; })
+    );
+    const deps: AndroidH264CaptureSourceDeps = {
+      createPersistent: () => persistent,
+      createScreenrecord: () => new FakeSource(),
+    };
+    const source = createAndroidH264CaptureSource(baseOptions(), "/tmp/automobile-video.jar", deps);
+
+    const starting = source.start();
+    await Promise.resolve();
+    await source.stop();
+    releaseStart?.();
+    await starting;
+
+    expect(persistent.stopped).toBe(1);
+  });
+
   test("passes the provided jar path to the persistent source", () => {
     let capturedJar: string | undefined;
     const deps: AndroidH264CaptureSourceDeps = {

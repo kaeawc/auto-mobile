@@ -10,6 +10,7 @@ import ScreenCaptureCore
 /// reconfiguration so frames don't get cropped.
 final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
     private let writer: FrameWriter
+    private let onFatalError: (Error) -> Void
     private let queue = DispatchQueue(label: "automobile.simulator-capture.frames")
     private var stream: SCStream?
     private var configuredPixelWidth: Int = 0
@@ -18,8 +19,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     private var fps: Int = CommandLineOptions.defaultSimulatorFPS
     private var audioEnabled = false
 
-    init(writer: FrameWriter) {
+    init(writer: FrameWriter, onFatalError: @escaping (Error) -> Void) {
         self.writer = writer
+        self.onFatalError = onFatalError
     }
 
     func start(window: SCWindow, fps: Int, audio: Bool) async throws {
@@ -90,9 +92,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     // MARK: - SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        FileHandle.standardError.write(
-            Data("error: ScreenCaptureKit stream stopped: \(error)\n".utf8)
-        )
+        onFatalError(error)
     }
 
     // MARK: - Internals

@@ -109,6 +109,7 @@ nav:
              - 'Appearance Sync': design-docs/mcp/observe/appearance.md
              - 'Screen Streaming': design-docs/mcp/observe/screen-streaming.md
              - 'WebRTC Streaming (WHIP)': design-docs/mcp/observe/webrtc-streaming.md
+             - 'WebRTC Standards Map': design-docs/mcp/observe/webrtc-standards-map.md
              - 'iOS WebRTC Streaming': design-docs/mcp/observe/ios-webrtc-streaming.md
              - 'Video Recording': design-docs/mcp/observe/video-recording.md
              - 'Vision Fallback': design-docs/mcp/observe/vision-fallback.md

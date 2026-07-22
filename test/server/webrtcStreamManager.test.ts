@@ -144,6 +144,53 @@ describe("webrtcStreamManager", () => {
     ).rejects.toThrow(/already active/);
   });
 
+  test("reserves a device before asynchronous jar resolution completes", async () => {
+    let releaseJar: ((path: string | null) => void) | undefined;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const first = startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await expect(
+      startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } })
+    ).rejects.toThrow(/already active or starting/);
+
+    releaseJar?.(null);
+    await first;
+  });
+
+  test("cancels an explicit stream while jar resolution is pending", async () => {
+    let releaseJar: ((path: string | null) => void) | undefined;
+    let publishersCreated = 0;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        publishersCreated++;
+        return new FakePublisher(config, deps) as unknown as WebRtcPublisher;
+      },
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const starting = startWebRtcStream({
+      device: ANDROID,
+      streamId: "pending-stop",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const stopped = await stopWebRtcStream("pending-stop");
+    releaseJar?.(null);
+
+    await expect(starting).rejects.toThrow(/stopped before startup/);
+    expect(stopped.state).toBe("stopped");
+    expect(publishersCreated).toBe(0);
+    expect(listWebRtcStreams()).toEqual([]);
+  });
+
   test("rejects a duplicate explicit streamId (even on a different device)", async () => {
     installFakes();
     const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "b" } as BootedDevice;
@@ -192,6 +239,53 @@ describe("webrtcStreamManager", () => {
     await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
     const stopped = await stopWebRtcStream();
     expect(stopped.state).toBe("stopped");
+  });
+
+  test("stop without id rejects an active stream plus a different pending start as ambiguous", async () => {
+    let releaseJar: ((path: string | null) => void) | undefined;
+    installFakes();
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    setWebRtcStreamManagerDependencies({
+      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+    });
+    const pending = startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } });
+
+    await expect(stopWebRtcStream()).rejects.toThrow(/specify streamId/);
+    releaseJar?.(null);
+    await pending;
+  });
+
+  test("rejects audio startup promptly when stopped before the publisher connects", async () => {
+    let releaseStart: (() => void) | undefined;
+    let enteredStart: (() => void) | undefined;
+    const startEntered = new Promise<void>(resolve => { enteredStart = resolve; });
+    const allowStartToReturn = new Promise<void>(resolve => { releaseStart = resolve; });
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publisher.start = async () => {
+          await publisher.onBeforeEstablish?.();
+          enteredStart?.();
+          await allowStartToReturn;
+        };
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const starting = startWebRtcStream({
+      device: ANDROID,
+      streamId: "audio-stop-before-connect",
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+    await startEntered;
+    await stopWebRtcStream("audio-stop-before-connect");
+    releaseStart?.();
+
+    await expect(starting).rejects.toThrow(/stopped before capture source started/);
   });
 
   test("does not leave an orphaned source when the stream is stopped mid-start", async () => {

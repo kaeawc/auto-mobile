@@ -107,4 +107,20 @@ describe("RtpH264TrackWriter", () => {
     expect(sink.packets[0].header.sequenceNumber).toBe(0xffff);
     expect(sink.packets[1].header.sequenceNumber).toBe(0);
   });
+
+  test("observes an SPS before packetizing its access unit", () => {
+    const sink = new RecordingSink();
+    const observed: Buffer[] = [];
+    const writer = new RtpH264TrackWriter({
+      sink,
+      ssrc: 1,
+      onSps: sps => observed.push(Buffer.from(sps)),
+    });
+    const sps = Buffer.from([0x67, 0x42, 0xe0, 0x2a]);
+
+    writer.writeChunk(annexB(sps, makeNal(5, 8)));
+    writer.flush();
+
+    expect(observed).toEqual([sps]);
+  });
 });

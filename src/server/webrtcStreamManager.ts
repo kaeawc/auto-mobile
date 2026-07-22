@@ -32,6 +32,18 @@ interface WebRtcStreamRecord {
   size?: { width: number; height: number };
   audioEnabled: boolean;
   startedAt: string;
+  /** Reservation token for a start that has not returned to its caller yet. */
+  startToken: symbol;
+}
+
+interface PendingWebRtcStart {
+  streamId: string;
+  device: BootedDevice;
+  config: ReturnType<typeof resolveWebRtcStreamingConfig>;
+  token: symbol;
+  cancelled: boolean;
+  /** Reject an audio startup waiter when this exact reservation is stopped. */
+  onCancelled?: () => void;
 }
 
 export interface WebRtcStreamManagerDependencies {
@@ -59,6 +71,8 @@ const defaultDependencies: WebRtcStreamManagerDependencies = {
 
 let dependencies: WebRtcStreamManagerDependencies = { ...defaultDependencies };
 const streams = new Map<string, WebRtcStreamRecord>();
+const startingDeviceIds = new Map<string, PendingWebRtcStart>();
+const startingStreamIds = new Map<string, PendingWebRtcStart>();
 const INITIAL_AUDIO_SOURCE_START_TIMEOUT_MS = 30_000;
 
 /** Override manager dependencies (tests). */
@@ -71,6 +85,8 @@ export function setWebRtcStreamManagerDependencies(
 /** Reset manager state and dependencies (tests). */
 export function resetWebRtcStreamManager(): void {
   streams.clear();
+  startingDeviceIds.clear();
+  startingStreamIds.clear();
   dependencies = { ...defaultDependencies };
 }
 
@@ -171,6 +187,75 @@ async function cleanupFailedStart(
   await publisher.stop().catch(() => {});
 }
 
+function assertStreamStartAvailable(deviceId: string, streamId: string): void {
+  const existing = activeStreamForDevice(deviceId);
+  if (existing || startingDeviceIds.has(deviceId)) {
+    throw new ActionableError(
+      `WebRTC stream already active or starting for device ${deviceId} (streamId ${existing?.streamId ?? "pending"}). Stop it first.`
+    );
+  }
+  if (streams.has(streamId) || startingStreamIds.has(streamId)) {
+    throw new ActionableError(`WebRTC stream ${streamId} already active. Stop it first.`);
+  }
+}
+
+function stoppedPendingDescriptor(pending: PendingWebRtcStart): WebRtcStreamDescriptor {
+  return {
+    streamId: pending.streamId,
+    state: "stopped",
+    whipEndpoint: pending.config.whipEndpoint,
+    resourceUrl: null,
+    iceServers: pending.config.iceServers,
+    framesSent: 0,
+    packetsSent: 0,
+    audioPacketsSent: 0,
+    audioSamplesSent: 0,
+  };
+}
+
+/** Cancel a pending-only start, or return undefined when an active record must stop. */
+function stopPendingStart(streamId?: string): WebRtcStreamDescriptor | undefined {
+  if (!streamId && streams.size > 0 && startingStreamIds.size > 0) {
+    throw new ActionableError("Multiple WebRTC streams are active or starting; specify streamId to stop one.");
+  }
+  const pending = streamId
+    ? startingStreamIds.get(streamId)
+    : startingStreamIds.size === 1
+      ? startingStreamIds.values().next().value
+      : undefined;
+  if (!pending || streams.has(pending.streamId)) {
+    return undefined;
+  }
+  pending.cancelled = true;
+  pending.onCancelled?.();
+  startingDeviceIds.delete(pending.device.deviceId);
+  startingStreamIds.delete(pending.streamId);
+  return stoppedPendingDescriptor(pending);
+}
+
+/** Remove the matching reservation without affecting a replacement stream start. */
+function cancelRecordStart(record: WebRtcStreamRecord): void {
+  const pending = startingStreamIds.get(record.streamId);
+  if (pending?.token === record.startToken) {
+    pending.cancelled = true;
+    pending.onCancelled?.();
+    startingStreamIds.delete(record.streamId);
+  }
+  if (startingDeviceIds.get(record.device.deviceId)?.token === record.startToken) {
+    startingDeviceIds.delete(record.device.deviceId);
+  }
+}
+
+/** Stop live media components while retaining best-effort cleanup semantics. */
+async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
+  await record.source?.stop().catch(error => {
+    logger.debug(`[WebRtcStream] source stop failed: ${error}`);
+  });
+  await record.publisher.stop().catch(error => {
+    logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
+  });
+}
+
 /**
  * Start publishing a device's screen to the configured coordination server over
  * WHIP. Android capture prefers the persistent on-device encoder and falls back
@@ -181,142 +266,162 @@ async function cleanupFailedStart(
 export async function startWebRtcStream(
   request: StartWebRtcStreamRequest
 ): Promise<WebRtcStreamDescriptor> {
-  const existing = activeStreamForDevice(request.device.deviceId);
-  if (existing) {
-    throw new ActionableError(
-      `WebRTC stream already active for device ${request.device.deviceId} (streamId ${existing.streamId}). Stop it first.`
-    );
-  }
-
   const config = resolveWebRtcStreamingConfig(request.overrides);
   const streamId = request.streamId ?? `webrtc_${dependencies.idGenerator.next()}`;
-
   // An explicit id reused across devices would otherwise overwrite the existing
-  // record here, orphaning the first stream's publisher/source (leaking the
-  // screenrecord/WHIP session and hiding it from list/stop).
-  if (streams.has(streamId)) {
-    throw new ActionableError(`WebRTC stream ${streamId} already active. Stop it first.`);
-  }
+  // record, orphaning the first stream's publisher/source.
+  assertStreamStartAvailable(request.device.deviceId, streamId);
 
-  const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
-
-  // Resolve the persistent-encoder jar ONCE, before establishing the WHIP
-  // session — a fatal fail-mode (checksum mismatch, or REQUIRE with nothing
-  // available) must abort the stream start with its ActionableError rather than
-  // surfacing mid-capture. The download resolves here, off the per-frame path;
-  // startSource() only constructs the (synchronous) capture source. A degrade
-  // returns null → screenrecord.
-  const jarPath = await dependencies.resolveVideoJar(request.device);
-
-  let settleInitialAudioSourceStart:
-    | ((result: { ok: true } | { ok: false; error: unknown }) => void)
-    | undefined;
-  let initialAudioSourceStartSettled = false;
-  const initialAudioSourceStart = config.audioEnabled
-    ? new Promise<void>((resolve, reject) => {
-      settleInitialAudioSourceStart = result => {
-        if (initialAudioSourceStartSettled) {
-          return;
-        }
-        initialAudioSourceStartSettled = true;
-        if (result.ok) {
-          resolve();
-        } else {
-          reject(result.error);
-        }
-      };
-    })
-    : null;
-  const settleInitialAudioStart = (error?: unknown): void => {
-    if (!config.audioEnabled) {
-      return;
-    }
-    settleInitialAudioSourceStart?.(error ? { ok: false, error } : { ok: true });
-  };
-
-  const publisherRef: { current?: WebRtcPublisher } = {};
-  const publisher = dependencies.createPublisher(
-    {
-      streamId,
-      whipEndpoint: config.whipEndpoint,
-      bearerToken: config.bearerToken,
-      iceServers: config.iceServers,
-      bitrateBps,
-      trickleIce: config.trickleIce,
-      audioEnabled: config.audioEnabled,
-    },
-    {
-      onBeforeEstablish: () => withRecord(streamId, stopSource),
-      onConnected: async () => {
-        const currentRecord = streams.get(streamId);
-        if (!currentRecord || currentRecord.publisher !== publisherRef.current) {
-          settleInitialAudioStart(new Error(`WebRTC stream ${streamId} stopped before capture source started.`));
-          return;
-        }
-        try {
-          const started = await startSource(currentRecord);
-          if (!started) {
-            const error = new Error(`WebRTC stream ${streamId} stopped before capture source started.`);
-            settleInitialAudioStart(error);
-            if (config.audioEnabled) {
-              throw error;
-            }
-            return;
-          }
-          settleInitialAudioStart();
-        } catch (error) {
-          settleInitialAudioStart(error);
-          throw error;
-        }
-      },
-    }
-  );
-  publisherRef.current = publisher;
-  const record: WebRtcStreamRecord = {
+  const startToken = Symbol(streamId);
+  const pending: PendingWebRtcStart = {
     streamId,
     device: request.device,
-    publisher,
-    source: null,
-    jarPath,
-    bitrateBps,
-    size: config.size,
-    audioEnabled: config.audioEnabled,
-    startedAt: dependencies.now().toISOString(),
+    config,
+    token: startToken,
+    cancelled: false,
   };
-  streams.set(streamId, record);
-
+  startingDeviceIds.set(request.device.deviceId, pending);
+  startingStreamIds.set(streamId, pending);
   try {
-    await publisher.start();
-    if (initialAudioSourceStart) {
-      await withTimeout(
-        initialAudioSourceStart,
-        INITIAL_AUDIO_SOURCE_START_TIMEOUT_MS,
-        "Timed out waiting for WebRTC audio capture source to start."
+    const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
+
+    // Resolve the persistent-encoder jar ONCE, before establishing the WHIP
+    // session — a fatal fail-mode (checksum mismatch, or REQUIRE with nothing
+    // available) must abort the stream start with its ActionableError rather than
+    // surfacing mid-capture. The download resolves here, off the per-frame path;
+    // startSource() only constructs the (synchronous) capture source. A degrade
+    // returns null → screenrecord.
+    const jarPath = await dependencies.resolveVideoJar(request.device);
+    if (pending.cancelled) {
+      throw new ActionableError(`WebRTC stream ${streamId} was stopped before startup completed.`);
+    }
+
+    let settleInitialAudioSourceStart:
+    | ((result: { ok: true } | { ok: false; error: unknown }) => void)
+    | undefined;
+    let initialAudioSourceStartSettled = false;
+    let initialAudioSourceStartStarted = false;
+    const initialAudioSourceStart = config.audioEnabled
+      ? new Promise<void>((resolve, reject) => {
+        settleInitialAudioSourceStart = result => {
+          if (initialAudioSourceStartSettled) {
+            return;
+          }
+          initialAudioSourceStartSettled = true;
+          if (result.ok) {
+            resolve();
+          } else {
+            reject(result.error);
+          }
+        };
+      })
+      : null;
+    const settleInitialAudioStart = (error?: unknown): void => {
+      if (!config.audioEnabled) {
+        return;
+      }
+      settleInitialAudioSourceStart?.(error ? { ok: false, error } : { ok: true });
+    };
+    pending.onCancelled = () => {
+      // Once onConnected has begun starting the source, let that operation
+      // report its own result. This preserves a real source-start failure when
+      // a replacement stream is started with the same id.
+      if (!initialAudioSourceStartStarted) {
+        settleInitialAudioStart(new Error(`WebRTC stream ${streamId} was stopped before capture source started.`));
+      }
+    };
+
+    const publisherRef: { current?: WebRtcPublisher } = {};
+    const publisher = dependencies.createPublisher(
+      {
+        streamId,
+        whipEndpoint: config.whipEndpoint,
+        bearerToken: config.bearerToken,
+        iceServers: config.iceServers,
+        bitrateBps,
+        trickleIce: config.trickleIce,
+        audioEnabled: config.audioEnabled,
+      },
+      {
+        onBeforeEstablish: () => withRecord(streamId, stopSource),
+        onConnected: async () => {
+          const currentRecord = streams.get(streamId);
+          if (!currentRecord || currentRecord.publisher !== publisherRef.current) {
+            settleInitialAudioStart(new Error(`WebRTC stream ${streamId} stopped before capture source started.`));
+            return;
+          }
+          try {
+            initialAudioSourceStartStarted = true;
+            const started = await startSource(currentRecord);
+            if (!started) {
+              const error = new Error(`WebRTC stream ${streamId} stopped before capture source started.`);
+              settleInitialAudioStart(error);
+              if (config.audioEnabled) {
+                throw error;
+              }
+              return;
+            }
+            settleInitialAudioStart();
+          } catch (error) {
+            settleInitialAudioStart(error);
+            throw error;
+          }
+        },
+      }
+    );
+    publisherRef.current = publisher;
+    const record: WebRtcStreamRecord = {
+      streamId,
+      device: request.device,
+      publisher,
+      source: null,
+      jarPath,
+      bitrateBps,
+      size: config.size,
+      audioEnabled: config.audioEnabled,
+      startedAt: dependencies.now().toISOString(),
+      startToken,
+    };
+    streams.set(streamId, record);
+
+    try {
+      await publisher.start();
+      if (initialAudioSourceStart) {
+        await withTimeout(
+          initialAudioSourceStart,
+          INITIAL_AUDIO_SOURCE_START_TIMEOUT_MS,
+          "Timed out waiting for WebRTC audio capture source to start."
+        );
+      }
+    } catch (error) {
+      await cleanupFailedStart(streamId, record, publisher);
+      throw new ActionableError(
+        `Failed to start WebRTC stream: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-  } catch (error) {
-    await cleanupFailedStart(streamId, record, publisher);
-    throw new ActionableError(
-      `Failed to start WebRTC stream: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
 
-  return publisher.getDescriptor();
+    return publisher.getDescriptor();
+  } finally {
+    if (startingDeviceIds.get(request.device.deviceId) === pending) {
+      startingDeviceIds.delete(request.device.deviceId);
+    }
+    if (startingStreamIds.get(streamId) === pending) {
+      startingStreamIds.delete(streamId);
+    }
+  }
 }
 
 /** Stop a stream by id, or the sole active stream when id is omitted. */
 export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamDescriptor> {
+  const stoppedPending = stopPendingStart(streamId);
+  if (stoppedPending) {
+    return stoppedPending;
+  }
   const record = resolveStreamRecord(streamId);
   streams.delete(record.streamId);
+  cancelRecordStart(record);
   const descriptor = record.publisher.getDescriptor();
-
-  await record.source?.stop().catch(error => {
-    logger.debug(`[WebRtcStream] source stop failed: ${error}`);
-  });
-  await record.publisher.stop().catch(error => {
-    logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
-  });
-
+  await stopActiveRecord(record);
   return { ...descriptor, state: "stopped" };
 }
 

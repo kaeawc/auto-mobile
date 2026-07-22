@@ -53,9 +53,10 @@ class VideoEncoder(
         // Repeat frame after 100ms of no changes (reduces idle bandwidth)
         setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
 
-        // H.264 Baseline profile for maximum compatibility
-        // Note: We don't set KEY_LEVEL - let the codec choose the appropriate level
-        // based on resolution/fps. Level 3.1 can't handle 720p@60fps or 1080p@60fps.
+        // Request baseline profile but let MediaCodec choose a supported level
+        // for this device and capture size. The publisher validates the emitted
+        // SPS before forwarding it, so an unsupported encoder level reconnects
+        // safely instead of making MediaCodec.configure() fail up front.
         setInteger(
           MediaFormat.KEY_PROFILE,
           MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,

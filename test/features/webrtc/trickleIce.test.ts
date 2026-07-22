@@ -5,11 +5,18 @@ import {
   serializeTrickleFragment,
 } from "../../../src/features/webrtc/trickleIce";
 
+const context = {
+  mLine: "m=video 9 UDP/TLS/RTP/SAVPF 102",
+  mid: "0",
+  ice: { ufrag: "abc", pwd: "def" },
+};
+const contexts = new Map([[context.mid, context]]);
+
 describe("serializeTrickleFragment / parseTrickleFragment", () => {
   test("round-trips a candidate with mid and ICE credentials", () => {
     const fragment = serializeTrickleFragment(
       { candidate: "candidate:1 1 udp 2113 1.2.3.4 5000 typ host", sdpMid: "0", sdpMLineIndex: 0 },
-      { ufrag: "abc", pwd: "def" }
+      context
     );
     expect(fragment).toContain("a=ice-ufrag:abc");
     expect(fragment).toContain("a=ice-pwd:def");
@@ -23,7 +30,7 @@ describe("serializeTrickleFragment / parseTrickleFragment", () => {
   });
 
   test("adds the candidate: prefix when missing", () => {
-    const fragment = serializeTrickleFragment({ candidate: "1 1 udp 2113 1.2.3.4 5000 typ host" });
+    const fragment = serializeTrickleFragment({ candidate: "1 1 udp 2113 1.2.3.4 5000 typ host" }, context);
     expect(fragment).toContain("a=candidate:1 1 udp");
   });
 
@@ -40,7 +47,7 @@ describe("serializeTrickleFragment / parseTrickleFragment", () => {
 describe("TrickleIceForwarder", () => {
   test("buffers candidates until the resource URL is known, then flushes in order", () => {
     const sent: Array<{ url: string; fragment: string }> = [];
-    const forwarder = new TrickleIceForwarder((url, fragment) => sent.push({ url, fragment }));
+    const forwarder = new TrickleIceForwarder((url, fragment) => sent.push({ url, fragment }), contexts);
 
     forwarder.addCandidate({ candidate: "candidate:a 1 udp 1 h 1 typ host" });
     forwarder.addCandidate({ candidate: "candidate:b 1 udp 1 h 2 typ host" });
@@ -55,7 +62,7 @@ describe("TrickleIceForwarder", () => {
 
   test("sends immediately once the resource URL is set", () => {
     const sent: string[] = [];
-    const forwarder = new TrickleIceForwarder((_url, fragment) => sent.push(fragment));
+    const forwarder = new TrickleIceForwarder((_url, fragment) => sent.push(fragment), contexts);
     forwarder.setResource("https://coord/whip/s");
     forwarder.addCandidate({ candidate: "candidate:c 1 udp 1 h 3 typ host" });
     expect(sent).toHaveLength(1);
@@ -64,7 +71,7 @@ describe("TrickleIceForwarder", () => {
 
   test("stop() drops buffered candidates and ignores further ones", () => {
     const sent: string[] = [];
-    const forwarder = new TrickleIceForwarder((_url, fragment) => sent.push(fragment));
+    const forwarder = new TrickleIceForwarder((_url, fragment) => sent.push(fragment), contexts);
     forwarder.addCandidate({ candidate: "candidate:a 1 udp 1 h 1 typ host" });
     forwarder.stop();
     forwarder.setResource("https://coord/whip/s");
@@ -74,7 +81,7 @@ describe("TrickleIceForwarder", () => {
 
   test("null resource (no Location header) keeps candidates unsent without error", () => {
     const sent: string[] = [];
-    const forwarder = new TrickleIceForwarder((_url, fragment) => sent.push(fragment));
+    const forwarder = new TrickleIceForwarder((_url, fragment) => sent.push(fragment), contexts);
     forwarder.addCandidate({ candidate: "candidate:a 1 udp 1 h 1 typ host" });
     expect(() => forwarder.setResource(null)).not.toThrow();
     expect(sent).toHaveLength(0);

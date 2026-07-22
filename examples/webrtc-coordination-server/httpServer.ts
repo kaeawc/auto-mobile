@@ -9,13 +9,23 @@ export interface HttpCoordinationServerOptions extends CoordinationServerOptions
 }
 
 const VIEWER_HTML_PATH = join(import.meta.dir ?? __dirname, "viewer.html");
+const MAX_SDP_BODY_BYTES = 1_000_000;
+
+class RequestBodyTooLargeError extends Error {}
+class InvalidSdpError extends Error {}
 
 /**
  * HTTP/WHIP/WHEP front end for {@link CoordinationServer}.
  *
+ * WHIP setup, resource `Location`, DELETE, trickle PATCH, and bearer auth are
+ * implemented from RFC 9725: https://www.rfc-editor.org/rfc/rfc9725.html.
+ * WHEP remains an Internet-Draft:
+ * https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep
+ *
  * Routes:
  *   POST   /whip[?streamId=]         WHIP ingest (from AutoMobile)   -> 201 + Location
- *   DELETE /whip/:streamId           terminate ingest
+ *   PATCH  /whip/:sessionId          conditional Trickle-ICE candidate update
+ *   DELETE /whip/:sessionId          terminate ingest
  *   POST   /whep/:streamId           WHEP subscribe (from browser)   -> 201 + Location
  *   DELETE /whep/:streamId/:subId    terminate subscriber
  *   GET    /api/streams              reconnect API: list streams
@@ -32,6 +42,14 @@ export class HttpCoordinationServer {
     this.ingestToken = options.ingestToken;
     this.server = createServer((req, res) => {
       this.handle(req, res).catch(error => {
+        if (error instanceof RequestBodyTooLargeError) {
+          res.writeHead(413).end("request body too large");
+          return;
+        }
+        if (error instanceof InvalidSdpError) {
+          res.writeHead(400).end("invalid SDP");
+          return;
+        }
         // Log the detail server-side; never expose error/stack text to the client.
         console.error("[coordination-server] request error:", error);
         this.sendJson(res, 500, { error: "internal server error" });
@@ -40,8 +58,10 @@ export class HttpCoordinationServer {
   }
 
   listen(port: number, host = "0.0.0.0"): Promise<number> {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
+      this.server.once("error", reject);
       this.server.listen(port, host, () => {
+        this.server.off("error", reject);
         const address = this.server.address();
         const boundPort = typeof address === "object" && address ? address.port : port;
         resolve(boundPort);
@@ -61,7 +81,16 @@ export class HttpCoordinationServer {
     this.applyCors(res);
 
     if (method === "OPTIONS") {
+      res.writeHead(200, { "Accept-Post": "application/sdp" }).end();
+      return;
+    }
+
+    if (method === "GET" && (path === "/whip" || path === "/whep" || /^\/(whip|whep)\/[^/]+$/.test(path) || /^\/whep\/[^/]+\/[^/]+$/.test(path))) {
       res.writeHead(204).end();
+      return;
+    }
+    if (method === "HEAD" && /^\/whep\/[^/]+$/.test(path)) {
+      res.writeHead(200, { "Content-Type": "application/sdp" }).end();
       return;
     }
 
@@ -87,16 +116,20 @@ export class HttpCoordinationServer {
         res.writeHead(401).end("Unauthorized");
         return;
       }
+      assertContentType(req, "application/sdp");
       const offer = await readBody(req);
-      const { streamId, answerSdp } = await this.coordinator.ingest(
-        offer,
-        url.searchParams.get("streamId") ?? undefined
-      );
+      let ingest: { streamId: string; sessionId: string; answerSdp: string; etag: string };
+      try {
+        ingest = await this.coordinator.ingest(offer, url.searchParams.get("streamId") ?? undefined);
+      } catch {
+        throw new InvalidSdpError();
+      }
       res.writeHead(201, {
         "Content-Type": "application/sdp",
-        "Location": `/whip/${encodeURIComponent(streamId)}`,
+        "Location": `/whip/${encodeURIComponent(ingest.sessionId)}`,
+        "ETag": `\"${ingest.etag}\"`,
       });
-      res.end(answerSdp);
+      res.end(ingest.answerSdp);
       return;
     }
     // WHIP trickle ICE: incremental candidates from the publisher --------------
@@ -106,13 +139,22 @@ export class HttpCoordinationServer {
         res.writeHead(401).end("Unauthorized");
         return;
       }
+      assertContentType(req, "application/trickle-ice-sdpfrag");
+      const ifMatch = req.headers["if-match"];
+      if (typeof ifMatch !== "string") { res.writeHead(428).end(); return; }
+      const sessionId = decodeURIComponent(whipPatchMatch[1]);
+      const etag = this.coordinator.getIceEtag(sessionId);
+      if (!etag) { res.writeHead(404).end(); return; }
+      // RFC 9725 §4.3.3 requires `If-Match: *` for an ICE restart. Let that
+      // reach the fragment parser so this Trickle-only server can return its
+      // required 422 response for unsupported restarts instead of 412.
+      if (ifMatch !== "*" && ifMatch !== `\"${etag}\"`) { res.writeHead(412).end(); return; }
       const fragment = await readBody(req);
       const applied = await this.coordinator.addIngestCandidates(
-        decodeURIComponent(whipPatchMatch[1]),
+        sessionId,
         fragment
       );
-      // 204 on success; 404 if the stream id is unknown (stale resource).
-      res.writeHead(applied ? 204 : 404).end();
+      res.writeHead(applied === "applied" ? 204 : applied === "restart" ? 422 : applied === "invalid" ? 400 : 404).end();
       return;
     }
     const whipDeleteMatch = /^\/whip\/([^/]+)$/.exec(path);
@@ -123,7 +165,7 @@ export class HttpCoordinationServer {
         res.writeHead(401).end("Unauthorized");
         return;
       }
-      await this.coordinator.stopIngest(decodeURIComponent(whipDeleteMatch[1]));
+      await this.coordinator.stopIngestSession(decodeURIComponent(whipDeleteMatch[1]));
       res.writeHead(200).end();
       return;
     }
@@ -132,6 +174,10 @@ export class HttpCoordinationServer {
     const whepMatch = /^\/whep\/([^/]+)$/.exec(path);
     if (method === "POST" && whepMatch) {
       const streamId = decodeURIComponent(whepMatch[1]);
+      if (!hasContentType(req, "application/sdp")) {
+        res.writeHead(415).end("unsupported SDP media type");
+        return;
+      }
       const offer = await readBody(req);
       try {
         const { subscriberId, answerSdp } = await this.coordinator.subscribe(streamId, offer);
@@ -188,7 +234,10 @@ export class HttpCoordinationServer {
   private applyCors(res: ServerResponse): void {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, If-Match");
+    // Browsers otherwise hide the WHIP session URL and entity-tag needed for
+    // conditional Trickle-ICE PATCH requests.
+    res.setHeader("Access-Control-Expose-Headers", "Location, ETag");
   }
 
   private sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -197,13 +246,32 @@ export class HttpCoordinationServer {
   }
 }
 
+function assertContentType(req: IncomingMessage, expected: string): void {
+  if (!hasContentType(req, expected)) {
+    throw new InvalidSdpError();
+  }
+}
+
+function hasContentType(req: IncomingMessage, expected: string): boolean {
+  return req.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() === expected;
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
-    let data = "";
+    const chunks: Buffer[] = [];
+    let size = 0;
     req.on("data", chunk => {
-      data += chunk;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > MAX_SDP_BODY_BYTES) {
+        reject(new RequestBodyTooLargeError());
+        req.removeAllListeners("data");
+        req.resume();
+        return;
+      }
+      chunks.push(buffer);
     });
-    req.on("end", () => resolve(data));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }

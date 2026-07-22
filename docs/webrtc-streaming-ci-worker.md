@@ -5,7 +5,9 @@ the screen of the Android or iOS device it is driving to a coordination server
 over WebRTC, so the stream can be watched live in a browser.
 
 For the full design, see
-[WebRTC Screen Streaming](./design-docs/mcp/observe/webrtc-streaming.md).
+[WebRTC Screen Streaming](./design-docs/mcp/observe/webrtc-streaming.md), and
+for the protocol rationale, see the
+[WebRTC standards map](./design-docs/mcp/observe/webrtc-standards-map.md).
 
 ```
 CI worker (AutoMobile daemon) ──WHIP──▶ coordination server ──WHEP──▶ browser
@@ -34,7 +36,7 @@ export AUTOMOBILE_WEBRTC_ICE_SERVERS="stun:stun.l.google.com:19302"
 # Optional tuning:
 export AUTOMOBILE_WEBRTC_BITRATE_KBPS="4000"
 export AUTOMOBILE_WEBRTC_MAX_SIZE="720x1280"
-# Optional Android audio (requires AUTOMOBILE_VIDEO_SERVER_JAR / built video-server):
+# Optional audio: Android requires a video-server jar; iOS requires Simulator-window capture.
 export AUTOMOBILE_WEBRTC_AUDIO="1"
 ```
 
@@ -69,8 +71,9 @@ Response:
 If multiple devices are attached, pass `"deviceId":"emulator-5554"` or the iOS
 simulator UDID. You can also override any config per call, e.g.
 `{"action":"start","whipEndpoint":"https://other/whip","bitrateKbps":2000}`.
-For audio, pass `"audio":true`; it is Android-only and requires the persistent
-`video-server` jar because `screenrecord` is video-only.
+For audio, pass `"audio":true`. Android requires the persistent `video-server`
+jar because `screenrecord` is video-only. iOS supports audio for Simulator-window
+capture through ScreenCaptureKit; physical iOS playback capture is unavailable.
 
 ### From Node / Bun
 
@@ -118,7 +121,7 @@ echo '{"action":"stop","streamId":"'"$CI_JOB_ID"'"}'  | nc -U ~/.auto-mobile/web
 
 The publisher reconnects automatically if the network blips; the browser viewer
 reconnects via the coordination server's reconnect API. Video streaming supports
-Android and iOS; optional audio is Android-only today.
+Android and iOS; optional audio works on Android and iOS Simulator windows.
 
 ## Troubleshooting
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { WhipClient, type FetchLike } from "../../../src/features/webrtc/WhipClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 interface Recorded {
   url: string;
@@ -80,11 +81,84 @@ describe("WhipClient.publish", () => {
     await expect(client.publish("offer")).rejects.toThrow(/empty SDP/);
   });
 
-  test("tolerates a missing Location header", async () => {
+  test("rejects a missing Location header because the session could not be cleaned up", async () => {
     const { fetchImpl } = fakeFetch(() => ({ status: 201, body: "answer", location: null }));
     const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
-    const session = await client.publish("offer");
-    expect(session.resourceUrl).toBeNull();
+    await expect(client.publish("offer")).rejects.toThrow(/required Location/);
+  });
+
+  test("aborts a stalled request at the configured timeout", async () => {
+    const timer = new FakeTimer();
+    let aborted = false;
+    const fetchImpl: FetchLike = async (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      });
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      fetchImpl,
+      timer,
+      requestTimeoutMs: 10,
+    });
+
+    const publishing = client.publish("offer");
+    timer.advanceTime(10);
+
+    await expect(publishing).rejects.toThrow(/timed out/);
+    expect(aborted).toBe(true);
+  });
+
+  test("times out when a successful response stalls while reading its SDP body", async () => {
+    const timer = new FakeTimer();
+    let resolveBodyReadStarted!: () => void;
+    let resolveStalledBody!: (body: string) => void;
+    const bodyReadStarted = new Promise<void>(resolve => {
+      resolveBodyReadStarted = resolve;
+    });
+    const stalledBody = new Promise<string>(resolve => {
+      resolveStalledBody = resolve;
+    });
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      timer,
+      requestTimeoutMs: 10,
+      fetchImpl: async () => ({
+        status: 201,
+        ok: true,
+        headers: { get: name => (name.toLowerCase() === "location" ? "/r/1" : null) },
+        text: async () => {
+          resolveBodyReadStarted();
+          return await stalledBody;
+        },
+      }),
+    });
+
+    const publishing = client.publish("offer");
+    await bodyReadStarted;
+    timer.advanceTime(10);
+
+    await expect(publishing).rejects.toThrow(/response body timed out/);
+    // Let the losing branch of Promise.race settle too. Bun tracks a pending
+    // test promise even after the timeout branch rejects.
+    resolveStalledBody("");
+    await Promise.resolve();
+  });
+
+  test("preserves an already-aborted caller signal", async () => {
+    let receivedAbortedSignal = false;
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      fetchImpl: async (_url, init) => {
+        receivedAbortedSignal = init.signal?.aborted ?? false;
+        throw new Error("aborted by caller");
+      },
+    });
+
+    await expect(client.publish("offer", AbortSignal.abort())).rejects.toThrow("aborted by caller");
+    expect(receivedAbortedSignal).toBe(true);
   });
 });
 
@@ -117,11 +191,12 @@ describe("WhipClient.patchCandidate", () => {
       bearerToken: "tok",
       fetchImpl,
     });
-    await client.patchCandidate("https://coord.example.com/whip/s", "a=candidate:1 1 udp ...\r\n");
+    await client.patchCandidate("https://coord.example.com/whip/s", "\"etag\"", "a=candidate:1 1 udp ...\r\n");
     expect(calls[0].method).toBe("PATCH");
     expect(calls[0].url).toBe("https://coord.example.com/whip/s");
     expect(calls[0].headers["Content-Type"]).toBe("application/trickle-ice-sdpfrag");
     expect(calls[0].headers["Authorization"]).toBe("Bearer tok");
+    expect(calls[0].headers["If-Match"]).toBe("\"etag\"");
     expect(calls[0].body).toContain("a=candidate:1 1 udp");
   });
 
@@ -129,7 +204,7 @@ describe("WhipClient.patchCandidate", () => {
     const { fetchImpl } = fakeFetch(() => ({ status: 405 }));
     const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
     await expect(
-      client.patchCandidate("https://coord.example.com/whip/s", "a=candidate:...")
+      client.patchCandidate("https://coord.example.com/whip/s", "\"etag\"", "a=candidate:...")
     ).resolves.toBeUndefined();
   });
 });

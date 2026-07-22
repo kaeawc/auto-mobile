@@ -36,4 +36,17 @@ describe("RtpPcmuTrackWriter", () => {
     expect(packets.map(packet => packet.header.timestamp)).toEqual([0, 2, 4]);
     expect(writer.stats).toEqual({ packetsWritten: 3, samplesWritten: 5 });
   });
+
+  test("preserves a PCM16 sample split across arbitrary chunk boundaries", () => {
+    const packets: RtpPacket[] = [];
+    const writer = new RtpPcmuTrackWriter({ sink: { writeRtp: packet => packets.push(packet) }, ssrc: 1 });
+
+    writer.writePcm16Chunk(Buffer.from([0x00]));
+    expect(packets).toHaveLength(0);
+    writer.writePcm16Chunk(Buffer.from([0x00]));
+
+    expect(packets).toHaveLength(1);
+    expect(packets[0].payload).toEqual(Buffer.from([0xff]));
+    expect(writer.stats).toEqual({ packetsWritten: 1, samplesWritten: 1 });
+  });
 });

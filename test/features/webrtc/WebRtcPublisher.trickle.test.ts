@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { RTCPeerConnection } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient } from "../../../src/features/webrtc/WhipClient";
+import { VIDEO_ONLY_WHIP_ANSWER } from "../../helpers/webrtcFakes";
 
 /**
  * Fake peer connection whose ICE gathering NEVER completes, so a publisher that
@@ -22,7 +23,7 @@ class FakeTricklePc {
       return { unSubscribe: () => {} };
     },
   };
-  localDescription = { sdp: "v=0" };
+  localDescription = { sdp: ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 102", "a=mid:0", "a=ice-ufrag:u", "a=ice-pwd:p"].join("\r\n") };
   addTransceiver() {
     return { sender: { ssrc: 1 } };
   }
@@ -47,8 +48,8 @@ function makePublisher(pc: FakeTricklePc, trickleIce: boolean) {
       createPeerConnection: () => pc as unknown as RTCPeerConnection,
       createWhipClient: () =>
         ({
-          publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
-          patchCandidate: async (url: string, fragment: string) => {
+          publish: async () => ({ answerSdp: VIDEO_ONLY_WHIP_ANSWER, resourceUrl: "https://coord/whip/s", etag: "\"etag\"" }),
+          patchCandidate: async (url: string, _etag: string, fragment: string) => {
             patched.push({ url, fragment });
           },
           delete: async () => {},

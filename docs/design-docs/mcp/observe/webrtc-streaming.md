@@ -9,6 +9,9 @@
 > socket. A reference coordination server + browser viewer ships under
 > [`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/).
 >
+> For the WebRTC protocol choices behind this implementation, see the
+> [WebRTC standards map](./webrtc-standards-map.md).
+>
 > Live Android capture depends on `adb screenrecord` or the persistent
 > `video-server` jar on a real device/emulator; iOS capture depends on the
 > CtrlProxy screen streaming helper plus local `ffmpeg` H.264 encoding. Everything
@@ -141,7 +144,7 @@ Newline-delimited JSON request/response.
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale, `WIDTHxHEIGHT` |
-| `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional Android audio (`audio: true` per request). Requires the persistent `video-server` jar. |
+| `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional audio (`audio: true` per request). Android requires the persistent `video-server` jar; iOS supports Simulator-window audio only. |
 
 Per-request fields override the environment defaults.
 
@@ -216,13 +219,14 @@ flag reference.
 
 ## Optional audio
 
-Audio is opt-in (`AUTOMOBILE_WEBRTC_AUDIO=1` or `"audio": true`) and currently
-Android-only. The publisher adds a sendonly PCMU audio track and the Android
-`video-server` captures 8 kHz mono PCM16 from `REMOTE_SUBMIX`; the TypeScript
-publisher converts that PCM to PCMU RTP. Because `screenrecord` is video-only,
-audio-enabled streams require the persistent `automobile-video.jar` path. If the
-jar is unavailable or `REMOTE_SUBMIX` cannot initialize on the device build, the
-stream start fails instead of silently publishing video-only audio.
+Audio is opt-in (`AUTOMOBILE_WEBRTC_AUDIO=1` or `"audio": true`). The publisher
+adds a sendonly PCMU audio track. Android `video-server` captures 8 kHz mono PCM16
+from `REMOTE_SUBMIX`, while iOS Simulator-window capture uses ScreenCaptureKit;
+the TypeScript publisher converts the PCM to PCMU RTP. Because `screenrecord` is
+video-only, Android audio-enabled streams require the persistent
+`automobile-video.jar` path. If its jar is unavailable or `REMOTE_SUBMIX` cannot
+initialize on the device build, stream start fails instead of silently publishing
+video-only audio. Physical iOS playback capture is unavailable through public APIs.
 
 Android playback capture is policy-limited: some apps/usages cannot be captured,
 and `REMOTE_SUBMIX` is privileged. The reference coordination server forwards
@@ -240,9 +244,9 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
   demand, so production installs use the persistent encoder by default. See
   [Persistent-encoder delivery](#persistent-encoder-delivery-automobile-videojar)
   above.
-- **Audio is Android-only and opt-in.** iOS WebRTC capture remains video-only,
-  and Android audio depends on `REMOTE_SUBMIX` availability for the shell-owned
-  `video-server` process.
+- **Audio is opt-in and platform-constrained.** iOS audio requires Simulator-window
+  capture; physical devices remain video-only. Android audio depends on
+  `REMOTE_SUBMIX` availability for the shell-owned `video-server` process.
 - **Reference server is single-process/in-memory.** Use a hardened WHIP/WHEP SFU
   (MediaMTX, LiveKit, Janus, Cloudflare) in production; the publisher is unchanged.
 - **Trickle ICE is opt-in.** By default the publisher gathers candidates before
@@ -256,9 +260,9 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 
 ## References
 
-- [WHIP — draft-ietf-wish-whip](https://datatracker.ietf.org/doc/draft-ietf-wish-whip/)
-- [WHEP — draft-ietf-wish-whep](https://datatracker.ietf.org/doc/draft-ietf-wish-whep/)
-- [RFC 6184 — RTP Payload Format for H.264 Video](https://datatracker.ietf.org/doc/html/rfc6184)
+- [WebRTC standards map](./webrtc-standards-map.md) — W3C, IETF, and ITU references mapped to AutoMobile behavior
+- [WHIP — RFC 9725](https://www.rfc-editor.org/rfc/rfc9725.html)
+- [WHEP — Internet-Draft](https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep)
 - [werift-webrtc](https://github.com/shinyoshiaki/werift-webrtc)
 - [CI worker setup guide](../../../webrtc-streaming-ci-worker.md)
 - [Reference coordination server](../../../../examples/webrtc-coordination-server/README.md)

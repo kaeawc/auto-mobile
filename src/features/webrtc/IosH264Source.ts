@@ -250,6 +250,8 @@ export class IosH264Source implements H264CaptureSource {
         }
         if (isNoFramesPermissionWarning(line)) {
           finish(() => reject(makeNoFramesError(target)));
+        } else if (isHelperError(line)) {
+          finish(() => reject(new Error(`screen-capture-helper reported an error: ${line}`)));
         }
       });
       helper.on("error", error => {
@@ -331,6 +333,12 @@ export class IosH264Source implements H264CaptureSource {
     helper.on("stderr", line => {
       if (line.length > 0) {
         logger.debug(`[IosH264Source] screen-capture-helper stderr: ${line}`);
+      }
+      if (isHelperError(line)) {
+        this.failIfCurrentHelper(
+          helper,
+          new Error(`screen-capture-helper reported an error: ${line}`)
+        );
       }
     });
   }
@@ -421,6 +429,11 @@ export class IosH264Source implements H264CaptureSource {
     ];
     if (this.options.size) {
       args.push("-vf", `scale=${this.options.size.width}:${this.options.size.height}`);
+    } else {
+      // Keep an unconstrained macOS capture inside the Level 4.2 capability
+      // advertised in the WHIP SDP. Explicit sizes are validated before source
+      // creation by webrtcStreamingConfig.
+      args.push("-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2");
     }
     args.push(
       "-an",
@@ -428,6 +441,8 @@ export class IosH264Source implements H264CaptureSource {
       "h264_videotoolbox",
       "-profile:v",
       "baseline",
+      "-level:v",
+      "4.2",
       "-bf",
       "0"
     );
@@ -496,6 +511,10 @@ function makeNoFramesError(target: CaptureTarget): ActionableError {
 
 function isNoFramesPermissionWarning(line: string): boolean {
   return line.toLowerCase().includes(NO_FRAMES_PERMISSION_WARNING);
+}
+
+function isHelperError(line: string): boolean {
+  return line.trimStart().toLowerCase().startsWith("error:");
 }
 
 function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {

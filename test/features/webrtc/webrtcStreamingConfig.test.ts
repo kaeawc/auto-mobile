@@ -48,6 +48,15 @@ describe("parseSize", () => {
   test("throws on bad format", () => {
     expect(() => parseSize("720p")).toThrow(/WIDTHxHEIGHT/);
   });
+
+  test("rejects zero and odd dimensions before device startup", () => {
+    expect(() => parseSize("0x720")).toThrow(/positive even integers/);
+    expect(() => parseSize("721x1280")).toThrow(/positive even integers/);
+  });
+
+  test("rejects a frame that exceeds the advertised H.264 Level 4.2 capability", () => {
+    expect(() => parseSize("2048x1080")).toThrow(/Level 4.2/);
+  });
 });
 
 describe("resolveWebRtcStreamingConfig", () => {
@@ -110,6 +119,16 @@ describe("resolveWebRtcStreamingConfig", () => {
     );
     expect(config.whipEndpoint).toBe("https://override/whip");
     expect(config.bitrateKbps).toBe(8000);
+  });
+
+  test("rejects invalid per-request size, bitrate, and WHIP endpoint", () => {
+    expect(() =>
+      resolveWebRtcStreamingConfig({ whipEndpoint: "https://coord/whip", size: { width: 1, height: 2 } })
+    ).toThrow(/positive even integers/);
+    expect(() =>
+      resolveWebRtcStreamingConfig({ whipEndpoint: "https://coord/whip", bitrateKbps: 0 })
+    ).toThrow(/positive number/);
+    expect(() => resolveWebRtcStreamingConfig({ whipEndpoint: "not a URL" })).toThrow(/absolute http/);
   });
 
   test("falls back to a default STUN server", () => {

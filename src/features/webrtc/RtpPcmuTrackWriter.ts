@@ -1,7 +1,10 @@
 import { RtpHeader, RtpPacket } from "werift";
 import type { RtpPacketSink } from "./RtpH264TrackWriter";
 
-/** PCMU/G.711 RTP clock rate. */
+/**
+ * PCMU/G.711 RTP clock rate and static payload type 0.
+ * RFC 3551 §6: https://www.rfc-editor.org/rfc/rfc3551.html#section-6
+ */
 export const PCMU_CLOCK_RATE = 8_000;
 export const PCMU_PAYLOAD_TYPE = 0;
 const DEFAULT_AUDIO_MTU = 1200;
@@ -28,6 +31,7 @@ export class RtpPcmuTrackWriter {
   private timestamp = 0;
   private packetsWritten = 0;
   private samplesWritten = 0;
+  private remainder: Buffer | null = null;
 
   constructor(options: RtpPcmuTrackWriterOptions) {
     this.sink = options.sink;
@@ -38,14 +42,16 @@ export class RtpPcmuTrackWriter {
   }
 
   writePcm16Chunk(chunk: Buffer): void {
-    const sampleCount = Math.floor(chunk.length / 2);
+    const input = this.remainder ? Buffer.concat([this.remainder, chunk]) : chunk;
+    const sampleCount = Math.floor(input.length / 2);
+    this.remainder = input.length % 2 === 0 ? null : Buffer.from(input.subarray(-1));
     if (sampleCount === 0) {
       return;
     }
 
     const payload = Buffer.alloc(sampleCount);
     for (let i = 0; i < sampleCount; i++) {
-      payload[i] = linear16ToMuLaw(chunk.readInt16LE(i * 2));
+      payload[i] = linear16ToMuLaw(input.readInt16LE(i * 2));
     }
 
     for (let offset = 0; offset < payload.length; offset += this.mtu) {

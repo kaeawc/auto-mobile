@@ -90,6 +90,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private socket: StreamSocket | null = null;
   private forwardedPort: number | null = null;
   private running = false;
+  private teardownPromise: Promise<void> | null = null;
   private resolveStartupAudioHeader: ((header: VideoServerStreamHeader) => void) | undefined;
   private resolveStartupAudioPacket: ((packet: VideoServerPacket) => void) | undefined;
 
@@ -116,17 +117,18 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       // Startup failed before we produced anything: tear down and rethrow so the
       // caller (source factory) can fall back to screenrecord.
       this.running = false;
-      await this.teardown();
+      await this.beginTeardown();
       throw error;
     }
   }
 
   async stop(): Promise<void> {
     if (!this.running) {
+      await this.teardownPromise;
       return;
     }
     this.running = false;
-    await this.teardown();
+    await this.beginTeardown();
   }
 
   private async launch(): Promise<void> {
@@ -137,9 +139,16 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
 
     // Push the DEX jar (idempotent; overwrites any prior copy).
     await adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`);
+    if (!this.running) {
+      return;
+    }
 
     // Launch the persistent server as a long-lived process.
     const server = await adb.spawn(this.buildServerArgs());
+    if (!this.running) {
+      server.kill("SIGINT");
+      return;
+    }
     this.server = server;
     server.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();
@@ -398,9 +407,15 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       return;
     }
     this.running = false;
-    this.socket = null;
-    void this.teardown();
+    void this.beginTeardown();
     this.options.onError?.(error);
+  }
+
+  private beginTeardown(): Promise<void> {
+    this.teardownPromise ??= this.teardown().finally(() => {
+      this.teardownPromise = null;
+    });
+    return this.teardownPromise;
   }
 
   private async teardown(): Promise<void> {

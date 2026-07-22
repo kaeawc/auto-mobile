@@ -9,6 +9,10 @@
 > raw `simctl` streaming and the remaining iOS delivery constraints. See the
 > [Status Glossary](../../status-glossary.md) for chip definitions.
 
+The WebRTC, RTP, and WHIP behavior shared with Android is mapped to its public
+standards in the [WebRTC standards map](./webrtc-standards-map.md). This document
+only covers the iOS capture and encoding boundary.
+
 Follow-up to #3751; addresses #3777.
 
 ## Goal

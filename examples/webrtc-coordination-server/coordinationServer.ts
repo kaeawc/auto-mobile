@@ -7,6 +7,8 @@ import {
   usePCMU,
   type RTCIceServer,
 } from "werift";
+import { WEBRTC_H264_PROFILE_LEVEL_ID } from "../../src/features/webrtc/h264Level";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Reference WebRTC coordination server (a tiny SFU).
@@ -15,6 +17,11 @@ import {
  * same stream from `subscribe()` over WHEP. Incoming RTP is forwarded to every
  * subscriber of that stream. `listStreams()` / `getStream()` back the reconnect
  * API a frontend uses to discover streams and (re)connect.
+ *
+ * WHEP reference: https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep
+ * RTP forwarding and H.264 packet semantics: RFC 3550 and RFC 6184
+ * (https://www.rfc-editor.org/rfc/rfc3550.html and
+ * https://www.rfc-editor.org/rfc/rfc6184.html).
  *
  * This is intentionally minimal (single-server, in-memory) — for production use
  * a hardened SFU such as MediaMTX, LiveKit, or Janus that also speaks WHIP/WHEP.
@@ -25,6 +32,8 @@ export interface CoordinationServerOptions {
   iceServers?: RTCIceServer[];
   /** How long to wait for ICE gathering (ms) before returning an SDP answer. */
   iceGatheringTimeoutMs?: number;
+  /** Injected so delayed replay remains deterministic in tests. */
+  timer?: Timer;
 }
 
 export interface StreamDescriptor {
@@ -48,16 +57,26 @@ interface Subscriber {
   id: string;
   pc: RTCPeerConnection;
   tracks: Map<"audio" | "video", MediaStreamTrack>;
+  ready: boolean;
 }
 
 interface StreamEntry {
   streamId: string;
+  /** Opaque WHIP resource id; distinct from the user-visible stream id. */
+  ingestSessionId: string;
   ingestPc: RTCPeerConnection;
   inboundTracks: Map<"audio" | "video", MediaStreamTrack>;
   subscribers: Map<string, Subscriber>;
   createdAt: string;
   framesForwarded: number;
   audioPacketsForwarded: number;
+  /** Last codec config plus a complete IDR access unit for late WHEP viewers. */
+  videoConfig: RtpPacket[];
+  videoKeyFrame: RtpPacket[];
+  collectingKeyFrame: RtpPacket[] | null;
+  collectingKeyFrameTimestamp: number | null;
+  iceEtag: string;
+  iceCredentials: { ufrag: string; pwd: string };
 }
 
 export interface RtpOutboundTrack {
@@ -79,6 +98,9 @@ function* outboundTracksFor(
   kind: "audio" | "video"
 ): Iterable<RtpOutboundTrack> {
   for (const subscriber of subscribers) {
+    if (kind === "video" && !subscriber.ready) {
+      continue;
+    }
     const outbound = subscriber.tracks.get(kind);
     if (outbound) {
       yield outbound;
@@ -90,12 +112,15 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:193
 
 export class CoordinationServer {
   private readonly streams = new Map<string, StreamEntry>();
+  private readonly ingestSessions = new Map<string, StreamEntry>();
   private readonly iceServers: RTCIceServer[];
   private readonly iceGatheringTimeoutMs: number;
+  private readonly timer: Timer;
 
   constructor(options: CoordinationServerOptions = {}) {
     this.iceServers = options.iceServers ?? DEFAULT_ICE_SERVERS;
     this.iceGatheringTimeoutMs = options.iceGatheringTimeoutMs ?? 5000;
+    this.timer = options.timer ?? defaultTimer;
   }
 
   /**
@@ -105,18 +130,31 @@ export class CoordinationServer {
   async ingest(
     offerSdp: string,
     requestedStreamId?: string
-  ): Promise<{ streamId: string; answerSdp: string }> {
+  ): Promise<{ streamId: string; sessionId: string; answerSdp: string; etag: string }> {
     const streamId = requestedStreamId?.trim() || `stream-${randomUUID().slice(0, 8)}`;
+    // Validate before allocating a peer connection. A malformed WHIP offer must
+    // fail with 4xx without leaking a native transport.
+    const iceCredentials = parseIceCredentials(offerSdp);
 
-    const pc = new RTCPeerConnection({ codecs: { video: [useH264()], audio: [usePCMU()] } });
+    const pc = new RTCPeerConnection({
+      bundlePolicy: "max-bundle",
+      codecs: { video: [useH264({ parameters: `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1` })], audio: [usePCMU()] },
+    });
     const entry: StreamEntry = {
       streamId,
+      ingestSessionId: randomUUID(),
       ingestPc: pc,
       inboundTracks: new Map(),
       subscribers: new Map(),
       createdAt: new Date().toISOString(),
       framesForwarded: 0,
       audioPacketsForwarded: 0,
+      videoConfig: [],
+      videoKeyFrame: [],
+      collectingKeyFrame: null,
+      collectingKeyFrameTimestamp: null,
+      iceEtag: randomUUID(),
+      iceCredentials,
     };
     pc.onTrack.subscribe(track => {
       if (track.kind !== "audio" && track.kind !== "video") {
@@ -126,6 +164,7 @@ export class CoordinationServer {
       track.onReceiveRtp.subscribe((rtp: RtpPacket) => {
         if (track.kind === "video") {
           entry.framesForwarded += rtp.header.marker ? 1 : 0;
+          cacheVideoForLateSubscriber(entry, rtp);
         } else {
           entry.audioPacketsForwarded++;
         }
@@ -164,7 +203,16 @@ export class CoordinationServer {
       await this.stopIngest(streamId);
     }
     this.streams.set(streamId, entry);
-    return { streamId, answerSdp: pc.localDescription?.sdp ?? "" };
+    this.ingestSessions.set(entry.ingestSessionId, entry);
+    return {
+      streamId,
+      sessionId: entry.ingestSessionId,
+      // Werift serializes rtcp-mux but not RFC 9725 / WHEP's required
+      // rtcp-mux-only SDP attribute. This changes signalling only; the peer
+      // connection remains RTCP-multiplexed.
+      answerSdp: addRtcpMuxOnly(pc.localDescription?.sdp ?? ""),
+      etag: entry.iceEtag,
+    };
   }
 
   /**
@@ -180,7 +228,10 @@ export class CoordinationServer {
       throw new Error(`No such stream: ${streamId}`);
     }
 
-    const pc = new RTCPeerConnection({ codecs: { video: [useH264()], audio: [usePCMU()] } });
+    const pc = new RTCPeerConnection({
+      bundlePolicy: "max-bundle",
+      codecs: { video: [useH264({ parameters: `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1` })], audio: [usePCMU()] },
+    });
     const tracks = new Map<"audio" | "video", MediaStreamTrack>();
     const videoTrack = new MediaStreamTrack({ kind: "video" });
     tracks.set("video", videoTrack);
@@ -192,8 +243,30 @@ export class CoordinationServer {
     }
 
     const subscriberId = randomUUID();
+    let replayedCachedVideo = false;
+    const replayWhenConnected = (): void => {
+      const subscriber = entry.subscribers.get(subscriberId);
+      if (replayedCachedVideo || subscriber?.pc !== pc) {
+        return;
+      }
+      replayedCachedVideo = true;
+      replayCachedVideo(entry, videoTrack);
+      // Do not forward newer live RTP before the cached SPS/PPS + IDR has been
+      // written, otherwise its older sequence numbers can be discarded.
+      subscriber.ready = true;
+    };
+    const scheduleReplayWhenConnected = (): void => {
+      // werift exposes `connected` before the remote WHEP peer has necessarily
+      // installed the returned answer. Give the paired transport a short turn
+      // to finish its sender/receiver bookkeeping before replaying cached RTP.
+      this.timer.setTimeout(replayWhenConnected, 100);
+    };
 
     pc.connectionStateChange.subscribe(state => {
+      if (state === "connected") {
+        scheduleReplayWhenConnected();
+        return;
+      }
       if (state === "failed" || state === "closed" || state === "disconnected") {
         entry.subscribers.delete(subscriberId);
         void pc.close().catch(() => {});
@@ -222,8 +295,14 @@ export class CoordinationServer {
       throw new Error(`Stream ${streamId} is no longer available`);
     }
 
-    entry.subscribers.set(subscriberId, { id: subscriberId, pc, tracks });
-    return { subscriberId, answerSdp: pc.localDescription?.sdp ?? "" };
+    entry.subscribers.set(subscriberId, { id: subscriberId, pc, tracks, ready: false });
+    // WHEP returns the answer before the browser can complete DTLS. Writing
+    // before this connection is live is dropped by werift, so replay after the
+    // connected transition (or immediately if it raced before registration).
+    if (pc.connectionState === "connected") {
+      scheduleReplayWhenConnected();
+    }
+    return { subscriberId, answerSdp: addRtcpMuxOnly(pc.localDescription?.sdp ?? "") };
   }
 
   async stopIngest(streamId: string): Promise<void> {
@@ -231,7 +310,22 @@ export class CoordinationServer {
     if (!entry) {
       return;
     }
-    this.streams.delete(streamId);
+    await this.stopIngestEntry(entry);
+  }
+
+  /** Stop the exact WHIP resource identified by its opaque session id. */
+  async stopIngestSession(sessionId: string): Promise<void> {
+    const entry = this.ingestSessions.get(sessionId);
+    if (entry) {
+      await this.stopIngestEntry(entry);
+    }
+  }
+
+  private async stopIngestEntry(entry: StreamEntry): Promise<void> {
+    if (this.streams.get(entry.streamId) === entry) {
+      this.streams.delete(entry.streamId);
+    }
+    this.ingestSessions.delete(entry.ingestSessionId);
     for (const subscriber of entry.subscribers.values()) {
       await subscriber.pc.close().catch(() => {});
     }
@@ -244,25 +338,30 @@ export class CoordinationServer {
    * stream id is unknown so the HTTP layer can answer 404. Parses leniently: the
    * `a=mid:` line (if any) applies to the following `a=candidate:` lines.
    */
-  async addIngestCandidates(streamId: string, fragment: string): Promise<boolean> {
-    const entry = this.streams.get(streamId);
+  getIceEtag(sessionId: string): string | null {
+    return this.ingestSessions.get(sessionId)?.iceEtag ?? null;
+  }
+
+  async addIngestCandidates(sessionId: string, fragment: string): Promise<"unknown" | "applied" | "invalid" | "restart"> {
+    const entry = this.ingestSessions.get(sessionId);
     if (!entry) {
-      return false;
+      return "unknown";
     }
-    let sdpMid: string | undefined;
-    for (const rawLine of fragment.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (line.startsWith("a=mid:")) {
-        sdpMid = line.slice("a=mid:".length).trim() || undefined;
-      } else if (line.startsWith("a=candidate:")) {
-        await entry.ingestPc
-          .addIceCandidate({ candidate: line.slice("a=".length), sdpMid })
-          .catch(() => {
-            // A malformed or duplicate candidate is non-fatal; keep the stream up.
-          });
-      }
+    const parsed = parseCandidateFragment(fragment);
+    if (!parsed) {
+      return "invalid";
     }
-    return true;
+    if (parsed.ice.ufrag !== entry.iceCredentials.ufrag || parsed.ice.pwd !== entry.iceCredentials.pwd) {
+      return "restart";
+    }
+    for (const candidate of parsed.candidates) {
+      await entry.ingestPc
+        .addIceCandidate({ candidate, sdpMid: parsed.mid })
+        .catch(() => {
+          // A malformed or duplicate candidate is non-fatal; keep the stream up.
+        });
+    }
+    return "applied";
   }
 
   async stopSubscriber(streamId: string, subscriberId: string): Promise<void> {
@@ -317,6 +416,80 @@ export class CoordinationServer {
       );
     } catch {
       // Proceed with whatever candidates were gathered.
+    }
+  }
+}
+
+function addRtcpMuxOnly(sdp: string): string {
+  return sdp.replace(/a=rtcp-mux\r?\n/g, match => `${match}a=rtcp-mux-only\r\n`);
+}
+
+function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
+  const payload = rtp.payload;
+  const nalType = payload[0] & 0x1f;
+  // SPS/PPS are normally single RTP packets. Preserve the most recent pair so a
+  // new decoder can configure itself before its first IDR access unit. RFC 6184
+  // §8 documents parameter-set transport; caching/replay is our late-viewer
+  // policy, not a replacement for RTCP feedback.
+  // https://www.rfc-editor.org/rfc/rfc6184.html#section-8
+  if (nalType === 7 || nalType === 8 || containsStapANalType(payload, 7) || containsStapANalType(payload, 8)) {
+    entry.videoConfig = [...entry.videoConfig.filter(packet => (packet.payload[0] & 0x1f) !== nalType), rtp.clone()];
+  }
+
+  const isIdrStart = nalType === 5 || (nalType === 28 && (payload[1] & 0x80) !== 0 && (payload[1] & 0x1f) === 5) || containsStapANalType(payload, 5);
+  // An IDR access unit may contain several type-5 NALs (or fragmented FU-As).
+  // Keep collecting until its RTP marker rather than discarding earlier slices.
+  if (isIdrStart && (!entry.collectingKeyFrame || entry.collectingKeyFrameTimestamp !== rtp.header.timestamp)) {
+    entry.collectingKeyFrame = [];
+    entry.collectingKeyFrameTimestamp = rtp.header.timestamp;
+  }
+  if (entry.collectingKeyFrame) {
+    entry.collectingKeyFrame.push(rtp.clone());
+    if (rtp.header.marker) {
+      entry.videoKeyFrame = entry.collectingKeyFrame;
+      entry.collectingKeyFrame = null;
+      entry.collectingKeyFrameTimestamp = null;
+    }
+  }
+}
+
+function containsStapANalType(payload: Buffer, expectedType: number): boolean {
+  if ((payload[0] & 0x1f) !== 24) {return false;}
+  let offset = 1;
+  while (offset + 2 <= payload.length) {
+    const size = payload.readUInt16BE(offset);
+    offset += 2;
+    if (size === 0 || offset + size > payload.length) {return false;}
+    if ((payload[offset] & 0x1f) === expectedType) {return true;}
+    offset += size;
+  }
+  return false;
+}
+
+function parseIceCredentials(sdp: string): { ufrag: string; pwd: string } {
+  const ufrag = sdp.match(/^a=ice-ufrag:(.+)$/m)?.[1]?.trim();
+  const pwd = sdp.match(/^a=ice-pwd:(.+)$/m)?.[1]?.trim();
+  if (!ufrag || !pwd) {throw new Error("Offer omitted ICE credentials.");}
+  return { ufrag, pwd };
+}
+
+function parseCandidateFragment(fragment: string): { mid: string; ice: { ufrag: string; pwd: string }; candidates: string[] } | null {
+  const lines = fragment.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const mLine = lines.find(line => line.startsWith("m="));
+  const mid = lines.find(line => line.startsWith("a=mid:"))?.slice(6).trim();
+  const ufrag = lines.find(line => line.startsWith("a=ice-ufrag:"))?.slice(12).trim();
+  const pwd = lines.find(line => line.startsWith("a=ice-pwd:"))?.slice(10).trim();
+  const candidates = lines.filter(line => line.startsWith("a=candidate:")).map(line => line.slice(2));
+  if (!mLine || !mid || !ufrag || !pwd || (candidates.length === 0 && !lines.includes("a=end-of-candidates"))) {return null;}
+  return { mid, ice: { ufrag, pwd }, candidates };
+}
+
+function replayCachedVideo(entry: StreamEntry, track: MediaStreamTrack): void {
+  for (const packet of [...entry.videoConfig, ...entry.videoKeyFrame]) {
+    try {
+      track.writeRtp(packet.clone());
+    } catch {
+      return;
     }
   }
 }

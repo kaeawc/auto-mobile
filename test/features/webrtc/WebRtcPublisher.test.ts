@@ -3,6 +3,19 @@ import type { RTCPeerConnection } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient, WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
 
+const ACCEPTED_VIDEO_ANSWER = [
+  "v=0",
+  "m=video 9 UDP/TLS/RTP/SAVPF 102",
+  "a=recvonly",
+  "a=rtpmap:102 H264/90000",
+  "a=fmtp:102 packetization-mode=1;profile-level-id=42e02a",
+].join("\r\n");
+const ACCEPTED_VIDEO_AND_AUDIO_ANSWER = [
+  ACCEPTED_VIDEO_ANSWER,
+  "m=audio 9 UDP/TLS/RTP/SAVPF 0",
+  "a=recvonly",
+].join("\r\n");
+
 /** Minimal fake peer connection whose media/offer path succeeds up to publish. */
 class FakePeerConnection {
   closed = false;
@@ -30,6 +43,12 @@ class RecordingPeerConnection extends FakePeerConnection {
     this.transceiverKinds.push(track.kind);
     return { sender: { ssrc: this.transceiverKinds.length } };
   }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
 }
 
 /**
@@ -94,6 +113,148 @@ describe("WebRtcPublisher establish failure", () => {
     expect(pc.closed).toBe(true);
     expect(publisher.getDescriptor().resourceUrl).toBeNull();
   });
+
+  test("stop during pre-establish does not create a WHIP session or overwrite stopped", async () => {
+    const gate = deferred();
+    let peerConnections = 0;
+    let publishes = 0;
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        onBeforeEstablish: () => gate.promise,
+        createPeerConnection: () => {
+          peerConnections++;
+          return new FakePeerConnection() as unknown as RTCPeerConnection;
+        },
+        createWhipClient: () => ({
+          publish: async () => { publishes++; return { answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }; },
+          delete: async () => {},
+        }) as unknown as WhipClient,
+      }
+    );
+
+    const start = publisher.start();
+    await Promise.resolve();
+    await publisher.stop();
+    gate.resolve();
+    await start;
+
+    expect(peerConnections).toBe(0);
+    expect(publishes).toBe(0);
+    expect(publisher.getState()).toBe("stopped");
+  });
+});
+
+describe("WebRtcPublisher WHIP answer validation", () => {
+  async function expectRejectedAnswer(answerSdp: string): Promise<void> {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", maxReconnectAttempts: 1 },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () => ({
+          publish: async () => ({ answerSdp, resourceUrl: "https://coord/whip/s" }),
+          delete: async () => {},
+        }) as unknown as WhipClient,
+      }
+    );
+    await expect(publisher.start()).rejects.toThrow(/WHIP answer did not accept/);
+    expect(pc.closed).toBe(true);
+  }
+
+  test("rejects H.264 at a non-RFC-6184 clock rate", async () => {
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("H264/90000", "H264/8000"));
+  });
+
+  test("rejects a WHIP answer that is not recvonly", async () => {
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("a=recvonly", "a=sendrecv"));
+  });
+
+  test("rejects an H.264 profile incompatible with the constrained-baseline sender", async () => {
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("42e02a", "64001f"));
+  });
+
+  test("accepts every RFC 6184 constrained-baseline profile representation", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () => ({
+          publish: async () => ({
+            answerSdp: ACCEPTED_VIDEO_ANSWER.replace("42e02a", "42c02a"),
+            resourceUrl: "https://coord/whip/s",
+          }),
+          delete: async () => {},
+        }) as unknown as WhipClient,
+      }
+    );
+
+    await publisher.start();
+    expect(publisher.getState()).toBe("connected");
+    await publisher.stop();
+  });
+
+  test("accepts a conforming Baseline level-1b profile variation with a sufficient receive ceiling", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () => ({
+          publish: async () => ({
+            answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
+              "profile-level-id=42e02a",
+              "profile-level-id=42f00b;level-asymmetry-allowed=1;max-recv-level=f02a"
+            ),
+            resourceUrl: "https://coord/whip/s",
+          }),
+          delete: async () => {},
+        }) as unknown as WhipClient,
+      }
+    );
+
+    await publisher.start();
+    expect(publisher.getState()).toBe("connected");
+    await publisher.stop();
+  });
+
+  test("rejects an answer whose receive level is below AutoMobile's source capability", async () => {
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("42e02a", "42e01f"));
+  });
+
+  test("accepts an asymmetric answer that explicitly supports the source level", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({
+              resourceUrl: "https://coord/resource",
+              answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
+                "profile-level-id=42e02a",
+                "profile-level-id=42e01f;level-asymmetry-allowed=1;max-recv-level=e02a"
+              ),
+            }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+
+    await publisher.start();
+    expect(publisher.getDescriptor().resourceUrl).toBe("https://coord/resource");
+  });
+
+  test("rejects a decimal max-recv-level because RFC 6184 requires hexadecimal SPS bytes", async () => {
+    await expectRejectedAnswer(
+      ACCEPTED_VIDEO_ANSWER.replace(
+        "profile-level-id=42e02a",
+        "profile-level-id=42e01f;level-asymmetry-allowed=1;max-recv-level=42"
+      )
+    );
+  });
 });
 
 describe("WebRtcPublisher.notifySourceFailed", () => {
@@ -104,6 +265,57 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     );
     await publisher.stop();
     expect(() => publisher.notifySourceFailed()).not.toThrow();
+  });
+
+  test("routes a synchronously throwing connected hook through recovery", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        onConnected: () => { throw new Error("capture start failed"); },
+        createWhipClient: () => ({}) as unknown as WhipClient,
+      }
+    );
+    const internals = publisher as unknown as {
+      pc: RTCPeerConnection | null;
+      fireConnected(connection: RTCPeerConnection): void;
+      notifySourceFailed: () => void;
+    };
+    let recoveries = 0;
+    internals.pc = pc as unknown as RTCPeerConnection;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    // A synchronous hook failure used to escape `Promise.resolve(hook())` and
+    // reject start. The asynchronous boundary now routes it to recovery.
+    expect(() => internals.fireConnected(pc as unknown as RTCPeerConnection)).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(recoveries).toBe(1);
+  });
+
+  test("recovers instead of forwarding an SPS incompatible with the advertised H.264 profile", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+    await publisher.start();
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    // A High-profile SPS must not be forwarded under the constrained-baseline
+    // profile-level-id advertised in the negotiated SDP.
+    publisher.writeH264Chunk(Buffer.from([0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 0, 1]));
+
+    expect(recoveries).toBe(1);
   });
 });
 
@@ -116,7 +328,7 @@ describe("WebRtcPublisher audio", () => {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
           ({
-            publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_AND_AUDIO_ANSWER, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
           }) as unknown as WhipClient,
       }
@@ -139,7 +351,7 @@ describe("WebRtcPublisher audio", () => {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
           ({
-            publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
           }) as unknown as WhipClient,
       }
@@ -152,5 +364,28 @@ describe("WebRtcPublisher audio", () => {
     expect(publisher.getDescriptor().audioPacketsSent).toBe(0);
 
     await publisher.stop();
+  });
+
+  test("rejects a WHIP answer that drops requested audio and deletes the session", async () => {
+    const pc = new RecordingPeerConnection();
+    const deleted: string[] = [];
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", audioEnabled: true },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({
+              answerSdp: `${ACCEPTED_VIDEO_ANSWER}\r\nm=audio 0 UDP/TLS/RTP/SAVPF 0`,
+              resourceUrl: "https://coord/whip/s",
+            }),
+            delete: async (url: string) => { deleted.push(url); },
+          }) as unknown as WhipClient,
+      }
+    );
+
+    await expect(publisher.start()).rejects.toThrow(/rejected the requested audio/);
+    expect(deleted).toEqual(["https://coord/whip/s"]);
+    expect(pc.closed).toBe(true);
   });
 });

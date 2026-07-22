@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models";
 import type { RTCIceServer } from "werift";
+import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 
 /**
  * WebRTC streaming configuration. On a CI worker this is typically supplied
@@ -107,7 +108,7 @@ export function parseSize(raw: string | undefined): { width: number; height: num
   if (!match) {
     throw new ActionableError(`Invalid size "${raw}"; expected WIDTHxHEIGHT (e.g. 1280x720).`);
   }
-  return { width: Number(match[1]), height: Number(match[2]) };
+  return validateSize({ width: Number(match[1]), height: Number(match[2]) });
 }
 
 /** Parse a boolean env flag (`1/true/yes/on`, case-insensitive). */
@@ -147,13 +148,17 @@ export function resolveWebRtcStreamingConfig(
 
   const iceServers =
     overrides.iceServers ?? parseIceServers(env[WEBRTC_ENV.ICE_SERVERS]) ?? DEFAULT_ICE_SERVERS;
-  const bitrateKbps = overrides.bitrateKbps ?? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS]);
-  const size = overrides.size ?? parseSize(env[WEBRTC_ENV.MAX_SIZE]);
+  const bitrateKbps = overrides.bitrateKbps === undefined
+    ? parseBitrate(env[WEBRTC_ENV.BITRATE_KBPS])
+    : validateBitrate(overrides.bitrateKbps);
+  const size = overrides.size === undefined
+    ? parseSize(env[WEBRTC_ENV.MAX_SIZE])
+    : validateSize(overrides.size);
   const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
   const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
 
   return {
-    whipEndpoint: whipEndpoint.trim(),
+    whipEndpoint: validateWhipEndpoint(whipEndpoint),
     bearerToken: overrides.bearerToken ?? env[WEBRTC_ENV.WHIP_TOKEN] ?? undefined,
     iceServers,
     bitrateKbps,
@@ -161,4 +166,42 @@ export function resolveWebRtcStreamingConfig(
     trickleIce,
     audioEnabled,
   };
+}
+
+function validateBitrate(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new ActionableError(`Invalid bitrate "${value}"; expected a positive number of kbps.`);
+  }
+  return Math.round(value);
+}
+
+function validateSize(size: { width: number; height: number }): { width: number; height: number } {
+  const { width, height } = size;
+  if (
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    width % 2 !== 0 ||
+    height % 2 !== 0 ||
+    h264MacroblocksPerFrame(width, height) > WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+  ) {
+    throw new ActionableError(
+      `Invalid size "${width}x${height}"; width and height must be positive even integers within the H.264 Level 4.2 frame limit.`
+    );
+  }
+  return { width, height };
+}
+
+function validateWhipEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+  } catch {
+    throw new ActionableError(`Invalid WHIP endpoint "${trimmed}"; expected an absolute http(s) URL.`);
+  }
+  return trimmed;
 }

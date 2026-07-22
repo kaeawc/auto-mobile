@@ -3361,7 +3361,7 @@ finish_ios_runtime_probe() {
     local probe_status=0 waited=0
     while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
         if ((waited >= IOS_RUNTIME_PROBE_TIMEOUT_SECONDS)); then
-            kill "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null || true
+            terminate_process_tree "${IOS_RUNTIME_PROBE_PID}"
             wait "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null || true
             IOS_RUNTIME_PROBE_PID=""
             rm -f "${IOS_RUNTIME_PROBE_FILE}"

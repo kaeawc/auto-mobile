@@ -32,9 +32,10 @@ teardown() {
   # for 6 hours until the runner cancelled it. A stall must be abandoned.
   cat > "${STUB_BIN}/xcrun" <<'STUB'
 #!/usr/bin/env bash
-# exec so the stub IS the stalled process: killing the probe PID must actually
-# stop it, not orphan a child that keeps the inherited fd open.
-exec sleep 300
+# Keep a child alive under the xcrun wrapper. The timeout must remove both
+# processes, not merely the wrapper that launched the stalled helper.
+sleep 300 &
+wait
 STUB
   chmod +x "${STUB_BIN}/xcrun"
 
@@ -42,7 +43,15 @@ STUB
   IOS_RUNTIME_PROBE_TIMEOUT_SECONDS=1
 
   start_ios_runtime_probe
-  [ -n "${IOS_RUNTIME_PROBE_PID}" ]
+  local worker_pid="${IOS_RUNTIME_PROBE_PID}"
+  [ -n "${worker_pid}" ]
+  local child_pid
+  for _ in {1..10}; do
+    child_pid=$("${PGREP}" -P "${worker_pid}" sleep 2>/dev/null || true)
+    [[ -n "${child_pid}" ]] && break
+    sleep 0.1
+  done
+  [ -n "${child_pid}" ]
 
   local started ended elapsed status=0
   started=$(date +%s)
@@ -54,6 +63,8 @@ STUB
   [ "$status" -eq 0 ]
   [ "$elapsed" -lt 30 ]
   [ -z "${IOS_RUNTIME_PROBE_PID}" ]
+  assert_process_is_not_active "${worker_pid}"
+  assert_process_is_not_active "${child_pid}"
 }
 
 @test "iOS runtime probe runs in the background and reports its completed result" {

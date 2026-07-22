@@ -134,8 +134,11 @@ object VideoServer {
     }
     val width = parts[0].toIntOrNull()?.takeIf { it > 0 } ?: return null
     val height = parts[1].toIntOrNull()?.takeIf { it > 0 } ?: return null
-    // MediaCodec requires even dimensions.
-    return (width and 0xFFFE) to (height and 0xFFFE)
+    // MediaCodec requires even, non-zero dimensions. Silently rounding 1x1 to 0x0
+    // defers a bad command-line value into an opaque encoder failure.
+    val evenWidth = width and 0xFFFE
+    val evenHeight = height and 0xFFFE
+    return if (evenWidth > 0 && evenHeight > 0) evenWidth to evenHeight else null
   }
 
   private fun printUsage() {
@@ -173,7 +176,7 @@ object VideoServer {
     if (isPortrait) {
       // Scale based on height
       if (displayHeight <= quality.maxHeight) {
-        return displayWidth to displayHeight
+        return evenDimensions(displayWidth, displayHeight)
       }
       val scale = quality.maxHeight.toFloat() / displayHeight.toFloat()
       val scaledWidth = (displayWidth * scale).toInt() and 0xFFFE // Round to even
@@ -181,13 +184,16 @@ object VideoServer {
     } else {
       // Scale based on width (landscape)
       if (displayWidth <= quality.maxHeight) {
-        return displayWidth to displayHeight
+        return evenDimensions(displayWidth, displayHeight)
       }
       val scale = quality.maxHeight.toFloat() / displayWidth.toFloat()
       val scaledHeight = (displayHeight * scale).toInt() and 0xFFFE // Round to even
       return quality.maxHeight to scaledHeight
     }
   }
+
+  private fun evenDimensions(width: Int, height: Int): Pair<Int, Int> =
+    (width and 0xFFFE) to (height and 0xFFFE)
 
   private fun run(
     width: Int,

@@ -250,6 +250,8 @@ export class IosH264Source implements H264CaptureSource {
         }
         if (isNoFramesPermissionWarning(line)) {
           finish(() => reject(makeNoFramesError(target)));
+        } else if (isHelperError(line)) {
+          finish(() => reject(new Error(`screen-capture-helper reported an error: ${line}`)));
         }
       });
       helper.on("error", error => {
@@ -331,6 +333,12 @@ export class IosH264Source implements H264CaptureSource {
     helper.on("stderr", line => {
       if (line.length > 0) {
         logger.debug(`[IosH264Source] screen-capture-helper stderr: ${line}`);
+      }
+      if (isHelperError(line)) {
+        this.failIfCurrentHelper(
+          helper,
+          new Error(`screen-capture-helper reported an error: ${line}`)
+        );
       }
     });
   }
@@ -496,6 +504,10 @@ function makeNoFramesError(target: CaptureTarget): ActionableError {
 
 function isNoFramesPermissionWarning(line: string): boolean {
   return line.toLowerCase().includes(NO_FRAMES_PERMISSION_WARNING);
+}
+
+function isHelperError(line: string): boolean {
+  return line.trimStart().toLowerCase().startsWith("error:");
 }
 
 function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {

@@ -53,8 +53,14 @@ class AudioCapture(
       throw IllegalStateException("AudioRecord REMOTE_SUBMIX failed to initialize")
     }
 
-    recorder.startRecording()
-    record = recorder
+    try {
+      recorder.startRecording()
+      record = recorder
+    } catch (e: RuntimeException) {
+      running.set(false)
+      recorder.release()
+      throw e
+    }
     thread =
       Thread(
           {

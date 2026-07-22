@@ -266,6 +266,10 @@ export class WebRtcPublisher {
       // Flush candidates gathered during the WHIP round-trip and stream the rest.
       this.trickle?.setResource(session.resourceUrl);
       await pc.setRemoteDescription({ type: "answer", sdp: session.answerSdp });
+      assertWhipAnswerAcceptsMedia(session.answerSdp, "video", "h264");
+      if (this.audioEnabled) {
+        assertWhipAnswerAcceptsMedia(session.answerSdp, "audio", "pcmu");
+      }
 
       this.establishing = false;
       this.watchConnectionState(pc);
@@ -284,6 +288,8 @@ export class WebRtcPublisher {
       // reconnect attempt to tear it down, so close it here. Guard on identity so
       // we never close a pc a concurrent teardown/establish already replaced.
       if (this.pc === pc) {
+        const resourceUrl = this.resourceUrl;
+        this.resourceUrl = null;
         this.pc = null;
         this.writer = null;
         this.audioWriter = null;
@@ -291,6 +297,9 @@ export class WebRtcPublisher {
         this.trickle = null;
         this.candidateSub?.unSubscribe();
         this.candidateSub = null;
+        if (resourceUrl) {
+          await this.whip.delete(resourceUrl).catch(() => {});
+        }
         await pc.close().catch(() => {});
       }
       throw error;
@@ -314,6 +323,11 @@ export class WebRtcPublisher {
         this.controller.notifyConnectionLost();
       }
     });
+    // An ICE/DTLS failure can arrive before the subscription above is installed.
+    // werift does not replay prior state changes, so inspect the current state too.
+    if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      this.controller.notifyConnectionLost();
+    }
   }
 
   /** Start capture (once per session) now that media can actually flow. */
@@ -401,6 +415,65 @@ export class WebRtcPublisher {
       }
     }
   }
+}
+
+function assertWhipAnswerAcceptsMedia(
+  answerSdp: string,
+  kind: "audio" | "video",
+  codec: "h264" | "pcmu"
+): void {
+  const section = findSdpMediaSection(answerSdp, kind);
+  if (!section) {
+    throw new Error(`WHIP answer did not include a ${kind} m-line.`);
+  }
+
+  const [mediaLine, ...attributeLines] = section;
+  const mediaParts = mediaLine.split(/\s+/);
+  const port = Number(mediaParts[1]);
+  const formats = new Set(mediaParts.slice(3));
+  if (!Number.isFinite(port) || port === 0) {
+    throw new Error(`WHIP answer rejected the requested ${kind} m-line.`);
+  }
+
+  const direction =
+    attributeLines
+      .map(line => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
+      .find((value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined) ??
+    "sendrecv";
+  if (direction !== "recvonly" && direction !== "sendrecv") {
+    throw new Error(`WHIP answer did not accept receiving ${kind} (direction=${direction}).`);
+  }
+
+  const staticPayloadType = codec === "pcmu" ? "0" : undefined;
+  const accepted =
+    (staticPayloadType !== undefined && formats.has(staticPayloadType)) ||
+    attributeLines.some(line => isAcceptedCodecRtpMap(line, formats, codec));
+  if (!accepted) {
+    throw new Error(`WHIP answer did not accept ${codec.toUpperCase()} ${kind}.`);
+  }
+}
+
+function findSdpMediaSection(sdp: string, kind: "audio" | "video"): string[] | null {
+  const lines = sdp.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  for (let index = 0; index < lines.length; index++) {
+    if (!lines[index].startsWith(`m=${kind} `)) {
+      continue;
+    }
+    const section = [lines[index]];
+    for (let sectionIndex = index + 1; sectionIndex < lines.length; sectionIndex++) {
+      if (lines[sectionIndex].startsWith("m=")) {
+        break;
+      }
+      section.push(lines[sectionIndex]);
+    }
+    return section;
+  }
+  return null;
+}
+
+function isAcceptedCodecRtpMap(line: string, formats: Set<string>, codec: string): boolean {
+  const match = line.match(/^a=rtpmap:(\S+)\s+([^/\s]+)/i);
+  return Boolean(match && formats.has(match[1]) && match[2].toLowerCase() === codec);
 }
 
 /**

@@ -3,6 +3,18 @@ import type { RTCPeerConnection } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient, WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
 
+const ACCEPTED_VIDEO_ANSWER = [
+  "v=0",
+  "m=video 9 UDP/TLS/RTP/SAVPF 102",
+  "a=recvonly",
+  "a=rtpmap:102 H264/90000",
+].join("\r\n");
+const ACCEPTED_VIDEO_AND_AUDIO_ANSWER = [
+  ACCEPTED_VIDEO_ANSWER,
+  "m=audio 9 UDP/TLS/RTP/SAVPF 0",
+  "a=recvonly",
+].join("\r\n");
+
 /** Minimal fake peer connection whose media/offer path succeeds up to publish. */
 class FakePeerConnection {
   closed = false;
@@ -116,7 +128,7 @@ describe("WebRtcPublisher audio", () => {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
           ({
-            publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_AND_AUDIO_ANSWER, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
           }) as unknown as WhipClient,
       }
@@ -139,7 +151,7 @@ describe("WebRtcPublisher audio", () => {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
           ({
-            publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
           }) as unknown as WhipClient,
       }
@@ -152,5 +164,28 @@ describe("WebRtcPublisher audio", () => {
     expect(publisher.getDescriptor().audioPacketsSent).toBe(0);
 
     await publisher.stop();
+  });
+
+  test("rejects a WHIP answer that drops requested audio and deletes the session", async () => {
+    const pc = new RecordingPeerConnection();
+    const deleted: string[] = [];
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", audioEnabled: true },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({
+              answerSdp: `${ACCEPTED_VIDEO_ANSWER}\r\nm=audio 0 UDP/TLS/RTP/SAVPF 0`,
+              resourceUrl: "https://coord/whip/s",
+            }),
+            delete: async (url: string) => { deleted.push(url); },
+          }) as unknown as WhipClient,
+      }
+    );
+
+    await expect(publisher.start()).rejects.toThrow(/rejected the requested audio/);
+    expect(deleted).toEqual(["https://coord/whip/s"]);
+    expect(pc.closed).toBe(true);
   });
 });

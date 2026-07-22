@@ -69,8 +69,9 @@ Response:
 If multiple devices are attached, pass `"deviceId":"emulator-5554"` or the iOS
 simulator UDID. You can also override any config per call, e.g.
 `{"action":"start","whipEndpoint":"https://other/whip","bitrateKbps":2000}`.
-For audio, pass `"audio":true`; it is Android-only and requires the persistent
-`video-server` jar because `screenrecord` is video-only.
+For audio, pass `"audio":true`. Android requires the persistent `video-server`
+jar because `screenrecord` is video-only. iOS supports audio for Simulator-window
+capture through ScreenCaptureKit; physical iOS playback capture is unavailable.
 
 ### From Node / Bun
 
@@ -118,7 +119,7 @@ echo '{"action":"stop","streamId":"'"$CI_JOB_ID"'"}'  | nc -U ~/.auto-mobile/web
 
 The publisher reconnects automatically if the network blips; the browser viewer
 reconnects via the coordination server's reconnect API. Video streaming supports
-Android and iOS; optional audio is Android-only today.
+Android and iOS; optional audio works on Android and iOS Simulator windows.
 
 ## Troubleshooting
 

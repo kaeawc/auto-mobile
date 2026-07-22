@@ -106,7 +106,9 @@ case .captureSimulator(let windowID, let fps, let audio):
 
     let sink = FileHandleFrameSink(handle: .standardOutput)
     let writer = FrameWriter(sink: sink)
-    let simSession = SimulatorCaptureSession(writer: writer)
+    let simSession = SimulatorCaptureSession(writer: writer) { error in
+        logError("error: ScreenCaptureKit stream stopped: \(error)")
+    }
 
     if case .failure(let error) = runBlocking({
         try await simSession.start(window: window, fps: fps, audio: audio)
@@ -157,7 +159,9 @@ case .capture(let deviceID):
 
     let sink = FileHandleFrameSink(handle: .standardOutput)
     let writer = FrameWriter(sink: sink)
-    let captureSession = DeviceCaptureSession(writer: writer)
+    let captureSession = DeviceCaptureSession(writer: writer) { error in
+        logError("error: iOS device capture failed: \(error)")
+    }
 
     do {
         try captureSession.start(device: device)

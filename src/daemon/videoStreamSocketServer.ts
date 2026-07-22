@@ -8,14 +8,13 @@ import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
 import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
+import { H264AnnexBParser, nalUnitType, NAL_TYPE_IDR, NAL_TYPE_PPS, NAL_TYPE_SPS } from "../features/webrtc/h264";
 import { VIDEO_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { BaseSocketServer, getSocketPath } from "./socketServer/index";
 import {
   encodePacket,
   encodePtsAndFlags,
   encodeStreamHeader,
-  isKeyFrameChunk,
-  isParameterSetChunk,
 } from "./videoStreamFraming";
 import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
 
@@ -39,12 +38,19 @@ export interface VideoStreamSocketServerDependencies {
 interface DeviceCapture {
   source: H264CaptureSource | null;
   subscribers: Set<Socket>;
+  backpressuredSubscribers: Set<Socket>;
+  waitingForKeyFrame: Set<Socket>;
   /**
    * Most recent parameter sets (SPS/PPS). A client that joins mid-stream cannot decode until it
    * sees these, and the encoder only re-emits them on key frames.
    */
-  parameterSets: Buffer | null;
+  sps: Buffer | null;
+  pps: Buffer | null;
+  parser: H264AnnexBParser;
+  size?: { width: number; height: number };
 }
+
+const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
 
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.
@@ -137,18 +143,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         framing: "h264",
       } satisfies VideoStreamSocketResponse);
 
-      socket.write(encodeStreamHeader(request.size?.width ?? 0, request.size?.height ?? 0));
+      socket.write(encodeStreamHeader(capture.size?.width ?? 0, capture.size?.height ?? 0));
 
       // Replay the parameter sets so a late joiner can decode immediately instead of waiting for
       // the encoder's next key frame.
-      if (capture.parameterSets) {
-        socket.write(
-          encodePacket(
-            encodePtsAndFlags(this.deps.nowUs(), { isConfig: true }),
-            capture.parameterSets
-          )
-        );
-      }
+      this.replayParameterSets(capture, socket);
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
       this.sendJson(socket, {
@@ -178,6 +177,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const existing = this.captures.get(deviceId);
     if (existing) {
       existing.subscribers.add(socket);
+      // A client that joins part way through a GOP must not consume inter frames before an IDR.
+      existing.waitingForKeyFrame.add(socket);
       this.socketDeviceIds.set(socket, deviceId);
       return existing;
     }
@@ -185,7 +186,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const capture: DeviceCapture = {
       source: null,
       subscribers: new Set([socket]),
-      parameterSets: null,
+      backpressuredSubscribers: new Set(),
+      waitingForKeyFrame: new Set(),
+      sps: null,
+      pps: null,
+      parser: new H264AnnexBParser(),
+      size: request.size,
     };
     // Registered before start() so a chunk arriving during startup still finds its subscribers.
     this.captures.set(deviceId, capture);
@@ -218,28 +224,52 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return;
     }
 
-    const isConfig = isParameterSetChunk(chunk);
-    if (isConfig) {
-      capture.parameterSets = Buffer.from(chunk);
+    // Source chunks are arbitrary byte boundaries. Split incrementally so a start code or NAL
+    // spanning two reads cannot be mistaken for a complete frame.
+    for (const nal of capture.parser.push(chunk)) {
+      this.broadcastNal(deviceId, capture, nal);
     }
+  }
 
+  private broadcastNal(deviceId: string, capture: DeviceCapture, nal: Buffer): void {
+    const type = nalUnitType(nal);
+    const isConfig = type === NAL_TYPE_SPS || type === NAL_TYPE_PPS;
+    if (type === NAL_TYPE_SPS) {capture.sps = Buffer.from(nal);}
+    if (type === NAL_TYPE_PPS) {capture.pps = Buffer.from(nal);}
+
+    const isKeyFrame = type === NAL_TYPE_IDR;
     const packet = encodePacket(
-      encodePtsAndFlags(this.deps.nowUs(), { isConfig, isKeyFrame: isKeyFrameChunk(chunk) }),
-      chunk
+      encodePtsAndFlags(this.deps.nowUs(), { isConfig, isKeyFrame }),
+      Buffer.concat([ANNEX_B_START_CODE, nal])
     );
 
     for (const subscriber of capture.subscribers) {
       if (subscriber.destroyed) {
-        capture.subscribers.delete(subscriber);
+        this.detach(subscriber);
         continue;
       }
-      // A slow viewer must not stall the encoder or the other viewers. write() returning false
-      // only means the kernel buffer is full and Node is queueing; for live video a backlog is
-      // worth a trace, not a disconnect.
+      if (capture.backpressuredSubscribers.has(subscriber)) {continue;}
+      if (capture.waitingForKeyFrame.has(subscriber)) {
+        if (!isKeyFrame) {continue;}
+        capture.waitingForKeyFrame.delete(subscriber);
+      }
       if (!subscriber.write(packet)) {
-        logger.debug(`[VideoStream] subscriber is behind on ${deviceId}`);
+        logger.debug(`[VideoStream] subscriber is behind on ${deviceId}; dropping to next key frame`);
+        capture.backpressuredSubscribers.add(subscriber);
+        capture.waitingForKeyFrame.add(subscriber);
+        subscriber.once("drain", () => {
+          const current = this.captures.get(deviceId);
+          current?.backpressuredSubscribers.delete(subscriber);
+        });
       }
     }
+  }
+
+  private replayParameterSets(capture: DeviceCapture, socket: Socket): void {
+    const parameterSets = [capture.sps, capture.pps].filter((nal): nal is Buffer => nal !== null);
+    if (parameterSets.length === 0) {return;}
+    const payload = Buffer.concat(parameterSets.flatMap(nal => [ANNEX_B_START_CODE, nal]));
+    socket.write(encodePacket(encodePtsAndFlags(this.deps.nowUs(), { isConfig: true }), payload));
   }
 
   private detach(socket: Socket): void {
@@ -254,6 +284,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return;
     }
     capture.subscribers.delete(socket);
+    capture.backpressuredSubscribers.delete(socket);
+    capture.waitingForKeyFrame.delete(socket);
     if (capture.subscribers.size === 0) {
       void this.stopCapture(deviceId);
     }
@@ -271,6 +303,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       subscriber.end();
     }
     capture.subscribers.clear();
+    capture.backpressuredSubscribers.clear();
+    capture.waitingForKeyFrame.clear();
 
     try {
       await capture.source?.stop();

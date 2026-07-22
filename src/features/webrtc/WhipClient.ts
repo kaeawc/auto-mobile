@@ -1,5 +1,8 @@
 import { ActionableError } from "../../models";
 import { logger } from "../../utils/logger";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+
+export const DEFAULT_WHIP_REQUEST_TIMEOUT_MS = 15_000;
 
 /**
  * Minimal `fetch` surface used by the WHIP client, so tests can inject a fake
@@ -26,6 +29,9 @@ export interface WhipClientOptions {
   /** Optional bearer token sent as `Authorization: Bearer <token>`. */
   bearerToken?: string;
   fetchImpl?: FetchLike;
+  /** Bound a stalled WHIP endpoint so start/stop/reconnect cannot hang forever. */
+  requestTimeoutMs?: number;
+  timer?: Timer;
 }
 
 export interface WhipSession {
@@ -48,6 +54,8 @@ export class WhipClient {
   private readonly endpoint: string;
   private readonly bearerToken?: string;
   private readonly fetchImpl: FetchLike;
+  private readonly requestTimeoutMs: number;
+  private readonly timer: Timer;
 
   constructor(options: WhipClientOptions) {
     if (!options.endpoint) {
@@ -60,11 +68,16 @@ export class WhipClient {
     if (!this.fetchImpl) {
       throw new ActionableError("No fetch implementation available for WHIP client.");
     }
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_WHIP_REQUEST_TIMEOUT_MS;
+    if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
+      throw new ActionableError("WHIP request timeout must be a positive number of milliseconds.");
+    }
+    this.timer = options.timer ?? defaultTimer;
   }
 
   /** POST the SDP offer to the ingest endpoint; returns the answer + resource URL. */
   async publish(offerSdp: string, signal?: AbortSignal): Promise<WhipSession> {
-    const response = await this.fetchImpl(this.endpoint, {
+    const response = await this.fetchWithTimeout(this.endpoint, {
       method: "POST",
       headers: this.headers({ "Content-Type": "application/sdp" }),
       body: offerSdp,
@@ -84,10 +97,10 @@ export class WhipClient {
     }
 
     const location = response.headers.get("location");
-    const resourceUrl = location ? this.resolveLocation(location) : null;
-    if (!resourceUrl) {
-      logger.warn("[WHIP] Ingest response omitted a Location header; reconnect/teardown will re-POST.");
+    if (!location) {
+      throw new ActionableError("WHIP ingest response omitted the required Location header.");
     }
+    const resourceUrl = this.resolveLocation(location);
 
     return { answerSdp, resourceUrl };
   }
@@ -103,7 +116,7 @@ export class WhipClient {
     sdpFragment: string,
     signal?: AbortSignal
   ): Promise<void> {
-    const response = await this.fetchImpl(resourceUrl, {
+    const response = await this.fetchWithTimeout(resourceUrl, {
       method: "PATCH",
       headers: this.headers({ "Content-Type": "application/trickle-ice-sdpfrag" }),
       body: sdpFragment,
@@ -118,7 +131,7 @@ export class WhipClient {
 
   /** DELETE the ingest resource to terminate the session (best-effort). */
   async delete(resourceUrl: string, signal?: AbortSignal): Promise<void> {
-    const response = await this.fetchImpl(resourceUrl, {
+    const response = await this.fetchWithTimeout(resourceUrl, {
       method: "DELETE",
       headers: this.headers(),
       signal,
@@ -134,6 +147,27 @@ export class WhipClient {
       headers["Authorization"] = `Bearer ${this.bearerToken}`;
     }
     return headers;
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }
+  ): Promise<Awaited<ReturnType<FetchLike>>> {
+    const controller = new AbortController();
+    const onAbort = (): void => controller.abort();
+    init.signal?.addEventListener("abort", onAbort, { once: true });
+    const timeout = this.timer.setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    try {
+      return await this.fetchImpl(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted && !init.signal?.aborted) {
+        throw new ActionableError(`WHIP ${init.method} request timed out after ${this.requestTimeoutMs}ms.`);
+      }
+      throw error;
+    } finally {
+      this.timer.clearTimeout(timeout);
+      init.signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   private resolveLocation(location: string): string {

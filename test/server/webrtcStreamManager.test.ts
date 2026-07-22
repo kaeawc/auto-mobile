@@ -144,6 +144,25 @@ describe("webrtcStreamManager", () => {
     ).rejects.toThrow(/already active/);
   });
 
+  test("reserves a device before asynchronous jar resolution completes", async () => {
+    let releaseJar: ((path: string | null) => void) | undefined;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const first = startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await expect(
+      startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } })
+    ).rejects.toThrow(/already active or starting/);
+
+    releaseJar?.(null);
+    await first;
+  });
+
   test("rejects a duplicate explicit streamId (even on a different device)", async () => {
     installFakes();
     const other: BootedDevice = { deviceId: "emulator-5556", platform: "android", name: "b" } as BootedDevice;

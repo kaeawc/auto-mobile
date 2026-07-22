@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { RTCPeerConnection } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient } from "../../../src/features/webrtc/WhipClient";
+import { VIDEO_ONLY_WHIP_ANSWER } from "../../helpers/webrtcFakes";
 
 /**
  * Fake peer connection whose ICE gathering NEVER completes, so a publisher that
@@ -47,7 +48,7 @@ function makePublisher(pc: FakeTricklePc, trickleIce: boolean) {
       createPeerConnection: () => pc as unknown as RTCPeerConnection,
       createWhipClient: () =>
         ({
-          publish: async () => ({ answerSdp: "v=0", resourceUrl: "https://coord/whip/s" }),
+          publish: async () => ({ answerSdp: VIDEO_ONLY_WHIP_ANSWER, resourceUrl: "https://coord/whip/s" }),
           patchCandidate: async (url: string, fragment: string) => {
             patched.push({ url, fragment });
           },

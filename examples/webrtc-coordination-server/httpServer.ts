@@ -9,6 +9,9 @@ export interface HttpCoordinationServerOptions extends CoordinationServerOptions
 }
 
 const VIEWER_HTML_PATH = join(import.meta.dir ?? __dirname, "viewer.html");
+const MAX_SDP_BODY_BYTES = 1_000_000;
+
+class RequestBodyTooLargeError extends Error {}
 
 /**
  * HTTP/WHIP/WHEP front end for {@link CoordinationServer}.
@@ -32,6 +35,10 @@ export class HttpCoordinationServer {
     this.ingestToken = options.ingestToken;
     this.server = createServer((req, res) => {
       this.handle(req, res).catch(error => {
+        if (error instanceof RequestBodyTooLargeError) {
+          res.writeHead(413).end("request body too large");
+          return;
+        }
         // Log the detail server-side; never expose error/stack text to the client.
         console.error("[coordination-server] request error:", error);
         this.sendJson(res, 500, { error: "internal server error" });
@@ -40,8 +47,10 @@ export class HttpCoordinationServer {
   }
 
   listen(port: number, host = "0.0.0.0"): Promise<number> {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
+      this.server.once("error", reject);
       this.server.listen(port, host, () => {
+        this.server.off("error", reject);
         const address = this.server.address();
         const boundPort = typeof address === "object" && address ? address.port : port;
         resolve(boundPort);
@@ -199,11 +208,20 @@ export class HttpCoordinationServer {
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
-    let data = "";
+    const chunks: Buffer[] = [];
+    let size = 0;
     req.on("data", chunk => {
-      data += chunk;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > MAX_SDP_BODY_BYTES) {
+        reject(new RequestBodyTooLargeError());
+        req.removeAllListeners("data");
+        req.resume();
+        return;
+      }
+      chunks.push(buffer);
     });
-    req.on("end", () => resolve(data));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }

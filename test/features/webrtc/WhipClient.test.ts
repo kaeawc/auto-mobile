@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { WhipClient, type FetchLike } from "../../../src/features/webrtc/WhipClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 interface Recorded {
   url: string;
@@ -80,11 +81,34 @@ describe("WhipClient.publish", () => {
     await expect(client.publish("offer")).rejects.toThrow(/empty SDP/);
   });
 
-  test("tolerates a missing Location header", async () => {
+  test("rejects a missing Location header because the session could not be cleaned up", async () => {
     const { fetchImpl } = fakeFetch(() => ({ status: 201, body: "answer", location: null }));
     const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
-    const session = await client.publish("offer");
-    expect(session.resourceUrl).toBeNull();
+    await expect(client.publish("offer")).rejects.toThrow(/required Location/);
+  });
+
+  test("aborts a stalled request at the configured timeout", async () => {
+    const timer = new FakeTimer();
+    let aborted = false;
+    const fetchImpl: FetchLike = async (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      });
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      fetchImpl,
+      timer,
+      requestTimeoutMs: 10,
+    });
+
+    const publishing = client.publish("offer");
+    timer.advanceTime(10);
+
+    await expect(publishing).rejects.toThrow(/timed out/);
+    expect(aborted).toBe(true);
   });
 });
 

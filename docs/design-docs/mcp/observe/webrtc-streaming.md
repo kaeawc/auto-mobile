@@ -216,13 +216,14 @@ flag reference.
 
 ## Optional audio
 
-Audio is opt-in (`AUTOMOBILE_WEBRTC_AUDIO=1` or `"audio": true`) and currently
-Android-only. The publisher adds a sendonly PCMU audio track and the Android
-`video-server` captures 8 kHz mono PCM16 from `REMOTE_SUBMIX`; the TypeScript
-publisher converts that PCM to PCMU RTP. Because `screenrecord` is video-only,
-audio-enabled streams require the persistent `automobile-video.jar` path. If the
-jar is unavailable or `REMOTE_SUBMIX` cannot initialize on the device build, the
-stream start fails instead of silently publishing video-only audio.
+Audio is opt-in (`AUTOMOBILE_WEBRTC_AUDIO=1` or `"audio": true`). The publisher
+adds a sendonly PCMU audio track. Android `video-server` captures 8 kHz mono PCM16
+from `REMOTE_SUBMIX`, while iOS Simulator-window capture uses ScreenCaptureKit;
+the TypeScript publisher converts the PCM to PCMU RTP. Because `screenrecord` is
+video-only, Android audio-enabled streams require the persistent
+`automobile-video.jar` path. If its jar is unavailable or `REMOTE_SUBMIX` cannot
+initialize on the device build, stream start fails instead of silently publishing
+video-only audio. Physical iOS playback capture is unavailable through public APIs.
 
 Android playback capture is policy-limited: some apps/usages cannot be captured,
 and `REMOTE_SUBMIX` is privileged. The reference coordination server forwards
@@ -240,9 +241,9 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
   demand, so production installs use the persistent encoder by default. See
   [Persistent-encoder delivery](#persistent-encoder-delivery-automobile-videojar)
   above.
-- **Audio is Android-only and opt-in.** iOS WebRTC capture remains video-only,
-  and Android audio depends on `REMOTE_SUBMIX` availability for the shell-owned
-  `video-server` process.
+- **Audio is opt-in and platform-constrained.** iOS audio requires Simulator-window
+  capture; physical devices remain video-only. Android audio depends on
+  `REMOTE_SUBMIX` availability for the shell-owned `video-server` process.
 - **Reference server is single-process/in-memory.** Use a hardened WHIP/WHEP SFU
   (MediaMTX, LiveKit, Janus, Cloudflare) in production; the publisher is unchanged.
 - **Trickle ICE is opt-in.** By default the publisher gathers candidates before

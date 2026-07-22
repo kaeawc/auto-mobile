@@ -58,6 +58,10 @@ interface StreamEntry {
   createdAt: string;
   framesForwarded: number;
   audioPacketsForwarded: number;
+  /** Last codec config plus a complete IDR access unit for late WHEP viewers. */
+  videoConfig: RtpPacket[];
+  videoKeyFrame: RtpPacket[];
+  collectingKeyFrame: RtpPacket[] | null;
 }
 
 export interface RtpOutboundTrack {
@@ -117,6 +121,9 @@ export class CoordinationServer {
       createdAt: new Date().toISOString(),
       framesForwarded: 0,
       audioPacketsForwarded: 0,
+      videoConfig: [],
+      videoKeyFrame: [],
+      collectingKeyFrame: null,
     };
     pc.onTrack.subscribe(track => {
       if (track.kind !== "audio" && track.kind !== "video") {
@@ -126,6 +133,7 @@ export class CoordinationServer {
       track.onReceiveRtp.subscribe((rtp: RtpPacket) => {
         if (track.kind === "video") {
           entry.framesForwarded += rtp.header.marker ? 1 : 0;
+          cacheVideoForLateSubscriber(entry, rtp);
         } else {
           entry.audioPacketsForwarded++;
         }
@@ -223,6 +231,7 @@ export class CoordinationServer {
     }
 
     entry.subscribers.set(subscriberId, { id: subscriberId, pc, tracks });
+    replayCachedVideo(entry, videoTrack);
     return { subscriberId, answerSdp: pc.localDescription?.sdp ?? "" };
   }
 
@@ -317,6 +326,36 @@ export class CoordinationServer {
       );
     } catch {
       // Proceed with whatever candidates were gathered.
+    }
+  }
+}
+
+function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
+  const payload = rtp.payload;
+  const nalType = payload[0] & 0x1f;
+  // SPS/PPS are normally single RTP packets. Preserve the most recent pair so a
+  // new decoder can configure itself before its first IDR access unit.
+  if (nalType === 7 || nalType === 8) {
+    entry.videoConfig = [...entry.videoConfig.filter(packet => (packet.payload[0] & 0x1f) !== nalType), rtp.clone()];
+  }
+
+  const isIdrStart = nalType === 5 || (nalType === 28 && (payload[1] & 0x80) !== 0 && (payload[1] & 0x1f) === 5);
+  if (isIdrStart) {entry.collectingKeyFrame = [];}
+  if (entry.collectingKeyFrame) {
+    entry.collectingKeyFrame.push(rtp.clone());
+    if (rtp.header.marker) {
+      entry.videoKeyFrame = entry.collectingKeyFrame;
+      entry.collectingKeyFrame = null;
+    }
+  }
+}
+
+function replayCachedVideo(entry: StreamEntry, track: MediaStreamTrack): void {
+  for (const packet of [...entry.videoConfig, ...entry.videoKeyFrame]) {
+    try {
+      track.writeRtp(packet.clone());
+    } catch {
+      return;
     }
   }
 }

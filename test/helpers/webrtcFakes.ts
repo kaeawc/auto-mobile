@@ -1,5 +1,13 @@
 import type { FetchLike } from "../../src/features/webrtc/WhipClient";
 
+export const VIDEO_ONLY_WHIP_ANSWER = [
+  "v=0",
+  "m=video 9 UDP/TLS/RTP/SAVPF 96",
+  "a=recvonly",
+  "a=rtpmap:96 H264/90000",
+  "",
+].join("\r\n");
+
 export interface RecordedWhipRequest {
   url: string;
   method: string;
@@ -53,7 +61,7 @@ export function createSuccessfulWhipFetch(
       status: 201,
       ok: true,
       headers: { get: name => (name.toLowerCase() === "location" ? location : null) },
-      text: async () => "v=0",
+      text: async () => VIDEO_ONLY_WHIP_ANSWER,
     };
   };
 }

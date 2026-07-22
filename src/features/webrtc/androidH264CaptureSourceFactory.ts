@@ -29,6 +29,7 @@ const defaultDeps: AndroidH264CaptureSourceDeps = {
  */
 class FallbackH264CaptureSource implements H264CaptureSource {
   private active: H264CaptureSource | null = null;
+  private stopped = false;
 
   constructor(
     private readonly persistent: H264CaptureSource,
@@ -36,24 +37,30 @@ class FallbackH264CaptureSource implements H264CaptureSource {
   ) {}
 
   async start(): Promise<void> {
+    this.stopped = false;
+    this.active = this.persistent;
     try {
       await this.persistent.start();
-      this.active = this.persistent;
     } catch (error) {
+      if (this.stopped || this.active !== this.persistent) {
+        return;
+      }
       logger.warn(
         `[webrtc] persistent encoder unavailable, falling back to screenrecord: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
       const screenrecord = this.buildScreenrecord();
-      await screenrecord.start();
       this.active = screenrecord;
+      await screenrecord.start();
     }
   }
 
   async stop(): Promise<void> {
-    await this.active?.stop();
+    this.stopped = true;
+    const active = this.active;
     this.active = null;
+    await active?.stop();
   }
 }
 

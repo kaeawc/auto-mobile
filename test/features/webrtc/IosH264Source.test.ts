@@ -368,6 +368,17 @@ describe("IosH264Source", () => {
     expect(errors[0].message).toContain("ffmpeg exited");
   });
 
+  test("reports a fatal capture-helper diagnostic after startup", async () => {
+    const { source, helper, errors } = createHarness();
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    helper.emitStderr("Error: AVCaptureSession runtime error: media services were reset");
+    await flush();
+
+    expect(errors[0].message).toContain("media services were reset");
+    expect(helper.stopped).toBe(true);
+  });
+
   test("awaits in-flight teardown after post-start encoder failure", async () => {
     const helper = new DelayedStopFrameCaptureHelper();
     const encoder = new FakeChildProcess();

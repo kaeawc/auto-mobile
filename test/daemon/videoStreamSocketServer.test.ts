@@ -253,6 +253,56 @@ describe("VideoStreamSocketServer", () => {
     expect(source.started).toBe(false);
   });
 
+  test("keeps a replacement capture when an abandoned startup later fails", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "amvs-replacement-capture-"));
+    const socketPath = path.join(dir, "video-stream.sock");
+    const abandonedSource = new FakeCaptureSource();
+    const replacementSource = new FakeCaptureSource();
+    let resolveAbandonedSource: ((source: H264CaptureSource) => void) | undefined;
+    let sourceCalls = 0;
+    const server = new VideoStreamSocketServer(
+      {
+        resolveDevice: async () => DEVICE,
+        createCaptureSource: async () => {
+          sourceCalls++;
+          if (sourceCalls === 1) {
+            return await new Promise<H264CaptureSource>(resolve => { resolveAbandonedSource = resolve; });
+          }
+          return replacementSource;
+        },
+        nowUs: () => 1_000n,
+      },
+      socketPath
+    );
+    await server.start();
+    harnesses.push({
+      server,
+      socketPath,
+      sources: [abandonedSource, replacementSource],
+      emit: () => {},
+      cleanup: async () => {
+        await server.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    });
+
+    const abandonedSocket = net.createConnection(socketPath);
+    await new Promise<void>(resolve => abandonedSocket.once("connect", resolve));
+    abandonedSocket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
+    await waitFor(() => resolveAbandonedSource !== undefined);
+    abandonedSocket.destroy();
+    await waitFor(() => server.activeDeviceIds().length === 0);
+
+    const replacement = await subscribe(socketPath);
+    expect(replacement.ack.success).toBe(true);
+    expect(server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
+
+    resolveAbandonedSource?.(abandonedSource);
+    await waitFor(() => abandonedSource.stopped);
+    expect(server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
+    expect(server.subscriberCount(DEVICE.deviceId)).toBe(1);
+  });
+
   test("uses the shared capture dimensions for every viewer", async () => {
     const h = await startHarness();
     await subscribe(h.socketPath, {

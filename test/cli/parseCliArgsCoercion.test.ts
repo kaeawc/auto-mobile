@@ -147,3 +147,45 @@ describe("parseCliArgs coercion sees through schema wrappers (#4241 review)", ()
     }
   });
 });
+
+describe("parseCliArgs preserves JSON-encoded scalars and rejects bad numbers (#4241 review)", () => {
+  test("a JSON-encoded string for a string param unwraps to the inner string", () => {
+    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", '"12345"']);
+
+    expect(params.text).toBe("12345");
+  });
+
+  test("a JSON-encoded string containing spaces unwraps", () => {
+    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", '"a b"']);
+
+    expect(params.text).toBe("a b");
+  });
+
+  test("a bare token for a string param is unchanged", () => {
+    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", "plain"]);
+
+    expect(params.text).toBe("plain");
+  });
+
+  test.each([
+    ["", "empty"],
+    [" ", "whitespace"],
+    ["0x10", "hex"],
+    ["[]", "array"],
+  ])("a non-JSON number token (%p, %s) is left for schema validation to reject", raw => {
+    const { params } = parseCliArgs(["startDevice", "--platform", "ios", "--timeout-ms", raw]);
+
+    expect(typeof params.timeoutMs).toBe("string");
+    expect(params.timeoutMs).toBe(raw);
+  });
+
+  test.each([
+    ["12", 12],
+    ["1e3", 1000],
+    ["-5", -5],
+  ])("a valid JSON number token (%p) still coerces to %p", (raw, expected) => {
+    const { params } = parseCliArgs(["startDevice", "--platform", "ios", "--timeout-ms", raw]);
+
+    expect(params.timeoutMs).toBe(expected);
+  });
+});

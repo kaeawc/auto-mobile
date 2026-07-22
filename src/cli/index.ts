@@ -88,26 +88,34 @@ function initializeCliTools(): void {
  * best-effort JSON behaviour so unknown tools and undeclared params are
  * unaffected.
  */
+/**
+ * Parse a CLI token as JSON, reporting whether it was JSON at all.
+ *
+ * A token that is not JSON is the common case, not an error — `--text plain` and
+ * `--action tap` are ordinary input — so the failure is logged at debug and the
+ * caller decides what the raw token means.
+ */
+function tryParseJsonToken(raw: string): { parsed: boolean; value: unknown } {
+  try {
+    return { parsed: true, value: JSON.parse(raw) };
+  } catch (error) {
+    logger.debug(`[cli] value is not JSON, treating as a raw token: ${raw} (${error})`);
+    return { parsed: false, value: raw };
+  }
+}
+
 function coerceCliValue(raw: string, typeName: string | undefined): unknown {
-  const bestEffort = (): unknown => {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return raw;
-    }
-  };
+  const bestEffort = (): unknown => tryParseJsonToken(raw).value;
 
   switch (typeName) {
     // Enums are string-valued here (e.g. --action start); treating them as
     // strings avoids a member that happens to look numeric being coerced.
     case "string":
     case "enum":
-      return raw;
+      return asDeclaredString(raw);
     case "number":
-    case "bigint": {
-      const parsed = Number(raw);
-      return Number.isNaN(parsed) ? bestEffort() : parsed;
-    }
+    case "bigint":
+      return asDeclaredNumber(raw);
     case "boolean":
       if (raw === "true") { return true; }
       if (raw === "false") { return false; }
@@ -115,6 +123,31 @@ function coerceCliValue(raw: string, typeName: string | undefined): unknown {
     default:
       return bestEffort();
   }
+}
+
+/**
+ * A string param's value.
+ *
+ * The bare token is the answer, except when the caller JSON-encoded it —
+ * `--text '"12345"'` must still yield `12345`, not a token with literal quote
+ * characters, since generated wrappers legitimately encode scalars that way.
+ */
+function asDeclaredString(raw: string): string {
+  const { parsed, value } = tryParseJsonToken(raw);
+  return parsed && typeof value === "string" ? value : raw;
+}
+
+/**
+ * A number param's value, or the raw token when it is not a JSON number.
+ *
+ * `Number()` accepts things JSON does not — `""` and `" "` become `0`, `"0x10"`
+ * becomes `16` — which would silently pass a wrong value to the daemon instead of
+ * letting schema validation reject a bad argument. Returning the raw token keeps
+ * the rejection.
+ */
+function asDeclaredNumber(raw: string): unknown {
+  const { parsed, value } = tryParseJsonToken(raw);
+  return parsed && typeof value === "number" && Number.isFinite(value) ? value : raw;
 }
 
 /**

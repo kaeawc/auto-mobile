@@ -32,7 +32,10 @@ MOCK
   chmod +x "${MOCK_BIN}/xcrun"
   output_file="$(mktemp)"
   args_file="$(mktemp)"
-  run env GITHUB_OUTPUT="$output_file" BUN_ARGS_FILE="$args_file" bash -c 'cd /tmp && "$1" --ios-version 26.5' _ "$(pwd)/$SCRIPT"
+  # GitHub Actions exports these globally; clear them so this case covers the
+  # public local adapter rather than the private CI recovery path.
+  # shellcheck disable=SC2016 # $1 expands in the child bash process.
+  run env CI= GITHUB_ACTIONS= GITHUB_OUTPUT="$output_file" BUN_ARGS_FILE="$args_file" bash -c 'cd /tmp && "$1" --ios-version 26.5' _ "$(pwd)/$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$output" = "CI-UDID" ]
   [ "$(<"$output_file")" = "simulator_udid=CI-UDID" ]

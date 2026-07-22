@@ -211,6 +211,47 @@ function stoppedPendingDescriptor(pending: PendingWebRtcStart): WebRtcStreamDesc
   };
 }
 
+/** Cancel a pending-only start, or return undefined when an active record must stop. */
+function stopPendingStart(streamId?: string): WebRtcStreamDescriptor | undefined {
+  if (!streamId && streams.size > 0 && startingStreamIds.size > 0) {
+    throw new ActionableError("Multiple WebRTC streams are active or starting; specify streamId to stop one.");
+  }
+  const pending = streamId
+    ? startingStreamIds.get(streamId)
+    : startingStreamIds.size === 1
+      ? startingStreamIds.values().next().value
+      : undefined;
+  if (!pending || streams.has(pending.streamId)) {
+    return undefined;
+  }
+  pending.cancelled = true;
+  startingDeviceIds.delete(pending.device.deviceId);
+  startingStreamIds.delete(pending.streamId);
+  return stoppedPendingDescriptor(pending);
+}
+
+/** Remove the matching reservation without affecting a replacement stream start. */
+function cancelRecordStart(record: WebRtcStreamRecord): void {
+  const pending = startingStreamIds.get(record.streamId);
+  if (pending?.token === record.startToken) {
+    pending.cancelled = true;
+    startingStreamIds.delete(record.streamId);
+  }
+  if (startingDeviceIds.get(record.device.deviceId)?.token === record.startToken) {
+    startingDeviceIds.delete(record.device.deviceId);
+  }
+}
+
+/** Stop live media components while retaining best-effort cleanup semantics. */
+async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
+  await record.source?.stop().catch(error => {
+    logger.debug(`[WebRtcStream] source stop failed: ${error}`);
+  });
+  await record.publisher.stop().catch(error => {
+    logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
+  });
+}
+
 /**
  * Start publishing a device's screen to the configured coordination server over
  * WHIP. Android capture prefers the persistent on-device encoder and falls back
@@ -358,41 +399,15 @@ export async function startWebRtcStream(
 
 /** Stop a stream by id, or the sole active stream when id is omitted. */
 export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamDescriptor> {
-  if (!streamId && streams.size > 0 && startingStreamIds.size > 0) {
-    throw new ActionableError("Multiple WebRTC streams are active or starting; specify streamId to stop one.");
-  }
-  const pending = streamId
-    ? startingStreamIds.get(streamId)
-    : startingStreamIds.size === 1
-      ? startingStreamIds.values().next().value
-      : undefined;
-  if (pending && !streams.has(pending.streamId)) {
-    pending.cancelled = true;
-    startingDeviceIds.delete(pending.device.deviceId);
-    startingStreamIds.delete(pending.streamId);
-    return stoppedPendingDescriptor(pending);
+  const stoppedPending = stopPendingStart(streamId);
+  if (stoppedPending) {
+    return stoppedPending;
   }
   const record = resolveStreamRecord(streamId);
   streams.delete(record.streamId);
-  const recordPending = startingStreamIds.get(record.streamId);
-  if (recordPending?.token === record.startToken) {
-    recordPending.cancelled = true;
-  }
-  if (startingDeviceIds.get(record.device.deviceId)?.token === record.startToken) {
-    startingDeviceIds.delete(record.device.deviceId);
-  }
-  if (startingStreamIds.get(record.streamId)?.token === record.startToken) {
-    startingStreamIds.delete(record.streamId);
-  }
+  cancelRecordStart(record);
   const descriptor = record.publisher.getDescriptor();
-
-  await record.source?.stop().catch(error => {
-    logger.debug(`[WebRtcStream] source stop failed: ${error}`);
-  });
-  await record.publisher.stop().catch(error => {
-    logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
-  });
-
+  await stopActiveRecord(record);
   return { ...descriptor, state: "stopped" };
 }
 

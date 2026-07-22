@@ -28,6 +28,7 @@ jobs:
   # Detect if only documentation files were changed to skip long-running jobs
   # Detect if only SHA256 checksum was changed to skip long-running jobs
   detect-changes:
+    timeout-minutes: 10
     name: "Detect Documentation-Only or SHA256-Only Changes"
     runs-on: ubuntu-latest
     outputs:
@@ -404,6 +405,7 @@ jobs:
   # =============================================================================
 
   build-desktop-core:
+    timeout-minutes: 20
     name: "Build Desktop Core Module"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -426,6 +428,7 @@ jobs:
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   desktop-core-unit-tests:
+    timeout-minutes: 30
     name: "Run Desktop Core Unit Tests"
     runs-on: ubuntu-latest
     needs: [detect-changes, build-desktop-core]
@@ -467,6 +470,7 @@ jobs:
           retention-days: 7
 
   build-ide-plugin:
+    timeout-minutes: 20
     name: "Build IDE Plugin"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -508,6 +512,7 @@ jobs:
           path: android/ide-plugin/build/distributions/*.zip
 
   ide-plugin-unit-tests:
+    timeout-minutes: 20
     name: "Run IDE Plugin Unit Tests"
     runs-on: ubuntu-latest
     needs: [detect-changes, build-ide-plugin]
@@ -537,6 +542,7 @@ jobs:
           path: android/ide-plugin/build/reports/tests/test/
 
   build-desktop-app:
+    timeout-minutes: 20
     name: "Build Desktop App (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
@@ -564,6 +570,7 @@ jobs:
           malloc-replacement: ${{ runner.os == 'Linux' && 'jemalloc' || 'none' }}
 
   desktop-app-unit-tests:
+    timeout-minutes: 30
     name: "Run Desktop App Unit Tests"
     runs-on: ubuntu-latest
     needs: [detect-changes, build-desktop-app]
@@ -593,6 +600,7 @@ jobs:
           path: android/desktop-app/build/reports/tests/test/
 
   fast-validation:
+    timeout-minutes: 20
     name: "Fast Validation"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -695,6 +703,7 @@ jobs:
   # call it replaced had no Gradle caching at all and recompiled every module
   # from scratch on every PR.
   detekt:
+    timeout-minutes: 30
     name: "Detekt"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -735,6 +744,7 @@ jobs:
           retention-days: 7
 
   bats-tests:
+    timeout-minutes: 30
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
@@ -786,6 +796,7 @@ jobs:
         run: bats test/bats/
 
   installer-minimal:
+    timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
@@ -851,6 +862,7 @@ jobs:
           exit 1
 
   installer-development:
+    timeout-minutes: 30
     name: "Installer Development (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
@@ -965,6 +977,7 @@ jobs:
           category: "/language:${{matrix.language}}"
 
   bun-audit:
+    timeout-minutes: 20
     name: "Bun Security Audit"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -1251,6 +1264,7 @@ jobs:
   # =============================================================================
 
   kotlin-code-coverage:
+    timeout-minutes: 30
     name: "Run CtrlProxy Unit Tests"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -1284,6 +1298,7 @@ jobs:
   # =============================================================================
 
   swiftlint:
+    timeout-minutes: 20
     name: "SwiftLint"
     runs-on: macos-14
     needs: detect-changes
@@ -1311,6 +1326,7 @@ jobs:
   # =============================================================================
 
   swift-code-coverage:
+    timeout-minutes: 20
     name: "Swift Code Coverage"
     runs-on: macos-14
     needs: detect-changes
@@ -1656,6 +1672,7 @@ jobs:
           retention-days: 7
 
   ios-spm-root-package-build:
+    timeout-minutes: 20
     name: "Build Root SPM Package"
     runs-on: macos-26
     needs: detect-changes
@@ -1679,6 +1696,7 @@ jobs:
   # =============================================================================
 
   junit-runner-unit-tests:
+    timeout-minutes: 20
     name: "Run JUnit Runner Unit Tests"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -1716,6 +1734,7 @@ jobs:
           if-no-files-found: ignore
 
   junit-runner-kotlin-consumer-compatibility:
+    timeout-minutes: 20
     name: "JUnit Runner Kotlin Consumer Compatibility"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -1924,6 +1943,7 @@ jobs:
           report_paths: '**/build/test-results/**/*.xml'
 
   build-junit-runner-library:
+    timeout-minutes: 20
     name: "Build JUnitRunner Library"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -1958,6 +1978,7 @@ jobs:
           path: core/build/outputs/aar/core-debug.aar
 
   build-android-control-proxy:
+    timeout-minutes: 20
     name: "Build CtrlProxy APK"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -1990,6 +2011,7 @@ jobs:
           path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
 
   build-playground-app:
+    timeout-minutes: 20
     name: "Build Playground App"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -2029,6 +2051,7 @@ jobs:
   # =============================================================================
 
   benchmarks:
+    timeout-minutes: 20
     name: "MCP Benchmarks"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -2480,6 +2503,7 @@ jobs:
   # declared in exactly one place (add a new iOS *build* job to ios-build-gate,
   # not here).
   ios-gate:
+    timeout-minutes: 10
     name: "iOS"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
@@ -2505,6 +2529,7 @@ jobs:
           done
 
   android-gate:
+    timeout-minutes: 10
     name: "Android"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
@@ -2542,6 +2567,7 @@ jobs:
           done
 
   ide-plugin-gate:
+    timeout-minutes: 10
     name: "IDE Plugin"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
@@ -2571,6 +2597,7 @@ jobs:
   # excludes ios-xctest-runner-simulator-tests, which is simulator-flaky and
   # must not gate merges — that stays covered by the non-required "iOS" gate.
   ios-build-gate:
+    timeout-minutes: 10
     name: "iOS Build"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
@@ -2606,6 +2633,7 @@ jobs:
   # never expands and reports its literal name, so the expanded
   # "... (typescript)" context would hang as a required check.
   codeql-gate:
+    timeout-minutes: 10
     name: "CodeQL"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
@@ -2639,6 +2667,7 @@ jobs:
   # reports its literal "(${{ matrix.os }})" name, so requiring the expanded
   # "(macos-latest)" context would hang those PRs.
   shell-tests-gate:
+    timeout-minutes: 10
     name: "Shell Tests"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:

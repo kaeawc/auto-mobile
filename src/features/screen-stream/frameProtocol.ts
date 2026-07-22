@@ -203,16 +203,30 @@ export class FrameDecoder {
 
   /**
    * Decide whether a candidate header at `offset` really is a frame boundary.
-   * "unsettled" means the buffered bytes cannot answer yet — the caller keeps
+   * The only evidence accepted is a valid header sitting exactly where this
+   * candidate's payload ends.
+   *
+   * Deliberately *not* evidence: the payload ending at the end of the buffer.
+   * stdout splits wherever the pipe happens to flush, so a chunk boundary says
+   * nothing about frame boundaries — trusting it lets payload bytes that spell
+   * a plausible header be emitted as a fabricated frame, which would feed
+   * garbage dimensions to the encoder downstream. Waiting costs one chunk of
+   * latency, once, on a path that is already degraded.
+   *
+   * The converse case is a real trade-off: when a recovered frame is followed
+   * immediately by a *second* corrupt header, that frame is rejected and
+   * dropped even though it was genuine. Accepting it would mean accepting any
+   * candidate whose successor is invalid — the exact rule that fabricates
+   * frames out of payload bytes. One dropped frame during back-to-back
+   * corruption is the cheaper error.
+   *
+   * "unsettled" means the buffered bytes cannot answer yet; the caller keeps
    * the candidate and re-asks once more data arrives. Retention is bounded by
    * the same payload ceiling that bounds normal decoding.
    */
   private corroborate(offset: number, header: FrameHeader): "accept" | "unsettled" | "reject" {
     const end = offset + FRAME_HEADER_SIZE + payloadSize(header);
-    const trailing = this.buffer.length - end;
-    if (trailing < 0) {return "unsettled";}
-    if (trailing === 0) {return "accept";}
-    if (trailing < FRAME_HEADER_SIZE) {return "unsettled";}
+    if (this.buffer.length - end < FRAME_HEADER_SIZE) {return "unsettled";}
     return headerError(parseHeader(this.buffer, end)) === null ? "accept" : "reject";
   }
 }

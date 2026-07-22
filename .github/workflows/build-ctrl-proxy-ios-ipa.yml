@@ -28,11 +28,17 @@ jobs:
         with:
           xcode-version: "26.5"
 
-      - name: "Ensure iOS Simulator runtime"
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
+      # Both installs are network I/O and independent of the simulator-runtime
+      # ensure below, so background them and let it overlap. The single barrier
+      # before the build is load-bearing rather than cosmetic:
+      # ctrl-proxy-create-ipa.sh re-invokes install-xcodegen.sh and pipes to
+      # xcpretty, and install-xcodegen.sh documents the concurrent-prefix race
+      # two installs cause against one prefix ("File exists", nested
+      # share/xcodegen/xcodegen/). Mechanism per #3779.
       - name: "Install XcodeGen"
         run: ./scripts/ios/install-xcodegen.sh
+        background: true
+        id: install-xcodegen
 
       - name: "Cache Ruby gems"
         uses: actions/cache@v5
@@ -40,8 +46,20 @@ jobs:
           path: ~/.gem
           key: gems-xcpretty-${{ runner.os }}
 
+      # Must stay AFTER the cache restore -- `gem install` writes ~/.gem, which
+      # is exactly what that step restores. Backgrounding it is fine; hoisting
+      # it above the cache is not.
       - name: "Install xcpretty"
         run: gem install xcpretty
+        background: true
+        id: install-xcpretty
+
+      # Foreground, and now overlapped by both installs. Stays after
+      # `Select Xcode 26.5` because it resolves against the selected toolchain.
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - wait: [install-xcodegen, install-xcpretty]
 
       - name: "Build CtrlProxy iOS IPA"
         id: checksum

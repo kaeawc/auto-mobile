@@ -148,16 +148,24 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     logger.info(`Restoring ADB-based snapshot for device ${this.device.deviceId}`);
 
     try {
-      // Clear current app data only if app data was captured
-      // Note: We only clear app data when includeAppData is true to avoid
-      // unintentionally wiping user data when the snapshot opted out of data capture
-      if (manifest.includeAppData && manifest.packages && manifest.packages.length > 0) {
-        await this.clearCurrentAppData(manifest.packages);
-      }
-
-      // Restore settings if they were captured
+      // Restore settings first: it is fast, independent of app data, and must not
+      // be lost if the app-data phase is slow or cannot complete (#4236).
       if (manifest.includeSettings && manifest.settings) {
         await this.restoreSettings(manifest.settings);
+      }
+
+      // Clear only the packages whose data was actually captured.
+      //
+      // manifest.packages is every installed package (CaptureSnapshot populates it
+      // from getInstalledPackages -- ~244 on a stock emulator), but only
+      // appDataBackup.backedUpPackages was backed up. Clearing all of them wiped
+      // data that could never be restored, and awaiting ~244 sequential `pm clear`
+      // calls exhausted the request budget so the restore timed out before app
+      // data or the foreground app were restored (#4236). Scoping to the backed-up
+      // set makes the default restore finish inside the budget.
+      const restorablePackages = manifest.appDataBackup?.backedUpPackages ?? [];
+      if (manifest.includeAppData && restorablePackages.length > 0) {
+        await this.clearCurrentAppData(restorablePackages);
       }
 
       // Restore app data if it was captured

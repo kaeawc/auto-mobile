@@ -44,7 +44,7 @@ done < <(rg -o "system-images;android-[0-9]+;${tag};${abi}" "$list_log" | sort -
 declare -a requested_packages=()
 for api in $(seq "$start_api" "$end_api"); do
   pkg="system-images;android-${api};${tag};${abi}"
-  if printf '%s\n' "${available_packages[@]}" | rg -q "^${pkg}$"; then
+  if printf '%s\n' ${available_packages[@]+"${available_packages[@]}"} | rg -q "^${pkg}$"; then
     requested_packages+=("$pkg")
   fi
 done

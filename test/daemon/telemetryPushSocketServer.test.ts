@@ -8,6 +8,11 @@ import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { withInMemorySingletonDatabase } from "../db/inMemorySingletonDatabase";
+import { getDatabase } from "../../src/db/database";
+import { runMigrations } from "../../src/db/migrator";
+import type { Database } from "../../src/db/types";
+import type { Kysely } from "kysely";
 
 /**
  * Test helper that wraps TelemetryPushSocketServer to allow injecting fake sockets
@@ -469,5 +474,78 @@ describe("TelemetryPushSocketServer", () => {
 
     server.pushTelemetryEvent(event);
     expect(socket.getWrittenMessages()).toHaveLength(1);
+  });
+});
+
+/**
+ * Regression test for issue #4209.
+ *
+ * The crash/ANR/tool-failure branch of `backfillRecentEvents` reads
+ * `r.sessionId`, but its `failure_occurrences` projection did not SELECT
+ * `session_id`. That was simultaneously a `tsc` error (TS2339, which had been
+ * absorbed into the typecheck baseline) and a live runtime bug: the read was
+ * always `undefined`, so every backfilled failure event shipped
+ * `sessionId: null` and was invisible to session-filtered subscribers.
+ *
+ * This pins the projection so the column cannot be dropped from the SELECT
+ * again without a red test.
+ */
+describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
+  it("carries the originating session id on backfilled crash events", async () => {
+    await withInMemorySingletonDatabase(async () => {
+      const db = getDatabase() as unknown as Kysely<Database>;
+      await runMigrations(db as unknown as Kysely<unknown>);
+
+      await db
+        .insertInto("failure_groups")
+        .values({
+          id: "group-1",
+          type: "crash",
+          signature: "sig-1",
+          title: "NullPointerException",
+          message: "boom",
+          severity: "critical",
+          first_occurrence: 1000,
+          last_occurrence: 1000,
+          total_count: 1,
+          unique_sessions: 1,
+          stack_trace_json: null,
+          tool_call_info_json: null,
+        })
+        .execute();
+
+      await db
+        .insertInto("failure_occurrences")
+        .values({
+          id: "occ-1",
+          group_id: "group-1",
+          timestamp: 1000,
+          device_id: "emulator-5554",
+          device_model: "Pixel",
+          os: "34",
+          app_version: "1.0.0",
+          session_id: "session-abc",
+          screen_at_failure: "MainActivity",
+          test_name: null,
+          test_execution_id: null,
+          error_code: null,
+          duration_ms: null,
+          tool_args_json: null,
+        })
+        .execute();
+
+      const server = new TestableTelemetryPushSocketServer(new FakeTimer());
+      const socket = new FakeSocket();
+
+      await (server as any).backfillRecentEvents(
+        { category: "crash", deviceId: "emulator-5554", sessionId: null },
+        socket as unknown as Socket
+      );
+
+      const messages = socket.getWrittenMessages<{ data: TelemetryEvent }>();
+      const crash = messages.find(m => m.data.category === "crash");
+      expect(crash).toBeDefined();
+      expect(crash!.data.sessionId).toBe("session-abc");
+    });
   });
 });

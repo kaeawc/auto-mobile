@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { VisionFallback } from "../../src/vision/VisionFallback";
+import { VisionFallback, MAX_VISION_CACHE_ENTRIES } from "../../src/vision/VisionFallback";
 import type {
   VisionFallbackConfig,
   VisionFallbackResult,
@@ -169,5 +169,38 @@ describe("VisionFallback orchestrator", () => {
     const res = await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     expect(res.found).toBe(true);
     expect(res.costUsd).toBe(5.0);
+  });
+
+  // The cache now outlives a single tool call (issue #4207), so it has to be
+  // bounded or a long-running daemon retains every query it ever made.
+  test("caps retained entries at MAX_VISION_CACHE_ENTRIES", async () => {
+    const fb = new VisionFallback(config(), timer);
+    stubAnalyzer(fb, result());
+
+    for (let i = 0; i < MAX_VISION_CACHE_ENTRIES + 10; i++) {
+      await fb.analyzeAndSuggest(`/s-${i}.png`, HIERARCHY, criteria("Login"));
+    }
+
+    expect(fb.getCacheStats().size).toBe(MAX_VISION_CACHE_ENTRIES);
+    // Oldest-write-first eviction: the earliest screenshots are gone.
+    expect(fb.getCacheStats().keys.some(k => k.startsWith("/s-0.png:"))).toBe(false);
+    expect(fb.getCacheStats().keys.some(k => k.startsWith("/s-73.png:"))).toBe(true);
+  });
+
+  test("sweeps entries past their TTL on write, not only on read", async () => {
+    const fb = new VisionFallback(config({ cacheTtlMinutes: 10 }), timer);
+    stubAnalyzer(fb, result());
+
+    await fb.analyzeAndSuggest("/stale.png", HIERARCHY, criteria("Login"));
+    expect(fb.getCacheStats().size).toBe(1);
+
+    timer.advanceTime(11 * 60 * 1000);
+    // A write for a *different* key must still retire the expired entry.
+    await fb.analyzeAndSuggest("/fresh.png", HIERARCHY, criteria("Login"));
+
+    expect(fb.getCacheStats().keys).toEqual(expect.arrayContaining([
+      expect.stringContaining("/fresh.png"),
+    ]));
+    expect(fb.getCacheStats().size).toBe(1);
   });
 });

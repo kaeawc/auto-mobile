@@ -8,6 +8,7 @@ import type {
   VisionFallbackConfig,
   VisionFallbackResult,
   ElementSearchCriteria,
+  VisionClient,
 } from "./VisionTypes";
 import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 import type { Timer } from "../utils/SystemTimer";
@@ -15,19 +16,29 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { stableStringify } from "../utils/stableStringify";
 
+/**
+ * Upper bound on live cache entries. The cache now outlives a single tool call
+ * (see VisionFallbackRegistry), so without a cap a long-running daemon would
+ * retain one entry per (screenshot, criteria) pair for its whole lifetime.
+ * Eviction is oldest-write-first once the cap is reached.
+ */
+export const MAX_VISION_CACHE_ENTRIES = 64;
+
 export class VisionFallback {
   private config: VisionFallbackConfig;
-  private claudeClient: ClaudeVisionClient | null = null;
+  private claudeClient: VisionClient | null = null;
   private resultCache: Map<string, { result: VisionFallbackResult; timestamp: number }>;
   private timer: Timer;
 
-  constructor(config: VisionFallbackConfig, timer: Timer = defaultTimer) {
+  constructor(config: VisionFallbackConfig, timer: Timer = defaultTimer, client?: VisionClient) {
     this.config = config;
     this.timer = timer;
     this.resultCache = new Map();
 
     // Initialize Claude client if provider is 'claude'
-    if (config.provider === "claude") {
+    if (client) {
+      this.claudeClient = client;
+    } else if (config.provider === "claude") {
       this.claudeClient = new ClaudeVisionClient();
     }
   }
@@ -110,10 +121,38 @@ export class VisionFallback {
     result: VisionFallbackResult
   ): void {
     const cacheKey = this.generateCacheKey(screenshotPath, searchCriteria);
+    this.evictExpired();
     this.resultCache.set(cacheKey, {
       result,
       timestamp: this.timer.now(),
     });
+    this.evictOverflow();
+  }
+
+  /**
+   * Drop entries past their TTL. getCachedResult only evicts the key it was
+   * asked for, so a key that is never queried again would otherwise be
+   * retained forever now that the cache is long-lived.
+   */
+  private evictExpired(): void {
+    const now = this.timer.now();
+    for (const [key, entry] of this.resultCache) {
+      const ageMinutes = (now - entry.timestamp) / (1000 * 60);
+      if (ageMinutes > this.config.cacheTtlMinutes) {
+        this.resultCache.delete(key);
+      }
+    }
+  }
+
+  /** Map iteration order is insertion order, so this evicts oldest-write-first. */
+  private evictOverflow(): void {
+    while (this.resultCache.size > MAX_VISION_CACHE_ENTRIES) {
+      const oldest = this.resultCache.keys().next();
+      if (oldest.done) {
+        return;
+      }
+      this.resultCache.delete(oldest.value);
+    }
   }
 
   private generateCacheKey(

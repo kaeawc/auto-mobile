@@ -2082,6 +2082,23 @@ describe("CtrlProxyManager", function() {
       expect(fakeDetector.getInvalidatedDevices()).toContain(testDevice.deviceId);
     });
 
+    test("disableViaSettings invalidates the detector cache when the write fails", async function() {
+      // A partial failure leaves the device state uncertain, so a cached
+      // "available" answer is exactly as wrong as it is after a clean disable.
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: ""
+      });
+      fakeAdb.setCommandError(
+        'shell settings put secure enabled_accessibility_services ""',
+        new Error("device offline")
+      );
+
+      await expect(accessibilityServiceClient.disableViaSettings()).rejects.toThrow();
+
+      expect(fakeDetector.getInvalidatedDevices()).toContain(testDevice.deviceId);
+    });
+
     describe("symmetry across every accessibility mutation method", function() {
       const mutations: Array<{ name: string; run: () => Promise<void> }> = [
         {

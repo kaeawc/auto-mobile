@@ -1025,9 +1025,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       perf.endOperation("writeServiceEnabled");
       logger.info("Accessibility Service enabled successfully via settings");
 
-      // Clear cache after enabling; clearAvailabilityCache also invalidates the
-      // accessibility detector cache so observe reports correct state (#4192).
-      this.clearAvailabilityCache();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const errorLower = errorMsg.toLowerCase();
@@ -1042,6 +1039,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       } else {
         throw new Error(`Failed to enable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`);
       }
+    } finally {
+      // Issue #4192: clear in `finally` so success, early return, and a partial
+      // failure all reconcile our cached view. clearAvailabilityCache also
+      // invalidates the accessibility detector cache, so observe cannot keep
+      // reporting the pre-mutation state.
+      this.clearAvailabilityCache();
     }
   }
 
@@ -1067,9 +1070,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Handle null or empty values
       if (currentServices === "null" || currentServices === "") {
         logger.info("No accessibility services enabled");
-        // Issue #4192: nothing to write, but our cached view may still claim the
-        // service is available - reconcile it with the device before returning.
-        this.clearAvailabilityCache();
         return;
       }
 
@@ -1098,9 +1098,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
 
       logger.info("Accessibility Service disabled successfully via settings");
-
-      // Clear cache after disabling
-      this.clearAvailabilityCache();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const errorLower = errorMsg.toLowerCase();
@@ -1115,6 +1112,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       } else {
         throw new Error(`Failed to disable Accessibility Service via settings. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`);
       }
+    } finally {
+      // Issue #4192: the disable path previously invalidated nothing, so observe
+      // kept reporting accessibility as available after the service was torn down.
+      // `finally` covers the early return (no services enabled) and a partial
+      // failure as well as the success path.
+      this.clearAvailabilityCache();
     }
   }
 
@@ -1171,9 +1174,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       await this.adb.executeCommand(`shell settings --user ${userId} put secure accessibility_enabled 1`);
       logger.info(`[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`);
 
-      // Clear cache after enabling (main user cache - per-user caching not implemented);
-      // this also invalidates the accessibility detector cache (#4192).
-      this.clearAvailabilityCache();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const errorLower = errorMsg.toLowerCase();
@@ -1188,6 +1188,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       } else {
         throw new Error(`Failed to enable Accessibility Service via settings for user ${userId}. This may indicate an ADB communication issue or device state problem. Original error: ${errorMsg}`);
       }
+    } finally {
+      // Issue #4192: main-user cache only (per-user caching not implemented);
+      // `finally` also covers the partial-failure path.
+      this.clearAvailabilityCache();
     }
   }
 

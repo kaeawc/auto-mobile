@@ -3,6 +3,16 @@ name: Release
 
 "on":
   create:
+  # prepare-release dispatches this explicitly after pushing the tag. The `create`
+  # event above did not fire for CI-pushed tags (see v0.0.42/v0.0.44: the tag push
+  # succeeded and no Release run was ever queued), so the tag event alone cannot be
+  # relied on to start a release.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, with no leading v (e.g. 0.0.45)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -14,22 +24,34 @@ jobs:
   validate-release-tag:
     name: "Validate Release Tag"
     runs-on: ubuntu-latest
-    if: github.event.ref_type == 'tag'
+    # workflow_dispatch carries no ref_type; only the create path needs the tag gate.
+    if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
     outputs:
       is_release_tag: ${{ steps.validate.outputs.is_release_tag }}
+      tag: ${{ steps.validate.outputs.tag }}
     steps:
       - name: "Validate tag format"
         id: validate
         shell: bash
         env:
-          TAG: ${{ github.event.ref }}
+          TAG: ${{ inputs.tag || github.event.ref }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
             echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
-            echo "Ignoring non-release tag: $TAG"
+            exit 0
           fi
+
+          echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            # An explicit dispatch names the tag it wants released, so a format
+            # miss is a caller error. Failing beats skipping every publish step
+            # and still reporting the run green.
+            echo "Refusing to release malformed tag: $TAG (expected 0.0.45, no leading v)" >&2
+            exit 1
+          fi
+          echo "Ignoring non-release tag: $TAG"
 
   build-ctrl-proxy-ios-ipa:
     needs: validate-release-tag
@@ -73,7 +95,7 @@ jobs:
         with:
           lfs: false
           fetch-depth: 0
-          ref: refs/tags/${{ github.event.ref }}
+          ref: refs/tags/${{ needs.validate-release-tag.outputs.tag }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -91,7 +113,7 @@ jobs:
       - name: Extract version from tag
         id: version
         env:
-          TAG: ${{ github.event.ref }}
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
         run: |
           VERSION="$TAG"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

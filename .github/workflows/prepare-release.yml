@@ -203,3 +203,21 @@ jobs:
           git push origin "$TAG"
 
           echo "Successfully created and pushed tag: $TAG"
+
+      - name: Start the release
+        shell: bash
+        env:
+          # The default GITHUB_TOKEN cannot dispatch a workflow run from inside a
+          # run; reuse the PAT that pushed the tag.
+          GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+          TAG: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Pushing the tag does not start Release on its own: the create event
+          # never fired for the CI-pushed v0.0.42/v0.0.44 tags, so every release
+          # since has been published by hand. Dispatch it explicitly instead.
+          gh workflow run release.yml --repo "$REPO" --ref main --field tag="$TAG"
+
+          echo "Dispatched release.yml for $TAG"

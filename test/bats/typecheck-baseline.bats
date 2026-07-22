@@ -370,3 +370,88 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"no new type errors"* ]]
 }
+
+# --- Escaped quotes inside string-literal members (issue #4257) --------------
+#
+# The tokenizer keyed on `"[^"]*"`, which cannot represent a literal whose VALUE
+# contains an escaped quote. `"z" | "a\" | b" | "c"` tokenized as `"z"`, `"a\"`
+# and a bare `b`, so `--update` wrote the corrupted signature
+# `"a\" | "z" | b" | "c"`. It is self-consistent (check mode against the same
+# render passed) but NOT order-insensitive, so the same baselined error rendered
+# in a different order read as NEW -- the exact failure issue #4224 exists to
+# prevent.
+
+@test "a member whose value contains an escaped quote is not split at that quote" {
+  esc='printf "%s\n" "src/e.ts(1,1): error TS2322: Type is \"z\" | \"a\\\" | b\" | \"c\"."'
+  TYPECHECK_TSC_CMD="$esc" bash "$SCRIPT" --update
+
+  # Three members, byte-sorted; the escaped quote and the separator inside the
+  # literal both stay within their member.
+  grep -qF 'Type is "a\" | b" | "c" | "z".' "$TYPECHECK_BASELINE"
+  # The pre-fix corruption must not reappear.
+  run grep -cF 'Type is "a\" | "z" | b" | "c".' "$TYPECHECK_BASELINE"
+  [ "$output" -eq 0 ]
+
+  # Round trip: the freshly written baseline validates against the same output.
+  TYPECHECK_TSC_CMD="$esc" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+  [[ "$output" != *"no longer occur"* ]]
+}
+
+@test "a union containing an escaped quote is order-insensitive" {
+  esc='printf "%s\n" "src/e.ts(1,1): error TS2322: Type is \"z\" | \"a\\\" | b\" | \"c\"."'
+  TYPECHECK_TSC_CMD="$esc" bash "$SCRIPT" --update
+
+  # Same three members, different render order -- must not read as new.
+  reordered='printf "%s\n" "src/e.ts(1,1): error TS2322: Type is \"a\\\" | b\" | \"c\" | \"z\"."'
+  TYPECHECK_TSC_CMD="$reordered" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+  [[ "$output" != *"no longer occur"* ]]
+}
+
+@test "escaped backslashes and escaped quotes tokenize together" {
+  # `"b\\"` ends in an escaped BACKSLASH (value `b\`) -- the closing quote is
+  # real -- while `"a\" | x"` embeds an escaped QUOTE and the separator. Getting
+  # only one of the two escapes right still mis-tokenizes this run.
+  esc='printf "%s\n" "src/bs.ts(1,1): error TS2322: Type is \"b\\\\\" | \"a\\\" | x\" | \"c\"."'
+  TYPECHECK_TSC_CMD="$esc" bash "$SCRIPT" --update
+
+  grep -qF 'Type is "a\" | x" | "b\\" | "c".' "$TYPECHECK_BASELINE"
+
+  TYPECHECK_TSC_CMD="$esc" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+  [[ "$output" != *"no longer occur"* ]]
+}
+
+@test "an escaped-quote union does not absorb a genuinely different error" {
+  esc='printf "%s\n" "src/e.ts(1,1): error TS2322: Type is \"z\" | \"a\\\" | b\" | \"c\"."'
+  TYPECHECK_TSC_CMD="$esc" bash "$SCRIPT" --update
+
+  # The baselined union reorders (benign) and a DISTINCT error appears whose
+  # escaped-quote member has a different value. Only the latter is new, and the
+  # baselined signature must not swallow it.
+  both='printf "%s\n" \
+    "src/e.ts(1,1): error TS2322: Type is \"c\" | \"z\" | \"a\\\" | b\"." \
+    "src/e.ts(4,4): error TS2322: Type is \"z\" | \"a\\\" | q\" | \"c\"."'
+  TYPECHECK_TSC_CMD="$both" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 NEW TypeScript error"* ]]
+  [[ "$output" == *'| q"'* ]]
+}
+
+@test "a template-literal member leaves its run untouched instead of mis-parsing" {
+  # Template literal types can contain both quotes and pipes and are not part of
+  # the token grammar, so the conservative fallback must leave the run alone
+  # rather than reorder across it.
+  tl='printf "%s\n" "src/t.ts(1,1): error TS2322: Type is \"z\" | \`p|q\` | \"a\"."'
+  TYPECHECK_TSC_CMD="$tl" bash "$SCRIPT" --update
+
+  grep -qF 'Type is "z" | `p|q` | "a".' "$TYPECHECK_BASELINE"
+
+  TYPECHECK_TSC_CMD="$tl" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+}

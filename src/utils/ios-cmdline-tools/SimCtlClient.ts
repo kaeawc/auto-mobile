@@ -119,6 +119,9 @@ export interface SimCtl {
    */
   killSimulator(device: BootedDevice): Promise<void>;
 
+  /** Erase all data from a simulator. Reserved for CI-owned recovery flows. */
+  eraseSimulator(udid: string): Promise<void>;
+
   /**
    * Wait for a simulator to be ready
    * @param udid - Device UDID to wait for
@@ -698,6 +701,11 @@ export class SimCtlClient implements SimCtl {
   async killSimulator(device: BootedDevice): Promise<void> {
     logger.debug(`Killing iOS simulator ${device.deviceId}`);
     await this.executeCommand(`shutdown ${device.deviceId}`);
+  }
+
+  async eraseSimulator(udid: string): Promise<void> {
+    logger.debug(`Erasing iOS simulator ${udid}`);
+    await this.executeCommand(`erase ${udid}`);
   }
 
   async waitForSimulatorReady(

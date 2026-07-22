@@ -246,6 +246,8 @@ export interface DefaultDeviceProvisionerDependencies {
   androidCreator: () => AndroidAvdCreator;
   idGenerator?: IdGenerator;
   architecture?: string;
+  /** Internal caller-owned device naming policy; the default remains unique user provisioning. */
+  createdDeviceName?: (baseName: string) => string;
 }
 
 export class DefaultDeviceProvisioner implements DeviceProvisioner {
@@ -280,7 +282,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     const deviceTypes = await simctl.getDeviceTypes();
     const deviceType = pickIosDeviceType(deviceTypes, criteria);
     const runtime = await simctl.resolveRuntimeIdentifier(criteria.minOsVersion);
-    const name = buildCreatedDeviceName(deviceType.name, this.idGenerator);
+    const name = this.dependencies.createdDeviceName?.(deviceType.name) ?? buildCreatedDeviceName(deviceType.name, this.idGenerator);
 
     let deviceId: string;
     try {

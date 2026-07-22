@@ -19,6 +19,10 @@ inputs:
     description: "CPU architecture"
     default: "x86_64"
     required: "true"
+  avd-name:
+    description: "AVD name created by the snapshot-preparation action"
+    default: "test"
+    required: "true"
   target:
     description: "System image target"
     default: "google_apis"
@@ -111,11 +115,11 @@ runs:
           ~/.android/avd/*
           ~/.android/adb*
           /usr/local/lib/android/sdk/system-images/*
-        key: avd-${{ runner.os }}-${{ inputs.api_level }}-${{ inputs.arch }}-${{ inputs.target }}
+        key: avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-${{ inputs.arch }}-${{ inputs.target }}
         restore-keys: |
-          avd-${{ runner.os }}-${{ inputs.api_level }}-${{ inputs.arch }}-
-          avd-${{ runner.os }}-${{ inputs.api_level }}-
-          avd-${{ runner.os }}-
+          avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-${{ inputs.arch }}-
+          avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-
+          avd-${{ runner.os }}-${{ inputs.avd-name }}-
 
     - name: Create AVD and generate snapshot for caching
       if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -124,6 +128,7 @@ runs:
         api-level: ${{ inputs.api_level }}
         arch: ${{ inputs.arch }}
         target: ${{ inputs.target }}
+        avd-name: ${{ inputs.avd-name }}
         force-avd-creation: false
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
         disable-animations: false
@@ -151,35 +156,27 @@ runs:
         echo "RELEASE_KEY_ALIAS=${{ inputs.release-key-alias }}" >> $GITHUB_ENV
         echo "RELEASE_KEY_PASSWORD=${{ inputs.release-key-password }}" >> $GITHUB_ENV
 
-    # Run emulator with automatic retry for infrastructure flakiness (#808)
-    # Handles: adb device offline, device not found, adb server killed, emulator boot failures
-    - name: Run Emulator (Attempt 1)
+    # The third-party action above owns SDK/AVD/snapshot preparation only. The
+    # product owns every actual emulator launch and readiness probe below.
+    - name: Boot and test Emulator (Attempt 1)
       id: emulator-attempt-1
       continue-on-error: true
-      uses: reactivecircus/android-emulator-runner@v2.35.0
-      with:
-        api-level: ${{ inputs.api_level }}
-        arch: ${{ inputs.arch }}
-        target: ${{ inputs.target }}
-        script: ../scripts/android/run-emulator-tests.sh "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
-        working-directory: ${{ inputs.working-directory }}
-        force-avd-creation: false
-        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-        disable-animations: false
+      shell: ${{ inputs.shell }}
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        export AUTOMOBILE_EMULATOR_ARGS='["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]'
+        "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
+        "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
 
-    - name: Run Emulator (Retry)
+    - name: Boot and test Emulator (Retry)
       id: emulator-attempt-2
       if: steps.emulator-attempt-1.outcome == 'failure'
-      uses: reactivecircus/android-emulator-runner@v2.35.0
-      with:
-        api-level: ${{ inputs.api_level }}
-        arch: ${{ inputs.arch }}
-        target: ${{ inputs.target }}
-        script: ../scripts/android/run-emulator-tests.sh "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
-        working-directory: ${{ inputs.working-directory }}
-        force-avd-creation: false
-        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-        disable-animations: false
+      shell: ${{ inputs.shell }}
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        export AUTOMOBILE_EMULATOR_ARGS='["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]'
+        "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
+        "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
 
     - name: Verify Emulator Tests Passed
       if: always()

@@ -38,6 +38,12 @@ teardown() {
 # keyguard, any other finger leaves it locked, and `input keyevent 26` re-locks.
 make_mock_adb() {
   printf 'isKeyguardShowing=true' > "${KEYGUARD_STATE_FILE}"
+  cat > "${MOCK_BIN}/sleep" << 'SCRIPT'
+#!/usr/bin/env bash
+# The production probe waits for real emulator UI transitions. The fake adb
+# changes state synchronously, so those delays add no coverage in these tests.
+exit 0
+SCRIPT
   cat > "${MOCK_BIN}/adb" << 'SCRIPT'
 #!/usr/bin/env bash
 if [ "$1" = "-s" ]; then
@@ -120,7 +126,7 @@ esac
 
 exit 0
 SCRIPT
-  chmod +x "${MOCK_BIN}/adb"
+  chmod +x "${MOCK_BIN}/adb" "${MOCK_BIN}/sleep"
   unset ANDROID_HOME
   unset ANDROID_SDK_ROOT
   export PATH="${MOCK_BIN}:/usr/bin:/bin"

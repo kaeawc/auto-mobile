@@ -210,6 +210,76 @@ describe("DatabaseInspector", () => {
     });
   });
 
+  describe("error envelope parsing", () => {
+    // Wire contract, established from the producer
+    // (android/auto-mobile-sdk/src/debug/kotlin/.../DatabaseInspectorProvider.kt): the
+    // provider fills a Bundle with the string keys `success`, `errorType`, `error` (and
+    // `result` on success). `adb shell content call` prints it with Bundle.toString(),
+    // i.e. `Bundle[{key=value, key=value}]` — entries joined by ", " and the whole map
+    // closed by a single trailing "}]". Values are raw, unescaped strings, so an entry's
+    // value may itself contain spaces, commas and closing braces. The only reliable
+    // terminators for a value are the next `, <knownKey>=` boundary or the bundle's
+    // trailing "}]".
+    const errorFor = async (response: string): Promise<string> => {
+      fakeAdb.setCommandResult(
+        `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
+        response
+      );
+      try {
+        await inspector.listDatabases(appId);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error("expected listDatabases to reject");
+    };
+
+    test("preserves a multi-word errorType", async () => {
+      const message = await errorFor(
+        `Bundle[{success=false, errorType=SQL Error, error=Database inspection is disabled}]`
+      );
+
+      expect(message).toBe("Database error (SQL Error): Database inspection is disabled");
+    });
+
+    test("preserves error text containing commas", async () => {
+      const message = await errorFor(
+        `Bundle[{success=false, errorType=SQLiteException, error=no such column: foo, bar}]`
+      );
+
+      expect(message).toBe("Database error (SQLiteException): no such column: foo, bar");
+    });
+
+    test("preserves error text containing a closing brace", async () => {
+      const message = await errorFor(
+        `Bundle[{success=false, errorType=SQLiteException, error=near "}": syntax error (code 1)}]`
+      );
+
+      expect(message).toBe(`Database error (SQLiteException): near "}": syntax error (code 1)`);
+    });
+
+    test("preserves error text when errorType follows error in the bundle", async () => {
+      const message = await errorFor(
+        `Bundle[{success=false, error=no such table: users, orders, errorType=SQLiteException}]`
+      );
+
+      expect(message).toBe("Database error (SQLiteException): no such table: users, orders");
+    });
+
+    test("single-word errorType and comma-free error text are unchanged", async () => {
+      const message = await errorFor(
+        `Bundle[{success=false, errorType=DISABLED, error=Database inspection is disabled}]`
+      );
+
+      expect(message).toBe("Database error (DISABLED): Database inspection is disabled");
+    });
+
+    test("falls back to UNKNOWN and Unknown error when the keys are absent", async () => {
+      const message = await errorFor(`Bundle[{success=false}]`);
+
+      expect(message).toBe("Database error (UNKNOWN): Unknown error");
+    });
+  });
+
   describe("error handling", () => {
     test("throws ActionableError when ContentProvider not found", async () => {
       // Simulate when the app doesn't have the SDK or provider

@@ -429,6 +429,11 @@ export class IosH264Source implements H264CaptureSource {
     ];
     if (this.options.size) {
       args.push("-vf", `scale=${this.options.size.width}:${this.options.size.height}`);
+    } else {
+      // Keep an unconstrained macOS capture inside the Level 4.2 capability
+      // advertised in the WHIP SDP. Explicit sizes are validated before source
+      // creation by webrtcStreamingConfig.
+      args.push("-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2");
     }
     args.push(
       "-an",
@@ -436,6 +441,8 @@ export class IosH264Source implements H264CaptureSource {
       "h264_videotoolbox",
       "-profile:v",
       "baseline",
+      "-level:v",
+      "4.2",
       "-bf",
       "0"
     );

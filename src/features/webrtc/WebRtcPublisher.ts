@@ -12,6 +12,11 @@ import { DEFAULT_RTP_MTU } from "./h264";
 import { ReconnectController, type ReconnectState } from "./ReconnectController";
 import { RtpH264TrackWriter } from "./RtpH264TrackWriter";
 import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
+import {
+  h264SpsLevelIdc,
+  WEBRTC_H264_LEVEL_IDC,
+  WEBRTC_H264_PROFILE_LEVEL_ID,
+} from "./h264Level";
 import { parseTrickleIceMediaContexts, TrickleIceForwarder } from "./trickleIce";
 import { WhipClient, type WhipClientOptions } from "./WhipClient";
 
@@ -134,8 +139,8 @@ export class WebRtcPublisher {
           // gathers/trickles ICE candidates (RFC 9725 §4.3.2).
           bundlePolicy: "max-bundle",
           codecs: this.audioEnabled
-            ? { video: [useH264()], audio: [usePCMU()] }
-            : { video: [useH264()] },
+            ? { video: [useH264({ parameters: h264CodecParameters() })], audio: [usePCMU()] }
+            : { video: [useH264({ parameters: h264CodecParameters() })] },
         }));
     const createWhip = deps.createWhipClient ?? (options => new WhipClient(options));
     this.whip = createWhip({
@@ -167,7 +172,14 @@ export class WebRtcPublisher {
 
   /** Feed a chunk of the raw H.264 (Annex-B) elementary stream. */
   writeH264Chunk(chunk: Buffer): void {
-    this.writer?.writeChunk(chunk);
+    try {
+      this.writer?.writeChunk(chunk);
+    } catch (error) {
+      logger.warn(
+        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${error instanceof Error ? error.message : String(error)}`
+      );
+      this.notifySourceFailed();
+    }
   }
 
   /** Feed 8 kHz mono PCM16LE audio; ignored when audio is not enabled. */
@@ -227,6 +239,12 @@ export class WebRtcPublisher {
     await this.teardownActiveSession();
 
     await this.onBeforeEstablish?.();
+    // stop() can race an asynchronous pre-establish hook (for example, source
+    // setup). Do not allocate a peer connection or POST a WHIP offer after the
+    // caller has explicitly stopped this publisher.
+    if (this.closed) {
+      throw new Error("Publisher closed during pre-establish.");
+    }
 
     const pc = this.createPeerConnection(this.config.iceServers ?? []);
     this.pc = pc;
@@ -240,6 +258,14 @@ export class WebRtcPublisher {
         ssrc: transceiver.sender.ssrc,
         mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
         timer: this.timer,
+        onSps: sps => {
+          const levelIdc = h264SpsLevelIdc(sps);
+          if (levelIdc !== undefined && levelIdc > WEBRTC_H264_LEVEL_IDC) {
+            throw new Error(
+              `H.264 SPS level ${levelIdc} exceeds negotiated level ${WEBRTC_H264_LEVEL_IDC}.`
+            );
+          }
+        },
       });
       if (this.audioEnabled) {
         const audioTrack = new MediaStreamTrack({ kind: "audio", streamId: this.config.streamId });
@@ -366,7 +392,7 @@ export class WebRtcPublisher {
       return;
     }
     this.connectedFired = true;
-    void Promise.resolve(this.onConnected?.()).catch(error => {
+    void Promise.resolve().then(() => this.onConnected?.()).catch(error => {
       // Capture failed to start (e.g. adb/screenrecord spawn failed) even though
       // the peer connected. Without this the stream would report connected with
       // no media and never recover — route it through the reconnect path.
@@ -479,7 +505,10 @@ function assertWhipAnswerAcceptsMedia(
       .map(line => line.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/)?.[1])
       .find((value): value is "sendrecv" | "sendonly" | "recvonly" | "inactive" => value !== undefined) ??
     sessionDirection ?? "sendrecv";
-  if (direction !== "recvonly" && direction !== "sendrecv") {
+  // WHIP is unidirectional ingest: an accepting endpoint MUST answer recvonly
+  // (RFC 9725 §4.2). Accepting sendrecv would make AutoMobile interoperate with
+  // a non-conforming endpoint and hide an invalid session contract.
+  if (direction !== "recvonly") {
     throw new Error(`WHIP answer did not accept receiving ${kind} (direction=${direction}).`);
   }
 
@@ -541,9 +570,39 @@ function isAcceptedCodecRtpMap(
     }
     const parameters = fmtp.slice(fmtp.indexOf(" ") + 1);
     const packetizationMode = /(?:^|;)\s*packetization-mode\s*=\s*1(?:;|$)/i.test(parameters);
-    const profile = /(?:^|;)\s*profile-level-id\s*=\s*(42e0[0-9a-f]{2})(?:;|$)/i.test(parameters);
-    return packetizationMode && profile;
+    const profileLevelId = /(?:^|;)\s*profile-level-id\s*=\s*([0-9a-f]{6})(?:;|$)/i.exec(parameters)?.[1];
+    return packetizationMode && profileLevelId !== undefined && acceptsLocalH264Send(parameters, profileLevelId);
   });
+}
+
+function hasCompatibleH264Profile(profileLevelId: string): boolean {
+  // RFC 6184 §8.2.2 treats constraint_set3_flag (bit 4 of profile-iop) as
+  // part of the level for Baseline/Main/Extended profiles, so it may differ in
+  // a conforming answer. The profile_idc and remaining profile-iop bits must
+  // stay symmetric with AutoMobile's 42e0xx constrained-baseline offer.
+  const profileIdc = Number.parseInt(profileLevelId.slice(0, 2), 16);
+  const profileIop = Number.parseInt(profileLevelId.slice(2, 4), 16);
+  return profileIdc === 0x42 && (profileIop & 0xef) === 0xe0;
+}
+
+function h264CodecParameters(): string {
+  return `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1`;
+}
+
+function acceptsLocalH264Send(parameters: string, profileLevelId: string): boolean {
+  if (!hasCompatibleH264Profile(profileLevelId)) {
+    return false;
+  }
+  const answerLevelIdc = Number.parseInt(profileLevelId.slice(4, 6), 16);
+  if (answerLevelIdc >= WEBRTC_H264_LEVEL_IDC) {
+    return true;
+  }
+  // With level asymmetry, the answer's profile-level-id describes its sending
+  // level; max-recv-level is its separately advertised receive ceiling (RFC
+  // 6184 §8.2.2). Do not send a Level 4.2 stream unless that ceiling permits it.
+  const asymmetric = /(?:^|;)\s*level-asymmetry-allowed\s*=\s*1(?:;|$)/i.test(parameters);
+  const maxReceiveLevel = /(?:^|;)\s*max-recv-level\s*=\s*(\d+)(?:;|$)/i.exec(parameters)?.[1];
+  return asymmetric && Number(maxReceiveLevel) >= WEBRTC_H264_LEVEL_IDC;
 }
 
 function addWhipRtcpMuxOnly(sdp: string): string {

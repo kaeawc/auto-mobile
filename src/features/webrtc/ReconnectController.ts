@@ -68,10 +68,18 @@ export class ReconnectController {
       await this.attempt();
     } catch (error) {
       this.cycleActive = false;
+      // stop() may win while an in-flight initial attempt is unwinding. Preserve
+      // its terminal state rather than reporting a cancelled start as failed.
+      if (this.stopped) {
+        return;
+      }
       this.setState("failed");
       throw error;
     }
     this.cycleActive = false;
+    if (this.stopped) {
+      return;
+    }
     this.setState("connected");
     this.drainPendingReconnect();
   }

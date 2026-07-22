@@ -7,6 +7,7 @@ import {
   usePCMU,
   type RTCIceServer,
 } from "werift";
+import { WEBRTC_H264_PROFILE_LEVEL_ID } from "../../src/features/webrtc/h264Level";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 /**
@@ -129,7 +130,7 @@ export class CoordinationServer {
 
     const pc = new RTCPeerConnection({
       bundlePolicy: "max-bundle",
-      codecs: { video: [useH264()], audio: [usePCMU()] },
+      codecs: { video: [useH264({ parameters: `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1` })], audio: [usePCMU()] },
     });
     const entry: StreamEntry = {
       streamId,
@@ -217,7 +218,7 @@ export class CoordinationServer {
 
     const pc = new RTCPeerConnection({
       bundlePolicy: "max-bundle",
-      codecs: { video: [useH264()], audio: [usePCMU()] },
+      codecs: { video: [useH264({ parameters: `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1` })], audio: [usePCMU()] },
     });
     const tracks = new Map<"audio" | "video", MediaStreamTrack>();
     const videoTrack = new MediaStreamTrack({ kind: "video" });

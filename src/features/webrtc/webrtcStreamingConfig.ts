@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models";
 import type { RTCIceServer } from "werift";
+import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 
 /**
  * WebRTC streaming configuration. On a CI worker this is typically supplied
@@ -182,10 +183,11 @@ function validateSize(size: { width: number; height: number }): { width: number;
     width <= 0 ||
     height <= 0 ||
     width % 2 !== 0 ||
-    height % 2 !== 0
+    height % 2 !== 0 ||
+    h264MacroblocksPerFrame(width, height) > WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
   ) {
     throw new ActionableError(
-      `Invalid size "${width}x${height}"; width and height must be positive even integers.`
+      `Invalid size "${width}x${height}"; width and height must be positive even integers within the H.264 Level 4.2 frame limit.`
     );
   }
   return { width, height };

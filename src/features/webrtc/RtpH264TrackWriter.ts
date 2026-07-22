@@ -34,6 +34,8 @@ export interface RtpH264TrackWriterOptions {
   timer?: Timer;
   /** Initial 16-bit sequence number (defaults to 0). */
   initialSequenceNumber?: number;
+  /** Observes each complete SPS before it can be sent to the negotiated peer. */
+  onSps?: (nal: Buffer) => void;
 }
 
 /**
@@ -50,6 +52,7 @@ export class RtpH264TrackWriter {
   private readonly payloadType: number;
   private readonly mtu: number;
   private readonly timer: Timer;
+  private readonly onSps?: (nal: Buffer) => void;
   private readonly parser = new H264AnnexBParser();
   private readonly assembler = new H264AccessUnitAssembler();
 
@@ -69,6 +72,7 @@ export class RtpH264TrackWriter {
       throw new Error("H.264 RTP MTU must be an integer of at least 3 bytes.");
     }
     this.timer = options.timer ?? defaultTimer;
+    this.onSps = options.onSps;
     this.sequenceNumber = (options.initialSequenceNumber ?? 0) & 0xffff;
   }
 
@@ -99,6 +103,9 @@ export class RtpH264TrackWriter {
   }
 
   private consumeNal(nal: Buffer): void {
+    if ((nal[0] & 0x1f) === 7) {
+      this.onSps?.(nal);
+    }
     if (isKeyFrameNal(nal)) {
       this.sawKeyFrame = true;
     }

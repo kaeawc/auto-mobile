@@ -142,6 +142,41 @@ describe("WebRTC coordination server e2e", () => {
   });
 
   test(
+    "returns 422 for a compliant but unsupported WHIP ICE restart",
+    async () => {
+      const http = new HttpCoordinationServer({ iceServers: [] });
+      const port = await http.listen(0, "127.0.0.1");
+      const base = `http://127.0.0.1:${port}`;
+      const publisher = new WebRtcPublisher({ streamId: "restart", whipEndpoint: `${base}/whip?streamId=restart` });
+      try {
+        await publisher.start();
+        const response = await fetch(`${base}/whip/restart`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/trickle-ice-sdpfrag",
+            "If-Match": "*",
+          },
+          body: [
+            "m=video 9 UDP/TLS/RTP/SAVPF 96",
+            "a=mid:0",
+            "a=ice-ufrag:replacement",
+            "a=ice-pwd:replacement",
+            "a=end-of-candidates",
+            "",
+          ].join("\r\n"),
+        });
+
+        expect(response.status).toBe(422);
+        expect((await fetch(`${base}/api/streams/restart`)).status).toBe(200);
+      } finally {
+        await publisher.stop();
+        await http.close();
+      }
+    },
+    15000
+  );
+
+  test(
     "publisher -> WHIP ingest -> WHEP subscriber forwards frames, reconnect API lists the stream",
     async () => {
       const http = new HttpCoordinationServer({ iceServers: [] });

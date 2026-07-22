@@ -145,7 +145,10 @@ export class HttpCoordinationServer {
       const streamId = decodeURIComponent(whipPatchMatch[1]);
       const etag = this.coordinator.getIceEtag(streamId);
       if (!etag) { res.writeHead(404).end(); return; }
-      if (ifMatch !== `\"${etag}\"`) { res.writeHead(412).end(); return; }
+      // RFC 9725 §4.3.3 requires `If-Match: *` for an ICE restart. Let that
+      // reach the fragment parser so this Trickle-only server can return its
+      // required 422 response for unsupported restarts instead of 412.
+      if (ifMatch !== "*" && ifMatch !== `\"${etag}\"`) { res.writeHead(412).end(); return; }
       const fragment = await readBody(req);
       const applied = await this.coordinator.addIngestCandidates(
         streamId,

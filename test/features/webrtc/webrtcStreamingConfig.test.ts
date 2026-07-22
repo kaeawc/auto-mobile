@@ -53,6 +53,10 @@ describe("parseSize", () => {
     expect(() => parseSize("0x720")).toThrow(/positive even integers/);
     expect(() => parseSize("721x1280")).toThrow(/positive even integers/);
   });
+
+  test("rejects a frame that exceeds the advertised H.264 Level 4.2 capability", () => {
+    expect(() => parseSize("2048x1080")).toThrow(/Level 4.2/);
+  });
 });
 
 describe("resolveWebRtcStreamingConfig", () => {

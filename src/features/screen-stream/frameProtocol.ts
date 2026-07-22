@@ -314,17 +314,21 @@ export class FrameDecoder {
     if (this.buffer.length - end < FRAME_HEADER_SIZE) {return "unsettled";}
     const successor = parseHeader(this.buffer, end);
     if (headerError(successor) !== null) {return "reject";}
-    // The successor is where resync hands control back to synchronized
-    // decoding, and the synchronized path does not consult the anchor — so the
-    // handoff point has to. Without this an audio-shaped record inside the
-    // damaged bytes is admissible on its own, resync ends at it, and whatever
-    // video header follows is decoded unchecked.
+    // The successor is held to the same admissibility rule as the candidate.
+    // An audio record is self-describing and carries no geometry, so on an
+    // anchored stream it cannot corroborate anything: accepting it would let a
+    // single crafted anchor-geometry frame followed by a 16-byte audio header
+    // end resync, one crafted frame cheaper than the two an anchored stream
+    // should cost. Audio interleaving during recovery therefore costs the
+    // frame it follows — the scan resumes at the next video pair — which is
+    // the same trade this decoder already makes for an uncorroborated frame.
     if (!this.admissible(successor)) {return "reject";}
     // The successor must belong to the same stream, not merely be well-formed.
     // Consecutive frames in a capture session share a geometry, so a successor
     // of a different size is evidence of coincidence, not of a boundary. This
     // is what covers the window before any frame has decoded, when there is no
-    // anchor to check against.
+    // anchor to check against: pre-anchor `admissible()` admits everything, so
+    // an audio record on either side is still accepted there.
     if (isAudioHeader(header) || isAudioHeader(successor)) {return "accept";}
     return sameGeometry(header, successor) ? "accept" : "reject";
   }
@@ -348,8 +352,13 @@ export class FrameDecoder {
    * when it drops an uncorroborated recovered frame.
    */
   private admissible(header: FrameHeader): boolean {
-    if (isAudioHeader(header) || this.anchor === null) {return true;}
-    return sameGeometry(header, this.anchor);
+    if (this.anchor === null) {return true;}
+    // Audio records carry no geometry, so they can never establish that the
+    // decoder is back on real frame boundaries — and resync ending at one hands
+    // the synchronized path a position nothing checked. An anchored stream
+    // stays in resync until it reaches a *video* boundary at its own geometry;
+    // audio arriving during that window is discarded with the rest.
+    return !isAudioHeader(header) && sameGeometry(header, this.anchor);
   }
 }
 

@@ -9,6 +9,7 @@ import { MemoryBaselineManager } from "./MemoryBaselineManager";
 import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
 import { Database, NewMemoryAuditResult } from "../../db/types";
+import { selectTopContributors } from "../../utils/topContributors";
 
 /**
  * Represents a single memory threshold violation
@@ -256,15 +257,10 @@ export class MemoryAudit {
       return "No memory issues detected";
     }
 
-    // Sort violations by contribution weight (highest first)
-    const sortedViolations = [...violations].sort(
-      (a, b) => b.contributionWeight - a.contributionWeight
-    );
-
     let diagnostics = "Memory issues detected:\n\n";
 
-    // Include top contributors (weight > 0.5)
-    const topContributors = sortedViolations.filter(v => v.contributionWeight > 0.5);
+    // Highest-weighted violations first; never empty for a non-empty violation set.
+    const topContributors = selectTopContributors(violations);
 
     diagnostics += "Top contributors:\n";
     for (const violation of topContributors) {

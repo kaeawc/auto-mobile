@@ -9,6 +9,7 @@ import { TouchLatencyTracker } from "./TouchLatencyTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { PerformanceAuditRepository } from "../../db/performanceAuditRepository";
 import { defaultTimer } from "../../utils/SystemTimer";
+import { selectTopContributors } from "../../utils/topContributors";
 
 /**
  * Performance metrics collected during audit
@@ -632,15 +633,10 @@ export class PerformanceAudit {
       return "No performance issues detected";
     }
 
-    // Sort violations by contribution weight (highest first)
-    const sortedViolations = [...violations].sort(
-      (a, b) => b.contributionWeight - a.contributionWeight
-    );
-
     let diagnostics = "Performance issues detected:\n\n";
 
-    // Include top contributors (weight > 0.5)
-    const topContributors = sortedViolations.filter(v => v.contributionWeight > 0.5);
+    // Highest-weighted violations first; never empty for a non-empty violation set.
+    const topContributors = selectTopContributors(violations);
 
     diagnostics += "Top contributors:\n";
     for (const violation of topContributors) {

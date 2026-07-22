@@ -370,62 +370,39 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(audio).toHaveLength(0);
   });
 
-  test("an audio successor does not corroborate a resync point on an anchored stream", () => {
+  test("resynchronizes through interleaved audio on an anchored stream", () => {
     const decoder = new FrameDecoder();
-    // The candidate side of the handoff is anchor-locked, but the successor was
-    // not: an audio header was accepted as corroboration outright. That let one
-    // crafted frame at the anchor geometry plus a bare 16-byte audio header end
-    // resync, handing the synchronized path — which does not consult the anchor
-    // — the chosen-geometry frame behind it. An anchored stream costs two
-    // crafted frames (see #4270); this made it one.
+    // The real helper (`SimulatorCaptureSession`) writes screen and audio to one
+    // queue, so a recovered video frame's immediate successor is routinely an
+    // audio header, not another video header. An audio record is a valid
+    // corroborator — it proves the candidate's payload ran to a real boundary —
+    // and audio does not disturb the anchor-locked recovery point. Holding the
+    // successor to video-only geometry instead would leave this common stream
+    // unable to resync at all: no video frame is ever immediately followed by a
+    // video header, so nothing would corroborate and the stream would stall.
     const errors: MalformedFrameError[] = [];
     const audio: Buffer[] = [];
     expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
 
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 16), Buffer.alloc(16, fill)]);
+
     const out = decoder.push(
       Buffer.concat([
-        encodeHeader(0, 1, 4, 0),
-        makeFrameBytes(4, 4, 16, 7, 0x33), // one crafted frame at the anchor geometry
-        encodeHeader(0, 8_000, 1, 8), // ...corroborated only by an audio header
-        Buffer.alloc(8, 0x07),
-        makeFrameBytes(32, 32, 128, 4242, 0xa5), // the payoff the handoff would reach
-        encodeHeader(32, 32, 128, 4243),
+        encodeHeader(0, 1, 4, 0), // corruption
+        makeFrameBytes(4, 4, 16, 2, 0x02), // V — recovery point, anchor geometry
+        audioRecord(0xa1), // A — the successor that corroborates it
+        makeFrameBytes(4, 4, 16, 3, 0x03), // V
+        audioRecord(0xa2), // A
+        makeFrameBytes(4, 4, 16, 4, 0x04), // V
       ]),
       err => errors.push(err),
       rec => audio.push(rec.pcm16le)
     );
 
     expect(errors).toHaveLength(1);
-    expect(out).toHaveLength(0);
-    expect(audio).toHaveLength(0);
-  });
-
-  test("an audio record still corroborates a resync point before any frame anchors", () => {
-    const decoder = new FrameDecoder();
-    // The mirror of the case above: pre-anchor there is no geometry to match,
-    // `admissible()` admits everything, and audio on either side of the handoff
-    // stays valid corroboration. Tightening the anchored path must not quietly
-    // take this with it.
-    const errors: MalformedFrameError[] = [];
-    const audio: Buffer[] = [];
-
-    const out = decoder.push(
-      Buffer.concat([
-        encodeHeader(0, 1, 4, 0),
-        Buffer.alloc(32, 0x00),
-        makeFrameBytes(8, 8, 32, 11, 0x22),
-        encodeHeader(0, 8_000, 1, 8),
-        Buffer.alloc(8, 0x07),
-        encodeHeader(8, 8, 32, 12),
-      ]),
-      err => errors.push(err),
-      rec => audio.push(rec.pcm16le)
-    );
-
-    expect(errors).toHaveLength(1);
-    expect(out).toHaveLength(1);
-    expect(out[0].header.width).toBe(8);
-    expect(audio).toHaveLength(1);
+    expect(out.map(f => f.header.timestampMs)).toEqual([2, 3, 4]);
+    expect(audio).toHaveLength(2);
   });
 
   test("does not resynchronize when the capture geometry changes inside the corruption", () => {

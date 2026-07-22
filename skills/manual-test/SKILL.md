@@ -81,15 +81,27 @@ at a time to conserve context; never let two actors drive devices at once.
      installed one and avoid the ~30s blocking download (#2590).
    - **Do NOT set `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`.** It wants an `.ipa`
      **file**, and `scripts/ios/ctrl-proxy-build-for-testing.sh` produces no `.ipa`
-     — only a derived-data tree. Pointing it at a directory fails **two different
-     ways** depending on whether a runner is already up. **Cold path:** the override
-     forces extraction (`needsRebuild()` returns true whenever an override is set,
-     `src/utils/IOSCtrlProxyBuilder.ts:393`), `ensureBundleDownloaded()` throws
-     `bundle override is not a file`, and CtrlProxy iOS **setup fails**. **Warm
-     path** (runner already installed/cached): setup short-circuits before the
-     builder runs, so the override is **bypassed with no diagnostic** and you
-     attribute results to a local build that never ran. So: if iOS setup fails,
-     suspect the override; if it appears to work, confirm which runner actually
+     — only a derived-data tree. The failure mode depends on whether the runner
+     **service is already running and responding**, which is *not* the same as
+     "artifacts are cached". `setup()` short-circuits only on a live health probe
+     (`isRunning()`, `src/utils/IOSCtrlProxyManager.ts:988-995`, and the
+     `attemptedSetup` reuse at `:966` which also re-probes via `isAvailable()`);
+     cached artifacts alone never short-circuit.
+     - **Service already running / responsive** — the builder is never consulted, so
+       the override is **bypassed with no diagnostic** and you attribute results to a
+       local build that never ran.
+     - **Anything else, including cached-but-not-running** — setup reaches
+       `needsRebuild()` (`src/utils/IOSCtrlProxyManager.ts:1001`), which returns true
+       whenever an override is set (`src/utils/IOSCtrlProxyBuilder.ts:393-396`).
+       `build()` then calls `ensureBundleDownloaded()`, which throws
+       `CtrlProxy bundle override is not a file`
+       (`src/utils/IOSCtrlProxyBuilder.ts:741-742`); that becomes a failed build
+       result (`:485-495`) and `setup()` returns the failure
+       (`src/utils/IOSCtrlProxyManager.ts:1020-1028`). There is **no** fallback to
+       cached artifacts — CtrlProxy iOS **setup fails loudly**.
+
+     So: if iOS setup fails with `bundle override is not a file`, unset the override;
+     if it appears to work, a runner was already live — confirm which runner actually
      served the call (ref
      [#4221](https://github.com/kaeawc/auto-mobile/issues/4221)). The build script
      writes to the **default** derived-data path (`/tmp/automobile-ctrl-proxy`), so
@@ -101,8 +113,10 @@ at a time to conserve context; never let two actors drive devices at once.
      Landing the build in the default derived-data path is **not** sufficient on
      its own: `needsRebuild()` also consults release metadata cached **separately**
      in `~/.automobile/ctrl-proxy-ios/ctrl-proxy-ios-bundle.json`, which the build
-     script never writes (`src/utils/IOSCtrlProxyBuilder.ts:398-433`). Three common
-     states download the **released** runner and extract it straight over
+     script never writes (`src/utils/IOSCtrlProxyBuilder.ts:398-433`). These states
+     are only reached when the service is **not** already running (a live runner is
+     reused and the builder never runs at all). Three of them download the
+     **released** runner and extract it straight over
      `/tmp/automobile-ctrl-proxy`, destroying your local build without a warning:
      - **fresh host / cleared cache** — metadata missing ⇒ "metadata missing, need
        download";
@@ -115,7 +129,12 @@ at a time to conserve context; never let two actors drive devices at once.
 
      Only when metadata is already present **and** matches the current version does
      the "no env var" path reuse your local build. The skip flag short-circuits
-     `needsRebuild()` before any of those checks, so it is the reliable switch.
+     `needsRebuild()` before any of those checks
+     (`src/utils/IOSCtrlProxyBuilder.ts:379-382`), so it is the reliable switch — and
+     it is the only thing that also covers the daemon-startup **prefetch**
+     (`IOSCtrlProxyBuilder.prefetchBuild()`, `src/index.ts:538`), which runs
+     `needsRebuild()`/`build()` in the background independently of `setup()` and can
+     overwrite your local build before you make a single tool call.
      **Caveat — it is process-wide, not iOS-only:** it also suppresses the Android
      CtrlProxy download/install, so install the freshly built APK on the emulator
      yourself (`adb install -r <fresh apk>`) before starting the daemon, or run the

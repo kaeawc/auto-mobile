@@ -255,6 +255,39 @@ describe("webrtcStreamManager", () => {
     await pending;
   });
 
+  test("rejects audio startup promptly when stopped before the publisher connects", async () => {
+    let releaseStart: (() => void) | undefined;
+    let enteredStart: (() => void) | undefined;
+    const startEntered = new Promise<void>(resolve => { enteredStart = resolve; });
+    const allowStartToReturn = new Promise<void>(resolve => { releaseStart = resolve; });
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publisher.start = async () => {
+          await publisher.onBeforeEstablish?.();
+          enteredStart?.();
+          await allowStartToReturn;
+        };
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const starting = startWebRtcStream({
+      device: ANDROID,
+      streamId: "audio-stop-before-connect",
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+    await startEntered;
+    await stopWebRtcStream("audio-stop-before-connect");
+    releaseStart?.();
+
+    await expect(starting).rejects.toThrow(/stopped before capture source started/);
+  });
+
   test("does not leave an orphaned source when the stream is stopped mid-start", async () => {
     // A source whose start() stops the stream (simulating stopWebRtcStream racing
     // the async onConnected startup path). The manager must re-check ownership

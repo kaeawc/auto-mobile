@@ -21,11 +21,6 @@ class VideoEncoder(
   private val bitrate: Int,
   private val fps: Int,
 ) {
-  companion object {
-    /** H.264 Level 4.2 is the capability advertised by the WebRTC publisher. */
-    internal const val WEBRTC_H264_LEVEL = MediaCodecInfo.CodecProfileLevel.AVCLevel42
-  }
-
   private var codec: MediaCodec? = null
 
   /** Input surface for the VirtualDisplay to render to. Available after [start]. */
@@ -58,14 +53,14 @@ class VideoEncoder(
         // Repeat frame after 100ms of no changes (reduces idle bandwidth)
         setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
 
-        // Match the constrained-baseline Level 4.2 advertised by the WebRTC
-        // publisher. The configured presets and validated size overrides fit
-        // this level; leaving it unconstrained can emit an incompatible SPS.
+        // Request baseline profile but let MediaCodec choose a supported level
+        // for this device and capture size. The publisher validates the emitted
+        // SPS before forwarding it, so an unsupported encoder level reconnects
+        // safely instead of making MediaCodec.configure() fail up front.
         setInteger(
           MediaFormat.KEY_PROFILE,
           MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
         )
-        setInteger(MediaFormat.KEY_LEVEL, WEBRTC_H264_LEVEL)
 
         // CBR for consistent bitrate
         setInteger(

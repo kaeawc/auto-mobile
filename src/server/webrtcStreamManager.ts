@@ -42,6 +42,8 @@ interface PendingWebRtcStart {
   config: ReturnType<typeof resolveWebRtcStreamingConfig>;
   token: symbol;
   cancelled: boolean;
+  /** Reject an audio startup waiter when this exact reservation is stopped. */
+  onCancelled?: () => void;
 }
 
 export interface WebRtcStreamManagerDependencies {
@@ -225,6 +227,7 @@ function stopPendingStart(streamId?: string): WebRtcStreamDescriptor | undefined
     return undefined;
   }
   pending.cancelled = true;
+  pending.onCancelled?.();
   startingDeviceIds.delete(pending.device.deviceId);
   startingStreamIds.delete(pending.streamId);
   return stoppedPendingDescriptor(pending);
@@ -235,6 +238,7 @@ function cancelRecordStart(record: WebRtcStreamRecord): void {
   const pending = startingStreamIds.get(record.streamId);
   if (pending?.token === record.startToken) {
     pending.cancelled = true;
+    pending.onCancelled?.();
     startingStreamIds.delete(record.streamId);
   }
   if (startingDeviceIds.get(record.device.deviceId)?.token === record.startToken) {
@@ -296,6 +300,7 @@ export async function startWebRtcStream(
     | ((result: { ok: true } | { ok: false; error: unknown }) => void)
     | undefined;
     let initialAudioSourceStartSettled = false;
+    let initialAudioSourceStartStarted = false;
     const initialAudioSourceStart = config.audioEnabled
       ? new Promise<void>((resolve, reject) => {
         settleInitialAudioSourceStart = result => {
@@ -316,6 +321,14 @@ export async function startWebRtcStream(
         return;
       }
       settleInitialAudioSourceStart?.(error ? { ok: false, error } : { ok: true });
+    };
+    pending.onCancelled = () => {
+      // Once onConnected has begun starting the source, let that operation
+      // report its own result. This preserves a real source-start failure when
+      // a replacement stream is started with the same id.
+      if (!initialAudioSourceStartStarted) {
+        settleInitialAudioStart(new Error(`WebRTC stream ${streamId} was stopped before capture source started.`));
+      }
     };
 
     const publisherRef: { current?: WebRtcPublisher } = {};
@@ -338,6 +351,7 @@ export async function startWebRtcStream(
             return;
           }
           try {
+            initialAudioSourceStartStarted = true;
             const started = await startSource(currentRecord);
             if (!started) {
               const error = new Error(`WebRTC stream ${streamId} stopped before capture source started.`);

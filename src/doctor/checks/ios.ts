@@ -29,8 +29,11 @@ const MIN_XCODE_VERSION = "15.0";
 
 const IOS_RUNNER_REBUILD_RECOMMENDATION =
   "Rebuild and redeploy the iOS CtrlProxy runner: run scripts/ios/ctrl-proxy-build-for-testing.sh " +
-  "and point AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH at the rebuilt bundle, or run the iOS hot-reload " +
-  "watcher with --manage-ios-runner.";
+  "— its output lands in the default derived-data path (set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA " +
+  "to the derived-data root only when building to a non-default location). Start the daemon with " +
+  "AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true so a missing/mismatched cached bundle metadata does not " +
+  "download the released runner over your build. Alternatively, run the iOS hot-reload watcher with " +
+  "--manage-ios-runner.";
 
 /** Per-simulator runner identity gathered by the inspector. */
 export interface IosRunnerInspection {

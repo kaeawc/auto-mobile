@@ -2,9 +2,6 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# Handle Ctrl-C (SIGINT) - exit immediately
-trap 'echo ""; echo "Installation cancelled."; exit 130' INT
-
 # Handle piped execution (curl | bash) where BASH_SOURCE is empty
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,6 +54,11 @@ MCP_CLIENT_LIST=()
 SELECTED_MCP_CLIENTS=()
 PRESET_CLIENT_FILTER=""  # When set, auto-select clients matching this prefix
 IOS_RUNTIME_NAMES=()
+IOS_RUNTIME_PROBE_PID=""
+IOS_RUNTIME_PROBE_FILE=""
+POST_BUN_SETUP_PID=""
+POST_BUN_SETUP_LOG_FILE=""
+POST_BUN_SETUP_STATE_FILE=""
 
 # ============================================================================
 # Original Global State
@@ -94,6 +96,52 @@ fi
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Stop a process tree after first freezing it. Killing only a background Bash
+# subshell leaves its active `bun` child running as an orphan, so capture each
+# descendant before any parent can exit and re-parent it.
+terminate_process_tree() {
+    local pid="$1"
+    kill -0 "${pid}" 2>/dev/null || return 0
+
+    kill -STOP "${pid}" 2>/dev/null || true
+
+    local children=()
+    local child
+    if command_exists pgrep; then
+        while IFS= read -r child; do
+            [[ -n "${child}" ]] && children+=("${child}")
+        done < <(pgrep -P "${pid}" . 2>/dev/null || true)
+    fi
+
+    # Bash 3 treats an empty array as unset with `set -u` enabled.
+    for child in "${children[@]:-}"; do
+        terminate_process_tree "${child}"
+    done
+
+    # A stopped process holds SIGTERM pending until it is resumed. These are
+    # installer-owned worker processes, so use SIGKILL after the recursive
+    # walk to guarantee cancellation cannot leave a Bun or daemon child alive.
+    kill -KILL "${pid}" 2>/dev/null || true
+}
+
+# Reap installer background work and remove its temporary files. The runtime
+# probe and post-Bun setup are always awaited during a normal install; this is
+# only the cancellation/error path that prevents an orphaned child process.
+cleanup_background_installer_work() {
+    local pid
+    for pid in "${IOS_RUNTIME_PROBE_PID}" "${POST_BUN_SETUP_PID}"; do
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            terminate_process_tree "${pid}"
+            wait "${pid}" 2>/dev/null || true
+        fi
+    done
+
+    [[ -n "${IOS_RUNTIME_PROBE_FILE}" ]] && rm -f "${IOS_RUNTIME_PROBE_FILE}"
+    [[ -n "${POST_BUN_SETUP_LOG_FILE}" ]] && rm -f "${POST_BUN_SETUP_LOG_FILE}"
+    [[ -n "${POST_BUN_SETUP_STATE_FILE}" ]] && rm -f "${POST_BUN_SETUP_STATE_FILE}"
+    return 0
 }
 
 # Detect the Git project containing the directory where the installer was run.
@@ -2962,22 +3010,40 @@ _install_dev_tools_brew() {
         return 0
     fi
 
-    local missing=0
+    # Homebrew serializes writes to its prefix, so separate background `brew`
+    # processes would contend for the same lock. One invocation avoids repeated
+    # startup work and lets Homebrew schedule the complete dependency set.
+    local brew_status=0
+    if run_spinner "Installing ${#to_install[@]} development tools" brew install "${to_install[@]}"; then
+        :
+    else
+        brew_status=$?
+    fi
+
+    local installed_after
+    installed_after=$(brew list --formula -1 2>/dev/null || true)
+    local missing_packages=()
     for pkg in "${to_install[@]}"; do
-        if run_spinner "Installing ${pkg}" brew install "${pkg}"; then
-            CHANGES_MADE=true
-        else
-            log_warn "Failed to install ${pkg}"
-            ((missing++)) || true
+        if ! printf '%s\n' "${installed_after}" | grep -qx "${pkg}"; then
+            missing_packages+=("${pkg}")
         fi
     done
 
-    if [[ ${missing} -gt 0 ]]; then
-        log_warn "${missing} dev tool(s) could not be installed"
+    if [[ ${#missing_packages[@]} -gt 0 ]]; then
+        for pkg in "${missing_packages[@]}"; do
+            log_warn "Failed to install ${pkg}"
+        done
+        log_warn "${#missing_packages[@]} dev tool(s) could not be installed"
         return 1
-    else
-        log_info "Development tools ready."
     fi
+
+    if [[ ${brew_status} -ne 0 ]]; then
+        log_warn "Homebrew reported an error after installing all requested development tools"
+        return "${brew_status}"
+    fi
+
+    CHANGES_MADE=true
+    log_info "Development tools ready."
 }
 
 _install_dev_tools_apt() {
@@ -3073,6 +3139,64 @@ handle_bun_setup() {
     fi
 
     return 0
+}
+
+# In non-interactive contributor installs, the CLI/daemon path is independent
+# of Homebrew runtime and development tools once Bun is ready. Capture its
+# output so concurrent work does not corrupt the installer UI, then replay it
+# in order when the parent joins the task.
+start_post_bun_setup() {
+    if [[ "${NON_INTERACTIVE}" != "true" ]] \
+        || [[ "${DRY_RUN}" == "true" ]] \
+        || [[ "${INSTALL_CLAUDE_MARKETPLACE}" == "true" ]] \
+        || { [[ "${INSTALL_AUTOMOBILE_CLI}" != "true" ]] && [[ "${START_DAEMON}" != "true" ]]; }; then
+        return 0
+    fi
+
+    POST_BUN_SETUP_LOG_FILE=$(mktemp "${TMPDIR:-/tmp}/auto-mobile-post-bun-log.XXXXXX")
+    POST_BUN_SETUP_STATE_FILE=$(mktemp "${TMPDIR:-/tmp}/auto-mobile-post-bun-state.XXXXXX")
+
+    (
+        CHANGES_MADE=false
+
+        if [[ "${INSTALL_AUTOMOBILE_CLI}" == "true" ]]; then
+            install_auto_mobile_cli
+        fi
+
+        migrate_stale_daemon
+
+        if [[ "${START_DAEMON}" == "true" ]]; then
+            start_mcp_daemon
+        fi
+
+        printf '%s\n' "${CHANGES_MADE}" >"${POST_BUN_SETUP_STATE_FILE}"
+    ) >"${POST_BUN_SETUP_LOG_FILE}" 2>&1 &
+    POST_BUN_SETUP_PID=$!
+}
+
+finish_post_bun_setup() {
+    if [[ -z "${POST_BUN_SETUP_PID}" ]]; then
+        return 0
+    fi
+
+    local setup_status=0
+    if wait "${POST_BUN_SETUP_PID}"; then
+        :
+    else
+        setup_status=$?
+    fi
+    POST_BUN_SETUP_PID=""
+
+    cat "${POST_BUN_SETUP_LOG_FILE}"
+
+    if [[ ${setup_status} -eq 0 ]] && [[ "$(cat "${POST_BUN_SETUP_STATE_FILE}")" == "true" ]]; then
+        CHANGES_MADE=true
+    fi
+
+    rm -f "${POST_BUN_SETUP_LOG_FILE}" "${POST_BUN_SETUP_STATE_FILE}"
+    POST_BUN_SETUP_LOG_FILE=""
+    POST_BUN_SETUP_STATE_FILE=""
+    return ${setup_status}
 }
 
 # Check if the public npm registry is reachable. If not (e.g. corporate
@@ -3199,6 +3323,50 @@ ios_check_command_line_tools() {
     fi
 
     return 1
+}
+
+# Listing simulator runtimes can wake CoreSimulator and take close to a minute
+# on a fresh macOS host. It is informational at this point, so start it while
+# the installer continues with independent setup work.
+start_ios_runtime_probe() {
+    local os
+    os=$(detect_os)
+    if [[ "${os}" != "macos" ]]; then
+        return 0
+    fi
+    if ! command -v xcrun >/dev/null 2>&1; then
+        return 0
+    fi
+
+    IOS_RUNTIME_PROBE_FILE=$(mktemp "${TMPDIR:-/tmp}/auto-mobile-ios-runtimes.XXXXXX")
+    xcrun simctl list runtimes >"${IOS_RUNTIME_PROBE_FILE}" 2>/dev/null &
+    IOS_RUNTIME_PROBE_PID=$!
+}
+
+finish_ios_runtime_probe() {
+    if [[ -z "${IOS_RUNTIME_PROBE_PID}" ]]; then
+        return 0
+    fi
+
+    local probe_status=0
+    if wait "${IOS_RUNTIME_PROBE_PID}"; then
+        :
+    else
+        probe_status=$?
+    fi
+    IOS_RUNTIME_PROBE_PID=""
+
+    if [[ ${probe_status} -eq 0 ]]; then
+        local runtimes
+        runtimes=$(grep -o 'iOS [0-9.]*' "${IOS_RUNTIME_PROBE_FILE}" | tr '\n' ',' | sed 's/,$//' || true)
+        if [[ -n "${runtimes}" ]]; then
+            log_info "iOS runtimes available: ${runtimes}"
+        fi
+    fi
+
+    rm -f "${IOS_RUNTIME_PROBE_FILE}"
+    IOS_RUNTIME_PROBE_FILE=""
+    return 0
 }
 
 ios_get_installed_runtimes() {
@@ -4033,12 +4201,10 @@ main() {
                 clt_path=$(xcode-select -p 2>/dev/null || true)
                 log_info "Command Line Tools path: ${clt_path}"
 
-                # Check iOS runtimes
-                local runtimes
-                runtimes=$(xcrun simctl list runtimes 2>/dev/null | grep -o 'iOS [0-9.]*' | tr '\n' ',' | sed 's/,$//' || true)
-                if [[ -n "${runtimes}" ]]; then
-                    log_info "iOS runtimes available: ${runtimes}"
-                fi
+                # Listing simulator runtimes may start CoreSimulator and is
+                # slow on a fresh host. It has no bearing on setup readiness,
+                # so collect it while the remaining installer work proceeds.
+                start_ios_runtime_probe
 
                 # Check devicectl (Xcode 15+ physical device control)
                 spin_check "Checking devicectl" "xcrun devicectl --version >/dev/null 2>&1" || true
@@ -4269,6 +4435,8 @@ main() {
         fi
     fi
 
+    start_post_bun_setup
+
     # Runtime dependencies (needed for AutoMobile features)
     show_installation_progress 5
     install_runtime_deps
@@ -4318,7 +4486,7 @@ main() {
 
     # CLI installation
     show_installation_progress 7
-    if [[ "${INSTALL_AUTOMOBILE_CLI}" == "true" ]]; then
+    if [[ -z "${POST_BUN_SETUP_PID}" && "${INSTALL_AUTOMOBILE_CLI}" == "true" ]]; then
         install_auto_mobile_cli
     fi
 
@@ -4327,13 +4495,19 @@ main() {
         install_claude_marketplace
     fi
 
-    # Migrate stale daemon (restart if running an older version)
-    migrate_stale_daemon
+    if [[ -n "${POST_BUN_SETUP_PID}" ]]; then
+        finish_post_bun_setup
+    else
+        # Migrate stale daemon (restart if running an older version)
+        migrate_stale_daemon
 
-    # Daemon startup
-    if [[ "${START_DAEMON}" == "true" ]]; then
-        start_mcp_daemon
+        # Daemon startup
+        if [[ "${START_DAEMON}" == "true" ]]; then
+            start_mcp_daemon
+        fi
     fi
+
+    finish_ios_runtime_probe
 
     # Write environment state for callers (e.g., hot-reload.sh)
     write_env_file
@@ -4356,5 +4530,7 @@ main() {
 # executing the installer. The default (unset) path still runs main for both
 # `bash install.sh` and piped `curl | bash` invocations.
 if [[ "${INSTALL_SH_SOURCE_ONLY:-}" != "true" ]]; then
+    trap 'cleanup_background_installer_work; echo ""; echo "Installation cancelled."; exit 130' INT TERM
+    trap cleanup_background_installer_work EXIT
     main "$@"
 fi

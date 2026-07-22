@@ -52,6 +52,70 @@ STUB
   [[ "$output" == *"dev tool(s) could not be installed"* ]]
 }
 
+@test "macOS development tools are installed in one Homebrew invocation" {
+  local brew_args="${TEST_DIR}/brew-args"
+  local installed_formulae="${TEST_DIR}/installed-formulae"
+
+  cat > "${STUB_BIN}/brew" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "list" ]]; then
+  [[ -f "${INSTALLED_FORMULAE}" ]] && cat "${INSTALLED_FORMULAE}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "install" ]]; then
+  shift
+  printf '%s\n' "$@" > "${BREW_ARGS}"
+  printf '%s\n' "$@" > "${INSTALLED_FORMULAE}"
+  exit 0
+fi
+
+exit 1
+STUB
+  "$CHMOD" +x "${STUB_BIN}/brew"
+
+  export BREW_ARGS="${brew_args}"
+  export INSTALLED_FORMULAE="${installed_formulae}"
+  run _install_dev_tools_brew
+
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "${brew_args}")" -eq 12 ]
+  grep -qx "shellcheck" "${brew_args}"
+  grep -qx "ideviceinstaller" "${brew_args}"
+}
+
+@test "macOS development tool installer fails when Homebrew fails after listing packages" {
+  local install_attempted="${TEST_DIR}/install-attempted"
+
+  cat > "${STUB_BIN}/brew" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "list" ]]; then
+  if [[ -f "${INSTALL_ATTEMPTED}" ]]; then
+    printf '%s\n' shellcheck jq ripgrep yq gum hadolint xmlstarlet swiftformat swiftlint xcodegen libusbmuxd ideviceinstaller
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "install" ]]; then
+  touch "${INSTALL_ATTEMPTED}"
+  exit 42
+fi
+
+exit 1
+STUB
+  "$CHMOD" +x "${STUB_BIN}/brew"
+  export INSTALL_ATTEMPTED="${install_attempted}"
+
+  run _install_dev_tools_brew
+
+  [ "$status" -eq 42 ]
+  [[ "$output" == *"Homebrew reported an error"* ]]
+}
+
 @test "Linux development tool installer fails when any apt package install fails" {
   cat > "${STUB_BIN}/apt-get" <<'STUB'
 #!/usr/bin/env bash

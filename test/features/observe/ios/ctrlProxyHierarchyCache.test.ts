@@ -123,6 +123,24 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(h.fetchCount()).toBe(2);
   });
 
+  test("the raw-observe invalidate keeps the unfiltered snapshot out of the next read", async () => {
+    // Mirrors HierarchyCollector.collectRaw: a raw (disableAllFiltering) fetch
+    // caches the *unfiltered* snapshot, then invalidates so it does not bleed into
+    // the next normal observe. That caller is the one the no-op was defeating —
+    // it never depended on invalidateCache() doing nothing.
+    const rawResult = await h.hierarchy.requestHierarchySync(undefined, true, undefined, 1000);
+    expect(h.fetchCount()).toBe(1);
+    expect(rawResult).not.toBeNull();
+    // The unfiltered snapshot really is in the shared cache at this point.
+    expect(h.getCached()?.hierarchy).toBe(rawResult!.hierarchy);
+
+    h.hierarchy.invalidateCache();
+
+    const next = await h.hierarchy.getLatestHierarchy(true, 1000);
+    expect(h.fetchCount()).toBe(2);
+    expect(next.hierarchy).not.toBe(rawResult!.hierarchy);
+  });
+
   // --- Controls: these fail if the fix simply disabled caching. ---
 
   test("without invalidation the cache serves inside the TTL", async () => {

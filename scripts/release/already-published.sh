@@ -22,6 +22,14 @@
 # Homebrew and the GitHub Release are deliberately absent: update-brew-formula.sh
 # already exits early when the rendered formula is unchanged, and
 # action-gh-release updates an existing release rather than failing on one.
+#
+# Known limit: the maven check probes repo1.maven.org, which is the sync target
+# rather than the Central Portal the publish uploads to. A rerun started inside
+# the sync window sees 404s, answers "missing", and the Gradle step then dies on
+# a duplicate GAV. That is the pre-guard behaviour, so it costs nothing, but it
+# means the maven guard helps a rerun an hour later and not a rerun a minute
+# later. Querying the Portal API with the credentials the step already has would
+# close it.
 
 set -euo pipefail
 
@@ -55,7 +63,10 @@ check_npm() {
     return 0
   fi
 
-  if printf '%s\n' "$out" | grep -q '404'; then
+  # Match npm's own error code, not a bare "404". npm appends a debug-log path
+  # whose millisecond field can itself be 404 (…T10_27_54_404Z-debug-0.log),
+  # which would make any npm failure -- ENOTFOUND, auth, 500 -- read as missing.
+  if printf '%s\n' "$out" | grep -q 'E404'; then
     echo missing
     return 0
   fi
@@ -110,9 +121,23 @@ check_mcp() {
   local version="$1" encoded body matches
   encoded="${MCP_SERVER_NAME//\//%2F}"
 
+  # v0.1 is the documented versions endpoint and the one publish-mcp-registry.sh
+  # verifies against. /v0 currently returns a byte-identical response, but it
+  # reads as a legacy alias and there is no reason to depend on it.
   if ! body=$(curl -sS --max-time 30 --retry 3 --retry-delay 2 \
-    "${MCP_REGISTRY_URL}/v0/servers/${encoded}/versions" 2>/dev/null); then
+    "${MCP_REGISTRY_URL}/v0.1/servers/${encoded}/versions" 2>/dev/null); then
     echo "ERROR: could not reach the MCP registry" >&2
+    return 1
+  fi
+
+  # curl has no -f here, and the registry answers a missing or renamed server
+  # with HTTP 404 and a well-formed JSON error object. `.servers[]?` suppresses
+  # the iterate error on that body, so it would parse to zero versions and read
+  # as "missing" -- the guard silently ceasing to guard. Require the shape.
+  if ! printf '%s' "$body" \
+    | jq -e 'type == "object" and (.servers | type) == "array"' >/dev/null 2>&1; then
+    echo "ERROR: MCP registry did not return a server list for ${MCP_SERVER_NAME}" >&2
+    echo "       response: ${body}" >&2
     return 1
   fi
 
@@ -143,8 +168,10 @@ main() {
 
   local target="$1" version="$2"
 
-  if [[ -z "$version" ]]; then
-    echo "ERROR: version must not be empty" >&2
+  # Same shape validate-release-tag enforces. A -z test alone would let "  "
+  # through, building a URL with spaces that 404s and reads as "missing".
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+    echo "ERROR: not a release version: '${version}' (expected 0.0.45)" >&2
     return 2
   fi
 

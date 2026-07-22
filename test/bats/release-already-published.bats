@@ -14,12 +14,20 @@ setup() {
   export PATH
 }
 
+# Both stubs append their argv to a log. Asserting on that log is the only thing
+# standing between this suite and a guard that queries the wrong thing: a stub
+# that ignores its arguments answers identically whether the script asks for the
+# right version or no version at all, so dropping "@$version" from the npm spec
+# would make the guard report "published" for every release, skip npm publish
+# forever, and keep every test green.
+
 # Writes a `curl` stub. $1 is the status returned for Maven POM requests; any
 # MCP registry request gets $2 as its response body.
 stub_curl() {
   local maven_status="${1:-404}" mcp_body="${2:-\{\"servers\":[]\}}"
   cat > "$STUB_DIR/curl" <<EOF
 #!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${BATS_TEST_TMPDIR}/curl.args"
 url="\${*: -1}"
 if [[ "\$url" == *registry.modelcontextprotocol.io* || "\$url" == *mcp-stub* ]]; then
   printf '%s' '${mcp_body}'
@@ -34,6 +42,7 @@ stub_npm() {
   local exit_code="$1" output="$2"
   cat > "$STUB_DIR/npm" <<EOF
 #!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${BATS_TEST_TMPDIR}/npm.args"
 printf '%s\n' '${output}'
 exit ${exit_code}
 EOF
@@ -45,6 +54,9 @@ EOF
   run "$SCRIPT" npm 0.0.45
   [ "$status" -eq 0 ]
   [ "$output" = "published" ]
+  # Pin the query, not just the answer. Without @0.0.45 in the spec `npm view`
+  # resolves the package itself and every version reports published.
+  grep -Fq 'view @kaeawc/auto-mobile@0.0.45 version' "$BATS_TEST_TMPDIR/npm.args"
 }
 
 @test "npm: a 404 reports missing" {
@@ -67,6 +79,23 @@ EOF
   MAVEN_BASE_URL="http://maven-stub" run "$SCRIPT" maven 0.0.44
   [ "$status" -eq 0 ]
   [ "$output" = "published" ]
+  # The group path, artifact id and version must all reach the URL; a typo in
+  # any of them makes the guard answer "missing" forever.
+  grep -Fq 'http://maven-stub/dev/jasonpearson/auto-mobile/auto-mobile-sdk/0.0.44/auto-mobile-sdk-0.0.44.pom' \
+    "$BATS_TEST_TMPDIR/curl.args"
+}
+
+# A wrong artifact list silently narrows what "published" means. Pin it to the
+# POM_ARTIFACT_ID values the Gradle publish actually uses.
+@test "maven: the probed artifacts match the modules release.yml publishes" {
+  local repo_root="$BATS_TEST_DIRNAME/../.."
+  local module
+  for module in protocol test-plan-validation junit-runner auto-mobile-sdk; do
+    local artifact
+    artifact="$(sed -n 's/^POM_ARTIFACT_ID=//p' "$repo_root/android/$module/gradle.properties")"
+    [ -n "$artifact" ]
+    grep -Fq "  $artifact" "$repo_root/scripts/release/already-published.sh"
+  done
 }
 
 @test "maven: no artifacts present reports missing" {
@@ -106,6 +135,10 @@ EOF
   MCP_REGISTRY_URL="http://mcp-stub" run "$SCRIPT" mcp 0.0.45
   [ "$status" -eq 0 ]
   [ "$output" = "published" ]
+  # The slash in the server name must be percent-encoded; unencoded, the
+  # registry returns an endpoint-not-found envelope that parses to zero versions.
+  # Pin the API version too — a silent endpoint move is the same class of bug.
+  grep -Fq '/v0.1/servers/dev.jasonpearson%2Fauto-mobile/versions' "$BATS_TEST_TMPDIR/curl.args"
 }
 
 @test "mcp: a registry holding only older versions reports missing" {
@@ -133,4 +166,42 @@ EOF
 @test "a missing version argument is rejected" {
   run "$SCRIPT" npm
   [ "$status" -ne 0 ]
+}
+
+# curl without -f exits 0 on an HTTP error, so the "could not reach" branches
+# only fire on a genuine transport failure (exit 6, status 000). Neither stub
+# above ever exits non-zero, so these branches were previously uncovered.
+@test "maven: an unreachable registry fails closed" {
+  printf '#!/usr/bin/env bash\nprintf %%s 000\nexit 6\n' > "$STUB_DIR/curl"
+  chmod +x "$STUB_DIR/curl"
+  MAVEN_BASE_URL="http://maven-stub" run "$SCRIPT" maven 0.0.45
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not reach Maven Central"* ]]
+  [[ "$output" != *missing* ]]
+}
+
+@test "mcp: an unreachable registry fails closed" {
+  printf '#!/usr/bin/env bash\nexit 6\n' > "$STUB_DIR/curl"
+  chmod +x "$STUB_DIR/curl"
+  MCP_REGISTRY_URL="http://mcp-stub" run "$SCRIPT" mcp 0.0.45
+  [ "$status" -ne 0 ]
+  [[ "$output" != *missing* ]]
+}
+
+# The registry answers a missing or renamed server with HTTP 404 and a
+# well-formed JSON error object. curl has no -f, so `.servers[]?` swallows it as
+# zero versions and the guard would report "missing" for a server that may well
+# be published under a name the script no longer knows.
+@test "mcp: a 404 error envelope fails closed rather than reading as missing" {
+  stub_curl 404 '{"title":"Not Found","status":404,"detail":"Server not found"}'
+  MCP_REGISTRY_URL="http://mcp-stub" run "$SCRIPT" mcp 0.0.45
+  [ "$status" -ne 0 ]
+  [[ "$output" != *missing* ]]
+  [[ "$output" == *"did not return a server list"* ]]
+}
+
+@test "a whitespace-only version is rejected" {
+  run "$SCRIPT" maven "   "
+  [ "$status" -ne 0 ]
+  [[ "$output" != *missing* ]]
 }

@@ -15,8 +15,10 @@ name: Release
         type: string
 
 # `create:` is retained as a fallback for a hand-pushed tag, so one tag could in
-# principle arrive by both routes. Two concurrent releases would double-publish to
-# npm, Maven and Docker; serialize per tag rather than rely on that never racing.
+# principle arrive by both routes. This serializes them; it does NOT dedupe them
+# -- with cancel-in-progress false the second run queues and then starts once the
+# first finishes. What makes that second run harmless is the already-published.sh
+# guard on each non-idempotent publish step, not this block. Both are required.
 concurrency:
   group: release-${{ inputs.tag || github.event.ref }}
   cancel-in-progress: false
@@ -43,8 +45,23 @@ jobs:
         env:
           TAG: ${{ inputs.tag || github.event.ref }}
           EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # The dispatch must run ON the tag, not merely name it. The Actions UI
+          # ref picker defaults to a branch, and prepare-release is not the only
+          # caller. docker/metadata-action derives its semver tags from
+          # github.ref, so a dispatch from main checks out the right tree and
+          # still pushes an image with no version tag -- green, and wrong.
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] \
+            && { [[ "$REF_TYPE" != "tag" ]] || [[ "$REF_NAME" != "$TAG" ]]; }; then
+            echo "Release must be dispatched on tag '$TAG', but this run is on" >&2
+            echo "${REF_TYPE} '${REF_NAME}'. Re-run it and pick the tag in the" >&2
+            echo "ref dropdown, or let prepare-release dispatch it." >&2
+            exit 1
+          fi
           if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
             echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
             exit 0

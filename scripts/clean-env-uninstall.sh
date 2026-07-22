@@ -330,7 +330,7 @@ remove_homebrew_packages() {
         return 0
     fi
 
-    for pkg in "${installed[@]}"; do
+    for pkg in ${installed[@]+"${installed[@]}"}; do
         run_cmd brew uninstall --ignore-dependencies "${pkg}" || true
     done
 

@@ -7,10 +7,91 @@ import type { BackStack } from "./interfaces/BackStack";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
 /**
- * Legacy task header, printed by `TaskRecord.toString()` / the pre-Android-10
- * `dumpsys` layout: "Task id #123" or "TaskRecord{task123 #123 A=... sz=3}".
+ * Legacy task header, printed by the pre-Android-10 `dumpsys` layout as either
+ * "Task id #123" or `ActivityStack.dumpActivitiesLocked`'s `"    * " + task`,
+ * i.e. "* TaskRecord{1d3813b #14418 A=com.example U=0 StackId=436 sz=2}".
+ *
+ * Anchored to the start of the line (issue #4263). `TaskRecord{...}` is printed
+ * verbatim in at least two NON-header positions in real legacy output:
+ *
+ *     * Hist #1: ActivityRecord{...}
+ *         frontOfTask=false task=TaskRecord{1d3813b #14418 A=... sz=2}
+ *
+ *     Running activities (most recent first):
+ *       TaskRecord{1d3813b #14418 A=... sz=2}
+ *
+ * The first sits BETWEEN two `Hist` rows, so read as a header it splits one
+ * task's activities across two headers and (before #4263) blanked the affinity
+ * of every activity below it. Line-anchoring rejects it: it is always preceded
+ * by `frontOfTask=<bool> task=`.
+ *
+ * The second IS at the start of its line, only without the bullet, so anchoring
+ * alone cannot tell it apart from a real header -- and the bullet-less form is
+ * itself pinned as a header by the #4223 suite. It is instead defused in
+ * `parseTasks`, which resumes an already-seen task id rather than restarting
+ * it, so a repeat cannot discard what was already parsed.
+ *
+ * The id is taken from the token right after the identity hash rather than by
+ * the previous greedy scan, which captured the last "#number" on the line.
  */
-const LEGACY_TASK_HEADER = /Task\s+id\s+#(\d+)|TaskRecord.*#(\d+)/;
+const LEGACY_TASK_HEADER = /^\s*(?:Task\s+id\s+#(\d+)\b|\*?\s*TaskRecord\{\S+\s+#(\d+)\b(.*))$/;
+
+/**
+ * `A=` / `I=` / `aI=` out of a task-header tail. Space-anchored so "aI=" is not
+ * read as "I=" and so "visibleRequested=" and friends cannot contribute a stray
+ * key match; the value excludes "}" so a field printed last yields the bare
+ * value rather than one with the closing brace glued on.
+ */
+const HEADER_AFFINITY = /(?:^|\s)A=([^\s}]+)/;
+const HEADER_COMPONENT = /(?:^|\s)a?I=([^\s}]+)/;
+
+/**
+ * One printed activity: "* Hist  #0: ActivityRecord{2b2ce0f u0 pkg/.Cls t61}".
+ *
+ * AOSP's `ActivityRecord.toString()` always puts the user id and the component
+ * INSIDE the braces, but it does NOT agree across versions on where the task id
+ * goes. Both shapes are present in this repo's committed captures under
+ * test/features/observe/windowDumps:
+ *
+ *   API 30-32, 34-36: ActivityRecord{2b2ce0f u0 com.example/.Main t61}
+ *   API 33:           ActivityRecord{a9cf40f u0 com.example/.Main} t8}
+ *
+ * On API 33 the component is closed off by its own brace and the task id trails
+ * outside it. So the component group is bounded to exclude "}" (otherwise the
+ * API 33 shape yields a name ending in "}"), and the task id is scanned for
+ * anywhere in the tail rather than assumed to sit at a fixed offset.
+ *
+ * Other trailing tokens are tolerated deliberately: a finishing activity prints
+ * " f" and an activity with no task prints "t??". Requiring the task id to be
+ * the last token is what made the original regex drop every line, so an
+ * unrecognized tail leaves the task id to fall back to the enclosing header
+ * rather than rejecting the whole activity.
+ */
+const ACTIVITY_LINE = /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+([^\s}]+)([^\n]*\})/;
+
+/** A parsed "Hist #N" row: its index within the task and its component. */
+interface HistRow {
+  /** Counts UP from the task root, so #0 is the root, not the top. */
+  histIndex: number;
+  /** Verbatim "pkg/.Cls" -- the same shape legacy `realActivity=` prints. */
+  component: string;
+  /** The row's own "tNN" token, when it carries one. */
+  taskId?: number;
+}
+
+function parseHistRow(line: string): HistRow | undefined {
+  const match = line.match(ACTIVITY_LINE);
+  if (!match) {
+    return undefined;
+  }
+  // Standalone "tNN" token in the tail, on either side of a closing brace.
+  const taskId = match[3].match(/(?:^|[\s}])t(\d+)(?=[\s}]|$)/);
+  return {
+    histIndex: parseInt(match[1], 10),
+    component: match[2],
+    taskId: taskId ? parseInt(taskId[1], 10) : undefined
+  };
+}
 
 /**
  * Modern task header (issue #4223). `TaskFragment.dumpInner` prints
@@ -59,26 +140,29 @@ interface TaskHeaderFields {
 function parseTaskHeader(line: string): TaskHeaderFields | undefined {
   const modern = line.match(MODERN_TASK_HEADER);
   if (modern) {
-    const tail = modern[2];
-    // Space-anchored so "aI=" is not read as "I=", and so "visibleRequested="
-    // and friends cannot contribute a stray key match.
-    // The value is bounded to exclude "}" so a field printed last still yields
-    // the bare value rather than one with the closing brace glued on.
-    const affinity = tail.match(/(?:^|\s)A=([^\s}]+)/);
-    const component = tail.match(/(?:^|\s)a?I=([^\s}]+)/);
-    return {
-      id: parseInt(modern[1], 10),
-      affinity: affinity ? affinity[1] : undefined,
-      component: component ? component[1] : undefined
-    };
+    return fieldsFromTail(parseInt(modern[1], 10), modern[2]);
   }
 
   const legacy = line.match(LEGACY_TASK_HEADER);
   if (legacy) {
-    return { id: parseInt(legacy[1] || legacy[2], 10) };
+    // "Task id #N" carries no fields; the "* TaskRecord{...}" form carries the
+    // same A=/I=/aI= tokens as the modern header and is read the same way.
+    return legacy[1] !== undefined
+      ? { id: parseInt(legacy[1], 10) }
+      : fieldsFromTail(parseInt(legacy[2], 10), legacy[3]);
   }
 
   return undefined;
+}
+
+function fieldsFromTail(id: number, tail: string): TaskHeaderFields {
+  const affinity = tail.match(HEADER_AFFINITY);
+  const component = tail.match(HEADER_COMPONENT);
+  return {
+    id,
+    affinity: affinity ? affinity[1] : undefined,
+    component: component ? component[1] : undefined
+  };
 }
 
 /**
@@ -126,37 +210,12 @@ export class GetBackStack implements BackStack {
         logger.debug(`[BACK_STACK] Found task affinity: ${currentTaskAffinity}`);
       }
 
-      // Match activity. AOSP's ActivityRecord.toString() always puts the user id
-      // and the component INSIDE the braces, but it does NOT agree across
-      // versions on where the task id goes. Both shapes are present in this
-      // repo's committed captures under test/features/observe/windowDumps:
-      //
-      //   API 30-32, 34-36: ActivityRecord{2b2ce0f u0 com.example/.Main t61}
-      //   API 33:           ActivityRecord{a9cf40f u0 com.example/.Main} t8}
-      //
-      // On API 33 the component is closed off by its own brace and the task id
-      // trails outside it. So the component group is bounded to exclude "}"
-      // (otherwise the API 33 shape yields a name ending in "}"), and the task
-      // id is scanned for anywhere in the tail rather than assumed to sit at a
-      // fixed offset. The "Hist #N" index counts up from the task root, so #0
-      // is the task root and the highest index is the topmost activity.
-      //
-      // Other trailing tokens are tolerated deliberately: a finishing activity
-      // prints " f" and an activity with no task prints "t??". Requiring the
-      // task id to be the last token is what made the original regex drop every
-      // line, so an unrecognized tail leaves the task id to fall back to the
-      // enclosing task header rather than rejecting the whole activity.
-      const activityMatch = line.match(
-        /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+([^\s}]+)([^\n]*\})/
-      );
-      if (activityMatch) {
-        const histIndex = parseInt(activityMatch[1], 10);
-        const fullName = activityMatch[2];
-        // Standalone "tNN" token in the tail, on either side of a closing brace.
-        const taskIdMatchFromActivity = activityMatch[3].match(/(?:^|[\s}])t(\d+)(?=[\s}]|$)/);
-        const taskIdFromActivity = taskIdMatchFromActivity
-          ? parseInt(taskIdMatchFromActivity[1], 10)
-          : currentTaskId;
+      // Match activity (see ACTIVITY_LINE / parseHistRow).
+      const hist = parseHistRow(line);
+      if (hist) {
+        const histIndex = hist.histIndex;
+        const fullName = hist.component;
+        const taskIdFromActivity = hist.taskId ?? currentTaskId;
 
         // Parse package/activity name (format: "com.example/.MainActivity" or "com.example/com.example.MainActivity")
         const parts = fullName.split("/");
@@ -198,15 +257,26 @@ export class GetBackStack implements BackStack {
     // "numActivities=" line, and the header's "sz=" is getChildCount() -- child
     // *containers*, which for a non-leaf task counts child tasks rather than
     // activities. Counting the task's own "Hist #N" lines is correct for both.
-    let histCount = 0;
+    // Kept per task id, not per header line: legacy output prints two headers
+    // for the same task ("Task id #N" then "* TaskRecord{... #N ...}"), so the
+    // second must resume the first's count rather than restart it.
+    const histCounts: Map<number, number> = new Map();
+    // The component of each task's "Hist #0" row. `Hist #0` is the task root
+    // (see #4197), and its "pkg/.Cls" is the same shape legacy `realActivity=`
+    // prints. This is the ONLY package source on the modern path (issue #4263):
+    // a modern header's `A=` is `Task.affinity`, which is uid-prefixed on
+    // Android 11+, is an app-declarable string that need not name a package,
+    // and is empty for `android:taskAffinity=""`. It is applied at flush time,
+    // and only as a fallback, so `I=`/`aI=` and `realActivity=` still win.
+    const histRoots: Map<number, string> = new Map();
 
     const flush = (): void => {
       if (currentTaskId === -1 || currentTask.id === undefined) {
         return;
       }
-      if (currentTask.numActivities === undefined) {
-        currentTask.numActivities = histCount;
-      }
+      // Hist-derived fields are filled in one pass after the loop, not here: a
+      // task can be flushed and then resumed by a later header for the same id,
+      // and a value written here would be mistaken for an explicit one.
       tasks.set(currentTaskId, currentTask as TaskInfo);
     };
 
@@ -219,8 +289,12 @@ export class GetBackStack implements BackStack {
         flush();
 
         currentTaskId = header.id;
-        currentTask = { id: currentTaskId };
-        histCount = 0;
+        // Resume a task we have already seen a header for rather than starting
+        // it over. Legacy output prints "Task id #N" and "* TaskRecord{... #N}"
+        // back to back for one task, and repeats the TaskRecord line under
+        // "Running activities"; restarting there discarded everything already
+        // parsed for that task (issue #4263).
+        currentTask = tasks.get(currentTaskId) ?? { id: currentTaskId };
         if (header.affinity) {
           currentTask.affinity = header.affinity;
         }
@@ -235,8 +309,18 @@ export class GetBackStack implements BackStack {
         continue;
       }
 
-      if (HIST_LINE.test(line)) {
-        histCount++;
+      const hist = parseHistRow(line);
+      if (hist) {
+        // A row carrying its own tNN belongs to that task even when it is
+        // printed under another header.
+        const owner = hist.taskId ?? currentTaskId;
+        histCounts.set(owner, (histCounts.get(owner) ?? 0) + 1);
+        if (hist.histIndex === 0 && !histRoots.has(owner)) {
+          histRoots.set(owner, hist.component);
+        }
+      } else if (HIST_LINE.test(line)) {
+        // A Hist row in a shape parseHistRow does not recognize still counts.
+        histCounts.set(currentTaskId, (histCounts.get(currentTaskId) ?? 0) + 1);
       }
 
       // Match affinity
@@ -267,6 +351,25 @@ export class GetBackStack implements BackStack {
 
     // Save last task
     flush();
+
+    for (const task of tasks.values()) {
+      if (task.numActivities === undefined) {
+        task.numActivities = histCounts.get(task.id) ?? 0;
+      }
+      const histRoot = histRoots.get(task.id);
+      // No Hist #0 row and no I=/aI=/realActivity= means nothing in this dump
+      // identifies the task's package. Leaving both undefined is the honest
+      // answer; the affinity is not a package name and is not guessed from.
+      if (histRoot === undefined) {
+        continue;
+      }
+      if (task.rootActivity === undefined) {
+        task.rootActivity = histRoot;
+      }
+      if (task.packageName === undefined) {
+        task.packageName = histRoot.split("/")[0];
+      }
+    }
 
     return Array.from(tasks.values());
   }

@@ -19,6 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
 
+# shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
+source "${SCRIPT_DIR}/swift_test_counts.sh"
+
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  Swift Package Tests${NC}"
 echo -e "${CYAN}========================================${NC}"
@@ -78,6 +81,15 @@ IOS_ONLY_PACKAGES=(
     "AccessibilityService"
 )
 
+# Total tests executed in a `swift test` transcript.
+#
+# Both runners can appear in one package's output, so their counts are summed:
+#   XCTest        "Executed 26 tests, with 0 failures ..."
+#   swift-testing "Test run with 0 tests in 0 suites passed ..."
+#
+# XCTest prints one "Executed" line per test bundle AND a duplicate summary line,
+# so the maximum is taken rather than the sum of the XCTest lines; swift-testing's
+# single count is then added.
 # Run tests for macOS-compatible packages
 echo -e "${BLUE}Running tests for macOS-compatible packages...${NC}"
 for package in "${TESTABLE_PACKAGES[@]}"; do
@@ -87,12 +99,30 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
 
         # Check if the package has test targets
         if grep -q "testTarget" "${PACKAGE_DIR}/Package.swift"; then
-            if (cd "${PACKAGE_DIR}" && swift test -Xswiftc -warnings-as-errors 2>&1); then
-                print_status 0 "${package} tests passed"
-                PASSED_PACKAGES+=("${package}")
+            # Assign inside the `if` condition: under set -e a bare
+            # test_output="$(failing-cmd)" aborts the whole script, so a package
+            # that genuinely fails would kill the run instead of being recorded.
+            if test_output="$(cd "${PACKAGE_DIR}" && swift test -Xswiftc -warnings-as-errors 2>&1)"; then
+                test_rc=0
             else
+                test_rc=$?
+            fi
+            echo "${test_output}"
+            executed_test_count "${test_output}"
+
+            if [ "${test_rc}" -ne 0 ]; then
                 print_status 1 "${package} tests failed"
                 FAILED_PACKAGES+=("${package}")
+            elif [ "${EXECUTED_TESTS}" -eq 0 ]; then
+                # `swift test` exits 0 when it runs nothing, so a package whose
+                # suite was deleted, emptied, or simply not discovered is
+                # indistinguishable from one that passed (issue #4143). A package
+                # that declares a testTarget must actually execute tests.
+                print_status 1 "${package} declares a testTarget but executed 0 tests"
+                FAILED_PACKAGES+=("${package} (0 tests executed)")
+            else
+                print_status 0 "${package} tests passed"
+                PASSED_PACKAGES+=("${package}")
             fi
         else
             print_warning "${package} has no test targets"

@@ -1540,16 +1540,15 @@ jobs:
             -destination "id=${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}" \
             -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests
 
-      - name: "Shutdown CtrlProxy UI test simulator"
-        if: always()
-        run: xcrun simctl shutdown all || true
-
-      # The Xcode 26.2 Reminders leg used to run here. It was dropped from PRs
-      # (issue #4078): it made the 26.5 Reminders run the job's THIRD simulator
-      # boot, which owned the entire slow tail (median 221s vs 81-100s for boots
-      # 1-2; every boot ≥300s was that one) and pushed the job past its 45-minute
-      # cap. Xcode-toolchain drift coverage for 26.2 is kept in nightly.yml, where
-      # it does not gate merges (see also #3592).
+      # One teardown, not two. These were separate because the Xcode 26.2 leg sat
+      # between them: the first released the CtrlProxy UI simulator before 26.2
+      # started, the second released 26.2's before 26.5 started. #4110 dropped
+      # that leg (it made the 26.5 Reminders run the job's THIRD boot, which owned
+      # the entire slow tail -- median 221s vs 81-100s for boots 1-2, every boot
+      # ≥300s was that one -- and pushed the job past its 45-minute cap), so the
+      # second `shutdown all` had nothing left to shut down. Xcode-toolchain drift
+      # coverage for 26.2 lives in nightly.yml, where it does not gate merges
+      # (see also #3592).
       - name: "Shutdown iOS Simulators"
         if: always()
         run: xcrun simctl shutdown all || true

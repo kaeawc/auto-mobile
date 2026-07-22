@@ -413,6 +413,20 @@ function parseArgs(log: ParseLogger): {
 }
 
 async function main() {
+  const rawArgs = process.argv.slice(2);
+  const bootDeviceIndex = rawArgs.indexOf("--boot-device");
+  if (bootDeviceIndex >= 0) {
+    // The daemon-free boot entrypoint must remain before every normal server
+    // import and startup side effect: no database, daemon, CtrlProxy, or media
+    // cache work is needed to launch and await a device.
+    const { runBootDeviceCommand } = await import("./cli/bootDevice");
+    await runBootDeviceCommand(rawArgs.slice(bootDeviceIndex + 1));
+    // Android launch owns a live emulator child; the one-shot caller only
+    // needs the already-flushed JSON result, not that child as its own event
+    // loop responsibility.
+    process.exit(0);
+  }
+
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");

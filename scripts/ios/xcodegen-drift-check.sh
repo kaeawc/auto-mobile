@@ -112,6 +112,6 @@ if [ "${SCOPE}" = "--ctrl-proxy" ]; then
 else
     echo "Run scripts/ios/xcodegen-generate.sh and commit the regenerated project files." >&2
 fi
-git status --short -- "${REAL_DRIFT_PATHS[@]}" >&2
-git diff -- "${REAL_DRIFT_PATHS[@]}" >&2
+git status --short -- ${REAL_DRIFT_PATHS[@]+"${REAL_DRIFT_PATHS[@]}"} >&2
+git diff -- ${REAL_DRIFT_PATHS[@]+"${REAL_DRIFT_PATHS[@]}"} >&2
 exit 1

@@ -166,14 +166,14 @@ kill_ctrl_proxy_ios_xcodebuild_processes() {
     log_info "Killing CtrlProxy iOS xcodebuild processes: ${pids[*]}"
   fi
 
-  for pid in "${pids[@]}"; do
+  for pid in ${pids[@]+"${pids[@]}"}; do
     kill "${pid}" 2>/dev/null || true
   done
 
   sleep 2
 
   local still_running=()
-  for pid in "${pids[@]}"; do
+  for pid in ${pids[@]+"${pids[@]}"}; do
     if kill -0 "${pid}" 2>/dev/null; then
       still_running+=("${pid}")
     fi
@@ -253,10 +253,10 @@ reload_mcp_daemon() {
     # Run daemon restart in background with timeout to prevent hanging
     local daemon_log="${PROJECT_ROOT}/scratch/daemon-restart.log"
     if [[ "${should_skip_ios_build}" == "true" ]]; then
-      env AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true "${daemon_env[@]}" \
+      env AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true ${daemon_env[@]+"${daemon_env[@]}"} \
         auto-mobile --daemon restart --debug --debug-perf > "${daemon_log}" 2>&1 &
     else
-      env "${daemon_env[@]}" \
+      env ${daemon_env[@]+"${daemon_env[@]}"} \
         auto-mobile --daemon restart --debug --debug-perf > "${daemon_log}" 2>&1 &
     fi
     local daemon_pid=$!

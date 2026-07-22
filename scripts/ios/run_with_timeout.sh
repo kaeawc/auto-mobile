@@ -66,7 +66,10 @@ run_with_timeout() {
         sleep 2
         kill -KILL -"${cmd_pid}" 2> /dev/null || kill -KILL "${cmd_pid}" 2> /dev/null || true
       fi
-    ) &
+    # The watcher never reports through the caller's output. Closing its output
+    # descriptors prevents its sleep child from holding a command substitution
+    # open after the timed command has already exited.
+    ) > /dev/null 2>&1 3>&- &
     local watcher_pid=$!
 
     local status=0

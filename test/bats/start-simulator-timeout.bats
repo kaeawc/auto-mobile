@@ -77,10 +77,13 @@ run_helper() {
 
 @test "run_with_timeout passes a genuine non-zero status through unchanged" {
   # Guards the inverse of the test above: expiry must not be conflated with a
-  # command that simply failed fast.
-  run_helper 'run_with_timeout 5 sh -c "exit 3"; echo "rc=$?"'
+  # command that simply failed fast. Capture output as boot-simulator.sh does:
+  # the watchdog must not keep the command substitution open until its timeout.
+  run_helper 'start=$SECONDS; value="$(run_with_timeout 5 sh -c "printf output; exit 3")"; status=$?; printf "rc=%s elapsed=%s value=%s\n" "$status" "$((SECONDS - start))" "$value"'
   [ "$status" -eq 0 ]
   [[ "$output" == *"rc=3"* ]]
+  [[ "$output" == *"value=output"* ]]
+  [[ "$output" == *"elapsed=0"* || "$output" == *"elapsed=1"* ]]
 }
 
 @test "run_with_timeout bounds a command whose descendant holds stdout open" {

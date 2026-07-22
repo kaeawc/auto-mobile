@@ -174,6 +174,27 @@ describe("WebRtcPublisher WHIP answer validation", () => {
     await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("42e02a", "64001f"));
   });
 
+  test("accepts every RFC 6184 constrained-baseline profile representation", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () => ({
+          publish: async () => ({
+            answerSdp: ACCEPTED_VIDEO_ANSWER.replace("42e02a", "42c02a"),
+            resourceUrl: "https://coord/whip/s",
+          }),
+          delete: async () => {},
+        }) as unknown as WhipClient,
+      }
+    );
+
+    await publisher.start();
+    expect(publisher.getState()).toBe("connected");
+    await publisher.stop();
+  });
+
   test("accepts a conforming Baseline level-1b profile variation with a sufficient receive ceiling", async () => {
     const pc = new FakePeerConnection();
     const publisher = new WebRtcPublisher(

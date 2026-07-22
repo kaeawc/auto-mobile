@@ -32,10 +32,11 @@ export function h264SpsLevelIdc(nal: Buffer): number | undefined {
 
 /** Whether a profile-level-id is compatible with AutoMobile constrained baseline. */
 export function isCompatibleConstrainedBaselineProfile(profileLevelId: string): boolean {
-  // RFC 6184 §8.2.2 permits constraint_set3_flag (bit 4) to vary with the
-  // level for Baseline/Main/Extended profiles; the remaining profile fields
-  // must be symmetric.
+  // RFC 6184 Table 5 defines constrained baseline as profile_idc 66 with
+  // constraint_set1_flag set and the lower four constraint bits clear. The
+  // other constraint flags may vary, so accept every valid representation.
+  // https://www.rfc-editor.org/rfc/rfc6184.html#section-8.2.2
   const profileIdc = Number.parseInt(profileLevelId.slice(0, 2), 16);
   const profileIop = Number.parseInt(profileLevelId.slice(2, 4), 16);
-  return profileIdc === 0x42 && (profileIop & 0xef) === 0xe0;
+  return profileIdc === 0x42 && (profileIop & 0x4f) === 0x40;
 }

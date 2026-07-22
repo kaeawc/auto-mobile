@@ -15,6 +15,7 @@ describe("H.264 SDP and SPS capability helpers", () => {
   test("accepts constrained-baseline profile variants but rejects a different profile", () => {
     expect(isCompatibleConstrainedBaselineProfile("42e02a")).toBe(true);
     expect(isCompatibleConstrainedBaselineProfile("42f00b")).toBe(true);
+    expect(isCompatibleConstrainedBaselineProfile("42c02a")).toBe(true);
     expect(isCompatibleConstrainedBaselineProfile("64001f")).toBe(false);
   });
 });

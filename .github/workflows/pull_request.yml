@@ -244,6 +244,9 @@ jobs:
               - 'scripts/android/**'
               - 'scripts/local-dev/hot-reload.sh'
               - '.github/workflows/android*.yml'
+              # This workflow controls Android-job gating, so changes to it
+              # must exercise the gate rather than being silently skipped.
+              - '.github/workflows/pull_request.yml'
 
       # Narrower than `android` above: detekt analyzes Kotlin only, so an XML
       # resource or a doc under android/ has nothing for it to look at. The

@@ -439,6 +439,38 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(out).toHaveLength(0);
   });
 
+  test("resync stays linear across a long audio-only gap", () => {
+    // Walking past audio to the video handoff must be memoized: every audio
+    // record is itself an admissible candidate, so without memoization each of
+    // N audio offsets re-walks the O(N) tail — one audio-interleaved corruption
+    // window costs O(N²) parses, the disproportionate-work shape this whole
+    // change exists to remove. `SimulatorCaptureSession` writes audio
+    // independently of screen frames, so a long audio-only gap after a corrupt
+    // frame is a real stream shape, not a contrived one.
+    const decoder = new FrameDecoder();
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 8), Buffer.alloc(8, fill)]);
+    const audioRun = Buffer.concat(
+      Array.from({ length: 500 }, (_unused, i) => audioRecord(i & 0xff))
+    );
+
+    let out: DecodedFrame[] = [];
+    const parses = countHeaderParses(() => {
+      out = decoder.push(
+        Buffer.concat([encodeHeader(0, 1, 4, 0), audioRun]),
+        () => {}
+      );
+    });
+
+    // No video after the audio yet, so resync correctly emits nothing and holds
+    // the bytes — but the work to reach that verdict must be linear in the gap,
+    // not quadratic. The pre-memoization walk cost ~140k parses here.
+    expect(out).toHaveLength(0);
+    expect(parses).toBeLessThan(audioRun.length * 1.2);
+  });
+
   test("does not resynchronize when the capture geometry changes inside the corruption", () => {
     const decoder = new FrameDecoder();
     // Deliberate trade, pinned so it stays deliberate. The helper does change

@@ -92,6 +92,12 @@ export interface MalformedFrameError {
   header: FrameHeader;
 }
 
+/** Result of walking past a run of audio records to the next video boundary. */
+type AudioSkip =
+  | { kind: "video"; header: FrameHeader }
+  | { kind: "unsettled" }
+  | { kind: "reject" };
+
 export class FrameDecoder {
   private buffer: Buffer = Buffer.alloc(0);
   private pendingHeader: FrameHeader | null = null;
@@ -131,6 +137,17 @@ export class FrameDecoder {
    * eventually. Only a wire-format marker closes that — see #4270.
    */
   private anchor: FrameHeader | null = null;
+  /**
+   * Memoizes the audio-skip walk within a single `resynchronize()` pass, keyed
+   * by the offset the walk starts at. Audio records are self-describing and
+   * chain end-to-end, so every candidate whose payload lands in the same audio
+   * run walks to the same terminal video header; without memoization each of
+   * the N audio offsets re-walks the O(N) tail, and one audio-interleaved
+   * corruption window costs O(N²) parses — the disproportionate-work shape this
+   * decoder exists to avoid. Reset each pass because the buffer (and therefore
+   * the absolute offsets) changes between passes.
+   */
+  private audioSkip: Map<number, AudioSkip> = new Map();
 
   /**
    * Append bytes from the helper's stdout stream and return any frames that
@@ -219,6 +236,9 @@ export class FrameDecoder {
    * offset is a plausible header with probability ~2^-38.
    */
   private resynchronize(): boolean {
+    // Offsets are absolute into the current buffer, which is stable for the
+    // duration of this pass and changes before the next one.
+    this.audioSkip.clear();
     const pending: number[] = [];
     // Ascending offset order overall — every retained candidate sits below the
     // scan cursor, every newly examinable offset at or above it — so this still
@@ -320,28 +340,42 @@ export class FrameDecoder {
     // that audio would either stall recovery on every real stream, or — worse —
     // accept the candidate and hand the unchecked video *after* the audio, of
     // any geometry, straight to the encoder.
-    let cursor = offset + FRAME_HEADER_SIZE + payloadSize(header);
+    const handoff = this.skipAudio(offset + FRAME_HEADER_SIZE + payloadSize(header));
+    if (handoff.kind !== "video") {return handoff.kind;}
+    // `handoff.header` is the video header resync would hand back at. It must
+    // belong to the same stream — before the first frame decodes there is no
+    // anchor and whatever arrives first defines the geometry (admissible()
+    // allows it), so the candidate and this successor must simply agree.
+    if (!this.admissible(handoff.header)) {return "reject";}
+    // An audio candidate carries no geometry of its own; a corroborating video
+    // handoff is all it needs.
+    if (isAudioHeader(header)) {return "accept";}
+    return sameGeometry(header, handoff.header) ? "accept" : "reject";
+  }
+
+  /**
+   * Follow the chain of audio records starting at `cursor` to the first video
+   * header, memoized so a run of N audio records costs O(N) parses across the
+   * whole pass rather than O(N) per candidate. Returns the terminal video
+   * header, `unsettled` if the run reaches the end of the buffer without one,
+   * or `reject` if a malformed header interrupts it. Iterative rather than
+   * recursive so a long audio run cannot overflow the stack.
+   */
+  private skipAudio(cursor: number): AudioSkip {
+    const chain: number[] = [];
+    let result: AudioSkip;
     for (;;) {
-      if (this.buffer.length - cursor < FRAME_HEADER_SIZE) {return "unsettled";}
-      const successor = parseHeader(this.buffer, cursor);
-      if (headerError(successor) !== null) {return "reject";}
-      if (isAudioHeader(successor)) {
-        // Audio carries no geometry and is emitted harmlessly, so it cannot be
-        // the boundary that poisons the encoder. Step over it and keep looking
-        // for the video header that actually needs vetting.
-        cursor += FRAME_HEADER_SIZE + payloadSize(successor);
-        continue;
-      }
-      // `successor` is the video header resync would hand back at. It must
-      // belong to the same stream — before the first frame decodes there is no
-      // anchor and whatever arrives first defines the geometry (admissible()
-      // allows it), so the candidate and this successor must simply agree.
-      if (!this.admissible(successor)) {return "reject";}
-      // An audio candidate carries no geometry of its own; a corroborating
-      // video handoff is all it needs.
-      if (isAudioHeader(header)) {return "accept";}
-      return sameGeometry(header, successor) ? "accept" : "reject";
+      const memo = this.audioSkip.get(cursor);
+      if (memo !== undefined) {result = memo; break;}
+      if (this.buffer.length - cursor < FRAME_HEADER_SIZE) {result = { kind: "unsettled" }; break;}
+      const header = parseHeader(this.buffer, cursor);
+      if (headerError(header) !== null) {result = { kind: "reject" }; break;}
+      if (!isAudioHeader(header)) {result = { kind: "video", header }; break;}
+      chain.push(cursor);
+      cursor += FRAME_HEADER_SIZE + payloadSize(header);
     }
+    for (const start of chain) {this.audioSkip.set(start, result);}
+    return result;
   }
 
   /**

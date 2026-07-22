@@ -3343,12 +3343,34 @@ start_ios_runtime_probe() {
     IOS_RUNTIME_PROBE_PID=$!
 }
 
+# Seconds to wait for the background runtime probe before abandoning it.
+# Overridable so the tests can exercise the timeout path without a real stall.
+IOS_RUNTIME_PROBE_TIMEOUT_SECONDS="${IOS_RUNTIME_PROBE_TIMEOUT_SECONDS:-20}"
+
 finish_ios_runtime_probe() {
     if [[ -z "${IOS_RUNTIME_PROBE_PID}" ]]; then
         return 0
     fi
 
-    local probe_status=0
+    # `xcrun simctl list` can stall indefinitely on a loaded macOS runner -- the
+    # hazard #3943 documents and the reason FakeDeviceSessionManager exists. This
+    # probe only decorates output with the installed runtimes, so an unbounded
+    # `wait` traded a cosmetic detail for a hang: on CI it pinned a BATS job for
+    # 6 hours until the runner cancelled it. Bound the join and degrade to
+    # "runtimes unknown" instead.
+    local probe_status=0 waited=0
+    while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
+        if ((waited >= IOS_RUNTIME_PROBE_TIMEOUT_SECONDS)); then
+            kill "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null || true
+            wait "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null || true
+            IOS_RUNTIME_PROBE_PID=""
+            rm -f "${IOS_RUNTIME_PROBE_FILE}"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
     if wait "${IOS_RUNTIME_PROBE_PID}"; then
         :
     else

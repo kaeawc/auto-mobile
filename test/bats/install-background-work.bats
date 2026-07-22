@@ -26,6 +26,36 @@ teardown() {
   rm -rf "${TEST_DIR}"
 }
 
+@test "a stalled iOS runtime probe is abandoned instead of hanging the run" {
+  # Regression: `xcrun simctl list` can stall indefinitely on a loaded macOS
+  # runner (#3943). The join was an unbounded `wait`, which pinned a CI BATS job
+  # for 6 hours until the runner cancelled it. A stall must be abandoned.
+  cat > "${STUB_BIN}/xcrun" <<'STUB'
+#!/usr/bin/env bash
+# exec so the stub IS the stalled process: killing the probe PID must actually
+# stop it, not orphan a child that keeps the inherited fd open.
+exec sleep 300
+STUB
+  chmod +x "${STUB_BIN}/xcrun"
+
+  detect_os() { printf 'macos\n'; }
+  IOS_RUNTIME_PROBE_TIMEOUT_SECONDS=1
+
+  start_ios_runtime_probe
+  [ -n "${IOS_RUNTIME_PROBE_PID}" ]
+
+  local started ended elapsed status=0
+  started=$(date +%s)
+  finish_ios_runtime_probe >/dev/null 2>&1 || status=$?
+  ended=$(date +%s)
+  elapsed=$((ended - started))
+
+  # Returns promptly and cleanly rather than blocking on the stalled child.
+  [ "$status" -eq 0 ]
+  [ "$elapsed" -lt 30 ]
+  [ -z "${IOS_RUNTIME_PROBE_PID}" ]
+}
+
 @test "iOS runtime probe runs in the background and reports its completed result" {
   cat > "${STUB_BIN}/xcrun" <<'STUB'
 #!/usr/bin/env bash

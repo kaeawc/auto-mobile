@@ -3431,6 +3431,18 @@ finish_ios_runtime_probe() {
             while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
                 if ((reap_waited >= 10)); then
                     terminate_process_tree_for_reaping "${IOS_RUNTIME_PROBE_PID}"
+                    # The resumed wrapper gets a bounded chance to reap its
+                    # killed children. Do not join it unboundedly: a wrapper
+                    # can resume from `wait` and continue into another stall.
+                    local fallback_waited=0
+                    while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
+                        if ((fallback_waited >= 10)); then
+                            terminate_process_tree "${IOS_RUNTIME_PROBE_PID}"
+                            break
+                        fi
+                        sleep 0.1
+                        fallback_waited=$((fallback_waited + 1))
+                    done
                     break
                 fi
                 sleep 0.1

@@ -109,6 +109,32 @@ describe("WebRtcPublisher establish failure", () => {
   });
 });
 
+describe("WebRtcPublisher WHIP answer validation", () => {
+  async function expectRejectedAnswer(answerSdp: string): Promise<void> {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", maxReconnectAttempts: 1 },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () => ({
+          publish: async () => ({ answerSdp, resourceUrl: "https://coord/whip/s" }),
+          delete: async () => {},
+        }) as unknown as WhipClient,
+      }
+    );
+    await expect(publisher.start()).rejects.toThrow(/did not accept H264 video/);
+    expect(pc.closed).toBe(true);
+  }
+
+  test("rejects H.264 at a non-RFC-6184 clock rate", async () => {
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("H264/90000", "H264/8000"));
+  });
+
+  test("rejects an H.264 profile incompatible with the constrained-baseline sender", async () => {
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("42e01f", "64001f"));
+  });
+});
+
 describe("WebRtcPublisher.notifySourceFailed", () => {
   test("is a no-op after close (does not throw)", async () => {
     const publisher = new WebRtcPublisher(

@@ -125,6 +125,22 @@ describe("WebRTC coordination server e2e", () => {
     }
   });
 
+  test("advertises the CORS and SDP contract required by browser WHIP clients", async () => {
+    const http = new HttpCoordinationServer({ iceServers: [] });
+    const port = await http.listen(0, "127.0.0.1");
+    const base = `http://127.0.0.1:${port}`;
+    try {
+      const response = await fetch(`${base}/whip`, { method: "OPTIONS" });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("accept-post")).toBe("application/sdp");
+      expect(response.headers.get("access-control-allow-headers")).toContain("If-Match");
+      expect(response.headers.get("access-control-expose-headers")).toContain("Location");
+      expect(response.headers.get("access-control-expose-headers")).toContain("ETag");
+    } finally {
+      await http.close();
+    }
+  });
+
   test(
     "publisher -> WHIP ingest -> WHEP subscriber forwards frames, reconnect API lists the stream",
     async () => {
@@ -173,7 +189,11 @@ describe("WebRTC coordination server e2e", () => {
         });
         expect(whepRes.status).toBe(201);
         expect(whepRes.headers.get("location")).toContain("/whep/e2e/");
-        await viewer.setRemoteDescription({ type: "answer", sdp: await whepRes.text() });
+        const whepAnswer = await whepRes.text();
+        // RFC 9725 / WHEP require rtcp-mux-only on each bundled m-section;
+        // werift needs this signalled explicitly by the reference server.
+        expect(whepAnswer).toContain("a=rtcp-mux\r\na=rtcp-mux-only\r\n");
+        await viewer.setRemoteDescription({ type: "answer", sdp: whepAnswer });
 
         await waitFor(() => viewer.connectionState === "connected", 8000);
 

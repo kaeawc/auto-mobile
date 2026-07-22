@@ -123,8 +123,14 @@ export class CoordinationServer {
     requestedStreamId?: string
   ): Promise<{ streamId: string; answerSdp: string; etag: string }> {
     const streamId = requestedStreamId?.trim() || `stream-${randomUUID().slice(0, 8)}`;
+    // Validate before allocating a peer connection. A malformed WHIP offer must
+    // fail with 4xx without leaking a native transport.
+    const iceCredentials = parseIceCredentials(offerSdp);
 
-    const pc = new RTCPeerConnection({ codecs: { video: [useH264()], audio: [usePCMU()] } });
+    const pc = new RTCPeerConnection({
+      bundlePolicy: "max-bundle",
+      codecs: { video: [useH264()], audio: [usePCMU()] },
+    });
     const entry: StreamEntry = {
       streamId,
       ingestPc: pc,
@@ -137,7 +143,7 @@ export class CoordinationServer {
       videoKeyFrame: [],
       collectingKeyFrame: null,
       iceEtag: randomUUID(),
-      iceCredentials: parseIceCredentials(offerSdp),
+      iceCredentials,
     };
     pc.onTrack.subscribe(track => {
       if (track.kind !== "audio" && track.kind !== "video") {
@@ -186,7 +192,14 @@ export class CoordinationServer {
       await this.stopIngest(streamId);
     }
     this.streams.set(streamId, entry);
-    return { streamId, answerSdp: pc.localDescription?.sdp ?? "", etag: entry.iceEtag };
+    return {
+      streamId,
+      // Werift serializes rtcp-mux but not RFC 9725 / WHEP's required
+      // rtcp-mux-only SDP attribute. This changes signalling only; the peer
+      // connection remains RTCP-multiplexed.
+      answerSdp: addRtcpMuxOnly(pc.localDescription?.sdp ?? ""),
+      etag: entry.iceEtag,
+    };
   }
 
   /**
@@ -202,7 +215,10 @@ export class CoordinationServer {
       throw new Error(`No such stream: ${streamId}`);
     }
 
-    const pc = new RTCPeerConnection({ codecs: { video: [useH264()], audio: [usePCMU()] } });
+    const pc = new RTCPeerConnection({
+      bundlePolicy: "max-bundle",
+      codecs: { video: [useH264()], audio: [usePCMU()] },
+    });
     const tracks = new Map<"audio" | "video", MediaStreamTrack>();
     const videoTrack = new MediaStreamTrack({ kind: "video" });
     tracks.set("video", videoTrack);
@@ -269,7 +285,7 @@ export class CoordinationServer {
     if (pc.connectionState === "connected") {
       scheduleReplayWhenConnected();
     }
-    return { subscriberId, answerSdp: pc.localDescription?.sdp ?? "" };
+    return { subscriberId, answerSdp: addRtcpMuxOnly(pc.localDescription?.sdp ?? "") };
   }
 
   async stopIngest(streamId: string): Promise<void> {
@@ -307,11 +323,11 @@ export class CoordinationServer {
       return "restart";
     }
     for (const candidate of parsed.candidates) {
-        await entry.ingestPc
-          .addIceCandidate({ candidate, sdpMid: parsed.mid })
-          .catch(() => {
-            // A malformed or duplicate candidate is non-fatal; keep the stream up.
-          });
+      await entry.ingestPc
+        .addIceCandidate({ candidate, sdpMid: parsed.mid })
+        .catch(() => {
+          // A malformed or duplicate candidate is non-fatal; keep the stream up.
+        });
     }
     return "applied";
   }
@@ -372,6 +388,10 @@ export class CoordinationServer {
   }
 }
 
+function addRtcpMuxOnly(sdp: string): string {
+  return sdp.replace(/a=rtcp-mux\r?\n/g, match => `${match}a=rtcp-mux-only\r\n`);
+}
+
 function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
   const payload = rtp.payload;
   const nalType = payload[0] & 0x1f;
@@ -398,13 +418,13 @@ function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
 }
 
 function containsStapANalType(payload: Buffer, expectedType: number): boolean {
-  if ((payload[0] & 0x1f) !== 24) return false;
+  if ((payload[0] & 0x1f) !== 24) {return false;}
   let offset = 1;
   while (offset + 2 <= payload.length) {
     const size = payload.readUInt16BE(offset);
     offset += 2;
-    if (size === 0 || offset + size > payload.length) return false;
-    if ((payload[offset] & 0x1f) === expectedType) return true;
+    if (size === 0 || offset + size > payload.length) {return false;}
+    if ((payload[offset] & 0x1f) === expectedType) {return true;}
     offset += size;
   }
   return false;
@@ -413,7 +433,7 @@ function containsStapANalType(payload: Buffer, expectedType: number): boolean {
 function parseIceCredentials(sdp: string): { ufrag: string; pwd: string } {
   const ufrag = sdp.match(/^a=ice-ufrag:(.+)$/m)?.[1]?.trim();
   const pwd = sdp.match(/^a=ice-pwd:(.+)$/m)?.[1]?.trim();
-  if (!ufrag || !pwd) throw new Error("Offer omitted ICE credentials.");
+  if (!ufrag || !pwd) {throw new Error("Offer omitted ICE credentials.");}
   return { ufrag, pwd };
 }
 
@@ -424,7 +444,7 @@ function parseCandidateFragment(fragment: string): { mid: string; ice: { ufrag: 
   const ufrag = lines.find(line => line.startsWith("a=ice-ufrag:"))?.slice(12).trim();
   const pwd = lines.find(line => line.startsWith("a=ice-pwd:"))?.slice(10).trim();
   const candidates = lines.filter(line => line.startsWith("a=candidate:")).map(line => line.slice(2));
-  if (!mLine || !mid || !ufrag || !pwd || (candidates.length === 0 && !lines.includes("a=end-of-candidates"))) return null;
+  if (!mLine || !mid || !ufrag || !pwd || (candidates.length === 0 && !lines.includes("a=end-of-candidates"))) {return null;}
   return { mid, ice: { ufrag, pwd }, candidates };
 }
 

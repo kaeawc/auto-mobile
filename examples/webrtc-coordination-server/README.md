@@ -66,7 +66,8 @@ echo '{"action":"start","deviceId":"emulator-5554","streamId":"ci-run-42"}' \
 
 | Method & path | Purpose |
 |---------------|---------|
-| `POST /whip[?streamId=]` | WHIP ingest — body is the publisher SDP offer; returns `201` + SDP answer + `Location: /whip/{streamId}` |
+| `POST /whip[?streamId=]` | WHIP ingest — `Content-Type: application/sdp`; returns `201` + SDP answer + `Location: /whip/{streamId}` + `ETag` |
+| `PATCH /whip/{streamId}` | WHIP Trickle ICE — `Content-Type: application/trickle-ice-sdpfrag` and `If-Match: <ETag>`; returns `204` for candidates or `422` for unsupported ICE restart |
 | `DELETE /whip/{streamId}` | Terminate an ingest session |
 | `POST /whep/{streamId}` | WHEP subscribe — body is the viewer SDP offer; returns `201` + SDP answer + `Location: /whep/{streamId}/{subscriberId}` |
 | `DELETE /whep/{streamId}/{subscriberId}` | Terminate a subscriber |

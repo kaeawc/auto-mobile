@@ -129,6 +129,10 @@ export class WebRtcPublisher {
       (iceServers =>
         new RTCPeerConnection({
           iceServers,
+          // RFC 9725 §4.4.1 requires the WHIP client to use max-bundle. Besides
+          // sharing one transport, this ensures only the offerer-tagged m-line
+          // gathers/trickles ICE candidates (RFC 9725 §4.3.2).
+          bundlePolicy: "max-bundle",
           codecs: this.audioEnabled
             ? { video: [useH264()], audio: [usePCMU()] }
             : { video: [useH264()] },
@@ -521,13 +525,25 @@ function isAcceptedCodecRtpMap(
   codec: string,
   attributeLines: string[]
 ): boolean {
-  const match = line.match(/^a=rtpmap:(\S+)\s+([^/\s]+)/i);
+  const match = line.match(/^a=rtpmap:(\S+)\s+([^/\s]+)\/(\d+)/i);
   if (!match || !formats.has(match[1]) || match[2].toLowerCase() !== codec) {
     return false;
   }
-  return codec !== "h264" || attributeLines.some(fmtp =>
-    fmtp.startsWith(`a=fmtp:${match[1]} `) && /(?:^|;)\s*packetization-mode\s*=\s*1(?:;|$)/i.test(fmtp.slice(fmtp.indexOf(" ") + 1))
-  );
+  if (codec !== "h264") {
+    return true;
+  }
+  // AutoMobile packetizes H.264 at the RFC 6184 fixed 90 kHz clock rate and
+  // uses FU-A, which requires packetization-mode=1. The local werift codec is
+  // constrained-baseline 42e0xx; level may differ when asymmetry is negotiated.
+  return match[3] === "90000" && attributeLines.some(fmtp => {
+    if (!fmtp.startsWith(`a=fmtp:${match[1]} `)) {
+      return false;
+    }
+    const parameters = fmtp.slice(fmtp.indexOf(" ") + 1);
+    const packetizationMode = /(?:^|;)\s*packetization-mode\s*=\s*1(?:;|$)/i.test(parameters);
+    const profile = /(?:^|;)\s*profile-level-id\s*=\s*(42e0[0-9a-f]{2})(?:;|$)/i.test(parameters);
+    return packetizationMode && profile;
+  });
 }
 
 function addWhipRtcpMuxOnly(sdp: string): string {

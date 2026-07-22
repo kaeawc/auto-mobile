@@ -24,6 +24,7 @@ class InvalidSdpError extends Error {}
  *
  * Routes:
  *   POST   /whip[?streamId=]         WHIP ingest (from AutoMobile)   -> 201 + Location
+ *   PATCH  /whip/:streamId           conditional Trickle-ICE candidate update
  *   DELETE /whip/:streamId           terminate ingest
  *   POST   /whep/:streamId           WHEP subscribe (from browser)   -> 201 + Location
  *   DELETE /whep/:streamId/:subId    terminate subscriber
@@ -80,7 +81,7 @@ export class HttpCoordinationServer {
     this.applyCors(res);
 
     if (method === "OPTIONS") {
-      res.writeHead(204).end();
+      res.writeHead(200, { "Accept-Post": "application/sdp" }).end();
       return;
     }
 
@@ -230,7 +231,10 @@ export class HttpCoordinationServer {
   private applyCors(res: ServerResponse): void {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, If-Match");
+    // Browsers otherwise hide the WHIP session URL and entity-tag needed for
+    // conditional Trickle-ICE PATCH requests.
+    res.setHeader("Access-Control-Expose-Headers", "Location, ETag");
   }
 
   private sendJson(res: ServerResponse, status: number, body: unknown): void {

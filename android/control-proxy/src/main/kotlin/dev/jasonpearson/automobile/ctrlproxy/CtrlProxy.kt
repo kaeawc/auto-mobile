@@ -83,6 +83,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import kotlin.coroutines.resume
+import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -157,6 +158,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
 
       return flags
+    }
+
+    /**
+     * Preserves the legacy `systemInsets` contract for gesture callers while typed categories
+     * remain available under `insets`. Pre-CtrlProxy observation merged system-gesture edges into
+     * this field, and swipe/pinch still use it to avoid Android's back-gesture region.
+     */
+    internal fun legacySystemInsets(insets: ObservationInsetsInfo): SystemInsetsInfo? {
+      val bars = insets.systemBars?.stable ?: return null
+      val gestures = insets.systemGestures ?: return bars
+      return SystemInsetsInfo(
+        top = max(bars.top, gestures.top),
+        bottom = max(bars.bottom, gestures.bottom),
+        left = max(bars.left, gestures.left),
+        right = max(bars.right, gestures.right),
+      )
     }
   }
 
@@ -2000,7 +2017,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       screenWidth = screenDimensions?.width,
       screenHeight = screenDimensions?.height,
       rotation = rotation,
-      systemInsets = insets.systemBars?.stable,
+      systemInsets = legacySystemInsets(insets),
       insets = insets,
       wakefulness = wakefulness,
       foregroundActivity = foreground,

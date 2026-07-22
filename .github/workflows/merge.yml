@@ -1235,15 +1235,23 @@ jobs:
           fetch-depth: 0  # Fetch full history for git-revision-date-localized plugin
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Independent of each other: setup-uv fetches a standalone binary and
+      # never reads the Python toolchain. Both are joined before `uv sync`.
       - name: "Setup Python"
         uses: actions/setup-python@v6
+        background: true
+        id: setup-python
         with:
           python-version: '3.11'
 
       - name: "Install uv"
         uses: astral-sh/setup-uv@v7
+        background: true
+        id: setup-uv
         with:
           enable-cache: true
+
+      - wait: [setup-python, setup-uv]
 
       - name: "Install MkDocs and dependencies"
         working-directory: scripts/github
@@ -1252,17 +1260,26 @@ jobs:
       - name: "Build documentation"
         run: scripts/github/deploy_pages.py build
 
+      # Distinct artifacts landing on distinct filenames, so they overlap. They
+      # must stay AFTER "Build documentation" -- mkdocs regenerates/cleans
+      # site/, which would delete a badge that landed early.
       - name: "Download Kotlin Coverage Badge"
         uses: actions/download-artifact@v7
+        background: true
+        id: dl-kotlin-badge
         with:
           name: kotlin-coverage-badge
           path: site
 
       - name: "Download Swift Coverage Badge"
         uses: actions/download-artifact@v7
+        background: true
+        id: dl-swift-badge
         with:
           name: swift-coverage-badge
           path: site
+
+      - wait: [dl-kotlin-badge, dl-swift-badge]
 
       - name: "Setup Pages"
         uses: actions/configure-pages@v5

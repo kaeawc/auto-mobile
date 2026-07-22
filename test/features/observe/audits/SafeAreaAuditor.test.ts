@@ -20,9 +20,9 @@ function observation(): ObserveResult {
     viewHierarchy: {
       hierarchy: {
         node: [
-          { text: "Title", "view-id": "title", bounds: { left: 10, top: 8, right: 60, bottom: 28 } },
-          { text: "Continue", clickable: "true", "view-id": "continue", bounds: { left: 10, top: 170, right: 90, bottom: 196 } },
-          { text: "System time", "resource-id": "com.android.systemui:id/clock", bounds: { left: 0, top: 0, right: 20, bottom: 20 } },
+          { "text": "Title", "view-id": "title", "bounds": { left: 10, top: 8, right: 60, bottom: 28 } },
+          { "text": "Continue", "clickable": "true", "view-id": "continue", "bounds": { left: 10, top: 170, right: 90, bottom: 196 } },
+          { "text": "System time", "resource-id": "com.android.systemui:id/clock", "bounds": { left: 0, top: 0, right: 20, bottom: 20 } },
         ] as any,
       },
     },
@@ -55,5 +55,26 @@ describe("SafeAreaAuditor", () => {
     };
 
     expect(new SafeAreaAuditor().inspect(result)[0]?.insetTypes).toEqual(["safeArea"]);
+  });
+
+  test("reads iOS CtrlProxy attributes from the hierarchy attribute bag", () => {
+    const result = observation();
+    result.insets = {
+      available: true,
+      source: "ios-sdk-safe-area",
+      units: "points",
+      safeArea: { top: 30, right: 0, bottom: 30, left: 0 },
+    };
+    result.viewHierarchy!.hierarchy.node = [{
+      $: {
+        "text": "Title",
+        "view-id": "ios-title",
+        "bounds": { left: 10, top: 8, right: 60, bottom: 28 },
+      },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+      { element: { viewId: "ios-title" }, insetTypes: ["safeArea"], sides: ["top"] },
+    ]);
   });
 });

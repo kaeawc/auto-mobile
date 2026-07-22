@@ -152,7 +152,6 @@ export class RealObserveScreen implements ObserveScreen {
     // Composed services
     this.screenshotRecorder = dependencies?.screenshotRecorder ?? new DefaultObserveScreenshotRecorder(
       device,
-      window,
       screenshotUtil as TrackedScreenshotService,
       getScreenshotStateStore()
     );
@@ -165,6 +164,7 @@ export class RealObserveScreen implements ObserveScreen {
     });
     this.deviceStateCollector = dependencies?.deviceStateCollector ?? new DeviceStateCollector({
       device,
+      window,
       backStack,
       adb: this.adb,
       timer: this.timer,

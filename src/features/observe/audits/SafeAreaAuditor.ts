@@ -52,7 +52,8 @@ export class SafeAreaAuditor {
     mandatorySystemGestures: ObservationEdgeInsets | undefined,
     warnings: LayoutWarning[]
   ): void {
-    if (!isSystemNode(node)) {this.inspectElement(node, screen, content, systemGestures, mandatorySystemGestures, warnings);}
+    const inspectedNode = withHierarchyAttributes(node);
+    if (!isSystemNode(inspectedNode)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, warnings);}
     for (const child of asNodes(node.node)) {
       this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, warnings);
     }
@@ -120,6 +121,12 @@ export class SafeAreaAuditor {
 function asNodes(value: unknown): Node[] {
   if (Array.isArray(value)) {return value.filter(isNode);}
   return isNode(value) ? [value] : [];
+}
+
+/** iOS CtrlProxy stores hierarchy attributes in xml2js-style `$` bags. */
+function withHierarchyAttributes(node: Node): Node {
+  const attributes = node.$;
+  return isNode(attributes) && !Array.isArray(attributes) ? { ...node, ...attributes } : node;
 }
 
 function isNode(value: unknown): value is Node {

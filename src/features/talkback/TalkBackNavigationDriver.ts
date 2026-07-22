@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../../models";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { A11yActionResult, A11yTapCoordinatesResult } from "../observe/android/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { FocusNavigationDriver } from "./FocusNavigationExecutor";
@@ -73,7 +74,9 @@ export interface TalkBackNavigationDriverFactory {
  * Default factory implementation for TalkBackNavigationDriver.
  */
 export class DefaultTalkBackNavigationDriverFactory implements TalkBackNavigationDriverFactory {
+  constructor(private readonly adbFactory: AdbClientFactory) {}
+
   createDriver(device: BootedDevice): TalkBackNavigationDriver {
-    return new DefaultTalkBackNavigationDriver(AndroidCtrlProxyClient.getInstance(device));
+    return new DefaultTalkBackNavigationDriver(AndroidCtrlProxyClient.getInstance(device, this.adbFactory));
   }
 }

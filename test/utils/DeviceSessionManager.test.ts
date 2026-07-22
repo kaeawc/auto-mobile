@@ -694,3 +694,88 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     expect(fakeDeviceUtils.getWaitForDeviceReadyChildProcess()).toBe(childProcess);
   });
 });
+
+describe("DeviceSessionManager device-list error formatting (#4227)", () => {
+  // These messages exist to tell the caller which identifier to use instead.
+  // Joining BootedDevice objects renders "[object Object]", destroying the only
+  // actionable part of the error.
+
+  function makeProvider(devices: BootedDevice[]): FakeDeviceClientProvider {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices(devices);
+    return new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), undefined, {
+      window: makeReadyWindow(),
+      ctrlProxyManager: new FakeCtrlProxyManager(),
+      ctrlProxyClient: stubAndroidCtrlProxy({ isConnected: () => true }),
+    });
+  }
+
+  const androidDevice: BootedDevice = {
+    name: "Pixel_9_Pro",
+    platform: "android",
+    deviceId: "emulator-5554",
+  };
+
+  test("ensureDeviceReady names the available devices instead of [object Object]", async () => {
+    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+
+    await expect(
+      manager.ensureDeviceReady("android", "no-such-device", { skipCtrlProxyDownload: true })
+    ).rejects.toThrow(/emulator-5554/);
+  });
+
+  test("ensureDeviceReady never renders [object Object]", async () => {
+    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+
+    let message = "";
+    try {
+      await manager.ensureDeviceReady("android", "no-such-device", { skipCtrlProxyDownload: true });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).not.toContain("[object Object]");
+  });
+
+  test("ensureDeviceReady still reports 'none' when no devices are present", async () => {
+    const manager = DeviceSessionManager.createInstance(makeProvider([]));
+
+    let message = "";
+    try {
+      await manager.ensureDeviceReady("android", "no-such-device", { skipCtrlProxyDownload: true });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).not.toContain("[object Object]");
+    expect(message).toContain("none");
+  });
+
+  test("verifyAndroidDevice names the available devices instead of [object Object]", async () => {
+    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+
+    let message = "";
+    try {
+      await manager.verifyAndroidDevice("no-such-device");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).not.toContain("[object Object]");
+    expect(message).toContain("Pixel_9_Pro");
+  });
+
+  test("verifyAndroidDevice still reports 'none' when no devices are present", async () => {
+    const manager = DeviceSessionManager.createInstance(makeProvider([]));
+
+    let message = "";
+    try {
+      await manager.verifyAndroidDevice("no-such-device");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain("none");
+    expect(message).not.toContain("[object Object]");
+  });
+});

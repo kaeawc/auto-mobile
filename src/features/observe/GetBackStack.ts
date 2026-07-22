@@ -7,6 +7,81 @@ import type { BackStack } from "./interfaces/BackStack";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
 /**
+ * Legacy task header, printed by `TaskRecord.toString()` / the pre-Android-10
+ * `dumpsys` layout: "Task id #123" or "TaskRecord{task123 #123 A=... sz=3}".
+ */
+const LEGACY_TASK_HEADER = /Task\s+id\s+#(\d+)|TaskRecord.*#(\d+)/;
+
+/**
+ * Modern task header (issue #4223). `TaskFragment.dumpInner` prints
+ *
+ *     pw.print(prefix); pw.print("* "); pw.println(toFullString());
+ *
+ * and `Task.toString()` -- which `Task.toFullString()` extends -- opens with
+ * "Task{" + hex identity hash + " #" + mTaskId before any optional field. The
+ * id is therefore the only positionally stable token after the hash: `A=` /
+ * `I=` / `aI=` are mutually exclusive and `rootTaskId=` appears only for
+ * non-root tasks, so everything past the id is matched by key instead.
+ *
+ * The leading "* " is required. `Task{...}` also appears inline elsewhere in
+ * dumpsys output (adjacent-task-fragment references, child lists), and an
+ * unanchored match would invent tasks out of those references. `TaskFragment{`
+ * is a different `toString()` with no "#id" and does not match "Task\{".
+ *
+ * Source: AOSP android15-release,
+ * services/core/java/com/android/server/wm/Task.java (toString, toFullString)
+ * and .../TaskFragment.java (dumpInner).
+ */
+const MODERN_TASK_HEADER = /^\s*\*\s*Task\{\S+\s+#(\d+)\b(.*)$/;
+
+/** "* Hist  #0: ActivityRecord{...}" -- one printed activity. */
+const HIST_LINE = /\bHist\s+#\d+:/;
+
+/** Fields carried by a modern task header line. */
+interface TaskHeaderFields {
+  id: number;
+  /**
+   * `Task.affinity`, verbatim. On Android 11+ this is uid-prefixed
+   * ("10164:com.example") because `ActivityRecord.computeTaskAffinity`
+   * prepends `uid + ":"` (b/35954083). The standalone `affinity=` line, where
+   * it is printed at all, holds the identical string, so no normalization is
+   * applied on either path.
+   */
+  affinity?: string;
+  /** `I=` / `aI=` -- the task's intent component, when it has no affinity. */
+  component?: string;
+}
+
+/**
+ * Parse a task-header line, modern form first, then the legacy forms.
+ * Returns undefined when the line is not a task header.
+ */
+function parseTaskHeader(line: string): TaskHeaderFields | undefined {
+  const modern = line.match(MODERN_TASK_HEADER);
+  if (modern) {
+    const tail = modern[2];
+    // Space-anchored so "aI=" is not read as "I=", and so "visibleRequested="
+    // and friends cannot contribute a stray key match.
+    // The value is bounded to exclude "}" so a field printed last still yields
+    // the bare value rather than one with the closing brace glued on.
+    const affinity = tail.match(/(?:^|\s)A=([^\s}]+)/);
+    const component = tail.match(/(?:^|\s)a?I=([^\s}]+)/);
+    return {
+      id: parseInt(modern[1], 10),
+      affinity: affinity ? affinity[1] : undefined,
+      component: component ? component[1] : undefined
+    };
+  }
+
+  const legacy = line.match(LEGACY_TASK_HEADER);
+  if (legacy) {
+    return { id: parseInt(legacy[1] || legacy[2], 10) };
+  }
+
+  return undefined;
+}
+
+/**
  * Extracts back stack information from Android device using dumpsys activity
  */
 export class GetBackStack implements BackStack {
@@ -33,10 +108,14 @@ export class GetBackStack implements BackStack {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // Match task affinity: "Task id #123" or "TaskRecord{...} #123"
-      const taskIdMatch = line.match(/Task\s+id\s+#(\d+)|TaskRecord.*#(\d+)/);
-      if (taskIdMatch) {
-        currentTaskId = parseInt(taskIdMatch[1] || taskIdMatch[2], 10);
+      // Match the enclosing task header, legacy or modern (see parseTaskHeader).
+      const header = parseTaskHeader(line);
+      if (header) {
+        currentTaskId = header.id;
+        // A modern header carries its affinity inline; a legacy one leaves it
+        // to the standalone "affinity=" line handled just below. Reset either
+        // way so one task's affinity cannot leak onto the next task.
+        currentTaskAffinity = header.affinity;
         logger.debug(`[BACK_STACK] Found task ID: ${currentTaskId}`);
       }
 
@@ -115,25 +194,49 @@ export class GetBackStack implements BackStack {
 
     let currentTaskId = -1;
     let currentTask: Partial<TaskInfo> = {};
+    // Activities printed under the current header. Modern output has no
+    // "numActivities=" line, and the header's "sz=" is getChildCount() -- child
+    // *containers*, which for a non-leaf task counts child tasks rather than
+    // activities. Counting the task's own "Hist #N" lines is correct for both.
+    let histCount = 0;
+
+    const flush = (): void => {
+      if (currentTaskId === -1 || currentTask.id === undefined) {
+        return;
+      }
+      if (currentTask.numActivities === undefined) {
+        currentTask.numActivities = histCount;
+      }
+      tasks.set(currentTaskId, currentTask as TaskInfo);
+    };
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // Match task start: "Task id #123" or "TaskRecord{...} #123"
-      const taskIdMatch = line.match(/Task\s+id\s+#(\d+)|TaskRecord.*#(\d+)/);
-      if (taskIdMatch) {
-        // Save previous task if it exists
-        if (currentTaskId !== -1 && currentTask.id !== undefined) {
-          tasks.set(currentTaskId, currentTask as TaskInfo);
-        }
+      // Match task start, legacy or modern (see parseTaskHeader).
+      const header = parseTaskHeader(line);
+      if (header) {
+        flush();
 
-        currentTaskId = parseInt(taskIdMatch[1] || taskIdMatch[2], 10);
+        currentTaskId = header.id;
         currentTask = { id: currentTaskId };
+        histCount = 0;
+        if (header.affinity) {
+          currentTask.affinity = header.affinity;
+        }
+        if (header.component) {
+          currentTask.rootActivity = header.component;
+          currentTask.packageName = header.component.split("/")[0];
+        }
         logger.debug(`[BACK_STACK] Parsing task: ${currentTaskId}`);
       }
 
       if (currentTaskId === -1) {
         continue;
+      }
+
+      if (HIST_LINE.test(line)) {
+        histCount++;
       }
 
       // Match affinity
@@ -163,9 +266,7 @@ export class GetBackStack implements BackStack {
     }
 
     // Save last task
-    if (currentTaskId !== -1 && currentTask.id !== undefined) {
-      tasks.set(currentTaskId, currentTask as TaskInfo);
-    }
+    flush();
 
     return Array.from(tasks.values());
   }

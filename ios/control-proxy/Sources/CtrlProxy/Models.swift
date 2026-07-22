@@ -921,6 +921,8 @@ public struct ViewHierarchy: Codable {
     public let screenScale: Float?
     public let screenWidth: Int?
     public let screenHeight: Int?
+    public let systemInsets: EdgeInsetsInfo?
+    public let insets: ObservationInsetsInfo
     public let error: String?
     public let fallbackToSpringboard: Bool?
 
@@ -933,6 +935,8 @@ public struct ViewHierarchy: Codable {
         screenScale: Float? = nil,
         screenWidth: Int? = nil,
         screenHeight: Int? = nil,
+        systemInsets: EdgeInsetsInfo? = nil,
+        insets: ObservationInsetsInfo = .unavailable,
         error: String? = nil,
         fallbackToSpringboard: Bool? = nil
     ) {
@@ -944,9 +948,32 @@ public struct ViewHierarchy: Codable {
         self.screenScale = screenScale
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
+        self.systemInsets = systemInsets
+        self.insets = insets
         self.error = error
         self.fallbackToSpringboard = fallbackToSpringboard
     }
+}
+
+public struct EdgeInsetsInfo: Codable, Sendable {
+    public let top: Double
+    public let right: Double
+    public let bottom: Double
+    public let left: Double
+}
+
+public struct ObservationInsetsInfo: Codable, Sendable {
+    public let available: Bool
+    public let source: String
+    public let units: String
+    public let safeArea: EdgeInsetsInfo?
+
+    public static let unavailable = ObservationInsetsInfo(
+        available: false,
+        source: "unavailable",
+        units: "unknown",
+        safeArea: nil
+    )
 }
 
 /// Window information

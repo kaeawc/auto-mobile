@@ -89,5 +89,32 @@ final class ViewHierarchyTrackerTests: XCTestCase {
         XCTAssertEqual(hierarchy.bundleId, "com.test.app")
         XCTAssertNotNil(ViewHierarchyTracker.shared.getLatestHierarchy())
     }
+
+    func testHashChangesWhenSafeAreaOrScreenMetricsChange() {
+        let baseline = SdkViewHierarchy(
+            screenScale: 3,
+            screenWidth: 390,
+            screenHeight: 844,
+            safeAreaInsets: SdkEdgeInsets(top: 59, right: 0, bottom: 34, left: 0),
+            root: nil
+        )
+        let changedInsets = SdkViewHierarchy(
+            screenScale: 3,
+            screenWidth: 390,
+            screenHeight: 844,
+            safeAreaInsets: SdkEdgeInsets(top: 59, right: 0, bottom: 34, left: 20),
+            root: nil
+        )
+        let changedDimensions = SdkViewHierarchy(
+            screenScale: 3,
+            screenWidth: 844,
+            screenHeight: 390,
+            safeAreaInsets: SdkEdgeInsets(top: 0, right: 59, bottom: 21, left: 34),
+            root: nil
+        )
+
+        XCTAssertNotEqual(ViewHierarchyWalker.computeHash(baseline), ViewHierarchyWalker.computeHash(changedInsets))
+        XCTAssertNotEqual(ViewHierarchyWalker.computeHash(baseline), ViewHierarchyWalker.computeHash(changedDimensions))
+    }
 }
 #endif

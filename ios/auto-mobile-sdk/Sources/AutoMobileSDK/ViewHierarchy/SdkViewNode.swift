@@ -9,6 +9,8 @@ public struct SdkViewHierarchy: Codable, Sendable {
     public let screenScale: Float
     public let screenWidth: Int
     public let screenHeight: Int
+    /** UIWindow safe area in the same point coordinate space as view bounds. */
+    public let safeAreaInsets: SdkEdgeInsets?
     public let root: SdkViewNode?
 
     public init(
@@ -17,6 +19,7 @@ public struct SdkViewHierarchy: Codable, Sendable {
         screenScale: Float,
         screenWidth: Int,
         screenHeight: Int,
+        safeAreaInsets: SdkEdgeInsets? = nil,
         root: SdkViewNode?
     ) {
         self.timestamp = timestamp
@@ -24,7 +27,22 @@ public struct SdkViewHierarchy: Codable, Sendable {
         self.screenScale = screenScale
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
+        self.safeAreaInsets = safeAreaInsets
         self.root = root
+    }
+}
+
+public struct SdkEdgeInsets: Codable, Sendable {
+    public let top: Double
+    public let right: Double
+    public let bottom: Double
+    public let left: Double
+
+    public init(top: Double, right: Double, bottom: Double, left: Double) {
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+        self.left = left
     }
 }
 

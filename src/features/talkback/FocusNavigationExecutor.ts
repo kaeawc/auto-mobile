@@ -2,12 +2,10 @@ import type { Element } from "../../models/Element";
 import type { ScreenSize } from "../../models/ScreenSize";
 import { ActionableError, type BootedDevice, type CurrentFocusResult, type TraversalOrderResult } from "../../models";
 import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { DeviceDetection } from "../../utils/DeviceDetection";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient, type A11ySwipeResult } from "../observe/android";
-import { GetScreenSize } from "../observe/GetScreenSize";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import { FocusPathCalculator, type FocusNavigationPath } from "./FocusPathCalculator";
 
@@ -52,11 +50,8 @@ interface FocusNavigationExecutorDependencies {
 
 class DefaultFocusNavigationDriver implements FocusNavigationDriver {
   private accessibilityService: AndroidCtrlProxyClient;
-  private screenSizeProvider: GetScreenSize;
-
-  constructor(accessibilityService: AndroidCtrlProxyClient, screenSizeProvider: GetScreenSize) {
+  constructor(accessibilityService: AndroidCtrlProxyClient) {
     this.accessibilityService = accessibilityService;
-    this.screenSizeProvider = screenSizeProvider;
   }
 
   async requestTraversalOrder(): Promise<TraversalOrderResult> {
@@ -78,21 +73,17 @@ class DefaultFocusNavigationDriver implements FocusNavigationDriver {
   }
 
   async getScreenSize(): Promise<ScreenSize> {
-    return this.screenSizeProvider.execute();
+    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(undefined, undefined, true);
+    if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
+      throw new ActionableError("CtrlProxy did not provide screen dimensions for TalkBack navigation");
+    }
+    return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
   }
 }
 
 class DefaultFocusNavigationDriverFactory implements FocusNavigationDriverFactory {
-  private adbFactory: AdbClientFactory;
-
-  constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {
-    this.adbFactory = adbFactory;
-  }
-
   createDriver(device: BootedDevice): FocusNavigationDriver {
-    const accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
-    const screenSizeProvider = new GetScreenSize(device, this.adbFactory);
-    return new DefaultFocusNavigationDriver(accessibilityService, screenSizeProvider);
+    return new DefaultFocusNavigationDriver(AndroidCtrlProxyClient.getInstance(device));
   }
 }
 

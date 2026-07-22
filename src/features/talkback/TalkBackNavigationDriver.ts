@@ -1,8 +1,7 @@
 import type { BootedDevice } from "../../models";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { A11yActionResult, A11yTapCoordinatesResult } from "../observe/android/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { GetScreenSize } from "../observe/GetScreenSize";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { FocusNavigationDriver } from "./FocusNavigationExecutor";
 
 /**
@@ -31,11 +30,8 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
  */
 class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
   private accessibilityService: AndroidCtrlProxyClient;
-  private screenSizeProvider: GetScreenSize;
-
-  constructor(accessibilityService: AndroidCtrlProxyClient, screenSizeProvider: GetScreenSize) {
+  constructor(accessibilityService: AndroidCtrlProxyClient) {
     this.accessibilityService = accessibilityService;
-    this.screenSizeProvider = screenSizeProvider;
   }
 
   async requestTraversalOrder() {
@@ -51,7 +47,11 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
   }
 
   async getScreenSize() {
-    return this.screenSizeProvider.execute();
+    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(undefined, undefined, true);
+    if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
+      throw new Error("CtrlProxy did not provide screen dimensions for TalkBack navigation");
+    }
+    return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
   }
 
   async requestTapCoordinates(x: number, y: number, durationMs: number): Promise<A11yTapCoordinatesResult> {
@@ -74,15 +74,9 @@ export interface TalkBackNavigationDriverFactory {
  * Default factory implementation for TalkBackNavigationDriver.
  */
 export class DefaultTalkBackNavigationDriverFactory implements TalkBackNavigationDriverFactory {
-  private adbFactory: AdbClientFactory;
-
-  constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {
-    this.adbFactory = adbFactory;
-  }
+  constructor(private readonly adbFactory: AdbClientFactory) {}
 
   createDriver(device: BootedDevice): TalkBackNavigationDriver {
-    const accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
-    const screenSizeProvider = new GetScreenSize(device, this.adbFactory);
-    return new DefaultTalkBackNavigationDriver(accessibilityService, screenSizeProvider);
+    return new DefaultTalkBackNavigationDriver(AndroidCtrlProxyClient.getInstance(device, this.adbFactory));
   }
 }

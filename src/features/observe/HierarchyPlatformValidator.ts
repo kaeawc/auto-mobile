@@ -103,6 +103,8 @@ export function discardHierarchyDerivedData(result: ObserveResult): void {
   // Screen metrics copied from the rejected hierarchy — reset to base defaults.
   result.screenSize = { width: 0, height: 0 };
   result.systemInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  result.insets = { available: false, source: "unavailable", units: "unknown" };
+  result.layoutWarnings = undefined;
   result.rotation = undefined;
   result.wakefulness = undefined;
 }

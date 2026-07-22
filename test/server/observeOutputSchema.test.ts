@@ -50,6 +50,45 @@ function collectBoundsUnions(schema: unknown): Array<Record<string, unknown>> {
 }
 
 describe("observeResultSchema: parses real captures (#3025)", () => {
+  test("accepts source-attributed insets and advisory layout warnings", () => {
+    const parsed = observeResultSchema.safeParse({
+      screenSize: { width: 375, height: 812 },
+      insets: {
+        available: true,
+        source: "ios-sdk-safe-area",
+        units: "points",
+        safeArea: { top: 59.5, right: 0, bottom: 34, left: 0 },
+      },
+      layoutWarnings: [{
+        type: "important-content-under-inset",
+        severity: "warning",
+        element: { text: "Title", bounds: { top: 0, right: 100, bottom: 30, left: 0 } },
+        categories: ["text"],
+        insetTypes: ["safeArea"],
+        sides: ["top"],
+        overlapPercent: 100,
+        confidence: "high",
+      }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  test("accepts nullable Android inset categories", () => {
+    expect(() => observeResultSchema.parse({
+      insets: {
+        available: true,
+        source: "android-window-metrics",
+        units: "physical-pixels",
+        systemBars: { visible: { top: 24, right: 0, bottom: 48, left: 0 }, stable: { top: 24, right: 0, bottom: 48, left: 0 } },
+        displayCutout: null,
+        systemGestures: null,
+        mandatorySystemGestures: null,
+        tappableElement: null,
+      },
+    })).not.toThrow();
+  });
+
   test("accepts the frozen android-home observe fixture (object bounds)", () => {
     const { observe } = loadAndroidHomeObserve();
     expect(() => observeResultSchema.parse(observe)).not.toThrow();
@@ -61,6 +100,26 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     // Sanity: the fixture really does carry tuple bounds after compaction.
     const json = JSON.stringify(compacted);
     expect(json).toContain("[0,0,1080,2400]");
+    expect(() => observeResultSchema.parse(compacted)).not.toThrow();
+  });
+
+  test("accepts compacted layout-warning bounds and fractional legacy iOS insets", () => {
+    const observe = {
+      systemInsets: { top: 59.5, right: 0, bottom: 34, left: 0 },
+      layoutWarnings: [{
+        type: "important-content-under-inset",
+        severity: "warning",
+        element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+        categories: ["text"],
+        insetTypes: ["safeArea"],
+        sides: ["top"],
+        overlapPercent: 100,
+        confidence: "high",
+      }],
+    };
+    const compacted = sanitizeObserveResult(observe as never, { dropElements: false, compact: true });
+
+    expect(compacted.layoutWarnings?.[0]?.element.bounds).toEqual([0, 0, 100, 30]);
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
   });
 

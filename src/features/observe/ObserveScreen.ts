@@ -1,12 +1,9 @@
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { BootedDevice, ObserveResult } from "../../models";
-import { GetScreenSize } from "./GetScreenSize";
-import { GetSystemInsets } from "./GetSystemInsets";
 import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
-import { GetDumpsysWindow } from "./GetDumpsysWindow";
 import { GetBackStack } from "./GetBackStack";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -20,7 +17,6 @@ import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import type { ObserveScreen, ObserveScreenExecuteOptions } from "./interfaces/ObserveScreen";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
-import type { DumpsysWindow } from "./interfaces/DumpsysWindow";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
 import { getObserveCacheStore, setObserveCacheStore } from "./cache/ObserveCacheRegistry";
@@ -43,6 +39,7 @@ import {
   RealHierarchyPlatformValidator
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
+import { SafeAreaAuditor } from "./audits/SafeAreaAuditor";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -58,7 +55,6 @@ export class RealObserveScreen implements ObserveScreen {
   private timer: Timer;
 
   private viewHierarchy: ViewHierarchyInterface;
-  private dumpsysWindow: DumpsysWindow;
   private predictiveUIState: PredictiveUIStateInterface;
 
   private screenshotRecorder: ObserveScreenshotRecorder;
@@ -69,6 +65,7 @@ export class RealObserveScreen implements ObserveScreen {
   private accessibilityStateDetector: AccessibilityStateDetector;
   private elementsBuilder: ObserveElementsBuilder;
   private platformValidator: HierarchyPlatformValidator;
+  private safeAreaAuditor: SafeAreaAuditor;
 
   // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
 
@@ -134,12 +131,9 @@ export class RealObserveScreen implements ObserveScreen {
     this.timer = timer;
 
     // Data sources (either injected or default)
-    const screenSize = dependencies?.screenSize ?? new GetScreenSize(device, this.adbFactory);
-    const systemInsets = dependencies?.systemInsets ?? new GetSystemInsets(device, this.adbFactory);
     this.viewHierarchy = dependencies?.viewHierarchy ?? new ViewHierarchy(device, this.adbFactory);
     const window = dependencies?.window ?? new Window(device, this.adbFactory);
     const screenshotUtil = dependencies?.screenshot ?? new TakeScreenshot(device, this.adbFactory);
-    this.dumpsysWindow = dependencies?.dumpsysWindow ?? new GetDumpsysWindow(device, this.adbFactory);
     const backStack = dependencies?.backStack ?? new GetBackStack(device, this.adbFactory);
     this.predictiveUIState = dependencies?.predictiveUIState ?? new PredictiveUIState();
 
@@ -170,8 +164,6 @@ export class RealObserveScreen implements ObserveScreen {
     });
     this.deviceStateCollector = dependencies?.deviceStateCollector ?? new DeviceStateCollector({
       device,
-      screenSize,
-      systemInsets,
       window,
       backStack,
       adb: this.adb,
@@ -194,6 +186,7 @@ export class RealObserveScreen implements ObserveScreen {
     });
     this.elementsBuilder = new ObserveElementsBuilder();
     this.platformValidator = dependencies?.platformValidator ?? new RealHierarchyPlatformValidator();
+    this.safeAreaAuditor = new SafeAreaAuditor();
   }
 
   // ---------- Public API ----------
@@ -275,6 +268,10 @@ export class RealObserveScreen implements ObserveScreen {
       // consumer (tool response, observe cache, LATEST_OBSERVATION resource, or the
       // navigation-graph recorder) ever observes the other platform's data.
       enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
+
+      if (serverConfig.isSafeAreaWarningsEnabled()) {
+        result.layoutWarnings = this.safeAreaAuditor.inspect(result);
+      }
 
       if (result.viewHierarchy) {
         result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);
@@ -380,7 +377,8 @@ export class RealObserveScreen implements ObserveScreen {
     return {
       updatedAt: new Date().toISOString(),
       screenSize: { width: 0, height: 0 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      insets: { available: false, source: "unavailable", units: "unknown" }
     };
   }
 
@@ -423,6 +421,9 @@ export class RealObserveScreen implements ObserveScreen {
           }
           if (hierarchy.systemInsets) {
             result.systemInsets = hierarchy.systemInsets;
+          }
+          if (hierarchy.insets) {
+            result.insets = hierarchy.insets;
           }
           if (hierarchy.foregroundActivity) {
             const parts = hierarchy.foregroundActivity.split("/");
@@ -469,7 +470,9 @@ export class RealObserveScreen implements ObserveScreen {
           };
         }
 
-        // Fallback: if activeWindow still not populated, use the Window class.
+        // CtrlProxy is installed lazily. Preserve active-window attribution for
+        // that bootstrap interval only; once CtrlProxy supplied an app/activity
+        // or hierarchy package, never make the legacy Window query.
         if (!result.activeWindow) {
           await this.deviceStateCollector.collectActiveWindow(result);
         }
@@ -497,6 +500,12 @@ export class RealObserveScreen implements ObserveScreen {
           logger.debug(`[iOS] Using screen size from CtrlProxy iOS: ${result.screenSize.width}x${result.screenSize.height}`);
         } else {
           logger.warn("[iOS] Failed to extract screen size from hierarchy");
+        }
+        if (result.viewHierarchy?.insets) {
+          result.insets = result.viewHierarchy.insets;
+        }
+        if (result.viewHierarchy?.systemInsets) {
+          result.systemInsets = result.viewHierarchy.systemInsets;
         }
 
         // Filter offscreen nodes to keep payload small. Original hierarchy stays

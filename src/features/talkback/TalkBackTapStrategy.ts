@@ -2,7 +2,7 @@ import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { FocusElementMatcher } from "./FocusElementMatcher";
-import { FocusNavigationExecutor } from "./FocusNavigationExecutor";
+import { FocusNavigationExecutor, type FocusNavigationDriverFactory } from "./FocusNavigationExecutor";
 import { FocusPathCalculator } from "./FocusPathCalculator";
 import type { TalkBackNavigationDriver } from "./TalkBackNavigationDriver";
 
@@ -34,6 +34,7 @@ interface TalkBackTapStrategyDependencies {
   matcher?: FocusElementMatcher;
   pathCalculator?: FocusPathCalculator;
   executor?: FocusNavigationExecutor;
+  driverFactory?: FocusNavigationDriverFactory;
   timer?: Timer;
 }
 
@@ -57,7 +58,8 @@ export class TalkBackTapStrategy {
     this.executor = dependencies.executor ?? new FocusNavigationExecutor({
       matcher: this.matcher,
       pathCalculator: this.pathCalculator,
-      timer: dependencies.timer
+      timer: dependencies.timer,
+      driverFactory: dependencies.driverFactory,
     });
     this.timer = dependencies.timer ?? defaultTimer;
   }

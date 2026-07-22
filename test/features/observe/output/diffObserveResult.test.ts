@@ -391,6 +391,24 @@ describe("diffObserveResult", () => {
     expect(DIFF_SCALAR_FIELDS).toContain("awaitDuration");
   });
 
+  test("layout warnings are captured in action observation diffs", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const warning = {
+      type: "important-content-under-inset",
+      severity: "warning",
+      element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+      categories: ["text"],
+      insetTypes: ["safeArea"],
+      sides: ["top"],
+      overlapPercent: 100,
+      confidence: "high",
+    } as const;
+
+    const diff = diffObserveResult(obs({ ...node }), obs({ ...node }, { layoutWarnings: [warning] }));
+    expect(diff.fields!.layoutWarnings).toEqual({ from: undefined, to: [warning] });
+    expect(DIFF_SCALAR_FIELDS).toContain("layoutWarnings");
+  });
+
   test("the emitted focusedElement is stripped of its `node` child subtree", () => {
     // parseNodeBounds shallow-copies the source node, so a mirror element can
     // carry a full child subtree — the only unbounded part of an Element.

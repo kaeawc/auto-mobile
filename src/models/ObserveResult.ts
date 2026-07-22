@@ -14,6 +14,7 @@ import { SelectedElement } from "../utils/interfaces/NavigationGraph";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
 import type { MediaView } from "../features/observe/IdentifyMediaViews";
 import type { ObserveError } from "../features/observe/ObserveError";
+import type { LayoutWarning, ObservationInsets } from "./ObservationInsets";
 
 export interface PredictionTarget {
   text?: string;
@@ -89,6 +90,12 @@ export interface ObserveResult {
 
   /** System UI insets */
   systemInsets: SystemInsets;
+
+  /** Typed inset metadata. Present even when a platform cannot measure it. */
+  insets?: ObservationInsets;
+
+  /** Potential edge-to-edge layout problems, emitted only when explicitly enabled. */
+  layoutWarnings?: LayoutWarning[];
 
   /** Screen rotation (0: portrait, 1: landscape 90°, 2: reverse portrait 180°, 3: reverse landscape 270°) */
   rotation?: number;

@@ -25,6 +25,7 @@ data class ViewHierarchy(
   val screenHeight: Int? = null,
   val rotation: Int? = null, // 0=portrait, 1=landscape90, 2=reverse, 3=landscape270
   val systemInsets: SystemInsetsInfo? = null,
+  val insets: ObservationInsetsInfo? = null,
   val wakefulness: String? = null, // "Awake", "Asleep", or "Dozing"
   val foregroundActivity: String? = null, // e.g. "com.example.app/.MainActivity"
   val density: Int? = null, // Display density in DPI

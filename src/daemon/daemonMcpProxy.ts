@@ -218,6 +218,7 @@ export interface ProxiedResourceTemplate {
  */
 const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "embeddedSdk",
+  "safeAreaWarnings",
   ...OUTPUT_REDUCTION_FLAG_SPECS.map(spec => spec.field),
 ];
 

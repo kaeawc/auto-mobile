@@ -43,6 +43,7 @@ class ServerConfig {
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
   private _toolResultsCompactJson: boolean = false;
+  private _safeAreaWarningsEnabled: boolean = false;
   private _toolOutputsDir: string | undefined;
 
   private constructor() {}
@@ -260,6 +261,15 @@ class ServerConfig {
 
   isObserveResultCompactEnabled(): boolean {
     return this._observeResultCompact;
+  }
+
+  /** `--safe-area-warnings` and `--edge-to-edge-warnings` are exact aliases. */
+  setSafeAreaWarningsEnabled(enabled: boolean): void {
+    this._safeAreaWarningsEnabled = enabled;
+  }
+
+  isSafeAreaWarningsEnabled(): boolean {
+    return this._safeAreaWarningsEnabled;
   }
 
   setToolResultsNoStructuredContentEnabled(enabled: boolean): void {

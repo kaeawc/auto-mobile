@@ -1,6 +1,7 @@
 import { ElementBounds } from "./ElementBounds";
 import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";
 import type { CtrlProxyReconnectStatus } from "./CtrlProxyReconnectStatus";
+import type { ObservationInsets } from "./ObservationInsets";
 
 /**
  * Hierarchy data sources that contributed to the result
@@ -46,6 +47,8 @@ export interface ViewHierarchyResult {
   rotation?: number;
   /** System insets (status bar, nav bar, gesture insets) */
   systemInsets?: { top: number; bottom: number; left: number; right: number };
+  /** Typed inset metadata captured alongside this hierarchy. */
+  insets?: ObservationInsets;
   /** Device wakefulness: "Awake", "Asleep", or "Dozing" (Android only, from accessibility service) */
   wakefulness?: "Awake" | "Asleep" | "Dozing";
   /** Foreground activity component name, e.g. "com.example.app/.MainActivity" (Android only) */

@@ -16,7 +16,29 @@ public enum HierarchyMerger {
     /// 2. **Inject** — add SDK-only nodes (views absent from the XCUITest tree) as children
     ///    of their nearest matched parent. Injected nodes carry `sdk.source=sdkWalker`.
     public static func merge(xcuitest: ViewHierarchy, sdk: SdkViewHierarchy?) -> ViewHierarchy {
-        guard let sdkRoot = sdk?.root else { return xcuitest }
+        guard let sdk else { return xcuitest }
+        let safeArea = sdk.safeAreaInsets.map {
+            EdgeInsetsInfo(top: $0.top, right: $0.right, bottom: $0.bottom, left: $0.left)
+        }
+        let enrichedInsets = safeArea.map {
+            ObservationInsetsInfo(available: true, source: "ios-sdk-safe-area", units: "points", safeArea: $0)
+        } ?? xcuitest.insets
+        guard let sdkRoot = sdk.root else {
+            return ViewHierarchy(
+                updatedAt: xcuitest.updatedAt,
+                packageName: xcuitest.packageName,
+                hierarchy: xcuitest.hierarchy,
+                windowInfo: xcuitest.windowInfo,
+                windows: xcuitest.windows,
+                screenScale: xcuitest.screenScale,
+                screenWidth: xcuitest.screenWidth,
+                screenHeight: xcuitest.screenHeight,
+                systemInsets: safeArea ?? xcuitest.systemInsets,
+                insets: enrichedInsets,
+                error: xcuitest.error,
+                fallbackToSpringboard: xcuitest.fallbackToSpringboard
+            )
+        }
         guard let xcuitestRoot = xcuitest.hierarchy else { return xcuitest }
 
         // Build flat lookups from the SDK tree
@@ -63,6 +85,8 @@ public enum HierarchyMerger {
             screenScale: xcuitest.screenScale,
             screenWidth: xcuitest.screenWidth,
             screenHeight: xcuitest.screenHeight,
+            systemInsets: safeArea ?? xcuitest.systemInsets,
+            insets: enrichedInsets,
             error: xcuitest.error,
             fallbackToSpringboard: xcuitest.fallbackToSpringboard
         )

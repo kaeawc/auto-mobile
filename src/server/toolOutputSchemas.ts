@@ -197,10 +197,48 @@ export const screenSizeSchema = z.object({
 });
 
 export const systemInsetsSchema = z.object({
-  top: z.number().int(),
-  right: z.number().int(),
-  bottom: z.number().int(),
-  left: z.number().int()
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+  left: z.number()
+});
+
+const edgeInsetsSchema = z.object({
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+  left: z.number()
+});
+
+const observationInsetsSchema = z.object({
+  available: z.boolean(),
+  source: z.enum(["android-window-metrics", "android-resource-fallback", "ios-sdk-safe-area", "unavailable"]),
+  units: z.enum(["physical-pixels", "points", "unknown"]),
+  // Android's Kotlin payload serializes unavailable typed inset categories as
+  // null (rather than omitting them), particularly on older API levels.
+  systemBars: z.object({ visible: edgeInsetsSchema, stable: edgeInsetsSchema }).nullish(),
+  displayCutout: edgeInsetsSchema.nullish(),
+  systemGestures: edgeInsetsSchema.nullish(),
+  mandatorySystemGestures: edgeInsetsSchema.nullish(),
+  tappableElement: edgeInsetsSchema.nullish(),
+  safeArea: edgeInsetsSchema.optional(),
+});
+
+const layoutWarningSchema = z.object({
+  type: z.enum(["important-content-under-inset", "interaction-in-system-gesture-region"]),
+  severity: z.enum(["warning", "info"]),
+  element: z.object({
+    viewId: z.string().optional(),
+    resourceId: z.string().optional(),
+    text: z.string().optional(),
+    contentDesc: z.string().optional(),
+    bounds: elementBoundsSchema,
+  }),
+  categories: z.array(z.enum(["text", "interaction"])),
+  insetTypes: z.array(z.enum(["systemBars", "displayCutout", "safeArea", "systemGestures", "mandatorySystemGestures"])),
+  sides: z.array(z.enum(["top", "right", "bottom", "left"])),
+  overlapPercent: z.number().int(),
+  confidence: z.enum(["high", "medium"]),
 });
 
 const predictionTargetSchema = z.object({
@@ -323,7 +361,8 @@ export const viewHierarchyResultSchema = z.object({
   "windows": z.array(viewHierarchyWindowSchema).nullish(),
   "contentHiddenRegions": z.array(contentHiddenRegionSchema).nullish(),
   "accessibility-focused-element": viewHierarchyNodeSchema.optional(),
-  "systemInsets": systemInsetsSchema.optional()
+  "systemInsets": systemInsetsSchema.optional(),
+  "insets": observationInsetsSchema.optional()
 }).passthrough();
 
 /**
@@ -368,6 +407,8 @@ const observeElementsSchema = z.object({
 export const observeResultSchema = z.object({
   screenSize: screenSizeSchema.optional(),
   systemInsets: systemInsetsSchema.optional(),
+  insets: observationInsetsSchema.optional(),
+  layoutWarnings: z.array(layoutWarningSchema).optional(),
   viewHierarchy: viewHierarchyResultSchema.optional(),
   activeWindow: activeWindowSchema.optional(),
   screenIdentity: screenIdentitySchema.optional(),

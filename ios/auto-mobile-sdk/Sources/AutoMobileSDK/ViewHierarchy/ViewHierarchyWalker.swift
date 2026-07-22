@@ -22,23 +22,46 @@ public enum ViewHierarchyWalker {
         let screenWidth = Int(screenBounds.width)
         let screenHeight = Int(screenBounds.height)
 
-        let rootNode = walkWindows()
+        let keyWindow = visibleKeyWindow()
+        let rootNode = keyWindow.flatMap(walkWindow)
+        let safeAreaInsets = keyWindow.map {
+            SdkEdgeInsets(
+                top: Double($0.safeAreaInsets.top),
+                right: Double($0.safeAreaInsets.right),
+                bottom: Double($0.safeAreaInsets.bottom),
+                left: Double($0.safeAreaInsets.left)
+            )
+        }
 
         return SdkViewHierarchy(
             bundleId: bundleId,
             screenScale: scale,
             screenWidth: screenWidth,
             screenHeight: screenHeight,
+            safeAreaInsets: safeAreaInsets,
             root: rootNode
         )
     }
 
-    /// Compute a structural hash of a hierarchy for change detection.
-    /// Ignores bounds (which change during animations) to focus on content changes.
+    /// Compute a hierarchy hash for change detection.
+    /// Ignores per-view bounds (which change during animations), while retaining screen and
+    /// safe-area metrics because they determine the coordinate and layout-warning contract.
     public static func computeHash(_ hierarchy: SdkViewHierarchy) -> Int {
         var hasher = Hasher()
         if let bundleId = hierarchy.bundleId {
             hasher.combine(bundleId)
+        }
+        hasher.combine(hierarchy.screenScale)
+        hasher.combine(hierarchy.screenWidth)
+        hasher.combine(hierarchy.screenHeight)
+        if let safeAreaInsets = hierarchy.safeAreaInsets {
+            hasher.combine(true)
+            hasher.combine(safeAreaInsets.top)
+            hasher.combine(safeAreaInsets.right)
+            hasher.combine(safeAreaInsets.bottom)
+            hasher.combine(safeAreaInsets.left)
+        } else {
+            hasher.combine(false)
         }
         if let root = hierarchy.root {
             hashNode(root, into: &hasher, depth: 0)
@@ -48,7 +71,7 @@ public enum ViewHierarchyWalker {
 
     // MARK: - Window Enumeration
 
-    private static func walkWindows() -> SdkViewNode? {
+    private static func visibleKeyWindow() -> UIWindow? {
         let windows: [UIWindow]
         if #available(iOS 15.0, *) {
             windows = UIApplication.shared.connectedScenes
@@ -59,15 +82,15 @@ public enum ViewHierarchyWalker {
         }
 
         // Find topmost visible window: prefer key window, then highest window level
-        guard let keyWindow = windows
+        return windows
             .filter({ !$0.isHidden && $0.alpha > 0 })
             .max(by: { a, b in
                 if a.windowLevel != b.windowLevel { return a.windowLevel < b.windowLevel }
                 return !a.isKeyWindow && b.isKeyWindow
-            }) else {
-            return nil
-        }
+            })
+    }
 
+    private static func walkWindow(_ keyWindow: UIWindow) -> SdkViewNode? {
         var opaqueOverlays: [CGRect] = []
         let rootBounds = keyWindow.bounds
 

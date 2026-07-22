@@ -1,9 +1,7 @@
 import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { appendObserveError } from "../ObserveError";
-import type { BootedDevice, ExecResult, ObserveResult } from "../../../models";
-import type { ScreenSize } from "../interfaces/ScreenSize";
-import type { SystemInsets } from "../interfaces/SystemInsets";
+import type { BootedDevice, ObserveResult } from "../../../models";
 import type { Window } from "../interfaces/Window";
 import type { BackStack } from "../interfaces/BackStack";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -11,8 +9,6 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 
 export interface DeviceStateCollectorOptions {
   device: BootedDevice;
-  screenSize: ScreenSize;
-  systemInsets: SystemInsets;
   window: Window;
   backStack: BackStack;
   adb: AdbExecutor;
@@ -21,56 +17,12 @@ export interface DeviceStateCollectorOptions {
 
 /**
  * Collects device-level state into an ObserveResult:
- * screen size, system insets, rotation, wakefulness, back stack, active window.
+ * wakefulness and back stack. CtrlProxy hierarchy metadata is the normal
+ * active-window source; the Window source is retained only for first-run
+ * bootstrap, before CtrlProxy is available.
  */
 export class DeviceStateCollector {
   constructor(private opts: DeviceStateCollectorOptions) {}
-
-  async collectScreenSize(dumpsysWindow: ExecResult, result: ObserveResult): Promise<void> {
-    const { screenSize, timer } = this.opts;
-    try {
-      const screenSizeStart = timer.now();
-      result.screenSize = await screenSize.execute(dumpsysWindow);
-      logger.debug(`Screen size retrieval took ${timer.now() - screenSizeStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get screen size:", error);
-      appendObserveError(result, {
-        phase: "screenSize",
-        message: "Failed to retrieve screen dimensions",
-        cause: String(error)
-      });
-    }
-  }
-
-  async collectSystemInsets(dumpsysWindow: ExecResult, result: ObserveResult): Promise<void> {
-    const { systemInsets, timer } = this.opts;
-    try {
-      const insetsStart = timer.now();
-      result.systemInsets = await systemInsets.execute(dumpsysWindow);
-      logger.debug(`System insets retrieval took ${timer.now() - insetsStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get system insets:", error);
-      appendObserveError(result, {
-        phase: "systemInsets",
-        message: "Failed to retrieve system insets",
-        cause: String(error)
-      });
-    }
-  }
-
-  async collectRotationInfo(dumpsysWindow: ExecResult, result: ObserveResult): Promise<void> {
-    const { timer } = this.opts;
-    try {
-      const rotationStart = timer.now();
-      const rotationMatch = dumpsysWindow.stdout.match(/mRotation=(\d)/);
-      if (rotationMatch) {
-        result.rotation = parseInt(rotationMatch[1], 10);
-      }
-      logger.debug(`Rotation info retrieval took ${timer.now() - rotationStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get rotation info:", error);
-    }
-  }
 
   async collectWakefulness(result: ObserveResult, signal?: AbortSignal): Promise<void> {
     const { adb } = this.opts;
@@ -108,15 +60,14 @@ export class DeviceStateCollector {
   async collectActiveWindow(result: ObserveResult): Promise<void> {
     const { window, timer } = this.opts;
     try {
-      logger.debug("[OBSERVER] collectActiveWindow");
-      const windowStart = timer.now();
+      const startedAt = timer.now();
       const activeWindow = await window.getActive();
-      logger.debug(`Active window retrieval took ${timer.now() - windowStart}ms`);
+      logger.debug(`Bootstrap active window retrieval took ${timer.now() - startedAt}ms`);
       if (activeWindow) {
         result.activeWindow = activeWindow;
       }
     } catch (error) {
-      logger.warn("Failed to get active window:", error);
+      logger.warn("Failed to get bootstrap active window:", error);
       appendObserveError(result, {
         phase: "activeWindow",
         message: "Failed to retrieve active window information",

@@ -133,13 +133,60 @@ function getDeclaredParamTypes(toolName: string): Record<string, string> | null 
   if (!tool) {
     return null;
   }
-  const shape = getCliHelpSchemaShape(tool.schema);
-  if (!shape) {
+
+  const shapes = collectSchemaShapes(tool.schema);
+  if (shapes.length === 0) {
     return null;
   }
+
+  // A param declared with different types across union branches cannot be
+  // coerced unambiguously from the token alone, so it is omitted and falls back
+  // to best-effort parsing rather than being coerced to the wrong branch's type.
+  const byParam = new Map<string, Set<string>>();
+  for (const shape of shapes) {
+    for (const [key, value] of Object.entries(shape)) {
+      const types = byParam.get(key) ?? new Set<string>();
+      types.add(getCliHelpParameterInfo(value).typeName);
+      byParam.set(key, types);
+    }
+  }
+
   return Object.fromEntries(
-    Object.entries(shape).map(([key, value]) => [key, getCliHelpParameterInfo(value).typeName])
+    [...byParam.entries()]
+      .filter(([, types]) => types.size === 1)
+      .map(([key, types]) => [key, [...types][0]])
   );
+}
+
+/**
+ * Every object shape a tool's schema can present.
+ *
+ * Union-rooted tools (`clipboard`, `deviceSnapshot`, and `postNotification` via a
+ * pipe into a union) have no single shape, so a lookup that only understands a
+ * flat object returns nothing and their params silently keep the old JSON
+ * coercion — `clipboard --action copy --text 12345` would still send a number.
+ * Branches are collected so those tools are typed too.
+ */
+function collectSchemaShapes(schema: any): Record<string, any>[] {
+  const definition = schema?._def;
+  if (!definition) {
+    return [];
+  }
+
+  if (definition.shape) {
+    return [definition.shape];
+  }
+
+  const options = definition.options ?? definition.out?._def?.options;
+  if (Array.isArray(options)) {
+    return options.flatMap((option: any) => collectSchemaShapes(option));
+  }
+
+  if (definition.out) {
+    return collectSchemaShapes(definition.out);
+  }
+
+  return [];
 }
 
 export function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string; params: Record<string, any> } {

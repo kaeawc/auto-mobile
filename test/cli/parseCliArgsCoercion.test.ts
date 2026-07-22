@@ -72,3 +72,36 @@ describe("parseCliArgs schema-aware coercion (#4241)", () => {
     expect(params.raw).toBe(true);
   });
 });
+
+describe("parseCliArgs coercion for union-rooted schemas (#4241 review)", () => {
+  // clipboard / deviceSnapshot are z.union at the root, and postNotification is a
+  // pipe into a union, so a shape lookup that only understands a flat object
+  // returns nothing and these tools kept the old JSON coercion.
+
+  test("clipboard --text keeps a numeric-looking value as a string", () => {
+    const { params } = parseCliArgs([
+      "clipboard", "--platform", "android", "--action", "copy", "--text", "12345"
+    ]);
+
+    expect(params.text).toBe("12345");
+    expect(typeof params.text).toBe("string");
+  });
+
+  test("deviceSnapshot --snapshotName keeps a numeric-looking value as a string", () => {
+    const { params } = parseCliArgs([
+      "deviceSnapshot", "--platform", "android", "--action", "capture", "--snapshotName", "20260722"
+    ]);
+
+    expect(params.snapshotName).toBe("20260722");
+    expect(typeof params.snapshotName).toBe("string");
+  });
+
+  test("postNotification --title keeps a numeric-looking value as a string", () => {
+    const { params } = parseCliArgs([
+      "postNotification", "--platform", "android", "--title", "911", "--body", "test"
+    ]);
+
+    expect(params.title).toBe("911");
+    expect(typeof params.title).toBe("string");
+  });
+});

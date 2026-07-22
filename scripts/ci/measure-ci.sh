@@ -366,7 +366,7 @@ fetch_bundle() {
   [ -n "$BRANCH" ] && run_args+=(--branch "$BRANCH")
 
   echo "Fetching up to ${LIMIT} \"${WORKFLOW}\" runs..." >&2
-  gh run list "${run_args[@]}" \
+  gh run list ${run_args[@]+"${run_args[@]}"} \
     --json databaseId,number,headSha,headBranch,event,status,conclusion,attempt,createdAt,updatedAt \
     | jq -c '[ .[] | {
         id: .databaseId,

@@ -220,7 +220,7 @@ show_installation_progress() {
 
     local index=1
     local step
-    for step in "${INSTALL_STEPS[@]}"; do
+    for step in ${INSTALL_STEPS[@]+"${INSTALL_STEPS[@]}"}; do
         if [[ "${index}" -eq "${CURRENT_INSTALL_STEP}" ]]; then
             gum style --bold --foreground 212 "  ${index}. → ${step}"
         else
@@ -671,7 +671,7 @@ print_dry_run_summary() {
     echo ""
 
     local i=1
-    for action in "${DRY_RUN_LOG[@]}"; do
+    for action in ${DRY_RUN_LOG[@]+"${DRY_RUN_LOG[@]}"}; do
         # Strip [DRY-RUN] prefix for cleaner output
         local clean_action="${action#\[DRY-RUN\] }"
         printf '  %d. %s\n' "${i}" "${clean_action}"
@@ -877,7 +877,7 @@ offer_android_home_shell_setup() {
     options+=("Skip (I'll set it manually)")
 
     local choice
-    choice=$(printf '%s\n' "${options[@]}" | gum choose --header "Add ANDROID_HOME to shell profile?")
+    choice=$(printf '%s\n' ${options[@]+"${options[@]}"} | gum choose --header "Add ANDROID_HOME to shell profile?")
 
     if [[ -z "${choice}" || "${choice}" == "Skip (I'll set it manually)" ]]; then
         log_info "Skipped ANDROID_HOME shell setup"
@@ -1206,41 +1206,41 @@ install_gum_linux() {
 
     if command_exists apt-get; then
         plain_info "Installing gum with apt-get..."
-        if ! "${sudo_cmd[@]}" apt-get update; then
+        if ! ${sudo_cmd[@]+"${sudo_cmd[@]}"} apt-get update; then
             plain_warn "apt-get update failed; falling back to manual gum install."
             return 1
         fi
-        if "${sudo_cmd[@]}" apt-get install -y gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} apt-get install -y gum; then
             return 0
         fi
         plain_warn "apt-get install failed; falling back to manual gum install."
     elif command_exists dnf; then
         plain_info "Installing gum with dnf..."
-        if "${sudo_cmd[@]}" dnf install -y gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} dnf install -y gum; then
             return 0
         fi
         plain_warn "dnf install failed; falling back to manual gum install."
     elif command_exists yum; then
         plain_info "Installing gum with yum..."
-        if "${sudo_cmd[@]}" yum install -y gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} yum install -y gum; then
             return 0
         fi
         plain_warn "yum install failed; falling back to manual gum install."
     elif command_exists pacman; then
         plain_info "Installing gum with pacman..."
-        if "${sudo_cmd[@]}" pacman -S --noconfirm gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} pacman -S --noconfirm gum; then
             return 0
         fi
         plain_warn "pacman install failed; falling back to manual gum install."
     elif command_exists zypper; then
         plain_info "Installing gum with zypper..."
-        if "${sudo_cmd[@]}" zypper --non-interactive install gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} zypper --non-interactive install gum; then
             return 0
         fi
         plain_warn "zypper install failed; falling back to manual gum install."
     elif command_exists apk; then
         plain_info "Installing gum with apk..."
-        if "${sudo_cmd[@]}" apk add --no-cache gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} apk add --no-cache gum; then
             return 0
         fi
         plain_warn "apk install failed; falling back to manual gum install."
@@ -1556,7 +1556,7 @@ detect_mcp_clients() {
 
 # Get list of detected client names for display
 get_detected_client_names() {
-    for entry in "${MCP_CLIENT_LIST[@]}"; do
+    for entry in ${MCP_CLIENT_LIST[@]+"${MCP_CLIENT_LIST[@]}"}; do
         echo "${entry}" | cut -d'|' -f1
     done | sort
 }
@@ -1571,7 +1571,7 @@ find_client_entry() {
         return 1
     fi
 
-    for entry in "${MCP_CLIENT_LIST[@]}"; do
+    for entry in ${MCP_CLIENT_LIST[@]+"${MCP_CLIENT_LIST[@]}"}; do
         local entry_name
         entry_name=$(echo "${entry}" | cut -d'|' -f1)
         if [[ "${entry_name}" == "${name}" ]]; then
@@ -1694,7 +1694,7 @@ select_mcp_clients() {
                 ;;
             "Update existing configurations to use @latest")
                 # Select all clients that have auto-mobile for update
-                SELECTED_MCP_CLIENTS=("${clients_with_auto_mobile[@]}")
+                SELECTED_MCP_CLIENTS=(${clients_with_auto_mobile[@]+"${clients_with_auto_mobile[@]}"})
                 log_info "Will update ${#SELECTED_MCP_CLIENTS[@]} existing configuration(s)"
                 return 0
                 ;;
@@ -2308,7 +2308,7 @@ configure_selected_mcp_clients() {
     gum style --bold "Configuring AutoMobile with the ${config_preset} setup"
     echo ""
 
-    for client in "${SELECTED_MCP_CLIENTS[@]}"; do
+    for client in ${SELECTED_MCP_CLIENTS[@]+"${SELECTED_MCP_CLIENTS[@]}"}; do
         local config_path
         config_path=$(get_client_config_path "${client}")
         local format
@@ -2430,7 +2430,7 @@ run_auto_mobile_cli() {
         return 1
     fi
 
-    "${AUTO_MOBILE_CMD[@]}" --cli "$@"
+    ${AUTO_MOBILE_CMD[@]+"${AUTO_MOBILE_CMD[@]}"} --cli "$@"
 }
 
 extract_device_ids() {
@@ -2774,7 +2774,7 @@ migrate_stale_daemon() {
 
     local restart_output
     local restart_status=0
-    restart_output=$("${AUTO_MOBILE_CMD[@]}" --daemon restart 2>&1) || restart_status=$?
+    restart_output=$(${AUTO_MOBILE_CMD[@]+"${AUTO_MOBILE_CMD[@]}"} --daemon restart 2>&1) || restart_status=$?
 
     if [[ ${restart_status} -ne 0 ]]; then
         log_warn "Daemon restart failed. You may need to restart manually:"
@@ -2804,7 +2804,7 @@ start_mcp_daemon() {
 
     local daemon_output
     local daemon_status=0
-    daemon_output=$("${AUTO_MOBILE_CMD[@]}" --daemon start 2>&1) || daemon_status=$?
+    daemon_output=$(${AUTO_MOBILE_CMD[@]+"${AUTO_MOBILE_CMD[@]}"} --daemon start 2>&1) || daemon_status=$?
 
     if [[ ${daemon_status} -ne 0 ]]; then
         # Check for corrupted migrations error
@@ -2843,7 +2843,7 @@ start_mcp_daemon() {
 
                     # Retry daemon start (reset status first)
                     daemon_status=0
-                    daemon_output=$("${AUTO_MOBILE_CMD[@]}" --daemon start 2>&1) || daemon_status=$?
+                    daemon_output=$(${AUTO_MOBILE_CMD[@]+"${AUTO_MOBILE_CMD[@]}"} --daemon start 2>&1) || daemon_status=$?
                     if [[ ${daemon_status} -ne 0 ]]; then
                         log_error "Failed to start MCP daemon after database reset:"
                         echo "${daemon_output}"
@@ -2864,7 +2864,7 @@ start_mcp_daemon() {
 
     local health_output
     local health_status=0
-    health_output=$("${AUTO_MOBILE_CMD[@]}" --daemon health 2>&1) || health_status=$?
+    health_output=$(${AUTO_MOBILE_CMD[@]+"${AUTO_MOBILE_CMD[@]}"} --daemon health 2>&1) || health_status=$?
 
     if [[ ${health_status} -ne 0 ]]; then
         log_error "Daemon health check failed:"
@@ -3015,7 +3015,7 @@ _install_dev_tools_brew() {
     # processes would contend for the same lock. One invocation avoids repeated
     # startup work and lets Homebrew schedule the complete dependency set.
     local brew_status=0
-    if run_spinner "Installing ${#to_install[@]} development tools" brew install "${to_install[@]}"; then
+    if run_spinner "Installing ${#to_install[@]} development tools" brew install ${to_install[@]+"${to_install[@]}"}; then
         :
     else
         brew_status=$?
@@ -3086,7 +3086,7 @@ _install_dev_tools_apt() {
     sudo apt-get update -qq 2>/dev/null || true
 
     local missing=0
-    for pkg in "${to_install[@]}"; do
+    for pkg in ${to_install[@]+"${to_install[@]}"}; do
         if sudo apt-get install -y -qq "${pkg}" >/dev/null 2>&1; then
             CHANGES_MADE=true
         else
@@ -3816,7 +3816,7 @@ install_bun() {
             # Multiple options - show choose menu with Skip option
             options+=("Skip")
             local choice
-            choice=$(printf '%s\n' "${options[@]}" | gum choose --header "How would you like to install Bun?")
+            choice=$(printf '%s\n' ${options[@]+"${options[@]}"} | gum choose --header "How would you like to install Bun?")
 
             if [[ -z "${choice}" || "${choice}" == "Skip" ]]; then
                 log_info "Skipped Bun installation"
@@ -3941,7 +3941,7 @@ apply_preset() {
 client_base_has_config() {
     local base_name="$1"
     detect_mcp_clients
-    for entry in "${MCP_CLIENT_LIST[@]}"; do
+    for entry in ${MCP_CLIENT_LIST[@]+"${MCP_CLIENT_LIST[@]}"}; do
         local entry_name
         entry_name=$(echo "${entry}" | cut -d'|' -f1)
         if [[ "${entry_name}" == "${base_name}"* ]]; then
@@ -4017,7 +4017,7 @@ select_preset() {
             choice=$(printf '%s\n' "${available_clients}" | head -1)
         fi
     else
-        choice=$(printf '%s\n' "${options[@]}" | gum filter --header "Select installation preset:" --placeholder "Type to filter...") || true
+        choice=$(printf '%s\n' ${options[@]+"${options[@]}"} | gum filter --header "Select installation preset:" --placeholder "Type to filter...") || true
     fi
 
     # Handle Ctrl+C or empty selection - exit script
@@ -4388,7 +4388,7 @@ main() {
         fi
 
         if [[ "${need_platform_choice}" == "true" ]]; then
-            platform_choice=$(printf '%s\n' "${platform_options[@]}" | gum choose --header "Platform setup:")
+            platform_choice=$(printf '%s\n' ${platform_options[@]+"${platform_options[@]}"} | gum choose --header "Platform setup:")
             # Normalize skip choices
             if [[ "${platform_choice}" == Skip* ]]; then
                 platform_choice="Skip platform setup"
@@ -4429,7 +4429,7 @@ main() {
             # User selected a specific AI agent - auto-configure matching clients
             detect_mcp_clients
             local matching_clients=()
-            for entry in "${MCP_CLIENT_LIST[@]}"; do
+            for entry in ${MCP_CLIENT_LIST[@]+"${MCP_CLIENT_LIST[@]}"}; do
                 local entry_name
                 entry_name=$(echo "${entry}" | cut -d'|' -f1)
                 # Match clients that start with the filter (e.g., "Cursor" matches "Cursor (Global)")

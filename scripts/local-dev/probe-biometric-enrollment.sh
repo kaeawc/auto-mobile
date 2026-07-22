@@ -240,7 +240,7 @@ if [[ -z "${ADB_SERIAL}" ]]; then
       [[ -n "${arg}" ]] || continue
       extra_emulator_args+=("${arg}")
     done <<< "${EMULATOR_ARGS}"
-    emulator_args_array+=("${extra_emulator_args[@]}")
+    emulator_args_array+=(${extra_emulator_args[@]+"${extra_emulator_args[@]}"})
   fi
   "${EMULATOR_BIN}" -avd "${AVD_NAME}" -port "${EMULATOR_PORT}" "${emulator_args_array[@]}" \
     > /tmp/auto-mobile-biometric-probe-emulator.log 2>&1 &

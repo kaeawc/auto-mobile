@@ -341,6 +341,35 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(out).toHaveLength(0);
   });
 
+  test("an audio-shaped record in the damaged bytes is not a way around the anchor", () => {
+    const decoder = new FrameDecoder();
+    // Audio records carry no geometry, so they are admissible on their own.
+    // That made them a handoff point: resync could end at the audio record and
+    // let the synchronized path — which does not consult the anchor — decode
+    // whatever video header followed. The successor is checked for exactly
+    // this reason.
+    const errors: MalformedFrameError[] = [];
+    const audio: Buffer[] = [];
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        Buffer.alloc(32, 0x00),
+        encodeHeader(0, 8_000, 1, 8),
+        Buffer.alloc(8, 0x07),
+        makeFrameBytes(32, 32, 128, 4242, 0xa5),
+        encodeHeader(32, 32, 128, 4243),
+      ]),
+      err => errors.push(err),
+      rec => audio.push(rec.pcm16le)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out).toHaveLength(0);
+    expect(audio).toHaveLength(0);
+  });
+
   test("does not resynchronize when the capture geometry changes inside the corruption", () => {
     const decoder = new FrameDecoder();
     // Deliberate trade, pinned so it stays deliberate. The helper does change

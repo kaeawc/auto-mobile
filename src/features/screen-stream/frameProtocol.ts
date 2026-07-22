@@ -118,12 +118,17 @@ export class FrameDecoder {
   private scanned: number = 0;
   /**
    * Geometry of the most recently decoded frame — the geometry this stream is
-   * using. A capture session emits one frame size for its lifetime, so once
-   * this is known, resync is locked to it and cannot introduce a size the
-   * stream was not already producing. That is what makes fabricating a frame
-   * with chosen dimensions impossible rather than merely improbable: no matter
-   * how many header-shaped ranges a damaged payload contains, the set of
-   * accepted geometries has exactly one element.
+   * using. Resync is locked to it, so the point where the decoder re-enters
+   * synchronized decoding can never be a frame of a size the stream was not
+   * already producing, however many header-shaped ranges a damaged payload
+   * contains.
+   *
+   * That bounds the resync *boundary*, which is what the fabrication cases
+   * exploited; it is not a guarantee that no chosen-size frame can ever be
+   * emitted. The synchronized path deliberately does not consult the anchor,
+   * because a genuine mid-stream reconfigure has to be honored, so an attacker
+   * who can supply a long enough run of chosen bytes still gets there
+   * eventually. Only a wire-format marker closes that — see #4270.
    */
   private anchor: FrameHeader | null = null;
 
@@ -309,6 +314,12 @@ export class FrameDecoder {
     if (this.buffer.length - end < FRAME_HEADER_SIZE) {return "unsettled";}
     const successor = parseHeader(this.buffer, end);
     if (headerError(successor) !== null) {return "reject";}
+    // The successor is where resync hands control back to synchronized
+    // decoding, and the synchronized path does not consult the anchor — so the
+    // handoff point has to. Without this an audio-shaped record inside the
+    // damaged bytes is admissible on its own, resync ends at it, and whatever
+    // video header follows is decoded unchecked.
+    if (!this.admissible(successor)) {return "reject";}
     // The successor must belong to the same stream, not merely be well-formed.
     // Consecutive frames in a capture session share a geometry, so a successor
     // of a different size is evidence of coincidence, not of a boundary. This

@@ -251,3 +251,30 @@ MOCK
   run grep -q "$expected" "$(pwd)/src/utils/deviceBootService.ts"
   [ "$status" -eq 0 ]
 }
+
+@test "the resolution tripwire survives a healthy probe with lots of trailing output" {
+  # `printf | grep -q` under `set -o pipefail` can report failure when grep exits
+  # on an early match and printf takes SIGPIPE, failing a healthy probe.
+  make_emulator
+  fake_bin="$(mktemp -d)"
+  cat > "${fake_bin}/bun" <<'MOCK'
+#!/usr/bin/env bash
+echo "error: No android device matching criteria found. Available images: none."
+# Trailing diagnostics large enough that the reader can stop before the writer.
+i=0
+while [ "$i" -lt 20000 ]; do
+  echo "trailing diagnostic line $i padded out to keep the pipe buffer busy"
+  i=$((i + 1))
+done
+exit 1
+MOCK
+  chmod +x "${fake_bin}/bun"
+
+  run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
+    PATH="${fake_bin}:${PATH}" \
+    bash "$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
+
+  rm -rf "$fake_bin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"resolvable by the product boot flow"* ]]
+}

@@ -37,11 +37,16 @@ output="$(cd "${repo_root}" && AUTOMOBILE_ALLOW_DEVICE_CREATE=0 \
 probe_status=$?
 set -e
 
-if printf '%s\n' "${output}" | grep -q "${resolution_failure}"; then
-  echo "error: the product boot flow cannot resolve the Android emulator in CI." >&2
-  printf '%s\n' "${output}" >&2
-  exit 1
-fi
+# Match with case, not `printf | grep -q`: grep -q exits on the first match, the
+# printf ahead of it can then take SIGPIPE, and `set -o pipefail` would turn a
+# healthy probe with plenty of trailing output into a pipeline failure.
+case "${output}" in
+  *"${resolution_failure}"*)
+    echo "error: the product boot flow cannot resolve the Android emulator in CI." >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+    ;;
+esac
 
 # Fail closed from here on. Everything below is an outcome this guard does not
 # understand, and a guard that cannot tell "healthy" from "unknown" is the exact
@@ -53,11 +58,14 @@ if [ "${probe_status}" -eq 0 ]; then
   exit 1
 fi
 
-if ! printf '%s\n' "${output}" | grep -q "${expected_diagnostic}"; then
-  echo "error: the emulator SDK resolution probe failed for an unexpected reason (exit ${probe_status})." >&2
-  echo "Expected the boot flow to fail with \"${expected_diagnostic}\"; it did not, so the SDK precondition is unverified." >&2
-  printf '%s\n' "${output}" >&2
-  exit 1
-fi
+case "${output}" in
+  *"${expected_diagnostic}"*) ;;
+  *)
+    echo "error: the emulator SDK resolution probe failed for an unexpected reason (exit ${probe_status})." >&2
+    echo "Expected the boot flow to fail with \"${expected_diagnostic}\"; it did not, so the SDK precondition is unverified." >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+    ;;
+esac
 
 echo "Android emulator SDK is resolvable by the product boot flow."

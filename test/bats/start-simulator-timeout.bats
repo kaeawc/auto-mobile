@@ -109,5 +109,8 @@ EOS
   # Elapsed pins that the bound actually fired rather than the run merely
   # outliving the descendant: signalling only the direct child returns at ~20s.
   local elapsed="${output##*elapsed=}"
-  [ "${elapsed}" -lt 15 ]
+  # The 2-second deadline may use the fallback's documented 2-second TERM-to-
+  # KILL grace period. Leave a small scheduling margin, but reject a watchdog
+  # that returns materially later than its requested bound.
+  [ "${elapsed}" -lt 8 ]
 }

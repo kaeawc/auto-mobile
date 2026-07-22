@@ -52,8 +52,14 @@ export class GetBackStack implements BackStack {
       //   "* Hist  #0: ActivityRecord{2b2ce0f u0 com.example/.MainActivity t61}"
       // The "Hist #N" index counts up from the task root, so #0 is the task
       // root and the highest index is the topmost (visible) activity.
+      //
+      // Trailing tokens before the closing brace are tolerated deliberately: a
+      // finishing activity prints " f}" and an activity with no task prints
+      // "t??". Requiring the task id to be the last token is what made the
+      // previous regex drop every line, so anything unrecognized is skipped
+      // rather than allowed to reject the whole activity.
       const activityMatch = line.match(
-        /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+(\S+)(?:\s+t(\d+))?\}/
+        /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+(\S+?)(?:\s+t(\d+))?(?:\s+[^}]*)?\}/
       );
       if (activityMatch) {
         const histIndex = parseInt(activityMatch[1], 10);

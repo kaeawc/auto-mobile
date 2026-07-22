@@ -182,6 +182,32 @@ describe("GetBackStack real-output parsing (#4197)", () => {
       expect(result.depth).toBe(1);
     });
 
+    test("a finishing activity (' f}') is still parsed", async () => {
+      const result = await parse(`
+    Task id #5
+    affinity=com.example
+      * Hist #1: ActivityRecord{aaa u0 com.example/.TopActivity t5 f}
+      * Hist #0: ActivityRecord{bbb u0 com.example/.MainActivity t5}
+`);
+
+      expect(result.activities.map(a => a.name)).toEqual([
+        "com.example.TopActivity",
+        "com.example.MainActivity"
+      ]);
+      expect(result.activities.map(a => a.taskId)).toEqual([5, 5]);
+    });
+
+    test("an activity with no task ('t??') falls back to the enclosing task", async () => {
+      const result = await parse(`
+    Task id #5
+    affinity=com.example
+      * Hist #0: ActivityRecord{aaa u0 com.example/.MainActivity t??}
+`);
+
+      expect(result.activities).toHaveLength(1);
+      expect(result.activities[0].taskId).toBe(5);
+    });
+
     test("an activity line without a tNN suffix falls back to the enclosing task", async () => {
       const result = await parse(`
     Task id #5

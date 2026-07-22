@@ -20,6 +20,12 @@
 #                      the last redirect wins. (#3648)
 #   bare-python        A bare `python` invocation (not python3) — absent on
 #                      ubuntu-latest / modern macOS. (#3657)
+#   empty-array-set-u  `"${arr[@]}"` for an array that can be empty, under
+#                      `set -u`. Bash 3.2 (/bin/bash on macos-latest) aborts
+#                      with "unbound variable"; 4.4+ special-cases it, so the
+#                      bug is invisible on Linux and locally. Use
+#                      `${arr[@]+"${arr[@]}"}` or an explicit
+#                      `[ ${#arr[@]} -gt 0 ]` guard. (#3651, #4212)
 #
 # Usage: scripts/shellcheck/validate_shell_portability.sh [dir ...]
 set -uo pipefail
@@ -85,6 +91,52 @@ scan "append-then-stderr" \
 scan "bare-python" \
   '(^|[;&|(]|\$\()[[:space:]]*python([[:space:]]|$)' \
   'Use python3 — bare python is absent on ubuntu-latest / modern macOS.'
+
+# The empty-array rule needs whole-file context (which arrays are initialized
+# empty, and whether a nearby `${#arr[@]}` guard covers the expansion), so it
+# cannot reuse the line-oriented `scan` helper above.
+# shellcheck disable=SC2016 # awk program: $0/$NR are awk fields, not shell.
+EMPTY_ARRAY_AWK='
+{ lines[NR] = $0 }
+/set -[a-z]*u/ { setu = 1 }
+match($0, /^[ \t]*(local[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=\(\)[ \t]*$/) {
+  decl = $0
+  sub(/^[ \t]*/, "", decl)
+  sub(/^local[ \t]+/, "", decl)
+  sub(/=\(\)[ \t]*$/, "", decl)
+  arrays[decl] = 1
+}
+END {
+  if (!setu) { exit }
+  for (n = 1; n <= NR; n++) {
+    line = lines[n]
+    if (line ~ /^[ \t]*#/) { continue }
+    if (index(line, "portability-ok")) { continue }
+    for (name in arrays) {
+      unsafe = "${" name "[@]}"
+      if (!index(line, unsafe)) { continue }
+      if (index(line, "${" name "[@]+")) { continue }
+      guarded = 0
+      for (k = n - 9; k < n; k++) {
+        if (k >= 1 && index(lines[k], "${#" name "[@]}")) { guarded = 1 }
+      }
+      if (guarded) { continue }
+      text = line
+      sub(/^[ \t]*/, "", text)
+      printf "%d:%s\n", n, text
+    }
+  }
+}
+'
+
+while IFS= read -r file; do
+  while IFS=: read -r lineno text; do
+    [ -z "$lineno" ] && continue
+    # shellcheck disable=SC2016 # literal hint text, not a shell expansion.
+    report "empty-array-set-u" "$file" "$lineno" "$text" \
+      'Bash 3.2 aborts on an empty "${arr[@]}" under set -u — use ${arr[@]+"${arr[@]}"}.'
+  done < <(awk "$EMPTY_ARRAY_AWK" "$file" 2>/dev/null || true)
+done < <(find "${ROOTS[@]}" -name '*.sh' -type f ! -name 'validate_shell_portability.sh' 2>/dev/null | sort)
 
 echo ""
 if [ "$violations" -gt 0 ]; then

@@ -191,7 +191,7 @@ fi
 
 if [[ -n "${only_list[*]-}" ]]; then
   for requested in "${only_list[@]}"; do
-    if ! contains_item "$requested" "${CHECK_NAMES[@]}"; then
+    if ! contains_item "$requested" ${CHECK_NAMES[@]+"${CHECK_NAMES[@]}"}; then
       echo "Unknown check in --only: $requested" >&2
       exit 1
     fi
@@ -200,7 +200,7 @@ fi
 
 if [[ -n "${skip_list[*]-}" ]]; then
   for requested in "${skip_list[@]}"; do
-    if ! contains_item "$requested" "${CHECK_NAMES[@]}"; then
+    if ! contains_item "$requested" ${CHECK_NAMES[@]+"${CHECK_NAMES[@]}"}; then
       echo "Unknown check in --skip: $requested" >&2
       exit 1
     fi
@@ -320,7 +320,7 @@ prune_finished_jobs() {
   # in-flight jobs drain (#3650).
   if [[ ${#new_pids[@]} -gt 0 ]]; then
     pids=("${new_pids[@]}")
-    pid_names=("${new_names[@]}")
+    pid_names=(${new_names[@]+"${new_names[@]}"})
   else
     pids=()
     pid_names=()
@@ -337,12 +337,12 @@ wait_for_slot() {
   done
 }
 
-for idx in "${selected_indices[@]}"; do
+for idx in ${selected_indices[@]+"${selected_indices[@]}"}; do
   wait_for_slot "$max_parallel"
   start_check "$idx"
 done
 
-for pid in "${pids[@]}"; do
+for pid in ${pids[@]+"${pids[@]}"}; do
   wait "$pid" || true
 done
 
@@ -353,7 +353,7 @@ echo "======================="
 passed=0
 failed=0
 
-for idx in "${selected_indices[@]}"; do
+for idx in ${selected_indices[@]+"${selected_indices[@]}"}; do
   name="${CHECK_NAMES[$idx]}"
   status_file="$run_dir/${name}.status"
   start_file="$run_dir/${name}.start"

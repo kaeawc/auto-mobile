@@ -74,6 +74,21 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     expect(parsed.success).toBe(true);
   });
 
+  test("accepts nullable Android inset categories", () => {
+    expect(() => observeResultSchema.parse({
+      insets: {
+        available: true,
+        source: "android-window-metrics",
+        units: "physical-pixels",
+        systemBars: { visible: { top: 24, right: 0, bottom: 48, left: 0 }, stable: { top: 24, right: 0, bottom: 48, left: 0 } },
+        displayCutout: null,
+        systemGestures: null,
+        mandatorySystemGestures: null,
+        tappableElement: null,
+      },
+    })).not.toThrow();
+  });
+
   test("accepts the frozen android-home observe fixture (object bounds)", () => {
     const { observe } = loadAndroidHomeObserve();
     expect(() => observeResultSchema.parse(observe)).not.toThrow();

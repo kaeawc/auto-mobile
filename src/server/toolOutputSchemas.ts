@@ -214,11 +214,13 @@ const observationInsetsSchema = z.object({
   available: z.boolean(),
   source: z.enum(["android-window-metrics", "android-resource-fallback", "ios-sdk-safe-area", "unavailable"]),
   units: z.enum(["physical-pixels", "points", "unknown"]),
-  systemBars: z.object({ visible: edgeInsetsSchema, stable: edgeInsetsSchema }).optional(),
-  displayCutout: edgeInsetsSchema.optional(),
-  systemGestures: edgeInsetsSchema.optional(),
-  mandatorySystemGestures: edgeInsetsSchema.optional(),
-  tappableElement: edgeInsetsSchema.optional(),
+  // Android's Kotlin payload serializes unavailable typed inset categories as
+  // null (rather than omitting them), particularly on older API levels.
+  systemBars: z.object({ visible: edgeInsetsSchema, stable: edgeInsetsSchema }).nullish(),
+  displayCutout: edgeInsetsSchema.nullish(),
+  systemGestures: edgeInsetsSchema.nullish(),
+  mandatorySystemGestures: edgeInsetsSchema.nullish(),
+  tappableElement: edgeInsetsSchema.nullish(),
   safeArea: edgeInsetsSchema.optional(),
 });
 

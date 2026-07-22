@@ -3378,7 +3378,9 @@ finish_ios_runtime_probe() {
 
             kill -TERM -- "${signal_target}" 2>/dev/null || true
             local shutdown_waited=0
-            while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
+            # The wrapper can exit before a helper that ignored SIGTERM. Poll
+            # the isolated group so the SIGKILL fallback still reaches it.
+            while kill -0 -- "${signal_target}" 2>/dev/null; do
                 if ((shutdown_waited >= 10)); then
                     kill -KILL -- "${signal_target}" 2>/dev/null || true
                     break

@@ -98,9 +98,17 @@ STUB
   start_ios_runtime_probe
   local worker_pid="${IOS_RUNTIME_PROBE_PID}"
   wait_for_process_group_leader "${worker_pid}"
+  local helper_pid
+  for _ in {1..10}; do
+    helper_pid=$("${PGREP}" -P "${worker_pid}" . 2>/dev/null || true)
+    [[ -n "${helper_pid}" ]] && break
+    sleep 0.1
+  done
+  [ -n "${helper_pid}" ]
   finish_ios_runtime_probe >/dev/null 2>&1
 
   assert_process_is_reaped "${worker_pid}"
+  assert_process_is_not_active "${helper_pid}"
 }
 
 @test "the runtime-probe process group remains bounded after a wrapper resumes into another stall" {

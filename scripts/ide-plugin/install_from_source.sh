@@ -103,7 +103,7 @@ restart_ide_macos() {
     if [[ "${#matches[@]}" -eq 1 ]]; then
       app_name="${matches[0]}"
     elif [[ "${#matches[@]}" -gt 1 ]]; then
-      app_name="$(select_from_list "Multiple IDEs are running. Which should be restarted?" "${matches[@]}")"
+      app_name="$(select_from_list "Multiple IDEs are running. Which should be restarted?" ${matches[@]+"${matches[@]}"})"
     fi
   fi
 

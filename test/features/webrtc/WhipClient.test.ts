@@ -113,6 +113,14 @@ describe("WhipClient.publish", () => {
 
   test("times out when a successful response stalls while reading its SDP body", async () => {
     const timer = new FakeTimer();
+    let resolveBodyReadStarted!: () => void;
+    let resolveStalledBody!: (body: string) => void;
+    const bodyReadStarted = new Promise<void>(resolve => {
+      resolveBodyReadStarted = resolve;
+    });
+    const stalledBody = new Promise<string>(resolve => {
+      resolveStalledBody = resolve;
+    });
     const client = new WhipClient({
       endpoint: "https://coord.example.com/whip",
       timer,
@@ -121,15 +129,22 @@ describe("WhipClient.publish", () => {
         status: 201,
         ok: true,
         headers: { get: name => (name.toLowerCase() === "location" ? "/r/1" : null) },
-        text: async () => await new Promise<string>(() => {}),
+        text: async () => {
+          resolveBodyReadStarted();
+          return await stalledBody;
+        },
       }),
     });
 
     const publishing = client.publish("offer");
-    await Promise.resolve();
+    await bodyReadStarted;
     timer.advanceTime(10);
 
     await expect(publishing).rejects.toThrow(/response body timed out/);
+    // Let the losing branch of Promise.race settle too. Bun tracks a pending
+    // test promise even after the timeout branch rejects.
+    resolveStalledBody("");
+    await Promise.resolve();
   });
 
   test("preserves an already-aborted caller signal", async () => {

@@ -218,6 +218,12 @@ jobs:
           # Pushing the tag does not start Release on its own: the create event
           # never fired for the CI-pushed v0.0.42/v0.0.44 tags, so every release
           # since has been published by hand. Dispatch it explicitly instead.
-          gh workflow run release.yml --repo "$REPO" --ref main --field tag="$TAG"
+          #
+          # Dispatch on the TAG, not on main. github.ref has to stay a tag ref:
+          # action-gh-release derives its tag from it, docker/metadata-action's
+          # type=semver is inert without it, and the reusable APK/IPA/jar builders
+          # run at the caller's ref -- on main they would build a different tree
+          # than the checksums minted just above were computed from.
+          gh workflow run release.yml --repo "$REPO" --ref "$TAG" -f tag="$TAG"
 
           echo "Dispatched release.yml for $TAG"

@@ -14,6 +14,13 @@ name: Release
         required: true
         type: string
 
+# `create:` is retained as a fallback for a hand-pushed tag, so one tag could in
+# principle arrive by both routes. Two concurrent releases would double-publish to
+# npm, Maven and Docker; serialize per tag rather than rely on that never racing.
+concurrency:
+  group: release-${{ inputs.tag || github.event.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -376,6 +383,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # Explicit, not derived from github.ref. The action throws "GitHub
+          # Releases requires a tag" on a non-tag ref, and this step runs after
+          # npm/Homebrew/MCP/Maven/Docker have already published irreversibly.
+          tag_name: ${{ needs.validate-release-tag.outputs.tag }}
           name: AutoMobile v${{ steps.version.outputs.version }}
           body_path: release_notes.txt
           files: |

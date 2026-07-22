@@ -138,3 +138,23 @@
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true"
   [ -z "$output" ]
 }
+
+# Pushing the tag does not start Release: the `create` event never fired for the
+# CI-pushed v0.0.42/v0.0.44 tags, so ~26 versions were published by hand while CI
+# reported green. prepare-release must dispatch release.yml explicitly, and it must
+# dispatch on the TAG -- action-gh-release and docker/metadata-action's type=semver
+# both read github.ref, so a main ref silently drops the version.
+@test "prepare-release dispatches release.yml on the tag (#4157)" {
+  local workflow=".github/workflows/prepare-release.yml"
+  grep -Fq 'gh workflow run release.yml' "$workflow"
+  # -e is required: a pattern starting with "--" is otherwise parsed as an option.
+  grep -Fq -e '--ref "$TAG"' "$workflow"
+  grep -Fq 'workflow_dispatch:' ".github/workflows/release.yml"
+}
+
+# The release tag must never be derived implicitly from github.ref: that step runs
+# after npm/Homebrew/MCP/Maven/Docker have already published irreversibly, and
+# npm publish is not idempotent, so a throw there is unrecoverable by rerun.
+@test "release.yml passes an explicit tag_name to action-gh-release (#4157)" {
+  grep -Fq 'tag_name: ${{ needs.validate-release-tag.outputs.tag }}' ".github/workflows/release.yml"
+}

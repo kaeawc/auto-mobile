@@ -406,6 +406,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return existsSync(trimmedPath);
   }
 
+  /**
+   * Describe how the emulator binary was resolved, for failure diagnostics.
+   *
+   * The previous guidance ("install via Homebrew") is actively misleading on a
+   * CI runner, where the SDK is present but the emulator package is not. The
+   * resolved path plus the environment it came from is what identifies the
+   * actual gap (issue #4237).
+   */
+  private describeEmulatorResolution(): string {
+    const unset = "<unset>";
+    return [
+      `  resolved emulator path: ${this.emulatorPath || unset}`,
+      `  ANDROID_HOME=${process.env.ANDROID_HOME ?? unset}`,
+      `  ANDROID_SDK_ROOT=${process.env.ANDROID_SDK_ROOT ?? unset}`,
+      `  ANDROID_SDK_HOME=${process.env.ANDROID_SDK_HOME ?? unset}`,
+      `  PATH=${process.env.PATH ?? unset}`,
+    ].join("\n");
+  }
+
   private isLikelyDaemonWorkingDirectoryFailure(errorMsg: string): boolean {
     if (!this.isResolvedEmulatorPathAvailable()) {
       return false;
@@ -661,12 +680,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
       if (missingEmulator) {
         throw new ActionableError(
-          `Android emulator not found. Please install it using one of these methods:\n` +
-          `1. Via Homebrew: brew install android-emulator\n` +
-          `2. Via Android Studio: Download from https://developer.android.com/studio\n` +
-          `3. Via Android SDK Manager: sdkmanager --install "emulator"\n\n` +
-          `Or set ANDROID_HOME to point to your Android SDK installation:\n` +
-          `export ANDROID_HOME=/path/to/android/sdk`
+          `Android emulator not found.\n${this.describeEmulatorResolution()}\n\n` +
+          `Install the emulator package with: sdkmanager --install "emulator"\n` +
+          `(Android Studio installs it too: https://developer.android.com/studio)\n` +
+          `Or point ANDROID_HOME at an SDK that already has emulator/emulator.`
         );
       }
 

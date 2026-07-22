@@ -156,6 +156,15 @@ runs:
         echo "RELEASE_KEY_ALIAS=${{ inputs.release-key-alias }}" >> $GITHUB_ENV
         echo "RELEASE_KEY_PASSWORD=${{ inputs.release-key-password }}" >> $GITHUB_ENV
 
+    # The AVD-creation step above is the only place the third-party action runs,
+    # and it is skipped on an AVD cache hit -- which is also the only thing that
+    # installs the SDK `emulator` package and puts it on PATH. Every step below
+    # runs outside that action, so the SDK has to be resolved explicitly here or
+    # the product boot flow cannot find the emulator binary (issue #4237).
+    - name: Ensure Android emulator SDK is resolvable
+      shell: ${{ inputs.shell }}
+      run: "${{ github.workspace }}/scripts/android/ensure-emulator-sdk.sh"
+
     # The third-party action above owns SDK/AVD/snapshot preparation only. The
     # product owns every actual emulator launch and readiness probe below.
     - name: Boot and test Emulator (Attempt 1)

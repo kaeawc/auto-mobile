@@ -783,6 +783,31 @@ jobs:
           path: scratch/junit-runner-kotlin-consumer/logs/
           if-no-files-found: ignore
 
+  # The two emulator jobs below stay disabled on merge (runner-heavy, ~15 min
+  # each) and run nightly instead. That left the CI emulator boot path with no
+  # main-push signal at all: #4199 broke it and main stayed green (#4237). This
+  # job is the cheap half of that signal -- it proves the product boot flow can
+  # resolve the emulator binary on a runner where the third-party
+  # emulator-runner action never executed, which is exactly the state an AVD
+  # cache hit produces. It boots nothing and takes ~2 minutes.
+  android-emulator-sdk-preflight:
+    name: "Verify Android Emulator SDK Resolution"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+        with:
+          install-global: "false"
+
+      - name: "Verify the emulator SDK resolves for the product boot flow"
+        shell: "bash"
+        run: scripts/android/verify-emulator-sdk-resolution.sh
+
   # Test isolation issue resolved in #107 and #109
   # Re-enabled in #110
   junit-runner-emulator-tests:

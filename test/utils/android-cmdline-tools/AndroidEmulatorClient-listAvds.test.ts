@@ -151,6 +151,52 @@ describe("AndroidEmulatorClient listAvds", () => {
     }
   });
 
+  test("names the resolved emulator path, ANDROID_HOME and PATH when the emulator is missing", async () => {
+    // Issue #4237: on a GitHub runner the "install via Homebrew" guidance is
+    // useless. What the operator actually needs is the path that was probed and
+    // the environment it was derived from.
+    const originalAndroidHome = process.env.ANDROID_HOME;
+    const originalAndroidSdkRoot = process.env.ANDROID_SDK_ROOT;
+    const originalPath = process.env.PATH;
+
+    try {
+      process.env.ANDROID_HOME = "/usr/local/lib/android/sdk";
+      delete process.env.ANDROID_SDK_ROOT;
+      process.env.PATH = "/usr/bin:/bin";
+
+      const execAsync = async (): Promise<ExecResult> => {
+        throw new Error("spawn /usr/local/lib/android/sdk/emulator/emulator ENOENT");
+      };
+      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer(), undefined, noAvdConfigReader);
+      (client as any).ensureEmulatorPath = async () => "/usr/local/lib/android/sdk/emulator/emulator";
+
+      let message = "";
+      try {
+        await client.listAvds();
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(message).toContain("Android emulator not found");
+      expect(message).toContain("/usr/local/lib/android/sdk/emulator/emulator");
+      expect(message).toContain("ANDROID_HOME=/usr/local/lib/android/sdk");
+      expect(message).toContain("ANDROID_SDK_ROOT=<unset>");
+      expect(message).toContain("PATH=/usr/bin:/bin");
+    } finally {
+      if (originalAndroidHome === undefined) {
+        delete process.env.ANDROID_HOME;
+      } else {
+        process.env.ANDROID_HOME = originalAndroidHome;
+      }
+      if (originalAndroidSdkRoot === undefined) {
+        delete process.env.ANDROID_SDK_ROOT;
+      } else {
+        process.env.ANDROID_SDK_ROOT = originalAndroidSdkRoot;
+      }
+      process.env.PATH = originalPath;
+    }
+  });
+
   test("returns AVDs when emulator command succeeds", async () => {
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\nPixel_Tablet\n");

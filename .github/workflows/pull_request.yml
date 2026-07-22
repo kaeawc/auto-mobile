@@ -607,6 +607,25 @@ jobs:
           # contain the base commit and the diff would fail.
           fetch-depth: 0
 
+      # Pure network/disk and independent of everything below, so background it
+      # here and let the JDK download and the npm-package setup (Bun + ripgrep +
+      # `bun install` + build, ~60-120s) overlap it. The `wait` barrier re-syncs
+      # before the first consumer: the aggregator's `xml` check shells out to
+      # xmlstarlet, and the BATS step needs bats. No dpkg-lock contention — this
+      # is the only apt user in the job (setup-java unpacks a tarball and
+      # setup-ripgrep installs a pre-built binary). Mechanism per #3779.
+      - name: "Install fast validation dependencies"
+        shell: bash
+        background: true
+        id: install-fast-validation-deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xmlstarlet
+          if ! command -v bats &>/dev/null; then
+            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            sudo /tmp/bats-core/install.sh /usr/local
+          fi
+
       # Pin the JDK so the ktfmt check formats deterministically (project targets
       # Java 21) instead of relying on the runner image's default JDK.
       - name: "Set up JDK"
@@ -617,15 +636,7 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Install fast validation dependencies"
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xmlstarlet
-          if ! command -v bats &>/dev/null; then
-            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
-            sudo /tmp/bats-core/install.sh /usr/local
-          fi
+      - wait: install-fast-validation-deps
 
       - name: "Run fast validation checks"
         shell: bash

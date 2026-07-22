@@ -126,6 +126,35 @@ terminate_process_tree() {
     kill -KILL "${pid}" 2>/dev/null || true
 }
 
+# Ask leaf processes in a tree to stop without killing their parents. A wrapper
+# blocked in `wait` can then reap the child and exit normally; callers retain a
+# bounded hard-kill fallback for helpers that ignore SIGTERM.
+request_process_tree_shutdown() {
+    local pid="$1"
+    kill -0 "${pid}" 2>/dev/null || return 0
+
+    local children=()
+    local child
+    local has_children=false
+    if command_exists pgrep; then
+        while IFS= read -r child; do
+            if [[ -n "${child}" ]]; then
+                children+=("${child}")
+                has_children=true
+            fi
+        done < <(pgrep -P "${pid}" . 2>/dev/null || true)
+    fi
+
+    if [[ "${has_children}" == "false" ]]; then
+        kill -TERM "${pid}" 2>/dev/null || true
+        return 0
+    fi
+
+    for child in "${children[@]:-}"; do
+        request_process_tree_shutdown "${child}"
+    done
+}
+
 # Reap installer background work and remove its temporary files. The runtime
 # probe and post-Bun setup are always awaited during a normal install; this is
 # only the cancellation/error path that prevents an orphaned child process.
@@ -3361,7 +3390,19 @@ finish_ios_runtime_probe() {
     local probe_status=0 waited=0
     while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
         if ((waited >= IOS_RUNTIME_PROBE_TIMEOUT_SECONDS)); then
-            terminate_process_tree "${IOS_RUNTIME_PROBE_PID}"
+            # Stop the helper first so an xcrun wrapper blocked in `wait` can
+            # reap it. Fall back to the hard tree kill after a one-second
+            # grace period so a stubborn helper cannot reintroduce the hang.
+            request_process_tree_shutdown "${IOS_RUNTIME_PROBE_PID}"
+            local reap_waited=0
+            while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
+                if ((reap_waited >= 10)); then
+                    terminate_process_tree "${IOS_RUNTIME_PROBE_PID}"
+                    break
+                fi
+                sleep 0.1
+                reap_waited=$((reap_waited + 1))
+            done
             wait "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null || true
             IOS_RUNTIME_PROBE_PID=""
             rm -f "${IOS_RUNTIME_PROBE_FILE}"

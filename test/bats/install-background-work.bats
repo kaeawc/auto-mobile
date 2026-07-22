@@ -21,6 +21,12 @@ assert_process_is_not_active() {
   [[ -z "${state}" || "${state}" == *Z* ]]
 }
 
+assert_process_is_reaped() {
+  local state
+  state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+  [[ -z "${state}" ]]
+}
+
 teardown() {
   export PATH="${ORIG_PATH}"
   rm -rf "${TEST_DIR}"
@@ -32,8 +38,8 @@ teardown() {
   # for 6 hours until the runner cancelled it. A stall must be abandoned.
   cat > "${STUB_BIN}/xcrun" <<'STUB'
 #!/usr/bin/env bash
-# Keep a child alive under the xcrun wrapper. The timeout must remove both
-# processes, not merely the wrapper that launched the stalled helper.
+  # Keep a child alive under the xcrun wrapper. The timeout must let the
+  # wrapper reap the helper rather than leaving it as a zombie.
 sleep 300 &
 wait
 STUB
@@ -63,8 +69,8 @@ STUB
   [ "$status" -eq 0 ]
   [ "$elapsed" -lt 30 ]
   [ -z "${IOS_RUNTIME_PROBE_PID}" ]
-  assert_process_is_not_active "${worker_pid}"
-  assert_process_is_not_active "${child_pid}"
+  assert_process_is_reaped "${worker_pid}"
+  assert_process_is_reaped "${child_pid}"
 }
 
 @test "iOS runtime probe runs in the background and reports its completed result" {

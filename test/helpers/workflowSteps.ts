@@ -40,6 +40,33 @@ export function loadJobSteps(workflowRelativePath: string, jobId: string): Workf
   return document.jobs?.[jobId]?.steps ?? [];
 }
 
+/** A job's own configuration, minus its steps. */
+export interface WorkflowJob {
+  "timeout-minutes"?: number;
+  /** Set when the job delegates to a reusable workflow. */
+  uses?: string;
+}
+
+/**
+ * Every job in a workflow, keyed by job id.
+ *
+ * Parsing rather than line-matching matters especially here: a job key may be
+ * quoted (`"my-job":`), which an indentation regex silently skips — so a guard
+ * built on one reports success for a job it never looked at.
+ */
+export function loadJobs(workflowRelativePath: string): Record<string, WorkflowJob> {
+  const document = load(readFileSync(join(repoRoot, workflowRelativePath), "utf8")) as {
+    jobs?: Record<string, WorkflowJob | undefined>;
+  };
+  const jobs: Record<string, WorkflowJob> = {};
+  for (const [id, job] of Object.entries(document.jobs ?? {})) {
+    if (job) {
+      jobs[id] = job;
+    }
+  }
+  return jobs;
+}
+
 export function stepNamed(steps: WorkflowStep[], name: string): WorkflowStep | undefined {
   return steps.find(step => step.name === name);
 }

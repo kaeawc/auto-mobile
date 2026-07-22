@@ -1,7 +1,7 @@
 {
   "src/cli/index.ts": {
     "auto-mobile/catch-convention": {
-      "count": 4
+      "count": 3
     },
     "complexity": {
       "count": 3
@@ -424,11 +424,6 @@
       "count": 1
     }
   },
-  "src/features/action/UninstallApp.ts": {
-    "max-depth": {
-      "count": 1
-    }
-  },
   "src/features/action/swipeon/OverlayDetector.ts": {
     "complexity": {
       "count": 2
@@ -452,14 +447,6 @@
   },
   "src/features/action/swipeon/TalkBackSwipeExecutor.ts": {
     "complexity": {
-      "count": 1
-    }
-  },
-  "src/features/action/swipeon/VoiceOverSwipeExecutor.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-depth": {
       "count": 1
     }
   },
@@ -578,14 +565,6 @@
   },
   "src/features/observe/GetBackStack.ts": {
     "complexity": {
-      "count": 1
-    }
-  },
-  "src/features/observe/GetScreenSize.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-depth": {
       "count": 1
     }
   },
@@ -838,11 +817,6 @@
       "count": 1
     }
   },
-  "src/features/utility/system-configuration/IosLockdownLocaleClient.ts": {
-    "auto-mobile/catch-convention": {
-      "count": 1
-    }
-  },
   "src/features/video/FfmpegVideoProcessingBackend.ts": {
     "complexity": {
       "count": 1
@@ -950,14 +924,6 @@
   "src/server/deviceSnapshotManager.ts": {
     "complexity": {
       "count": 1
-    }
-  },
-  "src/server/deviceTools.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-depth": {
-      "count": 2
     }
   },
   "src/server/finalizeToolResponse.ts": {
@@ -1250,9 +1216,6 @@
     }
   },
   "src/utils/ios-cmdline-tools/SimCtlClient.ts": {
-    "auto-mobile/catch-convention": {
-      "count": 1
-    },
     "complexity": {
       "count": 1
     },

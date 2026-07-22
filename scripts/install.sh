@@ -1304,15 +1304,118 @@ PACKAGE_INSTALL_TIMEOUT_SECONDS="${PACKAGE_INSTALL_TIMEOUT_SECONDS:-600}"
 # Assigns to a global rather than printing so callers can invoke it as a plain
 # statement — a function run inside `$(…)` or on the left of `||` has `set -e`
 # suppressed inside it (SC2310/SC2311).
+#
+# Deliberately NOT `--foreground`. That flag stops `timeout` putting the command
+# in its own process group, and the group is the only reason the
+# `bash -c "a && b"` call sites are bounded at all — bash does not exec the
+# package manager there, so a signal aimed at the direct child never reaches it.
+# `--foreground` looks like the fix for sudo's password prompt (it is what
+# `timeout --help` offers to "allow COMMAND to read from the TTY") but it trades
+# the bound away and does not even solve the prompt, which the output capture
+# swallows either way. The prompt is handled before the bound instead, in
+# ensure_sudo_credentials below.
+
+# How long a command gets between TERM and KILL. Shared with the watchdog
+# fallback so both bounding paths escalate identically, and overridable so tests
+# can exercise the escalation without waiting out the real grace.
+BOUNDED_KILL_GRACE_SECONDS="${BOUNDED_KILL_GRACE_SECONDS:-10}"
+
 BOUNDED_CMD_PREFIX=()
 resolve_bounded_cmd_prefix() {
     local secs="$1"
     BOUNDED_CMD_PREFIX=()
     if command_exists timeout; then
-        BOUNDED_CMD_PREFIX=(timeout -k 10 "${secs}")
+        BOUNDED_CMD_PREFIX=(timeout -k "${BOUNDED_KILL_GRACE_SECONDS}" "${secs}")
     elif command_exists gtimeout; then
-        BOUNDED_CMD_PREFIX=(gtimeout -k 10 "${secs}")
+        BOUNDED_CMD_PREFIX=(gtimeout -k "${BOUNDED_KILL_GRACE_SECONDS}" "${secs}")
     fi
+}
+
+# Whether stdin is a terminal, into STDIN_IS_TERMINAL.
+#
+# Its own function so tests can substitute it: a test harness never has a
+# controlling terminal, but the interactive branch it gates is exactly the
+# behaviour worth pinning. Assigns to a global rather than returning a status
+# for the same reason as resolve_bounded_cmd_prefix — a function used as a
+# condition has `set -e` suppressed inside it (SC2310).
+STDIN_IS_TERMINAL=false
+detect_stdin_terminal() {
+    STDIN_IS_TERMINAL=false
+    if [[ -t 0 ]]; then
+        STDIN_IS_TERMINAL=true
+    fi
+}
+
+# Whether a bounded invocation will shell out through sudo, into
+# BOUNDED_INSTALL_USES_SUDO.
+#
+# Checks every argument rather than just the first: _install_system_package
+# builds `sudo apt-get update && sudo apt-get install …` and hands the whole
+# chain to `bash -c`, so sudo is not argument one there.
+BOUNDED_INSTALL_USES_SUDO=false
+detect_bounded_install_sudo() {
+    local arg
+    BOUNDED_INSTALL_USES_SUDO=false
+    for arg in "$@"; do
+        case " ${arg} " in
+            *" sudo "*)
+                BOUNDED_INSTALL_USES_SUDO=true
+                return 0
+                ;;
+        esac
+    done
+}
+
+# Refresh sudo's cached credential *before* entering the bound and the capture.
+#
+# Both of run_bounded_install's properties are hostile to a password prompt:
+#
+#   - The output is captured, and sudo writes its prompt to stderr, so the
+#     prompt never reaches the terminal while it matters. It surfaces later, if
+#     at all, replayed out of the captured output after the bound has fired.
+#   - The command runs in its own process group (`timeout` calls setpgid, and
+#     the watchdog fallback uses `set -m`), which makes it a *background* group
+#     with respect to the terminal. A background process reading the controlling
+#     terminal gets SIGTTIN and stops, so sudo's read of /dev/tty never
+#     completes — the user's keystrokes go to the parent shell instead.
+#
+# Together those turned an expired credential into a silent hang for the full
+# 600s bound, followed by a spurious "exceeded … and was aborted". Refreshing
+# here — unbounded, uncaptured, in the caller's own process group — means the
+# bounded invocation itself never has to prompt.
+SUDO_CREDENTIALS_READY=false
+ensure_sudo_credentials() {
+    if [[ "${SUDO_CREDENTIALS_READY}" == "true" ]]; then
+        return 0
+    fi
+    # `command -v` rather than the command_exists helper: a function used as a
+    # condition has `set -e` suppressed inside it (SC2310).
+    if ! command -v sudo > /dev/null 2>&1; then
+        return 0
+    fi
+
+    # `-n` never prompts, so this is safe to run before knowing whether a
+    # terminal exists. It also refreshes the timestamp when one is cached.
+    if sudo -n -v 2> /dev/null; then
+        SUDO_CREDENTIALS_READY=true
+        return 0
+    fi
+
+    detect_stdin_terminal
+    if [[ "${NON_INTERACTIVE}" == "true" || "${STDIN_IS_TERMINAL}" != "true" ]]; then
+        # Prompting with no terminal would trade the old 45-minute stall for a
+        # new one. Let the install fail loudly instead.
+        log_warn "sudo has no cached credential and this session is not interactive; package installs may fail"
+        return 0
+    fi
+
+    log_info "Requesting sudo credentials before installing packages"
+    if sudo -v; then
+        SUDO_CREDENTIALS_READY=true
+    else
+        log_warn "Could not refresh sudo credentials; package installs may fail"
+    fi
+    return 0
 }
 
 # Bound a command with a pure-bash watchdog, for hosts with no timeout binary.
@@ -1375,6 +1478,8 @@ bounded_watchdog_run() {
     local cmd_pid=$!
     if [[ ${had_monitor} -eq 0 ]]; then set +m; fi
 
+    local grace="${BOUNDED_KILL_GRACE_SECONDS}"
+    local waited=0
     (
         sleep "${secs}"
         if kill -0 "${cmd_pid}" 2> /dev/null; then
@@ -1382,9 +1487,16 @@ bounded_watchdog_run() {
             # A negative pid targets the process group. Fall back to the bare
             # pid in case the child never became group leader.
             kill -TERM -"${cmd_pid}" 2> /dev/null || kill -TERM "${cmd_pid}" 2> /dev/null || true
-            # Same 10s grace as `timeout -k 10` on the coreutils path, so the
-            # two bounding paths escalate identically.
-            sleep 10
+            # Same grace as `timeout -k` on the coreutils path, so the two
+            # bounding paths escalate identically — but polled rather than slept
+            # straight through. The caller now waits for this subshell, so an
+            # unconditional sleep would add the whole grace to every timeout,
+            # including the common case where the command dies on TERM at once.
+            while [[ ${waited} -lt ${grace} ]]; do
+                kill -0 -"${cmd_pid}" 2> /dev/null || break
+                sleep 1
+                waited=$((waited + 1))
+            done
             kill -KILL -"${cmd_pid}" 2> /dev/null || kill -KILL "${cmd_pid}" 2> /dev/null || true
         fi
     ) > /dev/null 2>&1 3>&- &
@@ -1393,14 +1505,22 @@ bounded_watchdog_run() {
     local status=0
     wait "${cmd_pid}" 2> /dev/null || status=$?
     if [[ -s "${fired_marker}" ]]; then
-        # Leave the watcher running: it still owes the group a KILL for anything
-        # that ignored the TERM. Waiting for it here would add its full grace
-        # period to every timeout, and there is nothing to wait for — the output
-        # is already on disk, not in a pipe a survivor could hold open.
+        # Wait out the watcher's TERM-to-KILL escalation before returning.
+        # `wait` above returns as soon as the *direct child* exits, and the
+        # direct child is frequently a `bash -c` wrapper that dies on TERM while
+        # the package manager it spawned ignores it. Returning here reported the
+        # install aborted while that process was still running — and it outlived
+        # the installer itself. A watchdog that returns before the group is dead
+        # does not bound anything. Same contract as
+        # scripts/ios/run_with_timeout.sh; the poll above keeps the cost near
+        # zero whenever TERM is honoured.
+        wait "${watcher_pid}" 2> /dev/null || true
         status=124
     else
         kill "${watcher_pid}" 2> /dev/null || true
         wait "${watcher_pid}" 2> /dev/null || true
+        # The watcher can fire between the `wait` above and the kill here.
+        if [[ -s "${fired_marker}" ]]; then status=124; fi
     fi
     rm -f "${fired_marker}"
     BOUNDED_WATCHDOG_STATUS="${status}"
@@ -1419,34 +1539,50 @@ bounded_watchdog_run() {
 # suppression is half of why #4162 could not be diagnosed. Keeping the output is
 # worth more than the spinner.
 #
-# Capturing the output is only safe because GNU `timeout` puts the child in its
-# own process group and signals the whole group. Several call sites pass an
-# `&&` chain through `bash -c`, where bash does not exec the package manager;
-# signalling only the direct child would leave the grandchild alive holding this
-# capture's pipe open, and the bound would silently not apply.
+# Both bounding paths route the output to a file rather than a command
+# substitution. A `$(…)` capture keeps the caller blocked on EOF for as long as
+# any descendant retains the write end of the pipe, which is exactly the process
+# the kill escalation is chasing — so the capture would outlive the bound it is
+# supposed to be protected by. Writing to a file removes that coupling entirely:
+# the output is already on disk when the deadline fires, whatever survives.
 run_bounded_install() {
     local title="$1"
     shift
+
+    # Before the bound and before the capture, on purpose. Inside them sudo
+    # cannot prompt: the prompt is swallowed by the capture, and the command runs
+    # in a background process group where reading the terminal raises SIGTTIN.
+    # See ensure_sudo_credentials.
+    detect_bounded_install_sudo "$@"
+    if [[ "${BOUNDED_INSTALL_USES_SUDO}" == "true" ]]; then
+        ensure_sudo_credentials
+    fi
 
     resolve_bounded_cmd_prefix "${PACKAGE_INSTALL_TIMEOUT_SECONDS}"
 
     local output=""
     local status=0
-    if [[ ${#BOUNDED_CMD_PREFIX[@]} -gt 0 ]]; then
+    local outfile
+    outfile="$(mktemp "${TMPDIR:-/tmp}/automobile_install_output.XXXXXX")" || outfile=""
+    if [[ -n "${outfile}" && ${#BOUNDED_CMD_PREFIX[@]} -gt 0 ]]; then
         # The `+` guard keeps an empty prefix from tripping `set -u` on bash 3.2.
-        output=$(${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@" 2>&1) || status=$?
+        ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@" > "${outfile}" 2>&1 || status=$?
+        output="$(cat "${outfile}")"
+        rm -f "${outfile}"
+    elif [[ -n "${outfile}" ]]; then
+        bounded_watchdog_run "${PACKAGE_INSTALL_TIMEOUT_SECONDS}" "${outfile}" "$@"
+        status="${BOUNDED_WATCHDOG_STATUS}"
+        output="$(cat "${outfile}")"
+        rm -f "${outfile}"
+    elif [[ ${#BOUNDED_CMD_PREFIX[@]} -gt 0 ]]; then
+        # No temp file, but keep the bound: losing the capture is survivable,
+        # losing the ceiling is the fail-open #4162 exists to close. The output
+        # goes straight to the terminal here rather than being replayed.
+        log_warn "${title}: could not create a temp file to capture output; running bounded but uncaptured"
+        ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@" || status=$?
     else
-        local outfile
-        outfile="$(mktemp "${TMPDIR:-/tmp}/automobile_install_output.XXXXXX")" || outfile=""
-        if [[ -z "${outfile}" ]]; then
-            log_warn "${title}: could not create a temp file to capture output; running unbounded"
-            "$@" || status=$?
-        else
-            bounded_watchdog_run "${PACKAGE_INSTALL_TIMEOUT_SECONDS}" "${outfile}" "$@"
-            status="${BOUNDED_WATCHDOG_STATUS}"
-            output="$(cat "${outfile}")"
-            rm -f "${outfile}"
-        fi
+        log_warn "${title}: could not create a temp file to capture output; running unbounded"
+        "$@" || status=$?
     fi
 
     if [[ ${status} -eq 0 ]]; then

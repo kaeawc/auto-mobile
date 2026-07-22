@@ -186,7 +186,7 @@ echo ""
 
 echo "Build Results:"
 echo "  Passed: ${#PASSED_BUILDS[@]}"
-for component in "${PASSED_BUILDS[@]}"; do
+for component in ${PASSED_BUILDS[@]+"${PASSED_BUILDS[@]}"}; do
   echo "    ✓ ${component}"
 done
 echo ""

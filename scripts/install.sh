@@ -155,6 +155,39 @@ request_process_tree_shutdown() {
     done
 }
 
+# Force-stop a tree from its leaves while resuming each parent. A parent that
+# was blocked in `wait` gets to reap its killed child before it exits. This is
+# intentionally distinct from `terminate_process_tree`, whose cancellation
+# callers must stop every process immediately.
+terminate_process_tree_for_reaping() {
+    local pid="$1"
+    kill -0 "${pid}" 2>/dev/null || return 0
+
+    kill -STOP "${pid}" 2>/dev/null || true
+
+    local children=()
+    local child
+    local has_children=false
+    if command_exists pgrep; then
+        while IFS= read -r child; do
+            if [[ -n "${child}" ]]; then
+                children+=("${child}")
+                has_children=true
+            fi
+        done < <(pgrep -P "${pid}" . 2>/dev/null || true)
+    fi
+
+    if [[ "${has_children}" == "false" ]]; then
+        kill -KILL "${pid}" 2>/dev/null || true
+        return 0
+    fi
+
+    for child in "${children[@]:-}"; do
+        terminate_process_tree_for_reaping "${child}"
+    done
+    kill -CONT "${pid}" 2>/dev/null || true
+}
+
 # Reap installer background work and remove its temporary files. The runtime
 # probe and post-Bun setup are always awaited during a normal install; this is
 # only the cancellation/error path that prevents an orphaned child process.
@@ -3397,7 +3430,7 @@ finish_ios_runtime_probe() {
             local reap_waited=0
             while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
                 if ((reap_waited >= 10)); then
-                    terminate_process_tree "${IOS_RUNTIME_PROBE_PID}"
+                    terminate_process_tree_for_reaping "${IOS_RUNTIME_PROBE_PID}"
                     break
                 fi
                 sleep 0.1

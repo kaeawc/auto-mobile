@@ -214,6 +214,11 @@ export class DatabaseInspector {
    * contains spaces, commas and braces — so a value can only be terminated by the next
    * `, <knownKey>=` boundary or by the bundle's trailing "}]". Matching a value with a
    * character class such as `[^,}]+` silently truncates it at the first comma or brace.
+   *
+   * Bundle.toString() does not escape its values, so a value that itself contains a literal
+   * `, <knownKey>=` sequence is indistinguishable from a real entry boundary and would still be
+   * cut short. That ambiguity is in the wire format, not in this parser, and no SQLite message
+   * produces it in practice.
    */
   private extractBundleValue(output: string, key: string): string | null {
     // A key always starts the bundle ("Bundle[{key=") or follows an entry separator.

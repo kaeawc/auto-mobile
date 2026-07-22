@@ -88,6 +88,26 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
   });
 
+  test("accepts compacted layout-warning bounds and fractional legacy iOS insets", () => {
+    const observe = {
+      systemInsets: { top: 59.5, right: 0, bottom: 34, left: 0 },
+      layoutWarnings: [{
+        type: "important-content-under-inset",
+        severity: "warning",
+        element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+        categories: ["text"],
+        insetTypes: ["safeArea"],
+        sides: ["top"],
+        overlapPercent: 100,
+        confidence: "high",
+      }],
+    };
+    const compacted = sanitizeObserveResult(observe as never, { dropElements: false, compact: true });
+
+    expect(compacted.layoutWarnings?.[0]?.element.bounds).toEqual([0, 0, 100, 30]);
+    expect(() => observeResultSchema.parse(compacted)).not.toThrow();
+  });
+
   test("accepts an iOS root hierarchy.bounds with optional left/top (points)", () => {
     // Hierarchy.bounds is `{left?, top?, right, bottom}` on iOS — the element
     // union (all four keys required) would wrongly reject it, so it rides

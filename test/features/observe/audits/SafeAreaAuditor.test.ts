@@ -45,6 +45,14 @@ describe("SafeAreaAuditor", () => {
     expect(new SafeAreaAuditor().inspect(result)).toEqual([]);
   });
 
+  test("tolerates nullable Android runner inset categories", () => {
+    const result = observation();
+    result.insets!.displayCutout = null as never;
+    result.insets!.systemGestures = null as never;
+
+    expect(new SafeAreaAuditor().inspect(result)).toHaveLength(2);
+  });
+
   test("uses the iOS safe area rather than Android bar fields", () => {
     const result = observation();
     result.insets = {

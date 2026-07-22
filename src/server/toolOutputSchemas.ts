@@ -197,10 +197,10 @@ export const screenSizeSchema = z.object({
 });
 
 export const systemInsetsSchema = z.object({
-  top: z.number().int(),
-  right: z.number().int(),
-  bottom: z.number().int(),
-  left: z.number().int()
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+  left: z.number()
 });
 
 const edgeInsetsSchema = z.object({
@@ -230,7 +230,7 @@ const layoutWarningSchema = z.object({
     resourceId: z.string().optional(),
     text: z.string().optional(),
     contentDesc: z.string().optional(),
-    bounds: edgeInsetsSchema,
+    bounds: elementBoundsSchema,
   }),
   categories: z.array(z.enum(["text", "interaction"])),
   insetTypes: z.array(z.enum(["systemBars", "displayCutout", "safeArea", "systemGestures", "mandatorySystemGestures"])),

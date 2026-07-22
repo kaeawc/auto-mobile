@@ -188,9 +188,14 @@ function intersectArea(a: ObservationEdgeInsets, b: ObservationEdgeInsets): numb
     * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
 }
 
-function maxInsets(a?: ObservationEdgeInsets, b?: ObservationEdgeInsets): ObservationEdgeInsets | undefined {
+function maxInsets(
+  a?: ObservationEdgeInsets | null,
+  b?: ObservationEdgeInsets | null
+): ObservationEdgeInsets | undefined {
   if (!a && !b) {return undefined;}
-  const insets = [a, b].filter((inset): inset is ObservationEdgeInsets => inset !== undefined);
+  const insets = [a, b].filter(
+    (inset): inset is ObservationEdgeInsets => inset !== undefined && inset !== null
+  );
   return { top: maximumInset(insets, "top"), right: maximumInset(insets, "right"), bottom: maximumInset(insets, "bottom"), left: maximumInset(insets, "left") };
 }
 
@@ -198,7 +203,7 @@ function maximumInset(insets: ObservationEdgeInsets[], side: keyof ObservationEd
   return Math.max(0, ...insets.map(inset => inset[side]));
 }
 
-function insetTypes<A extends LayoutWarning["insetTypes"][number], B extends LayoutWarning["insetTypes"][number]>(first: ObservationEdgeInsets | undefined, second: ObservationEdgeInsets | undefined, firstType: A, secondType: B): Array<A | B> {
+function insetTypes<A extends LayoutWarning["insetTypes"][number], B extends LayoutWarning["insetTypes"][number]>(first: ObservationEdgeInsets | undefined | null, second: ObservationEdgeInsets | undefined | null, firstType: A, secondType: B): Array<A | B> {
   return [...(first ? [firstType] : []), ...(second ? [secondType] : [])];
 }
 

@@ -116,17 +116,75 @@ detect_tsc_version() {
 # machine.
 ROOT_SED_PATTERN="$(printf '%s' "$ROOT" | sed 's/[][\.*^$|/]/\\&/g')"
 
+# Union-order canonicalization (issue #4211).
+#
+# `tsc` renders a union's members in the order their literal types were first
+# instantiated across the program, NOT in declaration order. That instantiation
+# order shifts when the module graph changes, so the SAME error under the SAME
+# pinned tsc can render as
+#     severity: "critical" | "high" | "medium" | "low"     (when baselined)
+#     severity: "high" | "medium" | "critical" | "low"     (later)
+# Because the signature embeds the rendered type text verbatim, a reordering made
+# the baselined error read as NEW while the identical baselined one read as
+# FIXED -- turning `main` red with no code change (issue #4211, and the reason
+# issue #4209 was filed). The gate is meant to key on the ERROR, and `A | B` and
+# `B | A` are the same type, so member order must not be part of the key.
+#
+# Each maximal run of `TOKEN ( " | " TOKEN )+` is byte-sorted in place. TOKEN is
+# deliberately narrow -- a double-quoted string literal or a bare identifier --
+# so a run whose members are complex (object literals, generics) is left ALONE
+# rather than mis-parsed; leaving it alone is exactly today's behavior, so the
+# conservative match can only preserve the status quo, never corrupt a signature.
+# Runs are matched independently, so adjacent unions separated by `;` are sorted
+# separately and never bleed into one another.
+#
+# This is order-INSENSITIVE, not laxer: sorting is a canonical form, so two
+# errors collide only when their union members are the same multiset -- i.e.
+# when they are genuinely the same type. A union with a DIFFERENT member still
+# produces a different signature and is still caught as new (pinned by the
+# "different union members" BATS case).
+#
+# LC_ALL=C is exported at the top of this script, so the sort is byte-wise and
+# identical on every machine.
+canonicalize_unions() {
+  awk '
+    function canon_unions(line,   out, rest, run, n, arr, i, j, t, joined) {
+      out = ""
+      rest = line
+      while (match(rest, /("[^"]*"|[A-Za-z_$][A-Za-z0-9_$]*)( [|] ("[^"]*"|[A-Za-z_$][A-Za-z0-9_$]*))+/)) {
+        out = out substr(rest, 1, RSTART - 1)
+        run = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RSTART + RLENGTH)
+        # split on a literal " | " -- the bracket expression stops awk reading
+        # the pipe as regex alternation.
+        n = split(run, arr, " [|] ")
+        for (i = 1; i <= n; i++)
+          for (j = i + 1; j <= n; j++)
+            if (arr[i] > arr[j]) { t = arr[i]; arr[i] = arr[j]; arr[j] = t }
+        joined = arr[1]
+        for (i = 2; i <= n; i++) joined = joined " | " arr[i]
+        out = out joined
+      }
+      return out rest
+    }
+    { print canon_unions($0) }
+  '
+}
+
 # Reduce raw tsc output to a sorted multiset of stable error signatures.
 # 1. keep only top-level error lines (indented detail lines are dropped);
 # 2. strip the "(line,col)" file location (first "(n,n)" only, via no /g flag),
 #    so line shifts don't churn the baseline and message-embedded numbers survive;
-# 3. strip the absolute repo-root prefix from message-embedded paths.
+# 3. strip the absolute repo-root prefix from message-embedded paths;
+# 4. canonicalize union member order (issue #4211) so a re-rendered union does
+#    not read as a new error.
 # The `grep` is guarded with `|| true` so a clean tree (zero matching lines) does
 # not abort the script under `set -o pipefail`.
 normalize() {
   { grep -E '^[^[:space:]].*: error TS[0-9]+' || true; } \
     | sed -E 's/\(([0-9]+),([0-9]+)\)//' \
     | sed "s|${ROOT_SED_PATTERN}/||g" \
+    | canonicalize_unions \
     | sort
 }
 
@@ -175,12 +233,20 @@ swap_fingerprints() {
             if (joined != "") print "# swap-fp: " joined " :: " sig
           }
         }' \
+    | canonicalize_unions \
     | sort
 }
 
 # Baseline signatures only, i.e. the committed file minus its `#` header lines.
+#
+# The stored signatures are canonicalized on READ as well as on write (issue
+# #4211). `normalize()` now emits union members byte-sorted, so a baseline
+# committed BEFORE that change still holds unsorted unions; canonicalizing here
+# means such a baseline keeps matching instead of every union-bearing signature
+# reading as simultaneously new and fixed. It is idempotent for a freshly
+# written baseline, so the two paths cannot drift.
 baseline_signatures() {
-  grep -v '^#' "$BASELINE" || true
+  { grep -v '^#' "$BASELINE" || true; } | canonicalize_unions
 }
 
 # tsc exits 0 on a clean check and non-zero (2) when it reports diagnostics --
@@ -271,7 +337,13 @@ fi
 # against the current ones; a signature whose count is unchanged but whose column
 # multiset moved is a likely swap. Advisory ONLY -- never changes the exit code,
 # and silently no-ops for baselines generated before this field existed.
-baseline_swap_fp="$(grep -E '^# swap-fp: ' "$BASELINE" || true)"
+# Canonicalized on read for the same reason as `baseline_signatures()` (issue
+# #4211): the signature half of a `# swap-fp:` line stored before canonicalization
+# holds unsorted unions. Without this, every union-bearing fingerprint would look
+# "moved" against the now-canonical current set and the advisory would fire on
+# dozens of signatures at once -- noise that trains readers to ignore a guard
+# whose whole value is being rare.
+baseline_swap_fp="$({ grep -E '^# swap-fp: ' "$BASELINE" || true; } | canonicalize_unions)"
 if [[ -n "$baseline_swap_fp" ]]; then
   current_swap_fp="$(printf '%s\n' "$raw_tsc" | swap_fingerprints)"
   swap_moved="$(comm -13 \

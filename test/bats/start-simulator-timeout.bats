@@ -22,8 +22,13 @@ setup() {
 
   # Extract run_with_timeout now (full PATH → awk available); run it later
   # under the restricted PATH by sourcing this file.
-  FN_FILE="$WORK_DIR/run_with_timeout.sh"
-  awk '/^run_with_timeout\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$ABS_SCRIPT" > "$FN_FILE"
+  # Source the shared library directly. This previously awk-extracted the
+  # function out of start-simulator.sh; once it moved to its own sourceable file
+  # (#4095, when boot-simulator.sh became the second consumer) the extraction
+  # silently produced an EMPTY file, leaving run_with_timeout undefined. One test
+  # then failed loudly and the other passed for the wrong reason -- it asserts a
+  # non-zero rc, which an undefined function also returns.
+  FN_FILE="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ios/run_with_timeout.sh"
 }
 
 teardown() {
@@ -52,6 +57,11 @@ run_helper() {
 }
 
 @test "run_with_timeout reports failure when the command exceeds the limit" {
+  # Asserting only "non-zero" would also pass if run_with_timeout were undefined,
+  # so require the function to exist first.
+  run_helper 'declare -F run_with_timeout >/dev/null && echo defined'
+  [[ "$output" == *"defined"* ]]
+
   run_helper 'run_with_timeout 1 sleep 5; echo "rc=$?"'
   [ "$status" -eq 0 ]
   [[ "$output" != *"rc=0"* ]]

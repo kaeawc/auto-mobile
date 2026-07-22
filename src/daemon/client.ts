@@ -17,7 +17,7 @@ import { McpTimeoutError } from "./McpTimeoutError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import {
   cleanupStaleDaemonFilesForDeadPidSync,
-  getDaemonSocketPaths,
+  getDaemonSocketPathList,
   type StaleDaemonFileCleanupOptions,
 } from "./daemonFiles";
 
@@ -298,7 +298,7 @@ export class DaemonClient {
     recoveryOptions: DaemonClientRecoveryOptions
   ): boolean {
     const socketPaths = recoveryOptions.socketPaths ?? (
-      socketPath === SOCKET_PATH ? getDaemonSocketPaths() : [socketPath]
+      socketPath === SOCKET_PATH ? getDaemonSocketPathList() : [socketPath]
     );
 
     return cleanupStaleDaemonFilesForDeadPidSync({

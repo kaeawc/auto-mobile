@@ -61,6 +61,8 @@ interface Subscriber {
 
 interface StreamEntry {
   streamId: string;
+  /** Opaque WHIP resource id; distinct from the user-visible stream id. */
+  ingestSessionId: string;
   ingestPc: RTCPeerConnection;
   inboundTracks: Map<"audio" | "video", MediaStreamTrack>;
   subscribers: Map<string, Subscriber>;
@@ -105,6 +107,7 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:193
 
 export class CoordinationServer {
   private readonly streams = new Map<string, StreamEntry>();
+  private readonly ingestSessions = new Map<string, StreamEntry>();
   private readonly iceServers: RTCIceServer[];
   private readonly iceGatheringTimeoutMs: number;
   private readonly timer: Timer;
@@ -122,7 +125,7 @@ export class CoordinationServer {
   async ingest(
     offerSdp: string,
     requestedStreamId?: string
-  ): Promise<{ streamId: string; answerSdp: string; etag: string }> {
+  ): Promise<{ streamId: string; sessionId: string; answerSdp: string; etag: string }> {
     const streamId = requestedStreamId?.trim() || `stream-${randomUUID().slice(0, 8)}`;
     // Validate before allocating a peer connection. A malformed WHIP offer must
     // fail with 4xx without leaking a native transport.
@@ -134,6 +137,7 @@ export class CoordinationServer {
     });
     const entry: StreamEntry = {
       streamId,
+      ingestSessionId: randomUUID(),
       ingestPc: pc,
       inboundTracks: new Map(),
       subscribers: new Map(),
@@ -193,8 +197,10 @@ export class CoordinationServer {
       await this.stopIngest(streamId);
     }
     this.streams.set(streamId, entry);
+    this.ingestSessions.set(entry.ingestSessionId, entry);
     return {
       streamId,
+      sessionId: entry.ingestSessionId,
       // Werift serializes rtcp-mux but not RFC 9725 / WHEP's required
       // rtcp-mux-only SDP attribute. This changes signalling only; the peer
       // connection remains RTCP-multiplexed.
@@ -294,7 +300,22 @@ export class CoordinationServer {
     if (!entry) {
       return;
     }
-    this.streams.delete(streamId);
+    await this.stopIngestEntry(entry);
+  }
+
+  /** Stop the exact WHIP resource identified by its opaque session id. */
+  async stopIngestSession(sessionId: string): Promise<void> {
+    const entry = this.ingestSessions.get(sessionId);
+    if (entry) {
+      await this.stopIngestEntry(entry);
+    }
+  }
+
+  private async stopIngestEntry(entry: StreamEntry): Promise<void> {
+    if (this.streams.get(entry.streamId) === entry) {
+      this.streams.delete(entry.streamId);
+    }
+    this.ingestSessions.delete(entry.ingestSessionId);
     for (const subscriber of entry.subscribers.values()) {
       await subscriber.pc.close().catch(() => {});
     }
@@ -307,12 +328,12 @@ export class CoordinationServer {
    * stream id is unknown so the HTTP layer can answer 404. Parses leniently: the
    * `a=mid:` line (if any) applies to the following `a=candidate:` lines.
    */
-  getIceEtag(streamId: string): string | null {
-    return this.streams.get(streamId)?.iceEtag ?? null;
+  getIceEtag(sessionId: string): string | null {
+    return this.ingestSessions.get(sessionId)?.iceEtag ?? null;
   }
 
-  async addIngestCandidates(streamId: string, fragment: string): Promise<"unknown" | "applied" | "invalid" | "restart"> {
-    const entry = this.streams.get(streamId);
+  async addIngestCandidates(sessionId: string, fragment: string): Promise<"unknown" | "applied" | "invalid" | "restart"> {
+    const entry = this.ingestSessions.get(sessionId);
     if (!entry) {
       return "unknown";
     }

@@ -24,8 +24,8 @@ class InvalidSdpError extends Error {}
  *
  * Routes:
  *   POST   /whip[?streamId=]         WHIP ingest (from AutoMobile)   -> 201 + Location
- *   PATCH  /whip/:streamId           conditional Trickle-ICE candidate update
- *   DELETE /whip/:streamId           terminate ingest
+ *   PATCH  /whip/:sessionId          conditional Trickle-ICE candidate update
+ *   DELETE /whip/:sessionId          terminate ingest
  *   POST   /whep/:streamId           WHEP subscribe (from browser)   -> 201 + Location
  *   DELETE /whep/:streamId/:subId    terminate subscriber
  *   GET    /api/streams              reconnect API: list streams
@@ -118,7 +118,7 @@ export class HttpCoordinationServer {
       }
       assertContentType(req, "application/sdp");
       const offer = await readBody(req);
-      let ingest: { streamId: string; answerSdp: string; etag: string };
+      let ingest: { streamId: string; sessionId: string; answerSdp: string; etag: string };
       try {
         ingest = await this.coordinator.ingest(offer, url.searchParams.get("streamId") ?? undefined);
       } catch {
@@ -126,7 +126,7 @@ export class HttpCoordinationServer {
       }
       res.writeHead(201, {
         "Content-Type": "application/sdp",
-        "Location": `/whip/${encodeURIComponent(ingest.streamId)}`,
+        "Location": `/whip/${encodeURIComponent(ingest.sessionId)}`,
         "ETag": `\"${ingest.etag}\"`,
       });
       res.end(ingest.answerSdp);
@@ -142,8 +142,8 @@ export class HttpCoordinationServer {
       assertContentType(req, "application/trickle-ice-sdpfrag");
       const ifMatch = req.headers["if-match"];
       if (typeof ifMatch !== "string") { res.writeHead(428).end(); return; }
-      const streamId = decodeURIComponent(whipPatchMatch[1]);
-      const etag = this.coordinator.getIceEtag(streamId);
+      const sessionId = decodeURIComponent(whipPatchMatch[1]);
+      const etag = this.coordinator.getIceEtag(sessionId);
       if (!etag) { res.writeHead(404).end(); return; }
       // RFC 9725 §4.3.3 requires `If-Match: *` for an ICE restart. Let that
       // reach the fragment parser so this Trickle-only server can return its
@@ -151,7 +151,7 @@ export class HttpCoordinationServer {
       if (ifMatch !== "*" && ifMatch !== `\"${etag}\"`) { res.writeHead(412).end(); return; }
       const fragment = await readBody(req);
       const applied = await this.coordinator.addIngestCandidates(
-        streamId,
+        sessionId,
         fragment
       );
       res.writeHead(applied === "applied" ? 204 : applied === "restart" ? 422 : applied === "invalid" ? 400 : 404).end();
@@ -165,7 +165,7 @@ export class HttpCoordinationServer {
         res.writeHead(401).end("Unauthorized");
         return;
       }
-      await this.coordinator.stopIngest(decodeURIComponent(whipDeleteMatch[1]));
+      await this.coordinator.stopIngestSession(decodeURIComponent(whipDeleteMatch[1]));
       res.writeHead(200).end();
       return;
     }

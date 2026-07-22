@@ -13,7 +13,9 @@ import { ReconnectController, type ReconnectState } from "./ReconnectController"
 import { RtpH264TrackWriter } from "./RtpH264TrackWriter";
 import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
 import {
+  h264SpsProfileLevelId,
   h264SpsLevelIdc,
+  isCompatibleConstrainedBaselineProfile,
   WEBRTC_H264_LEVEL_IDC,
   WEBRTC_H264_PROFILE_LEVEL_ID,
 } from "./h264Level";
@@ -259,6 +261,12 @@ export class WebRtcPublisher {
         mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
         timer: this.timer,
         onSps: sps => {
+          const profileLevelId = h264SpsProfileLevelId(sps);
+          if (profileLevelId && !isCompatibleConstrainedBaselineProfile(profileLevelId)) {
+            throw new Error(
+              `H.264 SPS profile ${profileLevelId.slice(0, 4)} is incompatible with negotiated constrained baseline.`
+            );
+          }
           const levelIdc = h264SpsLevelIdc(sps);
           if (levelIdc !== undefined && levelIdc > WEBRTC_H264_LEVEL_IDC) {
             throw new Error(
@@ -575,22 +583,12 @@ function isAcceptedCodecRtpMap(
   });
 }
 
-function hasCompatibleH264Profile(profileLevelId: string): boolean {
-  // RFC 6184 §8.2.2 treats constraint_set3_flag (bit 4 of profile-iop) as
-  // part of the level for Baseline/Main/Extended profiles, so it may differ in
-  // a conforming answer. The profile_idc and remaining profile-iop bits must
-  // stay symmetric with AutoMobile's 42e0xx constrained-baseline offer.
-  const profileIdc = Number.parseInt(profileLevelId.slice(0, 2), 16);
-  const profileIop = Number.parseInt(profileLevelId.slice(2, 4), 16);
-  return profileIdc === 0x42 && (profileIop & 0xef) === 0xe0;
-}
-
 function h264CodecParameters(): string {
   return `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1`;
 }
 
 function acceptsLocalH264Send(parameters: string, profileLevelId: string): boolean {
-  if (!hasCompatibleH264Profile(profileLevelId)) {
+  if (!isCompatibleConstrainedBaselineProfile(profileLevelId)) {
     return false;
   }
   const answerLevelIdc = Number.parseInt(profileLevelId.slice(4, 6), 16);
@@ -601,8 +599,14 @@ function acceptsLocalH264Send(parameters: string, profileLevelId: string): boole
   // level; max-recv-level is its separately advertised receive ceiling (RFC
   // 6184 §8.2.2). Do not send a Level 4.2 stream unless that ceiling permits it.
   const asymmetric = /(?:^|;)\s*level-asymmetry-allowed\s*=\s*1(?:;|$)/i.test(parameters);
-  const maxReceiveLevel = /(?:^|;)\s*max-recv-level\s*=\s*(\d+)(?:;|$)/i.exec(parameters)?.[1];
-  return asymmetric && Number(maxReceiveLevel) >= WEBRTC_H264_LEVEL_IDC;
+  const maxReceiveLevel = /(?:^|;)\s*max-recv-level\s*=\s*([0-9a-f]{4})(?:;|$)/i.exec(parameters)?.[1];
+  // RFC 6184 §8.2.2 encodes max-recv-level as the two hexadecimal bytes after
+  // profile_idc in an SPS: profile-iop followed by level_idc (for example,
+  // e02a for constrained-baseline Level 4.2). It is not a decimal level number.
+  const maxReceiveLevelIdc = maxReceiveLevel
+    ? Number.parseInt(maxReceiveLevel.slice(2), 16)
+    : Number.NaN;
+  return asymmetric && maxReceiveLevelIdc >= WEBRTC_H264_LEVEL_IDC;
 }
 
 function addWhipRtcpMuxOnly(sdp: string): string {

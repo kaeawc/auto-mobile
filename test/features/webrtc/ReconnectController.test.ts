@@ -172,6 +172,30 @@ describe("ReconnectController", () => {
     expect(attempts).toBe(2);
     expect(controller.getState()).toBe("stopped");
   });
+
+  test("stop during an in-flight reconnect remains stopped when that attempt succeeds", async () => {
+    const timer = new FakeTimer();
+    let resolveReconnect: (() => void) | undefined;
+    let attempts = 0;
+    const controller = new ReconnectController({
+      attempt: async () => {
+        attempts++;
+        if (attempts === 2) {
+          await new Promise<void>(resolve => { resolveReconnect = resolve; });
+        }
+      },
+      timer,
+    });
+
+    await controller.start();
+    controller.notifyConnectionLost();
+    await drain();
+    controller.stop();
+    resolveReconnect?.();
+    await drain();
+
+    expect(controller.getState()).toBe("stopped");
+  });
 });
 
 /** Let queued microtasks (async attempt bodies) settle after advancing time. */

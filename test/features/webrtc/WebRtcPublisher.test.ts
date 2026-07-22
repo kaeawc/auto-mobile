@@ -184,7 +184,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
           publish: async () => ({
             answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
               "profile-level-id=42e02a",
-              "profile-level-id=42f00b;level-asymmetry-allowed=1;max-recv-level=42"
+              "profile-level-id=42f00b;level-asymmetry-allowed=1;max-recv-level=f02a"
             ),
             resourceUrl: "https://coord/whip/s",
           }),
@@ -214,7 +214,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
               resourceUrl: "https://coord/resource",
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
                 "profile-level-id=42e02a",
-                "profile-level-id=42e01f;level-asymmetry-allowed=1;max-recv-level=42"
+                "profile-level-id=42e01f;level-asymmetry-allowed=1;max-recv-level=e02a"
               ),
             }),
             delete: async () => {},
@@ -224,6 +224,15 @@ describe("WebRtcPublisher WHIP answer validation", () => {
 
     await publisher.start();
     expect(publisher.getDescriptor().resourceUrl).toBe("https://coord/resource");
+  });
+
+  test("rejects a decimal max-recv-level because RFC 6184 requires hexadecimal SPS bytes", async () => {
+    await expectRejectedAnswer(
+      ACCEPTED_VIDEO_ANSWER.replace(
+        "profile-level-id=42e02a",
+        "profile-level-id=42e01f;level-asymmetry-allowed=1;max-recv-level=42"
+      )
+    );
   });
 });
 
@@ -260,6 +269,31 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     expect(() => internals.fireConnected(pc as unknown as RTCPeerConnection)).not.toThrow();
     await Promise.resolve();
     await Promise.resolve();
+    expect(recoveries).toBe(1);
+  });
+
+  test("recovers instead of forwarding an SPS incompatible with the advertised H.264 profile", async () => {
+    const pc = new FakePeerConnection();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+    await publisher.start();
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    // A High-profile SPS must not be forwarded under the constrained-baseline
+    // profile-level-id advertised in the negotiated SDP.
+    publisher.writeH264Chunk(Buffer.from([0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 0, 1]));
+
     expect(recoveries).toBe(1);
   });
 });

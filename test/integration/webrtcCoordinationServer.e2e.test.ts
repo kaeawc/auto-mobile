@@ -32,7 +32,8 @@ function nal(type: number, size: number, fill: number): Buffer {
 
 function keyframe(): Buffer {
   return Buffer.concat([
-    START, nal(7, 8, 0x11),
+    // Constrained-baseline Level 4.2 SPS, matching the publisher's SDP.
+    START, Buffer.from([0x67, 0x42, 0xe0, 0x2a, 0x11, 0x11, 0x11, 0x11]),
     START, nal(8, 6, 0x22),
     START, nal(5, 3000, 0x33),
     START,
@@ -150,7 +151,7 @@ describe("WebRTC coordination server e2e", () => {
       const publisher = new WebRtcPublisher({ streamId: "restart", whipEndpoint: `${base}/whip?streamId=restart` });
       try {
         await publisher.start();
-        const response = await fetch(`${base}/whip/restart`, {
+        const response = await fetch(publisher.getDescriptor().resourceUrl!, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/trickle-ice-sdpfrag",
@@ -170,6 +171,30 @@ describe("WebRTC coordination server e2e", () => {
         expect((await fetch(`${base}/api/streams/restart`)).status).toBe(200);
       } finally {
         await publisher.stop();
+        await http.close();
+      }
+    },
+    15000
+  );
+
+  test(
+    "does not let a stale WHIP session delete a replacement with the same stream id",
+    async () => {
+      const http = new HttpCoordinationServer({ iceServers: [] });
+      const port = await http.listen(0, "127.0.0.1");
+      const endpoint = `http://127.0.0.1:${port}/whip?streamId=replaced`;
+      const first = new WebRtcPublisher({ streamId: "replaced", whipEndpoint: endpoint });
+      const replacement = new WebRtcPublisher({ streamId: "replaced", whipEndpoint: endpoint });
+      try {
+        await first.start();
+        const staleResourceUrl = first.getDescriptor().resourceUrl!;
+        await replacement.start();
+
+        expect((await fetch(staleResourceUrl, { method: "DELETE" })).status).toBe(200);
+        expect((await fetch(`http://127.0.0.1:${port}/api/streams/replaced`)).status).toBe(200);
+      } finally {
+        await first.stop();
+        await replacement.stop();
         await http.close();
       }
     },
@@ -294,7 +319,7 @@ describe("WebRTC coordination server e2e", () => {
         const secondIdrSlice = nal(5, 1200, 0x44);
         secondIdrSlice[1] = 0x40; // first_mb_in_slice > 0: same access unit as the first IDR.
         publisher.writeH264Chunk(Buffer.concat([
-          START, nal(7, 8, 0x11),
+          START, Buffer.from([0x67, 0x42, 0xe0, 0x2a, 0x11, 0x11, 0x11, 0x11]),
           START, nal(8, 6, 0x22),
           START, nal(5, 1200, 0x33),
           START, secondIdrSlice,

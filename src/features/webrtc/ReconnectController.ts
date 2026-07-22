@@ -134,6 +134,11 @@ export class ReconnectController {
     try {
       await this.attempt();
       this.cycleActive = false;
+      // stop() may win while a reconnect is establishing. Do not resurrect the
+      // terminal state after its transport has already been torn down.
+      if (this.stopped) {
+        return;
+      }
       this.setState("connected");
       this.drainPendingReconnect();
     } catch (error) {

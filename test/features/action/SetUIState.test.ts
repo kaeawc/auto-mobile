@@ -676,3 +676,131 @@ describe("SetUIState", () => {
     });
   });
 });
+
+describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+
+  let fakeTap: FakeTapOnElement;
+  let fakeInput: FakeInputText;
+  let fakeClear: FakeClearText;
+  let fakeSwipe: FakeSwipeOn;
+  let fakeObserve: FakeObserveScreenForSetUIState;
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeTap = new FakeTapOnElement();
+    fakeInput = new FakeInputText();
+    fakeClear = new FakeClearText();
+    fakeSwipe = new FakeSwipeOn();
+    fakeObserve = new FakeObserveScreenForSetUIState();
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  const build = () => new SetUIState(device, null, {
+    tapOnElement: fakeTap,
+    inputText: fakeInput,
+    clearText: fakeClear,
+    swipeOn: fakeSwipe,
+    observeScreen: fakeObserve,
+    fieldTypeDetector: fakeFieldTypeDetector,
+    timer: fakeTimer
+  });
+
+  test("an unmatched selector returns the tool's own error rather than searching forever", async () => {
+    // The screen never contains the field, so the scroll search exhausts both
+    // directions. The caller must get "Fields not found", not a transport timeout.
+    const result = await build().execute({
+      fields: [{ selector: { text: "NeverPresent" }, value: "x" }]
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not found");
+    expect(result.error).toContain("NeverPresent");
+  });
+
+  test("the search is bounded — it does not scroll indefinitely", async () => {
+    await build().execute({
+      fields: [{ selector: { text: "NeverPresent" }, value: "x" }]
+    });
+
+    // Both directions tried, then it stops. Without a bound this would not settle.
+    expect(fakeSwipe.getCallCount()).toBeGreaterThan(0);
+    expect(fakeSwipe.getCallCount()).toBeLessThanOrEqual(10);
+  });
+
+  test("the search stops once its time budget is spent, before the request times out", async () => {
+    // Each observe costs real wall-clock on a device (~3s of swipe + observe per
+    // futile scroll). Fakes are instant, so the cost is simulated here: without a
+    // deadline the loop only stops after exhausting both directions, which is
+    // what pushed a real call past the caller's request timeout (#4242).
+    let observeCalls = 0;
+    fakeObserve.setResultFactory(() => {
+      observeCalls++;
+      fakeTimer.advanceTime(5_000);
+      return {
+        updatedAt: fakeTimer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+      };
+    });
+
+    const result = await build().execute({
+      fields: [{ selector: { text: "NeverPresent" }, value: "x" }]
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not found");
+    // The budget must cut the search short rather than running every futile scroll.
+    expect(observeCalls).toBeLessThan(8);
+  });
+
+  test("a matched but unclassifiable node reports what it matched, not 'unknown'", async () => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: [{
+          $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" }
+        }]
+      }
+    } as ViewHierarchyResult;
+    fakeObserve.setResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy
+    });
+    fakeFieldTypeDetector.setFieldType("Email", "unknown" as any);
+
+    const result = await build().execute({
+      fields: [{ selector: { text: "Email" }, value: "a@b.c" }]
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).not.toBe("Unknown field type: unknown");
+    expect(result.error).toContain("Email");
+  });
+
+  test("an unclassifiable node is not retried", async () => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: [{
+          $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" }
+        }]
+      }
+    } as ViewHierarchyResult;
+    fakeObserve.setResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy
+    });
+    fakeFieldTypeDetector.setFieldType("Email", "unknown" as any);
+
+    const result = await build().execute({
+      fields: [{ selector: { text: "Email" }, value: "a@b.c" }]
+    });
+
+    expect(result.totalAttempts).toBeLessThanOrEqual(1);
+  });
+});

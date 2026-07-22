@@ -66,6 +66,17 @@ interface SetUIStateDependencies {
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_SCROLL_DIRECTION = "down";
 const MAX_FUTILE_SCROLLS = 3;
+/**
+ * Wall-clock ceiling for the scroll search.
+ *
+ * Each futile scroll costs a swipe plus an observe against the device, and the
+ * loop tries MAX_FUTILE_SCROLLS in each direction — roughly eight round trips,
+ * which lands at about the caller's request timeout. The caller then sees a
+ * transport timeout instead of this tool's own "Fields not found" error, which
+ * points at the wrong thing (#4242). Stopping short of that keeps the actionable
+ * error reachable.
+ */
+const SEARCH_BUDGET_MS = 20_000;
 
 /**
  * SetUIState - Declarative form field population tool
@@ -118,8 +129,14 @@ export class SetUIState extends BaseVisualChange {
     let scrollsWithoutProgress = 0;
     let currentDirection: "up" | "down" = scrollDirection;
     let triedReverse = false;
+    const searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
+    let budgetSpent = false;
 
     while (processed.size < options.fields.length) {
+      if (this.timer.now() >= searchDeadline) {
+        budgetSpent = true;
+        break;
+      }
       // Find all unprocessed fields visible in the current hierarchy, sorted by bounds.top
       const visibleFields = this.findVisibleFieldsInScreenOrder(
         options.fields,
@@ -207,7 +224,9 @@ export class SetUIState extends BaseVisualChange {
         fields: this.collectResults(fieldResults, options.fields, processed),
         totalAttempts,
         observation: lastObservation,
-        error: `Fields not found after scrolling: ${missing.join(", ")}`
+        error: budgetSpent
+          ? `Fields not found within the ${Math.round(SEARCH_BUDGET_MS / 1000)}s search budget: ${missing.join(", ")}`
+          : `Fields not found after scrolling: ${missing.join(", ")}`
       };
     }
 
@@ -324,6 +343,14 @@ export class SetUIState extends BaseVisualChange {
           signal
         );
 
+        // Retrying cannot reclassify an element that is not an editable field --
+        // the type comes from the element itself, so the remaining attempts would
+        // fail identically and only cost round trips (#4242).
+        if (!applyResult.success && applyResult.unclassifiable) {
+          lastError = applyResult.error;
+          break;
+        }
+
         if (!applyResult.success) {
           lastError = applyResult.error;
           continue;
@@ -430,7 +457,7 @@ export class SetUIState extends BaseVisualChange {
     fieldType: FieldType,
     progress?: ProgressCallback,
     signal?: AbortSignal
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; unclassifiable?: boolean }> {
     const tapOnElement = this.getTapOnElement();
     const inputText = this.getInputText();
     const clearText = this.getClearText();
@@ -538,7 +565,15 @@ export class SetUIState extends BaseVisualChange {
         }
 
         default:
-          return { success: false, error: `Unknown field type: ${fieldType}` };
+          // Name what was actually matched: this is normally a label rather than
+          // the input itself, and "Unknown field type: unknown" describes an
+          // internal state the caller cannot act on (#4242).
+          return {
+            success: false,
+            unclassifiable: true,
+            error: `Cannot set ${this.describeSelector(fieldSpec.selector)}: matched an element that is not `
+              + `an editable field (detected type "${fieldType}"). Select the input rather than its label.`
+          };
       }
     } catch (error) {
       return {

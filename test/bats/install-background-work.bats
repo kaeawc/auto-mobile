@@ -21,6 +21,12 @@ assert_process_is_not_active() {
   [[ -z "${state}" || "${state}" == *Z* ]]
 }
 
+assert_process_is_reaped() {
+  local state
+  state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+  [[ -z "${state}" ]]
+}
+
 teardown() {
   export PATH="${ORIG_PATH}"
   rm -rf "${TEST_DIR}"
@@ -32,9 +38,10 @@ teardown() {
   # for 6 hours until the runner cancelled it. A stall must be abandoned.
   cat > "${STUB_BIN}/xcrun" <<'STUB'
 #!/usr/bin/env bash
-# exec so the stub IS the stalled process: killing the probe PID must actually
-# stop it, not orphan a child that keeps the inherited fd open.
-exec sleep 300
+  # Keep a child alive under the xcrun wrapper. The timeout must let the
+  # wrapper reap the helper rather than leaving it as a zombie.
+sleep 300 &
+wait
 STUB
   chmod +x "${STUB_BIN}/xcrun"
 
@@ -42,7 +49,15 @@ STUB
   IOS_RUNTIME_PROBE_TIMEOUT_SECONDS=1
 
   start_ios_runtime_probe
-  [ -n "${IOS_RUNTIME_PROBE_PID}" ]
+  local worker_pid="${IOS_RUNTIME_PROBE_PID}"
+  [ -n "${worker_pid}" ]
+  local child_pid
+  for _ in {1..10}; do
+    child_pid=$("${PGREP}" -P "${worker_pid}" sleep 2>/dev/null || true)
+    [[ -n "${child_pid}" ]] && break
+    sleep 0.1
+  done
+  [ -n "${child_pid}" ]
 
   local started ended elapsed status=0
   started=$(date +%s)
@@ -54,6 +69,58 @@ STUB
   [ "$status" -eq 0 ]
   [ "$elapsed" -lt 30 ]
   [ -z "${IOS_RUNTIME_PROBE_PID}" ]
+  assert_process_is_reaped "${worker_pid}"
+  assert_process_is_reaped "${child_pid}"
+}
+
+@test "a SIGTERM-ignoring runtime helper is reaped after the hard fallback" {
+  cat > "${STUB_BIN}/xcrun" <<'STUB'
+#!/usr/bin/env bash
+bash -c 'trap "" TERM; while :; do :; done' &
+wait
+STUB
+  chmod +x "${STUB_BIN}/xcrun"
+
+  detect_os() { printf 'macos\n'; }
+  IOS_RUNTIME_PROBE_TIMEOUT_SECONDS=1
+
+  start_ios_runtime_probe
+  local worker_pid="${IOS_RUNTIME_PROBE_PID}"
+  local helper_pid
+  for _ in {1..10}; do
+    helper_pid=$("${PGREP}" -P "${worker_pid}" . 2>/dev/null || true)
+    [[ -n "${helper_pid}" ]] && break
+    sleep 0.1
+  done
+  [ -n "${helper_pid}" ]
+  finish_ios_runtime_probe >/dev/null 2>&1
+
+  assert_process_is_reaped "${worker_pid}"
+  assert_process_is_reaped "${helper_pid}"
+}
+
+@test "the hard runtime-probe fallback remains bounded after a wrapper resumes into another stall" {
+  cat > "${STUB_BIN}/xcrun" <<'STUB'
+#!/usr/bin/env bash
+bash -c 'trap "" TERM; while :; do :; done' &
+wait || true
+while :; do :; done
+STUB
+  chmod +x "${STUB_BIN}/xcrun"
+
+  detect_os() { printf 'macos\n'; }
+  IOS_RUNTIME_PROBE_TIMEOUT_SECONDS=1
+
+  start_ios_runtime_probe
+  local worker_pid="${IOS_RUNTIME_PROBE_PID}"
+  local started ended elapsed
+  started=$(date +%s)
+  finish_ios_runtime_probe >/dev/null 2>&1
+  ended=$(date +%s)
+  elapsed=$((ended - started))
+
+  [ "${elapsed}" -lt 30 ]
+  assert_process_is_reaped "${worker_pid}"
 }
 
 @test "iOS runtime probe runs in the background and reports its completed result" {

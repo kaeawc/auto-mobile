@@ -8,17 +8,25 @@ import { BackStackInfo, BootedDevice } from "../../../src/models";
  * Back-stack semantics pinned by this suite (issue #4197).
  *
  * Wire format. `dumpsys activity activities` prints activities using AOSP's
- * `ActivityRecord.toString()`, which puts the user id, the component and the
- * task id INSIDE the braces:
+ * `ActivityRecord.toString()`, which puts the user id and the component INSIDE
+ * the braces:
  *
  *     * Hist  #0: ActivityRecord{2b2ce0f u0 com.example/.MainActivity t61}
  *
- * Every real capture committed to this repo agrees on that shape — see
- * `test/features/observe/Window.test.ts` and the documented samples in
- * `src/utils/android-cmdline-tools/AdbClient.ts`. The shape the parser used to
- * expect (`ActivityRecord{...} u0 com.example/.MainActivity`, component after
- * the closing brace) is not emitted by any Android version, which is why
- * `parseActivities` returned an empty array against real output.
+ * The shape the parser used to expect (`ActivityRecord{...} u0
+ * com.example/.MainActivity`, component after the closing brace) is not emitted
+ * by any Android version, which is why `parseActivities` returned an empty
+ * array against real output.
+ *
+ * Where the TASK ID goes, however, is version-dependent. The captures committed
+ * under `test/features/observe/windowDumps/` disagree:
+ *
+ *     API 30-32, 34-36  ActivityRecord{6f2ed08 u0 com.android.settings/.Settings t6}
+ *     API 33            ActivityRecord{a9cf40f u0 com.android.settings/.Settings} t8}
+ *
+ * API 33 closes the component with its own brace and trails the task id after
+ * it. Both shapes are pinned below; the component must never come back with a
+ * "}" glued to it.
  *
  * Ordering and the task root. Activities are printed top-of-stack first, and
  * the `Hist #N` index is the position within the task counting UP from the
@@ -195,6 +203,30 @@ describe("GetBackStack real-output parsing (#4197)", () => {
         "com.example.MainActivity"
       ]);
       expect(result.activities.map(a => a.taskId)).toEqual([5, 5]);
+    });
+
+    test("API 33 shape ('...}' then ' tNN}') parses the component and its own task id", async () => {
+      // The two ActivityRecord strings below are copied verbatim from the
+      // committed API 33 capture, test/features/observe/windowDumps/
+      // api33-settings-window-dump.log:289 and :318. Unlike every other API
+      // level captured in that directory, API 33 closes the component with a
+      // brace and prints the task id after it. The enclosing task header is
+      // deliberately a task id the activities do NOT belong to, so a component
+      // ending in "}" or a task id silently falling back to the header both
+      // fail here.
+      const result = await parse(`
+    Task id #99
+    affinity=com.android.settings
+      * Hist  #1: ActivityRecord{a9cf40f u0 com.android.settings/.Settings} t8}
+      * Hist  #0: ActivityRecord{3177c30 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity} t7}
+`);
+
+      expect(result.activities.map(a => a.name)).toEqual([
+        "com.android.settings.Settings",
+        "com.google.android.apps.nexuslauncher.NexusLauncherActivity"
+      ]);
+      expect(result.activities.map(a => a.taskId)).toEqual([8, 7]);
+      expect(result.activities.map(a => a.isTaskRoot)).toEqual([false, true]);
     });
 
     test("an activity with no task ('t??') falls back to the enclosing task", async () => {

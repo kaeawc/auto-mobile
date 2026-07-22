@@ -47,24 +47,37 @@ export class GetBackStack implements BackStack {
         logger.debug(`[BACK_STACK] Found task affinity: ${currentTaskAffinity}`);
       }
 
-      // Match activity. AOSP's ActivityRecord.toString() puts the user id, the
-      // component and the task id INSIDE the braces, e.g.
-      //   "* Hist  #0: ActivityRecord{2b2ce0f u0 com.example/.MainActivity t61}"
-      // The "Hist #N" index counts up from the task root, so #0 is the task
-      // root and the highest index is the topmost (visible) activity.
+      // Match activity. AOSP's ActivityRecord.toString() always puts the user id
+      // and the component INSIDE the braces, but it does NOT agree across
+      // versions on where the task id goes. Both shapes are present in this
+      // repo's committed captures under test/features/observe/windowDumps:
       //
-      // Trailing tokens before the closing brace are tolerated deliberately: a
-      // finishing activity prints " f}" and an activity with no task prints
-      // "t??". Requiring the task id to be the last token is what made the
-      // previous regex drop every line, so anything unrecognized is skipped
-      // rather than allowed to reject the whole activity.
+      //   API 30-32, 34-36: ActivityRecord{2b2ce0f u0 com.example/.Main t61}
+      //   API 33:           ActivityRecord{a9cf40f u0 com.example/.Main} t8}
+      //
+      // On API 33 the component is closed off by its own brace and the task id
+      // trails outside it. So the component group is bounded to exclude "}"
+      // (otherwise the API 33 shape yields a name ending in "}"), and the task
+      // id is scanned for anywhere in the tail rather than assumed to sit at a
+      // fixed offset. The "Hist #N" index counts up from the task root, so #0
+      // is the task root and the highest index is the topmost activity.
+      //
+      // Other trailing tokens are tolerated deliberately: a finishing activity
+      // prints " f" and an activity with no task prints "t??". Requiring the
+      // task id to be the last token is what made the original regex drop every
+      // line, so an unrecognized tail leaves the task id to fall back to the
+      // enclosing task header rather than rejecting the whole activity.
       const activityMatch = line.match(
-        /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+(\S+?)(?:\s+t(\d+))?(?:\s+[^}]*)?\}/
+        /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+([^\s}]+)([^\n]*\})/
       );
       if (activityMatch) {
         const histIndex = parseInt(activityMatch[1], 10);
         const fullName = activityMatch[2];
-        const taskIdFromActivity = activityMatch[3] ? parseInt(activityMatch[3], 10) : currentTaskId;
+        // Standalone "tNN" token in the tail, on either side of a closing brace.
+        const taskIdMatchFromActivity = activityMatch[3].match(/(?:^|[\s}])t(\d+)(?=[\s}]|$)/);
+        const taskIdFromActivity = taskIdMatchFromActivity
+          ? parseInt(taskIdMatchFromActivity[1], 10)
+          : currentTaskId;
 
         // Parse package/activity name (format: "com.example/.MainActivity" or "com.example/com.example.MainActivity")
         const parts = fullName.split("/");

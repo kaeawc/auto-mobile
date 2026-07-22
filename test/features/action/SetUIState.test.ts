@@ -870,3 +870,64 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
     expect(result.success).toBe(true);
   });
 });
+
+describe("SetUIState budget is unaffected by slow work before the search (#4252 review 2)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  let fakeTap: FakeTapOnElement;
+  let fakeInput: FakeInputText;
+  let fakeClear: FakeClearText;
+  let fakeSwipe: FakeSwipeOn;
+  let fakeObserve: FakeObserveScreenForSetUIState;
+  let fakeFieldTypeDetector: FakeFieldTypeDetector;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeTap = new FakeTapOnElement();
+    fakeInput = new FakeInputText();
+    fakeClear = new FakeClearText();
+    fakeSwipe = new FakeSwipeOn();
+    fakeObserve = new FakeObserveScreenForSetUIState();
+    fakeFieldTypeDetector = new FakeFieldTypeDetector();
+    fakeTimer = new FakeTimer();
+  });
+
+  const build = () => new SetUIState(device, null, {
+    tapOnElement: fakeTap, inputText: fakeInput, clearText: fakeClear,
+    swipeOn: fakeSwipe, observeScreen: fakeObserve,
+    fieldTypeDetector: fakeFieldTypeDetector, timer: fakeTimer
+  });
+
+  test("an off-screen field still gets scroll attempts after a slow post-success observe", async () => {
+    // First field is visible and succeeds; the refresh observe that follows is
+    // slow. The second field is off-screen, so the search must still be given its
+    // full budget rather than inheriting time already spent.
+    const onlyFirst = {
+      hierarchy: {
+        node: [{ $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "first", "class": "android.widget.EditText" } }]
+      }
+    } as unknown as ViewHierarchyResult;
+
+    fakeFieldTypeDetector.setSkipVerification("first", true);
+
+    fakeObserve.setResultFactory(() => {
+      fakeTimer.advanceTime(19_000);
+      return {
+        updatedAt: fakeTimer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: onlyFirst
+      };
+    });
+
+    await build().execute({
+      fields: [
+        { selector: { elementId: "first" }, value: "a" },
+        { selector: { elementId: "offscreen" }, value: "b" }
+      ]
+    });
+
+    // The off-screen field must have been searched for, not skipped because
+    // earlier work had already aged the deadline.
+    expect(fakeSwipe.getCallCount()).toBeGreaterThan(0);
+  });
+});

@@ -50,11 +50,17 @@ export class CtrlProxyHierarchy {
 
   /**
    * Invalidate the cache (mark as not fresh).
+   *
+   * The entry is deliberately kept rather than nulled: `getLatestHierarchy` still
+   * returns it as an explicitly-stale fallback when a fresh fetch is impossible
+   * (disconnected/reconnecting runner). Use `IOSCtrlProxyClient.clearCache()` when
+   * the cached data must not be served at all — e.g. after an app data wipe.
    */
   invalidateCache(): void {
     const cached = this.context.getCachedHierarchy();
     if (cached) {
-      cached.fresh = false;
+      logger.debug("[CTRL_PROXY] Invalidating cached hierarchy");
+      this.context.setCachedHierarchy({ ...cached, fresh: false });
     }
   }
 
@@ -97,7 +103,9 @@ export class CtrlProxyHierarchy {
     const cachedHierarchy = this.context.getCachedHierarchy();
     if (cachedHierarchy) {
       const cacheAge = this.context.timer.now() - cachedHierarchy.receivedAt;
-      const isFresh = cacheAge < this.context.cacheFreshTtlMs;
+      // `fresh` is honoured as well as elapsed time: without it, invalidateCache()
+      // would be an observable no-op inside the TTL (issue #4193).
+      const isFresh = cachedHierarchy.fresh && cacheAge < this.context.cacheFreshTtlMs;
       const meetsMinTimestamp = minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
 
       if (isFresh && meetsMinTimestamp) {

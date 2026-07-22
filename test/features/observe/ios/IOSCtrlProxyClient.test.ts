@@ -1720,7 +1720,9 @@ describe("IOSCtrlProxyClient", function() {
         // Invalidate cache
         testClient.invalidateCache();
 
-        // Cache still exists but is marked as stale
+        // Cache still exists but is marked as stale (kept for the stale fallback
+        // path). See ctrlProxyHierarchyCache.test.ts for the refetch semantics
+        // this flag drives (issue #4193).
         expect(testClient.hasCachedHierarchy()).toBe(true);
       } finally {
         await testClient.close();

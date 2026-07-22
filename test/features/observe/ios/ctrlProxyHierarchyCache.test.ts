@@ -1,0 +1,164 @@
+/**
+ * Cache-invalidation semantics for the iOS hierarchy delegate (issue #4193).
+ *
+ * `CtrlProxyHierarchy.invalidateCache()` marks the cached entry `fresh = false`.
+ * Before #4193, `getLatestHierarchy()` derived freshness from elapsed time alone
+ * and never read that flag, so invalidation was an observable no-op: the next
+ * call still served the stale cache for the remainder of the TTL.
+ *
+ * These tests drive the TTL boundary with `FakeTimer` and count wire fetches, so
+ * they pin both the invalidation path and the caching controls that prove the fix
+ * did not simply disable the cache.
+ */
+
+import { beforeEach, describe, expect, test } from "bun:test";
+import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
+import type {
+  CtrlProxyCachedHierarchy,
+  HierarchyDelegateContext,
+  XCTestHierarchy,
+} from "../../../../src/features/observe/ios/types";
+import { RequestManager } from "../../../../src/utils/RequestManager";
+import { FakeTimer } from "../../../fakes/FakeTimer";
+
+const CACHE_TTL_MS = 500;
+
+interface Harness {
+  hierarchy: CtrlProxyHierarchy;
+  timer: FakeTimer;
+  /** Number of `request_hierarchy*` messages that reached the socket. */
+  fetchCount: () => number;
+  getCached: () => CtrlProxyCachedHierarchy | null;
+}
+
+function makeHierarchy(updatedAt: number, marker: string): XCTestHierarchy {
+  return {
+    updatedAt,
+    packageName: "com.test.app",
+    hierarchy: { text: marker },
+  } as XCTestHierarchy;
+}
+
+function createHarness(): Harness {
+  const timer = new FakeTimer();
+  const requestManager = new RequestManager(timer);
+  let cached: CtrlProxyCachedHierarchy | null = null;
+  let fetches = 0;
+
+  const context: HierarchyDelegateContext = {
+    getWebSocket: () => ({
+      readyState: 1,
+      send: (data: string) => {
+        const message = JSON.parse(data) as { requestId: string };
+        fetches += 1;
+        // Respond immediately with a hierarchy stamped at the current fake time,
+        // so each fetch is distinguishable from the previously cached one.
+        requestManager.resolve(message.requestId, {
+          hierarchy: makeHierarchy(timer.now(), `fetch-${fetches}`),
+        });
+      },
+    } as never),
+    requestManager,
+    timer,
+    ensureConnected: async () => true,
+    cancelScreenshotBackoff: () => {},
+    cacheFreshTtlMs: CACHE_TTL_MS,
+    getCachedHierarchy: () => cached,
+    setCachedHierarchy: h => { cached = h; },
+  };
+
+  return {
+    hierarchy: new CtrlProxyHierarchy(context),
+    timer,
+    fetchCount: () => fetches,
+    getCached: () => cached,
+  };
+}
+
+describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
+  let h: Harness;
+
+  beforeEach(() => {
+    h = createHarness();
+  });
+
+  async function primeCache(): Promise<void> {
+    await h.hierarchy.getLatestHierarchy(true, 1000);
+    expect(h.fetchCount()).toBe(1);
+    expect(h.getCached()).not.toBeNull();
+  }
+
+  test("invalidateCache forces a refetch well inside the TTL", async () => {
+    await primeCache();
+
+    h.timer.advanceTime(CACHE_TTL_MS / 2);
+    h.hierarchy.invalidateCache();
+
+    const result = await h.hierarchy.getLatestHierarchy(true, 1000);
+
+    expect(h.fetchCount()).toBe(2);
+    expect(result.fresh).toBe(true);
+    expect(result.updatedAt).toBe(CACHE_TTL_MS / 2);
+  });
+
+  test("invalidateCache at the TTL boundary still refetches", async () => {
+    await primeCache();
+
+    h.timer.advanceTime(CACHE_TTL_MS - 1);
+    h.hierarchy.invalidateCache();
+    await h.hierarchy.getLatestHierarchy(true, 1000);
+
+    expect(h.fetchCount()).toBe(2);
+  });
+
+  test("a refetch after invalidation restores caching", async () => {
+    await primeCache();
+
+    h.hierarchy.invalidateCache();
+    await h.hierarchy.getLatestHierarchy(true, 1000);
+    expect(h.fetchCount()).toBe(2);
+
+    // The replacement entry is fresh again, so the next in-TTL call is a cache hit.
+    await h.hierarchy.getLatestHierarchy(true, 1000);
+    expect(h.fetchCount()).toBe(2);
+  });
+
+  // --- Controls: these fail if the fix simply disabled caching. ---
+
+  test("without invalidation the cache serves inside the TTL", async () => {
+    await primeCache();
+
+    h.timer.advanceTime(CACHE_TTL_MS - 1);
+    const result = await h.hierarchy.getLatestHierarchy(true, 1000);
+
+    expect(h.fetchCount()).toBe(1);
+    expect(result.fresh).toBe(true);
+    expect(result.updatedAt).toBe(0);
+  });
+
+  test("without invalidation the cache refetches at and past the TTL", async () => {
+    await primeCache();
+
+    // Boundary: cacheAge === TTL is NOT fresh (strict `<`).
+    h.timer.advanceTime(CACHE_TTL_MS);
+    await h.hierarchy.getLatestHierarchy(true, 1000);
+    expect(h.fetchCount()).toBe(2);
+
+    h.timer.advanceTime(CACHE_TTL_MS + 1);
+    await h.hierarchy.getLatestHierarchy(true, 1000);
+    expect(h.fetchCount()).toBe(3);
+  });
+
+  test("invalidated cache is still returned as stale fallback when no fetch is possible", async () => {
+    await primeCache();
+    h.hierarchy.invalidateCache();
+
+    // skipWaitForFresh suppresses the sync fetch; the invalidated entry must still
+    // be available as a stale fallback rather than disappearing.
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+
+    expect(h.fetchCount()).toBe(1);
+    expect(result.fresh).toBe(false);
+    expect(result.hierarchy).not.toBeNull();
+  });
+});

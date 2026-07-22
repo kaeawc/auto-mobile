@@ -7,6 +7,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
+import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 
 export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
@@ -17,6 +18,7 @@ export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
  * boundary. A fresh segment re-emits SPS/PPS + an IDR, which decoders handle.
  */
 export const ANDROID_STREAM_SEGMENT_ROTATE_MS = (ANDROID_SCREENRECORD_MAX_SECONDS - 5) * 1000;
+const DEFAULT_SCREENRECORD_SIZE = { width: 1280, height: 720 };
 
 export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
   adbFactory?: AdbClientFactory;
@@ -46,6 +48,7 @@ export class AndroidH264Source implements H264CaptureSource {
   private rotateHandle: NodeJS.Timeout | null = null;
   private running = false;
   private segmentCount = 0;
+  private resolvedSize: { width: number; height: number } | null = null;
 
   constructor(options: AndroidH264SourceOptions) {
     this.options = options;
@@ -105,6 +108,10 @@ export class AndroidH264Source implements H264CaptureSource {
     if (!this.running) {
       return;
     }
+    const size = await this.captureSize(adb);
+    if (!this.running) {
+      return;
+    }
     const args = [
       "exec-out",
       "screenrecord",
@@ -115,9 +122,7 @@ export class AndroidH264Source implements H264CaptureSource {
     if (this.options.bitrateBps && this.options.bitrateBps > 0) {
       args.push("--bit-rate", String(Math.round(this.options.bitrateBps)));
     }
-    if (this.options.size) {
-      args.push("--size", `${this.options.size.width}x${this.options.size.height}`);
-    }
+    args.push("--size", `${size.width}x${size.height}`);
     args.push("-");
 
     logger.info(
@@ -223,4 +228,42 @@ export class AndroidH264Source implements H264CaptureSource {
       this.rotateHandle = null;
     }
   }
+
+  private async captureSize(adb: ReturnType<AdbClientFactory["create"]>): Promise<{ width: number; height: number }> {
+    if (this.options.size) {
+      return this.options.size;
+    }
+    if (this.resolvedSize) {
+      return this.resolvedSize;
+    }
+    try {
+      const { stdout } = await adb.executeCommand("shell wm size");
+      const match = /Physical size:\s*(\d+)x(\d+)/.exec(stdout);
+      if (match) {
+        this.resolvedSize = capToLevel42({ width: Number(match[1]), height: Number(match[2]) });
+        return this.resolvedSize;
+      }
+    } catch (error) {
+      logger.debug(`[AndroidH264Source] could not query display size: ${error}`);
+    }
+    // `wm size` is unavailable on a few older/restricted devices. Keep that
+    // fallback within the Level 4.2 SDP capability instead of emitting native
+    // display resolution with an unbounded SPS level.
+    this.resolvedSize = DEFAULT_SCREENRECORD_SIZE;
+    return this.resolvedSize;
+  }
+}
+
+function capToLevel42(size: { width: number; height: number }): { width: number; height: number } {
+  const scale = Math.min(1, Math.sqrt((WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME * 256) / (size.width * size.height)));
+  let width = Math.max(2, Math.floor((size.width * scale) / 2) * 2);
+  let height = Math.max(2, Math.floor((size.height * scale) / 2) * 2);
+  while (h264MacroblocksPerFrame(width, height) > WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME) {
+    if (width >= height) {
+      width -= 2;
+    } else {
+      height -= 2;
+    }
+  }
+  return { width, height };
 }

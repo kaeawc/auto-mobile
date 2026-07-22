@@ -99,7 +99,7 @@ export class WhipClient {
       );
     }
 
-    const answerSdp = await response.text();
+    const answerSdp = await this.readTextWithTimeout(response, "POST");
     if (!answerSdp.trim()) {
       throw new ActionableError("WHIP ingest returned an empty SDP answer.");
     }
@@ -198,10 +198,30 @@ export class WhipClient {
 
   private async safeText(response: { text(): Promise<string> }): Promise<string> {
     try {
-      return (await response.text()).slice(0, 300);
+      return (await this.readTextWithTimeout(response, "response")).slice(0, 300);
     } catch (error) {
       logger.debug(`[WHIP] failed to read error response body: ${error}`);
       return "";
+    }
+  }
+
+  /** Keep the request deadline in force when a peer stalls after HTTP headers. */
+  private async readTextWithTimeout(response: { text(): Promise<string> }, method: string): Promise<string> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        response.text(),
+        new Promise<never>((_, reject) => {
+          timeout = this.timer.setTimeout(
+            () => reject(new ActionableError(`WHIP ${method} response body timed out after ${this.requestTimeoutMs}ms.`)),
+            this.requestTimeoutMs
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
     }
   }
 }

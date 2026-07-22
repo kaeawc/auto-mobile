@@ -57,6 +57,7 @@ interface Subscriber {
   id: string;
   pc: RTCPeerConnection;
   tracks: Map<"audio" | "video", MediaStreamTrack>;
+  ready: boolean;
 }
 
 interface StreamEntry {
@@ -73,6 +74,7 @@ interface StreamEntry {
   videoConfig: RtpPacket[];
   videoKeyFrame: RtpPacket[];
   collectingKeyFrame: RtpPacket[] | null;
+  collectingKeyFrameTimestamp: number | null;
   iceEtag: string;
   iceCredentials: { ufrag: string; pwd: string };
 }
@@ -96,6 +98,9 @@ function* outboundTracksFor(
   kind: "audio" | "video"
 ): Iterable<RtpOutboundTrack> {
   for (const subscriber of subscribers) {
+    if (kind === "video" && !subscriber.ready) {
+      continue;
+    }
     const outbound = subscriber.tracks.get(kind);
     if (outbound) {
       yield outbound;
@@ -147,6 +152,7 @@ export class CoordinationServer {
       videoConfig: [],
       videoKeyFrame: [],
       collectingKeyFrame: null,
+      collectingKeyFrameTimestamp: null,
       iceEtag: randomUUID(),
       iceCredentials,
     };
@@ -239,11 +245,15 @@ export class CoordinationServer {
     const subscriberId = randomUUID();
     let replayedCachedVideo = false;
     const replayWhenConnected = (): void => {
-      if (replayedCachedVideo || entry.subscribers.get(subscriberId)?.pc !== pc) {
+      const subscriber = entry.subscribers.get(subscriberId);
+      if (replayedCachedVideo || subscriber?.pc !== pc) {
         return;
       }
       replayedCachedVideo = true;
       replayCachedVideo(entry, videoTrack);
+      // Do not forward newer live RTP before the cached SPS/PPS + IDR has been
+      // written, otherwise its older sequence numbers can be discarded.
+      subscriber.ready = true;
     };
     const scheduleReplayWhenConnected = (): void => {
       // werift exposes `connected` before the remote WHEP peer has necessarily
@@ -285,7 +295,7 @@ export class CoordinationServer {
       throw new Error(`Stream ${streamId} is no longer available`);
     }
 
-    entry.subscribers.set(subscriberId, { id: subscriberId, pc, tracks });
+    entry.subscribers.set(subscriberId, { id: subscriberId, pc, tracks, ready: false });
     // WHEP returns the answer before the browser can complete DTLS. Writing
     // before this connection is live is dropped by werift, so replay after the
     // connected transition (or immediately if it raced before registration).
@@ -429,12 +439,16 @@ function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
   const isIdrStart = nalType === 5 || (nalType === 28 && (payload[1] & 0x80) !== 0 && (payload[1] & 0x1f) === 5) || containsStapANalType(payload, 5);
   // An IDR access unit may contain several type-5 NALs (or fragmented FU-As).
   // Keep collecting until its RTP marker rather than discarding earlier slices.
-  if (isIdrStart && !entry.collectingKeyFrame) {entry.collectingKeyFrame = [];}
+  if (isIdrStart && (!entry.collectingKeyFrame || entry.collectingKeyFrameTimestamp !== rtp.header.timestamp)) {
+    entry.collectingKeyFrame = [];
+    entry.collectingKeyFrameTimestamp = rtp.header.timestamp;
+  }
   if (entry.collectingKeyFrame) {
     entry.collectingKeyFrame.push(rtp.clone());
     if (rtp.header.marker) {
       entry.videoKeyFrame = entry.collectingKeyFrame;
       entry.collectingKeyFrame = null;
+      entry.collectingKeyFrameTimestamp = null;
     }
   }
 }

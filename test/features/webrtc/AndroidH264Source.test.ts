@@ -27,7 +27,8 @@ class FakeProcess extends EventEmitter implements SpawnedProcess {
 function fakeAdbFactory(
   commands: string[] = [],
   spawnArgs: string[][] = [],
-  processes: FakeProcess[] = []
+  processes: FakeProcess[] = [],
+  wmSizeOutput = ""
 ): AdbClientFactory {
   return {
     create() {
@@ -35,7 +36,7 @@ function fakeAdbFactory(
         getAdbPathOnly: async () => "adb",
         executeCommand: async (command: string) => {
           commands.push(command);
-          return { stdout: "", stderr: "", exitCode: 0 };
+          return { stdout: wmSizeOutput, stderr: "", exitCode: 0 };
         },
         spawn: async (args: string[]) => {
           spawnArgs.push(args);
@@ -48,7 +49,10 @@ function fakeAdbFactory(
   };
 }
 
-function makeSource(overrides: Partial<Parameters<typeof AndroidH264Source.prototype.constructor>[0]> = {}) {
+function makeSource(
+  overrides: Partial<Parameters<typeof AndroidH264Source.prototype.constructor>[0]> = {},
+  wmSizeOutput = ""
+) {
   const chunks: Buffer[] = [];
   const processes: FakeProcess[] = [];
   const commands: string[] = [];
@@ -58,7 +62,7 @@ function makeSource(overrides: Partial<Parameters<typeof AndroidH264Source.proto
   const source = new AndroidH264Source({
     device: DEVICE,
     onData: chunk => chunks.push(chunk),
-    adbFactory: fakeAdbFactory(commands, spawnArgs, processes),
+    adbFactory: fakeAdbFactory(commands, spawnArgs, processes, wmSizeOutput),
     timer,
     segmentRotateMs: 1000,
     ...overrides,
@@ -75,6 +79,7 @@ describe("AndroidH264Source", () => {
     expect(processes).toHaveLength(1);
     const args = spawnArgs[0].join(" ");
     expect(args).toContain("exec-out screenrecord --output-format=h264");
+    expect(args).toContain("--size 1280x720");
     expect(args).not.toContain("-s emulator-5554");
     expect(args.endsWith(" -")).toBe(true);
 
@@ -82,6 +87,15 @@ describe("AndroidH264Source", () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toEqual(Buffer.from([0, 0, 0, 1, 0x67]));
 
+    await source.stop();
+  });
+
+  test("caps an unconfigured high-resolution display to the advertised H.264 level", async () => {
+    const { source, spawnArgs } = makeSource({}, "Physical size: 1440x3200\n");
+    await source.start();
+    const size = spawnArgs[0][spawnArgs[0].indexOf("--size") + 1];
+    const [width, height] = size.split("x").map(Number);
+    expect(Math.ceil(width / 16) * Math.ceil(height / 16)).toBeLessThanOrEqual(8192);
     await source.stop();
   });
 
@@ -191,6 +205,8 @@ describe("AndroidH264Source", () => {
 
     const { source, processes } = makeSource({ adbFactory });
     const startPromise = source.start(); // suspends on adb.spawn
+    await Promise.resolve(); // let the display-size query settle before spawn
+    await Promise.resolve();
     await source.stop(); // running=false while current is still null
     resolveAdb!(); // startSegment resumes after setup
     await startPromise;

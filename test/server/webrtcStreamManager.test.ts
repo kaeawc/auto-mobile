@@ -241,6 +241,20 @@ describe("webrtcStreamManager", () => {
     expect(stopped.state).toBe("stopped");
   });
 
+  test("stop without id rejects an active stream plus a different pending start as ambiguous", async () => {
+    let releaseJar: ((path: string | null) => void) | undefined;
+    installFakes();
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    setWebRtcStreamManagerDependencies({
+      resolveVideoJar: () => new Promise(resolve => { releaseJar = resolve; }),
+    });
+    const pending = startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } });
+
+    await expect(stopWebRtcStream()).rejects.toThrow(/specify streamId/);
+    releaseJar?.(null);
+    await pending;
+  });
+
   test("does not leave an orphaned source when the stream is stopped mid-start", async () => {
     // A source whose start() stops the stream (simulating stopWebRtcStream racing
     // the async onConnected startup path). The manager must re-check ownership

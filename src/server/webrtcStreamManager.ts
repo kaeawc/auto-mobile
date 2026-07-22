@@ -358,6 +358,9 @@ export async function startWebRtcStream(
 
 /** Stop a stream by id, or the sole active stream when id is omitted. */
 export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamDescriptor> {
+  if (!streamId && streams.size > 0 && startingStreamIds.size > 0) {
+    throw new ActionableError("Multiple WebRTC streams are active or starting; specify streamId to stop one.");
+  }
   const pending = streamId
     ? startingStreamIds.get(streamId)
     : startingStreamIds.size === 1

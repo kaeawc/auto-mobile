@@ -31,6 +31,7 @@ export class RtpPcmuTrackWriter {
   private timestamp = 0;
   private packetsWritten = 0;
   private samplesWritten = 0;
+  private remainder: Buffer | null = null;
 
   constructor(options: RtpPcmuTrackWriterOptions) {
     this.sink = options.sink;
@@ -41,14 +42,16 @@ export class RtpPcmuTrackWriter {
   }
 
   writePcm16Chunk(chunk: Buffer): void {
-    const sampleCount = Math.floor(chunk.length / 2);
+    const input = this.remainder ? Buffer.concat([this.remainder, chunk]) : chunk;
+    const sampleCount = Math.floor(input.length / 2);
+    this.remainder = input.length % 2 === 0 ? null : Buffer.from(input.subarray(-1));
     if (sampleCount === 0) {
       return;
     }
 
     const payload = Buffer.alloc(sampleCount);
     for (let i = 0; i < sampleCount; i++) {
-      payload[i] = linear16ToMuLaw(chunk.readInt16LE(i * 2));
+      payload[i] = linear16ToMuLaw(input.readInt16LE(i * 2));
     }
 
     for (let offset = 0; offset < payload.length; offset += this.mtu) {

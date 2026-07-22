@@ -111,6 +111,27 @@ describe("WhipClient.publish", () => {
     expect(aborted).toBe(true);
   });
 
+  test("times out when a successful response stalls while reading its SDP body", async () => {
+    const timer = new FakeTimer();
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      timer,
+      requestTimeoutMs: 10,
+      fetchImpl: async () => ({
+        status: 201,
+        ok: true,
+        headers: { get: name => (name.toLowerCase() === "location" ? "/r/1" : null) },
+        text: async () => await new Promise<string>(() => {}),
+      }),
+    });
+
+    const publishing = client.publish("offer");
+    await Promise.resolve();
+    timer.advanceTime(10);
+
+    await expect(publishing).rejects.toThrow(/response body timed out/);
+  });
+
   test("preserves an already-aborted caller signal", async () => {
     let receivedAbortedSignal = false;
     const client = new WhipClient({

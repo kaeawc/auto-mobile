@@ -29,6 +29,8 @@ interface Harness {
   /** Number of `request_hierarchy*` messages that reached the socket. */
   fetchCount: () => number;
   getCached: () => CtrlProxyCachedHierarchy | null;
+  /** Simulate a disconnected/reconnecting runner, so no fetch can succeed. */
+  setConnected: (connected: boolean) => void;
 }
 
 function makeHierarchy(updatedAt: number, marker: string): XCTestHierarchy {
@@ -44,6 +46,7 @@ function createHarness(): Harness {
   const requestManager = new RequestManager(timer);
   let cached: CtrlProxyCachedHierarchy | null = null;
   let fetches = 0;
+  let connected = true;
 
   const context: HierarchyDelegateContext = {
     getWebSocket: () => ({
@@ -60,7 +63,7 @@ function createHarness(): Harness {
     } as never),
     requestManager,
     timer,
-    ensureConnected: async () => true,
+    ensureConnected: async () => connected,
     cancelScreenshotBackoff: () => {},
     cacheFreshTtlMs: CACHE_TTL_MS,
     getCachedHierarchy: () => cached,
@@ -72,6 +75,7 @@ function createHarness(): Harness {
     timer,
     fetchCount: () => fetches,
     getCached: () => cached,
+    setConnected: value => { connected = value; },
   };
 }
 
@@ -141,6 +145,30 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(next.hierarchy).not.toBe(rawResult!.hierarchy);
   });
 
+  test("an invalidated entry forces a refetch even on the skipWaitForFresh observe path", async () => {
+    // ObserveScreen defaults to skipWaitForFresh=true, which normally suppresses the
+    // sync fetch entirely. An invalidated entry must override that, or the stale
+    // fallback hands back exactly the snapshot the invalidation was retiring.
+    const rawResult = await h.hierarchy.requestHierarchySync(undefined, true, undefined, 1000);
+    h.hierarchy.invalidateCache();
+
+    const next = await h.hierarchy.getLatestHierarchy(false, 15000, undefined, true, 0);
+
+    expect(h.fetchCount()).toBe(2);
+    expect(next.fresh).toBe(true);
+    expect(next.hierarchy).not.toBe(rawResult!.hierarchy);
+  });
+
+  test("skipWaitForFresh still skips the fetch when the cache was not invalidated", async () => {
+    await primeCache();
+    h.timer.advanceTime(CACHE_TTL_MS * 4); // past the TTL, but not invalidated
+
+    const result = await h.hierarchy.getLatestHierarchy(false, 15000, undefined, true, 0);
+
+    expect(h.fetchCount()).toBe(1);
+    expect(result.fresh).toBe(false);
+  });
+
   // --- Controls: these fail if the fix simply disabled caching. ---
 
   test("without invalidation the cache serves inside the TTL", async () => {
@@ -167,16 +195,20 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(h.fetchCount()).toBe(3);
   });
 
-  test("invalidated cache is still returned as stale fallback when no fetch is possible", async () => {
+  test("invalidated cache is still returned as stale fallback when the refetch fails", async () => {
     await primeCache();
+    const stale = h.getCached()!.hierarchy;
     h.hierarchy.invalidateCache();
 
-    // skipWaitForFresh suppresses the sync fetch; the invalidated entry must still
-    // be available as a stale fallback rather than disappearing.
+    // Disconnected/reconnecting runner: the forced refetch cannot succeed, so the
+    // invalidated entry must still be available as an explicitly-stale fallback
+    // rather than disappearing. This is why invalidateCache() keeps the entry
+    // instead of nulling it the way the Android delegate does.
+    h.setConnected(false);
     const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
 
-    expect(h.fetchCount()).toBe(1);
+    expect(h.fetchCount()).toBe(1); // ensureConnected failed before any send
     expect(result.fresh).toBe(false);
-    expect(result.hierarchy).not.toBeNull();
+    expect(result.hierarchy).toBe(stale);
   });
 });

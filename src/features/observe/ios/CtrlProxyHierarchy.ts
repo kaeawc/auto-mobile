@@ -121,8 +121,17 @@ export class CtrlProxyHierarchy {
       }
     }
 
-    // Need fresh data
-    if (!skipWaitForFresh) {
+    // Need fresh data.
+    //
+    // An explicitly invalidated entry forces the sync fetch even when the caller
+    // passed skipWaitForFresh. Observe's default path is skipWaitForFresh=true, so
+    // without this the stale fallback below would hand back the very entry the
+    // invalidation was meant to retire — e.g. the unfiltered snapshot that
+    // HierarchyCollector.collectRaw caches and then invalidates (issue #4193).
+    // Nulling the cache instead is not an option here: under skipWaitForFresh a
+    // missing cache yields no hierarchy at all rather than a refetch.
+    const cacheInvalidated = cachedHierarchy !== null && !cachedHierarchy.fresh;
+    if (!skipWaitForFresh || cacheInvalidated) {
       const result = await this.requestHierarchySync(perf, false, undefined, timeout);
       if (result) {
         if (result.hierarchy.packageName) {

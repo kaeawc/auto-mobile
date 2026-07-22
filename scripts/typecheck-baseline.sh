@@ -132,11 +132,28 @@ ROOT_SED_PATTERN="$(printf '%s' "$ROOT" | sed 's/[][\.*^$|/]/\\&/g')"
 #
 # Each maximal run of `TOKEN ( " | " TOKEN )+` is byte-sorted in place. TOKEN is
 # deliberately narrow -- a double-quoted string literal or a bare identifier --
-# so a run whose members are complex (object literals, generics) is left ALONE
-# rather than mis-parsed; leaving it alone is exactly today's behavior, so the
-# conservative match can only preserve the status quo, never corrupt a signature.
-# Runs are matched independently, so adjacent unions separated by `;` are sorted
-# separately and never bleed into one another.
+# so a run whose members are complex (object literals, generics, template-literal
+# types, numeric literals) is left ALONE rather than mis-parsed; leaving it alone
+# is exactly today's behavior, so the conservative match can only preserve the
+# status quo, never corrupt a signature. Runs are found independently, so
+# adjacent unions separated by `;` are sorted separately and never bleed into
+# one another.
+#
+# Runs are found by SCANNING, not by matching a run-shaped regex and re-splitting
+# the match (issue #4257). Two things a regex split gets wrong, and both have
+# turned `main` red before:
+#   * a string-literal member may contain the separator (`"a | b" | "c"`), so a
+#     text split on " | " cuts inside the quotes (issue #4229); and
+#   * a member's VALUE may contain an ESCAPED quote (`"z" | "a\" | b" | "c"`), so
+#     a `"[^"]*"` token stops at the `\"` and the literal's tail is re-read as
+#     extra members -- writing the corrupted signature `"a\" | "z" | b" | "c"`.
+#     That corruption is self-consistent, so a round trip passes; it only shows
+#     up when the same union is re-rendered in a different order, i.e. exactly
+#     the case union canonicalization exists to tolerate (issue #4257).
+# The scanner therefore reads a string literal the way TypeScript renders one:
+# quote, then a body of escape pairs (`\"`, `\\`, `\n`, ...) or plain non-quote
+# non-backslash characters, then the closing quote. Anything that is not a
+# complete literal or a bare identifier ends the run and is emitted verbatim.
 #
 # This is order-INSENSITIVE, not laxer: sorting is a canonical form, so two
 # errors collide only when their union members are the same multiset -- i.e.
@@ -148,47 +165,63 @@ ROOT_SED_PATTERN="$(printf '%s' "$ROOT" | sed 's/[][\.*^$|/]/\\&/g')"
 # identical on every machine.
 canonicalize_unions() {
   awk '
-    # Split a run into its members WITHOUT a plain text split. A string-literal
-    # member may itself contain the separator (the type `"a | b" | "c"`), and a
-    # naive split on " | " cuts inside the quotes -- producing a different result
-    # on each pass, so `--update` would write a baseline that check mode then
-    # rejected as new. Walking front-anchored tokens keeps quoted members intact.
-    # Returns the member count, or 0 if the run does not tokenize cleanly, in
-    # which case the caller leaves it untouched.
-    function split_members(run, arr,   n, rest, tok) {
-      n = 0
-      rest = run
-      while (length(rest) > 0) {
-        if (!match(rest, /^("[^"]*"|[A-Za-z_$][A-Za-z0-9_$]*)/)) { return 0 }
-        arr[++n] = substr(rest, RSTART, RLENGTH)
-        rest = substr(rest, RLENGTH + 1)
-        if (length(rest) == 0) { break }
-        if (substr(rest, 1, 3) != " | ") { return 0 }
-        rest = substr(rest, 4)
-      }
-      return n
+    # Read ONE member anchored at the front of `rest`: either a complete
+    # double-quoted string literal whose body understands backslash escapes
+    # (so `\"` and `\\` stay inside the literal), or a bare identifier.
+    # Returns its length in characters, or 0 when `rest` does not start with a
+    # complete member -- which is how an unterminated quote, a template literal,
+    # a numeric literal or an object type ends the run instead of being
+    # mis-parsed.
+    function member_len(rest) {
+      if (match(rest, /^("(\\.|[^"\\])*"|[A-Za-z_$][A-Za-z0-9_$]*)/)) { return RLENGTH }
+      return 0
     }
-    function canon_unions(line,   out, rest, run, n, arr, i, j, t, joined) {
+    function canon_unions(line,   out, pos, len, c, n, arr, i, j, t, joined, p, end, w) {
       out = ""
-      rest = line
-      while (match(rest, /("[^"]*"|[A-Za-z_$][A-Za-z0-9_$]*)( [|] ("[^"]*"|[A-Za-z_$][A-Za-z0-9_$]*))+/)) {
-        out = out substr(rest, 1, RSTART - 1)
-        run = substr(rest, RSTART, RLENGTH)
-        rest = substr(rest, RSTART + RLENGTH)
-        n = split_members(run, arr)
-        if (n < 2) {
-          # Not cleanly tokenizable -- emit verbatim, preserving current behavior.
-          out = out run
+      pos = 1
+      len = length(line)
+      while (pos <= len) {
+        c = substr(line, pos, 1)
+        # Only a quote or an identifier-start character can begin a member;
+        # everything else is copied through untouched.
+        if (c != "\"" && c !~ /^[A-Za-z_$]$/) {
+          out = out c
+          pos++
           continue
         }
-        for (i = 1; i <= n; i++)
-          for (j = i + 1; j <= n; j++)
-            if (arr[i] > arr[j]) { t = arr[i]; arr[i] = arr[j]; arr[j] = t }
-        joined = arr[1]
-        for (i = 2; i <= n; i++) joined = joined " | " arr[i]
-        out = out joined
+        # Walk `member ( " | " member )*` from here, remembering where the last
+        # COMPLETE member ended so a dangling separator is never consumed.
+        n = 0
+        p = pos
+        end = pos
+        while (1) {
+          w = member_len(substr(line, p))
+          if (w == 0) { break }
+          arr[++n] = substr(line, p, w)
+          p += w
+          end = p
+          if (substr(line, p, 3) != " | ") { break }
+          p += 3
+        }
+        if (n == 0) {
+          # A quote that opens no complete literal: emit it and move on.
+          out = out c
+          pos++
+          continue
+        }
+        if (n == 1) {
+          out = out arr[1]
+        } else {
+          for (i = 1; i <= n; i++)
+            for (j = i + 1; j <= n; j++)
+              if (arr[i] > arr[j]) { t = arr[i]; arr[i] = arr[j]; arr[j] = t }
+          joined = arr[1]
+          for (i = 2; i <= n; i++) joined = joined " | " arr[i]
+          out = out joined
+        }
+        pos = end
       }
-      return out rest
+      return out
     }
     { print canon_unions($0) }
   '

@@ -1,6 +1,12 @@
 import type { SimCtlClient } from "./SimCtlClient";
-import { quoteSimctlArg } from "./iosAppContainer";
 import { logger } from "../logger";
+
+/**
+ * The argv-shaped slice of the simctl client these helpers need. Commands are
+ * always issued as an argument array so values with spaces, quotes, escapes or
+ * no content at all reach `xcrun` verbatim (issue #4196).
+ */
+type SimctlArgvRunner = Pick<SimCtlClient, "executeCommandArgs">;
 
 /**
  * Curated (domain, key) allowlist captured/restored for iOS simulator snapshots.
@@ -29,13 +35,13 @@ export interface IosSettingsSnapshot {
  * prints the current setting; `content_size` is read the same way.
  */
 async function captureUiState(
-  simctl: Pick<SimCtlClient, "executeCommand">,
+  simctl: SimctlArgvRunner,
   deviceId: string
 ): Promise<IosSettingsSnapshot["ui"]> {
   const ui: NonNullable<IosSettingsSnapshot["ui"]> = {};
   try {
     const appearance = (
-      await simctl.executeCommand(`ui ${quoteSimctlArg(deviceId)} appearance`)
+      await simctl.executeCommandArgs(["ui", deviceId, "appearance"])
     ).stdout.trim();
     if (appearance === "light" || appearance === "dark") {
       ui.appearance = appearance;
@@ -45,7 +51,7 @@ async function captureUiState(
   }
   try {
     const contentSize = (
-      await simctl.executeCommand(`ui ${quoteSimctlArg(deviceId)} content_size`)
+      await simctl.executeCommandArgs(["ui", deviceId, "content_size"])
     ).stdout.trim();
     if (contentSize) {
       ui.contentSize = contentSize;
@@ -58,16 +64,15 @@ async function captureUiState(
 
 /** Capture the curated iOS settings allowlist + device-level UI state. */
 export async function captureIosSettings(
-  simctl: Pick<SimCtlClient, "executeCommand">,
+  simctl: SimctlArgvRunner,
   deviceId: string
 ): Promise<IosSettingsSnapshot> {
   const values: Record<string, string> = {};
   for (const { domain, key } of IOS_SETTINGS_KEYS) {
     try {
-      const cmd =
-        `spawn ${quoteSimctlArg(deviceId)} defaults read ` +
-        `${quoteSimctlArg(domain)} ${quoteSimctlArg(key)}`;
-      const result = await simctl.executeCommand(cmd);
+      const result = await simctl.executeCommandArgs([
+        "spawn", deviceId, "defaults", "read", domain, key
+      ]);
       const value = result.stdout.trim();
       if (value) {
         values[`${domain}/${key}`] = value;
@@ -87,7 +92,7 @@ export async function captureIosSettings(
  * are logged and skipped (non-fatal).
  */
 export async function restoreIosSettings(
-  simctl: Pick<SimCtlClient, "executeCommand">,
+  simctl: SimctlArgvRunner,
   deviceId: string,
   settings: IosSettingsSnapshot
 ): Promise<void> {
@@ -99,10 +104,9 @@ export async function restoreIosSettings(
     const domain = compoundKey.slice(0, slash);
     const key = compoundKey.slice(slash + 1);
     try {
-      const cmd =
-        `spawn ${quoteSimctlArg(deviceId)} defaults write ` +
-        `${quoteSimctlArg(domain)} ${quoteSimctlArg(key)} ${quoteSimctlArg(value)}`;
-      await simctl.executeCommand(cmd);
+      await simctl.executeCommandArgs([
+        "spawn", deviceId, "defaults", "write", domain, key, value
+      ]);
     } catch (error) {
       logger.warn(`[iOS] Failed to write ${domain}/${key}: ${error}`);
     }
@@ -110,18 +114,14 @@ export async function restoreIosSettings(
 
   if (settings.ui?.appearance) {
     try {
-      await simctl.executeCommand(
-        `ui ${quoteSimctlArg(deviceId)} appearance ${settings.ui.appearance}`
-      );
+      await simctl.executeCommandArgs(["ui", deviceId, "appearance", settings.ui.appearance]);
     } catch (error) {
       logger.warn(`[iOS] Failed to restore appearance: ${error}`);
     }
   }
   if (settings.ui?.contentSize) {
     try {
-      await simctl.executeCommand(
-        `ui ${quoteSimctlArg(deviceId)} content_size ${quoteSimctlArg(settings.ui.contentSize)}`
-      );
+      await simctl.executeCommandArgs(["ui", deviceId, "content_size", settings.ui.contentSize]);
     } catch (error) {
       logger.warn(`[iOS] Failed to restore content_size: ${error}`);
     }

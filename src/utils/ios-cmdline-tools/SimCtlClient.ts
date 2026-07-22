@@ -298,13 +298,26 @@ function splitCommandArgs(command: string): string[] {
 
   const args: string[] = [];
   let current = "";
+  // A token that was opened with a quote is real even when it is empty — `""`
+  // must survive as an empty argv entry. Dropping it shifts every later
+  // positional argument, which silently rewrites the command (issue #4196).
+  let started = false;
   let quote: '"' | "'" | null = null;
+
+  const flush = (): void => {
+    if (started) {
+      args.push(current);
+      current = "";
+      started = false;
+    }
+  };
 
   for (let i = 0; i < trimmed.length; i++) {
     const char = trimmed[i];
 
     if (char === "\\" && i + 1 < trimmed.length) {
       current += trimmed[i + 1];
+      started = true;
       i++;
       continue;
     }
@@ -320,23 +333,20 @@ function splitCommandArgs(command: string): string[] {
 
     if (char === "'" || char === "\"") {
       quote = char;
+      started = true;
       continue;
     }
 
     if (/\s/.test(char)) {
-      if (current.length > 0) {
-        args.push(current);
-        current = "";
-      }
+      flush();
       continue;
     }
 
     current += char;
+    started = true;
   }
 
-  if (current.length > 0) {
-    args.push(current);
-  }
+  flush();
 
   return args;
 }

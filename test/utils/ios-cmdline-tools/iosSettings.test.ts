@@ -15,12 +15,12 @@ describe("iosSettings", () => {
 
   test("captureIosSettings reads allowlisted keys + UI state", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandResult(
-      `spawn "${UDID}" defaults read ".GlobalPreferences" "AppleLocale"`,
+    simctl.setCommandArgsResult(
+      ["spawn", UDID, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       "nl_BE\n"
     );
-    simctl.setCommandResult(`ui "${UDID}" appearance`, "dark\n");
-    simctl.setCommandResult(`ui "${UDID}" content_size`, "large\n");
+    simctl.setCommandArgsResult(["ui", UDID, "appearance"], "dark\n");
+    simctl.setCommandArgsResult(["ui", UDID, "content_size"], "large\n");
 
     const snapshot = await captureIosSettings(simctl as any, UDID);
 
@@ -30,8 +30,8 @@ describe("iosSettings", () => {
 
   test("captureIosSettings skips unset keys (defaults read non-zero) without throwing", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandError(
-      `spawn "${UDID}" defaults read ".GlobalPreferences" "AppleLocale"`,
+    simctl.setCommandArgsError(
+      ["spawn", UDID, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       new Error("does not exist")
     );
     // appearance/content_size return "" by default → ui undefined
@@ -48,18 +48,18 @@ describe("iosSettings", () => {
       ui: { appearance: "dark", contentSize: "large" },
     });
 
-    const commands = simctl.getMethodCalls("executeCommand").map(c => String(c.command));
-    expect(commands).toEqual([
-      `spawn "${UDID}" defaults write ".GlobalPreferences" "AppleLocale" "nl_BE"`,
-      `ui "${UDID}" appearance dark`,
-      `ui "${UDID}" content_size "large"`,
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args);
+    expect(argvCommands).toEqual([
+      ["spawn", UDID, "defaults", "write", ".GlobalPreferences", "AppleLocale", "nl_BE"],
+      ["ui", UDID, "appearance", "dark"],
+      ["ui", UDID, "content_size", "large"],
     ]);
   });
 
   test("capture -> restore round-trips the locale value", async () => {
     const capSim = new FakeSimCtlClient();
-    capSim.setCommandResult(
-      `spawn "${UDID}" defaults read ".GlobalPreferences" "AppleLocale"`,
+    capSim.setCommandArgsResult(
+      ["spawn", UDID, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       "en_US"
     );
     const snapshot = await captureIosSettings(capSim as any, UDID);
@@ -67,16 +67,16 @@ describe("iosSettings", () => {
     const restoreSim = new FakeSimCtlClient();
     await restoreIosSettings(restoreSim as any, UDID, snapshot);
 
-    const commands = restoreSim.getMethodCalls("executeCommand").map(c => String(c.command));
-    expect(commands).toContain(
-      `spawn "${UDID}" defaults write ".GlobalPreferences" "AppleLocale" "en_US"`
+    const argvCommands = restoreSim.getMethodCalls("executeCommandArgs").map(c => c.args);
+    expect(argvCommands).toContainEqual(
+      ["spawn", UDID, "defaults", "write", ".GlobalPreferences", "AppleLocale", "en_US"]
     );
   });
 
   test("restoreIosSettings is non-fatal when a single key write fails", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandError(
-      `spawn "${UDID}" defaults write ".GlobalPreferences" "AppleLocale" "nl_BE"`,
+    simctl.setCommandArgsError(
+      ["spawn", UDID, "defaults", "write", ".GlobalPreferences", "AppleLocale", "nl_BE"],
       new Error("boom")
     );
 
@@ -85,8 +85,8 @@ describe("iosSettings", () => {
       ui: { appearance: "light" },
     });
 
-    const commands = simctl.getMethodCalls("executeCommand").map(c => String(c.command));
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args);
     // UI restore still ran after the failed write.
-    expect(commands).toContain(`ui "${UDID}" appearance light`);
+    expect(argvCommands).toContainEqual(["ui", UDID, "appearance", "light"]);
   });
 });

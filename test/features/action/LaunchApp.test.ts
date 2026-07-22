@@ -752,6 +752,11 @@ describe("LaunchApp", () => {
           const stdout = command.startsWith("get_app_container") ? containerPath : "";
           return { stdout, stderr: "", trim: () => stdout.trim(), toString: () => stdout, includes: (s: string) => stdout.includes(s) } as any;
         },
+        executeCommandArgs: async (args: string[]) => {
+          calls.push(`exec:${args.join(" ")}`);
+          const stdout = args[0] === "get_app_container" ? containerPath : "";
+          return { stdout, stderr: "", trim: () => stdout.trim(), toString: () => stdout, includes: (s: string) => stdout.includes(s) } as any;
+        },
       };
 
       const iosObserveScreen = new FakeObserveScreen();

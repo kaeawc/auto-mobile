@@ -17,15 +17,18 @@
 # subshell, so a relative path resolves against whatever cwd they left behind.
 SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ios/swift-test.sh"
 
-# Pull just the counter out of the script so the parsing is testable offline,
-# with no Swift toolchain and no network.
+# The counter lives in its own sourceable library (mirroring
+# scripts/ios/pbxproj_normalize.sh), so the tests load it directly. An earlier
+# revision sed-extracted the function out of swift-test.sh and hit
+# "sed: stdout: Broken pipe" on the CI runner, leaving the function undefined and
+# every test failing for a reason unrelated to what they assert.
+COUNTS_LIB="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/scripts/ios/swift_test_counts.sh"
+
 load_counter() {
   # shellcheck source=/dev/null
-  source <(sed -n '/^executed_test_count()/,/^}/p' "$SCRIPT")
+  source "$COUNTS_LIB"
 }
 
-# The counter sets EXECUTED_TESTS rather than echoing (calling a function inside
-# $( ) disables set -e, which the shell-sete ratchet rejects).
 count_of() {
   EXECUTED_TESTS=0
   executed_test_count "$1"

@@ -19,6 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
 
+# shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
+source "${SCRIPT_DIR}/swift_test_counts.sh"
+
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  Swift Package Tests${NC}"
 echo -e "${CYAN}========================================${NC}"
@@ -87,22 +90,6 @@ IOS_ONLY_PACKAGES=(
 # XCTest prints one "Executed" line per test bundle AND a duplicate summary line,
 # so the maximum is taken rather than the sum of the XCTest lines; swift-testing's
 # single count is then added.
-# Sets EXECUTED_TESTS rather than echoing: calling a function inside $( ) makes
-# bash silently disable set -e for it (SC2311), which the shell-sete ratchet
-# rejects -- and suppressing errexit inside a guard whose whole job is catching
-# silent success would be self-defeating.
-EXECUTED_TESTS=0
-executed_test_count() {
-    local output="$1" xctest swifttesting
-    xctest="$(printf '%s\n' "${output}" \
-        | sed -n 's/.*Executed \([0-9][0-9]*\) tests*,.*/\1/p' \
-        | sort -n | tail -1)"
-    swifttesting="$(printf '%s\n' "${output}" \
-        | sed -n 's/.*Test run with \([0-9][0-9]*\) tests* in .*/\1/p' \
-        | sort -n | tail -1)"
-    EXECUTED_TESTS=$(( ${xctest:-0} + ${swifttesting:-0} ))
-}
-
 # Run tests for macOS-compatible packages
 echo -e "${BLUE}Running tests for macOS-compatible packages...${NC}"
 for package in "${TESTABLE_PACKAGES[@]}"; do

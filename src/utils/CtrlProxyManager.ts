@@ -399,12 +399,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   /**
-   * Clear the cached availability status
+   * Clear the cached availability status.
+   *
+   * Issue #4192: this is the single choke point for "our cached view of the
+   * accessibility service is stale". It also invalidates the AccessibilityDetector
+   * cache, so `observe` cannot keep reporting the pre-mutation state. Every
+   * mutation path (enable/disable/enableForUser, install/upgrade, setup reset)
+   * routes through here — do not re-add per-call-site invalidation.
    */
   public clearAvailabilityCache(): void {
-    this.cachedAvailability = null;
-    this.cachedInstallation = null;
-    this.cachedEnabled = null;
+    this.clearServiceAvailabilityCache();
     this.cachedToggleCapabilities = null;
     this.cachedVersionCheck = null;
     logger.info("[CTRL_PROXY] Cleared all availability caches");
@@ -1021,10 +1025,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       perf.endOperation("writeServiceEnabled");
       logger.info("Accessibility Service enabled successfully via settings");
 
-      // Clear cache after enabling
+      // Clear cache after enabling; clearAvailabilityCache also invalidates the
+      // accessibility detector cache so observe reports correct state (#4192).
       this.clearAvailabilityCache();
-      // Also invalidate the accessibility detector cache so observe reports correct state
-      this.getAccessibilityDetector().invalidateCache(this.device.deviceId);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const errorLower = errorMsg.toLowerCase();
@@ -1064,6 +1067,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Handle null or empty values
       if (currentServices === "null" || currentServices === "") {
         logger.info("No accessibility services enabled");
+        // Issue #4192: nothing to write, but our cached view may still claim the
+        // service is available - reconcile it with the device before returning.
+        this.clearAvailabilityCache();
         return;
       }
 
@@ -1165,10 +1171,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       await this.adb.executeCommand(`shell settings --user ${userId} put secure accessibility_enabled 1`);
       logger.info(`[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`);
 
-      // Clear cache after enabling (main user cache - per-user caching not implemented)
+      // Clear cache after enabling (main user cache - per-user caching not implemented);
+      // this also invalidates the accessibility detector cache (#4192).
       this.clearAvailabilityCache();
-      // Also invalidate the accessibility detector cache so observe reports correct state
-      this.getAccessibilityDetector().invalidateCache(this.device.deviceId);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const errorLower = errorMsg.toLowerCase();
@@ -1586,6 +1591,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     this.cachedAvailability = null;
     this.cachedInstallation = null;
     this.cachedEnabled = null;
+    // Issue #4192: the detector answers "is accessibility available on this device"
+    // from its own cache, so it goes stale for exactly the same reasons these fields
+    // do. Invalidating here keeps the two views from diverging silently.
+    this.getAccessibilityDetector().invalidateCache(this.device.deviceId);
   }
 
   private queueBackgroundApkRefresh(): void {

@@ -2018,4 +2018,113 @@ describe("CtrlProxyManager", function() {
       expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled 0")).toBe(true);
     });
   });
+
+  // Issue #4192: every path that mutates accessibility state must also invalidate the
+  // AccessibilityDetector cache, otherwise `observe` keeps reporting the pre-mutation
+  // state. The invariant is enforced at a single choke point (clearAvailabilityCache),
+  // so a future fourth mutation method inherits it instead of having to remember.
+  describe("accessibility detector cache invalidation", function() {
+    const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+    let fakeDetector: FakeAccessibilityDetector;
+
+    function stubSettingsToggleSupported(): void {
+      // Emulator + API 29 => settings-based toggle is supported.
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", { stdout: "29", stderr: "" });
+    }
+
+    beforeEach(function() {
+      fakeDetector = new FakeAccessibilityDetector();
+      AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(fakeDetector);
+      stubSettingsToggleSupported();
+    });
+
+    test("clearAvailabilityCache invalidates the detector cache (the shared choke point)", function() {
+      expect(fakeDetector.getInvalidatedDevices()).toEqual([]);
+
+      accessibilityServiceClient.clearAvailabilityCache();
+
+      expect(fakeDetector.getInvalidatedDevices()).toEqual([testDevice.deviceId]);
+    });
+
+    test("disableViaSettings invalidates the detector cache", async function() {
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse('shell settings put secure enabled_accessibility_services ""', {
+        stdout: "",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell settings put secure accessibility_enabled 0", {
+        stdout: "",
+        stderr: ""
+      });
+
+      expect(fakeDetector.getInvalidatedDevices()).toEqual([]);
+
+      await accessibilityServiceClient.disableViaSettings();
+
+      expect(fakeDetector.getInvalidatedDevices()).toContain(testDevice.deviceId);
+    });
+
+    test("disableViaSettings invalidates the detector cache when no services are enabled", async function() {
+      // Early-return path: the device reports no enabled services, so nothing is written.
+      // A detector cache still claiming "available" is exactly the divergence in #4192.
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: "null",
+        stderr: ""
+      });
+
+      await accessibilityServiceClient.disableViaSettings();
+
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure")).toBe(false);
+      expect(fakeDetector.getInvalidatedDevices()).toContain(testDevice.deviceId);
+    });
+
+    describe("symmetry across every accessibility mutation method", function() {
+      const mutations: Array<{ name: string; run: () => Promise<void> }> = [
+        {
+          name: "enableViaSettings",
+          run: () => accessibilityServiceClient.enableViaSettings()
+        },
+        {
+          name: "disableViaSettings",
+          run: () => accessibilityServiceClient.disableViaSettings()
+        },
+        {
+          name: "enableForUser",
+          run: () => accessibilityServiceClient.enableForUser(10)
+        }
+      ];
+
+      for (const mutation of mutations) {
+        test(`${mutation.name} invalidates the detector cache for the target device`, async function() {
+          // Respond to both the default-user and --user forms so one table drives all three.
+          for (const prefix of ["shell settings", "shell settings --user 10"]) {
+            fakeAdb.setCommandResponse(`${prefix} get secure enabled_accessibility_services`, {
+              stdout: serviceComponent,
+              stderr: ""
+            });
+            fakeAdb.setCommandResponse(`${prefix} put secure enabled_accessibility_services "${serviceComponent}"`, {
+              stdout: "",
+              stderr: ""
+            });
+            fakeAdb.setCommandResponse(`${prefix} put secure enabled_accessibility_services ""`, {
+              stdout: "",
+              stderr: ""
+            });
+            fakeAdb.setCommandResponse(`${prefix} put secure accessibility_enabled 1`, { stdout: "", stderr: "" });
+            fakeAdb.setCommandResponse(`${prefix} put secure accessibility_enabled 0`, { stdout: "", stderr: "" });
+          }
+
+          expect(fakeDetector.getInvalidatedDevices()).toEqual([]);
+
+          await mutation.run();
+
+          expect(fakeDetector.getInvalidatedDevices()).toContain(testDevice.deviceId);
+        });
+      }
+    });
+  });
 });

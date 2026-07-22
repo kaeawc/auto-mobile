@@ -253,3 +253,91 @@ FIXTURE
   run bash "$ABS" "$FIX"
   [ "$status" -eq 0 ]
 }
+
+# --- Regression coverage for four fail-open gaps found in review of #4212. ---
+# Every one of these made the validator report success while the bash 3.2
+# crash it exists to catch went undetected. A gate that fails open is worse
+# than no gate, so each gap gets a test that fails if the hole reopens.
+
+@test "detects nounset armed via 'set -o nounset'" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -o nounset
+items=()
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "detects nounset armed via split flags 'set -e -u -o pipefail'" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -e -u -o pipefail
+items=()
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "an early-out in one function does not excuse an expansion in another" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+items=()
+guard() { if [[ ${#items[@]} -eq 0 ]]; then return 0; fi; }
+use() { printf '%s\n' "${items[@]}"; }
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "records an empty-array declaration carrying a trailing comment" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+items=() # optional args
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "fails closed when the awk scanner itself errors" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+extra=()
+printf '%s\n' "${extra[@]}"
+FIXTURE
+  FAKEBIN="$(mktemp -d)"
+  printf '#!/bin/sh\nexit 2\n' > "$FAKEBIN/awk"
+  chmod +x "$FAKEBIN/awk"
+  PATH="$FAKEBIN:$PATH" run bash "$ABS" "$FIX"
+  rm -rf "$FAKEBIN"
+  # Must NOT be 0. A scanner crash is a gate failure, not a clean scan.
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"scanner-error"* ]]
+}
+
+@test "still does NOT flag a same-function early-out (no false positive)" {
+  write_lines ok <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+f() {
+  local found=()
+  if [[ ${#found[@]} -eq 0 ]]; then
+    return 0
+  fi
+  printf '%s\n' "${found[@]}"
+}
+f
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}

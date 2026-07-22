@@ -98,16 +98,40 @@ scan "bare-python" \
 # shellcheck disable=SC2016 # awk program: $0/$NR are awk fields, not shell.
 EMPTY_ARRAY_AWK='
 { lines[NR] = $0 }
-/set -[a-z]*u/ { setu = 1 }
+# `set -u` has several spellings, and every one of them arms nounset:
+#   compact/split flag groups — `set -u`, `set -eu`, `set -euo pipefail`,
+#   `set -e -u -o pipefail`; and the long form `set -o nounset`.
+# Matching only /set -[a-z]*u/ missed the last two, leaving those files
+# unscanned entirely (they reported zero violations rather than being skipped
+# loudly, which is why the gap was invisible).
+/(^|[ \t;])set[ \t]+[^#]*-o[ \t]+nounset([ \t]|;|$)/ { setu = 1 }
+/(^|[ \t;])set[ \t]+([^#]*[ \t])?-[a-zA-Z]*u[a-zA-Z]*([ \t]|;|$)/ { setu = 1 }
+# Function-definition boundaries. An early-out in one function says nothing
+# about an expansion in another, so guards may not cross one of these lines.
+# Deliberately NOT anchored to end-of-line: a whole single-line definition
+# (`use() { printf "%s\n" "${items[@]}"; }`) is still a boundary.
+/^[ \t]*(function[ \t]+)?[A-Za-z_][A-Za-z0-9_:.-]*[ \t]*\(\)[ \t]*(\{|$)/ { fnstart[NR] = 1 }
+/^[ \t]*function[ \t]+[A-Za-z_][A-Za-z0-9_:.-]*[ \t]*\{/ { fnstart[NR] = 1 }
 # Empty-array declarations, including the typed forms: `arr=()`,
 # `local arr=()`, `local -a arr=()`, `declare -A arr=()`, `typeset -a arr=()`.
-match($0, /^[ \t]*((local|declare|typeset)[ \t]+(-[aAgilnrtux]+[ \t]+)*)?[A-Za-z_][A-Za-z0-9_]*=\(\)[ \t]*$/) {
+# A trailing comment (`items=() # optional args`) is a normal initializer and
+# must still register the array.
+match($0, /^[ \t]*((local|declare|typeset)[ \t]+(-[aAgilnrtux]+[ \t]+)*)?[A-Za-z_][A-Za-z0-9_]*=\(\)[ \t]*(#.*)?$/) {
   decl = $0
   sub(/^[ \t]*/, "", decl)
   sub(/^(local|declare|typeset)[ \t]+/, "", decl)
   while (decl ~ /^-[aAgilnrtux]+[ \t]+/) { sub(/^-[aAgilnrtux]+[ \t]+/, "", decl) }
-  sub(/=\(\)[ \t]*$/, "", decl)
+  sub(/=\(\)[ \t]*(#.*)?$/, "", decl)
   arrays[decl] = 1
+}
+
+# True when a function definition starts strictly between lines a and b, i.e.
+# the two lines cannot be proven to sit on the same lexical path.
+function crosses_function(a, b,   j) {
+  for (j = a + 1; j <= b; j++) {
+    if (fnstart[j]) { return 1 }
+  }
+  return 0
 }
 
 # A `${#arr[@]}` mention only counts as a guard when it is a positive-sense
@@ -156,10 +180,15 @@ END {
         # A block terminator between the guard and the expansion means the
         # guard has already closed and no longer covers this line.
         if (lines[k] ~ /^[ \t]*(fi|else|elif|done|esac|\})([ \t]|;|$)/) { guarded = 0; continue }
+        if (crosses_function(k, n)) { continue }
         if (is_positive_length_guard(lines[k], name)) { guarded = 1 }
       }
-      # An empty-array early-out anywhere above in the same scope also covers it.
+      # An empty-array early-out above also covers this expansion, but ONLY on
+      # the same lexical path. Scanning the whole file let a `return` inside one
+      # function excuse an unguarded expansion inside another, which is exactly
+      # the bash 3.2 crash this rule exists to catch.
       for (k = 1; k < n && !guarded; k++) {
+        if (crosses_function(k, n)) { continue }
         if (is_empty_early_out(lines, NR, k, name)) { guarded = 1 }
       }
       if (guarded) { continue }
@@ -171,16 +200,38 @@ END {
 }
 '
 
+scanner_errors=0
+
 while IFS= read -r file; do
+  # Fail CLOSED: `awk ... || true` turned a scanner crash into "no matches",
+  # so a broken or missing awk left this gate reporting success while it had
+  # scanned nothing at all. Capture the status and surface the diagnostic
+  # instead of discarding it down /dev/null.
+  awk_out=$(awk "$EMPTY_ARRAY_AWK" "$file" 2>&1)
+  awk_status=$?
+  if [ "$awk_status" -ne 0 ]; then
+    printf '%s[scanner-error]%s %s\n    awk exited %s while scanning this file\n    %s%s%s\n' \
+      "$RED" "$NC" "$file" "$awk_status" "$YELLOW" "$awk_out" "$NC" >&2
+    scanner_errors=$((scanner_errors + 1))
+    continue
+  fi
+  [ -z "$awk_out" ] && continue
   while IFS=: read -r lineno text; do
     [ -z "$lineno" ] && continue
     # shellcheck disable=SC2016 # literal hint text, not a shell expansion.
     report "empty-array-set-u" "$file" "$lineno" "$text" \
       'Bash 3.2 aborts on an empty "${arr[@]}" under set -u — use ${arr[@]+"${arr[@]}"}.'
-  done < <(awk "$EMPTY_ARRAY_AWK" "$file" 2>/dev/null || true)
+  done <<EOF
+$awk_out
+EOF
 done < <(find "${ROOTS[@]}" -name '*.sh' -type f ! -name 'validate_shell_portability.sh' 2>/dev/null | sort)
 
 echo ""
+if [ "$scanner_errors" -gt 0 ]; then
+  echo "${RED}The empty-array scanner failed on ${scanner_errors} file(s); results are incomplete.${NC}" >&2
+  echo "This is a gate failure, not a clean scan — fix the scanner before trusting a green run." >&2
+  exit 2
+fi
 if [ "$violations" -gt 0 ]; then
   echo "${RED}Found ${violations} shell-portability issue(s).${NC}" >&2
   echo "Fix them, or add '# portability-ok' on the line if it is a genuine exception." >&2

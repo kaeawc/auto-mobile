@@ -1206,41 +1206,41 @@ install_gum_linux() {
 
     if command_exists apt-get; then
         plain_info "Installing gum with apt-get..."
-        if ! "${sudo_cmd[@]}" apt-get update; then
+        if ! ${sudo_cmd[@]+"${sudo_cmd[@]}"} apt-get update; then
             plain_warn "apt-get update failed; falling back to manual gum install."
             return 1
         fi
-        if "${sudo_cmd[@]}" apt-get install -y gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} apt-get install -y gum; then
             return 0
         fi
         plain_warn "apt-get install failed; falling back to manual gum install."
     elif command_exists dnf; then
         plain_info "Installing gum with dnf..."
-        if "${sudo_cmd[@]}" dnf install -y gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} dnf install -y gum; then
             return 0
         fi
         plain_warn "dnf install failed; falling back to manual gum install."
     elif command_exists yum; then
         plain_info "Installing gum with yum..."
-        if "${sudo_cmd[@]}" yum install -y gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} yum install -y gum; then
             return 0
         fi
         plain_warn "yum install failed; falling back to manual gum install."
     elif command_exists pacman; then
         plain_info "Installing gum with pacman..."
-        if "${sudo_cmd[@]}" pacman -S --noconfirm gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} pacman -S --noconfirm gum; then
             return 0
         fi
         plain_warn "pacman install failed; falling back to manual gum install."
     elif command_exists zypper; then
         plain_info "Installing gum with zypper..."
-        if "${sudo_cmd[@]}" zypper --non-interactive install gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} zypper --non-interactive install gum; then
             return 0
         fi
         plain_warn "zypper install failed; falling back to manual gum install."
     elif command_exists apk; then
         plain_info "Installing gum with apk..."
-        if "${sudo_cmd[@]}" apk add --no-cache gum; then
+        if ${sudo_cmd[@]+"${sudo_cmd[@]}"} apk add --no-cache gum; then
             return 0
         fi
         plain_warn "apk install failed; falling back to manual gum install."
@@ -3816,7 +3816,7 @@ install_bun() {
             # Multiple options - show choose menu with Skip option
             options+=("Skip")
             local choice
-            choice=$(printf '%s\n' "${options[@]}" | gum choose --header "How would you like to install Bun?")
+            choice=$(printf '%s\n' ${options[@]+"${options[@]}"} | gum choose --header "How would you like to install Bun?")
 
             if [[ -z "${choice}" || "${choice}" == "Skip" ]]; then
                 log_info "Skipped Bun installation"

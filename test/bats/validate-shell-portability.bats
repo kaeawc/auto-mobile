@@ -166,3 +166,90 @@ FIXTURE
   run bash "$ABS" "$FIX"
   [ "$status" -eq 0 ]
 }
+
+@test "flags a typed 'declare -a' empty-array declaration" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+declare -a extra=()
+cmd=(run "${extra[@]}")
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "flags a typed 'local -a' empty-array declaration" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+f() {
+  local -a extra=()
+  printf '%s\n' "${extra[@]}"
+}
+f
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "flags an expansion after an inverse \${#arr[@]} check that guards nothing" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+extra=()
+if [[ "${#extra[@]}" -eq 0 ]]; then
+  echo none
+fi
+cmd=(run "${extra[@]}")
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "flags an expansion after a positive guard block has already closed" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+extra=()
+if [[ "${#extra[@]}" -gt 0 ]]; then
+  echo some
+fi
+cmd=(run "${extra[@]}")
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "does NOT flag an expansion after an empty-array early return" {
+  write_lines ok <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+f() {
+  local found=()
+  if [[ ${#found[@]} -eq 0 ]]; then
+    return 0
+  fi
+  printf '%s\n' "${found[@]}"
+}
+f
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}
+
+@test "does NOT flag an expansion guarded by a -n \${arr[*]-} test" {
+  write_lines ok <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+only_list=()
+if [[ -n "${only_list[*]-}" ]]; then
+  for requested in "${only_list[@]}"; do echo "$requested"; done
+fi
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}

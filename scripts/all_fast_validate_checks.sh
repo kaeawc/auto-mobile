@@ -79,7 +79,7 @@ split_csv() {
   if [[ -n "$value" ]]; then
     IFS=',' read -r -a items <<< "$value"
   fi
-  echo "${items[@]}"
+  echo ${items[@]+"${items[@]}"}
 }
 
 contains_item() {
@@ -103,7 +103,7 @@ groups_intersect() {
     IFS=',' read -r -a check_group_list <<< "$check_groups"
   fi
   local group
-  for group in "${check_group_list[@]}"; do
+  for group in ${check_group_list[@]+"${check_group_list[@]}"}; do
     if contains_item "$group" "${selected_groups[@]}"; then
       return 0
     fi
@@ -220,7 +220,7 @@ for idx in "${!CHECK_NAMES[@]}"; do
     fi
   elif [[ -n "${group_list[*]-}" ]]; then
     include=0
-    if groups_intersect "$groups" "${group_list[@]}"; then
+    if groups_intersect "$groups" ${group_list[@]+"${group_list[@]}"}; then
       include=1
     fi
   fi

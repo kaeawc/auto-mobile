@@ -83,7 +83,7 @@ echo "Validation Summary"
 echo "========================================="
 echo ""
 echo "Passed: ${#PASSED_COMPONENTS[@]}"
-for component in "${PASSED_COMPONENTS[@]}"; do
+for component in ${PASSED_COMPONENTS[@]+"${PASSED_COMPONENTS[@]}"}; do
   echo "  ✓ ${component}"
 done
 echo ""

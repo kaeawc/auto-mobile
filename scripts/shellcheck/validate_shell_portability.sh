@@ -99,12 +99,46 @@ scan "bare-python" \
 EMPTY_ARRAY_AWK='
 { lines[NR] = $0 }
 /set -[a-z]*u/ { setu = 1 }
-match($0, /^[ \t]*(local[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=\(\)[ \t]*$/) {
+# Empty-array declarations, including the typed forms: `arr=()`,
+# `local arr=()`, `local -a arr=()`, `declare -A arr=()`, `typeset -a arr=()`.
+match($0, /^[ \t]*((local|declare|typeset)[ \t]+(-[aAgilnrtux]+[ \t]+)*)?[A-Za-z_][A-Za-z0-9_]*=\(\)[ \t]*$/) {
   decl = $0
   sub(/^[ \t]*/, "", decl)
-  sub(/^local[ \t]+/, "", decl)
+  sub(/^(local|declare|typeset)[ \t]+/, "", decl)
+  while (decl ~ /^-[aAgilnrtux]+[ \t]+/) { sub(/^-[aAgilnrtux]+[ \t]+/, "", decl) }
   sub(/=\(\)[ \t]*$/, "", decl)
   arrays[decl] = 1
+}
+
+# A `${#arr[@]}` mention only counts as a guard when it is a positive-sense
+# length test that opens a block — an `-eq 0` early-out or a bare count in a
+# message guards nothing.
+function is_positive_length_guard(line, name) {
+  if (index(line, "${#" name "[@]}")) {
+    if (line ~ /-eq[ \t]+0/ || line ~ /-lt[ \t]+1/ || line ~ /==[ \t]*0/) { return 0 }
+    if (line !~ /(^|[ \t;])(if|elif|while|until)[ \t]/ && line !~ /&&/) { return 0 }
+    if (line ~ /-gt[ \t]+0/ || line ~ /-ge[ \t]+1/ || line ~ /-ne[ \t]+0/) { return 1 }
+    if (line ~ /\(\([^)]*\$\{#/) { return 1 }
+    return 0
+  }
+  # `[[ -n "${arr[*]-}" ]]` is the other non-empty test used in this repo.
+  if (line ~ /-n[ \t]+"?\$\{/ && (index(line, "${" name "[*]-}") || index(line, "${" name "[@]-}"))) {
+    return 1
+  }
+  return 0
+}
+
+# `if [ ${#arr[@]} -eq 0 ]; then return; fi` is an early-out: everything after
+# it is reached only when the array is non-empty. Returns 1 when line k opens
+# such a block and it leaves the scope within the next few lines.
+function is_empty_early_out(lines, nlines, k, name,   j) {
+  if (!index(lines[k], "${#" name "[@]}")) { return 0 }
+  if (lines[k] !~ /-eq[ \t]+0/ && lines[k] !~ /-lt[ \t]+1/ && lines[k] !~ /==[ \t]*0/) { return 0 }
+  if (lines[k] !~ /(^|[ \t;])(if|elif)[ \t]/ && lines[k] !~ /&&/) { return 0 }
+  for (j = k; j <= k + 3 && j <= nlines; j++) {
+    if (lines[j] ~ /(^|[ \t;])(return|exit|continue|break)([ \t;]|$)/) { return 1 }
+  }
+  return 0
 }
 END {
   if (!setu) { exit }
@@ -118,7 +152,15 @@ END {
       if (index(line, "${" name "[@]+")) { continue }
       guarded = 0
       for (k = n - 9; k < n; k++) {
-        if (k >= 1 && index(lines[k], "${#" name "[@]}")) { guarded = 1 }
+        if (k < 1) { continue }
+        # A block terminator between the guard and the expansion means the
+        # guard has already closed and no longer covers this line.
+        if (lines[k] ~ /^[ \t]*(fi|else|elif|done|esac|\})([ \t]|;|$)/) { guarded = 0; continue }
+        if (is_positive_length_guard(lines[k], name)) { guarded = 1 }
+      }
+      # An empty-array early-out anywhere above in the same scope also covers it.
+      for (k = 1; k < n && !guarded; k++) {
+        if (is_empty_early_out(lines, NR, k, name)) { guarded = 1 }
       }
       if (guarded) { continue }
       text = line

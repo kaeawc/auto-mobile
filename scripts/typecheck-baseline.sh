@@ -148,6 +148,26 @@ ROOT_SED_PATTERN="$(printf '%s' "$ROOT" | sed 's/[][\.*^$|/]/\\&/g')"
 # identical on every machine.
 canonicalize_unions() {
   awk '
+    # Split a run into its members WITHOUT a plain text split. A string-literal
+    # member may itself contain the separator (the type `"a | b" | "c"`), and a
+    # naive split on " | " cuts inside the quotes -- producing a different result
+    # on each pass, so `--update` would write a baseline that check mode then
+    # rejected as new. Walking front-anchored tokens keeps quoted members intact.
+    # Returns the member count, or 0 if the run does not tokenize cleanly, in
+    # which case the caller leaves it untouched.
+    function split_members(run, arr,   n, rest, tok) {
+      n = 0
+      rest = run
+      while (length(rest) > 0) {
+        if (!match(rest, /^("[^"]*"|[A-Za-z_$][A-Za-z0-9_$]*)/)) { return 0 }
+        arr[++n] = substr(rest, RSTART, RLENGTH)
+        rest = substr(rest, RLENGTH + 1)
+        if (length(rest) == 0) { break }
+        if (substr(rest, 1, 3) != " | ") { return 0 }
+        rest = substr(rest, 4)
+      }
+      return n
+    }
     function canon_unions(line,   out, rest, run, n, arr, i, j, t, joined) {
       out = ""
       rest = line
@@ -155,9 +175,12 @@ canonicalize_unions() {
         out = out substr(rest, 1, RSTART - 1)
         run = substr(rest, RSTART, RLENGTH)
         rest = substr(rest, RSTART + RLENGTH)
-        # split on a literal " | " -- the bracket expression stops awk reading
-        # the pipe as regex alternation.
-        n = split(run, arr, " [|] ")
+        n = split_members(run, arr)
+        if (n < 2) {
+          # Not cleanly tokenizable -- emit verbatim, preserving current behavior.
+          out = out run
+          continue
+        }
         for (i = 1; i <= n; i++)
           for (j = i + 1; j <= n; j++)
             if (arr[i] > arr[j]) { t = arr[i]; arr[i] = arr[j]; arr[j] = t }

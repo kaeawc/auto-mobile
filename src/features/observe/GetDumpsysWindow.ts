@@ -26,7 +26,8 @@ export class GetDumpsysWindow implements DumpsysWindow {
    * @param timer - Injected timer
    * @param logger - Injected logger. Tests that assert on emitted diagnostics must
    *   pass a fake: patching the shared `logger` singleton instead makes the
-   *   assertion race every other test that logs concurrently (issue #4134).
+   *   assertion race every other test that logs concurrently
+   *   ([issue #4134](https://github.com/kaeawc/auto-mobile/issues/4134)).
    */
   constructor(
     device: BootedDevice,

@@ -13,52 +13,114 @@
 # (scripts/ci/measure-ci.sh) with generous headroom: the goal is catching hangs,
 # not policing slow-but-healthy runs. A too-tight ceiling turns a slow run into a
 # flake, which is a worse failure than the one being prevented.
+#
+# The workflow is parsed STRUCTURALLY, not with line regexes. An earlier revision
+# of this guard matched `^  <name>:` by indentation and was therefore blind to a
+# validly-quoted key: adding `"sneaky-job":` with no timeout kept the suite green
+# while the job really did inherit 360. A guard that can be bypassed by quoting a
+# key is worse than no guard, because it reads as coverage.
 
-WORKFLOWS=".github/workflows/pull_request.yml"
+WORKFLOW=".github/workflows/pull_request.yml"
 
-# Print every job key defined under the top-level `jobs:` mapping.
-# awk, not sed -- BSD sed lacks the range forms this needs. Capture only starts
-# after `jobs:` so a same-named key under `on:` (e.g. `pull_request:`) cannot
-# masquerade as a job.
-job_keys() {
-  awk '
-    /^jobs:/ { in_jobs = 1; next }
-    !in_jobs { next }
-    /^[a-z]/ { in_jobs = 0; next }
-    /^  [a-z][a-z0-9_-]*:$/ { key = $0; sub(/^  /, "", key); sub(/:$/, "", key); print key }
-  ' "$1"
+# Print the name of every job that does not declare a job-level timeout-minutes.
+#
+# Jobs that call a reusable workflow (`uses:`) are exempt -- GitHub rejects
+# timeout-minutes on the caller side for those. There are none today; the branch
+# exists so adding one later does not produce an unsatisfiable failure.
+jobs_missing_timeout() {
+  python3 - "$1" <<'PY'
+import sys
+
+import yaml
+
+with open(sys.argv[1]) as handle:
+    document = yaml.safe_load(handle)
+
+jobs = (document or {}).get("jobs") or {}
+for name, spec in jobs.items():
+    if not isinstance(spec, dict):
+        continue
+    if "uses" in spec:
+        continue
+    if "timeout-minutes" not in spec:
+        print(name)
+PY
 }
 
-# Whether a named job block declares a job-level timeout-minutes.
-job_has_timeout() {
-  awk -v want="  $2:" '
-    $0 == want { inblock = 1; next }
-    inblock && /^  [a-z][a-z0-9_-]*:$/ { exit }
-    inblock && /^    timeout-minutes:/ { found = 1; exit }
-    END { exit(found ? 0 : 1) }
-  ' "$1"
+# Total job count, so a parser that silently returns nothing cannot pass by
+# finding zero offenders in zero jobs.
+job_count() {
+  python3 - "$1" <<'PY'
+import sys
+
+import yaml
+
+with open(sys.argv[1]) as handle:
+    document = yaml.safe_load(handle)
+
+print(len(((document or {}).get("jobs") or {})))
+PY
 }
 
-@test "the job extractor finds jobs at all" {
-  run job_keys "$WORKFLOWS"
+@test "the workflow parses and defines a plausible number of jobs" {
+  run job_count "$WORKFLOW"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | grep -c .)" -ge 20 ]
-  # and it must not pick up the `on:` trigger key of the same name
-  [[ "$output" != *"pull_request"* ]]
+  [ "$output" -ge 20 ]
 }
 
 @test "every pull_request job declares timeout-minutes" {
-  local offenders=""
-  while IFS= read -r job; do
-    [ -n "$job" ] || continue
-    if ! job_has_timeout "$WORKFLOWS" "$job"; then
-      offenders="${offenders}${job}"$'\n'
-    fi
-  done < <(job_keys "$WORKFLOWS")
-
-  if [ -n "$offenders" ]; then
+  run jobs_missing_timeout "$WORKFLOW"
+  [ "$status" -eq 0 ]
+  if [ -n "$output" ]; then
     echo "Jobs missing timeout-minutes (they inherit GitHub's 360-minute default):" >&2
-    echo "$offenders" >&2
+    echo "$output" >&2
   fi
-  [ -z "$offenders" ]
+  [ -z "$output" ]
+}
+
+@test "the guard sees a validly-quoted job key" {
+  # Regression for the reviewer's case on #4156: the previous indentation-regex
+  # extractor skipped quoted keys entirely, so `"sneaky-job":` could inherit 360
+  # while this suite stayed green.
+  local fixture="${BATS_TEST_TMPDIR:-/tmp}/quoted-key-$$.yml"
+  cat > "$fixture" <<'YAML'
+name: fixture
+on: [push]
+jobs:
+  plain-job:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+  "sneaky-job":
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YAML
+
+  run job_count "$fixture"
+  [ "$output" -eq 2 ]
+
+  run jobs_missing_timeout "$fixture"
+  [ "$output" = "sneaky-job" ]
+
+  rm -f "$fixture"
+}
+
+@test "a job calling a reusable workflow is exempt" {
+  # GitHub rejects timeout-minutes on a `uses:` job, so demanding one would be
+  # unsatisfiable rather than protective.
+  local fixture="${BATS_TEST_TMPDIR:-/tmp}/reusable-$$.yml"
+  cat > "$fixture" <<'YAML'
+name: fixture
+on: [push]
+jobs:
+  calls-reusable:
+    uses: ./.github/workflows/other.yml
+YAML
+
+  run jobs_missing_timeout "$fixture"
+  [ -z "$output" ]
+
+  rm -f "$fixture"
 }

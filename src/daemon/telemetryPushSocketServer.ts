@@ -218,6 +218,12 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             "failure_occurrences.group_id as groupId",
             "failure_occurrences.timestamp",
             "failure_occurrences.device_id as deviceId",
+            // Selected so the crash/ANR/tool-failure backfill can report the
+            // originating session like every sibling projection does (#4209).
+            // Without it `r.sessionId` is a type error AND always undefined at
+            // runtime, so these events shipped with `sessionId: null` and were
+            // invisible to session-filtered subscribers.
+            "failure_occurrences.session_id as sessionId",
             "failure_occurrences.screen_at_failure as screen",
             "failure_groups.type",
             "failure_groups.severity",

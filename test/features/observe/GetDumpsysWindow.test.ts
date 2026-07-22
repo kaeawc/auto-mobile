@@ -1,23 +1,19 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { GetDumpsysWindow } from "../../../src/features/observe/GetDumpsysWindow";
-import { logger, type Logger } from "../../../src/utils/logger";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeLogger } from "../../fakes/FakeLogger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice } from "../../../src/models";
 
 describe("GetDumpsysWindow", () => {
-  const originalDebug = logger.debug;
-
-  afterEach(() => {
-    logger.debug = originalDebug;
-  });
-
   test("logs disk cache read failures before refreshing from adb", async () => {
-    const debugLogs: string[] = [];
-    logger.debug = ((message: string) => {
-      debugLogs.push(message);
-    }) as Logger["debug"];
+    // The logger is injected rather than monkey-patched onto the shared singleton
+    // (issue #4134). The previous version replaced `logger.debug` process-wide and
+    // asserted an exact total, so any other test logging while this one held the
+    // patch appended into its array -- CI once observed 25 entries instead of 1.
+    // A fake instance is unreachable by other tests, so the race cannot occur.
+    const fakeLogger = new FakeLogger();
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("shell dumpsys window", {
       stdout: "mCurrentFocus=Window{test}",
@@ -35,13 +31,22 @@ describe("GetDumpsysWindow", () => {
     const dumpsysWindow = new GetDumpsysWindow(
       device,
       new FakeAdbClientFactory(fakeAdb),
-      new FakeTimer()
+      new FakeTimer(),
+      fakeLogger
     );
 
     const result = await dumpsysWindow.execute();
 
     expect(result.stdout).toBe("mCurrentFocus=Window{test}");
-    expect(debugLogs).toHaveLength(1);
-    expect(debugLogs[0]).toContain("Failed to read dumpsys window disk cache");
+
+    // Assert the specific diagnostic rather than a total count. Even scoped to
+    // this instance, a bare length check would pin every trace the class emits
+    // and break when an unrelated one is added.
+    const cacheReadFailures = fakeLogger.messages.filter(
+      entry => entry.level === "debug"
+        && entry.message.includes("Failed to read dumpsys window disk cache")
+    );
+    expect(cacheReadFailures).toHaveLength(1);
+    expect(cacheReadFailures[0].message).toContain(device.deviceId);
   });
 });

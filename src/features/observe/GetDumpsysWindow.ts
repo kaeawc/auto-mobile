@@ -7,12 +7,13 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { DumpsysWindow } from "./interfaces/DumpsysWindow";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { logger } from "../../utils/logger";
+import { logger as defaultLogger, type Logger } from "../../utils/logger";
 
 export class GetDumpsysWindow implements DumpsysWindow {
   private adb: AdbExecutor;
   private readonly device: BootedDevice;
   private timer: Timer;
+  private logger: Logger;
   private static memoryCache = new Map<string, { data: ExecResult; timestamp: number }>();
   private static readonly CACHE_TTL_MS = 30000; // 30 seconds
   private readonly cacheDir: string;
@@ -22,13 +23,23 @@ export class GetDumpsysWindow implements DumpsysWindow {
    * Create a GetDumpsysWindow instance
    * @param device - Device to run ADB commands against
    * @param adbFactory - Factory for creating AdbClient instances
+   * @param timer - Injected timer
+   * @param logger - Injected logger. Tests that assert on emitted diagnostics must
+   *   pass a fake: patching the shared `logger` singleton instead makes the
+   *   assertion race every other test that logs concurrently (issue #4134).
    */
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    timer: Timer = defaultTimer,
+    logger: Logger = defaultLogger
+  ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.cacheDir = getTempDir(TEMP_SUBDIRS.CACHE);
     this.cacheFilePath = path.join(this.cacheDir, `dumpsys-window-${device.deviceId}.json`);
     this.timer = timer;
+    this.logger = logger;
   }
 
   /**
@@ -56,7 +67,7 @@ export class GetDumpsysWindow implements DumpsysWindow {
       }
     } catch (error) {
       // Disk cache is opportunistic; a cache read failure should fall through to ADB refresh.
-      logger.debug(`Failed to load dumpsys window disk cache for device ${this.device.deviceId}: ${error instanceof Error ? error.message : String(error)}`, error);
+      this.logger.debug(`Failed to load dumpsys window disk cache for device ${this.device.deviceId}: ${error instanceof Error ? error.message : String(error)}`, error);
     }
 
     // No valid cache found, refresh and return
@@ -86,7 +97,7 @@ export class GetDumpsysWindow implements DumpsysWindow {
       await perf.track("saveDiskCache", () => this.saveToDiskCache(cacheEntry));
     } catch (error) {
       // Disk cache write failed, but we still return the result
-      logger.warn(`Failed to write disk cache for device ${this.device.deviceId}:`, error);
+      this.logger.warn(`Failed to write disk cache for device ${this.device.deviceId}:`, error);
     }
 
     return result;
@@ -102,7 +113,7 @@ export class GetDumpsysWindow implements DumpsysWindow {
       return JSON.parse(cacheData);
     } catch (error) {
       // Disk cache is opportunistic; callers can refresh from ADB when no cache is available.
-      logger.debug(`Failed to read dumpsys window disk cache for device ${this.device.deviceId}: ${error instanceof Error ? error.message : String(error)}`, error);
+      this.logger.debug(`Failed to read dumpsys window disk cache for device ${this.device.deviceId}: ${error instanceof Error ? error.message : String(error)}`, error);
       return null;
     }
   }

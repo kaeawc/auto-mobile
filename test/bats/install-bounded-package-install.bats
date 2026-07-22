@@ -57,6 +57,11 @@ STUB
 }
 
 teardown() {
+  # Reap anything a watchdog test deliberately left behind, so a regression in
+  # the kill escalation cannot leak a `sleep` into the rest of the run.
+  if [ -n "${SURVIVOR_PID_FILE:-}" ] && [ -s "${SURVIVOR_PID_FILE}" ]; then
+    kill -KILL "$(cat "${SURVIVOR_PID_FILE}")" 2> /dev/null || true
+  fi
   export PATH="${ORIG_PATH}"
   "$RM" -rf "${TEST_DIR}"
 }
@@ -324,4 +329,222 @@ STUB
   # `>/dev/null`, so package installs must go through run_bounded_install.
   run grep -nE 'run_spinner .*(brew install|apt-get install|dnf install|pacman -S|go install)' scripts/install.sh
   [ "$status" -ne 0 ]
+}
+
+# --- follow-up to #4232: sudo prompts and watchdog kill escalation -----------
+
+# Replace the pass-through sudo stub from setup() with one that models the
+# thing that actually breaks: an expired credential. Real sudo writes its
+# prompt to stderr and reads the password from /dev/tty, and `-n` fails rather
+# than prompting when nothing is cached.
+stub_expired_sudo() {
+  cat > "${STUB_BIN}/sudo" << STUB
+#!/usr/bin/env bash
+if [ "\$1" = "-n" ]; then
+  # Nothing cached yet. Refuse without prompting, exactly as sudo -n does.
+  [ -s "${TEST_DIR}/sudo_cached" ] && exit 0
+  exit 1
+fi
+if [ "\$1" = "-v" ]; then
+  printf 'PROMPT-VISIBLE: [sudo] password for tester: ' >&2
+  printf 'refreshed\n' > "${TEST_DIR}/sudo_cached"
+  printf 'v\n' >> "${TEST_DIR}/sudo_calls"
+  exit 0
+fi
+if [ ! -s "${TEST_DIR}/sudo_cached" ]; then
+  # The bounded invocation must never be the thing that prompts: at this point
+  # it is inside a background process group with its output captured, so the
+  # prompt is invisible and the read cannot reach the terminal.
+  printf 'BOUNDED-PROMPT\n' >&2
+  exit 1
+fi
+printf 'cmd\n' >> "${TEST_DIR}/sudo_calls"
+exec "\$@"
+STUB
+  "$CHMOD" +x "${STUB_BIN}/sudo"
+}
+
+@test "an expired sudo credential is refreshed visibly, outside the capture" {
+  # Reproduced before the fix, in a PTY with a 5s bound and a password typed one
+  # second in: the typed text was echoed by the parent shell, sudo never
+  # received it, and the prompt only surfaced at the end -- replayed out of the
+  # captured output after the bound had already fired.
+  #
+  # A visible prompt on a *successful* install is the assertion that matters:
+  # run_bounded_install prints its capture only on failure, so text that reaches
+  # the caller on the success path can only have escaped the capture.
+  hide_real_timeout
+  stub_expired_sudo
+  cat > "${STUB_BIN}/apt-get" << 'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/apt-get"
+  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  NON_INTERACTIVE=false
+
+  run run_bounded_install "Installing ffmpeg" sudo apt-get install -y -qq ffmpeg
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMPT-VISIBLE"* ]]
+  # ...and the bounded invocation itself must not have been the one prompting.
+  [[ "$output" != *"BOUNDED-PROMPT"* ]]
+}
+
+@test "sudo embedded in a bash -c chain is refreshed too" {
+  # _install_system_package builds `sudo apt-get update && sudo apt-get install`
+  # and hands the whole chain to `bash -c`, so sudo is not argument one.
+  hide_real_timeout
+  stub_expired_sudo
+  cat > "${STUB_BIN}/apt-get" << 'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/apt-get"
+  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  NON_INTERACTIVE=false
+
+  run run_bounded_install "Installing ffmpeg" bash -c "sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMPT-VISIBLE"* ]]
+}
+
+@test "an already-cached sudo credential is not re-prompted" {
+  hide_real_timeout
+  stub_expired_sudo
+  printf 'already\n' > "${TEST_DIR}/sudo_cached"
+  cat > "${STUB_BIN}/apt-get" << 'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/apt-get"
+  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  NON_INTERACTIVE=false
+
+  run run_bounded_install "Installing ffmpeg" sudo apt-get install -y -qq ffmpeg
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PROMPT-VISIBLE"* ]]
+}
+
+@test "a non-interactive session does not stop to prompt for sudo" {
+  # CI runs with no terminal on stdin. Blocking there would trade the old
+  # 45-minute stall for a new one.
+  hide_real_timeout
+  stub_expired_sudo
+  cat > "${STUB_BIN}/apt-get" << 'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/apt-get"
+  detect_stdin_terminal() { STDIN_IS_TERMINAL=false; }
+  NON_INTERACTIVE=true
+
+  run run_bounded_install "Installing ffmpeg" sudo apt-get install -y -qq ffmpeg
+
+  [[ "$output" != *"PROMPT-VISIBLE"* ]]
+  [ ! -s "${TEST_DIR}/sudo_cached" ]
+}
+
+@test "a command with no sudo in it never touches sudo" {
+  hide_real_timeout
+  stub_expired_sudo
+  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  NON_INTERACTIVE=false
+
+  run run_bounded_install "Installing thing" /bin/echo hello
+
+  [ "$status" -eq 0 ]
+  [ ! -s "${TEST_DIR}/sudo_calls" ]
+}
+
+@test "the watchdog fallback does not return while a TERM-ignoring descendant lives" {
+  # A watchdog that returns before the group is dead does not bound anything:
+  # the installer reports the install aborted and moves on -- or exits -- while
+  # the package manager is still running. Reproduced before the fix with a 1s
+  # bound: run_bounded_install returned 124 after 1s and the survivor was still
+  # alive, including after the parent script had exited entirely.
+  #
+  # No require_real_timeout: the fallback is pure bash, so this runs on
+  # macos-latest too, which is the host where the bound used to be absent.
+  hide_real_timeout
+  export SURVIVOR_PID_FILE="${TEST_DIR}/survivor.pid"
+  cat > "${STUB_BIN}/leaky-pm" << 'STUB'
+#!/usr/bin/env bash
+# A descendant that ignores TERM, as a package manager mid-transaction might.
+bash -c 'trap "" TERM; echo $$ > "$SURVIVOR_PID_FILE"; sleep 120' &
+# The direct child, by contrast, exits promptly on TERM -- which is what lets
+# the parent's `wait` return with the group still populated.
+trap 'exit 143' TERM
+sleep 60 &
+wait $!
+STUB
+  "$CHMOD" +x "${STUB_BIN}/leaky-pm"
+
+  PACKAGE_INSTALL_TIMEOUT_SECONDS=1
+  BOUNDED_KILL_GRACE_SECONDS=2
+  run run_bounded_install "Installing ffmpeg" leaky-pm
+
+  [ "$status" -eq 124 ]
+  [ -s "${SURVIVOR_PID_FILE}" ]
+  local survivor
+  survivor="$(cat "${SURVIVOR_PID_FILE}")"
+  run kill -0 "${survivor}"
+  [ "$status" -ne 0 ]
+}
+
+@test "the watchdog does not pay the full kill grace when TERM is honoured" {
+  # Waiting for the watcher must not mean waiting out the grace period on every
+  # timeout -- the common case is a command that dies on TERM immediately.
+  hide_real_timeout
+  cat > "${STUB_BIN}/stalling-pm" << 'STUB'
+#!/usr/bin/env bash
+sleep 60
+STUB
+  "$CHMOD" +x "${STUB_BIN}/stalling-pm"
+
+  PACKAGE_INSTALL_TIMEOUT_SECONDS=1
+  BOUNDED_KILL_GRACE_SECONDS=30
+  local start=${SECONDS}
+  run run_bounded_install "Installing ffmpeg" stalling-pm
+  local elapsed=$((SECONDS - start))
+
+  [ "$status" -eq 124 ]
+  [ "${elapsed}" -lt 20 ]
+}
+
+@test "the bounded prefix does not use --foreground" {
+  # --foreground stops `timeout` putting the child in its own process group,
+  # which is the only reason the `bash -c \"a && b\"` call sites are bounded at
+  # all: without it the signal never reaches the grandchild. It is a tempting
+  # but wrong fix for the sudo-prompt problem -- and it does not even solve it,
+  # since the prompt is swallowed by the output capture either way.
+  hide_real_timeout
+  "$LN" -sf /bin/echo "${STUB_BIN}/timeout"
+
+  resolve_bounded_cmd_prefix 42
+
+  local arg
+  # The `+` guard keeps an empty prefix from tripping `set -u` on bash 3.2.
+  for arg in ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"}; do
+    [ "${arg}" != "--foreground" ]
+    [ "${arg}" != "-f" ]
+  done
+}
+
+@test "no bounded path captures package manager output through a command substitution" {
+  # Both paths must route output to a file. A `$(...)` capture leaves the caller
+  # blocked on EOF for as long as any descendant retains the write end, which is
+  # precisely the survivor case the kill escalation exists for.
+  run grep -nE 'output=\$\(.*BOUNDED_CMD_PREFIX' scripts/install.sh
+  [ "$status" -ne 0 ]
+}
+
+@test "the command-substitution guard actually matches the shape it forbids" {
+  local fixture="${TEST_DIR}/reintroduced_capture.sh"
+  printf '%s\n' '        output=$(${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@" 2>&1) || status=$?' > "${fixture}"
+
+  run grep -nE 'output=\$\(.*BOUNDED_CMD_PREFIX' "${fixture}"
+  [ "$status" -eq 0 ]
 }

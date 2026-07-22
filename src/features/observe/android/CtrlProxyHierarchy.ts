@@ -273,6 +273,11 @@ export class CtrlProxyHierarchy {
   /**
    * Get view hierarchy from accessibility service.
    * This is the main entry point for getting hierarchy data from the accessibility service.
+   *
+   * @param timeoutMs - Optional overall budget for this read. It bounds BOTH the
+   *   WebSocket fresh-data wait and the ADB sync fallback, so a caller working
+   *   against its own deadline (e.g. the keyboard state confirmation poll) cannot
+   *   be blocked past that deadline by the 10s `requestHierarchySync` default.
    */
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
@@ -280,7 +285,8 @@ export class CtrlProxyHierarchy {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     disableAllFiltering: boolean = false,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs?: number
   ): Promise<ViewHierarchyResult | null> {
     const startTime = this.context.timer.now();
     const cachedHierarchy = this.context.getCachedHierarchy();
@@ -301,8 +307,11 @@ export class CtrlProxyHierarchy {
 
       // Get hierarchy from WebSocket service
       const waitForFresh = !skipWaitForFresh && (cachedHierarchy === null || !cachedHierarchy.fresh);
+      const freshWaitMs = timeoutMs === undefined
+        ? DEFAULT_FRESH_WAIT_MS
+        : Math.max(0, Math.min(DEFAULT_FRESH_WAIT_MS, timeoutMs));
       const response = await perf.track("getHierarchy", () =>
-        this.getLatestHierarchy(waitForFresh, DEFAULT_FRESH_WAIT_MS, perf, skipWaitForFresh, minTimestamp, signal)
+        this.getLatestHierarchy(waitForFresh, freshWaitMs, perf, skipWaitForFresh, minTimestamp, signal)
       );
 
       let hierarchyData = response.hierarchy;
@@ -315,8 +324,13 @@ export class CtrlProxyHierarchy {
         logger.debug(`[CTRL_PROXY] WebSocket returned ${hierarchyData ? "stale" : "no"} data (fresh=${isFresh}), syncing for fresh data`);
 
         const syncDiagnostics: HierarchySyncDiagnostics = {};
+        // Spend only what is left of the caller's budget on the sync fallback; the
+        // default is 10s, which would blow a short deadline on its own.
+        const syncTimeoutMs = timeoutMs === undefined
+          ? undefined
+          : Math.max(0, timeoutMs - (this.context.timer.now() - startTime));
         const syncResult = await perf.track("syncRequest", () =>
-          this.requestHierarchySync(perf, disableAllFiltering, signal, undefined, syncDiagnostics)
+          this.requestHierarchySync(perf, disableAllFiltering, signal, syncTimeoutMs, syncDiagnostics)
         );
 
         if (syncResult) {

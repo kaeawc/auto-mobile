@@ -13,6 +13,8 @@ export interface ViewHierarchy {
    * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method
    * @param minTimestamp - If provided, cached data must have updatedAt >= this value
    * @param signal - Optional abort signal
+   * @param timeoutMs - Optional overall budget for this read; bounds both the fresh-data
+   *   wait and the sync fallback so a caller with its own deadline cannot be blocked past it
    * @returns Promise with parsed view hierarchy
    */
   getViewHierarchy(
@@ -20,7 +22,8 @@ export interface ViewHierarchy {
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs?: number
   ): Promise<ViewHierarchyResult>;
 
   /**

@@ -79,13 +79,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs?: number
   ): Promise<ViewHierarchyResult> {
     switch (this.device.platform) {
       case "ios":
-        return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp);
+        return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs);
       case "android":
-        return this.getAndroidViewHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+        return this.getAndroidViewHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, signal, timeoutMs);
       default:
         throw new Error("Unsupported platform");
     }
@@ -101,7 +102,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   async getiOSViewHierarchy(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0
+    minTimestamp: number = 0,
+    timeoutMs?: number
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
     logger.info(`[VIEW_HIERARCHY] Starting getViewHierarchy for iOS (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
@@ -112,8 +114,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const viewHierarchy = await perf.track("ctrlProxyGetHierarchy", async () => {
       // Use getLatestHierarchy which properly handles skipWaitForFresh and minTimestamp
       const result = await xcTestClient.getLatestHierarchy(
-        !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh
-        15000,             // timeout
+        !skipWaitForFresh,        // waitForFresh = opposite of skipWaitForFresh
+        timeoutMs ?? 15000,       // timeout: caller budget when supplied
         perf,
         skipWaitForFresh,
         minTimestamp
@@ -177,7 +179,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs?: number
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
     logger.debug(`[VIEW_HIERARCHY] Starting Android getViewHierarchy (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
@@ -192,7 +195,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         skipWaitForFresh,
         minTimestamp,
         useRawElementSearch,
-        signal
+        signal,
+        timeoutMs
       );
 
       if (accessibilityHierarchy) {

@@ -221,6 +221,74 @@ describe("Keyboard", () => {
     expect(fakeTimer.getSleepCallCount()).toBe(0);
   });
 
+  test("each confirmation read is bounded by the remaining budget", async () => {
+    fakeHierarchy.setResults([focusedInputHierarchy()]);
+    fakeHierarchy.setDefaultResult(baseHierarchy());
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    await keyboard.execute("open");
+
+    const options = fakeHierarchy.getReadOptions();
+    // The pre-action read is a plain read; every confirmation read is bounded.
+    expect(options[0]).toBeUndefined();
+    const confirmationTimeouts = options.slice(1).map(option => option?.timeoutMs);
+    expect(confirmationTimeouts[0]).toBe(2000);
+    expect(confirmationTimeouts[1]).toBe(1900);
+    expect(confirmationTimeouts[confirmationTimeouts.length - 1]).toBe(100);
+    // Never zero and never more than what is left of the 2s window.
+    confirmationTimeouts.forEach((timeoutMs, index) => {
+      expect(timeoutMs).toBe(2000 - index * 100);
+      expect(timeoutMs!).toBeGreaterThan(0);
+    });
+  });
+
+  test("a stale cached hierarchy does not cause a false timeout", async () => {
+    // The cache keeps serving the pre-action (closed) sample; only a forced-fresh
+    // read observes the IME that actually opened.
+    fakeHierarchy.setCachedResult(focusedInputHierarchy());
+    fakeHierarchy.setResults([keyboardWindowHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("open");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(true);
+    // Pre-action read served from cache, one forced-fresh confirmation read.
+    expect(fakeHierarchy.getCallCount()).toBe(2);
+    expect(fakeHierarchy.getReadOptions()[1]?.forceFresh).toBe(true);
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test("every confirmation read forces past the hierarchy cache", async () => {
+    fakeHierarchy.setResults([
+      focusedInputHierarchy(),
+      baseHierarchy(),
+      keyboardWindowHierarchy()
+    ]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    await keyboard.execute("open");
+
+    const confirmationOptions = fakeHierarchy.getReadOptions().slice(1);
+    expect(confirmationOptions.length).toBe(2);
+    confirmationOptions.forEach(option => expect(option?.forceFresh).toBe(true));
+  });
+
+  test("close stops polling promptly once the signal aborts", async () => {
+    const controller = new AbortController();
+    fakeHierarchy.setResults([keyboardWindowHierarchy()]);
+    fakeHierarchy.setDefaultResult(keyboardWindowHierarchy());
+    controller.abort();
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close", controller.signal);
+
+    expect(result.success).toBe(false);
+    expect(result.open).toBe(true);
+    expect(fakeHierarchy.getCallCount()).toBe(2);
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
   test("detect does not poll or sleep", async () => {
     fakeHierarchy.setResults([baseHierarchy()]);
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);

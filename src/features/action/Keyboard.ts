@@ -11,27 +11,58 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android";
 
 type KeyboardAction = "open" | "close" | "detect";
 
+/**
+ * Per-read controls for a keyboard hierarchy sample.
+ *
+ * `timeoutMs` bounds the read itself: without it a single read can block on the
+ * 10s `requestHierarchySync` default and blow the confirmation budget entirely.
+ * `forceFresh` drops the cached hierarchy first, so a 100ms confirmation poll
+ * cannot keep resampling the same ~1s-fresh cache entry and miss the IME change.
+ */
+export interface KeyboardHierarchyReadOptions {
+  timeoutMs?: number;
+  forceFresh?: boolean;
+}
+
 export interface KeyboardHierarchyProvider {
-  getViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null>;
+  getViewHierarchy(
+    signal?: AbortSignal,
+    options?: KeyboardHierarchyReadOptions
+  ): Promise<ViewHierarchyResult | null>;
+}
+
+/** Minimal seam for dropping the cached hierarchy before a forced-fresh read. */
+export interface KeyboardHierarchyCache {
+  invalidateCache(): void;
 }
 
 class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
   private viewHierarchy: ViewHierarchy;
+  private cache: KeyboardHierarchyCache;
 
-  constructor(viewHierarchy: ViewHierarchy) {
+  constructor(viewHierarchy: ViewHierarchy, cache: KeyboardHierarchyCache) {
     this.viewHierarchy = viewHierarchy;
+    this.cache = cache;
   }
 
-  async getViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
+  async getViewHierarchy(
+    signal?: AbortSignal,
+    options?: KeyboardHierarchyReadOptions
+  ): Promise<ViewHierarchyResult | null> {
+    if (options?.forceFresh) {
+      this.cache.invalidateCache();
+    }
     return this.viewHierarchy.getViewHierarchy(
       undefined,
       new NoOpPerformanceTracker(),
       false,
       0,
-      signal
+      signal,
+      options?.timeoutMs
     );
   }
 }
@@ -77,7 +108,8 @@ export class Keyboard {
       this.hierarchyProvider = hierarchyProvider;
     } else {
       this.hierarchyProvider = new DefaultKeyboardHierarchyProvider(
-        new ViewHierarchy(device, adbFactory)
+        new ViewHierarchy(device, adbFactory),
+        AndroidCtrlProxyClient.getInstance(device, adbFactory)
       );
     }
   }
@@ -253,36 +285,58 @@ export class Keyboard {
    * show/hide animation and always reported the pre-action state (#4238); this
    * mirrors the confirmation poll VoiceOverToggle uses for the same defect class
    * (#4045). Time comes from the injected Timer so tests stay deterministic.
+   *
+   * Each read is bounded by whatever is left of the confirmation budget — an
+   * unbounded read falls back to `requestHierarchySync`, whose 10s default would
+   * overrun the 2s window on its own — and forces past the hierarchy cache, which
+   * otherwise serves the same ~1s-fresh pre-action sample to every poll and makes
+   * a slow IME transition look like a failure.
    */
   private async waitForKeyboardState(
     expectedOpen: boolean,
     signal?: AbortSignal
   ): Promise<KeyboardDetection> {
     const deadline = this.timer.now() + Keyboard.STATE_CONFIRMATION_TIMEOUT_MS;
-    let state: KeyboardDetection = { open: !expectedOpen };
 
-    for (;;) {
-      ({ state } = await this.getHierarchyWithState(signal));
-      if (!state.error && state.open === expectedOpen) {
-        return state;
-      }
-
+    let lastState = await this.readKeyboardStateBefore(deadline, signal);
+    while (lastState.error || lastState.open !== expectedOpen) {
       const remainingMs = deadline - this.timer.now();
       if (signal?.aborted || remainingMs <= 0) {
-        return state;
+        break;
       }
 
       await this.timer.sleep(Math.min(Keyboard.STATE_CONFIRMATION_POLL_INTERVAL_MS, remainingMs));
-      if (signal?.aborted) {
-        return state;
+      if (signal?.aborted || this.timer.now() >= deadline) {
+        break;
       }
+
+      lastState = await this.readKeyboardStateBefore(deadline, signal);
     }
+
+    return lastState;
+  }
+
+  /**
+   * One confirmation sample, bounded by what is left before `deadline` and forced
+   * past the hierarchy cache. Only called while the remaining budget is positive,
+   * so the read always gets a usable (non-zero) timeout.
+   */
+  private async readKeyboardStateBefore(
+    deadline: number,
+    signal?: AbortSignal
+  ): Promise<KeyboardDetection> {
+    const { state } = await this.getHierarchyWithState(signal, {
+      timeoutMs: Math.max(0, deadline - this.timer.now()),
+      forceFresh: true
+    });
+    return state;
   }
 
   private async getHierarchyWithState(
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: KeyboardHierarchyReadOptions
   ): Promise<{ hierarchy: ViewHierarchyResult | null; state: KeyboardDetection }> {
-    const hierarchy = await this.hierarchyProvider.getViewHierarchy(signal);
+    const hierarchy = await this.hierarchyProvider.getViewHierarchy(signal, options);
     return { hierarchy, state: this.resolveKeyboardState(hierarchy) };
   }
 

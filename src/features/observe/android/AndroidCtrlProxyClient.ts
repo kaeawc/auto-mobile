@@ -1337,9 +1337,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     disableAllFiltering: boolean = false,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs?: number
   ): Promise<ViewHierarchyResult | null> {
-    return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering, signal);
+    return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering, signal, timeoutMs);
   }
 
   async setRecompositionTrackingEnabled(enabled: boolean, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<void> {

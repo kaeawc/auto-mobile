@@ -196,8 +196,11 @@ export class TapOnElement extends BaseVisualChange {
     });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
     this.elementSelector = options.elementSelector ?? new DefaultElementSelector();
-    this.talkBackStrategy = options.talkBackStrategy ?? new TalkBackTapStrategy({ timer: this.timer });
     this.talkBackDriverFactory = options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
+    this.talkBackStrategy = options.talkBackStrategy ?? new TalkBackTapStrategy({
+      timer: this.timer,
+      driverFactory: this.talkBackDriverFactory,
+    });
     this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
     this.strategy = options.tapStrategy ?? createTapStrategy(

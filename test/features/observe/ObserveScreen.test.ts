@@ -165,6 +165,7 @@ describe("ObserveScreen", function() {
         screenScale: 3,
         screenWidth: 402,
         screenHeight: 874,
+        systemInsets: { top: 59, right: 0, bottom: 34, left: 0 },
         hierarchy: {
           node: {
             $: { class: "XCUIApplication" },
@@ -209,6 +210,7 @@ describe("ObserveScreen", function() {
         expect(result.screenIdentity?.components.bundleId).toBe("com.apple.reminders");
         expect(result.screenIdentity?.components.navigationTitle).toBe("New Reminder");
         expect(result.screenIdentity?.components.focusedElementId).toBe("Quick Entry Title Field");
+        expect(result.systemInsets).toEqual({ top: 59, right: 0, bottom: 34, left: 0 });
       } finally {
         resetObserveCacheStore();
       }

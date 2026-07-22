@@ -9,7 +9,7 @@
 - CtrlProxy's accessibility hierarchy provides screen dimensions and typed window insets. On Android R and later this includes visible and stable system bars, cutouts, gesture insets, mandatory gesture insets, and tappable-element insets; older devices use named Android resource fallbacks.
 - The legacy observation `dumpsys window` and `wm size` collectors have been removed.
 - In parallel, the observer collects rotation, wakefulness, and back stack while view hierarchy is fetched separately.
-- Active-window attribution is derived from CtrlProxy hierarchy metadata; observation does not fall back to `dumpsys window`.
+- Active-window attribution is normally derived from CtrlProxy hierarchy metadata. Before CtrlProxy supplies either foreground-activity or hierarchy-package metadata, observation makes one narrow `dumpsys window` bootstrap fallback; it does not use legacy dumpsys collectors for inset or screen-size data.
 - View Hierarchy
   - The best and fastest option is fetching it via the pre-installed and enabled accessibility service. This is never
     cached because that would introduce lag.

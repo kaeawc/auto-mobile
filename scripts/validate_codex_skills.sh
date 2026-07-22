@@ -180,7 +180,8 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
     agents_skill_files+=("$wrapper_file")
   done < <(find "${AGENTS_SKILLS_DIR}" -mindepth 1 -maxdepth 1 | sort)
 
-  for file in "${agents_skill_files[@]}"; do
+  # bash 3.2 errors on "${arr[@]}" for an empty array under `set -u`.
+  for file in ${agents_skill_files[@]+"${agents_skill_files[@]}"}; do
     rel_path="${file#"${PROJECT_ROOT}/"}"
     dir_name="$(basename "$(dirname "$file")")"
 
@@ -230,6 +231,31 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
       errors=1
     fi
 
+    # The wrapper duplicates the canonical description rather than pointing at
+    # it, so it drifts silently: Codex surfaces the wrapper's copy while the
+    # canonical skill says something else. Compare by value, not by raw line.
+    if [[ -f "${PROJECT_ROOT}/${canonical_path}" ]]; then
+      canonical_desc_line="$(awk '
+        NR == 1 && $0 != "---" { exit }
+        NR > 1 && $0 == "---" { exit }
+        NR > 1' "${PROJECT_ROOT}/${canonical_path}" \
+        | sed -n 's/^description:[[:space:]]*//p' | head -n 1)"
+      # Byte-identical, not semantically-equal. Decoding YAML scalars by hand kept
+      # producing false drift (escaped quotes, bash 3.2 replacement semantics,
+      # literal \n ordering), and the repo bans hand-rolled parsing of structured
+      # formats. The wrapper is generated from the canonical, so requiring the
+      # exact same line is both achievable and stricter.
+      canonical_description="$(trim "$canonical_desc_line")"
+      if [[ -n "$canonical_description" ]] \
+        && [[ "$wrapper_description" != "$canonical_description" ]]; then
+        echo "[ERROR] ${rel_path}: frontmatter description differs from ${canonical_path}" >&2
+        echo "        copy the canonical description line verbatim, including its quoting" >&2
+        echo "        canonical: ${canonical_description}" >&2
+        echo "        wrapper:   ${wrapper_description}" >&2
+        errors=1
+      fi
+    fi
+
     # Codex reads interface metadata next to the discoverable wrapper, not the
     # canonical source skill. If the canonical skill ships agents/openai.yaml,
     # the wrapper must colocate an equivalent one so the display name/default
@@ -245,12 +271,17 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
         errors=1
       else
         validate_openai_yaml "$wrapper_openai_yaml" "$dir_name"
+        # Same drift class as the description above: two copies, no pointer.
+        if ! cmp -s "$canonical_openai_yaml" "$wrapper_openai_yaml"; then
+          echo "[ERROR] ${wrapper_openai_yaml#"${PROJECT_ROOT}/"}: differs from ${canonical_openai_yaml#"${PROJECT_ROOT}/"}" >&2
+          errors=1
+        fi
       fi
     fi
   done
 fi
 
-for skill_name in "${skills_with_openai_metadata[@]}"; do
+for skill_name in ${skills_with_openai_metadata[@]+"${skills_with_openai_metadata[@]}"}; do
   wrapper_path="${AGENTS_SKILLS_DIR}/${skill_name}/SKILL.md"
   if [[ ! -f "$wrapper_path" ]]; then
     echo "[ERROR] .agents/skills: missing Codex discovery wrapper for ${skill_name}" >&2
@@ -311,14 +342,14 @@ done < <(
   ' "${AGENTS_FILE}"
 )
 
-for path in "${skill_paths[@]}"; do
+for path in ${skill_paths[@]+"${skill_paths[@]}"}; do
   if ! grep -Fxq "$path" <<< "$(printf '%s\n' "${agents_entries[@]-}")"; then
     echo "[ERROR] AGENTS.md: missing skill entry for ${path}" >&2
     errors=1
   fi
 done
 
-for path in "${agents_entries[@]}"; do
+for path in ${agents_entries[@]+"${agents_entries[@]}"}; do
   if ! grep -Fxq "$path" <<< "$(printf '%s\n' "${skill_paths[@]-}")"; then
     echo "[ERROR] AGENTS.md: references non-local or missing skill ${path}" >&2
     errors=1

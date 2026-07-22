@@ -1,6 +1,6 @@
 ---
 name: check-ci
-description: "Use this workflow skill for PR CI triage: inspect failing or pending checks, mergeability, and related review feedback, then reproduce likely failures locally and summarize next steps."
+description: "Use this workflow skill for PR CI triage: inspect pending and failed checks for the exact PR head, read live or completed job logs and artifacts, classify causality, reproduce likely failures locally, and summarize the safe next step."
 ---
 
 # Check CI
@@ -12,13 +12,34 @@ Use this for PR health checks and failure triage.
 
 ## Workflow
 
-1. Resolve the PR number from an argument or the current branch with `gh pr view --json number`.
-2. Inspect checks with `gh pr checks <pr>` and save verbose output to `scratch/check-ci-<pr>.log` when needed.
-3. If checks failed, fetch failed-job logs with `gh run view <run-id> --log-failed`.
-4. Check mergeability and branch drift with `gh pr view --json mergeable,mergeStateStatus` plus local `git fetch origin`.
-5. Gather review comments and unresolved feedback that may explain the failing state.
-6. Reproduce the most likely failure locally using the narrowest relevant command.
-7. Summarize current state, root cause, local repro status, and next fix steps.
+1. Resolve the PR number and snapshot `headRefOid`, `baseRefOid`, mergeability, and merge
+   state. Use that SHA for every subsequent query. An empty legacy combined status is
+   inconclusive, not green.
+2. Collect `gh pr checks <pr> --json name,state,bucket,link,workflow` plus paginated
+   `repos/<owner>/<repo>/commits/<head-sha>/check-runs`. Branch on `bucket`: only `fail` is a
+   failure — `skipping` and `cancel` are not. Flag duplicate check names with different
+   conclusions on the same head (a cancelled older run beside a successful newer one); the
+   stale one is what parks automerge.
+3. Enumerate runs for that head SHA, then each run's jobs. Ignore runs for older SHAs.
+   Queued and in-progress jobs stay pending — they are never implicitly green.
+4. For a completed failed job: `gh run view <run-id> --job <job-id> --log-failed`, or
+   `gh api repos/<owner>/<repo>/actions/jobs/<job-id>/logs` — the latter works as soon as
+   that job finishes, even while sibling jobs still run, so it does not wait on the slowest
+   leg. For a job still executing, `gh api .../actions/jobs/<job-id>` returns per-step status
+   naming the running or failed step. `gh api --follow` does not exist; use `--paginate`.
+5. If the log is truncated or lacks the failure body, list the run's artifacts and read the
+   relevant one. If `gh run download` is unauthorized, state that exact blocker — do not
+   infer a root cause from partial evidence.
+6. Classify every red result as PR-caused, pre-existing on main, transient/infrastructure, or
+   unproven, grounded in the job log, the changed paths, and current `origin/main`. Re-run a
+   job only when the evidence supports transience. Never change code for an unrelated or
+   unproven failure.
+7. Reproduce a PR-caused failure locally with the narrowest authoritative command.
+8. After any push, restart at step 1 — every check, thread, and comment was scoped to the
+   previous SHA.
+
+For PR discussion and review-thread triage, use `github-pr-feedback`; for the underlying gh
+and GraphQL mechanics, `github-cli`.
 
 ## Repo Validation Mapping
 
@@ -30,8 +51,9 @@ Use this for PR health checks and failure triage.
 
 ## Output Structure
 
-- Current CI state
-- Failing checks and likely root cause
+- Current CI state, scoped to the head SHA
+- Run/job ledger, including pending jobs and duplicate or stale checks
+- Failing checks, the evidence, and the causal classification
 - Mergeability or conflict status
-- Review feedback that is still actionable
+- Artifact or authorization limitations
 - Recommended next action

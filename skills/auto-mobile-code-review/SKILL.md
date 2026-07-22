@@ -1,81 +1,456 @@
 ---
 name: auto-mobile-code-review
-description: Use this workflow skill to review an AutoMobile change (a PR number or the current branch diff) the way this repo demands — ground every finding in file:line, reproduce before asserting, separate real bugs from daemon-session/environment artifacts, prefer reusing existing repo helpers and conventions over new code, and catch the regression or false-negative a fix can introduce. Deliver few verified findings, not many speculative ones.
+description: Use this workflow skill to review an AutoMobile change (a PR number or the current branch diff) the way this repo demands — check the PR's real CI, merge and base state first, then run diff-sized review lenses (two fixed, one generated) covering runtime behavior and delivery/enforcement, grounding every finding in file:line and reproducing before asserting. Never posts to GitHub; resolves review threads only on a PR we authored and are actively working.
 ---
 
 # AutoMobile Code Review
 
-Review a change — a PR (its number passed as the argument) or, with no argument, the current branch's diff vs `origin/main` — for correctness, regressions, and fit with AutoMobile's architecture and conventions. The deliverable is a **verified, actionable** review.
+Review a change — a PR (its number passed as the argument) or, with no argument, the current branch's
+diff vs `origin/main`. Few verified findings beat many plausible ones.
 
-## What a review is for
+**Never post to GitHub.** No review comments, reviews, or summaries. Report findings in the
+session. The only permitted GitHub write is resolving a review thread, under the conditions in
+*Working our own PR*.
 
-The verification discipline below is the floor, not the point. Automation and planning should be catching defects; spend the review on what they can't — understanding the change and helping the author. Approach it with curiosity, not correction:
+Review against the author's intent and the issue the change serves, not the diff in isolation.
+Ask rather than assert when genuinely unsure — sometimes you missed something. Name what's
+genuinely good in a sentence; never manufacture it.
 
-- **Read for the author's intent first.** Work out what they were solving and how they weighed the alternatives before you judge the code — the comment should show you got it. Tie the change back to the issue/story it serves and review against *that*, not the diff in isolation.
-- **A question often beats an assertion.** "What ruled out reusing `X` here?" surfaces more than "use `X`" — and sometimes the answer is that you missed something. Lead with the question when you're genuinely unsure.
-- **Name what's genuinely good, briefly.** A real simplification, the correct hard call, clear product value — say so in a sentence. Recognition is signal; skip it when it isn't earned, and never manufacture it.
-- **The findings still have to be verified.** None of this softens the bar below: ground every finding, reproduce before asserting, and deliver a few checked findings over many plausible ones.
+## Step 0 — Resolve the diff base
 
-## Scope the diff
+Everything below reuses `$BASE`, so establish it first. Which base is correct depends on the
+mode, and getting it wrong silently scopes the review to the wrong commits:
 
-- `git fetch origin main` first — always review against **latest main**, not a stale base.
-- For a PR number: `gh pr view <n> --json title,body,headRefOid,files,closingIssuesReferences`, `gh pr diff <n>`, then read the changed files on disk and the **issue it claims to close**. A PR's reviewed head can differ from what squash-**merged**, and a "fix" PR can merge **test-only** — check `git log origin/main` for what actually landed.
-- No argument: `git diff origin/main...HEAD`, then read the changed files in full (the hunk lies by omission).
-- Use the `github-cli` and `pr-analysis` skills for the mechanics of fetching PR metadata and posting review comments.
+```bash
+git fetch origin main
 
-## Review principles (verify, don't speculate)
+# PR mode — the local checkout is usually NOT the PR branch, so HEAD is unrelated to it.
+# The leading + forces the update: without it, re-fetching after a force-push is rejected
+# non-fast-forward and Step 0 fails before refreshing anything.
+git fetch origin "+pull/<PR>/head:refs/remotes/pr/<PR>"
+BASE=$(git merge-base "refs/remotes/pr/<PR>" origin/main)
+DIFF_ARGS=("$BASE" "refs/remotes/pr/<PR>")   # two endpoints: the PR head, not your tree
 
-1. **Ground every finding in code.** Cite `file:line` and read the surrounding context — never assert from the diff text or memory alone.
-2. **Reproduce before asserting a bug.** Run it: `sqlite3` the TCC db, query `~/.auto-mobile/auto-mobile.db`, run the `cmd locale` subcommand, drive the tool on a device. If you can't run it, label the finding **unverified** and give the exact repro. (Reproduce locally — e.g. `sqlite3 .mode json` "extra argument", invalid `cmd locale set-locales` — before filing.)
-3. **Separate real bugs from environment/session artifacts.** A tool failing with `Session not found` is almost always the daemon-restart **session wedge**, not a bug in that tool — confirm with a second, unrelated tool. A slow tool call may be the ctrlproxy slow-network runner download. Disambiguate before filing.
-4. **Check provenance + current state.** `git blame` the lines: don't blame the PR for pre-existing code. `git log origin/main -- <file>` to see if it's already fixed or superseded — inspect **latest main**, not just the diff.
-5. **For a fix PR, verify it closes the ISSUE, not just the symptom — and name the false-negative it introduces.** Ask "what does this change stop catching?" e.g. narrowing daemon detection to the pid-file PID kills a false positive but stops detecting a live cross-worktree rogue daemon; a `success ?? true` default reports a non-render as a successful highlight.
-6. **Prefer reuse + existing conventions over new code.** Find the existing helper first and recommend *that* (see gotchas below).
-7. **Know which layer owns a field.** The CtrlProxy runner emits the **raw** hierarchy; the TS layer **adds** fields (the `view-id` content-hash, the duplicated `elements` arrays). For a claim about the runner, verify against the runner's `connected` handshake `supportedCommands` / raw hierarchy, not the post-processed TS output.
-8. **Tests must follow repo conventions and prove the behavior.** Interface + Fake + FakeTimer, no real device/network, <100ms per unit test. Flag a fix lacking the test the issue asked for, and flag tests **narrowed to a new contract to pass** rather than proving the original behavior holds.
+# Branch mode — one endpoint, so the diff includes uncommitted work. Naming HEAD as a
+# second endpoint would silently drop every working-tree edit.
+BASE=$(git merge-base HEAD origin/main)
+DIFF_ARGS=("$BASE")
+```
 
-## Architecture (for grounding)
+Use `"${DIFF_ARGS[@]}"` for every diff below. The distinction is not cosmetic: in branch mode a
+two-endpoint diff omits exactly the uncommitted changes the review is supposed to cover.
 
-- **MCP server (`src/`, TS/Bun)** forwards tool calls to a **daemon** (`src/daemon/`) that owns a **DevicePool** and per-platform **CtrlProxy runners**: the Android accessibility-service APK (`android/control-proxy`) and the iOS XCUITest runner (`ios/control-proxy`), each speaking a WebSocket protocol (iOS on `:8765`). Apps under test may embed the **AutoMobile SDK** (`android/auto-mobile-sdk`, `ios/auto-mobile-sdk`) for in-app capabilities (DB inspection, network mock, highlight overlay) relayed through the runner.
-- Tools are registered in `src/server/index.ts`. The IDE/test-plan artifact `schemas/tool-definitions.json` is **generated** by `scripts/generate-tool-definitions.ts`.
+Both obvious branch-mode alternatives are wrong in a common case: `origin/main...HEAD` (three
+dots) is committed work only and reports **zero files** against a dirty tree, silently scoping
+the review to nothing; `git diff origin/main` (no dots) picks up uncommitted work but, when the
+branch is behind main, folds main's newer commits in as reverse-diffs.
 
-## Repo-specific gotchas to weigh (hard-won)
+## Step 1 — Establish the change's real state, before reading code
 
-- **Daemon lifecycle:** one per-UID socket + pidfile shared across worktrees, **per-connection** session — restarting the daemon **wedges** connected MCP clients (`Session not found`, no auto-recovery). Live-daemon detection should scan the full `ps` table for `--daemon-mode` and filter by **liveness** (catches cross-worktree rogues, drops dead probes), **not** narrow to the pid-file PID. Takeover must escalate SIGTERM→SIGKILL (daemons ignore SIGTERM). `findAllDaemonProcesses` should **fail closed** (throw), not return `[]`, on a `ps` error.
-- **CtrlProxy capability gate:** every tool is gated by the runner's `connected` handshake `supportedCommands`. The daemon **downloads a pinned release runner** (version-agnostic cache), so local runner changes need overrides — Android: `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` / `AUTOMOBILE_CTRL_PROXY_APK_PATH`; iOS: `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`. When iOS runner source changes, the release + checksum registry (`src/constants/release.ts`) must be re-cut or the feature is undeliverable. A mismatch between advertised `supportedCommands` and what TS routes is a real bug (e.g. `pinchOn` refuses iOS while the runner advertises `request_pinch`).
-- **Release-build SDK gating:** debug-only SDK behavior (network-mock enforcement, DB inspector, highlight overlay) MUST be `#if DEBUG`-gated. Verify a **release** build can't ship it — check the enforcement path, not just the rule-setting route.
-- **Schema drift:** `schemas/tool-definitions.json` is generated and silently drifts. The generator must register the **same** `register*Tools` categories as `src/server/index.ts`; flag any production tool missing from the artifact (and any gated/daemon-only tool falsely advertised). No CI drift guard exists.
-- **Relative paths under a detached daemon:** after the daemon `chdir`s to a stable cwd, a relative path arg MUST go through `resolvePathFromDaemonLaunchWorkingDirectory`. Grep for raw `fs.stat`/`copyFile`/`readFile` on a user-supplied relative path.
-- **Per-device singletons:** managers use `getInstance(device)` keyed by deviceId; an instance-level cache persists across calls — verify a cache fix persists where it's read.
-- **Plan vs MCP tool lookup:** plan/criticalSection execution must resolve via `getToolForPlan()`, not `getTool()` (the MCP-visibility gate) — otherwise `planExecutable`-but-hidden tools won't resolve inside a plan.
-- **Conditional schemas:** the flattener emits JSON-Schema `if/then` (e.g. `postNotification` requires `appId` iff iOS). Verify the host accepts it and that `appId` aliases (`bundleId`/`packageName`) are coerced, including nested (`systemTray.notification.appId`).
-- **Huge outputs:** `observe`/action results carry the full hierarchy (~25k tokens); `elements` duplicates the tree. Summarize — never paste raw hierarchies. Save long output under `scratch/`.
-- **Use the right tool form:** `sqlite3 -json <db> "<one statement>"`, NOT `.mode json` + SQL combined in one positional arg (errors "extra argument").
+Most escaped defects here were already red on the PR itself. These checks take seconds and
+frequently end the review.
+
+```bash
+gh pr checks <N> --json name,state,bucket,link
+gh pr view <N> --json mergedAt,mergeable,mergeStateStatus,baseRefOid,headRefOid,autoMergeRequest,statusCheckRollup
+```
+
+- **Any `failure` blocks — required or not.** Automerge lands PRs over non-required failures:
+  [#3969](https://github.com/kaeawc/auto-mobile/pull/3969) auto-merged with `Build Xcode Projects`, `XCTestRunner Simulator Tests`, and `iOS Build`
+  red, the pbxproj drift check having worked exactly as designed while the merge gate never
+  consulted it.
+- **Unfinished checks with automerge armed block equally.** [#4088](https://github.com/kaeawc/auto-mobile/pull/4088) merged five seconds before
+  `Swift Packages (Xcode 26.5)` concluded failure. For a merged PR, verify gates concluded
+  *before* the merge:
+  ```bash
+  gh api repos/kaeawc/auto-mobile/commits/<headRefOid>/check-runs?per_page=100 \
+    --jq '.check_runs[] | "\(.name)\t\(.conclusion)\t\(.completed_at)"'
+  ```
+  Any `completed_at` at or after `mergedAt` means the gate did not gate.
+- **Green is only as current as the base it ran on.** Use the Step 0 `$BASE` — the merge-base
+  — rather than `baseRefOid`. `$BASE` is computed from the commit graph, so it answers the
+  question that actually matters (what was this head built on top of?) without depending on
+  when GitHub refreshes a metadata field, it stays correct when a branch integrates main via a
+  *merge* rather than a rebase, and it works identically in branch mode, where there is no
+  `baseRefOid` at all. In practice the two agree — measured on
+  [#4106](https://github.com/kaeawc/auto-mobile/pull/4106) (both `abd432675`, 11 behind) and
+  [#4041](https://github.com/kaeawc/auto-mobile/pull/4041) (both `333c9923e`, 15 behind) — but
+  only one of them is correct by construction.
+
+  Cross-check against GitHub's own count, which needs no interpretation at all:
+  ```bash
+  gh api "repos/kaeawc/auto-mobile/compare/main...<headRefOid>" --jq '.behind_by'
+  ```
+  If `$BASE` differs from `origin/main` (equivalently, `behind_by > 0`):
+  ```bash
+  # --format= suppresses commit messages, so only paths print.
+  git log "$BASE"..origin/main --name-only --format= -- \
+    .github/workflows scripts/all_fast_validate_checks.sh \
+    android/build.gradle.kts android/gradle/libs.versions.toml \
+    eslint.config.* scripts/typecheck-baseline.txt eslint-suppressions.json | sort -u
+  ```
+  Any hit means rebase-and-re-run, not approval. [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) went green at 05:44, [#4005](https://github.com/kaeawc/auto-mobile/pull/4005) turned on the
+  detekt gate at 05:48, [#4016](https://github.com/kaeawc/auto-mobile/pull/4016) auto-merged at 05:49 — reddening main. Its `Fast Validation` job
+  had no `Run detekt` step at all.
+- **Run the tests the diff changed.** [#4070](https://github.com/kaeawc/auto-mobile/pull/4070) landed a deterministically-red assertion because a
+  refactor moved argv construction and updated one of two sibling tests. Use the Step 0 `$BASE`, so uncommitted test edits are included, and guard the empty case explicitly rather
+  than relying on `xargs -r` (GNU-only on older macOS and other BSDs):
+  ```bash
+  changed_tests=$(git diff --name-only "${DIFF_ARGS[@]}" -- 'test/**/*.test.ts')
+  [ -n "$changed_tests" ] && bun test $changed_tests
+  ```
+
+Pull the failing *job's* log, not the whole run — a finished job's log is readable while the run
+continues (see `github-cli`).
+
+**Classify each red result before treating it as a finding**: PR-caused, pre-existing on main,
+transient/infrastructure, or unproven — grounded in the job log, changed paths, and current
+`origin/main`. Never recommend a code change for an unrelated or unproven failure, but do name
+it in the summary. Flag one check name appearing twice on the head SHA with different
+conclusions: a stale cancelled run beside a fresh green one silently parks automerge.
+
+## Step 2 — Scope and size the diff
+
+`git fetch origin main` first. With a PR: `gh pr view <N> --json
+title,body,headRefOid,files,closingIssuesReferences`, `gh pr diff <N>`, then read the changed
+files on disk and the issue it claims to close — a reviewed head can differ from what
+squash-**merged**, and a "fix" PR can merge test-only, so check `git log origin/main` for what
+actually landed. With no argument, review committed *and* uncommitted work; read changed files
+in full, since the hunk lies by omission.
+
+Size the diff with the Step 0 `${DIFF_ARGS[@]}`, excluding lockfiles and generated
+artifacts:
+
+```bash
+git diff --numstat "${DIFF_ARGS[@]}" -- . \
+  ':(exclude)**/*.lock' ':(exclude)bun.lockb' ':(exclude)schemas/**' \
+  ':(exclude)**/project.pbxproj' ':(exclude)eslint-suppressions.json' \
+  | awk '{a+=$1; d+=$2} END {print a+d" changed lines across "NR" files"}'
+```
+
+Reuse `${DIFF_ARGS[@]}` for every later diff, sanity-check the file count, and report how far behind main
+the branch is (`git rev-list --count HEAD..origin/main`) — Step 1's stale-base check applies to
+branch reviews too.
+
+## Step 3 — Pick lenses by size
+
+A lens is a review pass with a fixed field of view. Run each as a **separate subagent**, then
+merge and dedupe yourself.
+
+- **Over 100 changed lines** → all three: Runtime Behavior, Delivery & Enforcement, and one
+  generated lens (Step 6).
+- **100 or fewer** → skip the generated lens. Run whichever constant lens the diff belongs to;
+  both when it straddles them (a `src/` change that also edits a workflow or guard script always
+  straddles).
+- Trivial diffs — version bump, comment, string with no behavioral reach — get one lens and a
+  short answer.
+
+Brief each subagent with: the diff, the issue it closes, *Verification discipline* below, that
+lens's checklist verbatim, and this isolation rule.
+
+### Lens subagents must not mutate the working tree
+
+Not advisory. A lens told to "review PR #N" will reach for `git checkout` and destroy the
+invoking session's state; this repo has ~100 worktrees on one object store, so the blast radius
+exceeds the reviewer. Put this in every brief:
+
+> Do not run `git checkout`, `git switch`, `git stash`, `git reset`, `git restore`, or
+> `git branch -f` in this worktree. It is not yours and other work depends on its state.
+
+Read PR content without checking anything out:
+
+```bash
+gh pr diff <N>                                       # the diff
+gh pr view <N> --json files,title,body               # metadata
+git fetch origin pull/<N>/head:refs/remotes/pr/<N>   # remote-tracking ref, no checkout
+git show refs/remotes/pr/<N>:<path>                  # any file at the PR head
+```
+
+A lens needing a populated tree makes its own and removes it:
+
+```bash
+mkdir -p scratch
+git worktree add "scratch/lens-<N>" refs/remotes/pr/<N>
+git worktree remove --force "scratch/lens-<N>"
+```
+
+A fresh worktree has **no `node_modules`**, so anything resolving an npm dependency (the
+TypeScript-AST guards under `scripts/`, `bun test`) fails there for environmental reasons that
+look exactly like real findings; symlinking `node_modules` in is not reliably enough either.
+Install them in the throwaway worktree instead:
+
+```bash
+git worktree add "scratch/lens-<N>" refs/remotes/pr/<N>
+(cd "scratch/lens-<N>" && bun install --frozen-lockfile)
+```
+
+Do **not** copy a PR-head file into the caller's checkout and restore it afterwards. That
+mutates a tree you do not own — it can clobber uncommitted work in branch mode, and if the check
+aborts partway the file is left modified — which is the very thing this section exists to
+prevent. If installing is too slow for the check at hand, label the finding **unverified** and
+give the exact command to run, rather than mutating someone else's worktree to get an answer.
+
+## Step 4 — Lens A: Runtime Behavior
+
+*Does the changed code do the thing, on every path a user can reach?*
+
+- **Reachability.** The most common miss here: new logic added to one converter/executor while
+  the public tool call routes through another. Trace each new function or branch *backwards* to
+  the MCP entry point and prove a user request reaches it — grep for the caller. Seen as heading
+  promotion added to `CtrlProxyHierarchy.convertToViewHierarchyResult` while `observe` goes
+  through `ViewHierarchy.getiOSViewHierarchy` → `convertXCTestHierarchy`, and a
+  VoiceOver-unsupported result made unreachable because `lookFor` swipes divert to
+  `ScrollUntilVisible`.
+- **Ordering around `await`.** Read every added `await` and ask what happens during it: a
+  listener or error handler registered *after* the first await loses early events; an await
+  inserted between a check and its `set` opens a TOCTOU window.
+- **Error and degradation paths.** Spawn failure, EOF, malformed cached metadata, download
+  failure, abort mid-flight. Every `catch` must throw `ActionableError`, log-then-return a typed
+  failure, or log-at-debug-and-continue *with a comment saying why it's safe*
+  (`CLAUDE.md`/`AGENTS.md`). Flag silent swallows and optimistic success (`success ?? true`).
+- **Cross-layer shape contracts.** Runners emit the **raw** hierarchy; the TS layer *adds*
+  fields. Android pushes `AccessibilityHierarchy` where `hierarchy` is already the root, unlike
+  the MCP wrapper shape. Code walking one shape and receiving the other fails silently — verify
+  which the actual caller passes.
+- **Overrides, injection, persistence.** Does an injected data-dir/env override survive the
+  changed path, or does a default overwrite it? Per-device `getInstance(device)` singletons hold
+  instance-level caches — verify a cache fix persists *where it is read*.
+- **Concurrency and identity.** Two concurrent calls for one device; cleanup deleting a
+  *replacement* resource; a callback firing for a superseded encoder. Guard by identity, not
+  presence.
+- **Process spawning.** `spawn(..., { shell: true })` concatenates `args` for the shell instead
+  of preserving argv boundaries, so any dynamic value — an AVD name, a path — can carry shell
+  syntax. Recurred all week across Windows `.bat`/`cmd` paths. Prefer a non-shell executable
+  path; otherwise quote explicitly.
+- **Relative paths under the detached daemon.** The daemon `chdir`s to a stable cwd ([#2564](https://github.com/kaeawc/auto-mobile/pull/2564)), so
+  user-supplied relative paths must go through `resolvePathFromDaemonLaunchWorkingDirectory`.
+  Grep for raw `fs.stat`/`readFile`/`copyFile` on an argument-derived path — this caught
+  `putAppFile`'s `sourcePath`.
+
+## Step 5 — Lens B: Delivery & Enforcement
+
+*Does the change ship, and does the thing enforcing it work?* A correct-looking diff here
+routinely ships nothing.
+
+- **Runner source changed ⇒ re-cut the release artifact.** If the diff touches
+  `ios/control-proxy/Sources/**` or `android/control-proxy/**`, the daemon still downloads the
+  pinned released runner. Unless `src/constants/release.ts` checksums change in the same PR (or
+  a re-cut is explicitly sequenced), the feature is **undeliverable** and the issue is not
+  closed. Blocking. Check with the Step 2 `$BASE`, not `origin/main...HEAD`, so an uncommitted
+  runner edit still trips it: `git diff --name-only "${DIFF_ARGS[@]}" | grep -E
+  '^(ios|android)/control-proxy/'`, then whether `src/constants/release.ts` is in the same diff.
+- **New Swift file ⇒ regenerate the Xcode project.** A file under `ios/control-proxy/Sources/**`
+  absent from the committed `ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj` is not
+  compiled on a normal checkout. `grep -c '<NewSymbol>'` against the pbxproj returning zero means
+  `xcodegen generate` was not run and committed.
+- **Generated artifacts drift silently.** `schemas/tool-definitions.json` comes from
+  `scripts/generate-tool-definitions.ts`, whose registered `register*Tools` categories must match
+  `src/server/index.ts`. Flag production tools missing from the artifact and daemon-only tools
+  falsely advertised. The flattener also emits JSON-Schema `if/then` (`postNotification` requires
+  `appId` iff iOS) — verify the host *accepts* it, not just that it generates, and that `appId`
+  aliases (`bundleId`, `packageName`) are coerced, including nested
+  `systemTray.notification.appId`.
+- **Debug-only SDK behavior must be `#if DEBUG`-gated on the enforcement path.** Network-mock
+  enforcement, DB inspector, and highlight overlay must be unshippable in release. Check the
+  enforcement short-circuit, not the rule-setting route — the iOS network mock had its setter
+  gated while enforcement sat outside `#if DEBUG`.
+- **A new guard must actually guard.** The `scripts/check-*` ratchets are the single largest
+  source of accepted findings:
+  - Does the pattern match **every** banned form? Template literals (`` `simctl ${x}` ``),
+    array/argv form, multiline argv, `exec`/`execSync`, `spawnSync`, destructured
+    `const {execFile} = require('child_process')`, and `/bin/sh -c` wrappers are what it has
+    repeatedly missed. Write a hostile example of each and run the guard against it.
+  - Does it **fail closed**? A guard that cannot compute its diff base must exit non-zero.
+    `origin/main` is absent in a depth-1 `actions/checkout`, so one that assumes it passes
+    silently on every PR.
+  - Is it **registered** in `scripts/all_fast_validate_checks.sh` via `add_check` with a
+    **unique** name? Two checks sharing a name collide on `$run_dir/${name}.log`.
+  - Is its file-selection predicate too wide? `check-android-emulator-boundary.ts:81` selects
+    with `/emulator/i` against the whole source *including comments*, so adding that word in a
+    comment pulls a file into scope and flags pre-existing code.
+- **CI job wiring**, when the diff touches `.github/workflows/**`:
+  - A new job absent from the required roll-up removes a merge blocker rather than adding one —
+    trace it to the gate job's `needs:`.
+  - Does the job install what the changed script needs? A BATS test shelling into a Bun script
+    fails on a `bats-tests` job that never sets up Bun.
+  - Do `if:` conditions still carry their guard? `!cancelled()` without the build gate re-enables
+    a leg meant to be gated.
+  - Flags and matrix values must survive YAML → shell — a JSON-array input joined into a string,
+    or gradle flags losing their spaces, silently drops every flag. Hand-simulate the quoting; a
+    GitHub expression pasted into a quoted shell string fails differently from one passed as an
+    argument.
+  - **A new path filter can silently un-gate a job.** When a job gains `if:
+    needs.detect-changes.outputs.<x> == 'true'`, compare the `dorny/paths-filter` globs against
+    the paths the script *it runs* treats as significant. [#4026](https://github.com/kaeawc/auto-mobile/pull/4026) gated detekt on a filter omitting
+    `android/gradle/wrapper/**`, which `scripts/android/detekt_scope.sh` treats as a full-scope
+    trigger — so a wrapper bump skipped detekt entirely instead of failing open.
+- **Post-merge-only workflows are invisible to PR CI**: `merge.yml`, `nightly.yml`,
+  `dead-code-detection.yml`, `release.yml`, `prepare-release.yml`,
+  `record-screenshot-baselines.yml`. The reusable builders `build-control-proxy-apk.yml`,
+  `build-ctrl-proxy-ios-ipa.yml`, and `build-video-server-jar.yml` are `workflow_call` only,
+  referenced solely by nightly/prepare-release/release, so APK/IPA signing, jar reproducibility,
+  and sha256 computation are **never** exercised pre-merge. Merge-only jobs with no PR
+  counterpart: `publish-android-libraries-snapshot`, `deploy-docs`, the coverage jobs,
+  `benchmark-context-thresholds`, `update-readme-badges`; ktfmt and detekt run full-tree on merge
+  but scoped or path-gated on PRs. When the diff touches `.github/**` or
+  `scripts/(ci|android|ios)/**`, reason statically and confirm the destination leg is green
+  (`gh run list --workflow=nightly.yml -L 5`) — landing on an already-red leg hides the
+  regression.
+- **New exports need a consumer.** `dead-code-detection.yml` is weekly-only and has been red for
+  months (271 findings against a threshold of 10; twelve duplicate issues filed and closed), so
+  it gates nothing. For each new exported symbol under `src/`:
+  `grep -rn '\bN\b' src/ test/ --include='*.ts' | grep -v '<defining file>'`. Zero hits widens
+  that gap invisibly.
+- **Baselines are one-way ratchets.** A grown `scripts/typecheck-baseline.txt` or
+  `eslint-suppressions.json`, or a rule folded into a shared selector where its budget can be
+  traded for a different violation, defeats the gate.
+- **Tests must prove behavior, not implementation.** Flag a fix lacking the test the issue asked
+  for; a test narrowed to a new contract so it passes; a workflow-YAML assertion that greps text
+  instead of parsing YAML; a test hard-coding a value the thing under test generates. Unit tests:
+  interface + fake + `FakeTimer`, no real device or network, under 100ms, never resolving the
+  real file-backed `getDatabase()`.
+- **Docs are part of the change.** Capability added or removed ⇒ the docs advertising it move
+  too. Stale claims in `docs/` were a recurring accepted finding.
+
+## Step 6 — The generated lens
+
+Diffs over 100 lines only. First name, in a sentence or two, what Lens A and Lens B
+**structurally under-weight for this diff**, then write the third lens to cover exactly that. It
+is the complement of the two constants, not a free-floating third opinion.
+
+- Mostly Kotlin/Swift on-device → device lifecycle/threading, API-level gating, `#if DEBUG`
+  release gating.
+- A refactor centralizing call sites → the constants check the new center, not whether **every**
+  old call site moved and behaves identically; make it an exhaustive call-site sweep.
+- DB/migration → transaction enlistment, atomic upsert vs read-modify-write races, column
+  defaults, retention.
+- Protocol/wire-format → non-finite numbers, overflow, decode error attribution, exact wire
+  strings the other side regex-matches.
+- TS layer plus a runner → **version skew**: a new TS layer against the old pinned runner (and
+  vice versa) is the normal state between re-cuts. Degrade or break?
+- Streaming/media/long-lived resources → backpressure on stdin/stdout, unbounded buffers,
+  teardown on every exit path, EOF.
+- Cross-platform (`.bat`/`cmd`, path separators, `os.tmpdir`) → Windows and the macOS CI leg
+  versus local Linux; BSD vs GNU `grep`, `sed`, `readlink`, `date`.
+
+Report which third lens you chose and why. If you cannot name a genuine gap, say so and run
+two — a manufactured third lens is worse than none.
+
+## Verification discipline
+
+Give this to every lens subagent.
+
+1. **Ground every finding in code.** Cite `file:line`; open the file and read around it. Never
+   assert from diff text or memory.
+2. **Reproduce before asserting.** If you can't, label it **unverified** and state exactly how to
+   verify.
+3. **Before you call a claim refuted, check that your test could have found it.** Two questions,
+   both of which have burned this repo:
+   - *Does the test discriminate?* If both the claim and its negation predict what you observed,
+     you learned nothing. A sample of three PRs that were all rebased cannot distinguish
+     `baseRefOid` from the merge-base, because those only diverge when a branch integrates main
+     via a merge.
+   - *Does your environment match the claim's scope?* A claim about "macOS/BSD" is not tested by
+     one macOS 15.6 laptop, and a claim about a CLI's behavior is not settled by the one version
+     you happen to have. State the version or platform you tested, so the limit is visible.
+4. **Refuting costs more than accepting, so it carries the higher burden.** Wrongly rejecting a
+   real finding leaves a live bug; wrongly accepting a bad one costs a small unnecessary change.
+   When the evidence is thin, take the change.
+5. **A wrong mechanism does not make a wrong suggestion.** Verify the claim and evaluate the
+   recommendation *separately* — a reviewer can be wrong about why and right about what. Twice
+   this week a finding's stated mechanism was demonstrably false while its proposed change was
+   the better design anyway (`xargs -r`, `baseRefOid`). If the suggestion stands on its own
+   reasoning, take it and say plainly that the stated reason did not hold.
+6. **Separate real bugs from environment artifacts.** `Session not found` is almost always the
+   daemon-restart session wedge ([#2599](https://github.com/kaeawc/auto-mobile/issues/2599)) — confirm with a second, unrelated tool first.
+7. **Check provenance.** `git blame` the lines; don't blame the PR for pre-existing code.
+   `git log origin/main -- <file>` to see if it's already fixed or superseded.
+8. **For a fix PR, verify it closes the ISSUE, not the symptom — and name the false negative it
+   introduces.** Ask what the change stops catching: a daemon-dedup fix narrowed to the pid-file
+   PID kills the false positive but stops detecting a live cross-worktree rogue daemon.
+9. **Prefer existing helpers.** One canonical primitive per concern: `IdGenerator`, `Random`,
+   `Backoff`.
+10. **Don't paste raw hierarchies** — `observe` results run ~25k tokens. Summarize.
+
+## Architecture
+
+The **MCP server** (`src/`, TS/Bun) forwards tool calls to a **daemon** (`src/daemon/`) owning a
+**DevicePool** and per-platform **CtrlProxy runners**: the Android accessibility-service APK
+(`android/control-proxy`) and the iOS XCUITest runner (`ios/control-proxy`), each speaking a
+WebSocket protocol (iOS on `:8765`). Apps under test may embed the **AutoMobile SDK** for in-app
+capabilities relayed through the runner. Tools register in `src/server/index.ts`.
+
+Two gates to hold in mind: every tool is gated by the runner's `connected` handshake
+`supportedCommands` (a mismatch with what the TS layer routes is a real bug), and
+plan/criticalSection execution resolves via `getToolForPlan()`, not `getTool()`.
+
+## Working our own PR
+
+When the argument names a PR **we** authored and are actively iterating on:
+
+1. Use `github-pr-feedback` for the feedback ledger and `check-ci` for workflow state. Don't
+   hand-roll either — feedback lives on **four** separate paginated surfaces (conversation
+   comments, review submissions, inline comments, GraphQL review threads) and only the last
+   carries resolution state.
+2. Scope everything to `headRefOid` and record it. Checks, threads, and comments are all relative
+   to the SHA they were made against, so after any push, re-collect from the new head before
+   resolving anything or calling CI green.
+3. Triage each unresolved thread with a disposition: `fix`, `wrong reason, right change`,
+   `already addressed`, `not actionable`, `duplicate`, `ambiguous`, or `out of scope`. Codex
+   findings carry a `P1`/`P2` badge; P1 claims to block. Verify the mechanism before acting
+   *and* before dismissing — but keep the two judgements apart: `wrong reason, right change`
+   exists because a false mechanism and a good suggestion arrive together often enough that
+   collapsing them into `not actionable` loses real fixes. An `isOutdated` thread is a prompt to
+   check whether the current head fixed the behavior, not a reason to discard it.
+4. **Resolve every thread you triaged** (`resolveReviewThread`) — that is what addressing one
+   means. A finding you fixed and a finding you verified and declined are both handled; only
+   the reason differs, and the reason goes to the user in-session, not to GitHub. For a `fix` or
+   a `wrong reason, right change`, resolve once it is committed **and pushed**, validation
+   passed, and the fresh head still contains it — and for the latter, say which part of the
+   stated reasoning did not hold, so a bad rationale does not become precedent. For `already addressed`, `not actionable`, `duplicate`, or `out of scope`,
+   resolve directly. Either way the PR must be open, authored by the authenticated user
+   (`gh api user -q .login`), and the resolution must answer *that* thread. The one exception
+   is `ambiguous` — if you could not tell whether the finding is real, leave it open and ask.
+   On a merged/closed PR, treat unresolved threads as historical dispositions — don't push,
+   resolve, or re-run without asking.
+5. Run the lenses as usual and report their findings to the user. Never post them. Only
+   *existing* threads get resolved.
+6. Close the loop: re-run the unresolved-threads query and expect it to come back empty. Over
+   one recent week, 46 of 94 codex threads here merged unresolved, several P1 — so "I read them"
+   is not the bar. Anything still open at the end is a thread you genuinely could not resolve,
+   and it needs a sentence in your summary saying why.
+
+Only for a PR we authored. On someone else's, read freely and resolve nothing.
 
 ## Output
 
-For **each** finding, cover three things in plain prose: your read on the change (is it a real bug, does the fix hold, are you confident or only suspicious), where it is (`file:line`, and how you checked — reproduced, read the code, checked main, `git blame`), and how to fix it (a named existing helper/convention where one fits, the manual device check that would confirm it, and any regression or false-negative the change risks).
+Report in the session as prose. For each finding: your read (real bug or suspicion, does the fix
+hold), where it is (`file:line`, how you checked), and how to fix it (a named existing helper,
+the manual check that would confirm it, and any regression or false negative it risks).
 
-When reviewing a PR, post findings as **inline review comments** anchored to the changed line (via `gh api .../pulls/<n>/reviews` with a `comments[]` array, `event: COMMENT`) plus a short summary body — not one monolithic comment.
+- **Open with a question only when it earns its place** — genuine confusion about the code.
+  Otherwise state the finding flat. No `Found a bug`, no severity label. `Nit:` is the only
+  label, for the genuinely minor.
+- **The mechanism is the lede.** `X does A, so B never happens` — symbols, files, and flags in
+  backticks, an em-dash for the consequence. Don't bury it under a paragraph of trace.
+- **Put the reproduction on its own line** so it runs without re-deriving the claim.
+- **Say whether it blocks in plain words** — `this should block` or `not a blocker`, as a normal
+  clause.
+- Drop self-certifying parentheticals (`verified by reading code`); the `file:line` carries it.
+- Give replacement lines directly when the fix is a concrete line edit.
 
-### Write the comment so a busy author acts on it
+The wall first, the same finding second:
 
-The finding can be correct and still land badly if it's a wall of text. Word each inline comment so the author sees the finding, the ask, and the repro without decoding a paragraph:
-
-- **Open with a question when it earns its place — otherwise state the finding flat.** A question is right when you genuinely don't understand the code, or when walking the author down your reasoning before you answer it reads better than asserting. When the finding is clear, just say what the bug is in one plain sentence — no `Found a bug`, no severity label. `Nit:` is the only label; reserve it for the genuinely minor.
-- **State the mechanism as the finding, not under it.** One plain sentence — `X does A, so B never happens` — every symbol, file, and flag in backticks, an em-dash for the consequence. Don't bury the finding beneath a paragraph of trace; the mechanism *is* the lede.
-- **Offer a `Suggested change for <reason>` with a ```suggestion block when the fix is a concrete line edit.** Let the author accept or reject it inline instead of re-typing your prose into code.
-- **Skip the `Verdict:`/`Evidence:`/`Fix:` labels and the enum verbatim in the posted comment.** That structure is a checklist of what to cover — your read on the change, where it is, how to fix it — not a template to stamp into GitHub. Write it as ordinary prose, loose with wording and capitalization; `this basically double-frees the handle` beats `**Verdict:** Confirmed bug`. Drop how-you-verified parentheticals (`(verified by reading code)`, "a concern I checked and dropped") — the `file:line` citation carries that, and they read as defensive.
-- **Put the reproduction on its own line.** A concrete repro is the most valuable thing in a bug comment — make it separable so the author can run it without re-deriving your claim.
-- **Keep every comment tight.** Say the thing in as few words as it takes; don't re-enumerate findings or restate the diff — the reader can find and read them.
-- **Say whether it blocks in plain words.** `this should block` or `not a blocker`, as a normal clause in the finding — don't spin up a label or severity track for it.
-- **If a thread's already been addressed, resolve it — don't write a comment.** A resolved thread already says "done"; a new comment saying so is noise.
-
-A worked rewrite — the wall first, the same finding second:
-
-> ❌ I looked into this and I believe there may be an issue where the timer scheduled by `scheduleAutoStop` ends up calling `this.stop()` (verified by reading the code), which as far as I can tell finalizes the session but does not appear to remove it from `byHandle`, so this could potentially be a concern.
+> ❌ I looked into this and I believe there may be an issue where the timer scheduled by
+> `scheduleAutoStop` ends up calling `this.stop()` (verified by reading the code), which as far
+> as I can tell finalizes the session but does not appear to remove it from `byHandle`, so this
+> could potentially be a concern.
 >
-> ✅ The auto-stop timer calls `this.stop()`, which finalizes the session but never removes it from `byHandle` — that delete lives only in `stopAndRemove`, which auto-stop doesn't go through, so an auto-stopped session stays registered forever.
+> ✅ The auto-stop timer calls `this.stop()`, which finalizes the session but never removes it
+> from `byHandle` — that delete lives only in `stopAndRemove`, which auto-stop doesn't go
+> through, so an auto-stopped session stays registered forever.
 > Set `maxDuration`, never call stop — after the timer fires, `byHandle` still holds the entry.
 
-Close with a one-paragraph **summary verdict** and the single most important thing to verify first. Stay skeptical: a verified "couldn't reproduce" beats an unverified bug report.
+Close with a one-paragraph verdict, which lenses you ran (and which third you generated, and
+why), and the single most important thing to verify first. A verified "couldn't reproduce" beats
+an unverified bug report.

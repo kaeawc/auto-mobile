@@ -749,17 +749,15 @@ jobs:
         with:
           lfs: false
 
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.9
-
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: scripts/ci/install-bun-deps.sh
-
+      # Pure network/disk (`brew install bats-core` on macOS, a source install on
+      # Linux) and independent of the Bun setup below, which only writes
+      # node_modules. Background it so the two overlap, then re-sync at the
+      # barrier before `bats test/bats/`, the sole consumer of both. Mechanism
+      # per #3779.
       - name: "Install BATS"
         shell: bash
+        background: true
+        id: install-bats
         run: |
           if command -v bats &>/dev/null; then
             echo "bats already installed: $(bats --version)"
@@ -771,6 +769,18 @@ jobs:
             git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
             sudo /tmp/bats-core/install.sh /usr/local
           fi
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
+      # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - wait: install-bats
 
       - name: "Run BATS Tests"
         run: bats test/bats/

@@ -338,3 +338,35 @@ EOF
   TYPECHECK_TSC_CMD="$orig" run bash "$SCRIPT"
   [ "$status" -eq 0 ]
 }
+
+@test "a string-literal union member containing the separator is not split inside its quotes" {
+  # The type `"a | b" | "c"` has a member whose VALUE contains " | ". A naive
+  # text split cuts inside the quotes and yields a different result on each
+  # pass, so `--update` would write a baseline that check mode instantly
+  # rejected as new. Canonicalization must be idempotent here.
+  q='printf "%s\n" "src/q.ts(1,1): error TS2322: Type is \"a | b\" | \"c\"."'
+  TYPECHECK_TSC_CMD="$q" bash "$SCRIPT" --update
+
+  # Members stay intact and sort as two members, not three.
+  grep -q 'Type is "a | b" | "c"' "$TYPECHECK_BASELINE"
+
+  # The freshly written baseline must validate against the very same output.
+  TYPECHECK_TSC_CMD="$q" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+  [[ "$output" != *"no longer occur"* ]]
+}
+
+@test "update then check is idempotent for every union shape in one line" {
+  mixed='printf "%s\n" "src/m.ts(1,1): error TS2322: Bad { a: \"z\" | \"a | b\" | \"c\"; b: string | null; c: { x: 1 } | undefined; }."'
+  TYPECHECK_TSC_CMD="$mixed" bash "$SCRIPT" --update
+  cp "$TYPECHECK_BASELINE" "$TEST_DIR/first.txt"
+
+  # Re-running update must reproduce the file byte-for-byte.
+  TYPECHECK_TSC_CMD="$mixed" bash "$SCRIPT" --update
+  diff -q "$TEST_DIR/first.txt" "$TYPECHECK_BASELINE"
+
+  TYPECHECK_TSC_CMD="$mixed" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+}

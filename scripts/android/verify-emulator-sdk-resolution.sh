@@ -19,11 +19,22 @@ repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 missing_avd="automobile-sdk-resolution-probe"
 
 # The one outcome that proves the SDK resolved: the product enumerated the AVDs,
-# found none matching, and refused to create one. This substring is the
-# ActionableError text in src/utils/deviceBootService.ts (provisionAndBoot); a
-# BATS guard pins the two together so a product reword is caught in-repo instead
-# of turning main red.
-expected_diagnostic="device matching criteria found"
+# found none matching, and refused to create one. These substrings come from the
+# ActionableError in src/utils/deviceBootService.ts (provisionAndBoot), which
+# interpolates the platform and the requested name:
+#   `No ${platform} device matching criteria found. ... name=${name} ...`
+# A BATS guard pins them to the product text so a reword is caught in-repo
+# instead of turning main red.
+#
+# Both halves are required, and specifically the ANDROID one. Matching only the
+# platform-agnostic "device matching criteria found" also matches the iOS
+# diagnostic ("No ios device matching criteria found"), so a boot-device CLI that
+# regressed to ignore --platform android, or that routed through the iOS manager,
+# would report a healthy *Android* SDK without exercising Android at all — the
+# same fail-open this tripwire exists to prevent.
+expected_diagnostic="No android device matching criteria found"
+# Pins the failure to *our* probe rather than any incidental no-match message.
+expected_probe_name="name=${missing_avd}"
 # The regression this tripwire exists for (issue #4237).
 resolution_failure="Android emulator not found"
 
@@ -63,6 +74,17 @@ case "${output}" in
   *)
     echo "error: the emulator SDK resolution probe failed for an unexpected reason (exit ${probe_status})." >&2
     echo "Expected the boot flow to fail with \"${expected_diagnostic}\"; it did not, so the SDK precondition is unverified." >&2
+    echo "Note a platform-agnostic no-match message is NOT enough here: the iOS path emits the same wording, and this guard must prove the *Android* SDK resolved." >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+    ;;
+esac
+
+case "${output}" in
+  *"${expected_probe_name}"*) ;;
+  *)
+    echo "error: the boot flow reported no matching Android device, but not for the AVD this probe asked for (exit ${probe_status})." >&2
+    echo "Expected \"${expected_probe_name}\" in the diagnostic; without it the failure may come from some other lookup, so the SDK precondition is unverified." >&2
     printf '%s\n' "${output}" >&2
     exit 1
     ;;

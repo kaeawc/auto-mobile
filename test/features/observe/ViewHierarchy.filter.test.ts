@@ -99,4 +99,39 @@ describe("ViewHierarchy filtering", () => {
     expect(source.hierarchy.node.node).toBe(originalChildren);
     expect(source.hierarchy.node.node).toHaveLength(2);
   });
+
+  test("drops all root children when none meet the filter criteria", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const child = { class: "android.widget.FrameLayout", enabled: "true" };
+    const root = { node: [child] };
+
+    expect(viewHierarchy.meetsFilterCriteria(child)).toBe(false);
+
+    const result = viewHierarchy.filterSingleNode(root, true);
+
+    expect(result.node).toEqual([]);
+  });
+
+  test("keeps only surviving root children when some meet the filter criteria", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const root = {
+      node: [
+        { class: "android.widget.FrameLayout", enabled: "true" },
+        { text: "Keep me" },
+      ],
+    };
+
+    const result = viewHierarchy.filterSingleNode(root, true);
+
+    expect(result.node).toEqual({ text: "Keep me" });
+  });
+
+  test("leaves a root node without children unchanged", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const root = { class: "android.widget.FrameLayout", enabled: "true" };
+
+    const result = viewHierarchy.filterSingleNode(root, true);
+
+    expect(result).toEqual({ class: "android.widget.FrameLayout", enabled: "true" });
+  });
 });

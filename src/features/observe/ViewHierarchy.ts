@@ -248,11 +248,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       const rootCopy = structuredClone(node);
 
       if (node.node) {
+        // Always overwrite: when every child is filtered out the root must report an
+        // empty child list rather than falling back to the raw cloned children.
         const processedChildren = this.processNodeChildren(node, child => this.filterSingleNode(child));
-
-        if (processedChildren.length > 0) {
-          rootCopy.node = this.normalizeNodeStructure(processedChildren);
-        }
+        rootCopy.node = this.normalizeNodeStructure(processedChildren);
       }
 
       return rootCopy;

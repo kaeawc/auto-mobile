@@ -4,7 +4,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
-import type { PidFileData } from "./types";
+import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { logger } from "../utils/logger";
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
@@ -55,19 +55,27 @@ export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
   defaultPath: path.join(os.homedir(), ".auto-mobile", "webrtc-stream.sock"),
 };
 
-const AUXILIARY_SOCKET_CONFIGS: SocketServerConfig[] = [
-  VIDEO_RECORDING_SOCKET_CONFIG,
-  TEST_RECORDING_SOCKET_CONFIG,
-  DEVICE_SNAPSHOT_SOCKET_CONFIG,
-  APPEARANCE_SOCKET_CONFIG,
-  PERFORMANCE_STREAM_SOCKET_CONFIG,
-  PERFORMANCE_PUSH_SOCKET_CONFIG,
-  DEVICE_DATA_STREAM_SOCKET_CONFIG,
-  FAILURES_STREAM_SOCKET_CONFIG,
-  FAILURES_PUSH_SOCKET_CONFIG,
-  TELEMETRY_PUSH_SOCKET_CONFIG,
-  WEBRTC_STREAM_SOCKET_CONFIG,
-];
+/**
+ * Canonical registry of every auxiliary daemon socket, keyed by its published
+ * name. This is the single source of truth: `getDaemonSocketPathList()` (cleanup)
+ * and `getDaemonSocketPathsByName()` (publication, `socketPaths.ts`) both derive
+ * from it, and the exhaustive `Record` type means adding a member to
+ * `AuxiliaryDaemonSocketName` without registering it here is a compile error.
+ */
+export const AUXILIARY_SOCKET_CONFIGS_BY_NAME: Record<AuxiliaryDaemonSocketName, SocketServerConfig> = {
+  "appearance": APPEARANCE_SOCKET_CONFIG,
+  "device-snapshot": DEVICE_SNAPSHOT_SOCKET_CONFIG,
+  "failures-push": FAILURES_PUSH_SOCKET_CONFIG,
+  "failures-stream": FAILURES_STREAM_SOCKET_CONFIG,
+  "observation-stream": DEVICE_DATA_STREAM_SOCKET_CONFIG,
+  "performance-push": PERFORMANCE_PUSH_SOCKET_CONFIG,
+  "performance-stream": PERFORMANCE_STREAM_SOCKET_CONFIG,
+  "telemetry-push": TELEMETRY_PUSH_SOCKET_CONFIG,
+  "test-recording": TEST_RECORDING_SOCKET_CONFIG,
+  "video-recording": VIDEO_RECORDING_SOCKET_CONFIG,
+  "video-stream": VIDEO_STREAM_SOCKET_CONFIG,
+  "webrtc-stream": WEBRTC_STREAM_SOCKET_CONFIG,
+};
 
 export interface DaemonFileCleanupOptions {
   pidFilePath?: string;
@@ -79,16 +87,24 @@ export interface StaleDaemonFileCleanupOptions extends DaemonFileCleanupOptions 
   isProcessRunning?: (pid: number) => boolean;
 }
 
-export function getDaemonSocketPaths(): string[] {
+/**
+ * Default on-disk paths of every daemon socket, for unlink-on-cleanup.
+ *
+ * Named apart from `getDaemonSocketPathsByName()` in `socketPaths.ts` (which
+ * returns the keyed map of live paths for publication) so the two cannot be
+ * confused at an import site — the shared-name/divergent-shape pair is what let
+ * `video-stream.sock` escape both registries (issue #4195).
+ */
+export function getDaemonSocketPathList(): string[] {
   return [
     SOCKET_PATH,
-    ...AUXILIARY_SOCKET_CONFIGS.map(config => getSocketPath(config)),
+    ...Object.values(AUXILIARY_SOCKET_CONFIGS_BY_NAME).map(config => getSocketPath(config)),
   ];
 }
 
 export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {}): Promise<boolean> {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
-  const socketPaths = options.socketPaths ?? getDaemonSocketPaths();
+  const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
 
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
     return false;
@@ -117,7 +133,7 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
 
 export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): boolean {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
-  const socketPaths = options.socketPaths ?? getDaemonSocketPaths();
+  const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
 
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
     return false;

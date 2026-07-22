@@ -9,10 +9,19 @@ import { getPerformanceStreamSocketPath } from "./performanceStreamSocketServer"
 import { getTelemetryPushSocketPath } from "./telemetryPushSocketServer";
 import { getTestRecordingSocketPath } from "./testRecordingSocketServer";
 import { getVideoRecordingSocketPath } from "./videoRecordingSocketServer";
+import { getVideoStreamSocketPath } from "./videoStreamSocketServer";
 import { getWebRtcStreamSocketPath } from "./webrtcStreamSocketServer";
 import type { DaemonSocketPaths } from "./types";
 
-export function getDaemonSocketPaths(): DaemonSocketPaths {
+/**
+ * Live paths of every daemon socket, keyed by published name, for the daemon
+ * status/pidfile payload.
+ *
+ * Distinct from `getDaemonSocketPathList()` in `daemonFiles.ts`, which returns
+ * the default paths as a flat array for unlink-on-cleanup. Both are anchored to
+ * `AuxiliaryDaemonSocketName`, so a new socket must appear in both (issue #4195).
+ */
+export function getDaemonSocketPathsByName(): DaemonSocketPaths {
   return {
     "control": SOCKET_PATH,
     "appearance": getAppearanceSocketPath(),
@@ -25,6 +34,7 @@ export function getDaemonSocketPaths(): DaemonSocketPaths {
     "telemetry-push": getTelemetryPushSocketPath(),
     "test-recording": getTestRecordingSocketPath(),
     "video-recording": getVideoRecordingSocketPath(),
+    "video-stream": getVideoStreamSocketPath(),
     "webrtc-stream": getWebRtcStreamSocketPath(),
   };
 }

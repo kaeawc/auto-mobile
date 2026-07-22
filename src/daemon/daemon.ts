@@ -47,7 +47,7 @@ import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./f
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
 import { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } from "./webrtcStreamSocketServer";
 import { startVideoStreamSocketServer, stopVideoStreamSocketServer } from "./videoStreamSocketServer";
-import { getDaemonSocketPaths } from "./socketPaths";
+import { getDaemonSocketPathsByName } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -769,7 +769,7 @@ export class Daemon {
     const pidData: PidFileData = {
       pid: process.pid,
       socketPath: SOCKET_PATH,
-      sockets: getDaemonSocketPaths(),
+      sockets: getDaemonSocketPathsByName(),
       port: this.port,
       dbPath: getDatabasePath(),
       startedAt: this.timer.now(),

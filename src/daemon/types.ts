@@ -81,7 +81,16 @@ export type DaemonSocketName =
   | "telemetry-push"
   | "test-recording"
   | "video-recording"
+  | "video-stream"
   | "webrtc-stream";
+
+/**
+ * Every daemon socket except the control socket. Auxiliary sockets are declared
+ * once in `daemonFiles.ts` as an exhaustive `Record` keyed by this type, so a
+ * newly-added socket cannot be started without also being registered for
+ * publication and cleanup (issue #4195).
+ */
+export type AuxiliaryDaemonSocketName = Exclude<DaemonSocketName, "control">;
 
 export type DaemonSocketPaths = Record<DaemonSocketName, string>;
 

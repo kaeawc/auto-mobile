@@ -203,3 +203,50 @@ jobs:
           git push origin "$TAG"
 
           echo "Successfully created and pushed tag: $TAG"
+
+      - name: Start the release
+        shell: bash
+        env:
+          # The default GITHUB_TOKEN cannot dispatch a workflow run from inside a
+          # run; reuse the PAT that pushed the tag.
+          GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+          TAG: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Pushing the tag does not start Release on its own: the create event
+          # never fired for the tags CI pushed at 0.0.42 and 0.0.44, so every
+          # release since has been published by hand. Dispatch it explicitly.
+          # (Those two tags were v-prefixed at the time and have since been
+          # deleted, so don't go looking for them in `git tag --list`.)
+          #
+          # Dispatch on the TAG, not on main. github.ref has to stay a tag ref:
+          # action-gh-release derives its tag from it, docker/metadata-action's
+          # type=semver is inert without it, and the reusable APK/IPA/jar builders
+          # run at the caller's ref -- on main they would build a different tree
+          # than the checksums minted just above were computed from.
+          #
+          # Re-dispatching an already-released tag is safe: every non-idempotent
+          # publish step consults scripts/release/already-published.sh first.
+          before=$(gh run list --repo "$REPO" --workflow release.yml \
+            --limit 1 --json databaseId --jq '.[].databaseId // 0')
+
+          gh workflow run release.yml --repo "$REPO" --ref "$TAG" -f tag="$TAG"
+
+          # The dispatch API returns 204 before the run exists and gh does not
+          # wait, so `gh workflow run` succeeds even if no run is ever created.
+          # A green step here with nothing queued is the same silent non-release
+          # this change exists to fix, so confirm a new run actually appeared.
+          for _ in $(seq 1 12); do
+            sleep 5
+            after=$(gh run list --repo "$REPO" --workflow release.yml \
+              --limit 1 --json databaseId --jq '.[].databaseId // 0')
+            if [[ "$after" != "$before" ]]; then
+              echo "Dispatched release.yml for $TAG (run ${after})"
+              exit 0
+            fi
+          done
+
+          echo "Dispatched release.yml for $TAG but no run appeared after 60s" >&2
+          exit 1

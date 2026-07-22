@@ -138,3 +138,105 @@
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true"
   [ -z "$output" ]
 }
+
+# The assertions below parse the workflow as YAML rather than grepping its text.
+# A raw grep is satisfied by any comment or unrelated step containing the string,
+# so it would keep passing while the step it claims to pin was deleted -- and a
+# wiring link that regresses silently is the exact defect this whole area exists
+# to prevent. `yq` reads the real trigger and step fields instead.
+#
+# Pushing the tag does not start Release on its own: the `create` event never
+# fired for the tags CI pushed at 0.0.42 and 0.0.44, so ~26 versions were
+# published by hand while CI reported green.
+
+# Skipping locally is a convenience; skipping in CI would silently retire every
+# assertion below, which is the same fail-green these guards exist to catch.
+wiring_requires_yq() {
+  command -v yq >/dev/null 2>&1 && return 0
+  if [[ -n "${CI:-}" ]]; then
+    echo "yq is required in CI to verify release workflow wiring" >&2
+    return 1
+  fi
+  skip "yq not installed"
+}
+
+@test "release.yml accepts a workflow_dispatch carrying a tag input (#4157)" {
+  wiring_requires_yq
+  run yq -r '.on.workflow_dispatch.inputs.tag.required' ".github/workflows/release.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "prepare-release dispatches release.yml on the tag, not a branch (#4157)" {
+  wiring_requires_yq
+  # Pull the one step's run script out of the parsed YAML, so comments elsewhere
+  # in the file cannot satisfy these assertions.
+  local script
+  script="$(yq -r '.jobs.prepare.steps[] | select(.name == "Start the release") | .run' \
+    ".github/workflows/prepare-release.yml")"
+  [ -n "$script" ]
+  [ "$script" != "null" ]
+
+  # Strip comment lines before matching, so the command has to really be there.
+  local code
+  code="$(printf '%s\n' "$script" | grep -v '^[[:space:]]*#')"
+  [[ "$code" == *"gh workflow run release.yml"* ]]
+  [[ "$code" == *'--ref "$TAG"'* ]]
+  [[ "$code" != *"--ref main"* ]]
+}
+
+# action-gh-release throws "GitHub Releases requires a tag" when github.ref is not
+# a tag ref, and that step runs after npm/Homebrew/MCP/Maven/Docker have already
+# published irreversibly. The tag must be explicit, never inferred from the ref.
+@test "release.yml passes an explicit tag_name to action-gh-release (#4157)" {
+  wiring_requires_yq
+  run yq -r '.jobs."verify-and-release".steps[]
+    | select(.uses != null and (.uses | test("^softprops/action-gh-release")))
+    | .with.tag_name' ".github/workflows/release.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ needs.validate-release-tag.outputs.tag }}' ]
+}
+
+# release.yml publishes to six targets in one job and npm publish is not
+# idempotent, so every target that rejects a duplicate must be guarded or a
+# failure late in the job makes the release unrerunnable. Homebrew and the
+# GitHub Release are intentionally unguarded: update-brew-formula.sh already
+# no-ops on an unchanged formula, and action-gh-release updates in place.
+@test "release.yml guards every non-idempotent publish (#4157)" {
+  wiring_requires_yq
+  local target
+  for target in npm mcp maven; do
+    local script
+    script="$(yq -r ".jobs.\"verify-and-release\".steps[] | select(.run != null) | .run" \
+      ".github/workflows/release.yml" \
+      | grep -v '^[[:space:]]*#' \
+      | grep -F "already-published.sh $target \"\$VERSION\"")"
+    [ -n "$script" ]
+  done
+}
+
+# The guard fails closed, but that only reaches the job if its exit status can
+# propagate. Under set -e a failing command substitution inside an `if` condition
+# does NOT abort, so the inline form would silently downgrade an
+# unreachable-registry error into "not published" and publish anyway.
+@test "release.yml assigns the guard result before testing it (#4157)" {
+  wiring_requires_yq
+  local runs
+  runs="$(yq -r '.jobs."verify-and-release".steps[] | select(.run != null) | .run' \
+    ".github/workflows/release.yml" | grep -v '^[[:space:]]*#')"
+  [[ "$runs" == *'state=$(scripts/release/already-published.sh'* ]]
+  [[ "$runs" != *'if [ "$(scripts/release/already-published.sh'* ]]
+}
+
+# A dispatch that merely names the tag is not enough: the Actions UI ref picker
+# defaults to a branch, and docker/metadata-action reads github.ref, so a run
+# dispatched from main ships an image with no version tag while reporting green.
+@test "release.yml requires the dispatch to run on the named tag (#4157)" {
+  wiring_requires_yq
+  local script
+  script="$(yq -r '.jobs."validate-release-tag".steps[]
+    | select(.id == "validate") | .run' ".github/workflows/release.yml" \
+    | grep -v '^[[:space:]]*#')"
+  [[ "$script" == *'REF_TYPE'* ]]
+  [[ "$script" == *'REF_NAME'* ]]
+}

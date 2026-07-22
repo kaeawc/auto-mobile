@@ -3,6 +3,25 @@ name: Release
 
 "on":
   create:
+  # prepare-release dispatches this explicitly after pushing the tag. The `create`
+  # event above did not fire for CI-pushed tags (see v0.0.42/v0.0.44: the tag push
+  # succeeded and no Release run was ever queued), so the tag event alone cannot be
+  # relied on to start a release.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, with no leading v (e.g. 0.0.45)"
+        required: true
+        type: string
+
+# `create:` is retained as a fallback for a hand-pushed tag, so one tag could in
+# principle arrive by both routes. This serializes them; it does NOT dedupe them
+# -- with cancel-in-progress false the second run queues and then starts once the
+# first finishes. What makes that second run harmless is the already-published.sh
+# guard on each non-idempotent publish step, not this block. Both are required.
+concurrency:
+  group: release-${{ inputs.tag || github.event.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -14,22 +33,49 @@ jobs:
   validate-release-tag:
     name: "Validate Release Tag"
     runs-on: ubuntu-latest
-    if: github.event.ref_type == 'tag'
+    # workflow_dispatch carries no ref_type; only the create path needs the tag gate.
+    if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
     outputs:
       is_release_tag: ${{ steps.validate.outputs.is_release_tag }}
+      tag: ${{ steps.validate.outputs.tag }}
     steps:
       - name: "Validate tag format"
         id: validate
         shell: bash
         env:
-          TAG: ${{ github.event.ref }}
+          TAG: ${{ inputs.tag || github.event.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # The dispatch must run ON the tag, not merely name it. The Actions UI
+          # ref picker defaults to a branch, and prepare-release is not the only
+          # caller. docker/metadata-action derives its semver tags from
+          # github.ref, so a dispatch from main checks out the right tree and
+          # still pushes an image with no version tag -- green, and wrong.
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] \
+            && { [[ "$REF_TYPE" != "tag" ]] || [[ "$REF_NAME" != "$TAG" ]]; }; then
+            echo "Release must be dispatched on tag '$TAG', but this run is on" >&2
+            echo "${REF_TYPE} '${REF_NAME}'. Re-run it and pick the tag in the" >&2
+            echo "ref dropdown, or let prepare-release dispatch it." >&2
+            exit 1
+          fi
           if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
             echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
-            echo "Ignoring non-release tag: $TAG"
+            exit 0
           fi
+
+          echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            # An explicit dispatch names the tag it wants released, so a format
+            # miss is a caller error. Failing beats skipping every publish step
+            # and still reporting the run green.
+            echo "Refusing to release malformed tag: $TAG (expected 0.0.45, no leading v)" >&2
+            exit 1
+          fi
+          echo "Ignoring non-release tag: $TAG"
 
   build-ctrl-proxy-ios-ipa:
     needs: validate-release-tag
@@ -73,7 +119,7 @@ jobs:
         with:
           lfs: false
           fetch-depth: 0
-          ref: refs/tags/${{ github.event.ref }}
+          ref: refs/tags/${{ needs.validate-release-tag.outputs.tag }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -91,7 +137,7 @@ jobs:
       - name: Extract version from tag
         id: version
         env:
-          TAG: ${{ github.event.ref }}
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
         run: |
           VERSION="$TAG"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -232,7 +278,22 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # npm publish is not idempotent: without this, a failure anywhere later
+          # in the job makes the whole release unrerunnable.
+          #
+          # Assign first, then test. Under set -e a failing command substitution
+          # inside an `if` condition does NOT abort, so testing it inline would
+          # turn the guard's fail-closed error into a silent "not published".
+          state=$(scripts/release/already-published.sh npm "$VERSION")
+          if [ "$state" = published ]; then
+            echo "npm already has $VERSION; skipping publish"
+            exit 0
+          fi
+          npm publish --provenance --access public
 
       - name: Publish Homebrew formula
         env:
@@ -249,7 +310,16 @@ jobs:
           curl -L "$URL" | tar xz mcp-publisher
 
       - name: Publish to MCP Registry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set -euo pipefail
+          # Assign first, then test — see the npm step for why.
+          state=$(scripts/release/already-published.sh mcp "$VERSION")
+          if [ "$state" = published ]; then
+            echo "MCP Registry already has $VERSION; skipping publish"
+            exit 0
+          fi
           ./mcp-publisher login dns --domain jasonpearson.dev \
             --private-key "${{ secrets.MCP_DNS_PRIVATE_KEY }}"
           ./mcp-publisher publish
@@ -275,6 +345,7 @@ jobs:
 
       - name: Publish Android Libraries to Maven Central
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           ORG_GRADLE_PROJECT_mavenCentralUsername:
             ${{ secrets.MAVEN_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword:
@@ -291,6 +362,15 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          # A duplicate GAV is rejected, so a rerun would die here. The guard
+          # fails closed on a partial publish rather than choosing for us.
+          # Assign first, then test — see the npm step for why.
+          state=$(scripts/release/already-published.sh maven "$VERSION")
+          if [ "$state" = published ]; then
+            echo "Maven Central already has $VERSION; skipping publish"
+            exit 0
+          fi
           cd android
           # Override VERSION_NAME with release version from git tag
           # (not SNAPSHOT in gradle.properties)
@@ -354,6 +434,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # Explicit, not derived from github.ref. The action throws "GitHub
+          # Releases requires a tag" on a non-tag ref, and this step runs after
+          # npm/Homebrew/MCP/Maven/Docker have already published irreversibly.
+          tag_name: ${{ needs.validate-release-tag.outputs.tag }}
           name: AutoMobile v${{ steps.version.outputs.version }}
           body_path: release_notes.txt
           files: |

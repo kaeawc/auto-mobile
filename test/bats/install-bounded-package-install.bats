@@ -56,6 +56,16 @@ stub_apt_get() {
   "$CHMOD" +x "${STUB_BIN}/apt-get"
 }
 
+# Drop the system directories from PATH so only stubs are resolvable.
+#
+# The setup PATH keeps /usr/bin:/bin because most tests need real `sleep`, `bash`
+# and friends -- but ubuntu-latest ships /usr/bin/timeout, so a test asserting
+# "no timeout binary exists" silently found the real one and only passed on the
+# macOS laptop this was written on, where there is none.
+hide_real_timeout() {
+  export PATH="${STUB_BIN}"
+}
+
 # Put a real timeout binary on the restricted PATH under the name the resolver
 # looks for, so the bound is exercised for real rather than against a stub.
 # macOS ships neither, but provides gtimeout when coreutils is installed.
@@ -69,6 +79,7 @@ require_real_timeout() {
 }
 
 @test "the bounded prefix uses timeout with a kill-after fallback" {
+  hide_real_timeout
   "$LN" -sf /bin/echo "${STUB_BIN}/timeout"
 
   resolve_bounded_cmd_prefix 42
@@ -82,6 +93,7 @@ require_real_timeout() {
 }
 
 @test "the bounded prefix falls back to gtimeout when timeout is absent" {
+  hide_real_timeout
   "$LN" -sf /bin/echo "${STUB_BIN}/gtimeout"
 
   resolve_bounded_cmd_prefix 42
@@ -90,6 +102,8 @@ require_real_timeout() {
 }
 
 @test "the bounded prefix is empty when no timeout binary exists" {
+  hide_real_timeout
+
   resolve_bounded_cmd_prefix 42
 
   [ "${#BOUNDED_CMD_PREFIX[@]}" -eq 0 ]
@@ -97,7 +111,9 @@ require_real_timeout() {
 
 @test "run_bounded_install runs the command unwrapped when no timeout binary exists" {
   # An empty prefix must expand to nothing rather than tripping `set -u` on the
-  # bash 3.2 that macos-latest still runs.
+  # bash 3.2 that macos-latest still runs. /bin/echo is spelled absolutely so it
+  # still resolves with the stub-only PATH.
+  hide_real_timeout
   run run_bounded_install "Installing thing" /bin/echo hello
   [ "$status" -eq 0 ]
   [[ "$output" == *"Installing thing: ok"* ]]

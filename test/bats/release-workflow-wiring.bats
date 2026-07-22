@@ -158,3 +158,25 @@
 @test "release.yml passes an explicit tag_name to action-gh-release (#4157)" {
   grep -Fq 'tag_name: ${{ needs.validate-release-tag.outputs.tag }}' ".github/workflows/release.yml"
 }
+
+# release.yml publishes to six targets in one job and npm publish is not
+# idempotent, so every target that rejects a duplicate must be guarded or a
+# failure late in the job makes the release unrerunnable. Homebrew and the
+# GitHub Release are intentionally unguarded: update-brew-formula.sh already
+# no-ops on an unchanged formula, and action-gh-release updates in place.
+@test "release.yml guards every non-idempotent publish (#4157)" {
+  local workflow=".github/workflows/release.yml"
+  grep -Fq 'already-published.sh npm "$VERSION"' "$workflow"
+  grep -Fq 'already-published.sh mcp "$VERSION"' "$workflow"
+  grep -Fq 'already-published.sh maven "$VERSION"' "$workflow"
+}
+
+# The guard fails closed, but that only reaches the job if its exit status can
+# propagate. Under set -e a failing command substitution inside an `if`
+# condition does NOT abort, so the inline form would silently downgrade an
+# unreachable-registry error into "not published" and publish anyway.
+@test "release.yml assigns the guard result before testing it (#4157)" {
+  local workflow=".github/workflows/release.yml"
+  grep -Fq 'state=$(scripts/release/already-published.sh' "$workflow"
+  ! grep -Fq 'if [ "$(scripts/release/already-published.sh' "$workflow"
+}

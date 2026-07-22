@@ -261,7 +261,22 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # npm publish is not idempotent: without this, a failure anywhere later
+          # in the job makes the whole release unrerunnable.
+          #
+          # Assign first, then test. Under set -e a failing command substitution
+          # inside an `if` condition does NOT abort, so testing it inline would
+          # turn the guard's fail-closed error into a silent "not published".
+          state=$(scripts/release/already-published.sh npm "$VERSION")
+          if [ "$state" = published ]; then
+            echo "npm already has $VERSION; skipping publish"
+            exit 0
+          fi
+          npm publish --provenance --access public
 
       - name: Publish Homebrew formula
         env:
@@ -278,7 +293,16 @@ jobs:
           curl -L "$URL" | tar xz mcp-publisher
 
       - name: Publish to MCP Registry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set -euo pipefail
+          # Assign first, then test — see the npm step for why.
+          state=$(scripts/release/already-published.sh mcp "$VERSION")
+          if [ "$state" = published ]; then
+            echo "MCP Registry already has $VERSION; skipping publish"
+            exit 0
+          fi
           ./mcp-publisher login dns --domain jasonpearson.dev \
             --private-key "${{ secrets.MCP_DNS_PRIVATE_KEY }}"
           ./mcp-publisher publish
@@ -304,6 +328,7 @@ jobs:
 
       - name: Publish Android Libraries to Maven Central
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           ORG_GRADLE_PROJECT_mavenCentralUsername:
             ${{ secrets.MAVEN_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword:
@@ -320,6 +345,15 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          # A duplicate GAV is rejected, so a rerun would die here. The guard
+          # fails closed on a partial publish rather than choosing for us.
+          # Assign first, then test — see the npm step for why.
+          state=$(scripts/release/already-published.sh maven "$VERSION")
+          if [ "$state" = published ]; then
+            echo "Maven Central already has $VERSION; skipping publish"
+            exit 0
+          fi
           cd android
           # Override VERSION_NAME with release version from git tag
           # (not SNAPSHOT in gradle.properties)

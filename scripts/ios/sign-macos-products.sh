@@ -78,7 +78,7 @@ sign_package() {
 sign_package "XcodeCompanion" "AutoMobileCompanion" "true"
 sign_package "XcodeExtension" "" "false"
 
-for artifact in "${sign_paths[@]}"; do
+for artifact in ${sign_paths[@]+"${sign_paths[@]}"}; do
   echo "Signing ${artifact}"
   codesign "${CODESIGN_ARGS[@]}" "${artifact}"
   codesign --verify --strict --verbose=2 "${artifact}"

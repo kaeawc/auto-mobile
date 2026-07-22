@@ -105,3 +105,45 @@ describe("parseCliArgs coercion for union-rooted schemas (#4241 review)", () => 
     expect(typeof params.title).toBe("string");
   });
 });
+
+describe("parseCliArgs coercion sees through schema wrappers (#4241 review)", () => {
+  // getCliHelpParameterInfo unwraps `optional` only, so a param wrapped in
+  // nullable/default reported the wrapper and fell back to JSON coercion.
+
+  test("a default-wrapped enum still coerces as a string", () => {
+    const { params } = parseCliArgs([
+      "tapOn", "--platform", "android", "--selector", '{"text":"x"}', "--action", "tap"
+    ]);
+
+    expect(params.action).toBe("tap");
+    expect(typeof params.action).toBe("string");
+  });
+
+  test("a default-wrapped number still coerces as a number", () => {
+    const { params } = parseCliArgs([
+      "executePlan", "--platform", "android", "--planContent", "x", "--startStep", "3"
+    ]);
+
+    expect(params.startStep).toBe(3);
+    expect(typeof params.startStep).toBe("number");
+  });
+
+  test("a nullable string keeps a numeric-looking value as a string", async () => {
+    // setKeyValue is embeddedSdkOnly, so it is only visible to the registry --
+    // and only callable at all -- in embedded-SDK mode.
+    const { serverConfig } = await import("../../src/utils/ServerConfig");
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    try {
+      const { params } = parseCliArgs([
+        "setKeyValue", "--platform", "android", "--appId", "com.example",
+        "--name", "prefs", "--key", "pin", "--type", "STRING", "--value", "12345"
+      ]);
+
+      expect(params.value).toBe("12345");
+      expect(typeof params.value).toBe("string");
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
+});

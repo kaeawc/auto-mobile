@@ -146,7 +146,7 @@ function getDeclaredParamTypes(toolName: string): Record<string, string> | null 
   for (const shape of shapes) {
     for (const [key, value] of Object.entries(shape)) {
       const types = byParam.get(key) ?? new Set<string>();
-      types.add(getCliHelpParameterInfo(value).typeName);
+      types.add(resolveDeclaredType(value));
       byParam.set(key, types);
     }
   }
@@ -156,6 +156,52 @@ function getDeclaredParamTypes(toolName: string): Record<string, string> | null 
       .filter(([, types]) => types.size === 1)
       .map(([key, types]) => [key, [...types][0]])
   );
+}
+
+/**
+ * The effective declared type of a parameter, seeing through wrappers.
+ *
+ * `getCliHelpParameterInfo` unwraps `optional` only, so a wrapped param reports
+ * the wrapper (`nullable`, `default`) instead of the type underneath and falls
+ * back to JSON coercion — `setKeyValue --value 12345` sends the number `12345`
+ * even though `storageTools.ts` declares `z.string().nullable()`. Wrappers are
+ * peeled here so the inner type decides the coercion.
+ *
+ * A `literal` resolves to the runtime type of its value, so `z.literal("copy")`
+ * coerces as a string rather than falling through.
+ */
+const SCHEMA_WRAPPER_TYPES = new Set([
+  "optional", "nullable", "default", "readonly", "catch", "branded", "lazy"
+]);
+
+/** The zod type name of a schema, normalized ("ZodString" -> "string"). */
+function schemaTypeName(schema: any): string {
+  const raw = schema?._def?.typeName ?? schema?._def?.type ?? "unknown";
+  return String(raw).replace(/^Zod/, "").toLowerCase();
+}
+
+/** The schema a wrapper wraps; the key varies across zod versions. */
+function unwrapSchema(schema: any): any {
+  const definition = schema?._def;
+  return definition?.innerType ?? definition?.type ?? definition?.schema ?? null;
+}
+
+function resolveDeclaredType(schema: any): string {
+  let current = schema;
+
+  for (let depth = 0; depth < 10 && current; depth++) {
+    const name = schemaTypeName(current);
+
+    if (name === "literal") {
+      return typeof (current._def?.value ?? current._def?.values?.[0]);
+    }
+    if (!SCHEMA_WRAPPER_TYPES.has(name)) {
+      return name;
+    }
+    current = unwrapSchema(current);
+  }
+
+  return "unknown";
 }
 
 /**

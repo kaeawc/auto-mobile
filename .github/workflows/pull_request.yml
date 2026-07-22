@@ -242,6 +242,11 @@ jobs:
             android:
               - 'android/**'
               - 'scripts/android/**'
+              # The emulator jobs are exactly what this composite action drives,
+              # so an edit to it must exercise them rather than skip them. #4199
+              # rewired this action and only ran the emulator jobs incidentally,
+              # because it also touched scripts/android/** (see #4237).
+              - '.github/actions/android-emulator/**'
               - 'scripts/local-dev/hot-reload.sh'
               - '.github/workflows/android*.yml'
               # This workflow controls Android-job gating, so changes to it

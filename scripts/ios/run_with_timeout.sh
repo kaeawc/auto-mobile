@@ -36,8 +36,12 @@ run_with_timeout() {
   else
     # The watchdog runs in a subshell and so cannot assign to a variable in this
     # scope; a marker file is how it reports back that it fired.
+    # Spell the template out rather than using `mktemp -t <prefix>`: BSD mktemp
+    # treats the argument as a prefix and appends randomness, but GNU mktemp
+    # requires a trailing XXXXXX and hard-errors on a bare prefix, which made
+    # every fallback call return 125 on Ubuntu.
     local fired_marker
-    fired_marker="$(mktemp -t run_with_timeout)" || return 125
+    fired_marker="$(mktemp "${TMPDIR:-/tmp}/run_with_timeout.XXXXXX")" || return 125
 
     # Monitor mode puts the child in its own process group (pgid == its pid),
     # which is what lets the group-directed kill below reach descendants.

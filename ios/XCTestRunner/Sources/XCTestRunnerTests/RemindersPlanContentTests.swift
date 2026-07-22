@@ -293,22 +293,19 @@ final class RemindersPlanContentTests: XCTestCase {
 
         assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
             workflow,
-            afterStepName: pullRequestRemindersLegAnchorStep
+            afterStepName: nil
         )
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
-            stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
-            afterStepName: pullRequestRemindersLegAnchorStep
+            stepName: "Warm up iOS CtrlProxy (Xcode 26.5)"
         )
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
-            stepName: "Warm up Reminders target app (Xcode 26.5)",
-            afterStepName: pullRequestRemindersLegAnchorStep
+            stepName: "Warm up Reminders target app (Xcode 26.5)"
         )
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,
-            stepName: "Run Reminders integration tests (Xcode 26.5)",
-            afterStepName: pullRequestRemindersLegAnchorStep
+            stepName: "Run Reminders integration tests (Xcode 26.5)"
         )
     }
 
@@ -976,20 +973,20 @@ private func assertWorkflowRunsGuardedRemindersTest(
 
 /// Scan anchor for the PR workflow's Reminders leg.
 ///
-/// Several step names occur twice in `ios-xctest-runner-simulator-tests` (e.g. "Select Xcode
-/// 26.5" is both the job's initial toolchain selection, which has no `if:`, and the Reminders
-/// leg's re-selection, which does), so the assertions below must start scanning after the leg
-/// begins. This was "Run Reminders integration tests (Xcode 26.2)" until #4078 dropped that
-/// leg; the unique `if: always()` teardown directly above the leg replaces it. Mirrors
-/// ANCHOR_STEP in test/bats/xctest-shared-prereq-gate.bats.
-private let pullRequestRemindersLegAnchorStep = "Shutdown iOS Simulators"
-
-/// `afterStepName` defaults to the Xcode 26.2 Reminders run step, which nightly.yml still has
-/// (it deliberately keeps both legs — the coverage is free there because it does not gate
-/// merges). pull_request.yml passes `pullRequestRemindersLegAnchorStep` instead.
+/// `afterStepName` anchors the scan past duplicated step names. nightly.yml is a
+/// matrix and genuinely repeats names ("Select Xcode ${{ matrix.config.xcode }}",
+/// "Ensure iOS Simulator runtime", ...), so it keeps the anchor and passes the
+/// Xcode 26.2 Reminders run step it still has.
+///
+/// pull_request.yml passes nil: #4114 removed the leg's redundant "Select Xcode
+/// 26.5" / "Ensure iOS Simulator runtime (Xcode 26.5)", which were its only
+/// duplicated step names, so a plain by-name lookup is unambiguous there. That
+/// invariant is enforced by the no-duplicate-step-names test in
+/// test/bats/xctest-shared-prereq-gate.bats -- if a duplicate is reintroduced,
+/// the lookup would silently resolve to the first occurrence.
 private func assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
     _ workflow: String,
-    afterStepName: String = "Run Reminders integration tests (Xcode 26.2)",
+    afterStepName: String? = "Run Reminders integration tests (Xcode 26.2)",
     file: StaticString = #filePath,
     line: UInt = #line
 ) {

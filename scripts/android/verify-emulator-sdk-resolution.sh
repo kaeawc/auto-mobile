@@ -18,7 +18,11 @@ repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 
 missing_avd="automobile-sdk-resolution-probe"
 set +e
-output="$(cd "${repo_root}" && bun run src/index.ts --boot-device --platform android \
+# Pin creation off explicitly. This probe deliberately names an AVD that does
+# not exist, so if AUTOMOBILE_ALLOW_DEVICE_CREATE is ever turned on repo-wide it
+# would turn a two-minute resolution check into a full emulator provision.
+output="$(cd "${repo_root}" && AUTOMOBILE_ALLOW_DEVICE_CREATE=0 \
+  bun run src/index.ts --boot-device --platform android \
   --name "${missing_avd}" --timeout-ms 5000 2>&1)"
 set -e
 

@@ -149,3 +149,25 @@ MOCK
   [ "$status" -eq 0 ]
   [[ "$output" == *"resolvable by the product boot flow"* ]]
 }
+
+@test "the resolution tripwire never provisions a device even if creation is enabled globally" {
+  make_emulator
+  fake_bin="$(mktemp -d)"
+  seen="$(mktemp)"
+  cat > "${fake_bin}/bun" <<MOCK
+#!/usr/bin/env bash
+printf '%s\n' "\${AUTOMOBILE_ALLOW_DEVICE_CREATE:-<unset>}" > "${seen}"
+echo "error: No matching device found"
+exit 1
+MOCK
+  chmod +x "${fake_bin}/bun"
+
+  run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
+    AUTOMOBILE_ALLOW_DEVICE_CREATE=1 PATH="${fake_bin}:${PATH}" \
+    bash "$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(<"$seen")" = "0" ]
+  rm -rf "$fake_bin"
+  rm -f "$seen"
+}

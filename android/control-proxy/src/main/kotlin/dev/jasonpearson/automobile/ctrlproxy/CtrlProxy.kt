@@ -30,11 +30,11 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
+import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.RecompositionSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
-import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -1729,7 +1729,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun toSystemInsetsInfo(insets: android.graphics.Insets): SystemInsetsInfo =
-    SystemInsetsInfo(top = insets.top, bottom = insets.bottom, left = insets.left, right = insets.right)
+    SystemInsetsInfo(
+      top = insets.top,
+      bottom = insets.bottom,
+      left = insets.left,
+      right = insets.right,
+    )
 
   /** Get typed current-window inset metadata for coordinate and layout inspection. */
   @Suppress("DEPRECATION")
@@ -1740,14 +1745,37 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val metrics = windowManager.currentWindowMetrics
         val windowInsets = metrics.windowInsets
         ObservationInsetsInfo(
-          systemBars = SystemBarsInsetsInfo(
-            visible = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.systemBars())),
-            stable = toSystemInsetsInfo(windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())),
-          ),
-          displayCutout = toSystemInsetsInfo(windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.displayCutout())),
-          systemGestures = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.systemGestures())),
-          mandatorySystemGestures = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.mandatorySystemGestures())),
-          tappableElement = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.tappableElement())),
+          systemBars =
+            SystemBarsInsetsInfo(
+              visible =
+                toSystemInsetsInfo(
+                  windowInsets.getInsets(android.view.WindowInsets.Type.systemBars())
+                ),
+              stable =
+                toSystemInsetsInfo(
+                  windowInsets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.systemBars()
+                  )
+                ),
+            ),
+          displayCutout =
+            toSystemInsetsInfo(
+              windowInsets.getInsetsIgnoringVisibility(
+                android.view.WindowInsets.Type.displayCutout()
+              )
+            ),
+          systemGestures =
+            toSystemInsetsInfo(
+              windowInsets.getInsets(android.view.WindowInsets.Type.systemGestures())
+            ),
+          mandatorySystemGestures =
+            toSystemInsetsInfo(
+              windowInsets.getInsets(android.view.WindowInsets.Type.mandatorySystemGestures())
+            ),
+          tappableElement =
+            toSystemInsetsInfo(
+              windowInsets.getInsets(android.view.WindowInsets.Type.tappableElement())
+            ),
         )
       } else {
         // API 24-29 cannot provide the typed WindowInsets categories from this service context.
@@ -1756,7 +1784,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val statusBarHeight =
           if (statusBarId > 0) resources.getDimensionPixelSize(statusBarId) else 0
         val navBarHeight = if (navBarId > 0) resources.getDimensionPixelSize(navBarId) else 0
-        val bars = SystemInsetsInfo(top = statusBarHeight, bottom = navBarHeight, left = 0, right = 0)
+        val bars =
+          SystemInsetsInfo(top = statusBarHeight, bottom = navBarHeight, left = 0, right = 0)
         ObservationInsetsInfo(
           source = "android-resource-fallback",
           systemBars = SystemBarsInsetsInfo(visible = bars, stable = bars),

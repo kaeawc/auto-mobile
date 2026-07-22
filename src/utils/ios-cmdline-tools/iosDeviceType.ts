@@ -11,7 +11,7 @@ export const IOS_SIMULATOR_UUID_PATTERN =
  * Physical iOS devices with an A12 or newer SoC (iOS 12+) report a UDID of
  * 8 hex digits, a hyphen, then 16 hex digits — e.g. `00008030-001C2D3E1234567A`.
  */
-export const IOS_PHYSICAL_UDID_MODERN_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{16}$/i;
+const IOS_PHYSICAL_UDID_MODERN_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{16}$/i;
 
 /**
  * Pre-A12 physical iOS devices report a bare 40-character hex UDID with no
@@ -19,7 +19,7 @@ export const IOS_PHYSICAL_UDID_MODERN_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{16}$/i;
  * shorter and/or contain characters outside the hex alphabet, so this stays
  * disjoint from them.
  */
-export const IOS_PHYSICAL_UDID_LEGACY_PATTERN = /^[0-9A-F]{40}$/i;
+const IOS_PHYSICAL_UDID_LEGACY_PATTERN = /^[0-9A-F]{40}$/i;
 
 /** True when the deviceId looks like an iOS simulator UDID (not a physical device). */
 export function isIosSimulatorUdid(deviceId: string): boolean {

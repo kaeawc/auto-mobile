@@ -3,6 +3,7 @@ import { isTruthy } from "../../../models/Element";
 
 type Node = Record<string, unknown>;
 type Side = LayoutWarning["sides"][number];
+type ContentInsets = { edges: ObservationEdgeInsets; types: LayoutWarning["insetTypes"] };
 
 /**
  * Report-only edge-to-edge inspection. It intentionally warns about potential
@@ -29,65 +30,61 @@ export class SafeAreaAuditor {
     return dedupeWarnings(warnings);
   }
 
-  private contentInsets(insets: NonNullable<ObserveResult["insets"]>): {
-    edges: ObservationEdgeInsets;
-    types: LayoutWarning["insetTypes"];
-  } | null {
+  private contentInsets(insets: NonNullable<ObserveResult["insets"]>): ContentInsets | null {
     if (insets.safeArea) {
       return { edges: insets.safeArea, types: ["safeArea"] };
     }
     const bars = insets.systemBars?.visible;
     const cutout = insets.displayCutout;
-    if (!bars && !cutout) {
-      return null;
-    }
+    const edges = maxInsets(bars, cutout);
+    if (!edges) {return null;}
     return {
-      edges: {
-        top: Math.max(bars?.top ?? 0, cutout?.top ?? 0),
-        right: Math.max(bars?.right ?? 0, cutout?.right ?? 0),
-        bottom: Math.max(bars?.bottom ?? 0, cutout?.bottom ?? 0),
-        left: Math.max(bars?.left ?? 0, cutout?.left ?? 0),
-      },
-      types: [bars ? "systemBars" : undefined, cutout ? "displayCutout" : undefined]
-        .filter((type): type is "systemBars" | "displayCutout" => type !== undefined),
+      edges,
+      types: insetTypes(bars, cutout, "systemBars", "displayCutout"),
     };
   }
 
   private inspectNode(
     node: Node,
     screen: { width: number; height: number },
-    content: ReturnType<SafeAreaAuditor["contentInsets"]>,
+    content: ContentInsets | null,
     systemGestures: ObservationEdgeInsets | undefined,
     mandatorySystemGestures: ObservationEdgeInsets | undefined,
     warnings: LayoutWarning[]
   ): void {
-    if (isSystemNode(node)) {
-      return;
-    }
-    const bounds = readBounds(node);
-    const categories = categoriesFor(node);
-    if (bounds && categories.length > 0 && !isScreenSized(bounds, screen) && node.enabled !== "false") {
-      if (content) {
-        const sides = intersectingSides(bounds, screen, content.edges);
-        if (sides.length > 0) {
-          warnings.push(this.warning(node, bounds, categories, content.types, sides, "important-content-under-inset", "warning", screen, content.edges));
-        }
-      }
-      if (categories.includes("interaction")) {
-        const gesture = maxInsets(systemGestures, mandatorySystemGestures);
-        const sides = gesture ? intersectingSides(bounds, screen, gesture) : [];
-        if (gesture && sides.length > 0) {
-          const types: LayoutWarning["insetTypes"] = [
-            systemGestures ? "systemGestures" : undefined,
-            mandatorySystemGestures ? "mandatorySystemGestures" : undefined,
-          ].filter((type): type is "systemGestures" | "mandatorySystemGestures" => type !== undefined);
-          warnings.push(this.warning(node, bounds, ["interaction"], types, sides, "interaction-in-system-gesture-region", "info", screen, gesture));
-        }
-      }
-    }
+    if (!isSystemNode(node)) {this.inspectElement(node, screen, content, systemGestures, mandatorySystemGestures, warnings);}
     for (const child of asNodes(node.node)) {
       this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, warnings);
     }
+  }
+
+  private inspectElement(
+    node: Node,
+    screen: { width: number; height: number },
+    content: ContentInsets | null,
+    systemGestures: ObservationEdgeInsets | undefined,
+    mandatorySystemGestures: ObservationEdgeInsets | undefined,
+    warnings: LayoutWarning[]
+  ): void {
+    const bounds = readBounds(node);
+    const categories = categoriesFor(node);
+    if (!bounds || categories.length === 0 || isScreenSized(bounds, screen) || node.enabled === "false") {return;}
+    this.inspectContent(node, bounds, categories, screen, content, warnings);
+    this.inspectGestureRegion(node, bounds, categories, screen, systemGestures, mandatorySystemGestures, warnings);
+  }
+
+  private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, warnings: LayoutWarning[]): void {
+    if (!content) {return;}
+    const sides = intersectingSides(bounds, screen, content.edges);
+    if (sides.length > 0) {warnings.push(this.warning(node, bounds, categories, content.types, sides, "important-content-under-inset", "warning", screen, content.edges));}
+  }
+
+  private inspectGestureRegion(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, systemGestures: ObservationEdgeInsets | undefined, mandatorySystemGestures: ObservationEdgeInsets | undefined, warnings: LayoutWarning[]): void {
+    if (!categories.includes("interaction")) {return;}
+    const gesture = maxInsets(systemGestures, mandatorySystemGestures);
+    if (!gesture) {return;}
+    const sides = intersectingSides(bounds, screen, gesture);
+    if (sides.length > 0) {warnings.push(this.warning(node, bounds, ["interaction"], insetTypes(systemGestures, mandatorySystemGestures, "systemGestures", "mandatorySystemGestures"), sides, "interaction-in-system-gesture-region", "info", screen, gesture));}
   }
 
   private warning(
@@ -121,7 +118,7 @@ export class SafeAreaAuditor {
 }
 
 function asNodes(value: unknown): Node[] {
-  if (Array.isArray(value)) return value.filter(isNode);
+  if (Array.isArray(value)) {return value.filter(isNode);}
   return isNode(value) ? [value] : [];
 }
 
@@ -131,10 +128,13 @@ function isNode(value: unknown): value is Node {
 
 function readBounds(node: Node): ObservationEdgeInsets | null {
   const candidate = node.bounds;
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
-  const value = candidate as Record<string, unknown>;
-  if (![value.left, value.top, value.right, value.bottom].every(item => typeof item === "number")) return null;
-  return value as unknown as ObservationEdgeInsets;
+  return isInsets(candidate) ? candidate : null;
+}
+
+function isInsets(value: unknown): value is ObservationEdgeInsets {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {return false;}
+  const candidate = value as Record<string, unknown>;
+  return [candidate.left, candidate.top, candidate.right, candidate.bottom].every(item => typeof item === "number");
 }
 
 function categoriesFor(node: Node): LayoutWarning["categories"] {
@@ -182,8 +182,17 @@ function intersectArea(a: ObservationEdgeInsets, b: ObservationEdgeInsets): numb
 }
 
 function maxInsets(a?: ObservationEdgeInsets, b?: ObservationEdgeInsets): ObservationEdgeInsets | undefined {
-  if (!a && !b) return undefined;
-  return { top: Math.max(a?.top ?? 0, b?.top ?? 0), right: Math.max(a?.right ?? 0, b?.right ?? 0), bottom: Math.max(a?.bottom ?? 0, b?.bottom ?? 0), left: Math.max(a?.left ?? 0, b?.left ?? 0) };
+  if (!a && !b) {return undefined;}
+  const insets = [a, b].filter((inset): inset is ObservationEdgeInsets => inset !== undefined);
+  return { top: maximumInset(insets, "top"), right: maximumInset(insets, "right"), bottom: maximumInset(insets, "bottom"), left: maximumInset(insets, "left") };
+}
+
+function maximumInset(insets: ObservationEdgeInsets[], side: keyof ObservationEdgeInsets): number {
+  return Math.max(0, ...insets.map(inset => inset[side]));
+}
+
+function insetTypes<A extends LayoutWarning["insetTypes"][number], B extends LayoutWarning["insetTypes"][number]>(first: ObservationEdgeInsets | undefined, second: ObservationEdgeInsets | undefined, firstType: A, secondType: B): Array<A | B> {
+  return [...(first ? [firstType] : []), ...(second ? [secondType] : [])];
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -194,7 +203,7 @@ function dedupeWarnings(warnings: LayoutWarning[]): LayoutWarning[] {
   const seen = new Set<string>();
   return warnings.filter(warning => {
     const key = `${warning.type}:${warning.element.viewId ?? warning.element.resourceId ?? warning.element.text ?? "unknown"}:${warning.sides.join(",")}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key)) {return false;}
     seen.add(key);
     return true;
   });

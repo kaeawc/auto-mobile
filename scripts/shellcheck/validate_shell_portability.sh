@@ -128,12 +128,15 @@ EMPTY_ARRAY_AWK='
 # `local arr=()`, `local -a arr=()`, `declare -A arr=()`, `typeset -a arr=()`.
 # A trailing comment (`items=() # optional args`) is a normal initializer and
 # must still register the array.
-match($0, /^[ \t]*((local|declare|typeset)[ \t]+(-[aAgilnrtux]+[ \t]+)*)?[A-Za-z_][A-Za-z0-9_]*=\(\)[ \t]*(#.*)?$/) {
+# `items=(); printf ...` and `items=();` are ordinary initializers. Anchoring to
+# end-of-line missed them entirely, so the array was never recorded and every
+# later expansion of it went unchecked.
+match($0, /^[ \t]*((local|declare|typeset)[ \t]+(-[aAgilnrtux]+[ \t]+)*)?[A-Za-z_][A-Za-z0-9_]*=\(\)[ \t]*(;|#|$)/) {
   decl = $0
   sub(/^[ \t]*/, "", decl)
   sub(/^(local|declare|typeset)[ \t]+/, "", decl)
   while (decl ~ /^-[aAgilnrtux]+[ \t]+/) { sub(/^-[aAgilnrtux]+[ \t]+/, "", decl) }
-  sub(/=\(\)[ \t]*(#.*)?$/, "", decl)
+  sub(/=\(\).*$/, "", decl)
   arrays[decl] = 1
 }
 
@@ -195,10 +198,10 @@ function is_empty_early_out(lines, nlines, k, name,   j, seg, cut) {
     # NON-empty case. Truncate and make this the last segment considered.
     if (match(seg, /(^|[ \t;])(else|elif)([ \t;]|$)/)) {
       seg = substr(seg, 1, RSTART - 1)
-      if (seg ~ /(^|[ \t;])(return|exit|continue|break)([ \t;]|$)/) { return 1 }
+      if (seg ~ /(^|[ \t;])(return|exit)([ \t;]|$)/) { return 1 }
       return 0
     }
-    if (seg ~ /(^|[ \t;])(return|exit|continue|break)([ \t;]|$)/) { return 1 }
+    if (seg ~ /(^|[ \t;])(return|exit)([ \t;]|$)/) { return 1 }
     # `fi` closes the construct without an exit — not an early-out.
     if (seg ~ /(^|[ \t;])fi([ \t;]|$)/) { return 0 }
   }

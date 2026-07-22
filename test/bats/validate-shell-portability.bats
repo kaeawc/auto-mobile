@@ -380,3 +380,61 @@ FIXTURE
   run bash "$ABS" "$FIX"
   [ "$status" -eq 0 ]
 }
+
+# --- Holes 4 and 5, found in review of #4217 after it merged. ---
+# Both are the same failure mode as holes 1-3: the gate reported success while
+# the bash 3.2 crash it exists to catch went undetected.
+
+@test "a loop continue is not a function-wide empty-array early-out" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+items=()
+for attempt in 1 2 3; do
+  if [[ ${#items[@]} -eq 0 ]]; then continue; fi
+  echo "$attempt"
+done
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "a loop break is not a function-wide empty-array early-out" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+items=()
+while true; do
+  if [[ ${#items[@]} -eq 0 ]]; then break; fi
+done
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "records a semicolon-terminated empty-array declaration" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+items=(); printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "records a bare semicolon empty-array declaration" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+items=();
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}

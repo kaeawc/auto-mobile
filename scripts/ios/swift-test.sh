@@ -87,6 +87,11 @@ IOS_ONLY_PACKAGES=(
 # XCTest prints one "Executed" line per test bundle AND a duplicate summary line,
 # so the maximum is taken rather than the sum of the XCTest lines; swift-testing's
 # single count is then added.
+# Sets EXECUTED_TESTS rather than echoing: calling a function inside $( ) makes
+# bash silently disable set -e for it (SC2311), which the shell-sete ratchet
+# rejects -- and suppressing errexit inside a guard whose whole job is catching
+# silent success would be self-defeating.
+EXECUTED_TESTS=0
 executed_test_count() {
     local output="$1" xctest swifttesting
     xctest="$(printf '%s\n' "${output}" \
@@ -95,7 +100,7 @@ executed_test_count() {
     swifttesting="$(printf '%s\n' "${output}" \
         | sed -n 's/.*Test run with \([0-9][0-9]*\) tests* in .*/\1/p' \
         | sort -n | tail -1)"
-    echo $(( ${xctest:-0} + ${swifttesting:-0} ))
+    EXECUTED_TESTS=$(( ${xctest:-0} + ${swifttesting:-0} ))
 }
 
 # Run tests for macOS-compatible packages
@@ -107,14 +112,21 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
 
         # Check if the package has test targets
         if grep -q "testTarget" "${PACKAGE_DIR}/Package.swift"; then
-            test_output="$(cd "${PACKAGE_DIR}" && swift test -Xswiftc -warnings-as-errors 2>&1)"
-            test_rc=$?
+            # Assign inside the `if` condition: under set -e a bare
+            # test_output="$(failing-cmd)" aborts the whole script, so a package
+            # that genuinely fails would kill the run instead of being recorded.
+            if test_output="$(cd "${PACKAGE_DIR}" && swift test -Xswiftc -warnings-as-errors 2>&1)"; then
+                test_rc=0
+            else
+                test_rc=$?
+            fi
             echo "${test_output}"
+            executed_test_count "${test_output}"
 
             if [ "${test_rc}" -ne 0 ]; then
                 print_status 1 "${package} tests failed"
                 FAILED_PACKAGES+=("${package}")
-            elif [ "$(executed_test_count "${test_output}")" -eq 0 ]; then
+            elif [ "${EXECUTED_TESTS}" -eq 0 ]; then
                 # `swift test` exits 0 when it runs nothing, so a package whose
                 # suite was deleted, emptied, or simply not discovered is
                 # indistinguishable from one that passed (issue #4143). A package

@@ -24,6 +24,13 @@ load_counter() {
   source <(sed -n '/^executed_test_count()/,/^}/p' "$SCRIPT")
 }
 
+# The counter sets EXECUTED_TESTS rather than echoing (calling a function inside
+# $( ) disables set -e, which the shell-sete ratchet rejects).
+count_of() {
+  EXECUTED_TESTS=0
+  executed_test_count "$1"
+}
+
 @test "the counter is defined in swift-test.sh" {
   load_counter
   declare -F executed_test_count
@@ -32,7 +39,7 @@ load_counter() {
 @test "an XCTest transcript reports its executed count" {
   load_counter
   out=$'\t Executed 27 tests, with 0 failures (0 unexpected) in 0.057 (0.059) seconds'
-  [ "$(executed_test_count "$out")" -eq 27 ]
+  count_of "$out"; [ "$EXECUTED_TESTS" -eq 27 ]
 }
 
 @test "XCTest's duplicated summary line is not double counted" {
@@ -41,26 +48,26 @@ load_counter() {
   # wrong for anything that later reads this number.
   load_counter
   out=$'\t Executed 27 tests, with 0 failures (0 unexpected) in 0.057 (0.059) seconds\n\t Executed 27 tests, with 0 failures (0 unexpected) in 0.057 (0.060) seconds'
-  [ "$(executed_test_count "$out")" -eq 27 ]
+  count_of "$out"; [ "$EXECUTED_TESTS" -eq 27 ]
 }
 
 @test "a zero-test run counts zero (the case that used to pass silently)" {
   load_counter
   out='✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.'
-  [ "$(executed_test_count "$out")" -eq 0 ]
+  count_of "$out"; [ "$EXECUTED_TESTS" -eq 0 ]
 }
 
 @test "a real package emitting both runners sums them" {
   # XCTestRunner emits an XCTest count AND a swift-testing count in one run.
   load_counter
   out=$'Executed 12 tests, with 0 failures (0 unexpected) in 1.0 (1.0) seconds\n✔ Test run with 5 tests in 2 suites passed after 0.1 seconds.'
-  [ "$(executed_test_count "$out")" -eq 17 ]
+  count_of "$out"; [ "$EXECUTED_TESTS" -eq 17 ]
 }
 
 @test "swift-testing-only packages are counted" {
   load_counter
   out='✔ Test run with 8 tests in 3 suites passed after 0.2 seconds.'
-  [ "$(executed_test_count "$out")" -eq 8 ]
+  count_of "$out"; [ "$EXECUTED_TESTS" -eq 8 ]
 }
 
 @test "output with no recognizable count yields zero rather than empty" {
@@ -68,7 +75,7 @@ load_counter() {
   # syntax error rather than a clean failure.
   load_counter
   out='some unrelated build chatter'
-  [ "$(executed_test_count "$out")" -eq 0 ]
+  count_of "$out"; [ "$EXECUTED_TESTS" -eq 0 ]
 }
 
 @test "swift-test.sh fails a testTarget package that executed no tests" {
@@ -76,4 +83,6 @@ load_counter() {
   # package failed rather than passed.
   grep -q 'executed 0 tests' "$SCRIPT"
   grep -q 'FAILED_PACKAGES+=("${package} (0 tests executed)")' "$SCRIPT"
+  # and the capture must be set -e safe, or a real failure aborts the script
+  grep -q 'if test_output="$(cd "${PACKAGE_DIR}"' "$SCRIPT"
 }

@@ -42,6 +42,8 @@ export interface WhipSession {
    * used to terminate — and, by extension, reconnect (re-publish) — the stream.
    */
   resourceUrl: string | null;
+  /** Strong entity tag for conditional Trickle-ICE PATCH requests. */
+  etag: string | null;
 }
 
 /**
@@ -107,8 +109,9 @@ export class WhipClient {
       throw new ActionableError("WHIP ingest response omitted the required Location header.");
     }
     const resourceUrl = this.resolveLocation(location);
+    const etag = response.headers.get("etag");
 
-    return { answerSdp, resourceUrl };
+    return { answerSdp, resourceUrl, etag };
   }
 
   /**
@@ -119,12 +122,16 @@ export class WhipClient {
    */
   async patchCandidate(
     resourceUrl: string,
+    etag: string,
     sdpFragment: string,
     signal?: AbortSignal
   ): Promise<void> {
     const response = await this.fetchWithTimeout(resourceUrl, {
       method: "PATCH",
-      headers: this.headers({ "Content-Type": "application/trickle-ice-sdpfrag" }),
+      headers: this.headers({
+        "Content-Type": "application/trickle-ice-sdpfrag",
+        "If-Match": etag,
+      }),
       body: sdpFragment,
       signal,
     });

@@ -8,6 +8,7 @@ const ACCEPTED_VIDEO_ANSWER = [
   "m=video 9 UDP/TLS/RTP/SAVPF 102",
   "a=recvonly",
   "a=rtpmap:102 H264/90000",
+  "a=fmtp:102 packetization-mode=1;profile-level-id=42e01f",
 ].join("\r\n");
 const ACCEPTED_VIDEO_AND_AUDIO_ANSWER = [
   ACCEPTED_VIDEO_ANSWER,

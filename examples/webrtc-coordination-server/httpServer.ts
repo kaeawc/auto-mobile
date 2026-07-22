@@ -12,6 +12,7 @@ const VIEWER_HTML_PATH = join(import.meta.dir ?? __dirname, "viewer.html");
 const MAX_SDP_BODY_BYTES = 1_000_000;
 
 class RequestBodyTooLargeError extends Error {}
+class InvalidSdpError extends Error {}
 
 /**
  * HTTP/WHIP/WHEP front end for {@link CoordinationServer}.
@@ -42,6 +43,10 @@ export class HttpCoordinationServer {
       this.handle(req, res).catch(error => {
         if (error instanceof RequestBodyTooLargeError) {
           res.writeHead(413).end("request body too large");
+          return;
+        }
+        if (error instanceof InvalidSdpError) {
+          res.writeHead(400).end("invalid SDP");
           return;
         }
         // Log the detail server-side; never expose error/stack text to the client.
@@ -79,6 +84,15 @@ export class HttpCoordinationServer {
       return;
     }
 
+    if (method === "GET" && (path === "/whip" || path === "/whep" || /^\/(whip|whep)\/[^/]+$/.test(path) || /^\/whep\/[^/]+\/[^/]+$/.test(path))) {
+      res.writeHead(204).end();
+      return;
+    }
+    if (method === "HEAD" && /^\/whep\/[^/]+$/.test(path)) {
+      res.writeHead(200, { "Content-Type": "application/sdp" }).end();
+      return;
+    }
+
     // Reconnect API ---------------------------------------------------------
     if (method === "GET" && path === "/api/streams") {
       this.sendJson(res, 200, { streams: this.coordinator.listStreams() });
@@ -101,16 +115,20 @@ export class HttpCoordinationServer {
         res.writeHead(401).end("Unauthorized");
         return;
       }
+      assertContentType(req, "application/sdp");
       const offer = await readBody(req);
-      const { streamId, answerSdp } = await this.coordinator.ingest(
-        offer,
-        url.searchParams.get("streamId") ?? undefined
-      );
+      let ingest: { streamId: string; answerSdp: string; etag: string };
+      try {
+        ingest = await this.coordinator.ingest(offer, url.searchParams.get("streamId") ?? undefined);
+      } catch {
+        throw new InvalidSdpError();
+      }
       res.writeHead(201, {
         "Content-Type": "application/sdp",
-        "Location": `/whip/${encodeURIComponent(streamId)}`,
+        "Location": `/whip/${encodeURIComponent(ingest.streamId)}`,
+        "ETag": `\"${ingest.etag}\"`,
       });
-      res.end(answerSdp);
+      res.end(ingest.answerSdp);
       return;
     }
     // WHIP trickle ICE: incremental candidates from the publisher --------------
@@ -120,13 +138,19 @@ export class HttpCoordinationServer {
         res.writeHead(401).end("Unauthorized");
         return;
       }
+      assertContentType(req, "application/trickle-ice-sdpfrag");
+      const ifMatch = req.headers["if-match"];
+      if (typeof ifMatch !== "string") { res.writeHead(428).end(); return; }
+      const streamId = decodeURIComponent(whipPatchMatch[1]);
+      const etag = this.coordinator.getIceEtag(streamId);
+      if (!etag) { res.writeHead(404).end(); return; }
+      if (ifMatch !== `\"${etag}\"`) { res.writeHead(412).end(); return; }
       const fragment = await readBody(req);
       const applied = await this.coordinator.addIngestCandidates(
-        decodeURIComponent(whipPatchMatch[1]),
+        streamId,
         fragment
       );
-      // 204 on success; 404 if the stream id is unknown (stale resource).
-      res.writeHead(applied ? 204 : 404).end();
+      res.writeHead(applied === "applied" ? 204 : applied === "restart" ? 422 : applied === "invalid" ? 400 : 404).end();
       return;
     }
     const whipDeleteMatch = /^\/whip\/([^/]+)$/.exec(path);
@@ -146,6 +170,10 @@ export class HttpCoordinationServer {
     const whepMatch = /^\/whep\/([^/]+)$/.exec(path);
     if (method === "POST" && whepMatch) {
       const streamId = decodeURIComponent(whepMatch[1]);
+      if (!hasContentType(req, "application/sdp")) {
+        res.writeHead(415).end("unsupported SDP media type");
+        return;
+      }
       const offer = await readBody(req);
       try {
         const { subscriberId, answerSdp } = await this.coordinator.subscribe(streamId, offer);
@@ -209,6 +237,16 @@ export class HttpCoordinationServer {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
   }
+}
+
+function assertContentType(req: IncomingMessage, expected: string): void {
+  if (!hasContentType(req, expected)) {
+    throw new InvalidSdpError();
+  }
+}
+
+function hasContentType(req: IncomingMessage, expected: string): boolean {
+  return req.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() === expected;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {

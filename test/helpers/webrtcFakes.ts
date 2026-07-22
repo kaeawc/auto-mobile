@@ -5,6 +5,7 @@ export const VIDEO_ONLY_WHIP_ANSWER = [
   "m=video 9 UDP/TLS/RTP/SAVPF 96",
   "a=recvonly",
   "a=rtpmap:96 H264/90000",
+  "a=fmtp:96 packetization-mode=1;profile-level-id=42e01f",
   "",
 ].join("\r\n");
 

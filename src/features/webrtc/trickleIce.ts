@@ -25,6 +25,13 @@ export interface IceCredentials {
   pwd?: string;
 }
 
+/** SDP context required by RFC 8840 for a media-level candidate fragment. */
+export interface TrickleIceMediaContext {
+  mLine: string;
+  mid: string;
+  ice: Required<IceCredentials>;
+}
+
 /** Ensure the candidate value carries the `candidate:` prefix exactly once. */
 function normalizeCandidateLine(candidate: string): string {
   const trimmed = candidate.trim();
@@ -38,20 +45,28 @@ function normalizeCandidateLine(candidate: string): string {
  */
 export function serializeTrickleFragment(
   candidate: TrickleCandidate,
-  ice: IceCredentials = {}
+  context: TrickleIceMediaContext
 ): string {
-  const lines: string[] = [];
-  if (ice.ufrag) {
-    lines.push(`a=ice-ufrag:${ice.ufrag}`);
-  }
-  if (ice.pwd) {
-    lines.push(`a=ice-pwd:${ice.pwd}`);
-  }
-  if (candidate.sdpMid !== undefined && candidate.sdpMid !== null) {
-    lines.push(`a=mid:${candidate.sdpMid}`);
-  }
+  const lines = [
+    context.mLine,
+    `a=mid:${candidate.sdpMid ?? context.mid}`,
+    `a=ice-ufrag:${context.ice.ufrag}`,
+    `a=ice-pwd:${context.ice.pwd}`,
+  ];
   lines.push(`a=${normalizeCandidateLine(candidate.candidate)}`);
   return `${lines.join("\r\n")}\r\n`;
+}
+
+/** Serialize the terminal marker for one Trickle-ICE media section. */
+export function serializeEndOfCandidates(context: TrickleIceMediaContext): string {
+  return [
+    context.mLine,
+    `a=mid:${context.mid}`,
+    `a=ice-ufrag:${context.ice.ufrag}`,
+    `a=ice-pwd:${context.ice.pwd}`,
+    "a=end-of-candidates",
+    "",
+  ].join("\r\n");
 }
 
 /**
@@ -86,14 +101,35 @@ export class TrickleIceForwarder {
 
   constructor(
     private readonly send: (resourceUrl: string, fragment: string) => void,
-    private readonly ice: IceCredentials = {}
+    private readonly contexts: Map<string, TrickleIceMediaContext>
   ) {}
 
   addCandidate(candidate: TrickleCandidate): void {
     if (this.stopped) {
       return;
     }
-    const fragment = serializeTrickleFragment(candidate, this.ice);
+    const context = this.contextFor(candidate.sdpMid);
+    if (!context) {
+      return;
+    }
+    const fragment = serializeTrickleFragment(candidate, context);
+    if (this.resourceUrl === null) {
+      this.buffered.push(fragment);
+    } else {
+      this.send(this.resourceUrl, fragment);
+    }
+  }
+
+  /** Forward the RFC 8838 end-of-candidates marker once gathering completes. */
+  completeGathering(mid?: string): void {
+    if (this.stopped) {
+      return;
+    }
+    const context = this.contextFor(mid);
+    if (!context) {
+      return;
+    }
+    const fragment = serializeEndOfCandidates(context);
     if (this.resourceUrl === null) {
       this.buffered.push(fragment);
     } else {
@@ -121,4 +157,30 @@ export class TrickleIceForwarder {
     this.stopped = true;
     this.buffered = [];
   }
+
+  private contextFor(mid: string | undefined): TrickleIceMediaContext | undefined {
+    return (mid === undefined ? this.contexts.values().next().value : this.contexts.get(mid));
+  }
+}
+
+/** Extract media-level pseudo-section context from a locally generated SDP offer. */
+export function parseTrickleIceMediaContexts(sdp: string): Map<string, TrickleIceMediaContext> {
+  const sessionIce = extractIceCredentials(sdp.split(/\r?\n(?=m=)/)[0]);
+  const contexts = new Map<string, TrickleIceMediaContext>();
+  for (const section of sdp.split(/\r?\n(?=m=)/).slice(1)) {
+    const lines = section.split(/\r?\n/).filter(Boolean);
+    const mLine = lines[0];
+    const mid = lines.find(line => line.startsWith("a=mid:"))?.slice("a=mid:".length);
+    const ice = { ...sessionIce, ...extractIceCredentials(section) };
+    if (mLine && mid && ice.ufrag && ice.pwd) {
+      contexts.set(mid, { mLine, mid, ice: { ufrag: ice.ufrag, pwd: ice.pwd } });
+    }
+  }
+  return contexts;
+}
+
+function extractIceCredentials(sdp: string): IceCredentials {
+  const ufrag = sdp.match(/^a=ice-ufrag:(.+)$/m)?.[1]?.trim();
+  const pwd = sdp.match(/^a=ice-pwd:(.+)$/m)?.[1]?.trim();
+  return { ufrag, pwd };
 }

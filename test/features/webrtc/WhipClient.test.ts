@@ -155,11 +155,12 @@ describe("WhipClient.patchCandidate", () => {
       bearerToken: "tok",
       fetchImpl,
     });
-    await client.patchCandidate("https://coord.example.com/whip/s", "a=candidate:1 1 udp ...\r\n");
+    await client.patchCandidate("https://coord.example.com/whip/s", "\"etag\"", "a=candidate:1 1 udp ...\r\n");
     expect(calls[0].method).toBe("PATCH");
     expect(calls[0].url).toBe("https://coord.example.com/whip/s");
     expect(calls[0].headers["Content-Type"]).toBe("application/trickle-ice-sdpfrag");
     expect(calls[0].headers["Authorization"]).toBe("Bearer tok");
+    expect(calls[0].headers["If-Match"]).toBe("\"etag\"");
     expect(calls[0].body).toContain("a=candidate:1 1 udp");
   });
 
@@ -167,7 +168,7 @@ describe("WhipClient.patchCandidate", () => {
     const { fetchImpl } = fakeFetch(() => ({ status: 405 }));
     const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
     await expect(
-      client.patchCandidate("https://coord.example.com/whip/s", "a=candidate:...")
+      client.patchCandidate("https://coord.example.com/whip/s", "\"etag\"", "a=candidate:...")
     ).resolves.toBeUndefined();
   });
 });

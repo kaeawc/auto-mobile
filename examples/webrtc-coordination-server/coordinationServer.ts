@@ -70,6 +70,8 @@ interface StreamEntry {
   videoConfig: RtpPacket[];
   videoKeyFrame: RtpPacket[];
   collectingKeyFrame: RtpPacket[] | null;
+  iceEtag: string;
+  iceCredentials: { ufrag: string; pwd: string };
 }
 
 export interface RtpOutboundTrack {
@@ -119,7 +121,7 @@ export class CoordinationServer {
   async ingest(
     offerSdp: string,
     requestedStreamId?: string
-  ): Promise<{ streamId: string; answerSdp: string }> {
+  ): Promise<{ streamId: string; answerSdp: string; etag: string }> {
     const streamId = requestedStreamId?.trim() || `stream-${randomUUID().slice(0, 8)}`;
 
     const pc = new RTCPeerConnection({ codecs: { video: [useH264()], audio: [usePCMU()] } });
@@ -134,6 +136,8 @@ export class CoordinationServer {
       videoConfig: [],
       videoKeyFrame: [],
       collectingKeyFrame: null,
+      iceEtag: randomUUID(),
+      iceCredentials: parseIceCredentials(offerSdp),
     };
     pc.onTrack.subscribe(track => {
       if (track.kind !== "audio" && track.kind !== "video") {
@@ -182,7 +186,7 @@ export class CoordinationServer {
       await this.stopIngest(streamId);
     }
     this.streams.set(streamId, entry);
-    return { streamId, answerSdp: pc.localDescription?.sdp ?? "" };
+    return { streamId, answerSdp: pc.localDescription?.sdp ?? "", etag: entry.iceEtag };
   }
 
   /**
@@ -286,25 +290,30 @@ export class CoordinationServer {
    * stream id is unknown so the HTTP layer can answer 404. Parses leniently: the
    * `a=mid:` line (if any) applies to the following `a=candidate:` lines.
    */
-  async addIngestCandidates(streamId: string, fragment: string): Promise<boolean> {
+  getIceEtag(streamId: string): string | null {
+    return this.streams.get(streamId)?.iceEtag ?? null;
+  }
+
+  async addIngestCandidates(streamId: string, fragment: string): Promise<"unknown" | "applied" | "invalid" | "restart"> {
     const entry = this.streams.get(streamId);
     if (!entry) {
-      return false;
+      return "unknown";
     }
-    let sdpMid: string | undefined;
-    for (const rawLine of fragment.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (line.startsWith("a=mid:")) {
-        sdpMid = line.slice("a=mid:".length).trim() || undefined;
-      } else if (line.startsWith("a=candidate:")) {
+    const parsed = parseCandidateFragment(fragment);
+    if (!parsed) {
+      return "invalid";
+    }
+    if (parsed.ice.ufrag !== entry.iceCredentials.ufrag || parsed.ice.pwd !== entry.iceCredentials.pwd) {
+      return "restart";
+    }
+    for (const candidate of parsed.candidates) {
         await entry.ingestPc
-          .addIceCandidate({ candidate: line.slice("a=".length), sdpMid })
+          .addIceCandidate({ candidate, sdpMid: parsed.mid })
           .catch(() => {
             // A malformed or duplicate candidate is non-fatal; keep the stream up.
           });
-      }
     }
-    return true;
+    return "applied";
   }
 
   async stopSubscriber(streamId: string, subscriberId: string): Promise<void> {
@@ -371,11 +380,11 @@ function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
   // §8 documents parameter-set transport; caching/replay is our late-viewer
   // policy, not a replacement for RTCP feedback.
   // https://www.rfc-editor.org/rfc/rfc6184.html#section-8
-  if (nalType === 7 || nalType === 8) {
+  if (nalType === 7 || nalType === 8 || containsStapANalType(payload, 7) || containsStapANalType(payload, 8)) {
     entry.videoConfig = [...entry.videoConfig.filter(packet => (packet.payload[0] & 0x1f) !== nalType), rtp.clone()];
   }
 
-  const isIdrStart = nalType === 5 || (nalType === 28 && (payload[1] & 0x80) !== 0 && (payload[1] & 0x1f) === 5);
+  const isIdrStart = nalType === 5 || (nalType === 28 && (payload[1] & 0x80) !== 0 && (payload[1] & 0x1f) === 5) || containsStapANalType(payload, 5);
   // An IDR access unit may contain several type-5 NALs (or fragmented FU-As).
   // Keep collecting until its RTP marker rather than discarding earlier slices.
   if (isIdrStart && !entry.collectingKeyFrame) {entry.collectingKeyFrame = [];}
@@ -386,6 +395,37 @@ function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
       entry.collectingKeyFrame = null;
     }
   }
+}
+
+function containsStapANalType(payload: Buffer, expectedType: number): boolean {
+  if ((payload[0] & 0x1f) !== 24) return false;
+  let offset = 1;
+  while (offset + 2 <= payload.length) {
+    const size = payload.readUInt16BE(offset);
+    offset += 2;
+    if (size === 0 || offset + size > payload.length) return false;
+    if ((payload[offset] & 0x1f) === expectedType) return true;
+    offset += size;
+  }
+  return false;
+}
+
+function parseIceCredentials(sdp: string): { ufrag: string; pwd: string } {
+  const ufrag = sdp.match(/^a=ice-ufrag:(.+)$/m)?.[1]?.trim();
+  const pwd = sdp.match(/^a=ice-pwd:(.+)$/m)?.[1]?.trim();
+  if (!ufrag || !pwd) throw new Error("Offer omitted ICE credentials.");
+  return { ufrag, pwd };
+}
+
+function parseCandidateFragment(fragment: string): { mid: string; ice: { ufrag: string; pwd: string }; candidates: string[] } | null {
+  const lines = fragment.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const mLine = lines.find(line => line.startsWith("m="));
+  const mid = lines.find(line => line.startsWith("a=mid:"))?.slice(6).trim();
+  const ufrag = lines.find(line => line.startsWith("a=ice-ufrag:"))?.slice(12).trim();
+  const pwd = lines.find(line => line.startsWith("a=ice-pwd:"))?.slice(10).trim();
+  const candidates = lines.filter(line => line.startsWith("a=candidate:")).map(line => line.slice(2));
+  if (!mLine || !mid || !ufrag || !pwd || (candidates.length === 0 && !lines.includes("a=end-of-candidates"))) return null;
+  return { mid, ice: { ufrag, pwd }, candidates };
 }
 
 function replayCachedVideo(entry: StreamEntry, track: MediaStreamTrack): void {

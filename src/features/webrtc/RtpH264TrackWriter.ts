@@ -65,6 +65,9 @@ export class RtpH264TrackWriter {
     this.ssrc = options.ssrc >>> 0;
     this.payloadType = options.payloadType ?? 102;
     this.mtu = options.mtu ?? DEFAULT_RTP_MTU;
+    if (!Number.isSafeInteger(this.mtu) || this.mtu < 3) {
+      throw new Error("H.264 RTP MTU must be an integer of at least 3 bytes.");
+    }
     this.timer = options.timer ?? defaultTimer;
     this.sequenceNumber = (options.initialSequenceNumber ?? 0) & 0xffff;
   }

@@ -36,27 +36,18 @@ WORKFLOW=".github/workflows/pull_request.yml"
 
 # Print the active `if:` value for a named step, or nothing when the step has none.
 #
-# Scanning starts only AFTER the step that immediately precedes the 26.5 leg:
-# several step names occur twice in the job (e.g. "Select Xcode 26.5" is both the
-# job's initial toolchain selection, which has no `if:`, and the 26.5 leg's
-# re-selection, which does). Without the anchor the first, unguarded occurrence
-# matches and the assertion reports a false violation. This mirrors
-# `afterStepName` in the Swift helper.
-#
-# The anchor was "Run Reminders integration tests (Xcode 26.2)" until #4078 dropped
-# the 26.2 leg from PRs. "Shutdown iOS Simulators" replaces it: it is the unique
-# `if: always()` teardown that still sits directly above the 26.5 leg. If it ever
-# stops being unique or moves, the step-lookup below fails loudly (no `if:` found)
-# rather than silently matching the wrong occurrence.
+# No positional anchor: #4114 removed the leg's redundant "Select Xcode 26.5" and
+# "Ensure iOS Simulator runtime (Xcode 26.5)", which were the only duplicated step
+# names in this job. Every step name is now unique, so a plain by-name lookup
+# cannot match the wrong occurrence. The uniqueness test below is what keeps that
+# true -- if a duplicate is ever reintroduced, this lookup would silently resolve
+# to the first one.
 #
 # awk, not sed -- BSD sed lacks the range forms this needs. A step block runs from
 # its `- name: "<step>"` line to the next step start or a step-indent comment.
-ANCHOR_STEP='Shutdown iOS Simulators'
 
 step_if_condition() {
-  awk -v want="      - name: \"$1\"" -v anchor="      - name: \"$ANCHOR_STEP\"" '
-    !past && $0 == anchor { past = 1; next }
-    !past { next }
+  awk -v want="      - name: \"$1\"" '
     $0 == want { inblock = 1; next }
     inblock && /^      [-#]/ { exit }
     inblock && /^        if:/ {
@@ -82,12 +73,23 @@ Run Reminders integration tests (Xcode 26.5)
 STEPS
 }
 
-@test "the extraction anchor step exists exactly once" {
-  # Everything below scans from this anchor. A missing anchor makes every lookup
-  # return nothing (which fails loudly), but a DUPLICATED anchor would silently
-  # shift the scan window and could re-admit the wrong occurrence of a step name.
-  count="$(grep -c "^      - name: \"$ANCHOR_STEP\"\$" "$WORKFLOW" || true)"
-  [ "$count" -eq 1 ]
+@test "no step name is duplicated in the XCTestRunner job" {
+  # The by-name lookup above is only safe while names are unique. A duplicate
+  # would resolve to the FIRST occurrence -- historically the job-initial,
+  # unguarded "Select Xcode 26.5" -- and silently assert against the wrong step.
+  # This replaces the old anchor-uniqueness guard (#4115): the anchor existed
+  # solely to work around the duplication that #4114 removed.
+  dupes="$(awk '
+    /^  ios-xctest-runner-simulator-tests:/ { injob = 1; next }
+    injob && /^  [a-z][a-z0-9_-]*:$/ { exit }
+    injob && /^      - name: "/ { print }
+  ' "$WORKFLOW" | sort | uniq -d)"
+
+  if [ -n "$dupes" ]; then
+    echo "Duplicated step names (by-name lookup would resolve to the first):" >&2
+    echo "$dupes" >&2
+  fi
+  [ -z "$dupes" ]
 }
 
 @test "every 26.5-leg step individually gates on steps.build-ctrlproxy.outcome == success" {

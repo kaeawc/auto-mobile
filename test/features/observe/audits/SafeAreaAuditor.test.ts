@@ -53,6 +53,13 @@ describe("SafeAreaAuditor", () => {
     expect(new SafeAreaAuditor().inspect(result)).toHaveLength(2);
   });
 
+  test("does not attribute a zero-valued display cutout to bar overlap", () => {
+    const result = observation();
+    result.insets!.displayCutout = { top: 0, right: 0, bottom: 0, left: 0 };
+
+    expect(new SafeAreaAuditor().inspect(result)[0]?.insetTypes).toEqual(["systemBars"]);
+  });
+
   test("uses the iOS safe area rather than Android bar fields", () => {
     const result = observation();
     result.insets = {

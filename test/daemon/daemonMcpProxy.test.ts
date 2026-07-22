@@ -432,6 +432,7 @@ describe("DaemonMcpProxy", () => {
     describe("startup option mismatch handling", () => {
       function runningStatus(options: {
         embeddedSdk?: boolean;
+        safeAreaWarnings?: boolean;
         toolResultsNoStructuredContent?: boolean;
         toolOutputsDir?: string;
         eventAllMarkers?: string[];
@@ -470,6 +471,33 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ embeddedSdk: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when safe-area warnings are requested", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ safeAreaWarnings: false }),
+          runningStatus({ safeAreaWarnings: false }),
+          runningStatus({ safeAreaWarnings: false }),
+          runningStatus({ safeAreaWarnings: true }),
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { safeAreaWarnings: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartOptions).toEqual({ safeAreaWarnings: true });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

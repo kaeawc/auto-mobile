@@ -3,7 +3,10 @@ import { isTruthy } from "../../../models/Element";
 
 type Node = Record<string, unknown>;
 type Side = LayoutWarning["sides"][number];
-type ContentInsets = { edges: ObservationEdgeInsets; types: LayoutWarning["insetTypes"] };
+type ContentInsets = {
+  edges: ObservationEdgeInsets;
+  typesForSides: (sides: Side[]) => LayoutWarning["insetTypes"];
+};
 
 /**
  * Report-only edge-to-edge inspection. It intentionally warns about potential
@@ -32,7 +35,10 @@ export class SafeAreaAuditor {
 
   private contentInsets(insets: NonNullable<ObserveResult["insets"]>): ContentInsets | null {
     if (insets.safeArea) {
-      return { edges: insets.safeArea, types: ["safeArea"] };
+      return {
+        edges: insets.safeArea,
+        typesForSides: sides => hasInsetOnSides(insets.safeArea, sides) ? ["safeArea"] : [],
+      };
     }
     const bars = insets.systemBars?.visible;
     const cutout = insets.displayCutout;
@@ -40,7 +46,7 @@ export class SafeAreaAuditor {
     if (!edges) {return null;}
     return {
       edges,
-      types: insetTypes(bars, cutout, "systemBars", "displayCutout"),
+      typesForSides: sides => insetTypes(bars, cutout, "systemBars", "displayCutout", sides),
     };
   }
 
@@ -77,7 +83,7 @@ export class SafeAreaAuditor {
   private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, warnings: LayoutWarning[]): void {
     if (!content) {return;}
     const sides = intersectingSides(bounds, screen, content.edges);
-    if (sides.length > 0) {warnings.push(this.warning(node, bounds, categories, content.types, sides, "important-content-under-inset", "warning", screen, content.edges));}
+    if (sides.length > 0) {warnings.push(this.warning(node, bounds, categories, content.typesForSides(sides), sides, "important-content-under-inset", "warning", screen, content.edges));}
   }
 
   private inspectGestureRegion(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, systemGestures: ObservationEdgeInsets | undefined, mandatorySystemGestures: ObservationEdgeInsets | undefined, warnings: LayoutWarning[]): void {
@@ -85,7 +91,7 @@ export class SafeAreaAuditor {
     const gesture = maxInsets(systemGestures, mandatorySystemGestures);
     if (!gesture) {return;}
     const sides = intersectingSides(bounds, screen, gesture);
-    if (sides.length > 0) {warnings.push(this.warning(node, bounds, ["interaction"], insetTypes(systemGestures, mandatorySystemGestures, "systemGestures", "mandatorySystemGestures"), sides, "interaction-in-system-gesture-region", "info", screen, gesture));}
+    if (sides.length > 0) {warnings.push(this.warning(node, bounds, ["interaction"], insetTypes(systemGestures, mandatorySystemGestures, "systemGestures", "mandatorySystemGestures", sides), sides, "interaction-in-system-gesture-region", "info", screen, gesture));}
   }
 
   private warning(
@@ -203,8 +209,15 @@ function maximumInset(insets: ObservationEdgeInsets[], side: keyof ObservationEd
   return Math.max(0, ...insets.map(inset => inset[side]));
 }
 
-function insetTypes<A extends LayoutWarning["insetTypes"][number], B extends LayoutWarning["insetTypes"][number]>(first: ObservationEdgeInsets | undefined | null, second: ObservationEdgeInsets | undefined | null, firstType: A, secondType: B): Array<A | B> {
-  return [...(first ? [firstType] : []), ...(second ? [secondType] : [])];
+function insetTypes<A extends LayoutWarning["insetTypes"][number], B extends LayoutWarning["insetTypes"][number]>(first: ObservationEdgeInsets | undefined | null, second: ObservationEdgeInsets | undefined | null, firstType: A, secondType: B, sides: Side[]): Array<A | B> {
+  return [
+    ...(hasInsetOnSides(first, sides) ? [firstType] : []),
+    ...(hasInsetOnSides(second, sides) ? [secondType] : []),
+  ];
+}
+
+function hasInsetOnSides(insets: ObservationEdgeInsets | undefined | null, sides: Side[]): boolean {
+  return insets !== undefined && insets !== null && sides.some(side => insets[side] > 0);
 }
 
 function stringValue(value: unknown): string | undefined {

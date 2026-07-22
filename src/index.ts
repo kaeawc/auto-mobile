@@ -704,7 +704,7 @@ async function main() {
       // Run in CLI mode
       logger.info("Running in CLI mode");
       // logger.enableStdoutLogging();
-      await runCliCommand(cliArgs);
+      await runCliCommand(cliArgs, { safeAreaWarnings });
       // CRITICAL: Exit explicitly after CLI command completes to prevent process from hanging
       // The event loop may have pending operations (ADB connections, file descriptors) that
       // prevent Node.js from exiting naturally. Force exit with code 0 to ensure clean termination.

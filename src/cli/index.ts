@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
 import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
+import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 
 // Import all tool registration functions
@@ -104,9 +105,10 @@ function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string;
  */
 async function runToolViaDaemon(
   toolName: string,
-  params: Record<string, any>
+  params: Record<string, any>,
+  daemonOptions?: DaemonOptions
 ): Promise<any> {
-  const proxy = new DaemonMcpProxy();
+  const proxy = new DaemonMcpProxy({ daemonOptions });
 
   try {
     const result = await proxy.callTool(toolName, params);
@@ -278,7 +280,7 @@ function handleToolResult(result: any, toolName: string): void {
 }
 
 // Main CLI command runner
-export async function runCliCommand(args: string[]): Promise<void> {
+export async function runCliCommand(args: string[], daemonOptions?: DaemonOptions): Promise<void> {
   try {
     if (args.length === 0) {
       // Show help with available tools
@@ -315,7 +317,7 @@ export async function runCliCommand(args: string[]): Promise<void> {
 
     // All tool execution goes through daemon (mandatory)
     logger.debug(`Executing tool via daemon: ${toolName}`);
-    const daemonResult = await runToolViaDaemon(toolName, params);
+    const daemonResult = await runToolViaDaemon(toolName, params, daemonOptions);
     handleToolResult(daemonResult, toolName);
 
     // Note: Session cleanup for executePlan now happens automatically on the daemon side

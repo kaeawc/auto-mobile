@@ -1276,6 +1276,197 @@ run_with_error_output() {
     return 0
 }
 
+# Ceiling, in seconds, for a single package-manager invocation.
+#
+# A healthy install of anything we ask for finishes in well under a minute; this
+# only exists so a stalled package manager cannot consume the whole job.
+# `Installer Minimal (ubuntu-latest)` once spent 45 minutes inside one apt-get
+# and emitted nothing, leaving the stall unexplainable after the fact (issue
+# #4162). A job-level `timeout-minutes` is not a substitute: it kills the job
+# without saying which command hung.
+#
+# 600s is chosen to sit under the installer job's own 20-minute `timeout-minutes`
+# — a bound above that would never fire before the job died, which is the
+# uninformative outcome this exists to avoid — while staying far above any
+# bottled install. Overridable so tests can exercise the bound without waiting
+# out a real stall, and so a host doing an unusually slow source build can raise
+# it rather than being cut off.
+PACKAGE_INSTALL_TIMEOUT_SECONDS="${PACKAGE_INSTALL_TIMEOUT_SECONDS:-600}"
+
+# Resolve a command prefix that bounds an invocation, into BOUNDED_CMD_PREFIX.
+# Empty when the host has no timeout binary, in which case run_bounded_install
+# falls back to bounded_watchdog_run below rather than running unbounded.
+#
+# `-k` matters: plain `timeout` sends only TERM, so a package manager that
+# ignores it would keep running and keep the captured pipe open past the
+# deadline.
+#
+# Assigns to a global rather than printing so callers can invoke it as a plain
+# statement — a function run inside `$(…)` or on the left of `||` has `set -e`
+# suppressed inside it (SC2310/SC2311).
+BOUNDED_CMD_PREFIX=()
+resolve_bounded_cmd_prefix() {
+    local secs="$1"
+    BOUNDED_CMD_PREFIX=()
+    if command_exists timeout; then
+        BOUNDED_CMD_PREFIX=(timeout -k 10 "${secs}")
+    elif command_exists gtimeout; then
+        BOUNDED_CMD_PREFIX=(gtimeout -k 10 "${secs}")
+    fi
+}
+
+# Bound a command with a pure-bash watchdog, for hosts with no timeout binary.
+#
+# Writes the command's combined output to <outfile>; returns the command's own
+# status, or 124 when the deadline fires (GNU timeout's convention, so the
+# caller's 124 handling covers both paths).
+#
+# This is a deliberate second copy of scripts/ios/run_with_timeout.sh's
+# fallback. install.sh is delivered by `curl … | bash` and cannot source a
+# sibling file, and the alternative is what this replaces: on a stock macOS host
+# — which has neither `timeout` nor `gtimeout` — every bound silently degraded
+# to no bound at all, which is precisely the fail-open #4162 exists to close.
+# A bounding mechanism that no-ops on the most common developer platform is
+# worse than none, because it reads as covered.
+#
+# Two properties a naive "background it and kill the pid" watchdog does not give
+# you, both learned in run_with_timeout.sh:
+#
+#   1. Return 124 on expiry. Surfacing `wait`'s status instead gives 143
+#      (128+SIGTERM), indistinguishable from a command signalled for any other
+#      reason.
+#   2. Signal the whole process group. Several call sites pass an `&&` chain
+#      through `bash -c`, so bash does not exec the package manager; signalling
+#      only the direct child leaves the grandchild alive and the bound silently
+#      does not apply.
+#
+# Output goes to a file rather than a command substitution so that a descendant
+# which survives the TERM cannot hold the caller blocked waiting for EOF.
+#
+# Reports through BOUNDED_WATCHDOG_STATUS rather than its own exit status, for
+# the same reason resolve_bounded_cmd_prefix assigns to a global: a function on
+# the left of `||` has `set -e` suppressed inside it (SC2310).
+BOUNDED_WATCHDOG_STATUS=0
+bounded_watchdog_run() {
+    local secs="$1"
+    local outfile="$2"
+    shift 2
+    BOUNDED_WATCHDOG_STATUS=0
+
+    # The watchdog runs in a subshell and so cannot assign to a variable in this
+    # scope; a marker file is how it reports back that it fired.
+    # Spell the template out rather than using `mktemp -t <prefix>`: BSD mktemp
+    # treats the argument as a prefix, but GNU mktemp requires a trailing
+    # XXXXXX and hard-errors on a bare prefix.
+    local fired_marker
+    if ! fired_marker="$(mktemp "${TMPDIR:-/tmp}/automobile_bounded_install.XXXXXX")"; then
+        BOUNDED_WATCHDOG_STATUS=125
+        return 0
+    fi
+
+    # Monitor mode puts the child in its own process group (pgid == its pid),
+    # which is what lets the group-directed kill below reach descendants.
+    # Restore the caller's setting right away so job-control notices do not leak
+    # into their output.
+    local had_monitor=0
+    case "$-" in *m*) had_monitor=1 ;; esac
+    set -m
+    "$@" > "${outfile}" 2>&1 &
+    local cmd_pid=$!
+    if [[ ${had_monitor} -eq 0 ]]; then set +m; fi
+
+    (
+        sleep "${secs}"
+        if kill -0 "${cmd_pid}" 2> /dev/null; then
+            printf 'fired' > "${fired_marker}"
+            # A negative pid targets the process group. Fall back to the bare
+            # pid in case the child never became group leader.
+            kill -TERM -"${cmd_pid}" 2> /dev/null || kill -TERM "${cmd_pid}" 2> /dev/null || true
+            # Same 10s grace as `timeout -k 10` on the coreutils path, so the
+            # two bounding paths escalate identically.
+            sleep 10
+            kill -KILL -"${cmd_pid}" 2> /dev/null || kill -KILL "${cmd_pid}" 2> /dev/null || true
+        fi
+    ) > /dev/null 2>&1 3>&- &
+    local watcher_pid=$!
+
+    local status=0
+    wait "${cmd_pid}" 2> /dev/null || status=$?
+    if [[ -s "${fired_marker}" ]]; then
+        # Leave the watcher running: it still owes the group a KILL for anything
+        # that ignored the TERM. Waiting for it here would add its full grace
+        # period to every timeout, and there is nothing to wait for — the output
+        # is already on disk, not in a pipe a survivor could hold open.
+        status=124
+    else
+        kill "${watcher_pid}" 2> /dev/null || true
+        wait "${watcher_pid}" 2> /dev/null || true
+    fi
+    rm -f "${fired_marker}"
+    BOUNDED_WATCHDOG_STATUS="${status}"
+    return 0
+}
+
+# Run a package install bounded by PACKAGE_INSTALL_TIMEOUT_SECONDS, printing the
+# package manager's output when it fails or is aborted.
+#
+# This is the install-shaped counterpart to run_with_error_output above: the same
+# capture-and-surface-on-failure contract, plus the bound and the 124/137
+# reporting that tells a stall apart from a genuine failure.
+#
+# Package installs deliberately do NOT go through run_spinner: `gum spin` hides
+# the wrapped command's output as thoroughly as `>/dev/null`, and that
+# suppression is half of why #4162 could not be diagnosed. Keeping the output is
+# worth more than the spinner.
+#
+# Capturing the output is only safe because GNU `timeout` puts the child in its
+# own process group and signals the whole group. Several call sites pass an
+# `&&` chain through `bash -c`, where bash does not exec the package manager;
+# signalling only the direct child would leave the grandchild alive holding this
+# capture's pipe open, and the bound would silently not apply.
+run_bounded_install() {
+    local title="$1"
+    shift
+
+    resolve_bounded_cmd_prefix "${PACKAGE_INSTALL_TIMEOUT_SECONDS}"
+
+    local output=""
+    local status=0
+    if [[ ${#BOUNDED_CMD_PREFIX[@]} -gt 0 ]]; then
+        # The `+` guard keeps an empty prefix from tripping `set -u` on bash 3.2.
+        output=$(${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@" 2>&1) || status=$?
+    else
+        local outfile
+        outfile="$(mktemp "${TMPDIR:-/tmp}/automobile_install_output.XXXXXX")" || outfile=""
+        if [[ -z "${outfile}" ]]; then
+            log_warn "${title}: could not create a temp file to capture output; running unbounded"
+            "$@" || status=$?
+        else
+            bounded_watchdog_run "${PACKAGE_INSTALL_TIMEOUT_SECONDS}" "${outfile}" "$@"
+            status="${BOUNDED_WATCHDOG_STATUS}"
+            output="$(cat "${outfile}")"
+            rm -f "${outfile}"
+        fi
+    fi
+
+    if [[ ${status} -eq 0 ]]; then
+        log_info "${title}: ok"
+        return 0
+    fi
+
+    # GNU timeout reports 124 when it fires; 137 is the follow-up KILL from -k.
+    if [[ ${status} -eq 124 || ${status} -eq 137 ]]; then
+        log_warn "${title} exceeded ${PACKAGE_INSTALL_TIMEOUT_SECONDS}s and was aborted"
+    else
+        log_warn "${title} failed (exit ${status})"
+    fi
+
+    if [[ -n "${output}" ]]; then
+        printf '%s\n' "${output}" >&2
+    fi
+    return "${status}"
+}
+
 spin_check() {
     local label="$1"
     local check_cmd="$2"
@@ -2041,12 +2232,12 @@ install_yq() {
     fi
 
     if [[ "${os}" == "macos" ]] && command_exists brew; then
-        if ! run_spinner "Installing yq via Homebrew" brew install yq; then
+        if ! run_bounded_install "Installing yq via Homebrew" brew install yq; then
             log_error "Failed to install yq"
             return 1
         fi
     elif command_exists go; then
-        if ! run_spinner "Installing yq via go install" go install github.com/mikefarah/yq/v4@latest; then
+        if ! run_bounded_install "Installing yq via go install" go install github.com/mikefarah/yq/v4@latest; then
             log_error "Failed to install yq"
             return 1
         fi
@@ -2917,28 +3108,20 @@ _install_system_package() {
         return 1
     fi
 
-    if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-        log_info "Installing ${pkg} (${description})..."
-        if run_spinner "Installing ${pkg}" bash -c "${install_cmd} >/dev/null 2>&1"; then
-            CHANGES_MADE=true
-            return 0
-        else
-            log_warn "${pkg} install failed — ${description} will be unavailable"
+    if [[ "${NON_INTERACTIVE}" != "true" ]]; then
+        if ! gum confirm "Install ${pkg}? (${description})"; then
+            log_info "Skipped ${pkg} — install later with: ${skip_hint}"
             return 1
         fi
     fi
 
-    if gum confirm "Install ${pkg}? (${description})"; then
-        if run_spinner "Installing ${pkg}" bash -c "${install_cmd} >/dev/null 2>&1"; then
-            CHANGES_MADE=true
-            return 0
-        else
-            log_warn "${pkg} install failed — ${description} will be unavailable"
-            return 1
-        fi
+    log_info "Installing ${pkg} (${description})..."
+    if run_bounded_install "Installing ${pkg}" bash -c "${install_cmd}"; then
+        CHANGES_MADE=true
+        return 0
     fi
 
-    log_info "Skipped ${pkg} — install later with: ${skip_hint}"
+    log_warn "${pkg} install failed — ${description} will be unavailable"
     return 1
 }
 
@@ -3015,7 +3198,7 @@ _install_dev_tools_brew() {
     # processes would contend for the same lock. One invocation avoids repeated
     # startup work and lets Homebrew schedule the complete dependency set.
     local brew_status=0
-    if run_spinner "Installing ${#to_install[@]} development tools" brew install ${to_install[@]+"${to_install[@]}"}; then
+    if run_bounded_install "Installing ${#to_install[@]} development tools" brew install ${to_install[@]+"${to_install[@]}"}; then
         :
     else
         brew_status=$?
@@ -3082,12 +3265,16 @@ _install_dev_tools_apt() {
         return 0
     fi
 
-    # Update package index once
-    sudo apt-get update -qq 2>/dev/null || true
+    # Update the package index once. A stale index is survivable — the per-package installs below report their
+    # own failures — but the update must still be bounded, since it is an
+    # apt-get like any other and can stall the same way.
+    if run_bounded_install "Updating package index" sudo apt-get update -qq; then
+        :
+    fi
 
     local missing=0
     for pkg in ${to_install[@]+"${to_install[@]}"}; do
-        if sudo apt-get install -y -qq "${pkg}" >/dev/null 2>&1; then
+        if run_bounded_install "Installing ${pkg}" sudo apt-get install -y -qq "${pkg}"; then
             CHANGES_MADE=true
         else
             log_warn "Failed to install ${pkg}"
@@ -3642,12 +3829,12 @@ ios_check_physical_device_tools() {
 
 _install_libimobiledevice_tools() {
     # ideviceinstaller depends on libimobiledevice; libusbmuxd provides iproxy
-    if run_spinner "Installing libusbmuxd" brew install libusbmuxd; then
+    if run_bounded_install "Installing libusbmuxd" brew install libusbmuxd; then
         CHANGES_MADE=true
     else
         log_warn "libusbmuxd install failed — iproxy will be unavailable"
     fi
-    if run_spinner "Installing ideviceinstaller" brew install ideviceinstaller; then
+    if run_bounded_install "Installing ideviceinstaller" brew install ideviceinstaller; then
         CHANGES_MADE=true
     else
         log_warn "ideviceinstaller install failed — physical device app install will be unavailable"
@@ -3782,13 +3969,13 @@ install_bun_curl() {
 install_bun_homebrew() {
     # Add the oven-sh/bun tap if not already added
     if ! brew tap 2>/dev/null | grep -q "oven-sh/bun"; then
-        if ! run_spinner "Adding Homebrew tap oven-sh/bun" brew tap oven-sh/bun; then
+        if ! run_bounded_install "Adding Homebrew tap oven-sh/bun" brew tap oven-sh/bun; then
             log_error "Failed to add Homebrew tap."
             return 1
         fi
     fi
 
-    if ! run_spinner "Installing Bun via Homebrew" brew install oven-sh/bun/bun; then
+    if ! run_bounded_install "Installing Bun via Homebrew" brew install oven-sh/bun/bun; then
         log_error "Bun installation via Homebrew failed."
         return 1
     fi

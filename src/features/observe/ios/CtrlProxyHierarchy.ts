@@ -149,20 +149,29 @@ export class CtrlProxyHierarchy {
 
     const reconnectStatus = this.context.getReconnectStatus?.() ?? undefined;
 
+    // Re-read the cache: `cachedHierarchy` was captured before the awaited sync,
+    // and an unsolicited hierarchy_update push handled by
+    // IOSCtrlProxyClient.processMessage can have replaced it while that request
+    // was in flight. Serving the pre-await snapshot would hand back the very
+    // entry an invalidation was meant to retire even though newer data arrived.
+    // Note this only re-reads; it must never null the cache, because under
+    // skipWaitForFresh a missing cache yields no hierarchy at all (#4193/#4230).
+    const fallbackHierarchy = this.context.getCachedHierarchy() ?? cachedHierarchy;
+
     // Return cached (stale) data if available
-    if (cachedHierarchy) {
+    if (fallbackHierarchy) {
       // Update tracking from cache — it may have been refreshed by a WebSocket push
-      if (cachedHierarchy.hierarchy.packageName) {
-        if (this.lastKnownPackageName && cachedHierarchy.hierarchy.packageName !== this.lastKnownPackageName) {
-          logger.warn(`[CTRL_PROXY] Stale cache packageName differs: cached=${cachedHierarchy.hierarchy.packageName}, lastKnown=${this.lastKnownPackageName}`);
+      if (fallbackHierarchy.hierarchy.packageName) {
+        if (this.lastKnownPackageName && fallbackHierarchy.hierarchy.packageName !== this.lastKnownPackageName) {
+          logger.warn(`[CTRL_PROXY] Stale cache packageName differs: cached=${fallbackHierarchy.hierarchy.packageName}, lastKnown=${this.lastKnownPackageName}`);
         }
-        this.lastKnownPackageName = cachedHierarchy.hierarchy.packageName;
+        this.lastKnownPackageName = fallbackHierarchy.hierarchy.packageName;
       }
       return {
-        hierarchy: cachedHierarchy.hierarchy,
+        hierarchy: fallbackHierarchy.hierarchy,
         fresh: false,
-        updatedAt: cachedHierarchy.hierarchy.updatedAt,
-        perfTiming: cachedHierarchy.perfTiming,
+        updatedAt: fallbackHierarchy.hierarchy.updatedAt,
+        perfTiming: fallbackHierarchy.perfTiming,
         reconnectStatus,
         reconnectMessage: reconnectStatus
           ? this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)

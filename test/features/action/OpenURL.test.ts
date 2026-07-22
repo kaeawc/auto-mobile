@@ -42,9 +42,9 @@ describe("OpenURL iOS routing", () => {
     const result = await openIos(iosDevice(SIMULATOR_UDID), simctl, devicectl, "https://example.com/x");
 
     expect(result).toEqual({ success: true, url: "https://example.com/x" });
-    const calls = simctl.getMethodCalls("executeCommand");
+    const calls = simctl.getMethodCalls("executeCommandArgs");
     expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(`openurl ${SIMULATOR_UDID} "https://example.com/x"`);
+    expect(calls[0].args).toEqual(["openurl", SIMULATOR_UDID, "https://example.com/x"]);
     expect(devicectl.launchCalls).toHaveLength(0);
   });
 
@@ -58,7 +58,7 @@ describe("OpenURL iOS routing", () => {
     expect(devicectl.launchCalls).toEqual([
       { deviceUdid: PHYSICAL_UDID, bundleId: "com.apple.mobilesafari", url: "https://example.com/order/123" },
     ]);
-    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(0);
   });
 
   test("(c) physical UDID + custom scheme launches the resolved target bundle id", async () => {
@@ -130,7 +130,7 @@ describe("OpenURL iOS routing", () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Xcode 15\+ and iOS 17\+/);
     expect(devicectl.launchCalls).toHaveLength(0);
-    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(0);
   });
 
   test("(e) devicectl launch failure returns { success:false, error }", async () => {
@@ -146,7 +146,7 @@ describe("OpenURL iOS routing", () => {
 
   test("(a-neg) simulator simctl failure returns { success:false, error }", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandError(`openurl ${SIMULATOR_UDID} "https://example.com"`, new Error("Invalid device"));
+    simctl.setCommandError(`openurl ${SIMULATOR_UDID} https://example.com`, new Error("Invalid device"));
     const devicectl = new FakeDeviceUrlLauncher();
 
     const result = await openIos(iosDevice(SIMULATOR_UDID), simctl, devicectl, "https://example.com");
@@ -181,7 +181,7 @@ describe("OpenURL package: delegation is unchanged", () => {
     expect(launchSpy).toHaveBeenCalledTimes(1);
     expect(launchSpy.mock.calls[0][0]).toBe("com.example.MyApp");
     expect(devicectl.launchCalls).toHaveLength(0);
-    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(0);
   });
 });
 
@@ -196,9 +196,9 @@ describe("OpenURL Android parity (regression guard)", () => {
     const result = await (openURL as any).executeAndroidOpenURL("https://example.com/x") as { success: boolean; url: string };
 
     expect(result).toEqual({ success: true, url: "https://example.com/x" });
-    expect(fakeAdb.getExecutedCommands()).toContain(
-      'shell am start -a android.intent.action.VIEW -d "https://example.com/x"'
-    );
+    expect(fakeAdb.getExecutedArgv()).toEqual([
+      ["shell", "am start -a android.intent.action.VIEW -d 'https://example.com/x'"],
+    ]);
   });
 });
 
@@ -270,8 +270,8 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
 
       const result = await openURL.execute(input);
 
-      expect(fakeAdb.getExecutedCommands()).toEqual([
-        `shell am start -a android.intent.action.VIEW -d "${expectedUrl}"`,
+      expect(fakeAdb.getExecutedArgv()).toEqual([
+        ["shell", `am start -a android.intent.action.VIEW -d '${expectedUrl}'`],
       ]);
       expect(result).toEqual({ success: true, url: expectedUrl });
     }
@@ -292,9 +292,9 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
 
       const result = await openURL.execute(input);
 
-      const calls = simctl.getMethodCalls("executeCommand");
+      const calls = simctl.getMethodCalls("executeCommandArgs");
       expect(calls).toHaveLength(1);
-      expect(calls[0].command).toBe(`openurl ${SIMULATOR_UDID} "${expectedUrl}"`);
+      expect(calls[0].args).toEqual(["openurl", SIMULATOR_UDID, expectedUrl]);
       expect(result).toEqual({ success: true, url: expectedUrl });
     }
   );

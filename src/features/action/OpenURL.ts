@@ -7,6 +7,7 @@ import { DeviceAppManager, DeviceUrlLauncher } from "../../utils/ios-cmdline-too
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
 import { LaunchApp } from "./LaunchApp";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 
@@ -163,10 +164,18 @@ export class OpenURL extends BaseVisualChange {
    * @returns Result of the URL opening operation
    */
   private async executeAndroidOpenURL(url: string): Promise<OpenURLResult> {
-    // Pass URL through as-is to am start without any reformatting
+    // Pass URL through as-is to am start without any reformatting.
     // Android's Intent system handles both hierarchical (scheme://authority/path)
-    // and opaque (scheme:scheme-specific-part) URIs correctly
-    await this.adb.executeCommand(`shell am start -a android.intent.action.VIEW -d "${url}"`);
+    // and opaque (scheme:scheme-specific-part) URIs correctly.
+    //
+    // The `am start …` line is issued as ONE argv element, so no host shell ever
+    // sees it; adb hands that element to the device's `sh`, which does parse it,
+    // so the URL is single-quoted for that shell (issue #4213). Double quotes
+    // would leave `"`, `$`, backticks and `\` live.
+    await this.adb.execute([
+      "shell",
+      `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`,
+    ]);
 
     return {
       success: true,
@@ -197,8 +206,10 @@ export class OpenURL extends BaseVisualChange {
   private async executeiOSSimulatorOpenURL(url: string): Promise<OpenURLResult> {
     try {
       const simctl = this.simctl ?? new SimCtlClient();
-      // Use simctl openurl command: xcrun simctl openurl <device> <url>
-      await simctl.executeCommand(`openurl ${this.device.deviceId} "${url}"`);
+      // xcrun simctl openurl <device> <url>, issued as argv so the URL reaches
+      // execFile byte-for-byte. The string path re-splits its command, which
+      // mangles quotes and backslashes (issue #4213 / #4196).
+      await simctl.executeCommandArgs(["openurl", this.device.deviceId, url]);
 
       return {
         success: true,

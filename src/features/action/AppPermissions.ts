@@ -19,6 +19,36 @@ import {
 } from "./IosPhysicalPermissions";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
+/**
+ * Map requested permission names onto the runner-reported grant map.
+ *
+ * `granted` is decoded from the wire and `permissionNames` is caller-supplied, so the
+ * membership test must be an own-property check: `permission in granted` also matches
+ * inherited `Object.prototype` members, which would report a bogus permission such as
+ * `toString` as "granted" (its inherited value is a truthy function) instead of
+ * "unknown" (issue #4187).
+ */
+export function mapAndroidPermissionStates(
+  permissionNames: string[],
+  granted: Record<string, boolean>
+): AppPermissionStateResult[] {
+  return permissionNames.map(permission => {
+    if (Object.hasOwn(granted, permission)) {
+      return {
+        permission,
+        state: granted[permission] ? "granted" : "denied",
+        source: "androidRuntime" as const,
+        raw: { granted: granted[permission] },
+      };
+    }
+    return {
+      permission,
+      state: "unknown" as const,
+      source: "androidRuntime" as const,
+    };
+  });
+}
+
 export type AppPermissionAction = IosSimulatorPermissionAction;
 
 export interface SetAppPermissionsInput {
@@ -378,21 +408,7 @@ export class AppPermissions {
           appId: normalizedAppId,
           deviceId: this.device.deviceId,
           platform: "android",
-          permissions: permissionNames.map(permission => {
-            if (permission in granted) {
-              return {
-                permission,
-                state: granted[permission] ? "granted" : "denied",
-                source: "androidRuntime" as const,
-                raw: { granted: granted[permission] },
-              };
-            }
-            return {
-              permission,
-              state: "unknown" as const,
-              source: "androidRuntime" as const,
-            };
-          }),
+          permissions: mapAndroidPermissionStates(permissionNames, granted),
         };
       }
     } catch {

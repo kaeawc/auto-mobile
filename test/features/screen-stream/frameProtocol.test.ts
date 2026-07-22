@@ -471,6 +471,35 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(parses).toBeLessThan(audioRun.length * 1.2);
   });
 
+  test("resync stays linear when audio arrives one record per chunk after a recovery frame", () => {
+    // The cross-chunk shape: a recovered video frame followed by audio that
+    // arrives one record per `push()` before the next video. Each retained
+    // candidate must resume its audio-skip walk where it stopped and audio
+    // offsets already inside a retained run must not be re-retained, or every
+    // chunk re-walks the whole buffered gap — 12k / 45k / 170k parses for
+    // N=100 / 200 / 400 in the report. `SimulatorCaptureSession` writes audio
+    // independently and can delay screen samples, so this is a real shape.
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 8), Buffer.alloc(8, fill)]);
+
+    const parsesFor = (n: number): number => {
+      const decoder = new FrameDecoder();
+      decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01));
+      // Corruption then a 4x4 recovery frame, so a video candidate is retained
+      // across the whole audio gap — the case that re-walks without a resume
+      // cursor.
+      decoder.push(Buffer.concat([encodeHeader(0, 1, 4, 0), makeFrameBytes(4, 4, 16, 2, 0x02)]));
+      return countHeaderParses(() => {
+        for (let i = 0; i < n; i++) {decoder.push(audioRecord(i & 0xff));}
+      });
+    };
+
+    // Linear, not quadratic: doubling the gap must roughly double the work, and
+    // stay far below the quadratic curve the report measured.
+    expect(parsesFor(200)).toBeLessThan(parsesFor(100) * 2.5);
+    expect(parsesFor(400)).toBeLessThan(400 * 40);
+  });
+
   test("does not resynchronize when the capture geometry changes inside the corruption", () => {
     const decoder = new FrameDecoder();
     // Deliberate trade, pinned so it stays deliberate. The helper does change

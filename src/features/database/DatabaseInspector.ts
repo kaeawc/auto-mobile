@@ -67,6 +67,13 @@ export interface SQLResult {
  * `adb shell content call` commands.
  */
 export class DatabaseInspector {
+  /**
+   * Keys the DatabaseInspectorProvider puts into the Bundle it returns from `call`
+   * (android/auto-mobile-sdk/src/debug/kotlin/.../database/DatabaseInspectorProvider.kt).
+   * Used to find entry boundaries when splitting the printed Bundle.
+   */
+  private static readonly BUNDLE_KEYS = ["success", "errorType", "error", "result"];
+
   constructor(
     private device: BootedDevice,
     private adb: AdbExecutor
@@ -177,13 +184,11 @@ export class DatabaseInspector {
    */
   private parseContentCallResult<T>(output: string): T {
     // Check for success
-    const successMatch = output.match(/success=(\w+)/);
-    const success = successMatch?.[1] === "true";
+    const success = this.extractBundleValue(output, "success") === "true";
 
     if (!success) {
-      const errorType = output.match(/errorType=(\w+)/)?.[1] || "UNKNOWN";
-      const errorMatch = output.match(/error=([^,}]+)/);
-      const error = errorMatch?.[1]?.trim() || "Unknown error";
+      const errorType = this.extractBundleValue(output, "errorType") || "UNKNOWN";
+      const error = this.extractBundleValue(output, "error") || "Unknown error";
       throw new ActionableError(`Database error (${errorType}): ${error}`);
     }
 
@@ -198,6 +203,44 @@ export class DatabaseInspector {
     } catch {
       throw new ActionableError(`Failed to parse ContentProvider response: invalid JSON`);
     }
+  }
+
+  /**
+   * Extract a single Bundle entry value from `content call` output.
+   *
+   * `adb shell content call` prints the returned Bundle with Bundle.toString(), i.e.
+   * `Bundle[{key=value, key=value}]`: entries are joined by ", " and the map is closed by a
+   * single trailing "}]". Values are raw, unescaped strings — a SQLite message routinely
+   * contains spaces, commas and braces — so a value can only be terminated by the next
+   * `, <knownKey>=` boundary or by the bundle's trailing "}]". Matching a value with a
+   * character class such as `[^,}]+` silently truncates it at the first comma or brace.
+   */
+  private extractBundleValue(output: string, key: string): string | null {
+    // A key always starts the bundle ("Bundle[{key=") or follows an entry separator.
+    const keyPattern = new RegExp(`(?:^|[[{,]\\s*)${key}=`);
+    const keyMatch = keyPattern.exec(output);
+    if (!keyMatch) {
+      return null;
+    }
+
+    const valueStart = keyMatch.index + keyMatch[0].length;
+    const rest = output.slice(valueStart);
+
+    // The value ends at the next known key boundary...
+    const nextKeyPattern = new RegExp(`,\\s*(?:${DatabaseInspector.BUNDLE_KEYS.join("|")})=`);
+    const nextKeyMatch = nextKeyPattern.exec(rest);
+    let end = nextKeyMatch ? nextKeyMatch.index : rest.length;
+
+    // ...or, when it is the last entry, at the bundle's trailing "}]".
+    if (!nextKeyMatch) {
+      const terminator = rest.lastIndexOf("}]");
+      if (terminator !== -1) {
+        end = terminator;
+      }
+    }
+
+    const value = rest.slice(0, end).trim();
+    return value.length > 0 ? value : null;
   }
 
   /**

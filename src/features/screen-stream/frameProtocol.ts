@@ -19,6 +19,22 @@
  * downstream callbacks. Instead the decoder enters a resynchronizing state:
  * it reports the corruption exactly once, then scans forward byte by byte for
  * the next structurally plausible header and resumes there.
+ *
+ * Structural plausibility is not enough on its own. The payload is BGRA pixel
+ * data, so its bytes reflect what is on the captured screen — a byte sequence
+ * someone can influence. Probability bounds ("a random offset parses as a
+ * header only once in 2^38") say nothing about chosen bytes: a payload can
+ * simply contain two header-shaped ranges spaced by the first one's declared
+ * payload length, and structural corroboration accepts it. So resync is also
+ * bounded by the stream's own geometry, which the decoder cannot be talked out
+ * of: see `admissible()`.
+ *
+ * What that does *not* close: chosen pixels at the geometry the stream is
+ * already using. Nothing in the wire format distinguishes a crafted byte
+ * sequence from a genuine one — there is no sync marker and no checksum — so
+ * only a format change could. It is a much smaller residual: the dimensions
+ * the encoder configures on can no longer be influenced, and whoever can choose
+ * payload pixels is already drawing on the screen being captured.
  */
 
 export const FRAME_HEADER_SIZE = 16;
@@ -100,6 +116,16 @@ export class FrameDecoder {
    * than re-parsing the whole retained buffer on every chunk.
    */
   private scanned: number = 0;
+  /**
+   * Geometry of the most recently decoded frame — the geometry this stream is
+   * using. A capture session emits one frame size for its lifetime, so once
+   * this is known, resync is locked to it and cannot introduce a size the
+   * stream was not already producing. That is what makes fabricating a frame
+   * with chosen dimensions impossible rather than merely improbable: no matter
+   * how many header-shaped ranges a damaged payload contains, the set of
+   * accepted geometries has exactly one element.
+   */
+  private anchor: FrameHeader | null = null;
 
   /**
    * Append bytes from the helper's stdout stream and return any frames that
@@ -140,6 +166,7 @@ export class FrameDecoder {
         onAudio?.({ pcm16le: payload });
       } else {
         frames.push({ header: pending, pixels: payload });
+        this.anchor = pending;
       }
       this.pendingHeader = null;
     }
@@ -225,6 +252,7 @@ export class FrameDecoder {
     for (const offset of offsets) {
       const header = parseHeader(this.buffer, offset);
       if (headerError(header) !== null) {continue;}
+      if (!this.admissible(header)) {continue;}
       const verdict = this.corroborate(offset, header);
       if (verdict === "accept") {return offset;}
       if (verdict === "unsettled") {pending.push(offset);}
@@ -279,8 +307,32 @@ export class FrameDecoder {
   private corroborate(offset: number, header: FrameHeader): "accept" | "unsettled" | "reject" {
     const end = offset + FRAME_HEADER_SIZE + payloadSize(header);
     if (this.buffer.length - end < FRAME_HEADER_SIZE) {return "unsettled";}
-    return headerError(parseHeader(this.buffer, end)) === null ? "accept" : "reject";
+    const successor = parseHeader(this.buffer, end);
+    if (headerError(successor) !== null) {return "reject";}
+    // The successor must belong to the same stream, not merely be well-formed.
+    // Consecutive frames in a capture session share a geometry, so a successor
+    // of a different size is evidence of coincidence, not of a boundary. This
+    // is what covers the window before any frame has decoded, when there is no
+    // anchor to check against.
+    if (isAudioHeader(header) || isAudioHeader(successor)) {return "accept";}
+    return sameGeometry(header, successor) ? "accept" : "reject";
   }
+
+  /**
+   * Whether a resync candidate may be considered at all. Audio records are
+   * self-describing and carry no geometry. A video candidate must match the
+   * geometry the stream is already using; before the first frame decodes there
+   * is nothing to match, and nothing downstream to poison either — whatever
+   * geometry arrives first *is* the stream's geometry, corrupt or not.
+   */
+  private admissible(header: FrameHeader): boolean {
+    if (isAudioHeader(header) || this.anchor === null) {return true;}
+    return sameGeometry(header, this.anchor);
+  }
+}
+
+function sameGeometry(a: FrameHeader, b: FrameHeader): boolean {
+  return a.width === b.width && a.height === b.height && a.bytesPerRow === b.bytesPerRow;
 }
 
 /** Lazily yields `from..toInclusive`, so a scan never materializes the range. */

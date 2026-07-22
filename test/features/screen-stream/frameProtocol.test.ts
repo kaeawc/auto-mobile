@@ -128,7 +128,7 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
 
     const errors: MalformedFrameError[] = [];
     const out = decoder.push(
-      Buffer.concat([corrupt, good, confirmingFrame()]),
+      Buffer.concat([corrupt, good, confirmingFrameLike(2, 2, 8)]),
       err => errors.push(err)
     );
 
@@ -202,7 +202,7 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     const stream = Buffer.concat([
       pseudoRandomPayload(1024 * 1024),
       makeFrameBytes(4, 4, 16, 909, 0x0f),
-      confirmingFrame(),
+      confirmingFrameLike(4, 4, 16),
     ]);
     for (let offset = 0; offset < stream.length; offset += 65_536) {
       const out = decoder.push(stream.subarray(offset, offset + 65_536), err =>
@@ -291,6 +291,56 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(out.map(f => f.header.timestampMs)).not.toContain(777);
   });
 
+  test("two coordinated header-shaped ranges in a payload do not fabricate a frame", () => {
+    const decoder = new FrameDecoder();
+    // The payload of the damaged frame carries two header-shaped byte ranges,
+    // spaced by exactly the first one's declared payload length, so the second
+    // corroborates the first. Structural corroboration alone therefore accepts
+    // it and emits payload bytes as a 32x32 frame — dimensions of the attacker's
+    // choosing, fed straight to the encoder. The payload is BGRA pixel data, so
+    // its bytes reflect what is on the captured screen; probability bounds do
+    // not apply to a byte sequence someone can choose.
+    const errors: MalformedFrameError[] = [];
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        encodeHeader(32, 32, 128, 4242),
+        Buffer.alloc(32 * 128, 0xa5),
+        encodeHeader(1, 1, 4, 7),
+      ]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out).toHaveLength(0);
+  });
+
+  test("resync cannot introduce a geometry the stream was not already using", () => {
+    const decoder = new FrameDecoder();
+    // Once a frame has decoded on the synchronized path its geometry is the
+    // stream's geometry, and resync is locked to it. A crafted pair of matching
+    // header-shaped ranges therefore cannot poison the encoder's frame size,
+    // however self-consistent the pair is.
+    const errors: MalformedFrameError[] = [];
+    const established = decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01));
+    expect(established.map(f => f.header.width)).toEqual([4]);
+
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        encodeHeader(32, 32, 128, 4242),
+        Buffer.alloc(32 * 128, 0xa5),
+        encodeHeader(32, 32, 128, 4243),
+        Buffer.alloc(32 * 128, 0xa5),
+        encodeHeader(32, 32, 128, 4244),
+      ]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out).toHaveLength(0);
+  });
+
   test("resynchronizes across a chunk boundary that splits the recovery header", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
@@ -313,7 +363,7 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     // the rest of it arrives. The decoder must not lock onto earlier garbage.
     const corrupt = Buffer.concat([encodeHeader(0, 1, 4, 0), pseudoRandomPayload(3_000)]);
     const good = makeFrameBytes(64, 64, 256, 121, 0xee);
-    const all = Buffer.concat([corrupt, good, confirmingFrame()]);
+    const all = Buffer.concat([corrupt, good, confirmingFrameLike(64, 64, 256)]);
     const half = corrupt.length + 1_000;
 
     expect(decoder.push(all.subarray(0, half), err => errors.push(err))).toHaveLength(0);
@@ -400,7 +450,16 @@ const CONFIRM_TS = 1000;
 
 /** The frame that corroborates the recovered one preceding it. */
 function confirmingFrame(): Buffer {
-  return makeFrameBytes(1, 1, 4, CONFIRM_TS, 0x01);
+  return confirmingFrameLike(1, 1, 4);
+}
+/**
+ * The confirming frame for a recovery frame of a given geometry. A capture
+ * session emits one frame size for its lifetime, and resync now requires the
+ * corroborating successor to agree, so a confirming frame has to match the
+ * frame it confirms.
+ */
+function confirmingFrameLike(width: number, height: number, bytesPerRow: number): Buffer {
+  return makeFrameBytes(width, height, bytesPerRow, CONFIRM_TS, 0x01);
 }
 /** Deterministic pseudo-random filler — reproducible across runs. */
 function pseudoRandomPayload(length: number): Buffer {

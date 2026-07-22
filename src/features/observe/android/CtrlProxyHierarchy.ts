@@ -307,9 +307,13 @@ export class CtrlProxyHierarchy {
 
       // Get hierarchy from WebSocket service
       const waitForFresh = !skipWaitForFresh && (cachedHierarchy === null || !cachedHierarchy.fresh);
+      // `timeoutMs` is the caller's overall budget, not a per-step allowance, so
+      // the wait gets what is LEFT of it. Starting from the original value would
+      // let a slow availability check or reconnect be followed by another full
+      // fresh wait, blowing the deadline this parameter exists to protect.
       const freshWaitMs = timeoutMs === undefined
         ? DEFAULT_FRESH_WAIT_MS
-        : Math.max(0, Math.min(DEFAULT_FRESH_WAIT_MS, timeoutMs));
+        : Math.max(0, Math.min(DEFAULT_FRESH_WAIT_MS, timeoutMs - (this.context.timer.now() - startTime)));
       const response = await perf.track("getHierarchy", () =>
         this.getLatestHierarchy(waitForFresh, freshWaitMs, perf, skipWaitForFresh, minTimestamp, signal)
       );

@@ -208,7 +208,7 @@ detect_mcp_configs() {
     configs+=("Goose|${HOME}/.config/goose/config.yaml|yaml")
 
     # Check each config for auto-mobile entries
-    for entry in "${configs[@]}"; do
+    for entry in ${configs[@]+"${configs[@]}"}; do
         local name path format
         name=$(echo "${entry}" | cut -d'|' -f1)
         path=$(echo "${entry}" | cut -d'|' -f2)
@@ -597,7 +597,7 @@ select_components() {
     echo ""
 
     local selected
-    selected=$(printf '%s\n' "${options[@]}" | gum filter --no-limit --placeholder "Type to filter, SPACE to select...") || true
+    selected=$(printf '%s\n' ${options[@]+"${options[@]}"} | gum filter --no-limit --placeholder "Type to filter, SPACE to select...") || true
 
     if [[ -z "${selected}" ]]; then
         log_info "No components selected"
@@ -650,7 +650,7 @@ confirm_uninstall() {
     echo ""
 
     if [[ "${UNINSTALL_MCP_CONFIGS}" == "true" ]]; then
-        for entry in "${MCP_CONFIGS_FOUND[@]}"; do
+        for entry in ${MCP_CONFIGS_FOUND[@]+"${MCP_CONFIGS_FOUND[@]}"}; do
             local name path
             name=$(echo "${entry}" | cut -d'|' -f1)
             path=$(echo "${entry}" | cut -d'|' -f2)

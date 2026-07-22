@@ -96,7 +96,7 @@ filter_entries="$(
 # glob and the path sits directly under that dir. Inlined (rather than a helper
 # invoked in an `if`) so `set -e` stays armed and no SC2310 suppression is added.
 missing=()
-for path in "${asserted_paths[@]}"; do
+for path in ${asserted_paths[@]+"${asserted_paths[@]}"}; do
   covered=0
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue

@@ -5,7 +5,6 @@ import { promisify } from "util";
 import type { BootedDevice, ExecResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import { quoteSimctlArg } from "../../utils/ios-cmdline-tools/iosAppContainer";
 
 export type IosSimulatorPermissionAction = "grant" | "revoke" | "reset";
 
@@ -47,7 +46,7 @@ export interface IosSimulatorPermissionQueryResult {
 }
 
 export interface IosSimulatorPrivacyClient {
-  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
+  executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
 }
 
 interface TccPermissionRow {
@@ -241,14 +240,13 @@ export class IosSimulatorPermissions {
     const results: IosSimulatorPermissionCommandResult[] = await Promise.all(
       normalizedPermissions.map(async permission => {
         try {
-          const command = [
+          const result = await this.simctl.executeCommandArgs([
             "privacy",
-            quoteSimctlArg(this.device.deviceId),
+            this.device.deviceId,
             action,
-            quoteSimctlArg(permission),
-            quoteSimctlArg(normalizedAppId)
-          ].join(" ");
-          const result = await this.simctl.executeCommand(command);
+            permission,
+            normalizedAppId
+          ]);
           return { permission, success: true, stdout: result.stdout, stderr: result.stderr };
         } catch (error) {
           return {

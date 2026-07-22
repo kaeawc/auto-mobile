@@ -125,10 +125,10 @@ describe("AppPermissions", () => {
 
     expect(setResult.success).toBe(true);
     expect(setResult.changedCount).toBe(1);
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
-        command: 'privacy "12345678-1234-1234-1234-123456789ABC" grant "camera" "com.example.app"',
-        timeoutMs: undefined,
+        args: ["privacy", "12345678-1234-1234-1234-123456789ABC", "grant", "camera", "com.example.app"],
+        timeoutMs: undefined
       },
     ]);
     expect(getResult.permissions).toEqual([

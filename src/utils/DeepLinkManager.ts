@@ -16,7 +16,6 @@ import type { ElementGeometry } from "./interfaces/ElementGeometry";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
-import { quoteSimctlArg } from "./ios-cmdline-tools/iosAppContainer";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 
 /**
@@ -244,9 +243,9 @@ export class DeepLinkManager implements DeepLinkManager {
       //    treat that as a clean not-installed result, not a raw thrown error.
       let appPath = "";
       try {
-        const container = await this.simctl.executeCommand(
-          `get_app_container ${quoteSimctlArg(udid)} ${quoteSimctlArg(bundleId)} app`
-        );
+        const container = await this.simctl.executeCommandArgs([
+          "get_app_container", udid, bundleId, "app"
+        ]);
         appPath = container.stdout.trim();
       } catch (error) {
         logger.debug(`[DeepLinkManager] get_app_container failed for ${bundleId}: ${error}`);

@@ -58,8 +58,8 @@ describe("DeepLinkManager iOS", () => {
   test("returns schemes from CFBundleURLTypes for a schemes-only app", async () => {
     const simctl = new FakeSimCtlClient();
     const appPath = "/sim/Containers/Bundle/Application/ABC/MyApp.app";
-    simctl.setCommandResult(
-      `get_app_container "${SIM_UDID}" "com.example.myapp" app`,
+    simctl.setCommandArgsResult(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
       appPath
     );
 
@@ -88,8 +88,11 @@ describe("DeepLinkManager iOS", () => {
     ]);
 
     // get_app_container routes through simctl (xcrun simctl), not host exec.
-    const simctlCalls = simctl.getMethodCalls("executeCommand");
-    expect(simctlCalls.some(c => String(c.command).includes("get_app_container") && String(c.command).includes(" app"))).toBe(true);
+    const simctlCalls = simctl.getMethodCalls("executeCommandArgs");
+    expect(simctlCalls.some(c => {
+      const args = c.args as string[];
+      return args[0] === "get_app_container" && args[3] === "app";
+    })).toBe(true);
     // plutil/codesign route through host exec, never simctl.
     expect(calls.some(c => c.includes("plutil -convert json"))).toBe(true);
     expect(simctlCalls.every(c => !String(c.command).includes("plutil"))).toBe(true);
@@ -98,8 +101,8 @@ describe("DeepLinkManager iOS", () => {
   test("returns universal-link hosts from associated-domains entitlement", async () => {
     const simctl = new FakeSimCtlClient();
     const appPath = "/sim/MyApp.app";
-    simctl.setCommandResult(
-      `get_app_container "${SIM_UDID}" "com.example.myapp" app`,
+    simctl.setCommandArgsResult(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
       appPath
     );
 
@@ -135,8 +138,8 @@ describe("DeepLinkManager iOS", () => {
 
   test("unsigned bundle with no entitlements yields empty hosts (not an error)", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandResult(
-      `get_app_container "${SIM_UDID}" "com.example.myapp" app`,
+    simctl.setCommandArgsResult(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
       "/sim/MyApp.app"
     );
     const infoPlist = JSON.stringify({ CFBundleURLTypes: [{ CFBundleURLSchemes: ["myapp"] }] });
@@ -168,8 +171,8 @@ describe("DeepLinkManager iOS", () => {
 
   test("malformed plist JSON returns success:false without throwing", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandResult(
-      `get_app_container "${SIM_UDID}" "com.example.myapp" app`,
+    simctl.setCommandArgsResult(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
       "/sim/MyApp.app"
     );
     const { exec } = fakeHostExec([
@@ -199,7 +202,7 @@ describe("DeepLinkManager iOS", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("not yet implemented");
     // No simctl or host exec invoked for physical devices.
-    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(0);
     expect(calls).toHaveLength(0);
   });
 });

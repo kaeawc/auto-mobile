@@ -57,13 +57,13 @@ describe("GrantIosSimulatorPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.grantedCount).toBe(2);
     expect(result.failedCount).toBe(0);
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
-        command: 'privacy "12345678-1234-1234-1234-123456789ABC" grant "camera" "com.example.app"',
+        args: ["privacy", "12345678-1234-1234-1234-123456789ABC", "grant", "camera", "com.example.app"],
         timeoutMs: undefined
       },
       {
-        command: 'privacy "12345678-1234-1234-1234-123456789ABC" grant "microphone" "com.example.app"',
+        args: ["privacy", "12345678-1234-1234-1234-123456789ABC", "grant", "microphone", "com.example.app"],
         timeoutMs: undefined
       }
     ]);
@@ -71,8 +71,8 @@ describe("GrantIosSimulatorPermissions", () => {
 
   test("returns per-permission failures without aborting the batch", async () => {
     const simctl = new FakeSimCtlClient();
-    simctl.setCommandError(
-      'privacy "12345678-1234-1234-1234-123456789ABC" grant "photos" "com.example.app"',
+    simctl.setCommandArgsError(
+      ["privacy", "12345678-1234-1234-1234-123456789ABC", "grant", "photos", "com.example.app"],
       new Error("unsupported service")
     );
     const action = new GrantIosSimulatorPermissions(simulatorDevice, simctl);
@@ -109,7 +109,7 @@ describe("GrantIosSimulatorPermissions", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("iOS permission changes via simctl privacy are only supported on simulators");
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([]);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
   test("rejects non-iOS devices", async () => {
@@ -124,7 +124,7 @@ describe("GrantIosSimulatorPermissions", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("iOS simulator permissions are only supported on iOS simulators");
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([]);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 });
 
@@ -140,13 +140,13 @@ describe("IosSimulatorPermissions", () => {
     expect(revoke.changedCount).toBe(1);
     expect(reset.success).toBe(true);
     expect(reset.changedCount).toBe(1);
-    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
-        command: 'privacy "12345678-1234-1234-1234-123456789ABC" revoke "camera" "com.example.app"',
+        args: ["privacy", "12345678-1234-1234-1234-123456789ABC", "revoke", "camera", "com.example.app"],
         timeoutMs: undefined
       },
       {
-        command: 'privacy "12345678-1234-1234-1234-123456789ABC" reset "microphone" "com.example.app"',
+        args: ["privacy", "12345678-1234-1234-1234-123456789ABC", "reset", "microphone", "com.example.app"],
         timeoutMs: undefined
       }
     ]);

@@ -17,6 +17,8 @@ export class FakeSimCtlClient {
   private containerErrors = new Map<string, Error>();
   private commandResults = new Map<string, ExecResult>();
   private commandErrors = new Map<string, Error>();
+  private argvResults = new Map<string, ExecResult>();
+  private argvErrors = new Map<string, Error>();
   private methodCalls = new Map<string, Array<Record<string, unknown>>>();
   private openSimulatorAppError: Error | null = null;
 
@@ -58,6 +60,26 @@ export class FakeSimCtlClient {
     });
   }
 
+  /**
+   * Stub a result keyed by the exact argv array. Unlike {@link setCommandResult},
+   * this survives values containing spaces or empty strings, which a joined
+   * command string cannot distinguish (issue #4196).
+   */
+  setCommandArgsResult(args: string[], stdout: string, stderr: string = ""): void {
+    this.argvResults.set(JSON.stringify(args), {
+      stdout,
+      stderr,
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (value: string) => stdout.includes(value),
+    });
+  }
+
+  /** Stub an error keyed by the exact argv array. See {@link setCommandArgsResult}. */
+  setCommandArgsError(args: string[], error: Error): void {
+    this.argvErrors.set(JSON.stringify(args), error);
+  }
+
   getMethodCalls(methodName: string): Array<Record<string, unknown>> {
     return this.methodCalls.get(methodName) ?? [];
   }
@@ -97,6 +119,17 @@ export class FakeSimCtlClient {
 
   async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
     this.recordCall("executeCommandArgs", { args, timeoutMs });
+
+    const argvKey = JSON.stringify(args);
+    const argvError = this.argvErrors.get(argvKey);
+    if (argvError) {
+      throw argvError;
+    }
+    const argvResult = this.argvResults.get(argvKey);
+    if (argvResult) {
+      return argvResult;
+    }
+
     const command = args.join(" ");
     const commandError = this.commandErrors.get(command);
     if (commandError) {
@@ -106,6 +139,15 @@ export class FakeSimCtlClient {
     const commandResult = this.commandResults.get(command);
     if (commandResult) {
       return commandResult;
+    }
+
+    if (args[0] === "get_app_container" && args[3] === "data") {
+      const bundleId = args[2];
+      const error = this.containerErrors.get(bundleId);
+      if (error) {
+        throw error;
+      }
+      return buildExecResult(this.containerPaths.get(bundleId) ?? "");
     }
 
     return buildExecResult("");

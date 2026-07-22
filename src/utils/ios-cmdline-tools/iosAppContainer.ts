@@ -9,10 +9,10 @@ import { logger } from "../logger";
  */
 export const IOS_APP_DATA_FOLDERS = ["Documents", "Library", "tmp"];
 
-/** Quote an arg for an `xcrun simctl` command line. */
-export function quoteSimctlArg(value: string): string {
-  return JSON.stringify(value);
-}
+// NOTE: there is deliberately no `quoteSimctlArg` helper here any more. Building a
+// simctl command line by quoting values into a string and re-splitting it back into
+// argv loses empty values and mangles escapes (issue #4196). Pass an argument array
+// to `executeCommandArgs` instead.
 
 /**
  * Terminate an app on a simulator if it's running. Non-fatal: a not-running app
@@ -36,13 +36,14 @@ export async function terminateAppIfRunning(
  * container can't be resolved (e.g. app not installed).
  */
 export async function getAppDataContainerPath(
-  simctl: Pick<SimCtlClient, "executeCommand">,
+  simctl: Pick<SimCtlClient, "executeCommandArgs">,
   deviceId: string,
   bundleId: string
 ): Promise<string | null> {
   try {
-    const command = `get_app_container ${quoteSimctlArg(deviceId)} ${quoteSimctlArg(bundleId)} data`;
-    const result = await simctl.executeCommand(command);
+    const result = await simctl.executeCommandArgs([
+      "get_app_container", deviceId, bundleId, "data"
+    ]);
     const containerPath = result.stdout.trim();
     if (!containerPath) {
       logger.warn(`[iOS] No data container path for ${bundleId}`);

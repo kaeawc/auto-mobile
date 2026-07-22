@@ -119,12 +119,12 @@ describe("CaptureSnapshotIos", () => {
   });
 
   it("captures iOS settings (locale + UI) into the manifest when includeSettings", async () => {
-    simctl.setCommandResult(
-      `spawn "${device.deviceId}" defaults read ".GlobalPreferences" "AppleLocale"`,
+    simctl.setCommandArgsResult(
+      ["spawn", device.deviceId, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       "nl_BE\n"
     );
-    simctl.setCommandResult(`ui "${device.deviceId}" appearance`, "dark\n");
-    simctl.setCommandResult(`ui "${device.deviceId}" content_size`, "large\n");
+    simctl.setCommandArgsResult(["ui", device.deviceId, "appearance"], "dark\n");
+    simctl.setCommandArgsResult(["ui", device.deviceId, "content_size"], "large\n");
 
     const captureSnapshot = new CaptureSnapshotIos(device, simctl as any, store);
     const result = await captureSnapshot.execute({
@@ -156,9 +156,9 @@ describe("CaptureSnapshotIos", () => {
     expect(result.manifest.iosSettings).toBeUndefined();
 
     const settingsCommands = simctl
-      .getMethodCalls("executeCommand")
-      .map(call => String(call.command))
-      .filter(cmd => cmd.includes("defaults") || cmd.startsWith("ui "));
+      .getMethodCalls("executeCommandArgs")
+      .map(call => call.args as string[])
+      .filter(args => args.includes("defaults") || args[0] === "ui");
     expect(settingsCommands).toEqual([]);
   });
 });

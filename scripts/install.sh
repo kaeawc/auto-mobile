@@ -1283,8 +1283,14 @@ run_with_error_output() {
 # `Installer Minimal (ubuntu-latest)` once spent 45 minutes inside one apt-get
 # and emitted nothing, leaving the stall unexplainable after the fact (issue
 # #4162). A job-level `timeout-minutes` is not a substitute: it kills the job
-# without saying which command hung. Overridable so tests can exercise the bound
-# without waiting out a real stall.
+# without saying which command hung.
+#
+# 600s is chosen to sit under the installer job's own 20-minute `timeout-minutes`
+# — a bound above that would never fire before the job died, which is the
+# uninformative outcome this exists to avoid — while staying far above any
+# bottled install. Overridable so tests can exercise the bound without waiting
+# out a real stall, and so a host doing an unusually slow source build can raise
+# it rather than being cut off.
 PACKAGE_INSTALL_TIMEOUT_SECONDS="${PACKAGE_INSTALL_TIMEOUT_SECONDS:-600}"
 
 # Resolve a command prefix that bounds an invocation, into BOUNDED_CMD_PREFIX.

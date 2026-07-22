@@ -204,8 +204,24 @@ STUB
 @test "no package install discards its output to /dev/null" {
   # Pins the defect shape directly, so reintroducing the redirect on any install
   # call site fails here even if the behavioural tests above stay satisfied.
-  run grep -nE '(apt-get|dnf|pacman|apk|brew|yum) (install|add|-S).*>\s*/dev/null' scripts/install.sh
+  # `[[:space:]]` rather than `\s`: the latter is a GNU extension, and a guard
+  # that silently fails to match on the BSD grep of macos-latest would pass for
+  # the wrong reason. The companion test below proves this pattern discriminates.
+  run grep -nE '(apt-get|dnf|pacman|apk|brew|yum) (install|add|-S).*>[[:space:]]*/dev/null' scripts/install.sh
   [ "$status" -ne 0 ]
+}
+
+@test "the discard guard actually matches a reintroduced redirect" {
+  # Without this, the guard above passes whenever its pattern is broken --
+  # exactly the failure mode of a source-scan check that greps for an absence.
+  local fixture="${TEST_DIR}/reintroduced.sh"
+  printf '%s\n' 'if run_spinner "x" bash -c "sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1"; then' > "${fixture}"
+
+  run grep -nE '(apt-get|dnf|pacman|apk|brew|yum) (install|add|-S).*>[[:space:]]*/dev/null' "${fixture}"
+  [ "$status" -eq 0 ]
+
+  run grep -nE 'run_spinner .*(brew install|apt-get install|dnf install|pacman -S|go install)' "${fixture}"
+  [ "$status" -eq 0 ]
 }
 
 @test "no package install runs behind run_spinner, which hides its output" {

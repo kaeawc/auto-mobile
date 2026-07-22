@@ -8,11 +8,13 @@ import type { BootedDevice } from "../../../src/models";
 
 describe("GetDumpsysWindow", () => {
   test("logs disk cache read failures before refreshing from adb", async () => {
-    // The logger is injected rather than monkey-patched onto the shared singleton
-    // (issue #4134). The previous version replaced `logger.debug` process-wide and
-    // asserted an exact total, so any other test logging while this one held the
-    // patch appended into its array -- CI once observed 25 entries instead of 1.
-    // A fake instance is unreachable by other tests, so the race cannot occur.
+    // The logger is injected rather than monkey-patched onto the shared
+    // singleton -- see
+    // [issue #4134](https://github.com/kaeawc/auto-mobile/issues/4134).
+    // The previous version replaced `logger.debug` process-wide and asserted an
+    // exact total, so any other test logging while this one held the patch
+    // appended into its array; CI once observed 25 entries instead of 1. A fake
+    // instance is unreachable by other tests, so the race cannot occur.
     const fakeLogger = new FakeLogger();
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("shell dumpsys window", {

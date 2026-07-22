@@ -349,8 +349,10 @@ export class LaunchApp extends BaseVisualChange {
           // re-targeted above (setTargetBundleId); after a data wipe the app gets
           // a brand-new process, so drop the cached hierarchy too — otherwise
           // waitForIosHierarchyReady returns stale pre-terminate data via the
-          // cache fast path. clearCache() nulls the cache entirely; invalidateCache()
-          // only marks it not-fresh but the time-based freshness check still matches.
+          // cache fast path. clearCache() nulls the cache entirely, which is what we
+          // need here: invalidateCache() (fixed in #4193) forces a refetch, but the
+          // invalidated entry is still served as a stale fallback if that refetch
+          // fails — and pre-terminate data for a wiped app must never be served.
           IOSCtrlProxyClient.getInstance(this.device).clearCache();
           launchResult = await perf.track("launch", () =>
             simulator

@@ -23,6 +23,7 @@ export interface WorkflowStep {
   background?: boolean;
   /** Native parallel-steps barrier: a single step id or a list of them. */
   wait?: string | string[];
+  if?: string | boolean;
 }
 
 const repoRoot = join(import.meta.dir, "../..");
@@ -65,6 +66,18 @@ export function loadJobs(workflowRelativePath: string): Record<string, WorkflowJ
     }
   }
   return jobs;
+}
+
+/** Every step of every job in a workflow, paired with its job id. */
+export function loadAllJobSteps(
+  workflowRelativePath: string
+): { jobId: string; step: WorkflowStep }[] {
+  const document = load(readFileSync(join(repoRoot, workflowRelativePath), "utf8")) as {
+    jobs?: Record<string, { steps?: WorkflowStep[] } | undefined>;
+  };
+  return Object.entries(document.jobs ?? {}).flatMap(([jobId, job]) =>
+    (job?.steps ?? []).map(step => ({ jobId, step }))
+  );
 }
 
 export function stepNamed(steps: WorkflowStep[], name: string): WorkflowStep | undefined {

@@ -615,6 +615,19 @@ jobs:
           # contain the base commit and the diff would fail.
           fetch-depth: 0
 
+      # Pulls a Docker image and consumes nothing this job produces, so start
+      # it up front and let the whole job overlap the pull. It has no consumer,
+      # so the barrier sits at the end -- a hadolint failure surfaces there
+      # rather than vanishing.
+      - name: "Run hadolint"
+        uses: hadolint/hadolint-action@v3.1.0
+        background: true
+        id: hadolint
+        with:
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+          failure-threshold: error
+
       # Pure network/disk and independent of everything below, so background it
       # here and let the JDK download and the npm-package setup (Bun + ripgrep +
       # `bun install` + build, ~60-120s) overlap it. The `wait` barrier re-syncs
@@ -680,12 +693,7 @@ jobs:
         shell: bash
         run: bash scripts/versioning/generate-ios-version.sh --check
 
-      - name: "Run hadolint"
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: Dockerfile
-          config: .hadolint.yaml
-          failure-threshold: error
+      - wait: hadolint
 
       - name: "Upload Fast Validation Logs"
         if: failure()
@@ -1030,9 +1038,14 @@ jobs:
         with:
           lfs: false
 
+      # Disjoint cache paths, so the two restores overlap each other. The
+      # barrier must precede "Setup Auto Mobile": that composite runs
+      # `turbo run build` against the same .turbo directory being restored.
       - name: "Cache Bun dependencies"
         if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/cache@v5
+        background: true
+        id: cache-bun
         with:
           # Restoring node_modules is notably expensive on Windows because the
           # archive contains thousands of small files. Bun can materialize it
@@ -1046,12 +1059,20 @@ jobs:
       - name: "Cache Turborepo"
         if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/cache@v5
+        background: true
+        id: cache-turbo
         with:
           path: .turbo
           key: turbo-${{ matrix.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
           restore-keys: |
             turbo-${{ matrix.os }}-${{ hashFiles('bun.lock') }}-
             turbo-${{ matrix.os }}-
+
+      # No `if:` here -- a `wait` step always runs and does not accept a
+      # condition; adding one fails whole-workflow validation. When the job's
+      # RUN_MCP_BUILD_TEST guard skips the cache steps there is simply nothing
+      # outstanding for the barrier to join.
+      - wait: [cache-bun, cache-turbo]
 
       - name: "Setup Auto Mobile"
         if: env.RUN_MCP_BUILD_TEST == 'true'
@@ -1166,8 +1187,13 @@ jobs:
           # default one-commit shallow clone.
           fetch-depth: 0
 
+      # Disjoint cache paths, so the two restores overlap each other. The
+      # barrier must precede "Setup Auto Mobile": that composite runs
+      # `turbo run build` against the same .turbo directory being restored.
       - name: "Cache Bun dependencies"
         uses: actions/cache@v5
+        background: true
+        id: cache-bun
         with:
           path: |
             ~/.bun/install/cache
@@ -1178,12 +1204,16 @@ jobs:
 
       - name: "Cache Turborepo"
         uses: actions/cache@v5
+        background: true
+        id: cache-turbo
         with:
           path: .turbo
           key: turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-${{ github.sha }}
           restore-keys: |
             turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-
             turbo-ubuntu-latest-
+
+      - wait: [cache-bun, cache-turbo]
 
       - name: "Setup Auto Mobile"
         uses: ./.github/actions/setup-auto-mobile-npm-package

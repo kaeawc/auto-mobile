@@ -27,6 +27,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+source "${SCRIPT_DIR}/run_with_timeout.sh"
+
 IOS_VERSION=""
 
 while [[ $# -gt 0 ]]; do
@@ -155,6 +159,8 @@ echo "Ensuring ${DEVICE_NAME} (${UDID}) is booted..." >&2
 # corrupt per-device state. Both knobs are env-tunable so the tests can exercise
 # the retry path without real sleeps.
 MAX_BOOT_ATTEMPTS="${BOOT_SIMULATOR_MAX_ATTEMPTS:-2}"
+# Per-attempt ceiling; run_with_timeout returns 124 when the attempt stalled.
+BOOT_ATTEMPT_TIMEOUT_SECONDS="${BOOT_ATTEMPT_TIMEOUT_SECONDS:-300}"
 RETRY_DELAY_SECONDS="${BOOT_SIMULATOR_RETRY_DELAY_SECONDS:-5}"
 
 device_state() {
@@ -170,7 +176,12 @@ booted=0
 BOOT_STATE=""
 for attempt in $(seq 1 "${MAX_BOOT_ATTEMPTS}"); do
   set +e
-  boot_log="$(xcrun simctl bootstatus "${UDID}" -b 2>&1)"
+  # Bound EACH attempt. bootstatus can stall indefinitely on a loaded runner
+  # (the #4078 wedge: "Waiting on System App" for ~30 min). Without a per-attempt
+  # bound a stalled first attempt consumes the whole step budget and the retry
+  # below never runs -- the retry only ever covered "returned, but not Booted".
+  # Healthy boots measure 38-111s across PR and nightly, so this is ~3x the max.
+  boot_log="$(run_with_timeout "${BOOT_ATTEMPT_TIMEOUT_SECONDS}" xcrun simctl bootstatus "${UDID}" -b 2>&1)"
   boot_rc=$?
   set -e
   printf '%s\n' "${boot_log}" >&2

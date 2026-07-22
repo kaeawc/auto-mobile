@@ -13,6 +13,7 @@ import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { stableStringify } from "../utils/stableStringify";
 
 export class VisionFallback {
   private config: VisionFallbackConfig;
@@ -119,7 +120,9 @@ export class VisionFallback {
     screenshotPath: string,
     searchCriteria: ElementSearchCriteria
   ): string {
-    const criteriaStr = JSON.stringify(searchCriteria);
+    // Sorted-key serialization: criteria written with their keys in a different
+    // order are the same search, and must not cost a second paid analyzer call.
+    const criteriaStr = stableStringify(searchCriteria);
     return `${screenshotPath}:${criteriaStr}`;
   }
 

@@ -108,6 +108,39 @@ describe("VisionFallback orchestrator", () => {
     expect(count()).toBe(2);
   });
 
+  test("criteria written with keys in a different order hit the cache: the paid analyzer runs once", async () => {
+    const fb = new VisionFallback(config(), timer);
+    const count = stubAnalyzer(fb, result());
+
+    // Semantically identical searches, keys typed in a different order.
+    await fb.analyzeAndSuggest("/s.png", HIERARCHY, { text: "Login", resourceId: "btn" });
+    await fb.analyzeAndSuggest("/s.png", HIERARCHY, { resourceId: "btn", text: "Login" });
+
+    expect(count()).toBe(1);
+    expect(fb.getCacheStats().size).toBe(1);
+  });
+
+  test("control: criteria with the same keys but different values are still analyzed separately", async () => {
+    const fb = new VisionFallback(config(), timer);
+    const count = stubAnalyzer(fb, result());
+
+    await fb.analyzeAndSuggest("/s.png", HIERARCHY, { text: "Login", resourceId: "btn" });
+    await fb.analyzeAndSuggest("/s.png", HIERARCHY, { resourceId: "btn2", text: "Login" });
+
+    expect(count()).toBe(2);
+    expect(fb.getCacheStats().size).toBe(2);
+  });
+
+  test("control: the same criteria against a different screenshot is not a cache hit", async () => {
+    const fb = new VisionFallback(config(), timer);
+    const count = stubAnalyzer(fb, result());
+
+    await fb.analyzeAndSuggest("/a.png", HIERARCHY, criteria("Login"));
+    await fb.analyzeAndSuggest("/b.png", HIERARCHY, criteria("Login"));
+
+    expect(count()).toBe(2);
+  });
+
   test("clearCache forces re-analysis", async () => {
     const fb = new VisionFallback(config(), timer);
     const count = stubAnalyzer(fb, result());

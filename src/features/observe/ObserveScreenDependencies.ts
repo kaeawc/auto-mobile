@@ -1,9 +1,6 @@
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
-import type { ScreenSize } from "./interfaces/ScreenSize";
-import type { SystemInsets } from "./interfaces/SystemInsets";
 import type { ViewHierarchy } from "./interfaces/ViewHierarchy";
 import type { Window } from "./interfaces/Window";
-import type { DumpsysWindow } from "./interfaces/DumpsysWindow";
 import type { BackStack } from "./interfaces/BackStack";
 import type { PredictiveUIState } from "./interfaces/PredictiveUIState";
 import type { ObserveResultCacheStore } from "./cache/ObserveResultCacheStore";
@@ -22,12 +19,9 @@ import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
  */
 export interface ObserveScreenDependencies {
   // Data sources
-  screenSize?: ScreenSize;
-  systemInsets?: SystemInsets;
   viewHierarchy?: ViewHierarchy;
   window?: Window;
   screenshot?: ScreenshotService;
-  dumpsysWindow?: DumpsysWindow;
   backStack?: BackStack;
   predictiveUIState?: PredictiveUIState;
 

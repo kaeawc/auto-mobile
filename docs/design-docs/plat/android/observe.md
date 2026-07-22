@@ -6,11 +6,10 @@
 
 ## UIAutomator Fallback
 
-- `dumpsys window` is fetched (with a short-lived memory/disk cache) and used to compute rotation and system insets.
-- Screen size is computed from `wm size` plus rotation, with its own memory/disk cache.
+- CtrlProxy's accessibility hierarchy provides screen dimensions and typed window insets. On Android R and later this includes visible and stable system bars, cutouts, gesture insets, mandatory gesture insets, and tappable-element insets; older devices use named Android resource fallbacks.
+- The legacy observation `dumpsys window` and `wm size` collectors have been removed.
 - In parallel, the observer collects rotation, wakefulness, and back stack while view hierarchy is fetched separately.
-- The active window is primarily derived from the view hierarchy package name, with a fallback to `dumpsys window` when
-  needed.
+- Active-window attribution is derived from CtrlProxy hierarchy metadata; observation does not fall back to `dumpsys window`.
 - View Hierarchy
   - The best and fastest option is fetching it via the pre-installed and enabled accessibility service. This is never
     cached because that would introduce lag.

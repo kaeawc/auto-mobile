@@ -3456,6 +3456,340 @@
           ],
           "additionalProperties": false
         },
+        "insets": {
+          "type": "object",
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "android-window-metrics",
+                "android-resource-fallback",
+                "ios-sdk-safe-area",
+                "unavailable"
+              ]
+            },
+            "units": {
+              "type": "string",
+              "enum": [
+                "physical-pixels",
+                "points",
+                "unknown"
+              ]
+            },
+            "systemBars": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "object",
+                  "properties": {
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "left": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
+                  "additionalProperties": false
+                },
+                "stable": {
+                  "type": "object",
+                  "properties": {
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "left": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "visible",
+                "stable"
+              ],
+              "additionalProperties": false
+            },
+            "displayCutout": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "left": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
+              "additionalProperties": false
+            },
+            "systemGestures": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "left": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
+              "additionalProperties": false
+            },
+            "mandatorySystemGestures": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "left": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
+              "additionalProperties": false
+            },
+            "tappableElement": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "left": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
+              "additionalProperties": false
+            },
+            "safeArea": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "left": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "available",
+            "source",
+            "units"
+          ],
+          "additionalProperties": false
+        },
+        "layoutWarnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "important-content-under-inset",
+                  "interaction-in-system-gesture-region"
+                ]
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "warning",
+                  "info"
+                ]
+              },
+              "element": {
+                "type": "object",
+                "properties": {
+                  "viewId": {
+                    "type": "string"
+                  },
+                  "resourceId": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "contentDesc": {
+                    "type": "string"
+                  },
+                  "bounds": {
+                    "type": "object",
+                    "properties": {
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "left": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "top",
+                      "right",
+                      "bottom",
+                      "left"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "bounds"
+                ],
+                "additionalProperties": false
+              },
+              "categories": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "interaction"
+                  ]
+                }
+              },
+              "insetTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "systemBars",
+                    "displayCutout",
+                    "safeArea",
+                    "systemGestures",
+                    "mandatorySystemGestures"
+                  ]
+                }
+              },
+              "sides": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ]
+                }
+              },
+              "overlapPercent": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "confidence": {
+                "type": "string",
+                "enum": [
+                  "high",
+                  "medium"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "severity",
+              "element",
+              "categories",
+              "insetTypes",
+              "sides",
+              "overlapPercent",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        },
         "viewHierarchy": {
           "type": "object",
           "properties": {
@@ -3621,6 +3955,215 @@
                 "right",
                 "bottom",
                 "left"
+              ],
+              "additionalProperties": false
+            },
+            "insets": {
+              "type": "object",
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "android-window-metrics",
+                    "android-resource-fallback",
+                    "ios-sdk-safe-area",
+                    "unavailable"
+                  ]
+                },
+                "units": {
+                  "type": "string",
+                  "enum": [
+                    "physical-pixels",
+                    "points",
+                    "unknown"
+                  ]
+                },
+                "systemBars": {
+                  "type": "object",
+                  "properties": {
+                    "visible": {
+                      "type": "object",
+                      "properties": {
+                        "top": {
+                          "type": "number"
+                        },
+                        "right": {
+                          "type": "number"
+                        },
+                        "bottom": {
+                          "type": "number"
+                        },
+                        "left": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "stable": {
+                      "type": "object",
+                      "properties": {
+                        "top": {
+                          "type": "number"
+                        },
+                        "right": {
+                          "type": "number"
+                        },
+                        "bottom": {
+                          "type": "number"
+                        },
+                        "left": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "visible",
+                    "stable"
+                  ],
+                  "additionalProperties": false
+                },
+                "displayCutout": {
+                  "type": "object",
+                  "properties": {
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "left": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
+                  "additionalProperties": false
+                },
+                "systemGestures": {
+                  "type": "object",
+                  "properties": {
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "left": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
+                  "additionalProperties": false
+                },
+                "mandatorySystemGestures": {
+                  "type": "object",
+                  "properties": {
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "left": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
+                  "additionalProperties": false
+                },
+                "tappableElement": {
+                  "type": "object",
+                  "properties": {
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "left": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
+                  "additionalProperties": false
+                },
+                "safeArea": {
+                  "type": "object",
+                  "properties": {
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "left": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "top",
+                    "right",
+                    "bottom",
+                    "left"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "available",
+                "source",
+                "units"
               ],
               "additionalProperties": false
             }

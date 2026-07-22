@@ -203,6 +203,42 @@ export const systemInsetsSchema = z.object({
   left: z.number().int()
 });
 
+const edgeInsetsSchema = z.object({
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+  left: z.number()
+});
+
+const observationInsetsSchema = z.object({
+  available: z.boolean(),
+  source: z.enum(["android-window-metrics", "android-resource-fallback", "ios-sdk-safe-area", "unavailable"]),
+  units: z.enum(["physical-pixels", "points", "unknown"]),
+  systemBars: z.object({ visible: edgeInsetsSchema, stable: edgeInsetsSchema }).optional(),
+  displayCutout: edgeInsetsSchema.optional(),
+  systemGestures: edgeInsetsSchema.optional(),
+  mandatorySystemGestures: edgeInsetsSchema.optional(),
+  tappableElement: edgeInsetsSchema.optional(),
+  safeArea: edgeInsetsSchema.optional(),
+});
+
+const layoutWarningSchema = z.object({
+  type: z.enum(["important-content-under-inset", "interaction-in-system-gesture-region"]),
+  severity: z.enum(["warning", "info"]),
+  element: z.object({
+    viewId: z.string().optional(),
+    resourceId: z.string().optional(),
+    text: z.string().optional(),
+    contentDesc: z.string().optional(),
+    bounds: edgeInsetsSchema,
+  }),
+  categories: z.array(z.enum(["text", "interaction"])),
+  insetTypes: z.array(z.enum(["systemBars", "displayCutout", "safeArea", "systemGestures", "mandatorySystemGestures"])),
+  sides: z.array(z.enum(["top", "right", "bottom", "left"])),
+  overlapPercent: z.number().int(),
+  confidence: z.enum(["high", "medium"]),
+});
+
 const predictionTargetSchema = z.object({
   text: z.string().optional(),
   elementId: z.string().optional(),
@@ -323,7 +359,8 @@ export const viewHierarchyResultSchema = z.object({
   "windows": z.array(viewHierarchyWindowSchema).nullish(),
   "contentHiddenRegions": z.array(contentHiddenRegionSchema).nullish(),
   "accessibility-focused-element": viewHierarchyNodeSchema.optional(),
-  "systemInsets": systemInsetsSchema.optional()
+  "systemInsets": systemInsetsSchema.optional(),
+  "insets": observationInsetsSchema.optional()
 }).passthrough();
 
 /**
@@ -368,6 +405,8 @@ const observeElementsSchema = z.object({
 export const observeResultSchema = z.object({
   screenSize: screenSizeSchema.optional(),
   systemInsets: systemInsetsSchema.optional(),
+  insets: observationInsetsSchema.optional(),
+  layoutWarnings: z.array(layoutWarningSchema).optional(),
   viewHierarchy: viewHierarchyResultSchema.optional(),
   activeWindow: activeWindowSchema.optional(),
   screenIdentity: screenIdentitySchema.optional(),

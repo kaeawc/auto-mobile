@@ -518,6 +518,7 @@ export class CtrlProxyHierarchy {
         "screenHeight": accessibilityHierarchy.screenHeight,
         "rotation": accessibilityHierarchy.rotation,
         "systemInsets": accessibilityHierarchy.systemInsets,
+        "insets": accessibilityHierarchy.insets,
         "wakefulness": accessibilityHierarchy.wakefulness,
         "foregroundActivity": accessibilityHierarchy.foregroundActivity,
         "density": accessibilityHierarchy.density,

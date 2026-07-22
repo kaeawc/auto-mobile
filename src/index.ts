@@ -103,6 +103,7 @@ function parseArgs(log: ParseLogger): {
   a11yFailureMode?: string;
   a11yMinSeverity?: string;
   a11yUseBaseline: boolean;
+  safeAreaWarnings: boolean;
   predictiveUi: boolean;
   rawElementSearch: boolean;
   planExecutionLockScope: PlanExecutionLockScope;
@@ -192,6 +193,7 @@ function parseArgs(log: ParseLogger): {
   const noA11yReportViewIds = args.includes("--no-report-view-ids");
   const noA11yRetrieveInteractiveWindows = args.includes("--no-retrieve-interactive-windows");
   const noOcclusion = args.includes("--no-occlusion");
+  const safeAreaWarnings = args.includes("--safe-area-warnings") || args.includes("--edge-to-edge-warnings");
   // Output-size reduction flags (issue #2756): each parses from CLI OR its
   // AUTOMOBILE_* env var, CLI winning via ||.
   const outputReduction = parseOutputReductionFlags(args, process.env);
@@ -404,6 +406,7 @@ function parseArgs(log: ParseLogger): {
     noA11yReportViewIds,
     noA11yRetrieveInteractiveWindows,
     noOcclusion,
+    safeAreaWarnings,
     outputReduction,
     toolOutputsDir,
   };
@@ -490,6 +493,7 @@ async function main() {
       noA11yReportViewIds,
       noA11yRetrieveInteractiveWindows,
       noOcclusion,
+      safeAreaWarnings,
       outputReduction,
       toolOutputsDir,
     } = parseArgs(logger);
@@ -613,6 +617,10 @@ async function main() {
       serverConfig.setWaitForPollingOverheadEnabled(false);
       logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
     }
+    if (safeAreaWarnings) {
+      serverConfig.setSafeAreaWarningsEnabled(true);
+      logger.info("Safe-area layout warnings enabled (--safe-area-warnings/--edge-to-edge-warnings)");
+    }
 
     // Log-only echoes for daemon CLI flags whose side effects are applied
     // downstream via startDaemon(). Surfacing them at startup makes CI logs
@@ -677,6 +685,7 @@ async function main() {
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
         noOcclusion,
+        safeAreaWarnings,
         // OutputReductionFlags field names match these DaemonOptions fields 1:1.
         ...outputReduction,
       });
@@ -740,6 +749,7 @@ async function main() {
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
         noOcclusion,
+        safeAreaWarnings,
         // OutputReductionFlags field names match these DaemonOptions fields 1:1.
         ...outputReduction,
       };

@@ -33,6 +33,8 @@ import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
 import dev.jasonpearson.automobile.ctrlproxy.models.RecompositionSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -1726,35 +1728,43 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Get all system insets (status bar, nav bar, gesture insets). */
+  private fun toSystemInsetsInfo(insets: android.graphics.Insets): SystemInsetsInfo =
+    SystemInsetsInfo(top = insets.top, bottom = insets.bottom, left = insets.left, right = insets.right)
+
+  /** Get typed current-window inset metadata for coordinate and layout inspection. */
   @Suppress("DEPRECATION")
-  private fun getSystemInsets(): SystemInsetsInfo {
+  private fun getObservationInsets(): ObservationInsetsInfo {
     return try {
       val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
       if (windowManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val metrics = windowManager.currentWindowMetrics
-        val insets =
-          metrics.windowInsets.getInsetsIgnoringVisibility(
-            android.view.WindowInsets.Type.systemBars()
-          )
-        SystemInsetsInfo(
-          top = insets.top,
-          bottom = insets.bottom,
-          left = insets.left,
-          right = insets.right,
+        val windowInsets = metrics.windowInsets
+        ObservationInsetsInfo(
+          systemBars = SystemBarsInsetsInfo(
+            visible = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.systemBars())),
+            stable = toSystemInsetsInfo(windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())),
+          ),
+          displayCutout = toSystemInsetsInfo(windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.displayCutout())),
+          systemGestures = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.systemGestures())),
+          mandatorySystemGestures = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.mandatorySystemGestures())),
+          tappableElement = toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.tappableElement())),
         )
       } else {
-        // Fallback for older Android versions
+        // API 24-29 cannot provide the typed WindowInsets categories from this service context.
         val statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android")
         val navBarId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
         val statusBarHeight =
           if (statusBarId > 0) resources.getDimensionPixelSize(statusBarId) else 0
         val navBarHeight = if (navBarId > 0) resources.getDimensionPixelSize(navBarId) else 0
-        SystemInsetsInfo(top = statusBarHeight, bottom = navBarHeight, left = 0, right = 0)
+        val bars = SystemInsetsInfo(top = statusBarHeight, bottom = navBarHeight, left = 0, right = 0)
+        ObservationInsetsInfo(
+          source = "android-resource-fallback",
+          systemBars = SystemBarsInsetsInfo(visible = bars, stable = bars),
+        )
       }
     } catch (e: Exception) {
       Log.w(TAG, "Failed to get system insets", e)
-      SystemInsetsInfo()
+      ObservationInsetsInfo(available = false, source = "unavailable", units = "unknown")
     }
   }
 
@@ -1919,7 +1929,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions()
     val rotation = getRotation()
-    val systemInsets = getSystemInsets()
+    val insets = getObservationInsets()
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       Log.w(TAG, "No windows or root node available for extraction")
@@ -1961,7 +1971,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       screenWidth = screenDimensions?.width,
       screenHeight = screenDimensions?.height,
       rotation = rotation,
-      systemInsets = systemInsets,
+      systemInsets = insets.systemBars?.stable,
+      insets = insets,
       wakefulness = wakefulness,
       foregroundActivity = foreground,
       density = density,

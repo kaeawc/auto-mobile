@@ -50,6 +50,30 @@ function collectBoundsUnions(schema: unknown): Array<Record<string, unknown>> {
 }
 
 describe("observeResultSchema: parses real captures (#3025)", () => {
+  test("accepts source-attributed insets and advisory layout warnings", () => {
+    const parsed = observeResultSchema.safeParse({
+      screenSize: { width: 375, height: 812 },
+      insets: {
+        available: true,
+        source: "ios-sdk-safe-area",
+        units: "points",
+        safeArea: { top: 59.5, right: 0, bottom: 34, left: 0 },
+      },
+      layoutWarnings: [{
+        type: "important-content-under-inset",
+        severity: "warning",
+        element: { text: "Title", bounds: { top: 0, right: 100, bottom: 30, left: 0 } },
+        categories: ["text"],
+        insetTypes: ["safeArea"],
+        sides: ["top"],
+        overlapPercent: 100,
+        confidence: "high",
+      }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   test("accepts the frozen android-home observe fixture (object bounds)", () => {
     const { observe } = loadAndroidHomeObserve();
     expect(() => observeResultSchema.parse(observe)).not.toThrow();

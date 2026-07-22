@@ -246,6 +246,8 @@ export class CtrlProxyHierarchy {
       // Screen dimensions in iOS points (logical pixels)
       screenWidth: hierarchy.screenWidth,
       screenHeight: hierarchy.screenHeight,
+      systemInsets: hierarchy.systemInsets,
+      insets: hierarchy.insets,
     };
   }
 

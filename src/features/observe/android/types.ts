@@ -19,6 +19,7 @@ import type {
   ActionTimingResult,
   DelegateContext,
 } from "../shared/types";
+import type { ObservationInsets } from "../../../models/ObservationInsets";
 import type { ScreenshotPerformanceMetadata } from "../ScreenshotMetadata";
 
 // Re-export shared types so existing imports from "./types" continue to work
@@ -103,6 +104,7 @@ export interface AccessibilityHierarchy {
   rotation?: number;
   /** System insets (status bar, nav bar, gesture insets) */
   systemInsets?: { top: number; bottom: number; left: number; right: number };
+  insets?: ObservationInsets;
   /** Device wakefulness: "Awake", "Asleep", or "Dozing" */
   wakefulness?: "Awake" | "Asleep" | "Dozing";
   /** Foreground activity component name, e.g. "com.example.app/.MainActivity" */

@@ -762,6 +762,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.noOcclusion) {
       args.push("--no-occlusion");
     }
+    if (options.safeAreaWarnings) {
+      args.push("--safe-area-warnings");
+    }
     if (options.memPerfAudit) {
       args.push("--mem-perf-audit");
     }
@@ -1267,6 +1270,8 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.noWaitForPollingOverhead = true;
     } else if (args[i] === "--no-occlusion") {
       options.noOcclusion = true;
+    } else if (args[i] === "--safe-area-warnings" || args[i] === "--edge-to-edge-warnings") {
+      options.safeAreaWarnings = true;
     } else if (args[i] === "--mem-perf-audit") {
       options.memPerfAudit = true;
     } else if (args[i] === "--accessibility-audit") {

@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** Fully implemented. All described fields (`viewHierarchy`, `screenSize`, `systemInsets`, `rotation`, `activeWindow`, `accessibilityAudit`, `performanceAudit`, etc.) are collected during observation. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** Fully implemented. Observation includes typed, source-attributed inset data when the platform can provide it. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 Each observation captures a snapshot of the current state of a device's screen and UI. When executed, it
 collects multiple data points in parallel to minimize observation latency. These operations are incredibly platform
@@ -13,7 +13,8 @@ All collected data is assembled into an object containing (fields may be omitted
 
 - `updatedAt`: device timestamp (or server timestamp fallback)
 - `screenSize`: current screen dimensions (rotation-aware)
-- `systemInsets`: UI insets for all screen edges
+- `insets`: typed safe-area and system-inset snapshot, including availability, source, units, system bars, cutouts, and Android gesture regions when available
+- `systemInsets`: compatibility alias for the stable system-bar edges; prefer `insets` for new consumers
 - `rotation`: current device rotation value
 - `activeWindow`: current app/activity information when resolved
 - `viewHierarchy`: complete UI hierarchy (if available)
@@ -24,6 +25,8 @@ All collected data is assembled into an object containing (fields may be omitted
 - `perfTiming`: collected internally for debug/perf capture diagnostics but stripped from the sanitized MCP tool output to reduce payload size
 - `gfxMetrics`: emitted in sanitized output for action UI-stability summaries; frame timing fields may be trimmed when `performanceAudit.metrics` already carries non-null computed replacements
 - `error`: error messages encountered during observation
+
+Start AutoMobile with `--safe-area-warnings` or its equivalent alias `--edge-to-edge-warnings` to add report-only `layoutWarnings`. These flag text or interactive elements that may overlap safe areas, system bars, display cutouts, or Android gesture regions. Intentional edge-to-edge backgrounds and scrollable content remain advisory rather than failures.
 
 The observation gracefully handles various error conditions:
 

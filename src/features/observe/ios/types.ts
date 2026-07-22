@@ -6,6 +6,7 @@
  */
 
 import type { ViewHierarchyWindowInfo } from "../../../models";
+import type { ObservationInsets } from "../../../models/ObservationInsets";
 import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
 import type { HighlightOperationResult } from "../../../models";
 import type {
@@ -77,6 +78,8 @@ export interface XCTestHierarchy {
   screenWidth?: number;
   /** Screen height in iOS points (logical pixels) */
   screenHeight?: number;
+  systemInsets?: { top: number; right: number; bottom: number; left: number };
+  insets?: ObservationInsets;
   error?: string;
 }
 

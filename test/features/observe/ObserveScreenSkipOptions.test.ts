@@ -30,13 +30,15 @@ class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
 }
 
 class FakeHierarchyCollector implements Pick<HierarchyCollector, "collect" | "collectRaw" | "extractScreenSize"> {
+  constructor(private foregroundActivity: string | null = "com.example/.MainActivity") {}
+
   async collect(result: ObserveResult): Promise<void> {
     result.viewHierarchy = {
       hierarchy: {},
       screenWidth: 1080,
       screenHeight: 1920,
       wakefulness: "Awake",
-      foregroundActivity: "com.example/.MainActivity",
+      ...(this.foregroundActivity ? { foregroundActivity: this.foregroundActivity } : {}),
     } as any;
   }
 
@@ -47,8 +49,9 @@ class FakeHierarchyCollector implements Pick<HierarchyCollector, "collect" | "co
   }
 }
 
-class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBackStack" | "collectWakefulness" | "collectActiveWindow" | "collectScreenSize" | "collectSystemInsets" | "collectRotationInfo"> {
+class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBackStack" | "collectWakefulness" | "collectActiveWindow"> {
   backStackCalls = 0;
+  activeWindowCalls = 0;
 
   async collectBackStack(result: ObserveResult, _perf: PerformanceTracker, _signal?: AbortSignal): Promise<void> {
     this.backStackCalls++;
@@ -60,12 +63,10 @@ class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBac
   }
 
   async collectActiveWindow(result: ObserveResult): Promise<void> {
+    this.activeWindowCalls++;
     result.activeWindow = { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 0 };
   }
 
-  async collectScreenSize(): Promise<void> {}
-  async collectSystemInsets(): Promise<void> {}
-  async collectRotationInfo(): Promise<void> {}
 }
 
 class NoOpAuditor implements Pick<PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector, "run"> {
@@ -78,7 +79,7 @@ const device: BootedDevice = {
   platform: "android",
 };
 
-function createObserveScreen() {
+function createObserveScreen(foregroundActivity: string | null = "com.example/.MainActivity") {
   const fakeTimer = new FakeTimer();
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
   const fakeDeviceStateCollector = new FakeDeviceStateCollector();
@@ -87,7 +88,7 @@ function createObserveScreen() {
     cacheStore: new FakeObserveCacheStore(fakeTimer),
     screenshotStateStore: new FakeScreenshotStateStore(),
     screenshotRecorder: fakeScreenshotRecorder,
-    hierarchyCollector: new FakeHierarchyCollector() as unknown as HierarchyCollector,
+    hierarchyCollector: new FakeHierarchyCollector(foregroundActivity) as unknown as HierarchyCollector,
     deviceStateCollector: fakeDeviceStateCollector as unknown as DeviceStateCollector,
     performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
     accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
@@ -132,6 +133,15 @@ describe("ObserveScreen skip options", () => {
 
     expect(fakeScreenshotRecorder.startCalls).toBe(1);
     expect(fakeDeviceStateCollector.backStackCalls).toBe(1);
+    expect(fakeDeviceStateCollector.activeWindowCalls).toBe(0);
+  });
+
+  test("uses the bootstrap active-window fallback only without CtrlProxy foreground metadata", async () => {
+    const created = createObserveScreen(null);
+
+    await created.observeScreen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(created.fakeDeviceStateCollector.activeWindowCalls).toBe(1);
   });
 
   test("both skip options=true skips screenshot and back stack", async () => {

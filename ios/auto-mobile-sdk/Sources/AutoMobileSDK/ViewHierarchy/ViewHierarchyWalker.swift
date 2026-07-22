@@ -22,13 +22,23 @@ public enum ViewHierarchyWalker {
         let screenWidth = Int(screenBounds.width)
         let screenHeight = Int(screenBounds.height)
 
-        let rootNode = walkWindows()
+        let keyWindow = visibleKeyWindow()
+        let rootNode = keyWindow.flatMap(walkWindow)
+        let safeAreaInsets = keyWindow.map {
+            SdkEdgeInsets(
+                top: Double($0.safeAreaInsets.top),
+                right: Double($0.safeAreaInsets.right),
+                bottom: Double($0.safeAreaInsets.bottom),
+                left: Double($0.safeAreaInsets.left)
+            )
+        }
 
         return SdkViewHierarchy(
             bundleId: bundleId,
             screenScale: scale,
             screenWidth: screenWidth,
             screenHeight: screenHeight,
+            safeAreaInsets: safeAreaInsets,
             root: rootNode
         )
     }
@@ -48,7 +58,7 @@ public enum ViewHierarchyWalker {
 
     // MARK: - Window Enumeration
 
-    private static func walkWindows() -> SdkViewNode? {
+    private static func visibleKeyWindow() -> UIWindow? {
         let windows: [UIWindow]
         if #available(iOS 15.0, *) {
             windows = UIApplication.shared.connectedScenes
@@ -59,15 +69,15 @@ public enum ViewHierarchyWalker {
         }
 
         // Find topmost visible window: prefer key window, then highest window level
-        guard let keyWindow = windows
+        return windows
             .filter({ !$0.isHidden && $0.alpha > 0 })
             .max(by: { a, b in
                 if a.windowLevel != b.windowLevel { return a.windowLevel < b.windowLevel }
                 return !a.isKeyWindow && b.isKeyWindow
-            }) else {
-            return nil
-        }
+            })
+    }
 
+    private static func walkWindow(_ keyWindow: UIWindow) -> SdkViewNode? {
         var opaqueOverlays: [CGRect] = []
         let rootBounds = keyWindow.bounds
 

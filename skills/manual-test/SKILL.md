@@ -85,11 +85,37 @@ at a time to conserve context; never let two actors drive devices at once.
      the daemon falls back to the **cached** runner with no diagnostic, so you
      attribute results to a local build that never ran (ref
      [#4221](https://github.com/kaeawc/auto-mobile/issues/4221)). The build script
-     writes to the **default** derived-data path, so a fresh local iOS runner needs
-     **no env var at all**. Only for a non-default location set
+     writes to the **default** derived-data path (`/tmp/automobile-ctrl-proxy`), so
+     no path env var is needed; only for a non-default location set
      `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` (the root — the
-     code appends `Build/Products` itself). Verify which runner actually served a
-     call with `grep xctestrun <daemon-log>`.
+     code appends `Build/Products` itself).
+   - **Set `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true` (or pass
+     `--skip-ctrl-proxy-download`) when testing a locally built iOS runner.**
+     Landing the build in the default derived-data path is **not** sufficient on
+     its own: `needsRebuild()` also consults release metadata cached **separately**
+     in `~/.automobile/ctrl-proxy-ios/ctrl-proxy-ios-bundle.json`, which the build
+     script never writes (`src/utils/IOSCtrlProxyBuilder.ts:398-433`). Three common
+     states download the **released** runner and extract it straight over
+     `/tmp/automobile-ctrl-proxy`, destroying your local build without a warning:
+     - **fresh host / cleared cache** — metadata missing ⇒ "metadata missing, need
+       download";
+     - **changed `AUTOMOBILE_VERSION`** — expected checksum no longer matches the
+       cached metadata ⇒ "checksum mismatch, need download" (and if the pinned
+       version is not in the checksum registry, setup fails closed instead);
+     - **physical-device target** — the baked device app hash never matches a local
+       build ⇒ "app hash mismatch, need download". (Simulator targets have no
+       expected app hash, so this one does not fire there.)
+
+     Only when metadata is already present **and** matches the current version does
+     the "no env var" path reuse your local build. The skip flag short-circuits
+     `needsRebuild()` before any of those checks, so it is the reliable switch.
+     **Caveat — it is process-wide, not iOS-only:** it also suppresses the Android
+     CtrlProxy download/install, so install the freshly built APK on the emulator
+     yourself (`adb install -r <fresh apk>`) before starting the daemon, or run the
+     Android leg in a separate daemon without the flag.
+   - **Verify which runner actually served the call** — `grep xctestrun <daemon-log>`
+     for the path, and `grep 'need download\|Downloading CtrlProxy bundle' <daemon-log>`
+     to confirm the released bundle did *not* replace your build.
    - `--embedded-sdk` — required for `sqlQuery`, `setPreference`/`getPreference`,
      in-app `highlight` (registration is **daemon-side**; the CLI must pass the same
      flag so the reuse check matches, else it restarts the daemon).

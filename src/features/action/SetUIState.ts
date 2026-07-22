@@ -129,7 +129,10 @@ export class SetUIState extends BaseVisualChange {
     let scrollsWithoutProgress = 0;
     let currentDirection: "up" | "down" = scrollDirection;
     let triedReverse = false;
-    let searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
+    // Null until a search actually starts. Holding a rolling deadline instead
+    // makes the budget sensitive to how long unrelated work took -- a slow
+    // post-success observe would age it before the next search even began.
+    let searchDeadline: number | null = null;
     let budgetSpent = false;
 
     while (processed.size < options.fields.length) {
@@ -157,10 +160,9 @@ export class SetUIState extends BaseVisualChange {
         fieldResults[fieldIndex] = result;
         processed.add(fieldIndex);
         totalAttempts += result.attempts;
-        // The budget bounds futile searching, not successful work: a form with
-        // many fields legitimately takes longer than one scroll search, and the
-        // next field may already be on screen (#4252 review).
-        searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
+        // Progress clears the budget: it bounds futile searching, not successful
+        // work. The next search re-arms it from scratch (#4252 review).
+        searchDeadline = null;
 
         // Refresh observation after each success
         if (result.success) {
@@ -182,8 +184,11 @@ export class SetUIState extends BaseVisualChange {
           };
         }
       } else {
-        // No visible matches — scroll to find more
-        if (this.timer.now() >= searchDeadline) {
+        // No visible matches — scroll to find more.
+        // Arm the budget on entering the search; only elapsed *search* time counts.
+        if (searchDeadline === null) {
+          searchDeadline = this.timer.now() + SEARCH_BUDGET_MS;
+        } else if (this.timer.now() >= searchDeadline) {
           budgetSpent = true;
           break;
         }

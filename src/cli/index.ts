@@ -16,6 +16,23 @@ import { registerPlanTools } from "../server/planTools";
 import { registerDoctorTools } from "../server/doctorTools";
 import { registerVideoRecordingTools } from "../server/videoRecordingTools";
 import { registerNotificationTools } from "../server/notificationTools";
+import { registerAccessibilityFocusTools } from "../server/accessibilityFocusTools";
+import { registerAccessibilityTools } from "../server/accessibilityTools";
+import { registerAppFileTools } from "../server/appFileTools";
+import { registerBarrierTools } from "../server/barrierTools";
+import { registerBiometricTools } from "../server/biometricTools";
+import { registerCriticalSectionTools } from "../server/criticalSectionTools";
+import { registerDatabaseTools } from "../server/databaseTools";
+import { registerDebugTools } from "../server/debugTools";
+import { registerDeepLinkTools } from "../server/deepLinkTools";
+import { registerFormTools } from "../server/formTools";
+import { registerHighlightTools } from "../server/highlightTools";
+import { registerNavigationTools } from "../server/navigationTools";
+import { registerNetworkTools } from "../server/networkTools";
+import { registerPreferenceTools } from "../server/preferenceTools";
+import { registerSnapshotTools } from "../server/snapshotTools";
+import { registerStorageTools } from "../server/storageTools";
+import { registerTelephonyTools } from "../server/telephonyTools";
 
 type CliHelpSchemaShape = Record<string, any> | undefined;
 interface CliHelpParameterInfo {
@@ -37,10 +54,95 @@ function initializeCliTools(): void {
   registerDoctorTools();
   registerVideoRecordingTools();
   registerNotificationTools();
+  registerAccessibilityFocusTools();
+  registerAccessibilityTools();
+  registerAppFileTools();
+  registerBarrierTools();
+  registerBiometricTools();
+  registerCriticalSectionTools();
+  registerDatabaseTools();
+  registerDebugTools();
+  registerDeepLinkTools();
+  registerFormTools();
+  registerHighlightTools();
+  registerNavigationTools();
+  registerNetworkTools();
+  registerPreferenceTools();
+  registerSnapshotTools();
+  registerStorageTools();
+  registerTelephonyTools();
 }
 
 // Parse CLI arguments into tool name, session UUID, and parameters
-function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string; params: Record<string, any> } {
+/**
+ * Coerce a raw CLI token using the tool's declared zod type.
+ *
+ * Running every value through `JSON.parse` made numeric-looking strings
+ * unpassable: `JSON.parse("12345")` yields a number, so `inputText --text 12345`
+ * and `sendSms --phoneNumber 5551234567` were rejected as
+ * "expected string, received number" (#4241). A phone number, PIN, OTP or zip
+ * code is a string whose natural value is digits, and the token alone cannot say
+ * which the caller meant — only the schema can.
+ *
+ * The declared type wins where we know it; otherwise we keep the previous
+ * best-effort JSON behaviour so unknown tools and undeclared params are
+ * unaffected.
+ */
+function coerceCliValue(raw: string, typeName: string | undefined): unknown {
+  const bestEffort = (): unknown => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  };
+
+  switch (typeName) {
+    // Enums are string-valued here (e.g. --action start); treating them as
+    // strings avoids a member that happens to look numeric being coerced.
+    case "string":
+    case "enum":
+      return raw;
+    case "number":
+    case "bigint": {
+      const parsed = Number(raw);
+      return Number.isNaN(parsed) ? bestEffort() : parsed;
+    }
+    case "boolean":
+      if (raw === "true") { return true; }
+      if (raw === "false") { return false; }
+      return bestEffort();
+    default:
+      return bestEffort();
+  }
+}
+
+/**
+ * Declared parameter types for a tool, or null when the tool is unknown.
+ *
+ * Registers the tool categories first: `runCliCommand` only calls
+ * `initializeCliTools()` on the no-args and `help` branches, not on the
+ * tool-execution path, so without this the registry is empty exactly when a real
+ * `--cli <tool>` invocation needs it and every value would silently fall back to
+ * the old JSON coercion. Registration is idempotent (the registry is a Map keyed
+ * by tool name), so calling it per invocation is safe.
+ */
+function getDeclaredParamTypes(toolName: string): Record<string, string> | null {
+  initializeCliTools();
+  const tool = ToolRegistry.getTool(toolName);
+  if (!tool) {
+    return null;
+  }
+  const shape = getCliHelpSchemaShape(tool.schema);
+  if (!shape) {
+    return null;
+  }
+  return Object.fromEntries(
+    Object.entries(shape).map(([key, value]) => [key, getCliHelpParameterInfo(value).typeName])
+  );
+}
+
+export function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string; params: Record<string, any> } {
   if (args.length === 0) {
     throw new ActionableError("No tool name provided. Usage: --cli [--session-uuid <uuid>] <tool-name> [--param value ...]");
   }
@@ -59,6 +161,7 @@ function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string;
 
   const toolName = args[toolNameIndex];
   const params: Record<string, any> = {};
+  const declaredTypes = getDeclaredParamTypes(toolName);
 
   // Parse remaining arguments as key-value pairs or boolean flags
   for (let i = toolNameIndex + 1; i < args.length; i++) {
@@ -82,13 +185,7 @@ function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string;
       // Key-value pair
       i++; // Skip the value in the next iteration
 
-      // Try to parse as JSON, fallback to string
-      try {
-        params[paramName] = JSON.parse(nextArg);
-      } catch {
-        // If not valid JSON, treat as string
-        params[paramName] = nextArg;
-      }
+      params[paramName] = coerceCliValue(nextArg, declaredTypes?.[paramName]);
     }
   }
 
@@ -364,10 +461,12 @@ Options:
 
 Parameters:
   Parameters are passed as --key value pairs
-  Values are parsed as JSON if possible, otherwise as strings
+  Values are converted using the tool's declared parameter type
+  Strings: --text 12345 stays the string "12345"
   Boolean values: --flag true or --flag false
   Numbers: --count 5
   Objects: --options '{"key": "value"}'
+  Unknown tools or parameters fall back to JSON-if-possible, otherwise string
 
 Session-based Execution:
   When using --session-uuid, the tool will be executed on the device assigned to that session.

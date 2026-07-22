@@ -24,6 +24,27 @@ import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect"
 import { disableStylusHandwriting } from "./disableStylusHandwriting";
 
 /**
+ * Render a device list for a "not found" error.
+ *
+ * These messages exist to tell the caller which identifier to use instead, so
+ * they must print the identifiers rather than the objects: `BootedDevice[].join()`
+ * stringifies each element to "[object Object]" and destroys the only actionable
+ * part of the message (#4227).
+ *
+ * Both identifiers are shown because callers reason in either — a user reads
+ * "Pixel_9_Pro" in a device picker but must pass the id. Android currently sets
+ * `name === deviceId` (AdbClient.getBootedAndroidDevices), so the redundant
+ * "x (x)" form is collapsed to a single value.
+ */
+function describeDevices(devices: BootedDevice[]): string {
+  return devices
+    .map(device => (device.name && device.name !== device.deviceId
+      ? `${device.name} (${device.deviceId})`
+      : device.deviceId))
+    .join(", ") || "none";
+}
+
+/**
  * Provider interface for device clients - enables dependency injection for testing
  */
 export interface DeviceClientProvider {
@@ -382,7 +403,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       if (!providedDevice) {
         throw new ActionableError(
           `Device ${providedDeviceId} not found on ${platform} platform. ` +
-          `Available ${platform} devices: ${platformDevices.join(", ") || "none"}`
+          `Available ${platform} devices: ${describeDevices(platformDevices)}`
         );
       }
       selectedDevice = providedDevice;
@@ -459,7 +480,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     if (!device) {
       throw new ActionableError(
-        `Android device ${deviceId} is not connected. Available devices: ${allDevices.join(", ") || "none"}`
+        `Android device ${deviceId} is not connected. Available devices: ${describeDevices(allDevices)}`
       );
     }
 

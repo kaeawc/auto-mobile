@@ -350,7 +350,50 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(audio[0].length).toBe(32);
     expect(out.map(f => f.header.timestampMs)).toEqual([CONFIRM_TS]);
   });
+
+  test("an unsettled candidate does not make later chunks rescan the retained bytes", () => {
+    // The adversarial shape: a corrupt header whose payload begins with a
+    // plausible header declaring a 256 MiB payload. That candidate cannot be
+    // corroborated until 256 MiB have arrived, so it is retained across every
+    // subsequent chunk. Scanning must resume where it left off — restarting at
+    // offset 0 each push makes one corrupt frame cost quadratic CPU, which is
+    // the disproportionate-work shape this whole change exists to remove.
+    const decoder = new FrameDecoder();
+    const decoy = encodeHeader(8_192, 8_192, 32_768, 0);
+    decoder.push(Buffer.concat([encodeHeader(0, 0, 0, 0), decoy]), () => {});
+
+    const chunks = 12;
+    const chunk = Buffer.alloc(8 * 1024, 0);
+    const parses = countHeaderParses(() => {
+      for (let i = 0; i < chunks; i++) {decoder.push(chunk);}
+    });
+
+    // Linear: each byte offset is examined once overall, plus the retained
+    // candidate re-asked once per chunk. Rescanning from zero would cost
+    // ~chunks/2 times this.
+    expect(parses).toBeLessThan(chunks * chunk.length * 1.1);
+  });
 });
+
+/**
+ * Count `parseHeader` calls inside `body`, via the four header-word reads each
+ * one makes. Measures scan work directly instead of timing it, so the bound is
+ * deterministic under load.
+ */
+function countHeaderParses(body: () => void): number {
+  let reads = 0;
+  const original = Buffer.prototype.readUInt32LE;
+  Buffer.prototype.readUInt32LE = function(this: Buffer, offset?: number): number {
+    reads++;
+    return original.call(this, offset as number);
+  };
+  try {
+    body();
+  } finally {
+    Buffer.prototype.readUInt32LE = original;
+  }
+  return reads / 4;
+}
 
 /** Timestamp of the frame whose header confirms a recovery point. */
 const CONFIRM_TS = 1000;

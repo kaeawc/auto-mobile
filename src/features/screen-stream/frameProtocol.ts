@@ -85,6 +85,21 @@ export class FrameDecoder {
    * one corrupt frame produces one report, not one per 16 discarded bytes.
    */
   private resynchronizing: boolean = false;
+  /**
+   * Offsets into `buffer`, ascending, whose corroboration is still pending
+   * because the bytes that would settle them have not arrived. These are the
+   * only already-examined offsets a later chunk can change the verdict of.
+   */
+  private unsettled: number[] = [];
+  /**
+   * How many leading bytes of `buffer` the forward scan has already examined.
+   * Offsets below this are settled for good: a 16-byte window is immutable once
+   * buffered, so an implausible header stays implausible, and a candidate
+   * rejected by its successor stays rejected. Carrying this cursor across
+   * pushes is what keeps resynchronization linear in the bytes received rather
+   * than re-parsing the whole retained buffer on every chunk.
+   */
+  private scanned: number = 0;
 
   /**
    * Append bytes from the helper's stdout stream and return any frames that
@@ -146,6 +161,7 @@ export class FrameDecoder {
     const malformed = headerError(header);
     if (malformed) {
       this.resynchronizing = true;
+      this.resetScan();
       onMalformed?.({ reason: malformed, header });
       return "malformed";
     }
@@ -164,21 +180,28 @@ export class FrameDecoder {
    * one can spell a perfectly plausible header. Each candidate is corroborated
    * by checking that whatever follows its payload is itself a valid header (or
    * that the payload runs exactly to the end of what has arrived).
+   *
+   * Each byte offset is examined exactly once across the whole resynchronization,
+   * not once per chunk. Only offsets still awaiting corroboration are re-asked,
+   * and there are almost never more than one of those: post-validation a random
+   * offset is a plausible header with probability ~2^-38.
    */
   private resynchronize(): boolean {
-    const lastOffset = this.buffer.length - FRAME_HEADER_SIZE;
-    let firstUnsettled = -1;
+    const pending: number[] = [];
+    // Ascending offset order overall — every retained candidate sits below the
+    // scan cursor, every newly examinable offset at or above it — so this still
+    // accepts the lowest-offset candidate that corroborates, as a single
+    // whole-buffer pass did.
+    let accepted = this.scan(this.unsettled, pending);
+    if (accepted < 0) {
+      accepted = this.scan(range(this.scanned, this.buffer.length - FRAME_HEADER_SIZE), pending);
+    }
 
-    for (let offset = 0; offset <= lastOffset; offset++) {
-      const header = parseHeader(this.buffer, offset);
-      if (headerError(header) !== null) {continue;}
-      const verdict = this.corroborate(offset, header);
-      if (verdict === "accept") {
-        this.buffer = this.buffer.subarray(offset);
-        this.resynchronizing = false;
-        return true;
-      }
-      if (verdict === "unsettled" && firstUnsettled < 0) {firstUnsettled = offset;}
+    if (accepted >= 0) {
+      this.buffer = this.buffer.subarray(accepted);
+      this.resetScan();
+      this.resynchronizing = false;
+      return true;
     }
 
     // A corroborated candidate outranks an earlier unproven one — payload
@@ -186,19 +209,48 @@ export class FrameDecoder {
     // corroboration tells the two apart. So the scan runs to the end before
     // falling back to the earliest candidate more bytes could still confirm;
     // failing that, keep only what could be a header straddling the chunk
-    // boundary. The retained region is rescanned when the next chunk arrives,
-    // which is bounded in practice: post-validation a random offset is a
-    // plausible header with probability ~2^-38, so the fallback is virtually
-    // always the genuine next frame, settled as soon as its payload lands.
-    const keepFrom =
-      firstUnsettled >= 0
-        ? firstUnsettled
-        : Math.max(0, this.buffer.length - (FRAME_HEADER_SIZE - 1));
-    if (keepFrom > 0) {
-      // Copy so the discarded chunk allocation can be freed.
-      this.buffer = Buffer.from(this.buffer.subarray(keepFrom));
-    }
+    // boundary.
+    this.scanned = Math.max(this.scanned, this.buffer.length - FRAME_HEADER_SIZE + 1, 0);
+    this.unsettled = pending;
+    this.discardSettledPrefix();
     return false;
+  }
+
+  /**
+   * Examine `offsets` in order, returning the first that corroborates, or -1.
+   * Offsets whose verdict more bytes could still change are appended to
+   * `pending`; settled ones are dropped and never looked at again.
+   */
+  private scan(offsets: Iterable<number>, pending: number[]): number {
+    for (const offset of offsets) {
+      const header = parseHeader(this.buffer, offset);
+      if (headerError(header) !== null) {continue;}
+      const verdict = this.corroborate(offset, header);
+      if (verdict === "accept") {return offset;}
+      if (verdict === "unsettled") {pending.push(offset);}
+    }
+    return -1;
+  }
+
+  /**
+   * Drop the leading bytes that can no longer begin a frame, rebasing the scan
+   * cursor and the retained candidates onto the shortened buffer.
+   */
+  private discardSettledPrefix(): void {
+    const keepFrom =
+      this.unsettled.length > 0
+        ? this.unsettled[0]
+        : Math.max(0, this.buffer.length - (FRAME_HEADER_SIZE - 1));
+    if (keepFrom === 0) {return;}
+    // Copy so the discarded chunk allocation can be freed.
+    this.buffer = Buffer.from(this.buffer.subarray(keepFrom));
+    this.unsettled = this.unsettled.map(offset => offset - keepFrom);
+    this.scanned = Math.max(0, this.scanned - keepFrom);
+  }
+
+  private resetScan(): void {
+    this.unsettled = [];
+    this.scanned = 0;
   }
 
   /**
@@ -229,6 +281,11 @@ export class FrameDecoder {
     if (this.buffer.length - end < FRAME_HEADER_SIZE) {return "unsettled";}
     return headerError(parseHeader(this.buffer, end)) === null ? "accept" : "reject";
   }
+}
+
+/** Lazily yields `from..toInclusive`, so a scan never materializes the range. */
+function* range(from: number, toInclusive: number): Generator<number> {
+  for (let value = from; value <= toInclusive; value++) {yield value;}
 }
 
 function isAudioHeader(header: FrameHeader): boolean {

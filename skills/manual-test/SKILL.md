@@ -81,9 +81,16 @@ at a time to conserve context; never let two actors drive devices at once.
      installed one and avoid the ~30s blocking download (#2590).
    - **Do NOT set `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`.** It wants an `.ipa`
      **file**, and `scripts/ios/ctrl-proxy-build-for-testing.sh` produces no `.ipa`
-     — only a derived-data tree. Pointing it at a directory is silently ignored:
-     the daemon falls back to the **cached** runner with no diagnostic, so you
-     attribute results to a local build that never ran (ref
+     — only a derived-data tree. Pointing it at a directory fails **two different
+     ways** depending on whether a runner is already up. **Cold path:** the override
+     forces extraction (`needsRebuild()` returns true whenever an override is set,
+     `src/utils/IOSCtrlProxyBuilder.ts:393`), `ensureBundleDownloaded()` throws
+     `bundle override is not a file`, and CtrlProxy iOS **setup fails**. **Warm
+     path** (runner already installed/cached): setup short-circuits before the
+     builder runs, so the override is **bypassed with no diagnostic** and you
+     attribute results to a local build that never ran. So: if iOS setup fails,
+     suspect the override; if it appears to work, confirm which runner actually
+     served the call (ref
      [#4221](https://github.com/kaeawc/auto-mobile/issues/4221)). The build script
      writes to the **default** derived-data path (`/tmp/automobile-ctrl-proxy`), so
      no path env var is needed; only for a non-default location set

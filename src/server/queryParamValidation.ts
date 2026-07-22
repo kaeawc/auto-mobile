@@ -57,7 +57,10 @@ export function optionalBoolean(value: string | undefined, label: string): boole
 
 export function queryParamsToRecord(query: string): Record<string, string> {
   const params = new URLSearchParams(query);
-  const entries: Record<string, string> = {};
+  // Null-prototype map: a `{}` here inherits `Object.prototype`, so a parameter named
+  // `constructor`/`toString`/`__proto__`/... would hit an inherited member and be
+  // rejected as a duplicate on its first occurrence (issue #4187).
+  const entries: Record<string, string> = Object.create(null);
   for (const [key, value] of params.entries()) {
     if (key in entries) {
       throw new Error(`Duplicate query parameter: ${key}`);

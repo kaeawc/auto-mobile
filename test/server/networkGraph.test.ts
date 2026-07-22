@@ -176,3 +176,42 @@ describe("buildNetworkGraph", () => {
     expect(postLeaf.p50).toBe(150);
   });
 });
+
+// Issue #4187: the tree used `{}` nodes guarded by `!node[key]`, so a path segment
+// named after an `Object.prototype` member read back as the inherited member
+// (truthy), the branch was never created, and `branch.paths = {}` was written onto
+// the global `Object` constructor instead.
+describe("buildNetworkGraph prototype-named path segments (issue #4187)", () => {
+  const PROTOTYPE_SEGMENTS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
+
+  it.each([...PROTOTYPE_SEGMENTS, "normalSegment"])(
+    "builds a branch for the %s segment without touching Object",
+    segment => {
+      const events = [
+        makeEvent({ url: `https://api.example.com/${segment}/items`, path: `/${segment}/items` }),
+      ];
+
+      const result = buildNetworkGraph(events);
+
+      expect(result.graph).toHaveLength(1);
+      const root = result.graph[0].paths;
+      expect(Object.prototype.hasOwnProperty.call(root, segment)).toBe(true);
+      const branch = root[segment] as GraphBranch;
+      expect(Object.keys(branch.paths)).toEqual(["items[GET]"]);
+      expect((branch.paths["items[GET]"] as GraphLeaf).success).toBe(1);
+      expect((Object as unknown as { paths?: unknown }).paths).toBeUndefined();
+    }
+  );
+
+  it.each([...PROTOTYPE_SEGMENTS, "normalSegment"])(
+    "records a leaf named %s",
+    segment => {
+      const events = [makeEvent({ url: `https://api.example.com/${segment}`, path: `/${segment}` })];
+
+      const result = buildNetworkGraph(events);
+      const root = result.graph[0].paths;
+      expect(Object.prototype.hasOwnProperty.call(root, `${segment}[GET]`)).toBe(true);
+      expect((root[`${segment}[GET]`] as GraphLeaf).success).toBe(1);
+    }
+  );
+});

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { bucketEvents } from "../../src/server/networkResources";
+import { aggregateStatsByHost, bucketEvents } from "../../src/server/networkResources";
 import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
 
 function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWithId {
@@ -128,5 +128,33 @@ describe("bucketEvents", () => {
     expect(buckets.length).toBeLessThanOrEqual(1000);
     // The later event should still land in a bucket
     expect(buckets[buckets.length - 1].requests).toBe(1);
+  });
+});
+
+// Issue #4187: `byHost` was a `{}` map guarded by `!byHost[host]`, so a host named
+// after an `Object.prototype` member read back as the inherited member (truthy),
+// initialization was skipped, and the host vanished from the emitted stats.
+describe("aggregateStatsByHost", () => {
+  const PROTOTYPE_HOSTS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
+
+  it.each([...PROTOTYPE_HOSTS, "api.example.com"])("aggregates the %s host", host => {
+    const stats = aggregateStatsByHost([
+      makeEvent({ host, durationMs: 100, statusCode: 200 }),
+      makeEvent({ host, durationMs: 300, statusCode: 500 }),
+    ]);
+
+    expect(Object.prototype.hasOwnProperty.call(stats, host)).toBe(true);
+    expect(stats[host]).toEqual({ requests: 2, errors: 1, p50: 200, p95: 290 });
+  });
+
+  it("keeps separate hosts separate", () => {
+    const stats = aggregateStatsByHost([
+      makeEvent({ host: "constructor", statusCode: 200 }),
+      makeEvent({ host: "api.example.com", statusCode: 404 }),
+    ]);
+
+    expect(Object.keys(stats).sort()).toEqual(["api.example.com", "constructor"]);
+    expect(stats["constructor"].errors).toBe(0);
+    expect(stats["api.example.com"].errors).toBe(1);
   });
 });

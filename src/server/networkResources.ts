@@ -178,6 +178,49 @@ export function bucketEvents(events: NetworkEventWithId[], bucketSeconds: number
   return result.sort((a, b) => a.bucketStart - b.bucketStart);
 }
 
+export interface HostStats {
+  requests: number;
+  errors: number;
+  p50: number;
+  p95: number;
+}
+
+/**
+ * Aggregate per-host request/error counts and latency percentiles.
+ *
+ * The accumulator is a null-prototype map: hosts come off the wire, and a `{}` map
+ * inherits `Object.prototype`, so a host named `constructor`/`toString`/`__proto__`/...
+ * would make the `!byHost[host]` guard read the inherited member (truthy), skip
+ * initialization, and drop that host from the emitted stats (issue #4187).
+ */
+export function aggregateStatsByHost(events: NetworkEventWithId[]): Record<string, HostStats> {
+  const byHost: Record<string, HostStats> = Object.create(null);
+  const durationsByHost: Record<string, number[]> = Object.create(null);
+
+  for (const event of events) {
+    const host = event.host ?? "unknown";
+    if (!byHost[host]) {
+      byHost[host] = { requests: 0, errors: 0, p50: 0, p95: 0 };
+      durationsByHost[host] = [];
+    }
+    byHost[host].requests++;
+    if (event.statusCode >= 400) {
+      byHost[host].errors++;
+    }
+    if (event.durationMs > 0) {
+      durationsByHost[host].push(event.durationMs);
+    }
+  }
+
+  for (const host of Object.keys(byHost)) {
+    const sorted = durationsByHost[host].sort((a, b) => a - b);
+    byHost[host].p50 = Math.round(computePercentile(sorted, 50));
+    byHost[host].p95 = Math.round(computePercentile(sorted, 95));
+  }
+
+  return byHost;
+}
+
 async function handleTrafficQuery(
   params: Record<string, string>
 ): Promise<ResourceContent> {
@@ -339,27 +382,7 @@ export function registerNetworkResources(): void {
       const p50 = Math.round(computePercentile(durations, 50));
       const p95 = Math.round(computePercentile(durations, 95));
 
-      const byHost: Record<string, { requests: number; errors: number; p50: number; p95: number }> = {};
-      const durationsByHost: Record<string, number[]> = {};
-      for (const event of events) {
-        const host = event.host ?? "unknown";
-        if (!byHost[host]) {
-          byHost[host] = { requests: 0, errors: 0, p50: 0, p95: 0 };
-          durationsByHost[host] = [];
-        }
-        byHost[host].requests++;
-        if (event.statusCode >= 400) {
-          byHost[host].errors++;
-        }
-        if (event.durationMs > 0) {
-          durationsByHost[host].push(event.durationMs);
-        }
-      }
-      for (const host of Object.keys(byHost)) {
-        const sorted = durationsByHost[host].sort((a, b) => a - b);
-        byHost[host].p50 = Math.round(computePercentile(sorted, 50));
-        byHost[host].p95 = Math.round(computePercentile(sorted, 95));
-      }
+      const byHost = aggregateStatsByHost(events);
 
       return {
         uri: NETWORK_RESOURCE_URIS.STATS,

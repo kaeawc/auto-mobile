@@ -28,7 +28,11 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     return schema;
   }
 
-  const mergedProperties: Record<string, unknown> = {};
+  // Null-prototype map: a `{}` here inherits `Object.prototype`, so the
+  // `!mergedProperties[key]` guard below would read the inherited member for a
+  // property named `constructor`/`toString`/`__proto__`/... and merge the real
+  // branch schema into it, silently corrupting the emitted schema (issue #4187).
+  const mergedProperties: Record<string, unknown> = Object.create(null);
   const seenAdditionalProperties = new Set<boolean | undefined>();
   const requiredSets: Set<string>[] = [];
 

@@ -126,7 +126,7 @@ export function buildNetworkGraph(
   const result: GraphHost[] = [];
 
   for (const [, { scheme, host, pathGroups }] of hostMap) {
-    const root: Record<string, GraphNode> = {};
+    const root: Record<string, GraphNode> = createPathNode();
 
     for (const [groupKey, groups] of pathGroups) {
       const [path] = groupKey.split("::");
@@ -187,6 +187,17 @@ function stripDurations(node: Record<string, GraphNode>): void {
   }
 }
 
+/**
+ * Path-tree nodes are keyed by URL path segments, which are attacker/app controlled.
+ * A `{}` map inherits `Object.prototype`, so a segment named `constructor`,
+ * `toString`, `__proto__`, ... reads back as the inherited member and the
+ * `!node[key]` guard below never creates the branch — writing `paths` onto the
+ * global `Object` constructor / `Object.prototype` instead (issue #4187).
+ */
+function createPathNode(): Record<string, GraphNode> {
+  return Object.create(null) as Record<string, GraphNode>;
+}
+
 function insertIntoTree(
   node: Record<string, GraphNode>,
   segments: string[],
@@ -230,14 +241,14 @@ function insertIntoTree(
   } else {
     // Branch position
     if (!node[key]) {
-      node[key] = { paths: {} } as GraphBranch;
+      node[key] = { paths: createPathNode() } as GraphBranch;
       if (isParam) {
         (node[key] as GraphBranch).parameterized = true;
       }
     }
     const branch = node[key] as GraphBranch;
     if (!branch.paths) {
-      branch.paths = {};
+      branch.paths = createPathNode();
     }
     insertIntoTree(branch.paths, segments, index + 1, leaf);
   }

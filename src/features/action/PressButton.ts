@@ -6,7 +6,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import { isNavigationPressButton } from "./pressButtonPolicy";
+import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
 
 export class PressButton extends BaseVisualChange {
   constructor(device: BootedDevice, adb: AdbClient | null = null) {
@@ -85,19 +85,9 @@ export class PressButton extends BaseVisualChange {
   private static readonly GLOBAL_ACTION_TIMEOUT_MS = 3000;
 
   private async executeAndroidButtonPress(button: string, timeoutMs?: number): Promise<PressButtonResult> {
-    const keyCodeMap: Record<string, number> = {
-      "home": 3,
-      "back": 4,
-      "menu": 82,
-      "power": 26,
-      "volume_up": 24,
-      "volume_down": 25,
-      "recent": 187,
-    };
-
     const normalized = button.toLowerCase();
-    const keyCode = keyCodeMap[normalized];
-    if (!keyCode) {
+    const keyCode = resolveAndroidKeyCode(normalized);
+    if (keyCode === undefined) {
       return {
         success: false,
         button,

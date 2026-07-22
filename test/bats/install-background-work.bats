@@ -27,6 +27,16 @@ assert_process_is_reaped() {
   [[ -z "${state}" ]]
 }
 
+wait_for_process_group_leader() {
+  local group
+  for _ in {1..10}; do
+    group=$(ps -o pgid= -p "$1" 2>/dev/null | tr -d ' ')
+    [ "${group}" = "$1" ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 teardown() {
   export PATH="${ORIG_PATH}"
   rm -rf "${TEST_DIR}"
@@ -51,6 +61,7 @@ STUB
   start_ios_runtime_probe
   local worker_pid="${IOS_RUNTIME_PROBE_PID}"
   [ -n "${worker_pid}" ]
+  wait_for_process_group_leader "${worker_pid}"
   local child_pid
   for _ in {1..10}; do
     child_pid=$("${PGREP}" -P "${worker_pid}" sleep 2>/dev/null || true)
@@ -73,7 +84,7 @@ STUB
   assert_process_is_reaped "${child_pid}"
 }
 
-@test "a SIGTERM-ignoring runtime helper is reaped after the hard fallback" {
+@test "a SIGTERM-ignoring runtime process group is reaped after the hard fallback" {
   cat > "${STUB_BIN}/xcrun" <<'STUB'
 #!/usr/bin/env bash
 bash -c 'trap "" TERM; while :; do :; done' &
@@ -86,20 +97,13 @@ STUB
 
   start_ios_runtime_probe
   local worker_pid="${IOS_RUNTIME_PROBE_PID}"
-  local helper_pid
-  for _ in {1..10}; do
-    helper_pid=$("${PGREP}" -P "${worker_pid}" . 2>/dev/null || true)
-    [[ -n "${helper_pid}" ]] && break
-    sleep 0.1
-  done
-  [ -n "${helper_pid}" ]
+  wait_for_process_group_leader "${worker_pid}"
   finish_ios_runtime_probe >/dev/null 2>&1
 
   assert_process_is_reaped "${worker_pid}"
-  assert_process_is_reaped "${helper_pid}"
 }
 
-@test "the hard runtime-probe fallback remains bounded after a wrapper resumes into another stall" {
+@test "the runtime-probe process group remains bounded after a wrapper resumes into another stall" {
   cat > "${STUB_BIN}/xcrun" <<'STUB'
 #!/usr/bin/env bash
 bash -c 'trap "" TERM; while :; do :; done' &
@@ -113,6 +117,7 @@ STUB
 
   start_ios_runtime_probe
   local worker_pid="${IOS_RUNTIME_PROBE_PID}"
+  wait_for_process_group_leader "${worker_pid}"
   local started ended elapsed
   started=$(date +%s)
   finish_ios_runtime_probe >/dev/null 2>&1

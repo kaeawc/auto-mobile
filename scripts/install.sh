@@ -56,6 +56,7 @@ PRESET_CLIENT_FILTER=""  # When set, auto-select clients matching this prefix
 IOS_RUNTIME_NAMES=()
 IOS_RUNTIME_PROBE_PID=""
 IOS_RUNTIME_PROBE_FILE=""
+IOS_RUNTIME_PROBE_PROCESS_GROUP=false
 POST_BUN_SETUP_PID=""
 POST_BUN_SETUP_LOG_FILE=""
 POST_BUN_SETUP_STATE_FILE=""
@@ -124,68 +125,6 @@ terminate_process_tree() {
     # installer-owned worker processes, so use SIGKILL after the recursive
     # walk to guarantee cancellation cannot leave a Bun or daemon child alive.
     kill -KILL "${pid}" 2>/dev/null || true
-}
-
-# Ask leaf processes in a tree to stop without killing their parents. A wrapper
-# blocked in `wait` can then reap the child and exit normally; callers retain a
-# bounded hard-kill fallback for helpers that ignore SIGTERM.
-request_process_tree_shutdown() {
-    local pid="$1"
-    kill -0 "${pid}" 2>/dev/null || return 0
-
-    local children=()
-    local child
-    local has_children=false
-    if command_exists pgrep; then
-        while IFS= read -r child; do
-            if [[ -n "${child}" ]]; then
-                children+=("${child}")
-                has_children=true
-            fi
-        done < <(pgrep -P "${pid}" . 2>/dev/null || true)
-    fi
-
-    if [[ "${has_children}" == "false" ]]; then
-        kill -TERM "${pid}" 2>/dev/null || true
-        return 0
-    fi
-
-    for child in "${children[@]:-}"; do
-        request_process_tree_shutdown "${child}"
-    done
-}
-
-# Force-stop a tree from its leaves while resuming each parent. A parent that
-# was blocked in `wait` gets to reap its killed child before it exits. This is
-# intentionally distinct from `terminate_process_tree`, whose cancellation
-# callers must stop every process immediately.
-terminate_process_tree_for_reaping() {
-    local pid="$1"
-    kill -0 "${pid}" 2>/dev/null || return 0
-
-    kill -STOP "${pid}" 2>/dev/null || true
-
-    local children=()
-    local child
-    local has_children=false
-    if command_exists pgrep; then
-        while IFS= read -r child; do
-            if [[ -n "${child}" ]]; then
-                children+=("${child}")
-                has_children=true
-            fi
-        done < <(pgrep -P "${pid}" . 2>/dev/null || true)
-    fi
-
-    if [[ "${has_children}" == "false" ]]; then
-        kill -KILL "${pid}" 2>/dev/null || true
-        return 0
-    fi
-
-    for child in "${children[@]:-}"; do
-        terminate_process_tree_for_reaping "${child}"
-    done
-    kill -CONT "${pid}" 2>/dev/null || true
 }
 
 # Reap installer background work and remove its temporary files. The runtime
@@ -3401,7 +3340,16 @@ start_ios_runtime_probe() {
     fi
 
     IOS_RUNTIME_PROBE_FILE=$(mktemp "${TMPDIR:-/tmp}/auto-mobile-ios-runtimes.XXXXXX")
-    xcrun simctl list runtimes >"${IOS_RUNTIME_PROBE_FILE}" 2>/dev/null &
+    if command_exists perl; then
+        # A dedicated process group lets the timeout signal every helper in one
+        # operation while this shell still waits for and reaps the direct child.
+        perl -MPOSIX=setsid -e 'setsid() or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n"' \
+            xcrun simctl list runtimes >"${IOS_RUNTIME_PROBE_FILE}" 2>/dev/null &
+        IOS_RUNTIME_PROBE_PROCESS_GROUP=true
+    else
+        xcrun simctl list runtimes >"${IOS_RUNTIME_PROBE_FILE}" 2>/dev/null &
+        IOS_RUNTIME_PROBE_PROCESS_GROUP=false
+    fi
     IOS_RUNTIME_PROBE_PID=$!
 }
 
@@ -3423,33 +3371,24 @@ finish_ios_runtime_probe() {
     local probe_status=0 waited=0
     while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
         if ((waited >= IOS_RUNTIME_PROBE_TIMEOUT_SECONDS)); then
-            # Stop the helper first so an xcrun wrapper blocked in `wait` can
-            # reap it. Fall back to the hard tree kill after a one-second
-            # grace period so a stubborn helper cannot reintroduce the hang.
-            request_process_tree_shutdown "${IOS_RUNTIME_PROBE_PID}"
-            local reap_waited=0
+            local signal_target="${IOS_RUNTIME_PROBE_PID}"
+            if [[ "${IOS_RUNTIME_PROBE_PROCESS_GROUP}" == "true" ]]; then
+                signal_target="-${IOS_RUNTIME_PROBE_PID}"
+            fi
+
+            kill -TERM -- "${signal_target}" 2>/dev/null || true
+            local shutdown_waited=0
             while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
-                if ((reap_waited >= 10)); then
-                    terminate_process_tree_for_reaping "${IOS_RUNTIME_PROBE_PID}"
-                    # The resumed wrapper gets a bounded chance to reap its
-                    # killed children. Do not join it unboundedly: a wrapper
-                    # can resume from `wait` and continue into another stall.
-                    local fallback_waited=0
-                    while kill -0 "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null; do
-                        if ((fallback_waited >= 10)); then
-                            terminate_process_tree "${IOS_RUNTIME_PROBE_PID}"
-                            break
-                        fi
-                        sleep 0.1
-                        fallback_waited=$((fallback_waited + 1))
-                    done
+                if ((shutdown_waited >= 10)); then
+                    kill -KILL -- "${signal_target}" 2>/dev/null || true
                     break
                 fi
                 sleep 0.1
-                reap_waited=$((reap_waited + 1))
+                shutdown_waited=$((shutdown_waited + 1))
             done
             wait "${IOS_RUNTIME_PROBE_PID}" 2>/dev/null || true
             IOS_RUNTIME_PROBE_PID=""
+            IOS_RUNTIME_PROBE_PROCESS_GROUP=false
             rm -f "${IOS_RUNTIME_PROBE_FILE}"
             return 0
         fi
@@ -3463,6 +3402,7 @@ finish_ios_runtime_probe() {
         probe_status=$?
     fi
     IOS_RUNTIME_PROBE_PID=""
+    IOS_RUNTIME_PROBE_PROCESS_GROUP=false
 
     if [[ ${probe_status} -eq 0 ]]; then
         local runtimes

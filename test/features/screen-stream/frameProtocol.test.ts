@@ -93,10 +93,15 @@ describe("FrameDecoder", () => {
     const bad = encodeHeader(0, 1, 4, 0);
     const good = makeFrameBytes(1, 1, 4, 99, 0xcd);
     const errors: MalformedFrameError[] = [];
-    const out = decoder.push(Buffer.concat([bad, good]), err => errors.push(err));
+    // Recovery is confirmed by the header that follows the recovered frame, so
+    // the stream carries one more frame after it.
+    const out = decoder.push(
+      Buffer.concat([bad, good, confirmingFrame()]),
+      err => errors.push(err)
+    );
     expect(errors).toHaveLength(1);
-    expect(out).toHaveLength(1);
-    expect(out[0].header.timestampMs).toBe(99);
+    expect(out.map(f => f.header.timestampMs)).toEqual([99, CONFIRM_TS]);
+    expect(out[0].pixels[0]).toBe(0xcd);
   });
 
   test("handles empty chunks without emitting frames", () => {
@@ -104,3 +109,306 @@ describe("FrameDecoder", () => {
     expect(decoder.push(Buffer.alloc(0))).toHaveLength(0);
   });
 });
+
+describe("FrameDecoder corrupt-header resynchronization", () => {
+  // A corrupt header carries no usable payload length, so the decoder cannot
+  // know where the damaged frame ends. It must scan forward for the next frame
+  // boundary rather than re-walking the payload as if it were headers.
+  //
+  // A recovery point is only accepted once the header that follows it confirms
+  // it, so each case below carries one extra frame on the wire; `CONFIRM_TS`
+  // marks it.
+
+  test("a corrupt header at stream start discards the frame, not just its 16 header bytes", () => {
+    const decoder = new FrameDecoder();
+    // Corrupt header claiming zero width, followed by a payload of pseudo-random
+    // bytes and then a genuinely valid frame.
+    const corrupt = Buffer.concat([encodeHeader(0, 1, 4, 0), pseudoRandomPayload(4_000)]);
+    const good = makeFrameBytes(2, 2, 8, 777, 0x5a);
+
+    const errors: MalformedFrameError[] = [];
+    const out = decoder.push(
+      Buffer.concat([corrupt, good, confirmingFrame()]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toBe("header_width_zero");
+    expect(out.map(f => f.header.timestampMs)).toEqual([777, CONFIRM_TS]);
+    expect(out[0].pixels[0]).toBe(0x5a);
+  });
+
+  test("a corrupt header mid-stream costs one callback and both good frames survive", () => {
+    const decoder = new FrameDecoder();
+    const before = makeFrameBytes(1, 1, 4, 11, 0x11);
+    const corrupt = Buffer.concat([encodeHeader(1, 0, 4, 0), pseudoRandomPayload(8_000)]);
+    const after = makeFrameBytes(1, 1, 4, 22, 0x22);
+
+    const errors: MalformedFrameError[] = [];
+    const out = decoder.push(
+      Buffer.concat([before, corrupt, after, confirmingFrame()]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toBe("header_height_zero");
+    expect(out.map(f => f.header.timestampMs)).toEqual([11, 22, CONFIRM_TS]);
+  });
+
+  test("a corrupt header at the tail emits one callback and resyncs on a later push", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+
+    const tail = Buffer.concat([encodeHeader(0, 0, 0, 0), pseudoRandomPayload(2_048)]);
+    expect(decoder.push(tail, err => errors.push(err))).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+
+    // The stream resumes with valid frames in a later chunk.
+    const out = decoder.push(
+      Buffer.concat([makeFrameBytes(1, 1, 4, 33, 0x33), confirmingFrame()]),
+      err => errors.push(err)
+    );
+    expect(errors).toHaveLength(1);
+    expect(out.map(f => f.header.timestampMs)).toEqual([33, CONFIRM_TS]);
+  });
+
+  test("a large corrupt frame does not amplify into a flood of callbacks", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    // The audit's shape: one corrupt header followed by a full-size payload.
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1080, 7680, 0),
+        pseudoRandomPayload(16_000),
+        makeFrameBytes(1, 1, 4, 88, 0x88),
+        confirmingFrame(),
+      ]),
+      err => errors.push(err)
+    );
+    expect(errors).toHaveLength(1);
+    // Not just quiet — actually back in sync.
+    expect(out.map(f => f.header.timestampMs)).toEqual([88, CONFIRM_TS]);
+  });
+
+  test("a sustained garbage stream stays quiet instead of amplifying", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    // 1 MiB of noise arriving in realistic chunks, then real frames. The old
+    // decoder failed this two ways depending on the bytes: a callback per 16
+    // discarded bytes, or a silent stall once it locked onto a bogus header
+    // claiming a huge payload. Quiet is only half the requirement — the stream
+    // has to come back.
+    const frames: number[] = [];
+    const stream = Buffer.concat([
+      pseudoRandomPayload(1024 * 1024),
+      makeFrameBytes(4, 4, 16, 909, 0x0f),
+      confirmingFrame(),
+    ]);
+    for (let offset = 0; offset < stream.length; offset += 65_536) {
+      const out = decoder.push(stream.subarray(offset, offset + 65_536), err =>
+        errors.push(err)
+      );
+      frames.push(...out.map(f => f.header.timestampMs));
+    }
+    expect(errors.length).toBeLessThanOrEqual(4);
+    expect(frames).toEqual([909, CONFIRM_TS]);
+  });
+
+  test("implausible dimensions are rejected so payload bytes rarely look like headers", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    // width*4 <= bytesPerRow, but both are absurd for a real display.
+    decoder.push(encodeHeader(1_000_000, 1_000_000, 8_000_000, 0), err => errors.push(err));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toBe("header_dimensions_out_of_range");
+  });
+
+  test("payload bytes that form a plausible header do not become a frame", () => {
+    const decoder = new FrameDecoder();
+    // Payload containing an embedded, structurally valid header. Nothing
+    // corroborates it, so the scan rejects it and lands on the real frame.
+    const embedded = Buffer.concat([encodeHeader(1, 1, 4, 555), Buffer.alloc(4, 0x77)]);
+    const corrupt = Buffer.concat([
+      encodeHeader(0, 1, 4, 0),
+      Buffer.alloc(64, 0x00),
+      embedded,
+      Buffer.alloc(64, 0x00),
+    ]);
+    const good = makeFrameBytes(1, 1, 4, 444, 0x44);
+
+    const errors: MalformedFrameError[] = [];
+    const out = decoder.push(
+      Buffer.concat([corrupt, good, confirmingFrame()]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out.map(f => f.header.timestampMs)).toEqual([444, CONFIRM_TS]);
+  });
+
+  test("a chunk boundary is not treated as proof of a frame boundary", () => {
+    const decoder = new FrameDecoder();
+    // The corrupt payload ends with bytes that spell a valid 1x1 header whose
+    // payload runs exactly to the end of the chunk. stdout splits wherever the
+    // pipe flushes, so that alignment is a coincidence, not corroboration —
+    // emitting it would fabricate a frame out of payload bytes.
+    const errors: MalformedFrameError[] = [];
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        Buffer.alloc(40, 0x00),
+        encodeHeader(1, 1, 4, 4242),
+        Buffer.alloc(4, 0xaa),
+      ]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out).toHaveLength(0);
+  });
+
+  test("drops a recovered frame when a second corrupt header follows it", () => {
+    const decoder = new FrameDecoder();
+    // Deliberate trade-off, pinned so it stays deliberate: accepting a
+    // candidate whose successor is not a valid header is the same rule that
+    // fabricates frames out of payload bytes (see the test above). One dropped
+    // frame during back-to-back corruption is the cheaper error.
+    const errors: MalformedFrameError[] = [];
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        Buffer.alloc(200, 0x31),
+        makeFrameBytes(1, 1, 4, 777, 0xbb),
+        encodeHeader(0, 1, 4, 0),
+        Buffer.alloc(200, 0x31),
+        makeFrameBytes(1, 1, 4, 888, 0xcc),
+        confirmingFrame(),
+      ]),
+      err => errors.push(err)
+    );
+
+    expect(out.map(f => f.header.timestampMs)).toEqual([888, CONFIRM_TS]);
+    expect(out.map(f => f.header.timestampMs)).not.toContain(777);
+  });
+
+  test("resynchronizes across a chunk boundary that splits the recovery header", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    const corrupt = Buffer.concat([encodeHeader(0, 1, 4, 0), pseudoRandomPayload(1_000)]);
+    const good = makeFrameBytes(1, 1, 4, 66, 0x66);
+    const all = Buffer.concat([corrupt, good, confirmingFrame()]);
+    const split = corrupt.length + 7;
+
+    expect(decoder.push(all.subarray(0, split), err => errors.push(err))).toHaveLength(0);
+    const out = decoder.push(all.subarray(split), err => errors.push(err));
+
+    expect(errors).toHaveLength(1);
+    expect(out.map(f => f.header.timestampMs)).toEqual([66, CONFIRM_TS]);
+  });
+
+  test("waits for more bytes rather than locking onto an unconfirmed candidate", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    // The recovery frame is large, so its payload cannot be corroborated until
+    // the rest of it arrives. The decoder must not lock onto earlier garbage.
+    const corrupt = Buffer.concat([encodeHeader(0, 1, 4, 0), pseudoRandomPayload(3_000)]);
+    const good = makeFrameBytes(64, 64, 256, 121, 0xee);
+    const all = Buffer.concat([corrupt, good, confirmingFrame()]);
+    const half = corrupt.length + 1_000;
+
+    expect(decoder.push(all.subarray(0, half), err => errors.push(err))).toHaveLength(0);
+    const out = decoder.push(all.subarray(half), err => errors.push(err));
+
+    expect(errors).toHaveLength(1);
+    expect(out.map(f => f.header.timestampMs)).toEqual([121, CONFIRM_TS]);
+    expect(out[0].pixels.length).toBe(64 * 256);
+  });
+
+  test("audio records with an implausible payload length are rejected", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    decoder.push(encodeHeader(0, 8_000, 1, 0xffffffff), err => errors.push(err));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].reason).toBe("audio_payload_too_large");
+  });
+
+  test("valid audio records still decode after a corrupt frame", () => {
+    const decoder = new FrameDecoder();
+    const errors: MalformedFrameError[] = [];
+    const audio: Buffer[] = [];
+    const corrupt = Buffer.concat([encodeHeader(0, 1, 4, 0), pseudoRandomPayload(512)]);
+    const record = Buffer.concat([encodeHeader(0, 8_000, 1, 32), Buffer.alloc(32, 0x09)]);
+
+    const out = decoder.push(
+      Buffer.concat([corrupt, record, confirmingFrame()]),
+      err => errors.push(err),
+      a => audio.push(a.pcm16le)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(audio).toHaveLength(1);
+    expect(audio[0].length).toBe(32);
+    expect(out.map(f => f.header.timestampMs)).toEqual([CONFIRM_TS]);
+  });
+
+  test("an unsettled candidate does not make later chunks rescan the retained bytes", () => {
+    // The adversarial shape: a corrupt header whose payload begins with a
+    // plausible header declaring a 256 MiB payload. That candidate cannot be
+    // corroborated until 256 MiB have arrived, so it is retained across every
+    // subsequent chunk. Scanning must resume where it left off — restarting at
+    // offset 0 each push makes one corrupt frame cost quadratic CPU, which is
+    // the disproportionate-work shape this whole change exists to remove.
+    const decoder = new FrameDecoder();
+    const decoy = encodeHeader(8_192, 8_192, 32_768, 0);
+    decoder.push(Buffer.concat([encodeHeader(0, 0, 0, 0), decoy]), () => {});
+
+    const chunks = 12;
+    const chunk = Buffer.alloc(8 * 1024, 0);
+    const parses = countHeaderParses(() => {
+      for (let i = 0; i < chunks; i++) {decoder.push(chunk);}
+    });
+
+    // Linear: each byte offset is examined once overall, plus the retained
+    // candidate re-asked once per chunk. Rescanning from zero would cost
+    // ~chunks/2 times this.
+    expect(parses).toBeLessThan(chunks * chunk.length * 1.1);
+  });
+});
+
+/**
+ * Count `parseHeader` calls inside `body`, via the four header-word reads each
+ * one makes. Measures scan work directly instead of timing it, so the bound is
+ * deterministic under load.
+ */
+function countHeaderParses(body: () => void): number {
+  let reads = 0;
+  const original = Buffer.prototype.readUInt32LE;
+  Buffer.prototype.readUInt32LE = function(this: Buffer, offset?: number): number {
+    reads++;
+    return original.call(this, offset as number);
+  };
+  try {
+    body();
+  } finally {
+    Buffer.prototype.readUInt32LE = original;
+  }
+  return reads / 4;
+}
+
+/** Timestamp of the frame whose header confirms a recovery point. */
+const CONFIRM_TS = 1000;
+
+/** The frame that corroborates the recovered one preceding it. */
+function confirmingFrame(): Buffer {
+  return makeFrameBytes(1, 1, 4, CONFIRM_TS, 0x01);
+}
+/** Deterministic pseudo-random filler — reproducible across runs. */
+function pseudoRandomPayload(length: number): Buffer {
+  const buf = Buffer.alloc(length);
+  let state = 0x12345678;
+  for (let i = 0; i < length; i++) {
+    state = (state * 1103515245 + 12345) & 0x7fffffff;
+    buf[i] = (state >>> 16) & 0xff;
+  }
+  return buf;
+}

@@ -1,4 +1,4 @@
-import { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AdbExecutor, type AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser } from "../../src/models";
 
 /**
@@ -12,6 +12,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private defaultError: Error | null = null;
   private executedCommands: string[] = [];
+  private executedArgv: string[][] = [];
   private commandCalls: Array<{
     command: string;
     timeoutMs?: number;
@@ -146,6 +147,16 @@ export class FakeAdbExecutor implements AdbExecutor {
     return [...this.executedCommands];
   }
 
+  /**
+   * Get the history of argv arrays passed to `execute()` (for test assertions).
+   * Unlike {@link getExecutedCommands}, this preserves argument boundaries, so a
+   * test can prove which characters landed inside a single argument.
+   * @returns Array of argv arrays, in call order
+   */
+  getExecutedArgv(): string[][] {
+    return this.executedArgv.map(args => [...args]);
+  }
+
   getCommandCalls(): Array<{
     command: string;
     timeoutMs?: number;
@@ -170,6 +181,7 @@ export class FakeAdbExecutor implements AdbExecutor {
    */
   clearHistory(): void {
     this.executedCommands = [];
+    this.executedArgv = [];
     this.commandCalls = [];
   }
 
@@ -199,6 +211,22 @@ export class FakeAdbExecutor implements AdbExecutor {
   }
 
   // Implementation of AdbExecutor interface
+
+  /**
+   * Execute argv directly. The argv array is recorded verbatim for boundary
+   * assertions, and its space-joined form is also appended to the string
+   * command history so existing pattern-based stubs keep matching.
+   */
+  async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    this.executedArgv.push([...args]);
+    return this.executeCommand(
+      args.join(" "),
+      options.timeoutMs,
+      options.maxBuffer,
+      options.noRetry,
+      options.signal
+    );
+  }
 
   async executeCommand(
     command: string,

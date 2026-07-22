@@ -526,7 +526,8 @@ STUB
   resolve_bounded_cmd_prefix 42
 
   local arg
-  for arg in "${BOUNDED_CMD_PREFIX[@]}"; do
+  # The `+` guard keeps an empty prefix from tripping `set -u` on bash 3.2.
+  for arg in ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"}; do
     [ "${arg}" != "--foreground" ]
     [ "${arg}" != "-f" ]
   done

@@ -1492,8 +1492,15 @@ bounded_watchdog_run() {
             # straight through. The caller now waits for this subshell, so an
             # unconditional sleep would add the whole grace to every timeout,
             # including the common case where the command dies on TERM at once.
+            # Poll both forms for the same reason the signals above use both:
+            # if the child never became group leader, `-pid` names no group, and
+            # testing only that would break out instantly and collapse the grace
+            # to zero — TERM and KILL in the same instant, with no chance to
+            # clean up.
             while [[ ${waited} -lt ${grace} ]]; do
-                kill -0 -"${cmd_pid}" 2> /dev/null || break
+                if ! kill -0 -"${cmd_pid}" 2> /dev/null && ! kill -0 "${cmd_pid}" 2> /dev/null; then
+                    break
+                fi
                 sleep 1
                 waited=$((waited + 1))
             done

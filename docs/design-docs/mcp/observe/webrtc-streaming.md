@@ -9,6 +9,9 @@
 > socket. A reference coordination server + browser viewer ships under
 > [`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/).
 >
+> For the WebRTC protocol choices behind this implementation, see the
+> [WebRTC standards map](./webrtc-standards-map.md).
+>
 > Live Android capture depends on `adb screenrecord` or the persistent
 > `video-server` jar on a real device/emulator; iOS capture depends on the
 > CtrlProxy screen streaming helper plus local `ffmpeg` H.264 encoding. Everything
@@ -257,9 +260,9 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 
 ## References
 
-- [WHIP — draft-ietf-wish-whip](https://datatracker.ietf.org/doc/draft-ietf-wish-whip/)
-- [WHEP — draft-ietf-wish-whep](https://datatracker.ietf.org/doc/draft-ietf-wish-whep/)
-- [RFC 6184 — RTP Payload Format for H.264 Video](https://datatracker.ietf.org/doc/html/rfc6184)
+- [WebRTC standards map](./webrtc-standards-map.md) — W3C, IETF, and ITU references mapped to AutoMobile behavior
+- [WHIP — RFC 9725](https://www.rfc-editor.org/rfc/rfc9725.html)
+- [WHEP — Internet-Draft](https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep)
 - [werift-webrtc](https://github.com/shinyoshiaki/werift-webrtc)
 - [CI worker setup guide](../../../webrtc-streaming-ci-worker.md)
 - [Reference coordination server](../../../../examples/webrtc-coordination-server/README.md)

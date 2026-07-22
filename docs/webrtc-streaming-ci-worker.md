@@ -5,7 +5,9 @@ the screen of the Android or iOS device it is driving to a coordination server
 over WebRTC, so the stream can be watched live in a browser.
 
 For the full design, see
-[WebRTC Screen Streaming](./design-docs/mcp/observe/webrtc-streaming.md).
+[WebRTC Screen Streaming](./design-docs/mcp/observe/webrtc-streaming.md), and
+for the protocol rationale, see the
+[WebRTC standards map](./design-docs/mcp/observe/webrtc-standards-map.md).
 
 ```
 CI worker (AutoMobile daemon) ──WHIP──▶ coordination server ──WHEP──▶ browser

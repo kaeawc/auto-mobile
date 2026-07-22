@@ -32,7 +32,7 @@ describe("GetBackStack", function() {
 
     expect(result).toBeDefined();
     expect(result.activities).toBeDefined();
-    expect(result.activities.length).toBeGreaterThanOrEqual(0); // May be 0 if regex doesn't match
+    expect(result.activities.length).toBe(4);
     expect(result.source).toBe("adb");
   });
 

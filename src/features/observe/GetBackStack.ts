@@ -47,12 +47,18 @@ export class GetBackStack implements BackStack {
         logger.debug(`[BACK_STACK] Found task affinity: ${currentTaskAffinity}`);
       }
 
-      // Match activity: "Hist #0: ActivityRecord{...} u0 com.example/.MainActivity"
-      // or "* Hist #0: ActivityRecord{...} u0 com.example/.MainActivity t123"
-      const activityMatch = line.match(/\*?\s*Hist\s+#\d+:\s+ActivityRecord\{[^\}]+\}\s+u\d+\s+([^\s]+)(?:\s+t(\d+))?/);
+      // Match activity. AOSP's ActivityRecord.toString() puts the user id, the
+      // component and the task id INSIDE the braces, e.g.
+      //   "* Hist  #0: ActivityRecord{2b2ce0f u0 com.example/.MainActivity t61}"
+      // The "Hist #N" index counts up from the task root, so #0 is the task
+      // root and the highest index is the topmost (visible) activity.
+      const activityMatch = line.match(
+        /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+(\S+)(?:\s+t(\d+))?\}/
+      );
       if (activityMatch) {
-        const fullName = activityMatch[1];
-        const taskIdFromActivity = activityMatch[2] ? parseInt(activityMatch[2], 10) : currentTaskId;
+        const histIndex = parseInt(activityMatch[1], 10);
+        const fullName = activityMatch[2];
+        const taskIdFromActivity = activityMatch[3] ? parseInt(activityMatch[3], 10) : currentTaskId;
 
         // Parse package/activity name (format: "com.example/.MainActivity" or "com.example/com.example.MainActivity")
         const parts = fullName.split("/");
@@ -67,7 +73,8 @@ export class GetBackStack implements BackStack {
         const activity: ActivityInfo = {
           name: activityName,
           taskId: taskIdFromActivity,
-          taskAffinity: currentTaskAffinity
+          taskAffinity: currentTaskAffinity,
+          isTaskRoot: histIndex === 0
         };
 
         activities.push(activity);
@@ -209,15 +216,13 @@ export class GetBackStack implements BackStack {
         ])
       );
 
-      // Calculate depth: number of activities in current task minus 1 (the current activity)
+      // Calculate depth: number of activities in current task minus 1 (the current activity).
+      // This is the number of entries that can still be popped from the current task.
+      // isTaskRoot is set during parsing from the activity's own "Hist #N" index -- the
+      // root is the #0 entry, which dumpsys prints LAST because it lists top-to-bottom.
       const currentTaskId = currentActivity?.taskId || -1;
       const activitiesInCurrentTask = activities.filter(a => a.taskId === currentTaskId);
       const depth = Math.max(0, activitiesInCurrentTask.length - 1);
-
-      // Mark the root activity
-      if (activitiesInCurrentTask.length > 0) {
-        activitiesInCurrentTask[0].isTaskRoot = true;
-      }
 
       const backStackInfo: BackStackInfo = {
         depth,

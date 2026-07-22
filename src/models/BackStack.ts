@@ -50,7 +50,11 @@ export interface TaskInfo {
 export interface BackStackInfo {
   /** Total depth of the back stack (number of entries that can be popped) */
   depth: number;
-  /** Activities in the back stack, ordered from bottom to top */
+  /**
+   * Activities in the back stack, in the order dumpsys reports them: top of
+   * stack first, task root last. The root entry of each task is flagged with
+   * `isTaskRoot`.
+   */
   activities: ActivityInfo[];
   /** Tasks in the back stack */
   tasks: TaskInfo[];

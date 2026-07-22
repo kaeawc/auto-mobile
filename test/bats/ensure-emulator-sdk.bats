@@ -136,7 +136,7 @@ MOCK
   fake_bin="$(mktemp -d)"
   cat > "${fake_bin}/bun" <<'MOCK'
 #!/usr/bin/env bash
-echo "error: No matching device found for automobile-sdk-resolution-probe"
+echo "error: No android device matching criteria found. name=automobile-sdk-resolution-probe Available images: none."
 exit 1
 MOCK
   chmod +x "${fake_bin}/bun"
@@ -157,7 +157,7 @@ MOCK
   cat > "${fake_bin}/bun" <<MOCK
 #!/usr/bin/env bash
 printf '%s\n' "\${AUTOMOBILE_ALLOW_DEVICE_CREATE:-<unset>}" > "${seen}"
-echo "error: No matching device found"
+echo "error: No android device matching criteria found. Available images: none."
 exit 1
 MOCK
   chmod +x "${fake_bin}/bun"
@@ -170,4 +170,84 @@ MOCK
   [ "$(<"$seen")" = "0" ]
   rm -rf "$fake_bin"
   rm -f "$seen"
+}
+
+# --- fail-closed tripwire semantics (issue #4260) ------------------------------
+#
+# The guard used to key only off the absence of "Android emulator not found", so
+# any other early failure fell through to the success message and reported a
+# green SDK-resolution guard. These pin the closed door.
+
+@test "the resolution tripwire fails when the probe dies for an unexpected reason" {
+  make_emulator
+  fake_bin="$(mktemp -d)"
+  cat > "${fake_bin}/bun" <<'MOCK'
+#!/usr/bin/env bash
+echo "error: Cannot find module './cli/bootDevice'" >&2
+exit 1
+MOCK
+  chmod +x "${fake_bin}/bun"
+
+  run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
+    PATH="${fake_bin}:${PATH}" \
+    bash "$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
+
+  rm -rf "$fake_bin"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"failed for an unexpected reason"* ]]
+  # The actual probe output has to be surfaced, or the failure is unactionable.
+  [[ "$output" == *"Cannot find module"* ]]
+  [[ "$output" != *"resolvable by the product boot flow"* ]]
+}
+
+@test "the resolution tripwire fails when the probe crashes with no output at all" {
+  make_emulator
+  fake_bin="$(mktemp -d)"
+  cat > "${fake_bin}/bun" <<'MOCK'
+#!/usr/bin/env bash
+exit 137
+MOCK
+  chmod +x "${fake_bin}/bun"
+
+  run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
+    PATH="${fake_bin}:${PATH}" \
+    bash "$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
+
+  rm -rf "$fake_bin"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"exit 137"* ]]
+  [[ "$output" != *"resolvable by the product boot flow"* ]]
+}
+
+@test "the resolution tripwire fails when the probe unexpectedly succeeds" {
+  make_emulator
+  fake_bin="$(mktemp -d)"
+  cat > "${fake_bin}/bun" <<'MOCK'
+#!/usr/bin/env bash
+echo '{"deviceId":"emulator-5554","platform":"android"}'
+exit 0
+MOCK
+  chmod +x "${fake_bin}/bun"
+
+  run env ANDROID_HOME="$SDK_ROOT" ANDROID_SDK_ROOT= ANDROID_SDK_HOME= \
+    PATH="${fake_bin}:${PATH}" \
+    bash "$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
+
+  rm -rf "$fake_bin"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpectedly succeeded"* ]]
+  [[ "$output" != *"resolvable by the product boot flow"* ]]
+}
+
+@test "the tripwire's expected diagnostic still matches the product boot error text" {
+  # The script asserts a substring of DeviceBootService.provisionAndBoot's
+  # ActionableError. If the product reworks that message, catch it here rather
+  # than by turning main red on the next push.
+  expected="$(grep -o 'expected_diagnostic="[^"]*"' \
+    "$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh" \
+    | head -n 1 | sed 's/^expected_diagnostic="//; s/"$//')"
+
+  [ -n "$expected" ]
+  run grep -q "$expected" "$(pwd)/src/utils/deviceBootService.ts"
+  [ "$status" -eq 0 ]
 }

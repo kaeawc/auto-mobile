@@ -1,3 +1,4 @@
+import { isIosUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { logger } from "./logger";
 
 /**
@@ -43,18 +44,15 @@ export class DeviceDetection implements DeviceDetection {
       return "android";
     }
 
-    // iOS device patterns (UUIDs from the iOS Simulator)
-    // iOS devices typically use UUIDs like: 569C0F94-5D53-40D2-AF8F-F4AA5BAA7D5E
-    // iOS simulators also use similar UUID patterns
-    const iosPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
-
     // Android device patterns
     // Emulators: emulator-5554, emulator-5556, etc.
     // Physical devices: various patterns like serial numbers
     const androidEmulatorPattern = /^emulator-\d+$/;
 
-    // Check for iOS UUID pattern first
-    if (iosPattern.test(deviceId)) {
+    // iOS covers three UDID shapes: the simulator's 8-4-4-4-12 UUID plus the two
+    // physical-device forms. Reuse the canonical predicate rather than a second
+    // classifier so this stays in step with the simctl/devicectl routing.
+    if (isIosUdid(deviceId)) {
       logger.info(`[DeviceDetection] Detected iOS device: ${deviceId}`);
       return "ios";
     }

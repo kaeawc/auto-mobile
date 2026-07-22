@@ -36,6 +36,14 @@ interface WebRtcStreamRecord {
   startToken: symbol;
 }
 
+interface PendingWebRtcStart {
+  streamId: string;
+  device: BootedDevice;
+  config: ReturnType<typeof resolveWebRtcStreamingConfig>;
+  token: symbol;
+  cancelled: boolean;
+}
+
 export interface WebRtcStreamManagerDependencies {
   idGenerator: IdGenerator;
   createPublisher: (config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps) => WebRtcPublisher;
@@ -61,8 +69,8 @@ const defaultDependencies: WebRtcStreamManagerDependencies = {
 
 let dependencies: WebRtcStreamManagerDependencies = { ...defaultDependencies };
 const streams = new Map<string, WebRtcStreamRecord>();
-const startingDeviceIds = new Map<string, symbol>();
-const startingStreamIds = new Map<string, symbol>();
+const startingDeviceIds = new Map<string, PendingWebRtcStart>();
+const startingStreamIds = new Map<string, PendingWebRtcStart>();
 const INITIAL_AUDIO_SOURCE_START_TIMEOUT_MS = 30_000;
 
 /** Override manager dependencies (tests). */
@@ -189,6 +197,20 @@ function assertStreamStartAvailable(deviceId: string, streamId: string): void {
   }
 }
 
+function stoppedPendingDescriptor(pending: PendingWebRtcStart): WebRtcStreamDescriptor {
+  return {
+    streamId: pending.streamId,
+    state: "stopped",
+    whipEndpoint: pending.config.whipEndpoint,
+    resourceUrl: null,
+    iceServers: pending.config.iceServers,
+    framesSent: 0,
+    packetsSent: 0,
+    audioPacketsSent: 0,
+    audioSamplesSent: 0,
+  };
+}
+
 /**
  * Start publishing a device's screen to the configured coordination server over
  * WHIP. Android capture prefers the persistent on-device encoder and falls back
@@ -206,8 +228,15 @@ export async function startWebRtcStream(
   assertStreamStartAvailable(request.device.deviceId, streamId);
 
   const startToken = Symbol(streamId);
-  startingDeviceIds.set(request.device.deviceId, startToken);
-  startingStreamIds.set(streamId, startToken);
+  const pending: PendingWebRtcStart = {
+    streamId,
+    device: request.device,
+    config,
+    token: startToken,
+    cancelled: false,
+  };
+  startingDeviceIds.set(request.device.deviceId, pending);
+  startingStreamIds.set(streamId, pending);
   try {
     const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
 
@@ -218,6 +247,9 @@ export async function startWebRtcStream(
     // startSource() only constructs the (synchronous) capture source. A degrade
     // returns null → screenrecord.
     const jarPath = await dependencies.resolveVideoJar(request.device);
+    if (pending.cancelled) {
+      throw new ActionableError(`WebRTC stream ${streamId} was stopped before startup completed.`);
+    }
 
     let settleInitialAudioSourceStart:
     | ((result: { ok: true } | { ok: false; error: unknown }) => void)
@@ -315,10 +347,10 @@ export async function startWebRtcStream(
 
     return publisher.getDescriptor();
   } finally {
-    if (startingDeviceIds.get(request.device.deviceId) === startToken) {
+    if (startingDeviceIds.get(request.device.deviceId) === pending) {
       startingDeviceIds.delete(request.device.deviceId);
     }
-    if (startingStreamIds.get(streamId) === startToken) {
+    if (startingStreamIds.get(streamId) === pending) {
       startingStreamIds.delete(streamId);
     }
   }
@@ -326,12 +358,27 @@ export async function startWebRtcStream(
 
 /** Stop a stream by id, or the sole active stream when id is omitted. */
 export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamDescriptor> {
+  const pending = streamId
+    ? startingStreamIds.get(streamId)
+    : startingStreamIds.size === 1
+      ? startingStreamIds.values().next().value
+      : undefined;
+  if (pending && !streams.has(pending.streamId)) {
+    pending.cancelled = true;
+    startingDeviceIds.delete(pending.device.deviceId);
+    startingStreamIds.delete(pending.streamId);
+    return stoppedPendingDescriptor(pending);
+  }
   const record = resolveStreamRecord(streamId);
   streams.delete(record.streamId);
-  if (startingDeviceIds.get(record.device.deviceId) === record.startToken) {
+  const recordPending = startingStreamIds.get(record.streamId);
+  if (recordPending?.token === record.startToken) {
+    recordPending.cancelled = true;
+  }
+  if (startingDeviceIds.get(record.device.deviceId)?.token === record.startToken) {
     startingDeviceIds.delete(record.device.deviceId);
   }
-  if (startingStreamIds.get(record.streamId) === record.startToken) {
+  if (startingStreamIds.get(record.streamId)?.token === record.startToken) {
     startingStreamIds.delete(record.streamId);
   }
   const descriptor = record.publisher.getDescriptor();

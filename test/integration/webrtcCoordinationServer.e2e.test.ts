@@ -108,6 +108,23 @@ describe("WebRTC coordination server e2e", () => {
     expect(packet.header.ssrc).toBe(0x05060708);
   });
 
+  test("rejects an oversized SDP request without taking down the HTTP server", async () => {
+    const http = new HttpCoordinationServer({ iceServers: [] });
+    const port = await http.listen(0, "127.0.0.1");
+    const base = `http://127.0.0.1:${port}`;
+    try {
+      const response = await fetch(`${base}/whip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: "v=0\r\n" + "x".repeat(1_000_000),
+      });
+      expect(response.status).toBe(413);
+      expect((await fetch(`${base}/api/streams`)).status).toBe(200);
+    } finally {
+      await http.close();
+    }
+  });
+
   test(
     "publisher -> WHIP ingest -> WHEP subscriber forwards frames, reconnect API lists the stream",
     async () => {
@@ -181,6 +198,81 @@ describe("WebRTC coordination server e2e", () => {
         expect(descriptor.subscriberCount).toBeGreaterThanOrEqual(1);
       } finally {
         await publisher.stop();
+        await viewer.close();
+        await http.close();
+      }
+    },
+    30000
+  );
+
+  test(
+    "replays cached SPS/PPS and a complete multi-slice IDR to a late WHEP viewer",
+    async () => {
+      const http = new HttpCoordinationServer({ iceServers: [] });
+      const port = await http.listen(0, "127.0.0.1");
+      const base = `http://127.0.0.1:${port}`;
+      const publisher = new WebRtcPublisher({
+        streamId: "late-viewer",
+        whipEndpoint: `${base}/whip?streamId=late-viewer`,
+      });
+      const primingViewer = new RTCPeerConnection({ codecs: { video: [useH264()] } });
+      const viewer = new RTCPeerConnection({ codecs: { video: [useH264()] } });
+      const received: RtpPacket[] = [];
+      viewer.onTrack.subscribe((track: MediaStreamTrack) => {
+        track.onReceiveRtp.subscribe((rtp: RtpPacket) => received.push(rtp));
+      });
+
+      try {
+        await publisher.start();
+        await waitFor(() => publisher.getState() === "connected", 8000);
+        primingViewer.addTransceiver("video", { direction: "recvonly" });
+        await primingViewer.setLocalDescription(await primingViewer.createOffer());
+        await waitForIce(primingViewer);
+        const primingResponse = await fetch(`${base}/whep/late-viewer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: primingViewer.localDescription?.sdp ?? "",
+        });
+        await primingViewer.setRemoteDescription({ type: "answer", sdp: await primingResponse.text() });
+        await waitFor(() => primingViewer.connectionState === "connected", 8000);
+        // Two IDR slices prove the cache retains the complete marked access unit.
+        const secondIdrSlice = nal(5, 1200, 0x44);
+        secondIdrSlice[1] = 0x40; // first_mb_in_slice > 0: same access unit as the first IDR.
+        publisher.writeH264Chunk(Buffer.concat([
+          START, nal(7, 8, 0x11),
+          START, nal(8, 6, 0x22),
+          START, nal(5, 1200, 0x33),
+          START, secondIdrSlice,
+          START,
+        ]));
+        publisher.writeH264Chunk(pFrame(0x55)); // Terminates and sends the cached IDR access unit.
+        publisher.writeH264Chunk(pFrame(0x56)); // Terminates the first P-frame parser buffer.
+        await sleep(200);
+        const cachedStream = (await (await fetch(`${base}/api/streams/late-viewer`)).json()) as {
+          framesForwarded: number;
+        };
+        expect(cachedStream.framesForwarded).toBeGreaterThan(0);
+        await primingViewer.close();
+
+        viewer.addTransceiver("video", { direction: "recvonly" });
+        await viewer.setLocalDescription(await viewer.createOffer());
+        await waitForIce(viewer);
+        const response = await fetch(`${base}/whep/late-viewer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: viewer.localDescription?.sdp ?? "",
+        });
+        expect(response.status).toBe(201);
+        await viewer.setRemoteDescription({ type: "answer", sdp: await response.text() });
+        await waitFor(() => viewer.connectionState === "connected", 8000);
+        await waitFor(() => received.some(rtp => rtp.header.marker), 5000);
+
+        expect(received.some(rtp => (rtp.payload[0] & 0x1f) === 7)).toBe(true);
+        expect(received.some(rtp => (rtp.payload[0] & 0x1f) === 8)).toBe(true);
+        expect(received.filter(rtp => (rtp.payload[0] & 0x1f) === 5).length).toBeGreaterThanOrEqual(2);
+      } finally {
+        await publisher.stop();
+        await primingViewer.close();
         await viewer.close();
         await http.close();
       }

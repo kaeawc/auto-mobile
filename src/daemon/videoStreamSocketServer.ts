@@ -198,7 +198,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.socketDeviceIds.set(socket, deviceId);
 
     try {
-      capture.source = await this.deps.createCaptureSource({
+      const source = await this.deps.createCaptureSource({
         device,
         onData: chunk => this.broadcast(deviceId, chunk),
         onError: error => {
@@ -208,7 +208,19 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
         size: request.size,
       });
-      await capture.source.start();
+      // The final subscriber may disconnect while source construction is in
+      // flight. Do not attach an unreachable capture process to a removed entry.
+      if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
+        await source.stop().catch(() => {});
+        throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+      }
+      capture.source = source;
+      await source.start();
+      if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
+        capture.source = null;
+        await source.stop().catch(() => {});
+        throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+      }
     } catch (error) {
       this.captures.delete(deviceId);
       this.socketDeviceIds.delete(socket);
@@ -250,8 +262,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       }
       if (capture.backpressuredSubscribers.has(subscriber)) {continue;}
       if (capture.waitingForKeyFrame.has(subscriber)) {
-        if (!isKeyFrame) {continue;}
-        capture.waitingForKeyFrame.delete(subscriber);
+        // Keep codec configuration flowing while waiting for an IDR. A late
+        // join can occur after SPS but before PPS, and suppressing PPS leaves
+        // the otherwise complete IDR undecodable.
+        if (!isKeyFrame && !isConfig) {continue;}
+        if (isKeyFrame) {
+          capture.waitingForKeyFrame.delete(subscriber);
+        }
       }
       if (!subscriber.write(packet)) {
         logger.debug(`[VideoStream] subscriber is behind on ${deviceId}; dropping to next key frame`);

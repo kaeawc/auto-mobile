@@ -155,7 +155,11 @@ export class WhipClient {
   ): Promise<Awaited<ReturnType<FetchLike>>> {
     const controller = new AbortController();
     const onAbort = (): void => controller.abort();
-    init.signal?.addEventListener("abort", onAbort, { once: true });
+    if (init.signal?.aborted) {
+      controller.abort();
+    } else {
+      init.signal?.addEventListener("abort", onAbort, { once: true });
+    }
     const timeout = this.timer.setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
       return await this.fetchImpl(url, { ...init, signal: controller.signal });

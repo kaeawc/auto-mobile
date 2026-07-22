@@ -208,6 +208,51 @@ describe("VideoStreamSocketServer", () => {
     expect(h.sources).toHaveLength(1);
   });
 
+  test("stops a capture source that resolves after its only subscriber disconnects", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "amvs-late-source-"));
+    const socketPath = path.join(dir, "video-stream.sock");
+    const source = new FakeCaptureSource();
+    let resolveSource: ((source: H264CaptureSource) => void) | undefined;
+    const sourceCreated = new Promise<void>(resolve => {
+      const server = new VideoStreamSocketServer(
+        {
+          resolveDevice: async () => DEVICE,
+          createCaptureSource: async () => {
+            resolve();
+            return await new Promise<H264CaptureSource>(sourceResolve => { resolveSource = sourceResolve; });
+          },
+          nowUs: () => 1_000n,
+        },
+        socketPath
+      );
+      void server.start().then(() => {
+        harnesses.push({
+          server,
+          socketPath,
+          sources: [source],
+          emit: () => {},
+          cleanup: async () => {
+            await server.close();
+            rmSync(dir, { recursive: true, force: true });
+          },
+        });
+      });
+    });
+
+    await waitFor(() => harnesses.some(h => h.socketPath === socketPath));
+    const harness = harnesses.find(h => h.socketPath === socketPath)!;
+    const socket = net.createConnection(socketPath);
+    await new Promise<void>(resolve => socket.once("connect", resolve));
+    socket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
+    await sourceCreated;
+    socket.destroy();
+    await waitFor(() => harness.server.activeDeviceIds().length === 0);
+    resolveSource?.(source);
+
+    await waitFor(() => source.stopped);
+    expect(source.started).toBe(false);
+  });
+
   test("uses the shared capture dimensions for every viewer", async () => {
     const h = await startHarness();
     await subscribe(h.socketPath, {
@@ -270,6 +315,22 @@ describe("VideoStreamSocketServer", () => {
     expect(packet.readInt32BE(8)).toBe(sps.length);
     expect(packet.subarray(12, 12 + sps.length)).toEqual(sps);
     expect(packet.readBigInt64BE(0)).toBeLessThan(0n); // CONFIG flag is bit 63
+  });
+
+  test("forwards a PPS that arrives after a late viewer's replayed SPS", async () => {
+    const h = await startHarness();
+    await subscribe(h.socketPath);
+    const sps = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x07, 0x64]);
+    const pps = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x08, 0xee]);
+    const idr = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa]);
+    h.emit(Buffer.concat([sps, pps]));
+
+    const late = await subscribe(h.socketPath);
+    h.emit(Buffer.concat([idr, Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01])]));
+    await waitFor(() => late.binary().includes(pps) && late.binary().includes(idr));
+
+    expect(late.binary().includes(pps)).toBe(true);
+    expect(late.binary().includes(idr)).toBe(true);
   });
 
   test("a failed capture start is reported and starts nothing", async () => {

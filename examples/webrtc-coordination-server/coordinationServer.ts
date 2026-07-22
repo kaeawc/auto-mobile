@@ -7,6 +7,7 @@ import {
   usePCMU,
   type RTCIceServer,
 } from "werift";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Reference WebRTC coordination server (a tiny SFU).
@@ -25,6 +26,8 @@ export interface CoordinationServerOptions {
   iceServers?: RTCIceServer[];
   /** How long to wait for ICE gathering (ms) before returning an SDP answer. */
   iceGatheringTimeoutMs?: number;
+  /** Injected so delayed replay remains deterministic in tests. */
+  timer?: Timer;
 }
 
 export interface StreamDescriptor {
@@ -96,10 +99,12 @@ export class CoordinationServer {
   private readonly streams = new Map<string, StreamEntry>();
   private readonly iceServers: RTCIceServer[];
   private readonly iceGatheringTimeoutMs: number;
+  private readonly timer: Timer;
 
   constructor(options: CoordinationServerOptions = {}) {
     this.iceServers = options.iceServers ?? DEFAULT_ICE_SERVERS;
     this.iceGatheringTimeoutMs = options.iceGatheringTimeoutMs ?? 5000;
+    this.timer = options.timer ?? defaultTimer;
   }
 
   /**
@@ -200,8 +205,26 @@ export class CoordinationServer {
     }
 
     const subscriberId = randomUUID();
+    let replayedCachedVideo = false;
+    const replayWhenConnected = (): void => {
+      if (replayedCachedVideo || entry.subscribers.get(subscriberId)?.pc !== pc) {
+        return;
+      }
+      replayedCachedVideo = true;
+      replayCachedVideo(entry, videoTrack);
+    };
+    const scheduleReplayWhenConnected = (): void => {
+      // werift exposes `connected` before the remote WHEP peer has necessarily
+      // installed the returned answer. Give the paired transport a short turn
+      // to finish its sender/receiver bookkeeping before replaying cached RTP.
+      this.timer.setTimeout(replayWhenConnected, 100);
+    };
 
     pc.connectionStateChange.subscribe(state => {
+      if (state === "connected") {
+        scheduleReplayWhenConnected();
+        return;
+      }
       if (state === "failed" || state === "closed" || state === "disconnected") {
         entry.subscribers.delete(subscriberId);
         void pc.close().catch(() => {});
@@ -231,7 +254,12 @@ export class CoordinationServer {
     }
 
     entry.subscribers.set(subscriberId, { id: subscriberId, pc, tracks });
-    replayCachedVideo(entry, videoTrack);
+    // WHEP returns the answer before the browser can complete DTLS. Writing
+    // before this connection is live is dropped by werift, so replay after the
+    // connected transition (or immediately if it raced before registration).
+    if (pc.connectionState === "connected") {
+      scheduleReplayWhenConnected();
+    }
     return { subscriberId, answerSdp: pc.localDescription?.sdp ?? "" };
   }
 
@@ -340,7 +368,9 @@ function cacheVideoForLateSubscriber(entry: StreamEntry, rtp: RtpPacket): void {
   }
 
   const isIdrStart = nalType === 5 || (nalType === 28 && (payload[1] & 0x80) !== 0 && (payload[1] & 0x1f) === 5);
-  if (isIdrStart) {entry.collectingKeyFrame = [];}
+  // An IDR access unit may contain several type-5 NALs (or fragmented FU-As).
+  // Keep collecting until its RTP marker rather than discarding earlier slices.
+  if (isIdrStart && !entry.collectingKeyFrame) {entry.collectingKeyFrame = [];}
   if (entry.collectingKeyFrame) {
     entry.collectingKeyFrame.push(rtp.clone());
     if (rtp.header.marker) {

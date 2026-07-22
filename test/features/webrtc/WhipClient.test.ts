@@ -110,6 +110,20 @@ describe("WhipClient.publish", () => {
     await expect(publishing).rejects.toThrow(/timed out/);
     expect(aborted).toBe(true);
   });
+
+  test("preserves an already-aborted caller signal", async () => {
+    let receivedAbortedSignal = false;
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      fetchImpl: async (_url, init) => {
+        receivedAbortedSignal = init.signal?.aborted ?? false;
+        throw new Error("aborted by caller");
+      },
+    });
+
+    await expect(client.publish("offer", AbortSignal.abort())).rejects.toThrow("aborted by caller");
+    expect(receivedAbortedSignal).toBe(true);
+  });
 });
 
 describe("WhipClient.delete", () => {

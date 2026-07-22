@@ -34,7 +34,7 @@ export AUTOMOBILE_WEBRTC_ICE_SERVERS="stun:stun.l.google.com:19302"
 # Optional tuning:
 export AUTOMOBILE_WEBRTC_BITRATE_KBPS="4000"
 export AUTOMOBILE_WEBRTC_MAX_SIZE="720x1280"
-# Optional Android audio (requires AUTOMOBILE_VIDEO_SERVER_JAR / built video-server):
+# Optional audio: Android requires a video-server jar; iOS requires Simulator-window capture.
 export AUTOMOBILE_WEBRTC_AUDIO="1"
 ```
 

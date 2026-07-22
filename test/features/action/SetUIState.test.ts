@@ -910,7 +910,10 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     fakeFieldTypeDetector.setSkipVerification("first", true);
 
     fakeObserve.setResultFactory(() => {
-      fakeTimer.advanceTime(19_000);
+      // Must EXCEED the 20s budget. At 19s the old rolling deadline — re-armed
+      // to now+20s just before this observe — still had a second left, so a
+      // scroll attempt happened either way and the test could not fail.
+      fakeTimer.advanceTime(25_000);
       return {
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },

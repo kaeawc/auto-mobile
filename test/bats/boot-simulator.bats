@@ -131,6 +131,50 @@ SCRIPT
   [[ "$output" != *"failed to boot"* ]]
 }
 
+@test "a STALLED boot attempt is bounded so the retry still runs (#4095)" {
+  # The retry added in #4095 only ever covered "bootstatus returned, but the
+  # device is not Booted". The wedge that motivated #4078 is a HANG -- bootstatus
+  # sitting in "Waiting on System App" -- and without a per-attempt bound the
+  # first attempt consumed the whole step budget and the retry never ran.
+  cat > "${MOCK_BIN}/state" <<'STATE'
+Shutdown
+STATE
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+STATE_FILE="$(dirname "$0")/state"
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.5"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  echo '{"runtimes":[{"version":"26.5.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5"}]}'
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo "{\"devices\":{\"com.apple.CoreSimulator.SimRuntime.iOS-26-5\":[{\"name\":\"iPhone 17 Pro\",\"udid\":\"STALL-UDID\",\"state\":\"$(cat "$STATE_FILE")\"}]}}"
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  # First attempt hangs; exec so the timeout actually kills it.
+  if [ "$(cat "$STATE_FILE")" = "Shutdown" ]; then
+    exec sleep 300
+  fi
+  exit 0
+elif [ "$1" = "simctl" ] && [ "$2" = "erase" ]; then
+  echo "Booted" > "$STATE_FILE"
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  local started ended elapsed
+  started=$(date +%s)
+  BOOT_ATTEMPT_TIMEOUT_SECONDS=2 run bash "$SCRIPT" --ios-version 26.5
+  ended=$(date +%s)
+  elapsed=$((ended - started))
+
+  # The stalled attempt is abandoned, the retry boots, and the run succeeds.
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"STALL-UDID"* ]]
+  [[ "$output" == *"boot attempt 1/2 failed"* ]]
+  # Far below the 300s stall: proof the bound fired rather than the sleep ending.
+  [ "$elapsed" -lt 60 ]
+}
+
 @test "retries a wedged boot and succeeds on the second attempt (#4095)" {
   # A wedge is usually transient runner state: the first bootstatus leaves the
   # device Shutdown, the retry brings it up. The build must not go red for that.

@@ -23,6 +23,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+source "${SCRIPT_DIR}/run_with_timeout.sh"
+
 UDID=""
 NAME=""
 IOS_VERSION=""
@@ -165,25 +169,6 @@ echo "Waiting for boot to complete (timeout: ${TIMEOUT_SECS}s)..." >&2
 # implementation because stock macOS ships neither — without this, `timeout`
 # resolved to 127 (command not found) and the boot was falsely reported as
 # failed even when the simulator booted fine (#3644).
-run_with_timeout() {
-  local secs="$1"
-  shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "${secs}" "$@"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "${secs}" "$@"
-  else
-    "$@" &
-    local cmd_pid=$!
-    ( sleep "${secs}"; kill -0 "${cmd_pid}" 2>/dev/null && kill "${cmd_pid}" 2>/dev/null ) &
-    local watcher_pid=$!
-    local status=0
-    wait "${cmd_pid}" 2>/dev/null || status=$?
-    kill "${watcher_pid}" 2>/dev/null || true
-    wait "${watcher_pid}" 2>/dev/null || true
-    return "${status}"
-  fi
-}
 
 # bootstatus -b blocks until the device is fully booted.
 # It exits 0 on success, non-zero on failure/timeout.

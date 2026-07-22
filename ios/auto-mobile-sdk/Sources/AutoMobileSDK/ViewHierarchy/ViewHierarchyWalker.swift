@@ -43,12 +43,25 @@ public enum ViewHierarchyWalker {
         )
     }
 
-    /// Compute a structural hash of a hierarchy for change detection.
-    /// Ignores bounds (which change during animations) to focus on content changes.
+    /// Compute a hierarchy hash for change detection.
+    /// Ignores per-view bounds (which change during animations), while retaining screen and
+    /// safe-area metrics because they determine the coordinate and layout-warning contract.
     public static func computeHash(_ hierarchy: SdkViewHierarchy) -> Int {
         var hasher = Hasher()
         if let bundleId = hierarchy.bundleId {
             hasher.combine(bundleId)
+        }
+        hasher.combine(hierarchy.screenScale)
+        hasher.combine(hierarchy.screenWidth)
+        hasher.combine(hierarchy.screenHeight)
+        if let safeAreaInsets = hierarchy.safeAreaInsets {
+            hasher.combine(true)
+            hasher.combine(safeAreaInsets.top)
+            hasher.combine(safeAreaInsets.right)
+            hasher.combine(safeAreaInsets.bottom)
+            hasher.combine(safeAreaInsets.left)
+        } else {
+            hasher.combine(false)
         }
         if let root = hierarchy.root {
             hashNode(root, into: &hasher, depth: 0)

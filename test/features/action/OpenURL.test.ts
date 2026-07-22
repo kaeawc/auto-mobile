@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { OpenURL } from "../../../src/features/action/OpenURL";
+import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../../src/models";
@@ -223,5 +224,115 @@ describe("OpenURL input validation", () => {
     const result = await openAndroid("package:");
     expect(result.success).toBe(false);
     expect(result.error).toBe("Invalid package URL - no package name specified");
+  });
+});
+
+// Issue #4166: execute() trimmed the URL for validation/logging but dispatched
+// the RAW value, so surrounding whitespace reached `am start -d` / `simctl
+// openurl` while the logs and the returned result showed the clean URL. These
+// tests assert the COMMAND STRING ACTUALLY ISSUED — the return value already
+// looked correct before the fix, which is exactly why this went unnoticed.
+describe("OpenURL trims the dispatched URL (issue #4166)", () => {
+  const restores: Array<() => void> = [];
+  afterEach(() => {
+    while (restores.length) { restores.pop()!(); }
+  });
+
+  // Run execute() without the observe/visual-change machinery: the block is the
+  // platform dispatch we want to observe, and it is the only part under test.
+  const stubObservedInteraction = () => {
+    const spy = spyOn(BaseVisualChange.prototype, "observedInteraction")
+      .mockImplementation(async (block: any) => block({} as any));
+    restores.push(() => spy.mockRestore());
+  };
+
+  const whitespaceCases: Array<[string, string, string]> = [
+    ["no whitespace (control)", "https://example.com/x", "https://example.com/x"],
+    ["leading space", " https://example.com/x", "https://example.com/x"],
+    ["trailing space", "https://example.com/x ", "https://example.com/x"],
+    ["leading and trailing spaces", "  https://example.com/x  ", "https://example.com/x"],
+    ["tab", "\thttps://example.com/x\t", "https://example.com/x"],
+    ["newline", "\nhttps://example.com/x\n", "https://example.com/x"],
+    ["carriage return + newline", "\r\nhttps://example.com/x\r\n", "https://example.com/x"],
+    // Inner whitespace is NOT surrounding whitespace: trim() must leave it alone.
+    ["inner whitespace is preserved", " https://example.com/a b ", "https://example.com/a b"],
+  ];
+
+  test.each(whitespaceCases)(
+    "android dispatch: %s",
+    async (_label, input, expectedUrl) => {
+      stubObservedInteraction();
+      const fakeAdb = new FakeAdbExecutor();
+      const openURL = new OpenURL(
+        { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+        fakeAdb as unknown as any
+      );
+
+      const result = await openURL.execute(input);
+
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        `shell am start -a android.intent.action.VIEW -d "${expectedUrl}"`,
+      ]);
+      expect(result).toEqual({ success: true, url: expectedUrl });
+    }
+  );
+
+  test.each(whitespaceCases)(
+    "ios simulator dispatch: %s",
+    async (_label, input, expectedUrl) => {
+      stubObservedInteraction();
+      const simctl = new FakeSimCtlClient();
+      const devicectl = new FakeDeviceUrlLauncher();
+      const openURL = new OpenURL(
+        iosDevice(SIMULATOR_UDID),
+        new FakeAdbExecutor() as unknown as any,
+        simctl as any,
+        devicectl as any
+      );
+
+      const result = await openURL.execute(input);
+
+      const calls = simctl.getMethodCalls("executeCommand");
+      expect(calls).toHaveLength(1);
+      expect(calls[0].command).toBe(`openurl ${SIMULATOR_UDID} "${expectedUrl}"`);
+      expect(result).toEqual({ success: true, url: expectedUrl });
+    }
+  );
+
+  test.each(whitespaceCases)(
+    "ios physical dispatch: %s",
+    async (_label, input, expectedUrl) => {
+      stubObservedInteraction();
+      const simctl = new FakeSimCtlClient();
+      const devicectl = new FakeDeviceUrlLauncher();
+      const openURL = new OpenURL(
+        iosDevice(PHYSICAL_UDID),
+        new FakeAdbExecutor() as unknown as any,
+        simctl as any,
+        devicectl as any
+      );
+
+      const result = await openURL.execute(input);
+
+      expect(devicectl.launchCalls).toEqual([
+        { deviceUdid: PHYSICAL_UDID, bundleId: "com.apple.mobilesafari", url: expectedUrl },
+      ]);
+      expect(result).toEqual({ success: true, url: expectedUrl });
+    }
+  );
+
+  test("package: URL with surrounding whitespace still delegates to LaunchApp", async () => {
+    const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true } as any);
+    restores.push(() => launchSpy.mockRestore());
+
+    const openURL = new OpenURL(
+      { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+      new FakeAdbExecutor() as unknown as any
+    );
+
+    const result = await openURL.execute("  package:com.example.MyApp  ");
+
+    expect(launchSpy.mock.calls[0][0]).toBe("com.example.MyApp");
+    expect(result).toEqual({ success: true, url: "package:com.example.MyApp" });
   });
 });

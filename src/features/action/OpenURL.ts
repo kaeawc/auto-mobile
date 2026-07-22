@@ -138,11 +138,11 @@ export class OpenURL extends BaseVisualChange {
         switch (this.device.platform) {
           case "android":
             return await perf.track("androidOpenURL", () =>
-              this.executeAndroidOpenURL(url)
+              this.executeAndroidOpenURL(trimmedUrl)
             );
           case "ios":
             return await perf.track("iOSOpenURL", () =>
-              this.executeiOSOpenURL(url)
+              this.executeiOSOpenURL(trimmedUrl)
             );
           default:
             perf.end();

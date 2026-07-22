@@ -16,6 +16,23 @@ import { registerPlanTools } from "../server/planTools";
 import { registerDoctorTools } from "../server/doctorTools";
 import { registerVideoRecordingTools } from "../server/videoRecordingTools";
 import { registerNotificationTools } from "../server/notificationTools";
+import { registerAccessibilityFocusTools } from "../server/accessibilityFocusTools";
+import { registerAccessibilityTools } from "../server/accessibilityTools";
+import { registerAppFileTools } from "../server/appFileTools";
+import { registerBarrierTools } from "../server/barrierTools";
+import { registerBiometricTools } from "../server/biometricTools";
+import { registerCriticalSectionTools } from "../server/criticalSectionTools";
+import { registerDatabaseTools } from "../server/databaseTools";
+import { registerDebugTools } from "../server/debugTools";
+import { registerDeepLinkTools } from "../server/deepLinkTools";
+import { registerFormTools } from "../server/formTools";
+import { registerHighlightTools } from "../server/highlightTools";
+import { registerNavigationTools } from "../server/navigationTools";
+import { registerNetworkTools } from "../server/networkTools";
+import { registerPreferenceTools } from "../server/preferenceTools";
+import { registerSnapshotTools } from "../server/snapshotTools";
+import { registerStorageTools } from "../server/storageTools";
+import { registerTelephonyTools } from "../server/telephonyTools";
 
 type CliHelpSchemaShape = Record<string, any> | undefined;
 interface CliHelpParameterInfo {
@@ -37,10 +54,243 @@ function initializeCliTools(): void {
   registerDoctorTools();
   registerVideoRecordingTools();
   registerNotificationTools();
+  registerAccessibilityFocusTools();
+  registerAccessibilityTools();
+  registerAppFileTools();
+  registerBarrierTools();
+  registerBiometricTools();
+  registerCriticalSectionTools();
+  registerDatabaseTools();
+  registerDebugTools();
+  registerDeepLinkTools();
+  registerFormTools();
+  registerHighlightTools();
+  registerNavigationTools();
+  registerNetworkTools();
+  registerPreferenceTools();
+  registerSnapshotTools();
+  registerStorageTools();
+  registerTelephonyTools();
 }
 
 // Parse CLI arguments into tool name, session UUID, and parameters
-function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string; params: Record<string, any> } {
+/**
+ * Coerce a raw CLI token using the tool's declared zod type.
+ *
+ * Running every value through `JSON.parse` made numeric-looking strings
+ * unpassable: `JSON.parse("12345")` yields a number, so `inputText --text 12345`
+ * and `sendSms --phoneNumber 5551234567` were rejected as
+ * "expected string, received number" (#4241). A phone number, PIN, OTP or zip
+ * code is a string whose natural value is digits, and the token alone cannot say
+ * which the caller meant — only the schema can.
+ *
+ * The declared type wins where we know it; otherwise we keep the previous
+ * best-effort JSON behaviour so unknown tools and undeclared params are
+ * unaffected.
+ */
+/**
+ * Parse a CLI token as JSON, reporting whether it was JSON at all.
+ *
+ * A token that is not JSON is the common case, not an error — `--text plain` and
+ * `--action tap` are ordinary input — so the failure is logged at debug and the
+ * caller decides what the raw token means.
+ */
+function tryParseJsonToken(raw: string): { parsed: boolean; value: unknown } {
+  try {
+    return { parsed: true, value: JSON.parse(raw) };
+  } catch (error) {
+    logger.debug(`[cli] value is not JSON, treating as a raw token: ${raw} (${error})`);
+    return { parsed: false, value: raw };
+  }
+}
+
+function coerceCliValue(raw: string, declared: DeclaredType | undefined): unknown {
+  const bestEffort = (): unknown => tryParseJsonToken(raw).value;
+
+  // A nullable param must still be able to receive an explicit JSON null --
+  // storageTools removes a key only when `value === null`, so turning the token
+  // into the string "null" would overwrite it instead of clearing it.
+  if (declared?.nullable && raw === "null") {
+    return null;
+  }
+
+  const typeName = declared?.type;
+
+  switch (typeName) {
+    // Enums are string-valued here (e.g. --action start); treating them as
+    // strings avoids a member that happens to look numeric being coerced.
+    case "string":
+    case "enum":
+      return asDeclaredString(raw);
+    case "number":
+    case "bigint":
+      return asDeclaredNumber(raw);
+    case "boolean":
+      if (raw === "true") { return true; }
+      if (raw === "false") { return false; }
+      return bestEffort();
+    default:
+      return bestEffort();
+  }
+}
+
+/**
+ * A string param's value.
+ *
+ * The bare token is the answer, except when the caller JSON-encoded it —
+ * `--text '"12345"'` must still yield `12345`, not a token with literal quote
+ * characters, since generated wrappers legitimately encode scalars that way.
+ */
+function asDeclaredString(raw: string): string {
+  const { parsed, value } = tryParseJsonToken(raw);
+  return parsed && typeof value === "string" ? value : raw;
+}
+
+/**
+ * A number param's value, or the raw token when it is not a JSON number.
+ *
+ * `Number()` accepts things JSON does not — `""` and `" "` become `0`, `"0x10"`
+ * becomes `16` — which would silently pass a wrong value to the daemon instead of
+ * letting schema validation reject a bad argument. Returning the raw token keeps
+ * the rejection.
+ */
+function asDeclaredNumber(raw: string): unknown {
+  const { parsed, value } = tryParseJsonToken(raw);
+  return parsed && typeof value === "number" && Number.isFinite(value) ? value : raw;
+}
+
+/**
+ * Declared parameter types for a tool, or null when the tool is unknown.
+ *
+ * Registers the tool categories first: `runCliCommand` only calls
+ * `initializeCliTools()` on the no-args and `help` branches, not on the
+ * tool-execution path, so without this the registry is empty exactly when a real
+ * `--cli <tool>` invocation needs it and every value would silently fall back to
+ * the old JSON coercion. Registration is idempotent (the registry is a Map keyed
+ * by tool name), so calling it per invocation is safe.
+ */
+function getDeclaredParamTypes(toolName: string): Record<string, DeclaredType> | null {
+  initializeCliTools();
+  const tool = ToolRegistry.getTool(toolName);
+  if (!tool) {
+    return null;
+  }
+
+  const shapes = collectSchemaShapes(tool.schema);
+  if (shapes.length === 0) {
+    return null;
+  }
+
+  // A param declared with different types across union branches cannot be
+  // coerced unambiguously from the token alone, so it is omitted and falls back
+  // to best-effort parsing rather than being coerced to the wrong branch's type.
+  // Nullability is unioned: if any branch accepts null, a JSON null must survive.
+  const byParam = new Map<string, { types: Set<string>; nullable: boolean }>();
+  for (const shape of shapes) {
+    for (const [key, value] of Object.entries(shape)) {
+      const declared = resolveDeclaredType(value);
+      const entry = byParam.get(key) ?? { types: new Set<string>(), nullable: false };
+      entry.types.add(declared.type);
+      entry.nullable = entry.nullable || declared.nullable;
+      byParam.set(key, entry);
+    }
+  }
+
+  return Object.fromEntries(
+    [...byParam.entries()]
+      .filter(([, entry]) => entry.types.size === 1)
+      .map(([key, entry]) => [key, { type: [...entry.types][0], nullable: entry.nullable }])
+  );
+}
+
+/**
+ * The effective declared type of a parameter, seeing through wrappers.
+ *
+ * `getCliHelpParameterInfo` unwraps `optional` only, so a wrapped param reports
+ * the wrapper (`nullable`, `default`) instead of the type underneath and falls
+ * back to JSON coercion — `setKeyValue --value 12345` sends the number `12345`
+ * even though `storageTools.ts` declares `z.string().nullable()`. Wrappers are
+ * peeled here so the inner type decides the coercion.
+ *
+ * A `literal` resolves to the runtime type of its value, so `z.literal("copy")`
+ * coerces as a string rather than falling through.
+ */
+const SCHEMA_WRAPPER_TYPES = new Set([
+  "optional", "nullable", "default", "readonly", "catch", "branded", "lazy"
+]);
+
+/** The zod type name of a schema, normalized ("ZodString" -> "string"). */
+function schemaTypeName(schema: any): string {
+  const raw = schema?._def?.typeName ?? schema?._def?.type ?? "unknown";
+  return String(raw).replace(/^Zod/, "").toLowerCase();
+}
+
+/** The schema a wrapper wraps; the key varies across zod versions. */
+function unwrapSchema(schema: any): any {
+  const definition = schema?._def;
+  return definition?.innerType ?? definition?.type ?? definition?.schema ?? null;
+}
+
+interface DeclaredType {
+  type: string;
+  /** True when a JSON `null` is a legal value and must survive coercion. */
+  nullable: boolean;
+}
+
+function resolveDeclaredType(schema: any): DeclaredType {
+  let current = schema;
+  let nullable = false;
+
+  for (let depth = 0; depth < 10 && current; depth++) {
+    const name = schemaTypeName(current);
+
+    if (name === "nullable") {
+      nullable = true;
+    }
+    if (name === "literal") {
+      return { type: typeof (current._def?.value ?? current._def?.values?.[0]), nullable };
+    }
+    if (!SCHEMA_WRAPPER_TYPES.has(name)) {
+      return { type: name, nullable };
+    }
+    current = unwrapSchema(current);
+  }
+
+  return { type: "unknown", nullable };
+}
+
+/**
+ * Every object shape a tool's schema can present.
+ *
+ * Union-rooted tools (`clipboard`, `deviceSnapshot`, and `postNotification` via a
+ * pipe into a union) have no single shape, so a lookup that only understands a
+ * flat object returns nothing and their params silently keep the old JSON
+ * coercion — `clipboard --action copy --text 12345` would still send a number.
+ * Branches are collected so those tools are typed too.
+ */
+function collectSchemaShapes(schema: any): Record<string, any>[] {
+  const definition = schema?._def;
+  if (!definition) {
+    return [];
+  }
+
+  if (definition.shape) {
+    return [definition.shape];
+  }
+
+  const options = definition.options ?? definition.out?._def?.options;
+  if (Array.isArray(options)) {
+    return options.flatMap((option: any) => collectSchemaShapes(option));
+  }
+
+  if (definition.out) {
+    return collectSchemaShapes(definition.out);
+  }
+
+  return [];
+}
+
+export function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string; params: Record<string, any> } {
   if (args.length === 0) {
     throw new ActionableError("No tool name provided. Usage: --cli [--session-uuid <uuid>] <tool-name> [--param value ...]");
   }
@@ -59,6 +309,7 @@ function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string;
 
   const toolName = args[toolNameIndex];
   const params: Record<string, any> = {};
+  const declaredTypes = getDeclaredParamTypes(toolName);
 
   // Parse remaining arguments as key-value pairs or boolean flags
   for (let i = toolNameIndex + 1; i < args.length; i++) {
@@ -82,13 +333,7 @@ function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: string;
       // Key-value pair
       i++; // Skip the value in the next iteration
 
-      // Try to parse as JSON, fallback to string
-      try {
-        params[paramName] = JSON.parse(nextArg);
-      } catch {
-        // If not valid JSON, treat as string
-        params[paramName] = nextArg;
-      }
+      params[paramName] = coerceCliValue(nextArg, declaredTypes?.[paramName]);
     }
   }
 
@@ -364,10 +609,12 @@ Options:
 
 Parameters:
   Parameters are passed as --key value pairs
-  Values are parsed as JSON if possible, otherwise as strings
+  Values are converted using the tool's declared parameter type
+  Strings: --text 12345 stays the string "12345"
   Boolean values: --flag true or --flag false
   Numbers: --count 5
   Objects: --options '{"key": "value"}'
+  Unknown tools or parameters fall back to JSON-if-possible, otherwise string
 
 Session-based Execution:
   When using --session-uuid, the tool will be executed on the device assigned to that session.

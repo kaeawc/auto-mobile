@@ -13,12 +13,16 @@ SCRIPT="scripts/ios/start-simulator.sh"
 setup() {
   ABS_SCRIPT="$(cd "$(dirname "$SCRIPT")" && pwd)/$(basename "$SCRIPT")"
   WORK_DIR="$(mktemp -d)"
-  # A PATH with only bash + sleep (no `timeout`/`gtimeout`), to force the
-  # pure-bash fallback path deterministically. The fallback needs no other
-  # external tools (command/kill/wait are builtins).
+  # A PATH without `timeout`/`gtimeout`, to force the pure-bash fallback path
+  # deterministically. Beyond builtins (command/kill/wait) the fallback needs
+  # sleep plus mktemp/rm -- the watchdog runs in a subshell, so a marker file is
+  # the only way it can report back that it fired. All three are POSIX.
   BIN_DIR="$(mktemp -d)"
-  ln -s "$(command -v bash)" "$BIN_DIR/bash"
-  ln -s "$(command -v sleep)" "$BIN_DIR/sleep"
+  # `sh` is not needed by the fallback; it is here so tests can build stub
+  # commands to run under it.
+  for _tool in bash sleep mktemp rm sh; do
+    ln -s "$(command -v "$_tool")" "$BIN_DIR/$_tool"
+  done
 
   # Extract run_with_timeout now (full PATH → awk available); run it later
   # under the restricted PATH by sourcing this file.
@@ -56,13 +60,51 @@ run_helper() {
   [[ "$output" == *"rc=0"* ]]
 }
 
-@test "run_with_timeout reports failure when the command exceeds the limit" {
+@test "run_with_timeout reports 124 when the command exceeds the limit" {
   # Asserting only "non-zero" would also pass if run_with_timeout were undefined,
   # so require the function to exist first.
   run_helper 'declare -F run_with_timeout >/dev/null && echo defined'
   [[ "$output" == *"defined"* ]]
 
+  # Pin the exact GNU-timeout expiry code. Asserting merely "non-zero" let the
+  # fallback return 143 (128+SIGTERM) for years -- indistinguishable from a
+  # command signalled for any other reason, which is the distinction
+  # boot-simulator.sh relies on to tell a stall apart from a boot failure.
   run_helper 'run_with_timeout 1 sleep 5; echo "rc=$?"'
   [ "$status" -eq 0 ]
-  [[ "$output" != *"rc=0"* ]]
+  [[ "$output" == *"rc=124"* ]]
+}
+
+@test "run_with_timeout passes a genuine non-zero status through unchanged" {
+  # Guards the inverse of the test above: expiry must not be conflated with a
+  # command that simply failed fast.
+  run_helper 'run_with_timeout 5 sh -c "exit 3"; echo "rc=$?"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rc=3"* ]]
+}
+
+@test "run_with_timeout bounds a command whose descendant holds stdout open" {
+  # The watchdog used to signal only the direct child. A command that leaves a
+  # descendant on stdout then keeps the caller's `out="$(run_with_timeout ...)"`
+  # blocked past the deadline waiting for EOF on the pipe -- so the bound did
+  # not apply at all, and boot-simulator.sh's stalled-boot retry never ran.
+  # The descendant self-exits well after the bound but still in finite time, so
+  # a regression fails this test in ~20s rather than hanging the job. Killing a
+  # wrapper shell would not bound it: bats reads the pipe until EOF, which the
+  # surviving descendant holds open regardless of the shell's fate.
+  cat > "$WORK_DIR/stallwrap" << 'EOS'
+#!/bin/sh
+# Deliberately no `exec`: the sleep is a descendant that inherits stdout.
+sleep 20 &
+wait
+EOS
+  chmod +x "$WORK_DIR/stallwrap"
+
+  run_helper "s=\$SECONDS; out=\"\$(run_with_timeout 2 '$WORK_DIR/stallwrap' 2>&1)\"; echo \"rc=\$? elapsed=\$((SECONDS-s))\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rc=124"* ]]
+  # Elapsed pins that the bound actually fired rather than the run merely
+  # outliving the descendant: signalling only the direct child returns at ~20s.
+  local elapsed="${output##*elapsed=}"
+  [ "${elapsed}" -lt 15 ]
 }

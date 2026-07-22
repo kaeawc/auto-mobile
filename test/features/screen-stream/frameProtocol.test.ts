@@ -341,6 +341,33 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(out).toHaveLength(0);
   });
 
+  test("does not resynchronize when the capture geometry changes inside the corruption", () => {
+    const decoder = new FrameDecoder();
+    // Deliberate trade, pinned so it stays deliberate. The helper does change
+    // geometry mid-stream — SimulatorCaptureSession reconfigures SCStream when
+    // the simulator window resizes — and a change landing inside a corruption
+    // window leaves the decoder unable to resync, so the stream needs a
+    // restart. There is no safe way to allow it: on a wire with no sync marker
+    // a genuine reconfigure and a crafted run of frames at a new size are the
+    // same bytes, so any rule that readmits the first readmits the second.
+    const errors: MalformedFrameError[] = [];
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+    decoder.push(Buffer.concat([encodeHeader(0, 1, 4, 0), Buffer.alloc(50, 0x00)]), err =>
+      errors.push(err)
+    );
+
+    let recovered = 0;
+    for (let i = 0; i < 20; i++) {
+      recovered += decoder.push(makeFrameBytes(8, 8, 32, 10 + i, 0x02), err =>
+        errors.push(err)
+      ).length;
+    }
+
+    // Corruption reported once, then silence — not a fabricated 8x8 frame.
+    expect(errors).toHaveLength(1);
+    expect(recovered).toBe(0);
+  });
+
   test("resynchronizes across a chunk boundary that splits the recovery header", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];

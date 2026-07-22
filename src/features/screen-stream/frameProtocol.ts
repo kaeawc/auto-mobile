@@ -324,6 +324,17 @@ export class FrameDecoder {
    * geometry the stream is already using; before the first frame decodes there
    * is nothing to match, and nothing downstream to poison either — whatever
    * geometry arrives first *is* the stream's geometry, corrupt or not.
+   *
+   * The trade, pinned by a test so it stays deliberate: the helper does change
+   * geometry mid-stream (`SimulatorCaptureSession` reconfigures `SCStream` when
+   * the simulator window resizes), and if that change lands inside a corruption
+   * window the decoder will not resynchronize — the stream needs a restart.
+   * There is no way to allow it safely: a genuine reconfigure and a crafted run
+   * of frames at a new size are byte-identical on a wire with no sync marker,
+   * so any rule permitting the first permits the second. Preferring the
+   * observable failure (no frames, corruption already reported) over silent
+   * injection into the encoder is the same trade this decoder already makes
+   * when it drops an uncorroborated recovered frame.
    */
   private admissible(header: FrameHeader): boolean {
     if (isAudioHeader(header) || this.anchor === null) {return true;}

@@ -54,6 +54,19 @@ export interface VisionFallbackConfig {
   cacheTtlMinutes: number;
 }
 
+/**
+ * The paid, provider-facing call. `VisionFallback` orchestrates caching and
+ * cost accounting around this; tests substitute a counting stub so the cache
+ * behaviour can be exercised without spending money.
+ */
+export interface VisionClient {
+  analyzeUIElement(
+    screenshotPath: string,
+    searchCriteria: ElementSearchCriteria,
+    viewHierarchy?: any
+  ): Promise<VisionFallbackResult>;
+}
+
 export interface VisionAnalyzer {
   analyzeAndSuggest(
     screenshotPath: string,

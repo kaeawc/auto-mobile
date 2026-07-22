@@ -2,7 +2,7 @@
  * Shared utility for applying vision fallback error enrichment across tools.
  */
 
-import { VisionFallback } from "./VisionFallback";
+import { getSharedVisionFallback } from "./VisionFallbackRegistry";
 import type { VisionFallbackConfig, ElementSearchCriteria, VisionAnalyzer } from "./VisionTypes";
 import type { ScreenshotCapturer } from "../features/navigation/SelectionStateTracker";
 import { logger } from "../utils/logger";
@@ -31,7 +31,10 @@ export async function getVisionEnrichedError(
       return baseError;
     }
 
-    const analyzer: VisionAnalyzer = visionAnalyzer ?? new VisionFallback(visionConfig);
+    // Must be the shared, config-keyed orchestrator: constructing one here
+    // would discard its result cache after a single call, making every vision
+    // fallback a fresh paid analyzer invocation.
+    const analyzer: VisionAnalyzer = visionAnalyzer ?? getSharedVisionFallback(visionConfig);
     const visionResult = await analyzer.analyzeAndSuggest(
       screenshotPath,
       viewHierarchy,

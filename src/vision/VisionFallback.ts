@@ -8,26 +8,46 @@ import type {
   VisionFallbackConfig,
   VisionFallbackResult,
   ElementSearchCriteria,
+  VisionClient,
 } from "./VisionTypes";
 import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { stableStringify } from "../utils/stableStringify";
+import type { ChecksumCalculator } from "../utils/ChecksumCalculator";
+import { DefaultChecksumCalculator } from "../utils/ChecksumCalculator";
+
+/**
+ * Upper bound on live cache entries. The cache now outlives a single tool call
+ * (see VisionFallbackRegistry), so without a cap a long-running daemon would
+ * retain one entry per (screenshot, criteria) pair for its whole lifetime.
+ * Eviction is oldest-write-first once the cap is reached.
+ */
+export const MAX_VISION_CACHE_ENTRIES = 64;
 
 export class VisionFallback {
   private config: VisionFallbackConfig;
-  private claudeClient: ClaudeVisionClient | null = null;
+  private claudeClient: VisionClient | null = null;
   private resultCache: Map<string, { result: VisionFallbackResult; timestamp: number }>;
   private timer: Timer;
+  private checksums: ChecksumCalculator;
 
-  constructor(config: VisionFallbackConfig, timer: Timer = defaultTimer) {
+  constructor(
+    config: VisionFallbackConfig,
+    timer: Timer = defaultTimer,
+    client?: VisionClient,
+    checksums: ChecksumCalculator = new DefaultChecksumCalculator()
+  ) {
     this.config = config;
     this.timer = timer;
+    this.checksums = checksums;
     this.resultCache = new Map();
 
     // Initialize Claude client if provider is 'claude'
-    if (config.provider === "claude") {
+    if (client) {
+      this.claudeClient = client;
+    } else if (config.provider === "claude") {
       this.claudeClient = new ClaudeVisionClient();
     }
   }
@@ -41,9 +61,15 @@ export class VisionFallback {
       throw new Error("Vision fallback is not enabled");
     }
 
+    // Every capture writes screenshot_<timestamp>.png, so the key must be
+    // derived once here from the file's *contents*; see generateCacheKey.
+    const cacheKey = this.config.cacheResults
+      ? await this.generateCacheKey(screenshotPath, searchCriteria)
+      : null;
+
     // Check cache first
-    if (this.config.cacheResults) {
-      const cached = this.getCachedResult(screenshotPath, searchCriteria);
+    if (cacheKey) {
+      const cached = this.getCachedResult(cacheKey);
       if (cached) {
         logger.debug("Vision fallback: using cached result");
         return cached;
@@ -71,8 +97,8 @@ export class VisionFallback {
       logger.debug(`Vision fallback complete: confidence=${result.confidence}, cost=$${result.costUsd.toFixed(4)}, time=${result.durationMs}ms`);
 
       // Cache result
-      if (this.config.cacheResults) {
-        this.cacheResult(screenshotPath, searchCriteria, result);
+      if (cacheKey) {
+        this.cacheResult(cacheKey, result);
       }
 
       return result;
@@ -81,11 +107,7 @@ export class VisionFallback {
     throw new Error(`Unsupported vision provider: ${this.config.provider}`);
   }
 
-  private getCachedResult(
-    screenshotPath: string,
-    searchCriteria: ElementSearchCriteria
-  ): VisionFallbackResult | null {
-    const cacheKey = this.generateCacheKey(screenshotPath, searchCriteria);
+  private getCachedResult(cacheKey: string): VisionFallbackResult | null {
     const cached = this.resultCache.get(cacheKey);
 
     if (!cached) {
@@ -104,26 +126,68 @@ export class VisionFallback {
     return cached.result;
   }
 
-  private cacheResult(
-    screenshotPath: string,
-    searchCriteria: ElementSearchCriteria,
-    result: VisionFallbackResult
-  ): void {
-    const cacheKey = this.generateCacheKey(screenshotPath, searchCriteria);
+  private cacheResult(cacheKey: string, result: VisionFallbackResult): void {
+    this.evictExpired();
     this.resultCache.set(cacheKey, {
       result,
       timestamp: this.timer.now(),
     });
+    this.evictOverflow();
   }
 
-  private generateCacheKey(
+  /**
+   * Drop entries past their TTL. getCachedResult only evicts the key it was
+   * asked for, so a key that is never queried again would otherwise be
+   * retained forever now that the cache is long-lived.
+   */
+  private evictExpired(): void {
+    const now = this.timer.now();
+    for (const [key, entry] of this.resultCache) {
+      const ageMinutes = (now - entry.timestamp) / (1000 * 60);
+      if (ageMinutes > this.config.cacheTtlMinutes) {
+        this.resultCache.delete(key);
+      }
+    }
+  }
+
+  /** Map iteration order is insertion order, so this evicts oldest-write-first. */
+  private evictOverflow(): void {
+    while (this.resultCache.size > MAX_VISION_CACHE_ENTRIES) {
+      const oldest = this.resultCache.keys().next();
+      if (oldest.done) {
+        return;
+      }
+      this.resultCache.delete(oldest.value);
+    }
+  }
+
+  private async generateCacheKey(
     screenshotPath: string,
     searchCriteria: ElementSearchCriteria
-  ): string {
+  ): Promise<string> {
     // Sorted-key serialization: criteria written with their keys in a different
     // order are the same search, and must not cost a second paid analyzer call.
     const criteriaStr = stableStringify(searchCriteria);
-    return `${screenshotPath}:${criteriaStr}`;
+    return `${await this.fingerprintScreenshot(screenshotPath)}:${criteriaStr}`;
+  }
+
+  /**
+   * Identify a screenshot by its contents, not its path. TakeScreenshot writes
+   * screenshot_<timestamp>.png, so a path-keyed cache gets a fresh key on every
+   * capture and can never hit — two tool calls against an unchanged screen must
+   * produce the same key or the cache is decorative.
+   */
+  private async fingerprintScreenshot(screenshotPath: string): Promise<string> {
+    try {
+      const { checksum } = await this.checksums.computeFileSha256(screenshotPath);
+      return checksum;
+    } catch (error) {
+      // Unreadable screenshot: fall back to the path, which is unique per
+      // capture. That only costs a cache miss — the paid call still happens
+      // and the caller still gets a result, so this must not throw.
+      logger.debug(`Vision fallback: could not fingerprint ${screenshotPath}, using path as key: ${error}`);
+      return screenshotPath;
+    }
   }
 
   /**

@@ -341,3 +341,42 @@ FIXTURE
   run bash "$ABS" "$FIX"
   [ "$status" -eq 0 ]
 }
+
+@test "an else-branch exit is not an empty-array early-out" {
+  write_lines bad <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+items=()
+if [[ ${#items[@]} -eq 0 ]]; then echo none; else return 0; fi
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"empty-array-set-u"* ]]
+}
+
+@test "does NOT arm the rule when set -u appears only in a comment" {
+  write_lines ok <<'FIXTURE'
+#!/usr/bin/env bash
+# mentions set -u only
+items=()
+printf '%s\n' "${items[@]}"
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}
+
+@test "still credits a single-line then-branch early-out (no false positive)" {
+  write_lines ok <<'FIXTURE'
+#!/usr/bin/env bash
+set -euo pipefail
+g() {
+  local xs=()
+  if [[ ${#xs[@]} -eq 0 ]]; then return 0; fi
+  printf '%s\n' "${xs[@]}"
+}
+g
+FIXTURE
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}

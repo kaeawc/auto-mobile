@@ -97,15 +97,27 @@ scan "bare-python" \
 # cannot reuse the line-oriented `scan` helper above.
 # shellcheck disable=SC2016 # awk program: $0/$NR are awk fields, not shell.
 EMPTY_ARRAY_AWK='
-{ lines[NR] = $0 }
-# `set -u` has several spellings, and every one of them arms nounset:
-#   compact/split flag groups — `set -u`, `set -eu`, `set -euo pipefail`,
-#   `set -e -u -o pipefail`; and the long form `set -o nounset`.
-# Matching only /set -[a-z]*u/ missed the last two, leaving those files
-# unscanned entirely (they reported zero violations rather than being skipped
-# loudly, which is why the gap was invisible).
-/(^|[ \t;])set[ \t]+[^#]*-o[ \t]+nounset([ \t]|;|$)/ { setu = 1 }
-/(^|[ \t;])set[ \t]+([^#]*[ \t])?-[a-zA-Z]*u[a-zA-Z]*([ \t]|;|$)/ { setu = 1 }
+{
+  lines[NR] = $0
+  # `set -u` has several spellings, and every one of them arms nounset:
+  #   compact/split flag groups — `set -u`, `set -eu`, `set -euo pipefail`,
+  #   `set -e -u -o pipefail`; and the long form `set -o nounset`.
+  # Matching only /set -[a-z]*u/ missed the last two, leaving those files
+  # unscanned entirely (they reported zero violations rather than being
+  # skipped loudly, which is why the gap was invisible).
+  #
+  # Match against the CODE only. Prose mentioning `set -u` — including the
+  # rule documentation in this very file — must not arm the scan, or the rule
+  # flags valid expansions in scripts bash would run happily.
+  codeline = $0
+  if (codeline ~ /^[ \t]*#/) {
+    codeline = ""
+  } else {
+    sub(/[ \t]+#.*$/, "", codeline)
+  }
+  if (codeline ~ /(^|[ \t;])set[ \t]+[^#]*-o[ \t]+nounset([ \t]|;|$)/) { setu = 1 }
+  if (codeline ~ /(^|[ \t;])set[ \t]+([^#]*[ \t])?-[a-zA-Z]*u[a-zA-Z]*([ \t]|;|$)/) { setu = 1 }
+}
 # Function-definition boundaries. An early-out in one function says nothing
 # about an expansion in another, so guards may not cross one of these lines.
 # Deliberately NOT anchored to end-of-line: a whole single-line definition
@@ -154,13 +166,41 @@ function is_positive_length_guard(line, name) {
 
 # `if [ ${#arr[@]} -eq 0 ]; then return; fi` is an early-out: everything after
 # it is reached only when the array is non-empty. Returns 1 when line k opens
-# such a block and it leaves the scope within the next few lines.
-function is_empty_early_out(lines, nlines, k, name,   j) {
+# such a block AND the branch taken when the array is empty is the one that
+# leaves scope.
+#
+# The exit must live in the THEN branch. Accepting any `return`/`exit` within
+# the next few lines credited this:
+#   if [[ ${#items[@]} -eq 0 ]]; then echo none; else return 0; fi
+# where the empty case falls through to the unsafe expansion and crashes on
+# bash 3.2. So the scan stops dead at `else`/`elif`/`fi`.
+function is_empty_early_out(lines, nlines, k, name,   j, seg, cut) {
   if (!index(lines[k], "${#" name "[@]}")) { return 0 }
   if (lines[k] !~ /-eq[ \t]+0/ && lines[k] !~ /-lt[ \t]+1/ && lines[k] !~ /==[ \t]*0/) { return 0 }
   if (lines[k] !~ /(^|[ \t;])(if|elif)[ \t]/ && lines[k] !~ /&&/) { return 0 }
   for (j = k; j <= k + 3 && j <= nlines; j++) {
-    if (lines[j] ~ /(^|[ \t;])(return|exit|continue|break)([ \t;]|$)/) { return 1 }
+    seg = lines[j]
+    # On the opening line, only what follows `then` is inside the then-branch;
+    # the test itself may legitimately contain the word `exit` in a message.
+    if (j == k) {
+      cut = index(seg, "; then")
+      if (cut > 0) {
+        seg = substr(seg, cut + 6)
+      } else {
+        cut = index(seg, " then ")
+        if (cut > 0) { seg = substr(seg, cut + 5) } else { seg = "" }
+      }
+    }
+    # `else`/`elif` ends the then-branch: anything past it runs in the
+    # NON-empty case. Truncate and make this the last segment considered.
+    if (match(seg, /(^|[ \t;])(else|elif)([ \t;]|$)/)) {
+      seg = substr(seg, 1, RSTART - 1)
+      if (seg ~ /(^|[ \t;])(return|exit|continue|break)([ \t;]|$)/) { return 1 }
+      return 0
+    }
+    if (seg ~ /(^|[ \t;])(return|exit|continue|break)([ \t;]|$)/) { return 1 }
+    # `fi` closes the construct without an exit — not an early-out.
+    if (seg ~ /(^|[ \t;])fi([ \t;]|$)/) { return 0 }
   }
   return 0
 }

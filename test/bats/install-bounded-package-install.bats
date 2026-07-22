@@ -380,7 +380,7 @@ STUB
 exit 0
 STUB
   "$CHMOD" +x "${STUB_BIN}/apt-get"
-  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  has_controlling_tty() { return 0; }
   NON_INTERACTIVE=false
 
   run run_bounded_install "Installing ffmpeg" sudo apt-get install -y -qq ffmpeg
@@ -388,6 +388,66 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" == *"PROMPT-VISIBLE"* ]]
   # ...and the bounded invocation itself must not have been the one prompting.
+  [[ "$output" != *"BOUNDED-PROMPT"* ]]
+}
+
+@test "the sudo refresh keys off the controlling terminal, not stdin" {
+  # `curl … | bash` is the documented install path, and there fd 0 is the
+  # script pipe for the whole run -- `[[ -t 0 ]]` is false even though the user
+  # is sitting at a terminal. Gating the visible refresh on stdin therefore
+  # skipped it in exactly the interactive case it exists for, and the bounded
+  # `sudo` went on to hit the invisible prompt anyway.
+  #
+  # `has_controlling_tty` is the primitive the script already uses for this
+  # (prompt_confirm_plain reads from /dev/tty for the same reason); stubbing it
+  # is how a test harness -- which never has a controlling terminal -- can pin
+  # the branch. stdin here is bats' pipe, i.e. the real curl|bash shape.
+  hide_real_timeout
+  stub_expired_sudo
+  cat > "${STUB_BIN}/apt-get" << 'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/apt-get"
+  has_controlling_tty() { return 0; }
+  NON_INTERACTIVE=false
+
+  [ ! -t 0 ]
+
+  run run_bounded_install "Installing ffmpeg" sudo apt-get install -y -qq ffmpeg
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMPT-VISIBLE"* ]]
+  [[ "$output" != *"BOUNDED-PROMPT"* ]]
+}
+
+@test "a sudo timestamp that expires between installs is refreshed again" {
+  # sudo's cached credential has its own timeout (5 minutes by default), and a
+  # package install can outlast it. An in-process "already refreshed" flag
+  # therefore goes stale: the next bounded install skipped even the
+  # non-prompting `sudo -n -v` and prompted from inside the capture instead --
+  # the same invisible hang, one install later.
+  hide_real_timeout
+  stub_expired_sudo
+  cat > "${STUB_BIN}/apt-get" << 'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  "$CHMOD" +x "${STUB_BIN}/apt-get"
+  has_controlling_tty() { return 0; }
+  NON_INTERACTIVE=false
+
+  run run_bounded_install "Installing first" sudo apt-get install -y -qq first
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMPT-VISIBLE"* ]]
+
+  # The first install ran long enough for sudo's timestamp to expire.
+  : > "${TEST_DIR}/sudo_cached"
+
+  run run_bounded_install "Installing second" sudo apt-get install -y -qq second
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROMPT-VISIBLE"* ]]
   [[ "$output" != *"BOUNDED-PROMPT"* ]]
 }
 
@@ -401,7 +461,7 @@ STUB
 exit 0
 STUB
   "$CHMOD" +x "${STUB_BIN}/apt-get"
-  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  has_controlling_tty() { return 0; }
   NON_INTERACTIVE=false
 
   run run_bounded_install "Installing ffmpeg" bash -c "sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg"
@@ -419,7 +479,7 @@ STUB
 exit 0
 STUB
   "$CHMOD" +x "${STUB_BIN}/apt-get"
-  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  has_controlling_tty() { return 0; }
   NON_INTERACTIVE=false
 
   run run_bounded_install "Installing ffmpeg" sudo apt-get install -y -qq ffmpeg
@@ -438,7 +498,7 @@ STUB
 exit 0
 STUB
   "$CHMOD" +x "${STUB_BIN}/apt-get"
-  detect_stdin_terminal() { STDIN_IS_TERMINAL=false; }
+  has_controlling_tty() { return 1; }
   NON_INTERACTIVE=true
 
   run run_bounded_install "Installing ffmpeg" sudo apt-get install -y -qq ffmpeg
@@ -450,7 +510,7 @@ STUB
 @test "a command with no sudo in it never touches sudo" {
   hide_real_timeout
   stub_expired_sudo
-  detect_stdin_terminal() { STDIN_IS_TERMINAL=true; }
+  has_controlling_tty() { return 0; }
   NON_INTERACTIVE=false
 
   run run_bounded_install "Installing thing" /bin/echo hello
@@ -492,6 +552,62 @@ STUB
   survivor="$(cat "${SURVIVOR_PID_FILE}")"
   run kill -0 "${survivor}"
   [ "$status" -ne 0 ]
+}
+
+@test "the coreutils path does not return while a TERM-ignoring descendant lives" {
+  # GNU timeout waits only on its direct child. Its `-k` escalation is armed
+  # inside the signal handler and dies with the process, so once that child is
+  # reaped -- typically the `bash -c` wrapper, which honours TERM -- timeout
+  # exits 124 immediately and the KILL is never delivered to the grandchild
+  # that ignored TERM. (coreutils src/timeout.c: `while ((wait_result =
+  # waitpid (monitored_pid, …)))` then `return status`; the `settimeout
+  # (kill_after, false)` only ever runs from cleanup().) The group-wide TERM
+  # does reach the grandchild; nothing follows it.
+  #
+  # That is the same defect the watchdog fallback fixes below, so both bounding
+  # paths get the same guarantee: run_bounded_install does not return while a
+  # member of the bounded group is still alive.
+  require_real_timeout
+  export SURVIVOR_PID_FILE="${TEST_DIR}/survivor.pid"
+  cat > "${STUB_BIN}/leaky-pm" << 'STUB'
+#!/usr/bin/env bash
+bash -c 'trap "" TERM; echo $$ > "$SURVIVOR_PID_FILE"; sleep 120' &
+trap 'exit 143' TERM
+sleep 60 &
+wait $!
+STUB
+  "$CHMOD" +x "${STUB_BIN}/leaky-pm"
+
+  PACKAGE_INSTALL_TIMEOUT_SECONDS=1
+  BOUNDED_KILL_GRACE_SECONDS=2
+  run run_bounded_install "Installing ffmpeg" leaky-pm
+
+  [ "$status" -eq 124 ] || [ "$status" -eq 137 ]
+  [ -s "${SURVIVOR_PID_FILE}" ]
+  local survivor
+  survivor="$(cat "${SURVIVOR_PID_FILE}")"
+  run kill -0 "${survivor}"
+  [ "$status" -ne 0 ]
+}
+
+@test "the coreutils path does not pay the full kill grace when TERM is honoured" {
+  # The escalation above must not turn every coreutils timeout into a full
+  # grace-period wait; the common case is a command that dies on TERM at once.
+  require_real_timeout
+  cat > "${STUB_BIN}/stalling-pm" << 'STUB'
+#!/usr/bin/env bash
+sleep 60
+STUB
+  "$CHMOD" +x "${STUB_BIN}/stalling-pm"
+
+  PACKAGE_INSTALL_TIMEOUT_SECONDS=1
+  BOUNDED_KILL_GRACE_SECONDS=30
+  local start=${SECONDS}
+  run run_bounded_install "Installing ffmpeg" stalling-pm
+  local elapsed=$((SECONDS - start))
+
+  [ "$status" -ne 0 ]
+  [ "${elapsed}" -lt 20 ]
 }
 
 @test "the watchdog does not pay the full kill grace when TERM is honoured" {

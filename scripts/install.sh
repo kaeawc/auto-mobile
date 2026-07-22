@@ -1331,18 +1331,36 @@ resolve_bounded_cmd_prefix() {
     fi
 }
 
-# Whether stdin is a terminal, into STDIN_IS_TERMINAL.
+# Whether a controlling terminal is reachable, into HAS_CONTROLLING_TTY.
 #
-# Its own function so tests can substitute it: a test harness never has a
-# controlling terminal, but the interactive branch it gates is exactly the
-# behaviour worth pinning. Assigns to a global rather than returning a status
-# for the same reason as resolve_bounded_cmd_prefix — a function used as a
-# condition has `set -e` suppressed inside it (SC2310).
-STDIN_IS_TERMINAL=false
-detect_stdin_terminal() {
-    STDIN_IS_TERMINAL=false
-    if [[ -t 0 ]]; then
-        STDIN_IS_TERMINAL=true
+# Deliberately `has_controlling_tty` and not `[[ -t 0 ]]`. The documented
+# install path is `curl … | bash`, where fd 0 is the script pipe for the whole
+# run: stdin is never a terminal there even when the user is sitting at one.
+# Testing stdin therefore skipped the visible refresh in exactly the
+# interactive case it exists for, and the bounded sudo went on to hit the
+# invisible prompt anyway. /dev/tty is the right question, and is what
+# prompt_confirm_plain already reads from for the same reason.
+#
+# Assigns to a global rather than returning a status for the same reason as
+# resolve_bounded_cmd_prefix — a function used as a condition has `set -e`
+# suppressed inside it (SC2310).
+HAS_CONTROLLING_TTY=false
+detect_controlling_tty() {
+    HAS_CONTROLLING_TTY=false
+    # Called as a plain statement with `set -e` lifted around it, rather than in
+    # an `if`/`&&`/`||`. Those forms disable `set -e` for the whole callee
+    # (SC2310) and the set-e gate rejects new instances of that shape; this
+    # keeps the suppression scoped to the one call and restores the caller's
+    # setting immediately.
+    local had_e=0
+    case "$-" in *e*) had_e=1 ;; esac
+    set +e
+    has_controlling_tty
+    local status=$?
+    if [[ ${had_e} -eq 1 ]]; then set -e; fi
+
+    if [[ ${status} -eq 0 ]]; then
+        HAS_CONTROLLING_TTY=true
     fi
 }
 
@@ -1383,11 +1401,15 @@ detect_bounded_install_sudo() {
 # 600s bound, followed by a spurious "exceeded … and was aborted". Refreshing
 # here — unbounded, uncaptured, in the caller's own process group — means the
 # bounded invocation itself never has to prompt.
-SUDO_CREDENTIALS_READY=false
+#
+# Runs in full every time rather than short-circuiting on an "already
+# refreshed" flag. sudo's cached credential has its own timeout (5 minutes by
+# default) and a package install can outlast it, so a flag set by an earlier
+# install goes stale — and trusting it would skip even the non-prompting
+# `sudo -n -v` and put the prompt back inside the capture, one install later.
+# The probe below is cheap and silent when a credential is cached, so there is
+# nothing to memoize.
 ensure_sudo_credentials() {
-    if [[ "${SUDO_CREDENTIALS_READY}" == "true" ]]; then
-        return 0
-    fi
     # `command -v` rather than the command_exists helper: a function used as a
     # condition has `set -e` suppressed inside it (SC2310).
     if ! command -v sudo > /dev/null 2>&1; then
@@ -1395,14 +1417,14 @@ ensure_sudo_credentials() {
     fi
 
     # `-n` never prompts, so this is safe to run before knowing whether a
-    # terminal exists. It also refreshes the timestamp when one is cached.
+    # terminal exists. It also refreshes the timestamp when one is cached,
+    # which is why re-running it per install is the point rather than waste.
     if sudo -n -v 2> /dev/null; then
-        SUDO_CREDENTIALS_READY=true
         return 0
     fi
 
-    detect_stdin_terminal
-    if [[ "${NON_INTERACTIVE}" == "true" || "${STDIN_IS_TERMINAL}" != "true" ]]; then
+    detect_controlling_tty
+    if [[ "${NON_INTERACTIVE}" == "true" || "${HAS_CONTROLLING_TTY}" != "true" ]]; then
         # Prompting with no terminal would trade the old 45-minute stall for a
         # new one. Let the install fail loudly instead.
         log_warn "sudo has no cached credential and this session is not interactive; package installs may fail"
@@ -1410,11 +1432,88 @@ ensure_sudo_credentials() {
     fi
 
     log_info "Requesting sudo credentials before installing packages"
-    if sudo -v; then
-        SUDO_CREDENTIALS_READY=true
-    else
+    if ! sudo -v; then
         log_warn "Could not refresh sudo credentials; package installs may fail"
     fi
+    return 0
+}
+
+# Wait for the process group led by <pid> to drain, then KILL whatever is left.
+#
+# Assumes a TERM has already gone out to the group; this is only the
+# escalation. Shared by both bounding paths so they finish a kill identically.
+#
+# Polls rather than sleeping the grace straight through, because the common
+# case is a command that dies on TERM at once and callers wait on this.
+#
+# Polls both `-pid` and `pid` for the same reason the signals below use both:
+# if the child never became group leader, `-pid` names no group, and testing
+# only that would break out instantly and collapse the grace to zero — TERM and
+# KILL in the same instant, with no chance to clean up.
+bounded_kill_escalate() {
+    local pid="$1"
+    local grace="$2"
+    local waited=0
+    while [[ ${waited} -lt ${grace} ]]; do
+        if ! kill -0 -"${pid}" 2> /dev/null && ! kill -0 "${pid}" 2> /dev/null; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    # A negative pid targets the process group; the bare pid is the fallback for
+    # a child that never became group leader.
+    kill -KILL -"${pid}" 2> /dev/null || kill -KILL "${pid}" 2> /dev/null || true
+    return 0
+}
+
+# Run a `timeout`-prefixed command and finish the kill it abandons.
+#
+# GNU timeout waits only on its direct child, and its `-k` escalation is armed
+# inside a signal handler, so it dies with the process. Once that child is
+# reaped — typically a `bash -c` wrapper, which honours TERM — timeout returns
+# 124 immediately and the KILL is never delivered to a grandchild that ignored
+# the group-wide TERM. `timeout --help` says as much: `-k` sends KILL only "if
+# COMMAND is still running". So `run_bounded_install` could report an install
+# aborted and move on to the next one while the previous package manager was
+# still holding the dpkg lock.
+#
+# Running timeout under `set -m` puts it at the head of its own process group,
+# which is the group timeout itself signals (it calls `setpgid (0, 0)` and then
+# `kill (0, sig)`), so polling and killing that group here picks up exactly the
+# descendants timeout leaves behind. The watchdog fallback below gets the same
+# guarantee by construction; this gives the coreutils path parity.
+#
+# Reports through BOUNDED_TIMEOUT_STATUS for the same reason as the watchdog: a
+# function on the left of `||` has `set -e` suppressed inside it (SC2310).
+BOUNDED_TIMEOUT_STATUS=0
+bounded_timeout_run() {
+    local outfile="$1"
+    shift
+
+    local had_monitor=0
+    case "$-" in *m*) had_monitor=1 ;; esac
+    set -m
+    if [[ -n "${outfile}" ]]; then
+        "$@" > "${outfile}" 2>&1 &
+    else
+        "$@" &
+    fi
+    local cmd_pid=$!
+    if [[ ${had_monitor} -eq 0 ]]; then set +m; fi
+
+    local status=0
+    wait "${cmd_pid}" 2> /dev/null || status=$?
+
+    # 124 is timeout firing; 137 is its own follow-up KILL landing on the direct
+    # child. Only then is anything still in the group a survivor worth chasing —
+    # a command that exited on its own terms may legitimately have left a
+    # daemon behind.
+    if [[ ${status} -eq 124 || ${status} -eq 137 ]]; then
+        bounded_kill_escalate "${cmd_pid}" "${BOUNDED_KILL_GRACE_SECONDS}"
+    fi
+
+    BOUNDED_TIMEOUT_STATUS="${status}"
     return 0
 }
 
@@ -1478,8 +1577,6 @@ bounded_watchdog_run() {
     local cmd_pid=$!
     if [[ ${had_monitor} -eq 0 ]]; then set +m; fi
 
-    local grace="${BOUNDED_KILL_GRACE_SECONDS}"
-    local waited=0
     (
         sleep "${secs}"
         if kill -0 "${cmd_pid}" 2> /dev/null; then
@@ -1487,24 +1584,9 @@ bounded_watchdog_run() {
             # A negative pid targets the process group. Fall back to the bare
             # pid in case the child never became group leader.
             kill -TERM -"${cmd_pid}" 2> /dev/null || kill -TERM "${cmd_pid}" 2> /dev/null || true
-            # Same grace as `timeout -k` on the coreutils path, so the two
-            # bounding paths escalate identically — but polled rather than slept
-            # straight through. The caller now waits for this subshell, so an
-            # unconditional sleep would add the whole grace to every timeout,
-            # including the common case where the command dies on TERM at once.
-            # Poll both forms for the same reason the signals above use both:
-            # if the child never became group leader, `-pid` names no group, and
-            # testing only that would break out instantly and collapse the grace
-            # to zero — TERM and KILL in the same instant, with no chance to
-            # clean up.
-            while [[ ${waited} -lt ${grace} ]]; do
-                if ! kill -0 -"${cmd_pid}" 2> /dev/null && ! kill -0 "${cmd_pid}" 2> /dev/null; then
-                    break
-                fi
-                sleep 1
-                waited=$((waited + 1))
-            done
-            kill -KILL -"${cmd_pid}" 2> /dev/null || kill -KILL "${cmd_pid}" 2> /dev/null || true
+            # Same grace as `timeout -k` on the coreutils path, via the same
+            # helper, so the two bounding paths escalate identically.
+            bounded_kill_escalate "${cmd_pid}" "${BOUNDED_KILL_GRACE_SECONDS}"
         fi
     ) > /dev/null 2>&1 3>&- &
     local watcher_pid=$!
@@ -1573,7 +1655,8 @@ run_bounded_install() {
     outfile="$(mktemp "${TMPDIR:-/tmp}/automobile_install_output.XXXXXX")" || outfile=""
     if [[ -n "${outfile}" && ${#BOUNDED_CMD_PREFIX[@]} -gt 0 ]]; then
         # The `+` guard keeps an empty prefix from tripping `set -u` on bash 3.2.
-        ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@" > "${outfile}" 2>&1 || status=$?
+        bounded_timeout_run "${outfile}" ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@"
+        status="${BOUNDED_TIMEOUT_STATUS}"
         output="$(cat "${outfile}")"
         rm -f "${outfile}"
     elif [[ -n "${outfile}" ]]; then
@@ -1586,7 +1669,8 @@ run_bounded_install() {
         # losing the ceiling is the fail-open #4162 exists to close. The output
         # goes straight to the terminal here rather than being replayed.
         log_warn "${title}: could not create a temp file to capture output; running bounded but uncaptured"
-        ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@" || status=$?
+        bounded_timeout_run "" ${BOUNDED_CMD_PREFIX[@]+"${BOUNDED_CMD_PREFIX[@]}"} "$@"
+        status="${BOUNDED_TIMEOUT_STATUS}"
     else
         log_warn "${title}: could not create a temp file to capture output; running unbounded"
         "$@" || status=$?

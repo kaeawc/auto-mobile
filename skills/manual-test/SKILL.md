@@ -79,8 +79,17 @@ at a time to conserve context; never let two actors drive devices at once.
      runner (also uninstall+reinstall the APK on the emulator first for a runner fix);
      otherwise `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED=true` to keep the
      installed one and avoid the ~30s blocking download (#2590).
-   - `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH=/tmp/automobile-ctrl-proxy/Build/Products`
-     for the fresh iOS runner.
+   - **Do NOT set `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`.** It wants an `.ipa`
+     **file**, and `scripts/ios/ctrl-proxy-build-for-testing.sh` produces no `.ipa`
+     — only a derived-data tree. Pointing it at a directory is silently ignored:
+     the daemon falls back to the **cached** runner with no diagnostic, so you
+     attribute results to a local build that never ran (ref
+     [#4221](https://github.com/kaeawc/auto-mobile/issues/4221)). The build script
+     writes to the **default** derived-data path, so a fresh local iOS runner needs
+     **no env var at all**. Only for a non-default location set
+     `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` (the root — the
+     code appends `Build/Products` itself). Verify which runner actually served a
+     call with `grep xctestrun <daemon-log>`.
    - `--embedded-sdk` — required for `sqlQuery`, `setPreference`/`getPreference`,
      in-app `highlight` (registration is **daemon-side**; the CLI must pass the same
      flag so the reuse check matches, else it restarts the daemon).

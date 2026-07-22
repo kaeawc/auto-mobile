@@ -650,7 +650,10 @@ describe("checkIosCtrlProxyRunner", () => {
     expect(result.message).toContain("versionStatus=stale");
     expect(result.message).toContain("request_shake");
     expect(result.recommendation).toContain("ctrl-proxy-build-for-testing.sh");
-    expect(result.recommendation).toContain("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH");
+    // BUNDLE_PATH takes an .ipa file and cannot consume the build script's
+    // derived-data output; DERIVED_DATA is the followable override (#4221).
+    expect(result.recommendation).toContain("AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA");
+    expect(result.recommendation).not.toContain("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH");
   });
 
   test("reports unknown when the runner is installed but not running", async () => {

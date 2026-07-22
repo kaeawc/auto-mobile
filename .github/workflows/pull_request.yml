@@ -1068,8 +1068,11 @@ jobs:
             turbo-${{ matrix.os }}-${{ hashFiles('bun.lock') }}-
             turbo-${{ matrix.os }}-
 
+      # No `if:` here -- a `wait` step always runs and does not accept a
+      # condition; adding one fails whole-workflow validation. When the job's
+      # RUN_MCP_BUILD_TEST guard skips the cache steps there is simply nothing
+      # outstanding for the barrier to join.
       - wait: [cache-bun, cache-turbo]
-        if: env.RUN_MCP_BUILD_TEST == 'true'
 
       - name: "Setup Auto Mobile"
         if: env.RUN_MCP_BUILD_TEST == 'true'

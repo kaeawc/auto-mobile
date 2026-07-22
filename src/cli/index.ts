@@ -104,8 +104,17 @@ function tryParseJsonToken(raw: string): { parsed: boolean; value: unknown } {
   }
 }
 
-function coerceCliValue(raw: string, typeName: string | undefined): unknown {
+function coerceCliValue(raw: string, declared: DeclaredType | undefined): unknown {
   const bestEffort = (): unknown => tryParseJsonToken(raw).value;
+
+  // A nullable param must still be able to receive an explicit JSON null --
+  // storageTools removes a key only when `value === null`, so turning the token
+  // into the string "null" would overwrite it instead of clearing it.
+  if (declared?.nullable && raw === "null") {
+    return null;
+  }
+
+  const typeName = declared?.type;
 
   switch (typeName) {
     // Enums are string-valued here (e.g. --action start); treating them as
@@ -160,7 +169,7 @@ function asDeclaredNumber(raw: string): unknown {
  * the old JSON coercion. Registration is idempotent (the registry is a Map keyed
  * by tool name), so calling it per invocation is safe.
  */
-function getDeclaredParamTypes(toolName: string): Record<string, string> | null {
+function getDeclaredParamTypes(toolName: string): Record<string, DeclaredType> | null {
   initializeCliTools();
   const tool = ToolRegistry.getTool(toolName);
   if (!tool) {
@@ -175,19 +184,22 @@ function getDeclaredParamTypes(toolName: string): Record<string, string> | null 
   // A param declared with different types across union branches cannot be
   // coerced unambiguously from the token alone, so it is omitted and falls back
   // to best-effort parsing rather than being coerced to the wrong branch's type.
-  const byParam = new Map<string, Set<string>>();
+  // Nullability is unioned: if any branch accepts null, a JSON null must survive.
+  const byParam = new Map<string, { types: Set<string>; nullable: boolean }>();
   for (const shape of shapes) {
     for (const [key, value] of Object.entries(shape)) {
-      const types = byParam.get(key) ?? new Set<string>();
-      types.add(resolveDeclaredType(value));
-      byParam.set(key, types);
+      const declared = resolveDeclaredType(value);
+      const entry = byParam.get(key) ?? { types: new Set<string>(), nullable: false };
+      entry.types.add(declared.type);
+      entry.nullable = entry.nullable || declared.nullable;
+      byParam.set(key, entry);
     }
   }
 
   return Object.fromEntries(
     [...byParam.entries()]
-      .filter(([, types]) => types.size === 1)
-      .map(([key, types]) => [key, [...types][0]])
+      .filter(([, entry]) => entry.types.size === 1)
+      .map(([key, entry]) => [key, { type: [...entry.types][0], nullable: entry.nullable }])
   );
 }
 
@@ -219,22 +231,32 @@ function unwrapSchema(schema: any): any {
   return definition?.innerType ?? definition?.type ?? definition?.schema ?? null;
 }
 
-function resolveDeclaredType(schema: any): string {
+interface DeclaredType {
+  type: string;
+  /** True when a JSON `null` is a legal value and must survive coercion. */
+  nullable: boolean;
+}
+
+function resolveDeclaredType(schema: any): DeclaredType {
   let current = schema;
+  let nullable = false;
 
   for (let depth = 0; depth < 10 && current; depth++) {
     const name = schemaTypeName(current);
 
+    if (name === "nullable") {
+      nullable = true;
+    }
     if (name === "literal") {
-      return typeof (current._def?.value ?? current._def?.values?.[0]);
+      return { type: typeof (current._def?.value ?? current._def?.values?.[0]), nullable };
     }
     if (!SCHEMA_WRAPPER_TYPES.has(name)) {
-      return name;
+      return { type: name, nullable };
     }
     current = unwrapSchema(current);
   }
 
-  return "unknown";
+  return { type: "unknown", nullable };
 }
 
 /**

@@ -189,3 +189,47 @@ describe("parseCliArgs preserves JSON-encoded scalars and rejects bad numbers (#
     expect(params.timeoutMs).toBe(expected);
   });
 });
+
+describe("parseCliArgs preserves JSON null for nullable params (#4241 review)", () => {
+  async function withEmbeddedSdk<T>(run: () => T): Promise<T> {
+    const { serverConfig } = await import("../../src/utils/ServerConfig");
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    try {
+      return run();
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  }
+
+  const setKeyValue = (value: string) => [
+    "setKeyValue", "--platform", "android", "--appId", "com.example",
+    "--name", "prefs", "--key", "k", "--type", "STRING", "--value", value
+  ];
+
+  test("an explicit null reaches a nullable param as null", async () => {
+    // storageTools removes the key only when value === null; the literal string
+    // "null" would overwrite it instead.
+    const params = await withEmbeddedSdk(() => parseCliArgs(setKeyValue("null")).params);
+
+    expect(params.value).toBeNull();
+  });
+
+  test("a nullable param still keeps other numeric-looking strings as strings", async () => {
+    const params = await withEmbeddedSdk(() => parseCliArgs(setKeyValue("12345")).params);
+
+    expect(params.value).toBe("12345");
+  });
+
+  test("a value merely containing 'null' is untouched", async () => {
+    const params = await withEmbeddedSdk(() => parseCliArgs(setKeyValue("null-ish")).params);
+
+    expect(params.value).toBe("null-ish");
+  });
+
+  test("a non-nullable string param keeps the literal token 'null'", () => {
+    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", "null"]);
+
+    expect(params.text).toBe("null");
+  });
+});

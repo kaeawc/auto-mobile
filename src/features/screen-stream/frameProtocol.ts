@@ -310,23 +310,38 @@ export class FrameDecoder {
    * the same payload ceiling that bounds normal decoding.
    */
   private corroborate(offset: number, header: FrameHeader): "accept" | "unsettled" | "reject" {
-    const end = offset + FRAME_HEADER_SIZE + payloadSize(header);
-    if (this.buffer.length - end < FRAME_HEADER_SIZE) {return "unsettled";}
-    const successor = parseHeader(this.buffer, end);
-    if (headerError(successor) !== null) {return "reject";}
-    // The successor is where resync hands control back to synchronized
-    // decoding, and the synchronized path does not consult the anchor — so the
-    // handoff point has to. Without this an audio-shaped record inside the
-    // damaged bytes is admissible on its own, resync ends at it, and whatever
-    // video header follows is decoded unchecked.
-    if (!this.admissible(successor)) {return "reject";}
-    // The successor must belong to the same stream, not merely be well-formed.
-    // Consecutive frames in a capture session share a geometry, so a successor
-    // of a different size is evidence of coincidence, not of a boundary. This
-    // is what covers the window before any frame has decoded, when there is no
-    // anchor to check against.
-    if (isAudioHeader(header) || isAudioHeader(successor)) {return "accept";}
-    return sameGeometry(header, successor) ? "accept" : "reject";
+    // Walk from the end of the candidate's payload to the first *video* header,
+    // stepping over self-describing audio records on the way. That video header
+    // is where resync hands control back to the synchronized path, which emits
+    // video frames without consulting the anchor — so it is the boundary that
+    // must match, not merely whatever record sits physically next to the
+    // candidate. `SimulatorCaptureSession` writes screen and audio to one queue,
+    // so an audio record routinely lands between two video frames; stopping at
+    // that audio would either stall recovery on every real stream, or — worse —
+    // accept the candidate and hand the unchecked video *after* the audio, of
+    // any geometry, straight to the encoder.
+    let cursor = offset + FRAME_HEADER_SIZE + payloadSize(header);
+    for (;;) {
+      if (this.buffer.length - cursor < FRAME_HEADER_SIZE) {return "unsettled";}
+      const successor = parseHeader(this.buffer, cursor);
+      if (headerError(successor) !== null) {return "reject";}
+      if (isAudioHeader(successor)) {
+        // Audio carries no geometry and is emitted harmlessly, so it cannot be
+        // the boundary that poisons the encoder. Step over it and keep looking
+        // for the video header that actually needs vetting.
+        cursor += FRAME_HEADER_SIZE + payloadSize(successor);
+        continue;
+      }
+      // `successor` is the video header resync would hand back at. It must
+      // belong to the same stream — before the first frame decodes there is no
+      // anchor and whatever arrives first defines the geometry (admissible()
+      // allows it), so the candidate and this successor must simply agree.
+      if (!this.admissible(successor)) {return "reject";}
+      // An audio candidate carries no geometry of its own; a corroborating
+      // video handoff is all it needs.
+      if (isAudioHeader(header)) {return "accept";}
+      return sameGeometry(header, successor) ? "accept" : "reject";
+    }
   }
 
   /**

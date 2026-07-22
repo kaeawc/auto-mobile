@@ -405,6 +405,40 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(audio).toHaveLength(2);
   });
 
+  test("an audio successor does not let a different-size video through resync", () => {
+    const decoder = new FrameDecoder();
+    // The fabrication path an audio successor must not open: an anchor-geometry
+    // candidate whose successor is audio cannot be accepted on the audio alone,
+    // because the video frame *after* the audio is where synchronized decoding
+    // resumes and it is emitted unchecked. If that video is a different size,
+    // accepting the candidate hands a fabricated-geometry frame to the encoder
+    // from one damaged frame. Corroboration must scan through the audio and hold
+    // the next video boundary to the anchor.
+    const errors: MalformedFrameError[] = [];
+    const audio: Buffer[] = [];
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 16), Buffer.alloc(16, fill)]);
+
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0), // corruption
+        makeFrameBytes(4, 4, 16, 2, 0x02), // V — anchor-geometry candidate
+        audioRecord(0xa1), // A — must not corroborate the candidate by itself
+        makeFrameBytes(32, 32, 128, 3, 0x03), // V — different size, would-be fabrication
+      ]),
+      err => errors.push(err),
+      rec => audio.push(rec.pcm16le)
+    );
+
+    // The 32x32 frame must never surface, and the anchor-mismatched candidate is
+    // not corroborated, so resync stalls rather than emitting anything.
+    expect(errors).toHaveLength(1);
+    expect(out.map(f => `${f.header.width}x${f.header.height}`)).not.toContain("32x32");
+    expect(out).toHaveLength(0);
+  });
+
   test("does not resynchronize when the capture geometry changes inside the corruption", () => {
     const decoder = new FrameDecoder();
     // Deliberate trade, pinned so it stays deliberate. The helper does change

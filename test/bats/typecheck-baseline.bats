@@ -254,3 +254,87 @@ teardown() {
   [[ "$output" != *"swap-guard"* ]]
   [[ "$output" == *"no new type errors"* ]]
 }
+
+# --- Union member order canonicalization (issue #4211) -----------------------
+#
+# `tsc` renders union members in type-instantiation order, which shifts when the
+# module graph changes. A reordered union used to read as a NEW error while the
+# identical baselined one read as FIXED, turning `main` red with no code change.
+
+@test "check mode PASSES when a baselined union is re-rendered in a different order" {
+  orig='printf "%s\n" "src/u.ts(1,1): error TS2339: Property (s) does not exist on type { severity: \"critical\" | \"high\" | \"medium\" | \"low\"; }."'
+  TYPECHECK_TSC_CMD="$orig" bash "$SCRIPT" --update
+
+  # Same error, same members, different render order -- must not be "new".
+  reordered='printf "%s\n" "src/u.ts(1,1): error TS2339: Property (s) does not exist on type { severity: \"high\" | \"medium\" | \"critical\" | \"low\"; }."'
+  TYPECHECK_TSC_CMD="$reordered" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+  # It must not be reported as fixed either -- that would mean the two signatures
+  # still differ and merely cancelled out in the counts.
+  [[ "$output" != *"no longer occur"* ]]
+}
+
+@test "canonicalization is order-insensitive, NOT laxer: different union members still fail" {
+  orig='printf "%s\n" "src/u.ts(1,1): error TS2339: Property (s) does not exist on type { severity: \"critical\" | \"high\" | \"medium\" | \"low\"; }."'
+  TYPECHECK_TSC_CMD="$orig" bash "$SCRIPT" --update
+
+  # One member genuinely changed ("low" -> "trivial"): a different type, so a
+  # different error, so the gate must still fail closed.
+  changed='printf "%s\n" "src/u.ts(1,1): error TS2339: Property (s) does not exist on type { severity: \"critical\" | \"high\" | \"medium\" | \"trivial\"; }."'
+  TYPECHECK_TSC_CMD="$changed" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 NEW TypeScript error"* ]]
+}
+
+@test "a genuinely new error is still caught alongside a reordered union" {
+  orig='printf "%s\n" "src/u.ts(1,1): error TS2339: Property (s) does not exist on type { severity: \"critical\" | \"high\"; }."'
+  TYPECHECK_TSC_CMD="$orig" bash "$SCRIPT" --update
+
+  # The union reorders AND an unrelated error appears; only the latter is new.
+  both='printf "%s\n" \
+    "src/u.ts(1,1): error TS2339: Property (s) does not exist on type { severity: \"high\" | \"critical\"; }." \
+    "src/new.ts(2,2): error TS2551: Property (q) does not exist."'
+  TYPECHECK_TSC_CMD="$both" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 NEW TypeScript error"* ]]
+  [[ "$output" == *"src/new.ts"* ]]
+  [[ "$output" != *"src/u.ts"* ]]
+}
+
+@test "a legacy baseline with unsorted unions still matches after the change" {
+  # Simulate a baseline committed BEFORE canonicalization existed: written by
+  # hand with members in non-sorted order, exactly as the real committed
+  # baseline holds them.
+  cat > "$TYPECHECK_BASELINE" <<EOF
+# AutoMobile typecheck baseline (issue #3001) -- see scripts/typecheck-baseline.sh
+# generated-with: tsc 6.0.3
+src/legacy.ts: error TS2339: Property (s) does not exist on type { k: "zebra" | "apple" | "mango"; }.
+EOF
+
+  same='printf "%s\n" "src/legacy.ts(9,9): error TS2339: Property (s) does not exist on type { k: \"zebra\" | \"apple\" | \"mango\"; }."'
+  TYPECHECK_TSC_VERSION="6.0.3" TYPECHECK_TSC_CMD="$same" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new type errors"* ]]
+  [[ "$output" != *"no longer occur"* ]]
+}
+
+@test "adjacent unions separated by a semicolon are sorted independently" {
+  orig='printf "%s\n" "src/two.ts(1,1): error TS2339: Bad type { a: \"y\" | \"x\"; b: string | null; }."'
+  TYPECHECK_TSC_CMD="$orig" bash "$SCRIPT" --update
+
+  # Each run canonicalizes on its own; members must not migrate across the ";".
+  grep -q 'a: "x" | "y"; b: null | string;' "$TYPECHECK_BASELINE"
+}
+
+@test "a union with complex members is left untouched rather than mis-parsed" {
+  orig='printf "%s\n" "src/c.ts(1,1): error TS2345: Type { a: number } | null is not assignable."'
+  TYPECHECK_TSC_CMD="$orig" bash "$SCRIPT" --update
+
+  # The object-literal member is not a bare token, so the conservative matcher
+  # leaves the run alone -- preserving today'"'"'s behavior instead of corrupting it.
+  grep -q 'Type { a: number } | null is not assignable' "$TYPECHECK_BASELINE"
+
+  TYPECHECK_TSC_CMD="$orig" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}

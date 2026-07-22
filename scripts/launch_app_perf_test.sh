@@ -419,7 +419,7 @@ main() {
     local max_time=${all_durations[0]}
     local sum_time=0
 
-    for duration in "${all_durations[@]}"; do
+    for duration in ${all_durations[@]+"${all_durations[@]}"}; do
         [[ $duration -lt $min_time ]] && min_time=$duration
         [[ $duration -gt $max_time ]] && max_time=$duration
         sum_time=$((sum_time + duration))

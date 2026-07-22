@@ -214,6 +214,56 @@ describe("ExploreBlockerDetection", () => {
 
       expect(isRatingDialog(elements)).toBe(true);
     });
+
+    // Issue #4190: keywords were matched as bare substrings, so ordinary UI
+    // text containing "star"/"rate" ("Get Started", "Restart", "accurate")
+    // was misclassified as a rating dialog.
+    test.each([
+      // [text, expected]
+      ["Get Started", false],
+      ["GET STARTED", false],
+      ["Restart", false],
+      ["Restart app?", false],
+      ["Started", false],
+      ["accurate", false],
+      ["Highly accurate results", false],
+      ["generate", false],
+      ["Generate report", false],
+      ["separate", false],
+      ["Separate tabs", false],
+      ["Reviewer name", false],
+      ["Starter pack", false],
+      ["Home", false],
+      ["Settings", false],
+      // positive controls: real rating dialogs must still match
+      ["Rate this app", true],
+      ["rate this app", true],
+      ["RATE THIS APP", true],
+      ["Rate us — 5 stars", true],
+      ["5 stars", true],
+      ["star", true],
+      ["Tap a star to rate!", true],
+      ["Leave a review", true],
+      ["Write reviews", true],
+      ["Rated 4.5", true],
+      ["Rating", true],
+      ["Give us feedback", true],
+      ["Feedback?", true],
+      ["Enjoying the app?", true],
+      ["Enjoy this app?", true],
+      ["(rate)", true],
+      ["\"review\"", true]
+    ])("isRatingDialog(%p) === %p", (text: string, expected: boolean) => {
+      expect(isRatingDialog([createMockElement({ text })])).toBe(expected);
+    });
+
+    test("does not match across the text / content-desc boundary", () => {
+      const elements = [
+        createMockElement({ "text": "Get sta", "content-desc": "rted" })
+      ];
+
+      expect(isRatingDialog(elements)).toBe(false);
+    });
   });
 
   describe("combined blocker detection", () => {

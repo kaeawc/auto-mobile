@@ -8,6 +8,46 @@ import { extractAllElements } from "./ExploreElementExtraction";
 import { defaultTimer } from "../../utils/SystemTimer";
 
 /**
+ * Normalized, lowercased text for an element.
+ *
+ * `text` and `content-desc` are joined with a space so a keyword can never be
+ * formed by the concatenation itself (issue #4190).
+ */
+function elementText(el: Element): string {
+  return `${el.text ?? ""} ${el["content-desc"] ?? ""}`.toLowerCase();
+}
+
+/**
+ * Rating keywords plus their common inflections, matched on word boundaries.
+ *
+ * Substring matching misclassified ordinary UI text — "Get Started" and
+ * "Restart" contain "star", "accurate"/"generate"/"separate" contain "rate"
+ * (issue #4190). Boundary matching keeps legitimate hits such as "5 stars"
+ * and "Enjoying the app?".
+ */
+const RATING_KEYWORDS = [
+  "rate",
+  "rates",
+  "rated",
+  "rating",
+  "ratings",
+  "review",
+  "reviews",
+  "reviewed",
+  "feedback",
+  "enjoy",
+  "enjoys",
+  "enjoyed",
+  "enjoying",
+  "star",
+  "stars"
+];
+
+const RATING_KEYWORD_PATTERN = new RegExp(
+  `\\b(?:${RATING_KEYWORDS.join("|")})\\b`
+);
+
+/**
  * Check if screen is a permission dialog
  */
 export function isPermissionDialog(elements: Element[]): boolean {
@@ -58,13 +98,7 @@ export function isLoginScreen(elements: Element[]): boolean {
  * Check if screen is a rating/review dialog
  */
 export function isRatingDialog(elements: Element[]): boolean {
-  const ratingKeywords = ["rate", "review", "feedback", "enjoy", "star"];
-
-  return elements.some(el => {
-    const text =
-      (el.text?.toLowerCase() ?? "") + (el["content-desc"]?.toLowerCase() ?? "");
-    return ratingKeywords.some(keyword => text.includes(keyword));
-  });
+  return elements.some(el => RATING_KEYWORD_PATTERN.test(elementText(el)));
 }
 
 /**

@@ -10,6 +10,7 @@ setup() {
   TEST_DIR="$(mktemp -d)"
   MOCK_BIN="${TEST_DIR}/bin"
   INVOCATIONS_FILE="${TEST_DIR}/invocations"
+  ABS="$(cd "$(dirname "$SCRIPT")" && pwd)/$(basename "$SCRIPT")"
   mkdir -p "${MOCK_BIN}"
   ORIG_PATH="${PATH}"
 }
@@ -44,15 +45,37 @@ SCRIPT
 exit 0
 SCRIPT
   chmod +x "${binary}"
+  local resolved_binary="$(cd "$(dirname "${binary}")" && pwd -P)/$(basename "${binary}")"
 
   run env \
     PATH="${MOCK_BIN}:${PATH}" \
     AUTOMOBILE_MEDIAMTX_BINARY="${binary}" \
     INVOCATIONS_FILE="${INVOCATIONS_FILE}" \
-    bash "${SCRIPT}"
+    bash "${ABS}"
 
   [ "${status}" -eq 0 ]
-  [ "$(cat "${INVOCATIONS_FILE}")" = "gate=1 binary=${binary} args=test ${TEST_FILE}" ]
+  [ "$(cat "${INVOCATIONS_FILE}")" = "gate=1 binary=${resolved_binary} args=test ${TEST_FILE}" ]
+}
+
+@test "runner resolves an injected relative MediaMTX binary before forwarding it" {
+  make_bun_stub
+  local binary="${TEST_DIR}/mediamtx"
+  cat > "${binary}" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  chmod +x "${binary}"
+  local resolved_binary="$(cd "$(dirname "${binary}")" && pwd -P)/$(basename "${binary}")"
+
+  cd "${TEST_DIR}"
+  run env \
+    PATH="${MOCK_BIN}:${PATH}" \
+    AUTOMOBILE_MEDIAMTX_BINARY="./mediamtx" \
+    INVOCATIONS_FILE="${INVOCATIONS_FILE}" \
+    bash "${ABS}"
+
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${INVOCATIONS_FILE}")" = "gate=1 binary=${resolved_binary} args=test ${TEST_FILE}" ]
 }
 
 @test "download path rejects a MediaMTX archive whose pinned checksum does not match" {

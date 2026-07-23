@@ -10,6 +10,7 @@ import {
 } from "../../utils/android-cmdline-tools/vmSnapshot";
 import { DeviceSnapshotStore } from "../../utils/DeviceSnapshotStore";
 import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -247,9 +248,8 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
             logger.debug(`[RestoreSnapshot] a11y settings put failed for ${settingsType}/${key}: ${error}`);
           }
           if (!applied) {
-            // Escape special characters in value
-            const escapedValue = value.replace(/'/g, "'\\''");
-            await this.adb.executeCommand(`shell settings put ${settingsType} ${key} '${escapedValue}'`);
+            // ADB hands the command to the device shell, so preserve the setting value as one literal word.
+            await this.adb.executeCommand(`shell settings put ${settingsType} ${key} ${shellQuote(value)}`);
           }
           successCount++;
         } catch (error) {

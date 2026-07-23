@@ -10,6 +10,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import path from "path";
+import { shellQuote } from "../../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 interface PostNotificationAction {
@@ -417,8 +418,7 @@ export class PostNotification {
 }
 
 const quoteForShell = (value: string): string => {
-  const escaped = value.replace(/'/g, "'\\''").replace(/\r?\n/g, "\\n");
-  return `'${escaped}'`;
+  return shellQuote(value.replace(/\r?\n/g, "\\n"));
 };
 
 const quoteForAdbArg = (value: string): string => {

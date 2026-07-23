@@ -3,6 +3,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { BootedDevice, ClipboardResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 
@@ -175,10 +176,8 @@ export class Clipboard {
               error: "Text is required for copy action"
             };
           }
-          // Escape text for shell command using single quotes (safer than double quotes)
-          // In single-quoted strings, only single quotes need escaping: ' becomes '\''
-          const escapedText = text.replace(/'/g, "'\\''");
-          const result = await this.adb.executeCommand(`shell cmd clipboard set '${escapedText}'`);
+          // ADB hands the command to the device shell, so preserve user text as one literal word.
+          const result = await this.adb.executeCommand(`shell cmd clipboard set ${shellQuote(text)}`);
 
           // Check if cmd clipboard is supported
           if (result.includes("No shell command implementation")) {

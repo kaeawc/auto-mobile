@@ -87,6 +87,8 @@ else
   download_mediamtx
 fi
 
+mediamtx_binary="$(cd "$(dirname "${mediamtx_binary}")" && pwd -P)/$(basename "${mediamtx_binary}")"
+
 cd "${repo_root}"
 AUTOMOBILE_MEDIAMTX_WEBRTC_INTEGRATION=1 \
 AUTOMOBILE_MEDIAMTX_BINARY="${mediamtx_binary}" \

@@ -37,6 +37,12 @@ interface DecodedVideo {
   decodedFrames: number;
 }
 
+interface StartedProcess {
+  readonly process: ChildProcessWithoutNullStreams;
+  readonly logs: () => string;
+  readonly error: () => Error | undefined;
+}
+
 class CdpClient {
   private readonly socket: WebSocket;
   private nextId = 1;
@@ -92,16 +98,21 @@ function appendLog(current: string, chunk: Buffer): string {
   return `${current}${chunk.toString()}`.slice(-MAX_LOG_CHARS);
 }
 
-function startProcess(command: string, args: string[], cwd: string): { process: ChildProcessWithoutNullStreams; logs: () => string } {
+function startProcess(command: string, args: string[], cwd: string): StartedProcess {
   const process = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
+  let spawnError: Error | undefined;
   process.stdout.on("data", chunk => {
     output = appendLog(output, chunk);
   });
   process.stderr.on("data", chunk => {
     output = appendLog(output, chunk);
   });
-  return { process, logs: () => output };
+  process.on("error", error => {
+    spawnError = error;
+    output = appendLog(output, Buffer.from(`${error.message}\n`));
+  });
+  return { process, logs: () => output, error: () => spawnError };
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, message: string, timeoutMs: number = 15_000): Promise<void> {
@@ -132,8 +143,13 @@ async function waitForHttpServer(
   logs: () => string,
   url: string,
   name: string,
+  processError?: () => Error | undefined,
 ): Promise<void> {
   await waitFor(async () => {
+    const spawnError = processError?.();
+    if (spawnError) {
+      throw new Error(`${name} failed to start: ${spawnError.message}\n${logs()}`);
+    }
     const exited = exitedProcessDescription(process);
     if (exited) {
       throw new Error(`${name} exited before readiness (${exited}):\n${logs()}`);
@@ -150,7 +166,10 @@ async function waitForHttpServer(
       }
       return true;
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith(`${name} exited before readiness`)) {
+      if (
+        error instanceof Error &&
+        (error.message.startsWith(`${name} exited before readiness`) || error.message.startsWith(`${name} failed to start`))
+      ) {
         throw error;
       }
       return false;
@@ -159,7 +178,7 @@ async function waitForHttpServer(
 }
 
 async function stopProcess(process: ChildProcessWithoutNullStreams | undefined, graceMs: number = 3_000): Promise<void> {
-  if (!process || process.exitCode !== null || process.signalCode !== null) {
+  if (!process || process.pid === undefined || process.exitCode !== null || process.signalCode !== null) {
     return;
   }
   process.kill("SIGTERM");
@@ -230,6 +249,17 @@ async function openReader(chrome: ChildProcessWithoutNullStreams, debugPort: num
   await cdp.command("Page.enable");
   await cdp.command("Runtime.enable");
   await cdp.command("Page.navigate", { url: `http://127.0.0.1:${WEBRTC_PORT}/${STREAM_NAME}` });
+  await waitFor(async () => {
+    try {
+      const response = await cdp.command("Runtime.evaluate", {
+        expression: 'document.readyState === "complete" && document.querySelector("video") !== null',
+        returnByValue: true,
+      });
+      return response.result?.result?.value === true;
+    } catch {
+      return false;
+    }
+  }, "Chrome did not load the MediaMTX reader page");
   return cdp;
 }
 
@@ -280,6 +310,16 @@ test.skipIf(process.platform === "win32")("rejects a stale listener when the ser
     .rejects.toThrow("MediaMTX exited before readiness (exit code 7):\naddress already in use");
 });
 
+test.skipIf(process.platform === "win32")("captures a child spawn error for the test body", async () => {
+  const started = startProcess(join(tmpdir(), "missing-mediamtx-test-binary"), [], tmpdir());
+
+  await once(started.process, "error");
+
+  expect(started.error()).toBeInstanceOf(Error);
+  await stopProcess(started.process, 1);
+  expect(started.process.pid).toBeUndefined();
+});
+
 describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
   test("publishes real H.264 through WHIP and Chrome decodes the MediaMTX WHEP reader", async () => {
     const mediamtxBinary = process.env.AUTOMOBILE_MEDIAMTX_BINARY;
@@ -304,23 +344,31 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
         mediaMtx.logs,
         `http://127.0.0.1:${WEBRTC_PORT}/`,
         "MediaMTX",
+        mediaMtx.error,
       );
 
       await publisher.start();
-      ffmpeg = spawn("ffmpeg", [
+      const ffmpegProcess = startProcess("ffmpeg", [
         "-hide_banner", "-loglevel", "error", "-re",
         "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10",
         "-an", "-c:v", "libx264", "-profile:v", "baseline", "-level:v", "3.1",
         "-preset", "ultrafast", "-tune", "zerolatency", "-g", "10", "-keyint_min", "10",
         "-f", "h264", "pipe:1",
-      ], { stdio: ["ignore", "pipe", "pipe"] });
+      ], tempDir);
+      ffmpeg = ffmpegProcess.process;
       let ffmpegErrors = "";
       ffmpeg.stderr.on("data", chunk => {
         ffmpegErrors = appendLog(ffmpegErrors, chunk);
       });
       ffmpeg.stdout.on("data", chunk => publisher.writeH264Chunk(chunk));
 
-      await waitFor(() => publisher.getDescriptor().framesSent >= 10, "publisher did not send synthetic H.264 frames");
+      await waitFor(() => {
+        const spawnError = ffmpegProcess.error();
+        if (spawnError) {
+          throw new Error(`FFmpeg failed to start: ${spawnError.message}`);
+        }
+        return publisher.getDescriptor().framesSent >= 10;
+      }, "publisher did not send synthetic H.264 frames");
       const profileDir = join(tempDir, "chrome-profile");
       const debugPort = await reserveLoopbackPort();
       chrome = startProcess(resolveChromeBinary(), [

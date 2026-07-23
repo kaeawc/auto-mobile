@@ -62,19 +62,21 @@ function isCanonicalShellQuoteExpression(expression: ts.Expression): boolean {
   return !!span && span.literal.text === "'" && isSingleQuoteEscapeCall(span.expression);
 }
 
-function hasCanonicalShellQuoteReturn(body: ts.Block | ts.Expression | undefined): boolean {
+function containsSingleQuoteEscapeCall(node: ts.Node): boolean {
+  if (ts.isExpression(node) && isSingleQuoteEscapeCall(node)) {
+    return true;
+  }
+  return ts.forEachChild(node, containsSingleQuoteEscapeCall) ?? false;
+}
+
+function hasLocalShellQuoteImplementation(body: ts.Block | ts.Expression | undefined): boolean {
   if (!body) {
     return false;
   }
   if (!ts.isBlock(body)) {
-    return isCanonicalShellQuoteExpression(body);
+    return isCanonicalShellQuoteExpression(body) || containsSingleQuoteEscapeCall(body);
   }
-  return body.statements.some(
-    statement =>
-      ts.isReturnStatement(statement) &&
-      !!statement.expression &&
-      (isCanonicalShellQuoteExpression(statement.expression) || isSingleQuoteEscapeCall(statement.expression)),
-  );
+  return containsSingleQuoteEscapeCall(body);
 }
 
 function localHelperName(node: ts.Node): string | null {
@@ -82,7 +84,7 @@ function localHelperName(node: ts.Node): string | null {
     if (isBannedHelperName(node.name)) {
       return node.name.text;
     }
-    return hasCanonicalShellQuoteReturn(node.body) && node.name ? node.name.getText() : null;
+    return hasLocalShellQuoteImplementation(node.body) && node.name ? node.name.getText() : null;
   }
   if (
     (ts.isVariableDeclaration(node) ||
@@ -97,7 +99,7 @@ function localHelperName(node: ts.Node): string | null {
     (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isPropertyAssignment(node)) &&
     !isBannedHelperName(node.name) &&
     isFunctionValue(node.initializer) &&
-    hasCanonicalShellQuoteReturn(node.initializer.body)
+    hasLocalShellQuoteImplementation(node.initializer.body)
   ) {
     return node.name.getText();
   }

@@ -69,3 +69,25 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"ShellQuoteBoundaryFixture.ts"* ]]
 }
+
+@test "rejects a helper that quotes an escaped temporary value" {
+  printf '%s\n' \
+    "export function quoteForShell(value: string): string { const escaped = value.replace(/'/g, \"'\\\\''\"); return \`'\${escaped}'\`; }" \
+    > "$FIXTURE"
+
+  run env SHELL_QUOTE_SOURCE_ROOT="$fixture_root" bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ShellQuoteBoundaryFixture.ts"* ]]
+}
+
+@test "rejects a helper that escapes a temporary inside a nested block" {
+  printf '%s\n' \
+    "export function quoteForShell(value: string): string { let escaped: string; if (value) { escaped = value.replace(/'/g, \"'\\\\''\"); } else { escaped = value; } return \`'\${escaped}'\`; }" \
+    > "$FIXTURE"
+
+  run env SHELL_QUOTE_SOURCE_ROOT="$fixture_root" bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ShellQuoteBoundaryFixture.ts"* ]]
+}

@@ -13,7 +13,8 @@ if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
   exit 2
 fi
 
-pattern='((spawn|spawnSync|execFile|execFileSync)\([[:space:]]*["'"'"']xcodebuild|exec(Sync)?\([^)]*["'"'"']xcodebuild)'
+quote_pattern=$'["`\x27]'
+pattern="((spawn|spawnSync|execFile|execFileSync)\\([[:space:]]*${quote_pattern}xcodebuild|exec(Sync)?\\([^)]*${quote_pattern}xcodebuild)"
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" || "$file" == test/* ]] && continue

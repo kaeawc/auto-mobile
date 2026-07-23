@@ -37,6 +37,26 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "rejects a template-literal xcodebuild execution" {
+  printf '%s\n' 'spawn(`xcodebuild`, ["test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects a multiline direct xcodebuild execution" {
+  printf '%s\n' 'spawn(' '  "xcodebuild",' '  ["test"],' ');' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "allows XcodebuildClient to own direct execution" {
   printf '%s\n' 'spawn("xcodebuild", ["test"]);' > "$repo_dir/src/utils/ios-cmdline-tools/XcodebuildClient.ts"
   git -C "$repo_dir" add src/utils/ios-cmdline-tools/XcodebuildClient.ts

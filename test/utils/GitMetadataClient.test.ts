@@ -14,7 +14,9 @@ const fakeRunner = (responses: Record<string, string | null>): GitCommandRunner 
   };
 
 describe("DefaultGitMetadataClient", () => {
-  test("uses the default runner in this source checkout", () => {
+  // Git for Windows is commonly a shell-resolved git.exe shim, while this
+  // production boundary deliberately uses shell:false argv execution.
+  test.skipIf(process.platform === "win32")("uses the default runner in this source checkout", () => {
     const readPackageName = (directory: string): string | null =>
       (JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { name?: string }).name ?? null;
 

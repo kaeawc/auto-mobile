@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { ActionableError, type ExecResult } from "../../models";
 import { createExecResult } from "../execResult";
 import { defaultTimer, type Timer } from "../SystemTimer";
-import { PlistClient, type PlistReader } from "./PlistClient";
+import { PlistClient } from "./PlistClient";
 
 export type PlistDictionary = Readonly<Record<string, unknown>>;
 

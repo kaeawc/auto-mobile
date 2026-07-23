@@ -174,11 +174,11 @@ describe("DeepLinkManager iOS", () => {
       "/sim/MyApp.app"
     );
     const infoPlist = JSON.stringify({ CFBundleURLTypes: [{ CFBundleURLSchemes: ["myapp"] }] });
-    const { exec } = fakeHostExec([{ match: "plutil -convert json", stdout: infoPlist }]);
+    const { exec, plist } = fakeHostExec([{ match: "plutil -convert json", stdout: infoPlist }]);
     const metadata: AppBundleMetadata = {
       readEntitlements: async () => { throw new Error("codesign is unavailable"); },
     };
-    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, metadata);
+    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, metadata);
 
     const result = await manager.getDeepLinks("com.example.myapp");
 

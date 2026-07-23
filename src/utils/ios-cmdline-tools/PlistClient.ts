@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { spawn } from "node:child_process";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
@@ -164,5 +163,6 @@ export class PlistClient implements PlistReader {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new ActionableError(`plutil produced malformed JSON: ${detail}`);
+    }
   }
 }

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { DefaultGitMetadataClient, type GitCommandRunner } from "../../src/utils/GitMetadataClient";
 
 const OWN = "@kaeawc/auto-mobile";
@@ -12,6 +14,13 @@ const fakeRunner = (responses: Record<string, string | null>): GitCommandRunner 
   };
 
 describe("DefaultGitMetadataClient", () => {
+  test("uses the default runner in this source checkout", () => {
+    const readPackageName = (directory: string): string | null =>
+      (JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { name?: string }).name ?? null;
+
+    expect(new DefaultGitMetadataClient().readVersion(process.cwd(), readPackageName)?.shortSha).toMatch(/^[0-9a-f]{12}$/);
+  });
+
   test("uses argv and a short timeout when executing git", () => {
     const calls: Array<{ command: string; args: readonly string[]; cwd: string; timeoutMs: number }> = [];
     const client = new DefaultGitMetadataClient((command, args, options) => {

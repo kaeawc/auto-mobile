@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import ts from "typescript";
 
 const SOURCE_ROOT = "src";
-const OWNER = "src/utils/GitMetadataClient.ts";
+const OWNER = join(SOURCE_ROOT, "utils/GitMetadataClient.ts");
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const CHILD_PROCESS_FUNCTIONS = new Set(["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync"]);
 

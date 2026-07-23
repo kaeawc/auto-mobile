@@ -21,6 +21,10 @@ import {
   type HostPortAvailabilityChecker
 } from "./ios/IOSHostPortAvailabilityChecker";
 import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
+import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
+import type { HostCommandExecutor } from "./HostCommandExecutor";
+import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
+import type { HostCommandExecutor } from "./HostCommandExecutor";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 /**
@@ -132,6 +136,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly builder: IOSCtrlProxyBuilder;
   private readonly processExecutor: ProcessExecutor;
   private readonly xcodebuild: Xcodebuild;
+  private readonly processClient: IOSCtrlProxyProcessClient;
   private readonly signingManager: XcodeSigningManager;
   private readonly deviceAppManager: DeviceAppManager;
   private readonly remoteRunner: RemoteCtrlProxyIOSRunner;
@@ -214,7 +219,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     deviceAppManager: DeviceAppManager = new DeviceAppManager(),
     remoteRunner?: RemoteCtrlProxyIOSRunner,
     hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
-    xcodebuild: Xcodebuild = new XcodebuildClient()
+    xcodebuild: Xcodebuild = new XcodebuildClient(),
+    processClient?: IOSCtrlProxyProcessClient
   ) {
     this.device = device;
     this.timer = timer;
@@ -222,6 +228,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.builder = builder || IOSCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;
     this.xcodebuild = xcodebuild;
+    this.processClient = processClient ?? new IOSCtrlProxyProcessClient();
     this.signingManager = signingManager;
     this.deviceAppManager = deviceAppManager;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
@@ -328,7 +335,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     deviceAppManager?: DeviceAppManager,
     remoteRunner?: RemoteCtrlProxyIOSRunner,
     hostPortAvailabilityChecker?: HostPortAvailabilityChecker,
-    xcodebuild?: Xcodebuild
+    xcodebuild?: Xcodebuild,
+    processClient?: IOSCtrlProxyProcessClient
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager(
       device,
@@ -343,8 +351,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         async (file, args) => processExecutor.exec([file, ...args].join(" ")),
         timer,
         (command, args, options) => processExecutor.spawn(command, args, options)
-      )
+      ),
+      processClient ?? IOSCtrlProxyManager.processClientForTesting(processExecutor, timer)
     );
+  }
+
+  private static processClientForTesting(processExecutor: ProcessExecutor, timer: Timer): IOSCtrlProxyProcessClient {
+    const host = processExecutor as unknown as Partial<HostCommandExecutor>;
+    return typeof host.executeCommand === "function"
+      ? new IOSCtrlProxyProcessClient(host as HostCommandExecutor, timer)
+      : new IOSCtrlProxyProcessClient(undefined, timer);
   }
 
   /**
@@ -371,9 +387,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
     timer: Timer = defaultTimer
   ): Promise<void> {
+    const processClient = IOSCtrlProxyManager.processClientForTesting(processExecutor, timer);
     let pids: number[] = [];
     try {
-      pids = await IOSCtrlProxyManager.findStartupCtrlProxyCandidatePids(processExecutor);
+      pids = await processClient.findStartupCandidatePids();
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to enumerate CtrlProxy iOS processes during startup sweep: ${error}`);
       return;
@@ -381,8 +398,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     for (const pid of pids) {
       try {
-        const processInfo = await IOSCtrlProxyManager.getProcessInfo(processExecutor, pid);
-        if (!processInfo || !IOSCtrlProxyManager.isCtrlProxyRunnerCommand(processInfo.command)) {
+        const processInfo = await processClient.getProcessInfo(pid);
+        if (!processInfo || !processClient.isCtrlProxyRunnerCommand(processInfo.command)) {
           continue;
         }
         const rootPid = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
@@ -400,7 +417,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           continue;
         }
         logger.info(`[IOSCtrlProxy] Reaping orphaned CtrlProxy iOS process tree rooted at ${rootPid}`);
-        await IOSCtrlProxyManager.terminateProcessTree(processExecutor, timer, rootPid);
+        await processClient.terminateProcessTree(rootPid);
       } catch (error) {
         logger.debug(`[IOSCtrlProxy] Failed to reap orphaned CtrlProxy iOS process ${pid}: ${error}`);
       }
@@ -1395,16 +1412,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Check if a process is still running
    */
   private async isProcessRunning(pid: number): Promise<boolean> {
-    try {
-      // On macOS/Linux, kill -0 checks if process exists without actually killing it
-      await this.processExecutor.exec(`kill -0 ${pid} 2>/dev/null`);
-      return true;
-    } catch (error) {
-      // `kill -0` exits non-zero (throwing) when the PID is gone or unreachable;
-      // treat that as "not running" rather than failing the liveness check.
-      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
-      return false;
-    }
+    return this.processClient.isRunning(pid);
   }
 
   /**
@@ -1446,10 +1454,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // for THIS device before treating it as "still starting" — otherwise a recycled
     // PID (our runner exited, its PID reassigned to an unrelated process) would make
     // us defer to a health endpoint that never comes.
-    const info = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, this.xcTestProcessId);
-    if (!info) {
-      return false;
-    }
+    const info = await this.processClient.getProcessInfo(this.xcTestProcessId);
+    if (!info) {return false;}
     // Require CtrlProxy-specific identity, not merely any xcodebuild for this device
     // (#2834 review): a user's own `xcodebuild … -destination id=<deviceId>` on the same
     // simulator must NOT be mistaken for our runner, or we would wait on it and later
@@ -1543,50 +1549,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async findExternalXcodebuildCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
-    try {
-      // pgrep -x matches only processes whose binary name is exactly "xcodebuild"
-      const { stdout: pgrepOut } = await this.processExecutor.exec(
-        "pgrep -x xcodebuild 2>/dev/null"
-      );
-      const pids = pgrepOut.trim().split("\n").filter(line => line.length > 0);
-      if (pids.length === 0) {
-        return null;
-      }
-
-      // Filter to PIDs whose args contain CtrlProxy, excluding our tracked PID
-      for (const pidStr of pids) {
-        const pid = parseInt(pidStr, 10);
-        if (this.xcTestProcessId && pid === this.xcTestProcessId) {
-          continue;
-        }
-        try {
-          const processInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, pid);
-          const argsOut = processInfo?.command ?? "";
-          if (argsOut.includes("CtrlProxy")) {
-            if (await this.isDaemonManagedSimulatorXcodebuildProcess(argsOut, processInfo)) {
-              continue;
-            }
-            const identityText = `${argsOut} ${processInfo?.environment ?? ""}`;
-            if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {
-              continue;
-            }
-            const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ??
-              this.parseCtrlProxyPortFromProcessArgs(processInfo?.environment ?? "") ??
-              IOSCtrlProxyManager.DEFAULT_PORT;
-            logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
-            return { pid, port };
-          }
-        } catch {
-          // Process may have exited between pgrep and ps
-        }
-      }
-      return null;
-    } catch (error) {
-      // pgrep exits non-zero (throwing) when no xcodebuild process matches; that
-      // just means there's no external runner to adopt, not a real failure.
-      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
-      return null;
+    for (const pid of await this.processClient.findXcodebuildPids()) {
+      if (pid === this.xcTestProcessId) {continue;}
+      const processInfo = await this.processClient.getProcessInfo(pid);
+      const argsOut = processInfo?.command ?? "";
+      if (!argsOut.includes("CtrlProxy") || await this.isDaemonManagedSimulatorXcodebuildProcess(argsOut, processInfo)) {continue;}
+      const identityText = `${argsOut} ${processInfo?.environment ?? ""}`;
+      if (!IOSCtrlProxyManager.hasDeviceIdentity(identityText, this.device.deviceId)) {continue;}
+      const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ?? this.parseCtrlProxyPortFromProcessArgs(processInfo?.environment ?? "") ?? IOSCtrlProxyManager.DEFAULT_PORT;
+      logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
+      return { pid, port };
     }
+    return null;
   }
 
   private async findExternalDirectCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
@@ -1701,22 +1675,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async findListeningProcessesOnPort(port: number): Promise<ListeningProcess[]> {
-    try {
-      const { stdout } = await this.processExecutor.exec(
-        `lsof -nP -iTCP:${port} -sTCP:LISTEN -Fp 2>/dev/null`
-      );
-      const pids = IOSCtrlProxyManager.parseLsofPids(stdout);
-      const processes: ListeningProcess[] = [];
-      for (const pid of pids) {
-        const processInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, pid);
-        if (processInfo) {
-          processes.push({ pid, port, ...processInfo });
-        }
-      }
-      return processes;
-    } catch {
-      return [];
+    const processes: ListeningProcess[] = [];
+    for (const pid of await this.processClient.findListeningPids(port)) {
+      const processInfo = await this.processClient.getProcessInfo(pid);
+      if (processInfo) {processes.push({ pid, port, ...processInfo });}
     }
+    return processes;
   }
 
   private isOwnedCtrlProxyRunnerProcess(process: ListeningProcess): boolean {
@@ -1733,7 +1697,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     while (parentPid !== undefined && parentPid > 1 && !visitedPids.has(parentPid)) {
       visitedPids.add(parentPid);
-      const processInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, parentPid);
+      const processInfo = await this.processClient.getProcessInfo(parentPid);
       if (!processInfo) {
         return false;
       }
@@ -1802,24 +1766,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private static async findStartupCtrlProxyCandidatePids(processExecutor: ProcessExecutor): Promise<number[]> {
-    const pids = new Set<number>();
-    for (const command of [
-      "pgrep -x xcodebuild 2>/dev/null",
-      "pgrep -f 'CtrlProxyUITests-Runner' 2>/dev/null",
-    ]) {
-      try {
-        const { stdout } = await processExecutor.exec(command);
-        for (const line of stdout.trim().split("\n")) {
-          const pid = Number.parseInt(line, 10);
-          if (!Number.isNaN(pid)) {
-            pids.add(pid);
-          }
-        }
-      } catch {
-        // pgrep exits non-zero when no process matches.
-      }
-    }
-    return [...pids];
+    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).findStartupCandidatePids();
   }
 
   private static parseLsofPids(stdout: string): number[] {
@@ -1841,44 +1788,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     processExecutor: ProcessExecutor,
     pid: number
   ): Promise<{ ppid?: number; command: string; environment?: string } | null> {
-    try {
-      const { stdout } = await processExecutor.exec(`ps -p ${pid} -o ppid= -o args= 2>/dev/null`);
-      const output = stdout.trim();
-      if (!output) {
-        return null;
-      }
-      const match = output.match(/^(\d+)\s+([\s\S]+)$/);
-      const environment = await IOSCtrlProxyManager.getProcessEnvironment(processExecutor, pid);
-      if (!match) {
-        return { command: output, environment };
-      }
-      return {
-        ppid: Number.parseInt(match[1], 10),
-        command: match[2],
-        environment,
-      };
-    } catch (error) {
-      // `ps -p <pid>` exits non-zero (throwing) if the process exited between
-      // discovery and this lookup; treat it as "no info available", not an error.
-      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
-      return null;
-    }
+    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).getProcessInfo(pid);
   }
 
   private static async getProcessEnvironment(
     processExecutor: ProcessExecutor,
     pid: number
   ): Promise<string | undefined> {
-    try {
-      const { stdout } = await processExecutor.exec(`ps eww -p ${pid} -o command= 2>/dev/null`);
-      const output = stdout.trim();
-      return output.length > 0 ? output : undefined;
-    } catch (error) {
-      // Same-pid race as getProcessInfo: the process may be gone by the time we
-      // read its full command line, so an absent environment string is expected.
-      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
-      return undefined;
-    }
+    return (await IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).getProcessInfo(pid))?.environment;
   }
 
   private static hasDeviceIdentity(text: string, deviceId: string): boolean {
@@ -1961,63 +1878,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer,
     pid: number
   ): Promise<void> {
-    const processTreePids = await IOSCtrlProxyManager.findDescendantProcessIds(processExecutor, pid);
-    const descendantFirstPids = [...processTreePids].reverse();
-
-    try {
-      await processExecutor.exec(`kill -TERM -- -${pid} 2>/dev/null`);
-    } catch {
-      // Process group may not exist when pid is not a group leader.
-    }
-    await IOSCtrlProxyManager.signalProcessIds(processExecutor, [...descendantFirstPids, pid], "TERM");
-
-    if (!await IOSCtrlProxyManager.waitForProcessesExit(processExecutor, timer, [pid, ...processTreePids])) {
-      try {
-        await processExecutor.exec(`kill -KILL -- -${pid} 2>/dev/null`);
-      } catch {
-        // Process group may not exist when pid is not a group leader.
-      }
-      await IOSCtrlProxyManager.signalProcessIds(processExecutor, [...descendantFirstPids, pid], "KILL");
-      await IOSCtrlProxyManager.waitForProcessesExit(processExecutor, timer, [pid, ...processTreePids]);
-    }
+    await IOSCtrlProxyManager.processClientForTesting(processExecutor, timer).terminateProcessTree(pid);
   }
 
   private static async findDescendantProcessIds(
     processExecutor: ProcessExecutor,
     rootPid: number
   ): Promise<number[]> {
-    try {
-      const { stdout } = await processExecutor.exec("ps -axo pid=,ppid=");
-      const childrenByParent = new Map<number, number[]>();
-      for (const line of stdout.trim().split("\n")) {
-        const match = line.trim().match(/^(\d+)\s+(\d+)$/);
-        if (!match) {
-          continue;
-        }
-        const pid = Number(match[1]);
-        const ppid = Number(match[2]);
-        const siblings = childrenByParent.get(ppid) ?? [];
-        siblings.push(pid);
-        childrenByParent.set(ppid, siblings);
-      }
-
-      const descendants: number[] = [];
-      const queue = [...(childrenByParent.get(rootPid) ?? [])];
-      const visited = new Set<number>();
-      while (queue.length > 0) {
-        const pid = queue.shift()!;
-        if (visited.has(pid)) {
-          continue;
-        }
-        visited.add(pid);
-        descendants.push(pid);
-        queue.push(...(childrenByParent.get(pid) ?? []));
-      }
-      return descendants;
-    } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Failed to enumerate descendants for PID ${rootPid}: ${error}`);
-      return [];
-    }
+    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).findDescendantProcessIds(rootPid);
   }
 
   private static async signalProcessIds(
@@ -2025,13 +1893,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     pids: number[],
     signal: "TERM" | "KILL"
   ): Promise<void> {
-    for (const pid of pids) {
-      try {
-        await processExecutor.exec(`kill -${signal} ${pid} 2>/dev/null`);
-      } catch {
-        // Process may have already exited.
-      }
-    }
+    for (const pid of pids) {await IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).terminateProcess(pid);}
   }
 
   private static async terminateProcess(
@@ -2039,20 +1901,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer,
     pid: number
   ): Promise<void> {
-    try {
-      await processExecutor.exec(`kill -TERM ${pid} 2>/dev/null`);
-    } catch {
-      // Process may have already exited.
-    }
-
-    if (!await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid)) {
-      try {
-        await processExecutor.exec(`kill -KILL ${pid} 2>/dev/null`);
-      } catch {
-        // Process may have exited between liveness check and kill.
-      }
-      await IOSCtrlProxyManager.waitForProcessExit(processExecutor, timer, pid);
-    }
+    await IOSCtrlProxyManager.processClientForTesting(processExecutor, timer).terminateProcess(pid);
   }
 
   private static async waitForProcessesExit(
@@ -2099,15 +1948,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     processExecutor: ProcessExecutor,
     pid: number
   ): Promise<boolean> {
-    try {
-      await processExecutor.exec(`kill -0 ${pid} 2>/dev/null`);
-      return true;
-    } catch (error) {
-      // `kill -0` throws once the pid has exited, which is exactly the "not
-      // running" case the port-release / exit-wait callers are polling for.
-      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
-      return false;
-    }
+    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).isRunning(pid);
   }
 
   /**

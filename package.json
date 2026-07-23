@@ -43,6 +43,7 @@
     "check:ffmpeg-boundary": "bash scripts/check-ffmpeg-execution-boundary.sh",
     "check:simulator-tcc-sqlite-boundary": "bash scripts/check-simulator-tcc-sqlite-boundary.sh",
     "check:daemon-launcher-boundary": "bash scripts/check-daemon-launcher-boundary.sh",
+    "check:ios-ctrl-proxy-process-boundary": "bash scripts/check-ios-ctrl-proxy-process-boundary.sh",
     "dead-code:ts": "bash scripts/detect-dead-code-ts.sh",
     "dead-code:ts:prune": "bash -o pipefail -c 'bunx ts-prune --project tsconfig.dead-code.json -i src/db/migrations | (grep -v \"(used in module)\" || true) | bash scripts/filter-ts-prune-allowlist.sh'",
     "dead-code:ts:knip": "bunx knip",

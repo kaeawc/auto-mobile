@@ -51,7 +51,7 @@ Users:
       const users = await adbClient.listUsers();
 
       expect(users.length).toBe(1);
-      expect(users[0], {
+      expect(users[0]).toEqual({
         userId: 0,
         name: "Owner",
         flags: 0x4c13,
@@ -93,13 +93,13 @@ Users:
       const users = await adbClient.listUsers();
 
       expect(users.length).toBe(2);
-      expect(users[0], {
+      expect(users[0]).toEqual({
         userId: 0,
         name: "Owner",
         flags: 0x4c13,
         running: true
       });
-      expect(users[1], {
+      expect(users[1]).toEqual({
         userId: 10,
         name: "Work profile",
         flags: 0x30,
@@ -229,13 +229,13 @@ Users:
       const users = await adbClient.listUsers();
 
       expect(users.length).toBe(2);
-      expect(users[0], {
+      expect(users[0]).toEqual({
         userId: 0,
         name: "Owner",
         flags: 0x4c13,
         running: true
       });
-      expect(users[1], {
+      expect(users[1]).toEqual({
         userId: 10,
         name: "Work profile",
         flags: 0x30,
@@ -272,7 +272,7 @@ Users:
       const users = await adbClient.listUsers();
 
       expect(users.length).toBe(1);
-      expect(users[0], {
+      expect(users[0]).toEqual({
         userId: 0,
         name: "Owner",
         flags: 0x4c13,
@@ -360,7 +360,7 @@ Users:
       const users = await adbClient.listUsers();
 
       expect(users.length).toBe(1);
-      expect(users[0], {
+      expect(users[0]).toEqual({
         userId: 0,
         name: "Owner",
         flags: 0x13,
@@ -387,7 +387,7 @@ Users:
       const users = await adbClient.listUsers();
 
       expect(users.length).toBe(1);
-      expect(users[0], {
+      expect(users[0]).toEqual({
         userId: 0,
         name: "Owner",
         flags: 0x13,
@@ -422,8 +422,8 @@ Users:
       const users = await adbClient.listUsers();
 
       expect(users.length).toBe(2);
-      expect(users[0].flags, 0x4c13); // 19475 in decimal
-      expect(users[1].flags, 0x1a2b); // 6699 in decimal
+      expect(users[0].flags).toBe(0x4c13); // 19475 in decimal
+      expect(users[1].flags).toBe(0x1a2b); // 6699 in decimal
     });
   });
 });

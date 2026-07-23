@@ -290,11 +290,46 @@ function noAccumulatorForEachRule() {
 	};
 }
 
+// A bare `expect(...)` used as a statement asserts nothing: no matcher is
+// chained, so nothing runs and it can never fail (issue #4198 — 10 such dead
+// assertions were hiding in one test file). Flag an ExpressionStatement whose
+// expression is a direct `expect()` CallExpression.
+//
+// This deliberately targets the MISSING matcher, not the arity: bun honours a
+// second argument as a label (`expect(x, "label").toBe(y)` fails as `error:
+// label`), so a labeled assertion WITH a matcher is legitimate. Because a
+// chained matcher makes the statement's callee a MemberExpression rather than
+// the `expect` Identifier, that form is inherently excluded by this selector.
+//
+// Report-only (no `fix`) so the repo's `eslint . --fix` lint command cannot
+// rewrite it — the ratchet convention requires ratchet rules be non-auto-fixable
+// (see CLAUDE.md). Kept as its own rule rather than folded into
+// no-restricted-syntax so its suppression budget stays isolated, matching
+// no-accumulator-foreach.
+function noBareExpectRule() {
+	return {
+		meta: {
+			type: "problem",
+			messages: {
+				bareExpect: "`expect(...)` with no matcher chained asserts nothing and can never fail. Chain a matcher (e.g. .toBe/.toEqual). Note: `expect(x, \"label\")` is a valid labeled assertion only when a matcher follows.",
+			},
+		},
+		create(context) {
+			return {
+				"ExpressionStatement > CallExpression[callee.name='expect']"(node) {
+					context.report({ node, messageId: "bareExpect" });
+				},
+			};
+		},
+	};
+}
+
 const catchConventionPlugin = {
 	rules: {
 		"catch-convention": catchConventionRule(),
 		"no-unknown-cast": noUnknownCastRule(),
 		"no-accumulator-foreach": noAccumulatorForEachRule(),
+		"no-bare-expect": noBareExpectRule(),
 	},
 };
 
@@ -623,6 +658,9 @@ export default [
 		rules: {
 			...baseRules,
 			"no-unused-expressions": "off",
+			// A bare `expect(...)` statement asserts nothing (issue #4198). Only
+			// test files use `expect`, so scope the gate here.
+			"auto-mobile/no-bare-expect": 2,
 		},
 	},
 	{

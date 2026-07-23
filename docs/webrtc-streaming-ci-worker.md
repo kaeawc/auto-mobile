@@ -1,8 +1,10 @@
 # Streaming a device's screen from a CI worker (WebRTC / WHIP)
 
 This guide shows how to make an AutoMobile daemon running on a CI worker **push**
-the screen of the Android or iOS device it is driving to a coordination server
-over WebRTC, so the stream can be watched live in a browser.
+the screen of the Android or iOS device it is driving to a WHIP ingest server
+over WebRTC, so the stream can be watched live in a browser. The supported
+server is [MediaMTX](https://github.com/bluenviron/mediamtx) — a single-binary
+SFU that accepts the WHIP stream and fans it out to browsers over WHEP.
 
 For the full design, see
 [WebRTC Screen Streaming](./design-docs/mcp/observe/webrtc-streaming.md), and
@@ -10,7 +12,7 @@ for the protocol rationale, see the
 [WebRTC standards map](./design-docs/mcp/observe/webrtc-standards-map.md).
 
 ```
-CI worker (AutoMobile daemon) ──WHIP──▶ coordination server ──WHEP──▶ browser
+CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP──▶ browser
 ```
 
 ## Prerequisites
@@ -20,18 +22,45 @@ CI worker (AutoMobile daemon) ──WHIP──▶ coordination server ──WHEP
 - A connected/booted **Android** emulator or device (`adb devices` lists it), or
   a booted **iOS** simulator with the CtrlProxy screen streaming helper and
   local `ffmpeg` available.
-- A reachable **coordination server** that accepts WHIP ingest. Use the bundled
-  [reference server](../examples/webrtc-coordination-server/README.md) to try it
-  out, or a production SFU such as MediaMTX / LiveKit / Janus / Cloudflare.
+- A reachable **WHIP ingest server**. Run MediaMTX with the
+  [example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml) — `mediamtx ./examples/mediamtx/mediamtx.yml`
+  (or the official container) — which serves WHIP at `/<stream>/whip` and WHEP at
+  `/<stream>/whep` on port `8889`. Any WHIP-compatible SFU (LiveKit, Janus,
+  Cloudflare) works too. The bundled
+  [reference server](../examples/webrtc-coordination-server/README.md) still
+  exists for a zero-dependency local try-out, but MediaMTX is the supported
+  production fanout.
+  - **Ports:** `8889` is only the WHIP/WHEP signaling listener. The media itself
+    flows over MediaMTX's ICE **UDP** listener `webrtcLocalUDPAddress: :8189` — a
+    containerized or firewalled deployment that exposes only `8889` gets WHIP/WHEP
+    setup failures or black video. Map/open `8189/udp` too, or configure a
+    TURN/TCP-only path. Behind Docker/NAT, mapping the port is not enough if
+    MediaMTX advertises its private/container interface — set
+    `webrtcAdditionalHosts: [<public-ip-or-dns>]` so it hands out reachable ICE
+    candidates, otherwise signaling completes but ICE times out to black video.
+  - **Auth:** the stock config is **localhost-only** — its active `authInternalUsers`
+    entry admits `127.0.0.1`/`::1`, so a CI worker publishing from *another host*
+    gets `401` until you enable the config's commented tokened `authInternalUsers`
+    block. Then set `AUTOMOBILE_WEBRTC_WHIP_TOKEN` to that user's `<user>:<pass>`
+    (MediaMTX reads internal credentials from `Authorization: Bearer <user>:<pass>`).
 
-## 1. Point the worker at your coordination server
+## 1. Point the worker at your WHIP server
 
-Set these before (or when) starting the daemon:
+MediaMTX derives the stream name from the URL **path**, so set the endpoint to a
+per-stream WHIP URL (the publisher also appends a harmless `?streamId=` query
+that MediaMTX ignores). The stock config serves plain **HTTP** on `:8889`, so use
+`http://`. For a reachable deployment, enable TLS and switch to `https://` — see
+[HTTPS](./design-docs/mcp/observe/webrtc-streaming.md#production-fanout-mediamtx)
+in the design doc for the certificate + `webrtcEncryption` steps. Set these
+before (or when) starting the daemon. Because MediaMTX keys the stream from the
+path, a **per-job** stream must carry its id in the endpoint path — the `start`
+request's `streamId` alone only sets the ignored query (see [Typical CI
+shape](#typical-ci-shape) for deriving both from `$CI_JOB_ID`):
 
 ```bash
-export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="https://coord.example.com/whip"
+export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx.example.com:8889/ci-run-42/whip"
 # Optional:
-export AUTOMOBILE_WEBRTC_WHIP_TOKEN="<bearer token, if the server requires one>"
+export AUTOMOBILE_WEBRTC_WHIP_TOKEN="<user>:<pass>"  # for cross-host MediaMTX; matches the tokened authInternalUsers block
 export AUTOMOBILE_WEBRTC_ICE_SERVERS="stun:stun.l.google.com:19302"
 # Optional tuning:
 export AUTOMOBILE_WEBRTC_BITRATE_KBPS="4000"
@@ -42,7 +71,7 @@ export AUTOMOBILE_WEBRTC_AUDIO="1"
 
 > **NAT/firewall:** CI workers are usually behind NAT. Add a **TURN** server to
 > `AUTOMOBILE_WEBRTC_ICE_SERVERS` (JSON form) if a plain STUN server cannot
-> establish connectivity to your coordination server:
+> establish connectivity to your WHIP server:
 >
 > ```bash
 > export AUTOMOBILE_WEBRTC_ICE_SERVERS='[{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]'
@@ -65,7 +94,7 @@ Response:
 ```json
 {"success":true,"type":"webrtc_stream_response","action":"start",
  "stream":{"streamId":"ci-run-42","state":"connected",
-           "resourceUrl":"https://coord.example.com/whip/ci-run-42", ...}}
+           "resourceUrl":"http://mediamtx.example.com:8889/ci-run-42/whip/<session>", ...}}
 ```
 
 If multiple devices are attached, pass `"deviceId":"emulator-5554"` or the iOS
@@ -87,9 +116,10 @@ console.log(res.stream?.resourceUrl);
 
 ## 3. Watch it
 
-Open the coordination server's viewer (the reference server serves one at `/`)
-and pick `ci-run-42` from the stream list. The viewer discovers streams through
-the reconnect API (`GET /api/streams`) and connects over WHEP.
+Point a browser WHEP viewer at the matching WHEP URL — for the stream above,
+`http://mediamtx.example.com:8889/ci-run-42/whep`. MediaMTX serves a built-in
+reader page at `http://mediamtx.example.com:8889/ci-run-42`; any WHEP-capable
+`<video>` client works too.
 
 ## 4. Stop the stream
 
@@ -112,16 +142,20 @@ echo '{"action":"status","streamId":"ci-run-42"}' | nc -U ~/.auto-mobile/webrtc-
 
 ```bash
 # 1. boot emulator/simulator + start daemon (project-specific)
-# 2. begin streaming so humans can watch the run live
-echo '{"action":"start","streamId":"'"$CI_JOB_ID"'"}' | nc -U ~/.auto-mobile/webrtc-stream.sock
+# 2. begin streaming so humans can watch the run live.
+#    Put $CI_JOB_ID in the WHIP *path* so each job is its own MediaMTX stream —
+#    passing only streamId would leave every job publishing to the same path.
+WHIP="http://mediamtx.example.com:8889/$CI_JOB_ID/whip"
+echo '{"action":"start","streamId":"'"$CI_JOB_ID"'","whipEndpoint":"'"$WHIP"'"}' | nc -U ~/.auto-mobile/webrtc-stream.sock
 # 3. run your AutoMobile test plan ...
 # 4. stop streaming on teardown (best-effort)
 echo '{"action":"stop","streamId":"'"$CI_JOB_ID"'"}'  | nc -U ~/.auto-mobile/webrtc-stream.sock || true
 ```
 
-The publisher reconnects automatically if the network blips; the browser viewer
-reconnects via the coordination server's reconnect API. Video streaming supports
-Android and iOS; optional audio works on Android and iOS Simulator windows.
+The publisher reconnects automatically if the network blips. MediaMTX keeps the
+WHEP path stable, but a browser WHEP client must retry or recreate its peer
+connection after the publisher reconnects. Video streaming supports Android and
+iOS; optional audio works on Android and iOS Simulator windows.
 
 ## Troubleshooting
 
@@ -129,7 +163,7 @@ Android and iOS; optional audio works on Android and iOS Simulator windows.
 |---------|--------------------|
 | `No WHIP endpoint configured` | Set `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` or pass `whipEndpoint`. |
 | `No connected android devices found` | Emulator/device not booted, or pass the right `deviceId`. |
-| `WHIP ingest failed: … 401` | Coordination server requires a token — set `AUTOMOBILE_WEBRTC_WHIP_TOKEN`. |
+| `WHIP ingest failed: … 401` | The WHIP server requires auth, or you're publishing cross-host against the localhost-only stock config. Enable the tokened `authInternalUsers` block and set `AUTOMOBILE_WEBRTC_WHIP_TOKEN` to that user's `<user>:<pass>`. |
 | Stream shows `connected` but the browser video is black | ICE could not traverse NAT — add a TURN server. |
 | Brief hitch every ~3 minutes | Expected `screenrecord` segment rotation (180 s cap). Build/provide `automobile-video.jar` to use the persistent encoder. |
 | Audio-enabled stream fails to start | The persistent `video-server` jar is missing, or the device build does not allow shell `REMOTE_SUBMIX` capture. Disable audio or use a compatible Android image. |

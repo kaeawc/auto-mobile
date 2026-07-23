@@ -1,0 +1,125 @@
+# MediaMTX configuration for AutoMobile WebRTC screen streaming.
+#
+# MediaMTX (https://github.com/bluenviron/mediamtx) is a single-binary media
+# server that ingests a WebRTC stream over WHIP and fans it out to browsers over
+# WHEP. It replaces the hand-rolled reference coordination server as the
+# supported production fanout: it owns per-subscriber RTP forwarding, keyframe
+# recovery, and reconnect/migration — so AutoMobile only has to publish.
+#
+# The AutoMobile publisher is unchanged: it is a standard RFC 9725 WHIP client.
+# Point AUTOMOBILE_WEBRTC_WHIP_ENDPOINT at a per-stream WHIP URL served here
+# (see the note on stream naming at the bottom of this file).
+#
+# This config requires MediaMTX v1.19.2 or newer. Keys occasionally change
+# across releases; the authoritative reference is the bundled mediamtx.yml in
+# the MediaMTX repo.
+# Validate this configuration against the MediaMTX release you deploy before
+# exposing it outside a local try-out.
+
+###############################################################################
+# WebRTC (WHIP ingest + WHEP egress)
+###############################################################################
+
+# Enable the WebRTC server. It serves WHIP at /<name>/whip and WHEP at
+# /<name>/whep on webrtcAddress.
+webrtc: yes
+webrtcAddress: :8889
+
+# --- TLS / HTTPS ---
+# This listener is plain HTTP by default (webrtcEncryption: no), so its URLs are
+# http://…:8889/… — use those for the local try-out. For a reachable deployment,
+# terminate TLS here and switch the URLs (and AUTOMOBILE_WEBRTC_WHIP_ENDPOINT) to
+# https://. MediaMTX does not ship a certificate. Use a publicly-trusted
+# certificate (e.g. Let's Encrypt): AutoMobile's WHIP client is Bun's `fetch` and
+# browser WHEP clients both reject an untrusted cert, so a self-signed cert only
+# works if its CA is installed/trusted on every publisher and viewer host. A
+# self-signed cert can be generated for such a setup with:
+#
+#   openssl genrsa -out server.key 2048
+#   openssl req -new -x509 -sha256 -key server.key -out server.crt -days 3650
+#
+# then uncomment (paths are relative to MediaMTX's working directory):
+# webrtcEncryption: yes
+# webrtcServerKey: server.key
+# webrtcServerCert: server.crt
+
+# STUN/TURN for NAT traversal. Mirror whatever you pass to the publisher via
+# AUTOMOBILE_WEBRTC_ICE_SERVERS so both peers agree on how to connect.
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+  # TURN example — uncomment and fill in for CI workers behind NAT that a plain
+  # STUN server cannot traverse:
+  # - url: turn:turn.example.com:3478
+  #   username: user
+  #   password: pass
+
+# Behind Docker/NAT, MediaMTX otherwise advertises its private/container
+# interface as the ICE host, so signaling succeeds but media never connects.
+# List the public IP(s)/DNS name(s) clients use to reach the server:
+# webrtcAdditionalHosts: [1.2.3.4, mediamtx.example.com]
+
+###############################################################################
+# Trim the surface: AutoMobile only uses WebRTC. Disable the other ingress and
+# egress protocols so nothing else is listening.
+###############################################################################
+rtsp: no
+rtmp: no
+hls: no
+srt: no
+moq: no
+
+###############################################################################
+# Authentication
+###############################################################################
+# IMPORTANT: out of the box MediaMTX allows anonymous publish AND read from ANY
+# IP (its built-in `any` user has an empty `ips` list). On a reachable host that
+# is an open WHIP/WHEP endpoint. This example overrides that default to restrict
+# anonymous access to localhost, so copying it verbatim does not expose an open
+# ingest — the local try-out still works with no credentials.
+authInternalUsers:
+  - user: any
+    ips: ["127.0.0.1", "::1"]
+    permissions:
+      - action: publish
+      - action: read
+
+# Reachable deployment (the CI-worker use case): require the token AutoMobile
+# sends. Under internal auth MediaMTX reads credentials from an
+# `Authorization: Bearer <user>:<pass>` header, so set
+# AUTOMOBILE_WEBRTC_WHIP_TOKEN to "<user>:<pass>". Replace the block above with:
+#
+# authInternalUsers:
+#   - user: automobile
+#     pass: <choose-a-strong-secret>   # AUTOMOBILE_WEBRTC_WHIP_TOKEN="automobile:<choose-a-strong-secret>"
+#     permissions:
+#       - action: publish
+#   - user: any                        # readers open; tokenize the same way to lock down
+#     permissions:
+#       - action: read
+
+###############################################################################
+# Paths (streams)
+###############################################################################
+# One path per stream, created on demand. AutoMobile publishes to
+# /<streamId>/whip and browsers subscribe at /<streamId>/whep. `all_others`
+# accepts any stream name without pre-declaring it.
+paths:
+  all_others:
+
+###############################################################################
+# Stream naming — how to set AUTOMOBILE_WEBRTC_WHIP_ENDPOINT
+###############################################################################
+# MediaMTX derives the stream name from the URL *path* (/<name>/whip), whereas
+# the AutoMobile publisher additionally appends a harmless `?streamId=<id>`
+# query parameter (a coordination-server convention MediaMTX ignores). So put
+# the stream name in the path:
+#
+#   export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx-host:8889/ci-run-42/whip"
+#
+# or override per request over the control socket so the path carries the job id:
+#
+#   {"action":"start","whipEndpoint":"http://mediamtx-host:8889/$CI_JOB_ID/whip"}
+#
+# Watch it in a browser at the matching WHEP URL:
+#
+#   http://mediamtx-host:8889/ci-run-42/whep

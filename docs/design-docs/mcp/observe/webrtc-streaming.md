@@ -54,12 +54,17 @@ by common media servers (MediaMTX, LiveKit, Janus, Cloudflare).
                                            │  Location: resource URL
                                            ▼
                                  ┌───────────────────────┐   WHEP    ┌─────────┐
-                                 │ Coordination server   │◀─────────▶│ Browser │
-                                 │ (WHIP ingest → forward │  offer/   │ <video> │
-                                 │  RTP → WHEP egress)   │  answer   └─────────┘
-                                 │  GET /api/streams  ◀──┼── reconnect API
+                                 │ MediaMTX (SFU)        │◀─────────▶│ Browser │
+                                 │ WHIP ingest → forward  │  offer/   │ <video> │
+                                 │ RTP → WHEP egress     │  answer   └─────────┘
+                                 │ /<stream>/whip · /whep │
                                  └───────────────────────┘
 ```
+
+> The supported production fanout is **MediaMTX**; the AutoMobile publisher is
+> unchanged (a standard WHIP client). See
+> [Production fanout: MediaMTX](#production-fanout-mediamtx) below. The bundled
+> reference coordination server remains for zero-dependency local try-out.
 
 ### Components (in `src/features/webrtc/`)
 
@@ -83,6 +88,69 @@ Control plane:
 | `src/server/webrtcStreamManager.ts` | Per-device stream lifecycle; wires source ⇄ publisher; restarts the source on reconnect so a fresh keyframe follows |
 | `src/daemon/webrtcStreamSocketServer.ts` | `webrtc-stream.sock` request/response control (`start`/`stop`/`status`/`list`) |
 | `src/daemon/webrtcStreamClient.ts` | Minimal client for scripts/tooling |
+
+## Production fanout: MediaMTX
+
+The publisher only needs a **WHIP ingest endpoint**; it does not care what
+serves it. The supported production fanout is
+[MediaMTX](https://github.com/bluenviron/mediamtx), a single-binary SFU that
+ingests the WHIP stream and fans it out to browsers over WHEP. It owns the
+per-subscriber RTP forwarding, keyframe recovery, and reconnect/migration that a
+multi-viewer stream needs — so AutoMobile stays out of the SFU business.
+
+Run it with the checked-in [example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml):
+
+```bash
+mediamtx ./examples/mediamtx/mediamtx.yml   # serves WHIP + WHEP on :8889
+```
+
+Then point the worker at a **per-stream** WHIP URL — MediaMTX takes the stream
+name from the URL path (`/<stream>/whip`); the publisher additionally appends a
+harmless `?streamId=` query that MediaMTX ignores. The stock config serves plain
+HTTP on `:8889` (enable `webrtcEncryption` for `https://`):
+
+```bash
+export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx-host:8889/ci-run-42/whip"
+```
+
+> **Reachable/containerized hosts** need more than `:8889` (which is only
+> signaling): expose the ICE media port `webrtcLocalUDPAddress: :8189/udp` (add
+> `webrtcAdditionalHosts` behind NAT, or use TURN), and enable auth — the stock
+> config is localhost-only, so a cross-host worker `401`s until the tokened
+> `authInternalUsers` block is enabled and `AUTOMOBILE_WEBRTC_WHIP_TOKEN` is set to
+> `<user>:<pass>`. See the CI guide's
+> [Prerequisites](../../../webrtc-streaming-ci-worker.md#prerequisites) for both.
+
+Browsers subscribe at the matching WHEP URL `http://mediamtx-host:8889/ci-run-42/whep`
+(MediaMTX also serves a built-in reader page at `http://mediamtx-host:8889/ci-run-42`).
+Any WHIP/WHEP-compatible SFU (LiveKit, Janus, Cloudflare) works the same way.
+
+**HTTPS.** The stock config is plain HTTP. For a reachable deployment, terminate
+TLS on the WebRTC listener with a **publicly-trusted** certificate (e.g. Let's
+Encrypt) — AutoMobile's WHIP client (Bun's `fetch`) and browser WHEP clients both
+reject an untrusted cert, so a self-signed cert works only if its CA is trusted on
+every publisher and viewer host. Enable it in the config —
+
+```bash
+# publicly-trusted cert preferred; self-signed shown for a CA-trusted intranet:
+openssl genrsa -out server.key 2048
+openssl req -new -x509 -sha256 -key server.key -out server.crt -days 3650
+```
+
+```yaml
+webrtcEncryption: yes
+webrtcServerKey: server.key
+webrtcServerCert: server.crt
+```
+
+then use `https://` for both `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` and the WHEP URL
+(`https://mediamtx-host:8889/ci-run-42/whip` · `…/whep`). The
+[example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml)
+carries these keys commented out.
+
+The bundled reference coordination server
+([`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/README.md))
+remains as a zero-dependency way to try the path locally, and is described below.
 
 ## Why the daemon socket (not an MCP tool)
 
@@ -247,8 +315,10 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 - **Audio is opt-in and platform-constrained.** iOS audio requires Simulator-window
   capture; physical devices remain video-only. Android audio depends on
   `REMOTE_SUBMIX` availability for the shell-owned `video-server` process.
-- **Reference server is single-process/in-memory.** Use a hardened WHIP/WHEP SFU
-  (MediaMTX, LiveKit, Janus, Cloudflare) in production; the publisher is unchanged.
+- **Reference server is single-process/in-memory.** It exists for local
+  try-out only. Use the supported [MediaMTX](#production-fanout-mediamtx) fanout
+  (or another hardened WHIP/WHEP SFU — LiveKit, Janus, Cloudflare) in production;
+  the publisher is unchanged.
 - **Trickle ICE is opt-in.** By default the publisher gathers candidates before
   POSTing the WHIP offer (non-trickle), which is simplest and widely compatible.
   Set `AUTOMOBILE_WEBRTC_TRICKLE_ICE=1` (or `trickleIce: true`) to publish the

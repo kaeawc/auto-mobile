@@ -101,14 +101,15 @@ the resolved device type and runtime are logged at creation time.
 
 ## WebRTC screen streaming (`AUTOMOBILE_WEBRTC_*`)
 
-Defaults for pushing a device's screen to a coordination server over WebRTC/WHIP.
+Defaults for pushing a device's screen to a WHIP ingest server (the supported
+fanout is [MediaMTX](https://github.com/bluenviron/mediamtx)) over WebRTC/WHIP.
 See the [CI worker guide](../webrtc-streaming-ci-worker.md) and the
 [design doc](../design-docs/mcp/observe/webrtc-streaming.md). Any value can be
 overridden per request on the `webrtc-stream.sock` control socket.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL of the coordination server. Required to start a stream unless passed per request. | unset |
+| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL. For MediaMTX use a per-stream path, e.g. `http://host:8889/<stream>/whip` (the stock config is plain HTTP; enable `webrtcEncryption` for `https://`). Required to start a stream unless passed per request. | unset |
 | `AUTOMOBILE_WEBRTC_WHIP_TOKEN` | Bearer token sent as `Authorization: Bearer <token>` on WHIP ingest. | unset |
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`. | `stun:stun.l.google.com:19302` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |

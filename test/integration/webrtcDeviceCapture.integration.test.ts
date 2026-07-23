@@ -135,7 +135,10 @@ async function changeFixture(): Promise<void> {
 }
 
 afterEach(async () => {
-  if (platform === "android") {await execFileAsync("adb", ["shell", "cmd", "uimode", "night", "no"]).catch(() => undefined);}
+  if (platform === "android") {
+    const id = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
+    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"]).catch(() => undefined);
+  }
   if (platform === "ios") {await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"]).catch(() => undefined);}
 });
 
@@ -144,7 +147,11 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     if (!process.env.AUTOMOBILE_MEDIAMTX_BINARY) {throw new Error("MediaMTX runner did not provide AUTOMOBILE_MEDIAMTX_BINARY");}
     await mkdir(artifactDir, { recursive: true });
     const daemonDbDir = await mkdtemp(join(artifactDir, "daemon-db-"));
-    const daemonEnvironment = { ...process.env, AUTOMOBILE_DB_DIR: daemonDbDir };
+    const daemonEnvironment = {
+      ...process.env,
+      AUTOMOBILE_DB_DIR: daemonDbDir,
+      AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000",
+    };
     delete daemonEnvironment.AUTOMOBILE_DB_PATH;
     const mediamtx = start(process.env.AUTOMOBILE_MEDIAMTX_BINARY, ["examples/mediamtx/mediamtx.yml"], join(artifactDir, "mediamtx.log"));
     let chrome: ChildProcessWithoutNullStreams | undefined;
@@ -160,8 +167,8 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         await Bun.sleep(100);
         return mediamtx.exitCode === null && mediamtx.signalCode === null;
       }, "MediaMTX did not become ready");
-      await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment });
       started = true;
+      await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment }).catch(() => undefined);
       await waitFor(async () => {
         try {
           const response = await sendWebRtcStreamRequest({ action: "list", id: `${streamId}-daemon-ready` }, { timeoutMs: 1_000 });

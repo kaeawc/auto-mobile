@@ -12,7 +12,7 @@ interface WorkflowDocument {
   jobs?: Record<string, {
     needs?: string | string[];
     if?: string;
-    steps?: Array<{ id?: string; uses?: string; with?: { filters?: string } }>;
+    steps?: Array<{ id?: string; name?: string; uses?: string; with?: { filters?: string; "gradle-tasks"?: string } }>;
   }>;
 }
 
@@ -58,5 +58,15 @@ describe("#4308 device WebRTC integration workflow", () => {
     }
     expect(android?.if).toContain("inputs.platform == 'android'");
     expect(ios?.if).toContain("inputs.platform == 'ios'");
+  });
+
+  test("builds the CtrlProxy APK before the Android emulator composite installs it", () => {
+    const androidSteps = workflow().jobs?.["android-device-webrtc"]?.steps ?? [];
+    const buildIndex = androidSteps.findIndex(step => step.name === "Build CtrlProxy APK");
+    const emulatorIndex = androidSteps.findIndex(step => step.uses === "./.github/actions/android-emulator");
+
+    expect(buildIndex).toBeGreaterThanOrEqual(0);
+    expect(androidSteps[buildIndex]?.with?.["gradle-tasks"]).toContain(":control-proxy:assembleDebug");
+    expect(emulatorIndex).toBeGreaterThan(buildIndex);
   });
 });

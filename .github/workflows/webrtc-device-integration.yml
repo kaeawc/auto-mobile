@@ -54,6 +54,14 @@ jobs:
         with:
           lfs: false
       - uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Build CtrlProxy APK"
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":control-proxy:assembleDebug"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
       - name: "Install Chrome for WHEP decoding"
         run: |
           sudo apt-get update

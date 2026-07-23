@@ -15,6 +15,7 @@ const platform = process.env.AUTOMOBILE_WEBRTC_DEVICE_PLATFORM;
 const webRtcPort = 8889;
 const streamId = `device-capture-${platform ?? "unknown"}`;
 const artifactDir = resolve("scratch/webrtc-device-integration");
+const daemonEnvironment = { ...process.env, AUTOMOBILE_DB_PATH: ":memory:" };
 
 interface ChromeTarget { type: string; webSocketDebuggerUrl?: string }
 interface CdpResponse { id?: number; result?: { result?: { value?: unknown } }; error?: { message?: string } }
@@ -157,7 +158,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         await Bun.sleep(100);
         return mediamtx.exitCode === null && mediamtx.signalCode === null;
       }, "MediaMTX did not become ready");
-      await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"]);
+      await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment });
       started = true;
       await launchFixture();
       const response = await sendWebRtcStreamRequest({ action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` });
@@ -180,7 +181,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     } finally {
       cdp?.close();
       await stop(chrome);
-      if (started) {await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"]).catch(() => undefined);}
+      if (started) {await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], { env: daemonEnvironment }).catch(() => undefined);}
       await stop(mediamtx);
       await writeFile(join(artifactDir, "result.txt"), `platform=${platform}\nstream=${streamId}\n`);
     }

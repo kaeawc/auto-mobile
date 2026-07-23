@@ -765,6 +765,14 @@ describe("DeviceSessionManager device-list error formatting (#4227)", () => {
     deviceId: "emulator-5554",
   };
 
+  test("verifyAndroidDevice matches the device id when the Android name differs", async () => {
+    const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
+
+    await expect(
+      manager.verifyAndroidDevice(androidDevice.deviceId, { skipCtrlProxyDownload: true })
+    ).resolves.toBeUndefined();
+  });
+
   test("ensureDeviceReady names the available devices instead of [object Object]", async () => {
     const manager = DeviceSessionManager.createInstance(makeProvider([androidDevice]));
 

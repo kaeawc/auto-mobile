@@ -222,31 +222,6 @@ describe("Rotate", () => {
     });
   });
 
-  describe("constructor", () => {
-    test("should work with non-null deviceId", () => {
-      const device: BootedDevice = {
-        name: "Test Device",
-        platform: "android",
-        deviceId: "test-device",
-        source: "local"
-      };
-      const rotateInstance = new Rotate(device, null, fakeTimer);
-      expect(rotateInstance).toBeDefined();
-    });
-
-    test("should work with custom ADB executor", () => {
-      const device: BootedDevice = {
-        name: "Test Device",
-        platform: "android",
-        deviceId: "test-device",
-        source: "local"
-      };
-      const customAdb = new FakeAdbExecutor();
-      const rotateInstance = new Rotate(device, customAdb, fakeTimer);
-      expect(rotateInstance).toBeDefined();
-    });
-  });
-
   describe("edge cases", () => {
     test("should handle whitespace in ADB output", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("  1  \n"));

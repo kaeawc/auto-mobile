@@ -197,7 +197,7 @@ describe("RecentApps", () => {
       const result = await recentApps.execute(progressCallback);
 
       expect(result.success).toBe(true);
-      expect(callbackCalled || fakeObserveScreen.wasMethodCalled("execute")).toBe(true);
+      expect(callbackCalled).toBe(true);
     });
 
     test("should handle missing view hierarchy gracefully", async () => {
@@ -208,14 +208,10 @@ describe("RecentApps", () => {
         return result;
       });
 
-      try {
-        const result = await recentApps.execute();
-        // BaseVisualChange catches the error and returns success: false
-        // We're testing the graceful handling, so just ensure result is not successful
-        expect(result.success).toBe(false);
-      } catch (caughtError) {
-        expect((caughtError as Error).message).toContain("Cannot perform action without view hierarchy");
-      }
+      const result = await recentApps.execute();
+
+      expect(result.success).toBe(false);
+      expect(result.method).toBe("unknown");
     });
 
     test("should handle missing screen size gracefully", async () => {
@@ -226,12 +222,7 @@ describe("RecentApps", () => {
         return result;
       });
 
-      try {
-        await recentApps.execute();
-        throw new Error("Expected an error to be thrown");
-      } catch (caughtError) {
-        expect((caughtError as Error).message).toContain("Screen size or system insets not available");
-      }
+      await expect(recentApps.execute()).rejects.toThrow("Screen size or system insets not available");
     });
   });
 
@@ -274,42 +265,25 @@ describe("RecentApps", () => {
     test("should handle gesture navigation ADB command failure", async () => {
       const mockCachedObservation = createObserveResult(createGestureNavigationHierarchy());
       fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "error" });
+      fakeAdb.setDefaultError(new Error("gesture command failed"));
 
-      try {
-        await recentApps.execute();
-        throw new Error("Expected an error to be thrown");
-      } catch (caughtError) {
-        expect(caughtError).toBeDefined();
-      }
+      await expect(recentApps.execute()).rejects.toThrow("gesture command failed");
     });
 
     test("should handle legacy navigation ADB command failure", async () => {
       const mockCachedObservation = createObserveResult(createLegacyNavigationHierarchy());
       fakeObserveScreen.setObserveResult(mockCachedObservation);
-      // Set default response with error to simulate ADB failure
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "error" });
+      fakeAdb.setDefaultError(new Error("legacy command failed"));
 
-      try {
-        await recentApps.execute();
-        throw new Error("Expected an error to be thrown");
-      } catch (caughtError) {
-        // Error should be thrown when ADB command fails
-        expect(caughtError).toBeDefined();
-      }
+      await expect(recentApps.execute()).rejects.toThrow("legacy command failed");
     });
 
     test("should handle hardware navigation ADB command failure", async () => {
       const mockCachedObservation = createObserveResult(createEmptyHierarchy());
       fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setCommandResponse("shell input keyevent 187", { stdout: "", stderr: "error" });
+      fakeAdb.setCommandError("shell input keyevent 187", new Error("hardware command failed"));
 
-      try {
-        await recentApps.execute();
-        throw new Error("Expected an error to be thrown");
-      } catch (caughtError) {
-        expect(caughtError).toBeDefined();
-      }
+      await expect(recentApps.execute()).rejects.toThrow("hardware command failed");
     });
 
     test("should handle missing system insets for gesture navigation", async () => {
@@ -317,12 +291,7 @@ describe("RecentApps", () => {
       (mockCachedObservation.systemInsets as any) = null;
       fakeObserveScreen.setObserveResult(mockCachedObservation);
 
-      try {
-        await recentApps.execute();
-        throw new Error("Expected an error to be thrown");
-      } catch (caughtError) {
-        expect((caughtError as Error).message).toContain("Screen size or system insets not available");
-      }
+      await expect(recentApps.execute()).rejects.toThrow("Screen size or system insets not available");
     });
 
     test("should handle missing recent apps button in legacy navigation", async () => {
@@ -337,27 +306,11 @@ describe("RecentApps", () => {
       (recentApps as any).detectNavigationStyle = () => "legacy";
 
       try {
-        await recentApps.execute();
-        throw new Error("Expected an error to be thrown");
-      } catch (caughtError) {
-        expect((caughtError as Error).message).toContain("Recent apps button not found");
+        await expect(recentApps.execute()).rejects.toThrow("Recent apps button not found");
       } finally {
         // Restore the original method
         (recentApps as any).detectNavigationStyle = originalDetectNavigationStyle;
       }
-    });
-  });
-
-  describe("constructor", () => {
-    test("should work with null deviceId", () => {
-      const recentAppsInstance = new RecentApps(testDevice, fakeAdb, fakeTimer);
-      expect(recentAppsInstance).toBeDefined();
-    });
-
-    test("should work with custom AdbClient", () => {
-      const customAdb = new FakeAdbExecutor();
-      const recentAppsInstance = new RecentApps(testDevice, customAdb, fakeTimer);
-      expect(recentAppsInstance).toBeDefined();
     });
   });
 
@@ -403,12 +356,7 @@ describe("RecentApps", () => {
     test("should throw when CtrlProxy recentApps fails on iOS", async () => {
       fakeIOSCtrlProxy.setFailureMode("recentApps", new Error("Connection lost"));
 
-      try {
-        await iosRecentApps.execute();
-        throw new Error("Expected an error to be thrown");
-      } catch (error) {
-        expect((error as Error).message).toContain("Connection lost");
-      }
+      await expect(iosRecentApps.execute()).rejects.toThrow("Connection lost");
     });
 
     test("should return explicit failure when CtrlProxy cannot verify App Switcher on iOS", async () => {

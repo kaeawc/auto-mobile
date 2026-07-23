@@ -1,0 +1,152 @@
+import { parseArgs as parseNodeArgs } from "node:util";
+import type { VideoRecordingConfigInput } from "../models";
+import type { PlanExecutionLockScope } from "../utils/ServerConfig";
+import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
+import { hasEventAllMarkersCliOverride, parseEventAllMarkersConfig } from "../utils/eventAllMarkers";
+import { parseOutputReductionFlags } from "../utils/outputReductionFlags";
+import { parseToolOutputsDirConfig } from "../utils/toolOutputArtifacts";
+import { resolveDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+
+export interface ParseLogger {
+  warn(message: string): void;
+}
+
+const booleanOptions = Object.fromEntries(
+  [
+    "cli", "daemon-mode", "no-proxy", "direct", "no-daemon", "debug-perf", "ui-perf-debug",
+    "debug", "no-ui-perf-mode", "mem-perf-audit", "accessibility-audit", "predictive",
+    "predictive-ui", "raw-element-search", "embedded-sdk", "network-mockable",
+    "dismiss-keyboard-after-input", "mcp-recording", "no-navigation-screenshots",
+    "no-waitfor-polling-overhead", "no-include-not-important-views", "no-report-view-ids",
+    "no-retrieve-interactive-windows", "no-occlusion", "safe-area-warnings", "edge-to-edge-warnings",
+  ].map(name => [name, { type: "boolean" as const }])
+);
+
+/** Parses daemon options from explicit argument tokens, rather than process.argv. */
+// The existing option surface is intentionally preserved during this extraction.
+// A declarative parser migration is separate behavior-changing work.
+// eslint-disable-next-line complexity
+export function parseArgs(args: string[], log: ParseLogger) {
+  const { values } = parseNodeArgs({
+    args,
+    options: booleanOptions,
+    allowPositionals: true,
+    strict: false,
+  });
+  // `=== true` intentionally retains the prior exact-flag behavior for
+  // `--flag=value` while delegating ordinary flag tokenization to Node/Bun.
+  const hasFlag = (name: string) => values[name] === true;
+  let daemonPort: number | undefined;
+  let daemonHost: string | undefined;
+  const cliMode = hasFlag("cli");
+  const daemonMode = hasFlag("daemon-mode");
+  const noProxy = hasFlag("no-proxy") || hasFlag("direct");
+  const noDaemon = hasFlag("no-daemon");
+  const daemonCommandIndex = args.indexOf("--daemon");
+  const daemonCommand = daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] : undefined;
+  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
+  const debugPerf = hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
+  const debug = hasFlag("debug") || process.env.AUTOMOBILE_DEBUG === "1";
+  const uiPerfMode = !hasFlag("no-ui-perf-mode");
+  const memPerfAuditMode = hasFlag("mem-perf-audit");
+  const a11yAuditMode = hasFlag("accessibility-audit");
+  let a11yLevel: string | undefined;
+  let a11yFailureMode: string | undefined;
+  let a11yMinSeverity: string | undefined;
+  let a11yUseBaseline = false;
+  const predictiveUi = hasFlag("predictive") || hasFlag("predictive-ui");
+  const rawElementSearch = hasFlag("raw-element-search");
+  const skipCtrlProxyDownload = shouldSkipCtrlProxyDownload(args);
+  const embeddedSdk = hasFlag("embedded-sdk");
+  const networkMockable = hasFlag("network-mockable");
+  const dismissKeyboardAfterInput = hasFlag("dismiss-keyboard-after-input");
+  const eventAllMarkers = parseEventAllMarkersConfig(args, process.env);
+  const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
+  const mcpRecording = hasFlag("mcp-recording");
+  const navigationScreenshots = !hasFlag("no-navigation-screenshots");
+  const noWaitForPollingOverhead = hasFlag("no-waitfor-polling-overhead");
+  const noA11yIncludeNotImportantViews = hasFlag("no-include-not-important-views");
+  const noA11yReportViewIds = hasFlag("no-report-view-ids");
+  const noA11yRetrieveInteractiveWindows = hasFlag("no-retrieve-interactive-windows");
+  const noOcclusion = hasFlag("no-occlusion");
+  const safeAreaWarnings = hasFlag("safe-area-warnings") || hasFlag("edge-to-edge-warnings");
+  const outputReduction = parseOutputReductionFlags(args, process.env);
+  const toolOutputsDir = parseToolOutputsDirConfig(args, process.env, resolveDaemonLaunchWorkingDirectory());
+  let planExecutionLockScope: PlanExecutionLockScope = "session";
+  const videoRecordingDefaults: VideoRecordingConfigInput = {};
+
+  const parsePositiveNumber = (value: string | undefined, label: string, allowFloat: boolean): number | undefined => {
+    if (!value) {return undefined;}
+    const parsed = allowFloat ? Number(value) : parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      log.warn(`Invalid ${label}: ${value}`);
+      return undefined;
+    }
+    return allowFloat ? parsed : Math.round(parsed);
+  };
+  const applyQualityPreset = (value: string | undefined, source: string) => {
+    if (!value) {return;}
+    if (!new Set(["low", "medium", "high"]).has(value)) {
+      log.warn(`Invalid video quality preset (${source}): ${value}`);
+      return;
+    }
+    videoRecordingDefaults.qualityPreset = value;
+  };
+  const applyFormat = (value: string | undefined, source: string) => {
+    if (!value) {return;}
+    if (value !== "mp4") {
+      log.warn(`Invalid video format (${source}): ${value}`);
+      return;
+    }
+    videoRecordingDefaults.format = value;
+  };
+
+  applyQualityPreset(process.env.AUTOMOBILE_VIDEO_QUALITY_PRESET ?? process.env.AUTO_MOBILE_VIDEO_QUALITY_PRESET, "env");
+  const envNumbers: Array<[string | undefined, string, boolean, keyof VideoRecordingConfigInput]> = [
+    [process.env.AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS ?? process.env.AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS, "video target bitrate", false, "targetBitrateKbps"],
+    [process.env.AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS ?? process.env.AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS, "video max throughput", true, "maxThroughputMbps"],
+    [process.env.AUTOMOBILE_VIDEO_FPS ?? process.env.AUTO_MOBILE_VIDEO_FPS, "video fps", false, "fps"],
+    [process.env.AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB ?? process.env.AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB, "video max archive size", true, "maxArchiveSizeMb"],
+  ];
+  for (const [value, label, allowFloat, key] of envNumbers) {
+    const parsed = parsePositiveNumber(value, label, allowFloat);
+    if (parsed !== undefined) {videoRecordingDefaults[key] = parsed as never;}
+  }
+  applyFormat(process.env.AUTOMOBILE_VIDEO_FORMAT ?? process.env.AUTO_MOBILE_VIDEO_FORMAT, "env");
+
+  const cliIndex = args.indexOf("--cli");
+  const cliArgs = cliMode ? args.slice(cliIndex + 1) : [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--cli") {break;}
+    if (arg === "--port") {
+      const port = parseInt(args[i + 1], 10);
+      if (!isNaN(port) && port > 0 && port < 65536) {daemonPort = port;} else {log.warn(`Invalid port: ${args[i + 1]}`);}
+      i++;
+    } else if (arg === "--host") {
+      const host = args[i + 1];
+      if (host && !host.startsWith("--")) {daemonHost = host;} else {log.warn(`Invalid host: ${host}`);}
+      i++;
+    } else if (arg === "--a11y-level") {
+      a11yLevel = args[++i];
+    } else if (arg === "--a11y-failure-mode") {
+      a11yFailureMode = args[++i];
+    } else if (arg === "--a11y-min-severity") {
+      a11yMinSeverity = args[++i];
+    } else if (arg === "--a11y-use-baseline") {
+      a11yUseBaseline = true;
+    } else if (arg === "--plan-execution-lock-scope") {
+      const scope = args[++i];
+      if (scope === "global" || scope === "session") {planExecutionLockScope = scope;} else {log.warn(`Invalid plan execution lock scope: ${scope}. Using default: ${planExecutionLockScope}`);}
+    } else if (arg === "--video-quality" || arg === "--video-quality-preset") {applyQualityPreset(args[++i], "cli");} else if (arg === "--video-target-bitrate-kbps") {
+      const value = parsePositiveNumber(args[++i], "video target bitrate", false); if (value !== undefined) {videoRecordingDefaults.targetBitrateKbps = value;}
+    } else if (arg === "--video-max-throughput-mbps") {
+      const value = parsePositiveNumber(args[++i], "video max throughput", true); if (value !== undefined) {videoRecordingDefaults.maxThroughputMbps = value;}
+    } else if (arg === "--video-fps") {
+      const value = parsePositiveNumber(args[++i], "video fps", false); if (value !== undefined) {videoRecordingDefaults.fps = value;}
+    } else if (arg === "--video-format") {applyFormat(args[++i], "cli");} else if (arg === "--video-archive-size-mb") {
+      const value = parsePositiveNumber(args[++i], "video max archive size", true); if (value !== undefined) {videoRecordingDefaults.maxArchiveSizeMb = value;}
+    }
+  }
+  return { cliMode, cliArgs, daemonPort, daemonHost, debugPerf, debug, uiPerfMode, memPerfAuditMode, a11yAuditMode, a11yLevel, a11yFailureMode, a11yMinSeverity, a11yUseBaseline, predictiveUi, rawElementSearch, planExecutionLockScope, videoRecordingDefaults, daemonMode, daemonCommand, daemonArgs, skipCtrlProxyDownload, embeddedSdk, networkMockable, dismissKeyboardAfterInput, eventAllMarkers, eventAllMarkersCliOverride, mcpRecording, navigationScreenshots, noWaitForPollingOverhead, noProxy, noDaemon, noA11yIncludeNotImportantViews, noA11yReportViewIds, noA11yRetrieveInteractiveWindows, noOcclusion, safeAreaWarnings, outputReduction, toolOutputsDir };
+}

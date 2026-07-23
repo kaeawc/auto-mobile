@@ -23,7 +23,6 @@ describe("AVDManager", function() {
     mockLocation = {
       path: "/mock/sdk/cmdline-tools/latest",
       source: "manual" as const,
-      version: "test",
       available_tools: ["avdmanager", "sdkmanager"]
     };
   });
@@ -400,7 +399,6 @@ Available Packages:
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools",
         source: "typical" as const,
-        version: "26.1.1",
         available_tools: ["avdmanager", "sdkmanager"]
       };
 
@@ -485,7 +483,6 @@ Available Packages:
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools",
         source: "typical" as const,
-        version: "26.1.1",
         available_tools: ["avdmanager", "sdkmanager"]
       };
 
@@ -612,7 +609,6 @@ Available Android Virtual Devices:
       const homebrewLocation = {
         path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
         source: "homebrew" as const,
-        version: "test",
         available_tools: ["avdmanager", "sdkmanager"]
       };
 
@@ -1238,7 +1234,6 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools/bin",
         source: "typical" as const,
-        version: "26.1.1",
         available_tools: ["avdmanager", "sdkmanager"]
       };
 
@@ -1274,7 +1269,6 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
       const oldToolsLocation = {
         path: "/opt/android-sdk/tools",
         source: "typical" as const,
-        version: "26.1.1",
         available_tools: ["avdmanager", "sdkmanager"]
       };
 

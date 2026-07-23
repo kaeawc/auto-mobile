@@ -50,7 +50,6 @@ function createClient(overrides: Partial<ConstructorParameters<typeof SdkManager
     detectAndroidCommandLineTools: async () => [{
       path: "/sdk/cmdline-tools/latest",
       source: "manual",
-      version: "test",
       available_tools: ["sdkmanager"],
     }],
     getAndroidHomeWithSystemImages: () => null,
@@ -158,6 +157,22 @@ describe("SdkManagerClient", () => {
     expect(child.stdinWrites).toEqual(["y\n".repeat(10)]);
   });
 
+  test("gives the network-backed catalogue fetch a longer default budget than a local command", async () => {
+    const { client, child, timer } = createClient();
+    const pending = client.list({ terminationGraceMs: 1_000 });
+    await settleSpawn();
+
+    timer.advanceTime(60_000);
+    expect(child.kills).toEqual([]);
+
+    timer.advanceTime(240_000);
+    expect(child.kills).toEqual(["SIGTERM"]);
+    timer.advanceTime(1_000);
+    child.close(null);
+
+    await expect(pending).rejects.toThrow("timed out after 300000ms");
+  });
+
   test("terminates a slow install, then escalates after its grace period", async () => {
     const { client, child, timer } = createClient();
     const pending = client.installPackage("system-images;android-35;google_apis;arm64-v8a", {
@@ -215,7 +230,6 @@ describe("SdkManagerClient", () => {
       detectAndroidCommandLineTools: async () => [{
         path: "/opt/homebrew/share/android-commandlinetools",
         source: "homebrew",
-        version: "test",
         available_tools: ["sdkmanager"],
       }],
     });

@@ -17,6 +17,11 @@ const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build
 const DEFAULT_MAX_OUTPUT_CHARS = 16_384;
 const UNBOUNDED_STDOUT_CHARS = Number.MAX_SAFE_INTEGER;
 const DEFAULT_TERMINATION_GRACE_MS = 5_000;
+const LOCAL_COMMAND_TIMEOUT_MS = 60_000;
+// `--list` downloads repository manifests from dl.google.com on a cold cache, so it needs a
+// network-sized budget rather than the local-command one.
+const CATALOGUE_FETCH_TIMEOUT_MS = 300_000;
+const PACKAGE_INSTALL_TIMEOUT_MS = 600_000;
 
 export interface SdkManagerExecutionOptions {
   signal?: AbortSignal;
@@ -92,19 +97,19 @@ export class SdkManagerClient {
 
   async list(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
     return this.run(["--list"], {
-      timeoutMs: 60_000,
+      timeoutMs: CATALOGUE_FETCH_TIMEOUT_MS,
       maxStdoutChars: UNBOUNDED_STDOUT_CHARS,
     }, options);
   }
 
   async acceptLicenses(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
-    return this.run(["--licenses"], { input: "y\n".repeat(20), timeoutMs: 60_000 }, options);
+    return this.run(["--licenses"], { input: "y\n".repeat(20), timeoutMs: LOCAL_COMMAND_TIMEOUT_MS }, options);
   }
 
   async installPackage(packageName: string, options: SdkManagerExecutionOptions & { acceptLicenses?: boolean } = {}): Promise<SdkManagerCommandResult> {
     return this.run([packageName], {
       input: options.acceptLicenses ? "y\n".repeat(10) : undefined,
-      timeoutMs: 600_000,
+      timeoutMs: PACKAGE_INSTALL_TIMEOUT_MS,
     }, options);
   }
 

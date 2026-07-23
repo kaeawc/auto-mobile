@@ -1,6 +1,7 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
+import { shellQuote } from "../../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../../observe/android/AndroidCtrlProxyClient";
 import type { SettingsNamespace } from "../../observe/android";
 import type {
@@ -61,7 +62,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     const previousLanguageTag = await this.getCurrentLocaleTag();
 
     try {
-      await this.runShellCommand(`shell setprop persist.sys.locale ${quoteShellArg(languageTag)}`);
+      await this.runShellCommand(`shell setprop persist.sys.locale ${shellQuote(languageTag)}`);
       await this.runShellCommand("shell stop; start");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -119,7 +120,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
     try {
       await this.adb.executeCommand(
-        `shell cmd locale set-app-locales ${quoteShellArg(appId)} --user ${targetUserId} --locales ${quoteShellArg(languageTag)}`
+        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${targetUserId} --locales ${shellQuote(languageTag)}`
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -208,7 +209,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     const previousZoneId = await this.readSetting("shell getprop persist.sys.timezone");
 
     try {
-      await this.adb.executeCommand(`shell setprop persist.sys.timezone ${quoteShellArg(zoneId)}`);
+      await this.adb.executeCommand(`shell setprop persist.sys.timezone ${shellQuote(zoneId)}`);
       const effectiveZoneId = await this.readSetting("shell getprop persist.sys.timezone");
       if (effectiveZoneId !== zoneId) {
         return {
@@ -487,7 +488,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   private async getAppLocaleTag(appId: string, userId: number): Promise<string | null> {
     try {
       const result = await this.adb.executeCommand(
-        `shell cmd locale get-app-locales ${quoteShellArg(appId)} --user ${userId}`,
+        `shell cmd locale get-app-locales ${shellQuote(appId)} --user ${userId}`,
         undefined,
         undefined,
         true
@@ -547,8 +548,4 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     }
     return actual.replace(/_/g, "-").toLowerCase() === expected.replace(/_/g, "-").toLowerCase();
   }
-}
-
-function quoteShellArg(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }

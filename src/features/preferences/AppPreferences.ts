@@ -2,6 +2,7 @@ import { Builder, parseStringPromise } from "xml2js";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { shellQuote } from "../../utils/shellQuote";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
@@ -100,7 +101,7 @@ export class AppPreferences {
     if (this.device.platform === "android") {
       if (input.scope === "systemProperty") {
         await this.adb().executeCommand(
-          `shell setprop ${shellQuote(input.key)} ${shellQuote(stringValue(normalizedValue))}`
+          `shell setprop ${shellQuoteUnlessSafe(input.key)} ${shellQuoteUnlessSafe(stringValue(normalizedValue))}`
         );
       } else {
         await this.setAndroidSharedPreference({ ...input, value: normalizedValue });
@@ -136,7 +137,7 @@ export class AppPreferences {
   }
 
   private async getAndroidSystemProperty(input: GetPreferenceInput): Promise<PreferenceResult> {
-    const result = await this.adb().executeCommand(`shell getprop ${shellQuote(input.key)}`);
+    const result = await this.adb().executeCommand(`shell getprop ${shellQuoteUnlessSafe(input.key)}`);
     const value = removeOneTrailingLineEnding(result.stdout);
     if (value.length > 0) {
       return this.result(input, true, value, "string");
@@ -166,14 +167,14 @@ export class AppPreferences {
     const encodedXml = Buffer.from(updatedXml, "utf8").toString("base64");
     const innerCommand = `mkdir -p shared_prefs && printf '%s' '${encodedXml}' | base64 -d > shared_prefs/${fileName}.xml`;
     await this.adb().executeCommand(
-      `shell run-as ${shellQuote(input.appId!)} sh -c ${shellQuote(innerCommand)}`
+      `shell run-as ${shellQuoteUnlessSafe(input.appId!)} sh -c ${shellQuoteUnlessSafe(innerCommand)}`
     );
   }
 
   private async readAndroidSharedPreferencesXml(appId: string, fileName: string): Promise<string> {
     try {
       const result = await this.adb().executeCommand(
-        `shell run-as ${shellQuote(appId)} cat shared_prefs/${fileName}.xml`
+        `shell run-as ${shellQuoteUnlessSafe(appId)} cat shared_prefs/${fileName}.xml`
       );
       return result.stdout;
     } catch (error) {
@@ -585,11 +586,11 @@ function valuesEqual(actual: PreferenceValue | null, expected: PreferenceValue, 
   return parsePreferenceValue(stringValue(actual), type) === expected;
 }
 
-function shellQuote(value: string): string {
+function shellQuoteUnlessSafe(value: string): string {
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
     return value;
   }
-  return `'${value.replace(/'/g, "'\\''")}'`;
+  return shellQuote(value);
 }
 
 function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {

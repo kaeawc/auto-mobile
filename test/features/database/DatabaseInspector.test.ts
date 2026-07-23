@@ -1,6 +1,7 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { DatabaseInspector } from "../../../src/features/database/DatabaseInspector";
 import type { BootedDevice } from "../../../src/models";
+import { shellQuote } from "../../../src/utils/shellQuote";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { ActionableError } from "../../../src/models";
 
@@ -182,7 +183,7 @@ describe("DatabaseInspector", () => {
       const response = `Bundle[{success=true, result={"type":"mutation","rowsAffected":1}}]`;
 
       fakeAdb.setCommandResult(
-        `shell content call --uri content://${appId}.automobile.database --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'INSERT INTO users (name) VALUES ('\"'\"'Alice'\"'\"')'`,
+        `shell content call --uri content://${appId}.automobile.database --method executeSQL --extra databasePath:s:${shellQuote(databasePath)} --extra query:s:${shellQuote("INSERT INTO users (name) VALUES ('Alice')")}`,
         response
       );
 
@@ -312,7 +313,7 @@ describe("DatabaseInspector", () => {
 
       // The path should have escaped quotes
       fakeAdb.setCommandResult(
-        `shell content call --uri content://${appId}.automobile.database --method listTables --extra databasePath:s:'/data/data/com.example.app/databases/user'\"'\"'s.db'`,
+        `shell content call --uri content://${appId}.automobile.database --method listTables --extra databasePath:s:${shellQuote(pathWithQuote)}`,
         response
       );
 

@@ -1,5 +1,6 @@
 import { ActionableError, BootedDevice } from "../../models";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { shellQuote } from "../../utils/shellQuote";
 
 /**
  * Database descriptor returned from listDatabases
@@ -161,20 +162,12 @@ export class DatabaseInspector {
 
     if (extras) {
       for (const [key, value] of Object.entries(extras)) {
-        cmd += ` --extra ${key}:s:'${this.escapeShellValue(value)}'`;
+        cmd += ` --extra ${key}:s:${shellQuote(value)}`;
       }
     }
 
     const result = await this.adb.executeCommand(cmd);
     return this.parseContentCallResult<T>(result.stdout);
-  }
-
-  /**
-   * Escape value for shell command
-   */
-  private escapeShellValue(value: string): string {
-    // Escape single quotes for shell
-    return value.replace(/'/g, "'\"'\"'");
   }
 
   /**

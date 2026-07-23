@@ -5,6 +5,7 @@ import { createHash, X509Certificate } from "crypto";
 import { Parser } from "xml2js";
 import type { ExecResult } from "../../models";
 import { logger } from "../logger";
+import { shellQuote } from "../shellQuote";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 
@@ -101,8 +102,6 @@ const createDefaultDependencies = (): XcodeSigningDependencies => ({
   homedir,
   now: () => Date.now()
 });
-
-const quoteShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
 const parsePlistValue = (node: PlistNode | undefined): unknown => {
   if (!node) {
@@ -498,7 +497,7 @@ export class XcodeSigningManager {
 
   private async parseProvisioningProfile(path: string): Promise<ProvisioningProfile | null> {
     try {
-      const cmsCommand = `security cms -D -i ${quoteShell(path)}`;
+      const cmsCommand = `security cms -D -i ${shellQuote(path)}`;
       const decoded = await this.dependencies.exec(cmsCommand);
       const plist = await parsePlist(decoded.stdout);
       if (!plist || typeof plist !== "object") {

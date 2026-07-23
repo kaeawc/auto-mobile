@@ -62,6 +62,11 @@ function findViolations(file: string): Violation[] {
   const childProcessNamespaces = new Set<string>();
   const violations: Violation[] = [];
 
+  const isChildProcessRequire = (expression: ts.Expression): boolean =>
+    ts.isCallExpression(expression) && ts.isIdentifier(expression.expression) && expression.expression.text === "require" &&
+    expression.arguments.length === 1 && ts.isStringLiteral(expression.arguments[0]) &&
+    CHILD_PROCESS_MODULES.has(expression.arguments[0].text);
+
   const record = (node: ts.CallExpression): void => {
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
     violations.push({ file, line: line + 1, column: character + 1, text: node.getText(sourceFile) });
@@ -86,6 +91,34 @@ function findViolations(file: string): Violation[] {
           const imported = specifier.propertyName?.text ?? specifier.name.text;
           if (CHILD_PROCESS_FUNCTIONS.has(imported)) { childProcessFunctions.add(specifier.name.text); }
         }
+      }
+    }
+
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) &&
+      node.moduleReference.expression && ts.isStringLiteral(node.moduleReference.expression) &&
+      CHILD_PROCESS_MODULES.has(node.moduleReference.expression.text)) {
+      childProcessNamespaces.add(node.name.text);
+    }
+
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      if (ts.isIdentifier(node.name) && isChildProcessRequire(node.initializer)) {
+        childProcessNamespaces.add(node.name.text);
+      }
+      if (ts.isObjectBindingPattern(node.name) && isChildProcessRequire(node.initializer)) {
+        for (const element of node.name.elements) {
+          const imported = element.propertyName?.getText(sourceFile) ?? element.name.getText(sourceFile);
+          if (CHILD_PROCESS_FUNCTIONS.has(imported) && ts.isIdentifier(element.name)) {
+            childProcessFunctions.add(element.name.text);
+          }
+        }
+      }
+      if (ts.isIdentifier(node.name) && ts.isIdentifier(node.initializer) && childProcessFunctions.has(node.initializer.text)) {
+        childProcessFunctions.add(node.name.text);
+      }
+      if (ts.isIdentifier(node.name) && ts.isPropertyAccessExpression(node.initializer) &&
+        ts.isIdentifier(node.initializer.expression) && childProcessNamespaces.has(node.initializer.expression.text) &&
+        CHILD_PROCESS_FUNCTIONS.has(node.initializer.name.text)) {
+        childProcessFunctions.add(node.name.text);
       }
     }
 

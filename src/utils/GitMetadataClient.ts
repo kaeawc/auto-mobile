@@ -35,13 +35,14 @@ const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => 
       timeout: timeoutMs,
       killSignal: "SIGTERM",
     });
-  } catch {
+  } catch (error) {
     // Version probing runs before logger initialization; metadata is optional.
+    void error;
   }
   if (!result || result.status !== 0 || result.error) {
     return null;
   }
-  return result.stdout.trim();
+  return (typeof result.stdout === "string" ? result.stdout : result.stdout.toString()).trim();
 };
 
 /**

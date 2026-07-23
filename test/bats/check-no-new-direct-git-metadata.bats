@@ -34,3 +34,21 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"GitMetadataBoundaryFixture.ts"* ]]
 }
+
+@test "rejects an aliased child-process execution" {
+  printf '%s\n' 'import { execFileSync } from "node:child_process";' 'const run = execFileSync;' 'run("git", ["rev-parse", "HEAD"]);' > "$fixture"
+
+  run bash "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-git-metadata.sh"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GitMetadataBoundaryFixture.ts"* ]]
+}
+
+@test "rejects a destructured CommonJS child-process execution" {
+  printf '%s\n' 'const { execSync } = require("child_process");' 'execSync("git status");' > "$fixture"
+
+  run bash "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-git-metadata.sh"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GitMetadataBoundaryFixture.ts"* ]]
+}

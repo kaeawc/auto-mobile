@@ -144,7 +144,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
    * Ask the on-device encoder to emit a fresh IDR by sending the request-keyframe
    * command over the socket. The encoder (MediaCodec) honors it via
    * PARAMETER_KEY_REQUEST_SYNC_FRAME, so a late/recovering WHEP viewer decodes
-   * without waiting for the 10s I-frame interval. The publisher throttles calls.
+   * without waiting for the periodic two-second I-frame interval. The publisher
+   * throttles calls.
    */
   requestKeyFrame(): void {
     const socket = this.socket;

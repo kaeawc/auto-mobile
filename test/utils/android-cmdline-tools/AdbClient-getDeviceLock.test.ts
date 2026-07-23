@@ -3,9 +3,12 @@ import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ExecResult } from "../../../src/models";
 
 /**
- * Parse-level tests for AdbClient.getDeviceLock (issue #4235). A per-command
- * mock exec returns captured `dumpsys window` / `locksettings get-disabled`
- * output so the parse is pinned deterministically, with no device.
+ * Parse-level tests for AdbClient.getDeviceLock (issue #4235). The fixture is the
+ * real `dumpsys window policy` KeyguardServiceDelegate block captured from an
+ * API 35 emulator; individual booleans are flipped to model the other lock
+ * states. Verified against a live device: a PIN-secured device reports
+ * `secure=true`, so `locksettings get-disabled` (the first implementation) was
+ * replaced because it cannot separate a swipe lock from a PIN.
  */
 function execResult(stdout: string): ExecResult {
   return {
@@ -17,27 +20,31 @@ function execResult(stdout: string): ExecResult {
   } as unknown as ExecResult;
 }
 
-/**
- * Build an AdbClient whose exec returns `window` for the dumpsys-window read and
- * `disabled` for the locksettings read. `throwOn` lets a test fail one command.
- */
-function makeClient(opts: {
-  window?: string;
-  disabled?: string;
-  throwOn?: "window" | "locksettings";
-}): AdbClient {
+/** Real KeyguardServiceDelegate block with the three parsed booleans templated. */
+function policyDump(opts: { showing?: string; occluded?: string; secure?: string }): string {
+  return [
+    "  Keyguard occluded state:",
+    `    mKeyguardOccluded=false mKeyguardOccludedChanged=false`,
+    "    KeyguardServiceDelegate",
+    ...(opts.showing === undefined ? [] : [`      showing=${opts.showing}`]),
+    "      inputRestricted=false",
+    ...(opts.occluded === undefined ? [] : [`      occluded=${opts.occluded}`]),
+    ...(opts.secure === undefined ? [] : [`      secure=${opts.secure}`]),
+    "      dreaming=false",
+    "      deviceHasKeyguard=true",
+    "      KeyguardStateMonitor",
+    "        mIsShowing=true",
+    "        mSimSecure=false"
+  ].join("\n");
+}
+
+function makeClient(policyStdout: string | { throws: true }): AdbClient {
   const mockExec = (command: string): Promise<ExecResult> => {
-    if (command.includes("dumpsys window")) {
-      if (opts.throwOn === "window") {
-        return Promise.reject(new Error("window boom"));
+    if (command.includes("dumpsys window policy")) {
+      if (typeof policyStdout === "object") {
+        return Promise.reject(new Error("dumpsys boom"));
       }
-      return Promise.resolve(execResult(opts.window ?? ""));
-    }
-    if (command.includes("locksettings get-disabled")) {
-      if (opts.throwOn === "locksettings") {
-        return Promise.reject(new Error("locksettings boom"));
-      }
-      return Promise.resolve(execResult(opts.disabled ?? ""));
+      return Promise.resolve(execResult(policyStdout));
     }
     return Promise.resolve(execResult(""));
   };
@@ -45,61 +52,54 @@ function makeClient(opts: {
 }
 
 describe("AdbClient.getDeviceLock", () => {
-  it("reports a secure lock when the keyguard is showing and no lock is disabled", async () => {
-    const client = makeClient({
-      window: "  mDreamingLockscreen=true\n  isKeyguardShowing=true",
-      disabled: "false"
-    });
+  it("reports a secure lock when the keyguard is showing and secure=true", async () => {
+    const client = makeClient(policyDump({ showing: "true", occluded: "false", secure: "true" }));
     const lock = await client.getDeviceLock();
     expect(lock).toEqual({ locked: true, keyguardShowing: true, secure: true });
   });
 
-  it("reports a swipe-only lock (secure=false) when the lock screen is disabled", async () => {
-    const client = makeClient({
-      window: "isKeyguardShowing=true",
-      disabled: "true"
-    });
+  it("reports a swipe-only lock (secure=false) — the case get-disabled could not distinguish", async () => {
+    const client = makeClient(policyDump({ showing: "true", occluded: "false", secure: "false" }));
     const lock = await client.getDeviceLock();
     expect(lock).toEqual({ locked: true, keyguardShowing: true, secure: false });
   });
 
   it("reports unlocked when the keyguard is not showing", async () => {
-    const client = makeClient({
-      window: "isKeyguardShowing=false",
-      disabled: "false"
-    });
+    const client = makeClient(policyDump({ showing: "false", occluded: "false", secure: "true" }));
     const lock = await client.getDeviceLock();
     expect(lock?.locked).toBe(false);
     expect(lock?.keyguardShowing).toBe(false);
   });
 
-  it("leaves secure undefined (not guessed) when locksettings is unavailable", async () => {
-    const client = makeClient({
-      window: "isKeyguardShowing=true",
-      throwOn: "locksettings"
-    });
+  it("treats an occluded keyguard as not locking the app (locked=false, still showing)", async () => {
+    const client = makeClient(policyDump({ showing: "true", occluded: "true", secure: "true" }));
+    const lock = await client.getDeviceLock();
+    expect(lock?.locked).toBe(false);
+    expect(lock?.keyguardShowing).toBe(true);
+  });
+
+  it("leaves secure undefined (not guessed) when the secure field is absent", async () => {
+    const client = makeClient(policyDump({ showing: "true", occluded: "false" }));
     const lock = await client.getDeviceLock();
     expect(lock?.keyguardShowing).toBe(true);
     expect(lock?.secure).toBeUndefined();
   });
 
-  it("leaves secure undefined when locksettings prints unexpected text", async () => {
-    const client = makeClient({
-      window: "isKeyguardShowing=true",
-      disabled: "Permission denial"
-    });
+  it("does not confuse the CamelCase siblings (mSimSecure / mKeyguardOccluded / mIsShowing)", async () => {
+    // secure=true present, but mSimSecure=false also in the dump; must read secure=true.
+    const client = makeClient(policyDump({ showing: "true", occluded: "false", secure: "true" }));
     const lock = await client.getDeviceLock();
-    expect(lock?.secure).toBeUndefined();
+    expect(lock?.secure).toBe(true);
   });
 
-  it("returns null (lock state unknown) when the keyguard state can't be read", async () => {
-    const client = makeClient({ window: "no keyguard field here", disabled: "false" });
+  it("returns null (lock state unknown) when the keyguard showing field is absent", async () => {
+    const client = makeClient(policyDump({ occluded: "false", secure: "true" }));
     const lock = await client.getDeviceLock();
     expect(lock).toBeNull();
   });
 
-  it("returns null when the dumpsys window read fails", async () => {
-    const client = makeClient({ throwOn: "window", disabled: "false" });
+  it("returns null when the dumpsys window policy read fails", async () => {
+    const client = makeClient({ throws: true });
     const lock = await client.getDeviceLock();
     expect(lock).toBeNull();
   });

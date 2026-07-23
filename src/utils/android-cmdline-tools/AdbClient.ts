@@ -833,68 +833,61 @@ export class AdbClient implements AdbExecutor {
   /**
    * Get the device lock state (Android only).
    *
-   * `keyguardShowing` (and, since they coincide on Android, `locked`) come from
-   * `dumpsys window`; `secure` comes from `locksettings get-disabled` (a disabled
-   * lock is a non-secure swipe lock). Any read failure degrades gracefully:
-   * an unreadable keyguard state yields `null` (lock state unknown), and an
-   * unreadable/unparseable secure signal yields `secure: undefined` rather than a
-   * guessed boolean, so a secure lock is never mistaken for a swipe lock (#4235).
+   * All three signals come from a single `dumpsys window policy` read — its
+   * `KeyguardServiceDelegate` block carries `showing`, `occluded`, and `secure`
+   * (the last mirrors `KeyguardManager.isKeyguardSecure()`, i.e. a credential is
+   * set). `secure` is deliberately NOT derived from `locksettings get-disabled`:
+   * that only reports whether the lock is set to *None*, so it returns `false`
+   * for both a swipe lock and a PIN and cannot tell them apart (#4235 review).
+   *
+   * `locked` is `showing && !occluded` — an occluded keyguard (a
+   * FLAG_SHOW_WHEN_LOCKED activity like the camera) is not obscuring the app.
+   *
+   * Degrades gracefully: an unreadable policy dump, or one missing the keyguard
+   * `showing` field, yields `null` (lock state unknown → observe omits the
+   * field); a missing `secure` field yields `secure: undefined` rather than a
+   * guessed boolean, so a swipe lock is never mistaken for a secure one.
+   *
+   * The field names are the API 30+ `KeyguardServiceDelegate` dump; on a release
+   * that does not emit them the read simply returns `null` — a missing signal,
+   * never a wrong one.
    */
   async getDeviceLock(signal?: AbortSignal): Promise<DeviceLockState | null> {
-    const keyguardShowing = await this.readKeyguardShowing(signal);
+    let policy: string;
+    try {
+      const result = await this.executeCommand(
+        "shell dumpsys window policy",
+        undefined,
+        undefined,
+        true,
+        signal
+      );
+      policy = result.stdout;
+    } catch {
+      logger.debug("[ADB] Failed to read window policy for device lock state");
+      return null;
+    }
+
+    // Lowercase, boundary-anchored tokens: the KeyguardServiceDelegate fields are
+    // `showing=`/`occluded=`/`secure=`, which do not collide with the CamelCase
+    // siblings in the same dump (`mKeyguardOccluded=`, `mSimSecure=`, `mIsShowing=`).
+    const keyguardShowing = AdbClient.matchBool(policy, /(?:^|\s)showing=(true|false)/);
     if (keyguardShowing === null) {
       return null;
     }
-    const secure = await this.readLockSecure(signal);
-    return { locked: keyguardShowing, keyguardShowing, secure };
+    const occluded = AdbClient.matchBool(policy, /(?:^|\s)occluded=(true|false)/) ?? false;
+    const secure = AdbClient.matchBool(policy, /(?:^|\s)secure=(true|false)/);
+    return {
+      locked: keyguardShowing && !occluded,
+      keyguardShowing,
+      secure: secure ?? undefined
+    };
   }
 
-  /** Parse keyguard visibility from `dumpsys window`; null when undeterminable. */
-  private async readKeyguardShowing(signal?: AbortSignal): Promise<boolean | null> {
-    try {
-      const result = await this.executeCommand(
-        "shell dumpsys window",
-        undefined,
-        undefined,
-        true,
-        signal
-      );
-      const match = result.stdout.match(
-        /(?:isKeyguardShowing|mShowingLockscreen|mKeyguardShowing|mDreamingLockscreen)=(true|false)/
-      );
-      return match ? match[1] === "true" : null;
-    } catch {
-      logger.debug("[ADB] Failed to read keyguard state");
-      return null;
-    }
-  }
-
-  /**
-   * Parse secure-vs-swipe from `locksettings get-disabled`.
-   * Output "true" = lock screen disabled → not secure; "false" = a lock is set →
-   * secure. Anything else (permission denied, unexpected text) → undefined.
-   */
-  private async readLockSecure(signal?: AbortSignal): Promise<boolean | undefined> {
-    try {
-      const result = await this.executeCommand(
-        "shell locksettings get-disabled",
-        undefined,
-        undefined,
-        true,
-        signal
-      );
-      const value = result.stdout.trim().toLowerCase();
-      if (value === "true") {
-        return false;
-      }
-      if (value === "false") {
-        return true;
-      }
-      return undefined;
-    } catch {
-      logger.debug("[ADB] Failed to read lock secure state");
-      return undefined;
-    }
+  /** First `<field>=true|false` match as a boolean, or null when the field is absent. */
+  private static matchBool(haystack: string, pattern: RegExp): boolean | null {
+    const match = haystack.match(pattern);
+    return match ? match[1] === "true" : null;
   }
 
   /**

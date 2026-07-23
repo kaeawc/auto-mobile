@@ -68,9 +68,12 @@ echo -e "${YELLOW}Starting ktfmt validation...${NC}"
 
 # Function to find all Kotlin files
 find_all_kotlin_files() {
+    # Scope hidden-file exclusion to the project itself. A generic `*/.*`
+    # pattern also matches hidden parent directories such as
+    # `/Users/jason/.codex/worktrees`, making a valid worktree look empty.
     find "$PROJECT_ROOT" -type f '(' -name "*.kt" -o -name "*.kts" ')' \
         -not -path "*/build/*" \
-        -not -path "*/.*" \
+        -not -path "$PROJECT_ROOT/.*" \
         -not -path "*/node_modules/*" \
         -not -path "*/target/*" \
         -not -path "*/out/*" \
@@ -140,6 +143,21 @@ if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
     && ! git rev-parse --verify -q "${ONLY_CHANGED_SINCE_SHA}^{commit}" >/dev/null 2>&1; then
     echo -e "${YELLOW}Base SHA '${ONLY_CHANGED_SINCE_SHA}' does not resolve; falling back to a full-tree ktfmt check.${NC}"
     ONLY_CHANGED_SINCE_SHA=""
+    ONLY_TOUCHED_FILES=false
+fi
+
+# A changed formatter, its file-selection helper, or its CI runtime can change
+# the result for files outside a PR's Kotlin diff. Run the full tree for those
+# changes rather than relying on the post-merge backstop to discover drift.
+if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
+    && ! git diff --quiet "$ONLY_CHANGED_SINCE_SHA"...HEAD -- \
+        scripts/ktfmt \
+        scripts/lib/file-selection.sh \
+        .github/workflows/pull_request.yml \
+        .github/workflows/merge.yml; then
+    echo -e "${YELLOW}Ktfmt inputs changed since the base SHA; running a full-tree ktfmt check.${NC}"
+    ONLY_CHANGED_SINCE_SHA=""
+    ONLY_TOUCHED_FILES=false
 fi
 
 if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]]; then
@@ -170,46 +188,35 @@ fi
 
 echo -e "${YELLOW}Found ${#files_to_process[@]} Kotlin file(s) to process${NC}"
 
-# Create temporary file for storing file list
-temp_file=$(mktemp)
-trap 'rm -f "$temp_file"' EXIT
+# ktfmt writes formatted content back to its input files. Mirror the selected
+# files under one temporary root so validation stays read-only, then format all
+# copies in one JVM. The old one-file-at-a-time loop started a JVM per source
+# file; on main that turned 680 files into a ten-minute job.
+temp_dir=$(mktemp -d)
+ktfmt_log=$(mktemp)
+trap 'rm -rf "$temp_dir"; rm -f "$ktfmt_log"' EXIT
 
-# Write files to temporary file for xargs processing
-printf '%s\n' "${files_to_process[@]}" > "$temp_file"
+declare -a formatted_files
+for file in "${files_to_process[@]}"; do
+    relative_file="${file#"$PROJECT_ROOT"/}"
+    formatted_file="$temp_dir/$relative_file"
+    mkdir -p "$(dirname "$formatted_file")"
+    cp "$file" "$formatted_file"
+    formatted_files+=("$formatted_file")
+done
 
-# Run ktfmt with xargs and capture output
+# Passing all files in one invocation is safe for the current tree (680 paths)
+# and removes almost all JVM startup cost; no parallel workers are needed.
 echo -e "${YELLOW}Running ktfmt...${NC}"
-
-if [[ -s "$temp_file" ]]; then
-    temp_dir=$(mktemp -d)
-    trap 'rm -rf "$temp_dir"' EXIT
-
-    while IFS= read -r file; do
-        if [[ -f "$file" ]]; then
-            # Preserve the file name for actionable output while formatting an
-            # isolated copy so validation never mutates the working tree.
-            temp_file_path="$temp_dir/$(basename "$file")"
-            cp "$file" "$temp_file_path"
-
-            # Format the temp file with --google-style (2-space block and
-            # 2-space continuation indent — the style the tree is formatted
-            # with). Treat a non-zero ktfmt exit as a failure rather than
-            # silently diffing an unformatted copy (which would falsely report
-            # the file as clean).
-            if ! ktfmt --google-style "$temp_file_path" >/dev/null 2>&1; then
-                errors="${errors}${file}: ktfmt failed to run (non-zero exit)\n"
-                continue
-            fi
-
-            # Compare original and formatted versions.
-            if ! diff -q "$file" "$temp_file_path" >/dev/null 2>&1; then
-                errors="${errors}${file}: File needs formatting\n"
-            fi
-        fi
-    done < "$temp_file"
-else
-    echo -e "${GREEN}No files to process${NC}"
+if ! ktfmt --google-style "${formatted_files[@]}" > "$ktfmt_log" 2>&1; then
+    errors="ktfmt failed to run (non-zero exit):\n$(<"$ktfmt_log")\n"
 fi
+
+for index in "${!files_to_process[@]}"; do
+    if ! diff -q "${files_to_process[$index]}" "${formatted_files[$index]}" >/dev/null 2>&1; then
+        errors="${errors}${files_to_process[$index]}: File needs formatting\n"
+    fi
+done
 
 # Calculate total elapsed time
 if [[ -f "$PROJECT_ROOT/scripts/utils/get_timestamp.sh" ]]; then

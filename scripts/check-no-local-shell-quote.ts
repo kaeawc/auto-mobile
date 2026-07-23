@@ -2,8 +2,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import * as ts from "typescript";
 
-const SOURCE_ROOT = "src";
-const OWNER = "src/utils/shellQuote.ts";
+const SOURCE_ROOT = process.env.SHELL_QUOTE_SOURCE_ROOT ?? "src";
+const OWNER = join(SOURCE_ROOT, "utils/shellQuote.ts");
 const LOCAL_HELPER_NAMES = new Set(["shellQuote", "quoteShell", "quoteShellArg"]);
 
 interface Violation {
@@ -23,17 +23,74 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
-function isLocalHelperDeclaration(node: ts.Node): node is ts.FunctionDeclaration | ts.VariableDeclaration {
-  if (ts.isFunctionDeclaration(node)) {
-    return !!node.name && LOCAL_HELPER_NAMES.has(node.name.text);
+function isBannedHelperName(name: ts.DeclarationName | ts.PropertyName | undefined): name is ts.Identifier {
+  return !!name && ts.isIdentifier(name) && LOCAL_HELPER_NAMES.has(name.text);
+}
+
+function isFunctionValue(expression: ts.Expression | undefined): boolean {
+  return !!expression && (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression));
+}
+
+function isCanonicalShellQuoteExpression(expression: ts.Expression): boolean {
+  if (!ts.isTemplateExpression(expression) || expression.head.text !== "'" || expression.templateSpans.length !== 1) {
+    return false;
   }
-  return (
-    ts.isVariableDeclaration(node) &&
-    ts.isIdentifier(node.name) &&
-    LOCAL_HELPER_NAMES.has(node.name.text) &&
-    !!node.initializer &&
-    (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+  const [span] = expression.templateSpans;
+  if (!span || span.literal.text !== "'" || !ts.isCallExpression(span.expression)) {
+    return false;
+  }
+  const call = span.expression;
+  if (
+    !ts.isPropertyAccessExpression(call.expression) ||
+    !["replace", "replaceAll"].includes(call.expression.name.text) ||
+    call.arguments.length !== 2
+  ) {
+    return false;
+  }
+  const [search, replacement] = call.arguments;
+  const replacesSingleQuotes =
+    (ts.isRegularExpressionLiteral(search) && search.text === "/'/g") ||
+    (ts.isStringLiteral(search) && search.text === "'");
+  return replacesSingleQuotes && ts.isStringLiteral(replacement) && replacement.text === "'\\''";
+}
+
+function hasCanonicalShellQuoteReturn(body: ts.Block | ts.Expression | undefined): boolean {
+  if (!body) {
+    return false;
+  }
+  if (!ts.isBlock(body)) {
+    return isCanonicalShellQuoteExpression(body);
+  }
+  return body.statements.some(
+    statement => ts.isReturnStatement(statement) && !!statement.expression && isCanonicalShellQuoteExpression(statement.expression),
   );
+}
+
+function localHelperName(node: ts.Node): string | null {
+  if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) {
+    if (isBannedHelperName(node.name)) {
+      return node.name.text;
+    }
+    return hasCanonicalShellQuoteReturn(node.body) && node.name ? node.name.getText() : null;
+  }
+  if (
+    (ts.isVariableDeclaration(node) ||
+      ts.isPropertyDeclaration(node) ||
+      ts.isPropertyAssignment(node)) &&
+    isBannedHelperName(node.name) &&
+    isFunctionValue(node.initializer)
+  ) {
+    return node.name.text;
+  }
+  if (
+    (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isPropertyAssignment(node)) &&
+    !isBannedHelperName(node.name) &&
+    isFunctionValue(node.initializer) &&
+    hasCanonicalShellQuoteReturn(node.initializer.body)
+  ) {
+    return node.name.getText();
+  }
+  return null;
 }
 
 function findViolations(file: string): Violation[] {
@@ -47,13 +104,14 @@ function findViolations(file: string): Violation[] {
   const violations: Violation[] = [];
 
   const visit = (node: ts.Node): void => {
-    if (isLocalHelperDeclaration(node)) {
+    const name = localHelperName(node);
+    if (name) {
       const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       violations.push({
         file,
         line: line + 1,
         column: character + 1,
-        name: node.name.text,
+        name,
       });
     }
     ts.forEachChild(node, visit);

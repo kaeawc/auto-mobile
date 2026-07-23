@@ -3,6 +3,7 @@ import { XcodebuildClient } from "../../../src/utils/ios-cmdline-tools/Xcodebuil
 import type { ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 
 describe("XcodebuildClient executeCommand timeout", () => {
   test("aborts the underlying child process when the command times out", async () => {
@@ -67,5 +68,47 @@ describe("XcodebuildClient executeCommand timeout", () => {
 
     expect(result.stdout).toBe("ok");
     expect(capturedSignal?.aborted).toBe(false);
+  });
+});
+
+describe("XcodebuildClient streaming runner", () => {
+  test("starts a detached argv-form runner without a shell", async () => {
+    const child = new FakeChildProcess();
+    const calls: Array<{ command: string; args: string[]; options: import("node:child_process").SpawnOptions }> = [];
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      (command, args, options) => {
+        calls.push({ command, args, options });
+        return child as never;
+      }
+    );
+
+    const result = await client.startStreaming(
+      ["test-without-building", "-destination", "id=A B"],
+      { detached: true, env: { AUTOMOBILE_DEVICE_ID: "A B" }, stdio: ["ignore", "pipe", "pipe"] }
+    );
+
+    expect(result).toBe(child);
+    expect(calls).toEqual([{
+      command: "xcodebuild",
+      args: ["test-without-building", "-destination", "id=A B"],
+      options: {
+        detached: true,
+        env: { AUTOMOBILE_DEVICE_ID: "A B" },
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+      }
+    }]);
+  });
+
+  test("rejects a streaming runner when xcodebuild is unavailable", async () => {
+    const client = new XcodebuildClient(async () => {
+      throw new Error("not found");
+    });
+
+    await expect(client.startStreaming(["test-without-building"])).rejects.toThrow(
+      "xcodebuild is not available"
+    );
   });
 });

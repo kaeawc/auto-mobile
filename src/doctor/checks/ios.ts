@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import type { BootedDevice, ExecResult } from "../../models";
 import { CheckResult, DoctorOptions } from "../types";
 import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { Xcodebuild, XcodebuildClient } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { logger, type Logger } from "../../utils/logger";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
 import { IOSCtrlProxyBuilder } from "../../utils/IOSCtrlProxyBuilder";
@@ -85,6 +86,7 @@ const execFileAsync = promisify(execFile);
 export interface IosDoctorDependencies {
   platform: () => NodeJS.Platform;
   execFile: (file: string, args: string[]) => Promise<ExecResult>;
+  xcodebuild: Pick<Xcodebuild, "executeCommand">;
   fileExists: (path: string) => boolean;
   readDir: (path: string) => Promise<string[]>;
   homedir: () => string;
@@ -359,6 +361,7 @@ const createIosDoctorDependencies = (): IosDoctorDependencies => ({
     });
     return createExecResult(result.stdout, result.stderr);
   },
+  xcodebuild: new XcodebuildClient(),
   fileExists: existsSync,
   readDir: async path => fs.readdir(path),
   homedir,
@@ -416,7 +419,9 @@ export async function checkXcodeInstallation(
   }
 
   try {
-    const result = await dependencies.execFile("xcodebuild", ["-version"]);
+    const result = await dependencies.xcodebuild.executeCommand(["-version"], {
+      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+    });
     const version = parseXcodeVersion(result.stdout);
 
     if (!version) {

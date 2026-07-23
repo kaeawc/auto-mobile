@@ -1,18 +1,31 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { promisify } from "node:util";
 import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
 import { defaultTimer, Timer } from "../SystemTimer";
 
-interface XcodebuildCommandOptions {
+export interface XcodebuildCommandOptions {
   timeoutMs?: number;
   maxBuffer?: number;
 }
 
+export interface XcodebuildStreamingOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly detached?: boolean;
+  readonly stdio?: SpawnOptions["stdio"];
+}
+
+export type XcodebuildSpawner = (
+  command: string,
+  args: string[],
+  options: SpawnOptions
+) => ChildProcess;
+
 export interface Xcodebuild {
   executeCommand(args: string[], options?: XcodebuildCommandOptions): Promise<ExecResult>;
   isAvailable(): Promise<boolean>;
+  startStreaming(args: string[], options?: XcodebuildStreamingOptions): Promise<ChildProcess>;
 }
 
 const execAsync = async (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal): Promise<ExecResult> => {
@@ -35,7 +48,8 @@ export class XcodebuildClient implements Xcodebuild {
 
   constructor(
     execAsyncFn: ((file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    private readonly spawnProcess: XcodebuildSpawner = spawn
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
@@ -100,6 +114,34 @@ export class XcodebuildClient implements Xcodebuild {
       logger.warn(`[iOS] Command failed after ${duration}ms: ${fullCommand} - ${(error as Error).message}`);
       throw error;
     }
+  }
+
+  /**
+   * Launch a long-lived xcodebuild invocation without a shell. Callers retain
+   * lifecycle ownership of the returned child, while this boundary owns binary
+   * resolution, availability diagnostics, and argv-safe process creation.
+   */
+  async startStreaming(
+    args: string[],
+    options: XcodebuildStreamingOptions = {}
+  ): Promise<ChildProcess> {
+    if (!(await this.isLocalXcodebuildAvailable())) {
+      throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
+    }
+
+    const child = this.spawnProcess("xcodebuild", args, {
+      detached: options.detached,
+      env: options.env,
+      stdio: options.stdio,
+      shell: false,
+    });
+
+    if (!child.pid) {
+      child.kill();
+      throw new ActionableError("xcodebuild failed to start: no process ID was assigned.");
+    }
+
+    return child;
   }
 
   private async isLocalXcodebuildAvailable(): Promise<boolean> {

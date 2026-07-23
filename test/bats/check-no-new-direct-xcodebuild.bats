@@ -1,0 +1,48 @@
+#!/usr/bin/env bats
+
+setup() {
+  repo_dir="$(mktemp -d)"
+  mkdir -p "$repo_dir/scripts" "$repo_dir/src/utils/ios-cmdline-tools"
+  cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-xcodebuild.sh" "$repo_dir/scripts/"
+  touch "$repo_dir/src/utils/ios-cmdline-tools/XcodebuildClient.ts"
+  git -C "$repo_dir" init -q
+  git -C "$repo_dir" config user.email test@example.com
+  git -C "$repo_dir" config user.name test
+  git -C "$repo_dir" add .
+  git -C "$repo_dir" commit -qm baseline
+  git -C "$repo_dir" commit --allow-empty -qm head
+}
+
+teardown() {
+  rm -rf "$repo_dir"
+}
+
+@test "rejects a new direct argv-form xcodebuild execution" {
+  printf '%s\n' 'spawn("xcodebuild", ["test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects a new single-quoted shell-form xcodebuild execution" {
+  printf '%s\n' "execSync('xcodebuild -version');" > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "allows XcodebuildClient to own direct execution" {
+  printf '%s\n' 'spawn("xcodebuild", ["test"]);' > "$repo_dir/src/utils/ios-cmdline-tools/XcodebuildClient.ts"
+  git -C "$repo_dir" add src/utils/ios-cmdline-tools/XcodebuildClient.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
+}

@@ -11,6 +11,7 @@ import { type ChildProcess } from "child_process";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
 import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
 import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
+import { XcodebuildClient, type Xcodebuild } from "./ios-cmdline-tools/XcodebuildClient";
 import { DeviceAppManager } from "./ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { exponentialBackoff } from "./Backoff";
@@ -130,6 +131,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private servicePort: number;
   private readonly builder: IOSCtrlProxyBuilder;
   private readonly processExecutor: ProcessExecutor;
+  private readonly xcodebuild: Xcodebuild;
   private readonly signingManager: XcodeSigningManager;
   private readonly deviceAppManager: DeviceAppManager;
   private readonly remoteRunner: RemoteCtrlProxyIOSRunner;
@@ -211,13 +213,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     signingManager: XcodeSigningManager = new XcodeSigningManager(),
     deviceAppManager: DeviceAppManager = new DeviceAppManager(),
     remoteRunner?: RemoteCtrlProxyIOSRunner,
-    hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker()
+    hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
+    xcodebuild: Xcodebuild = new XcodebuildClient()
   ) {
     this.device = device;
     this.timer = timer;
     this.servicePort = this.allocateServicePort();
     this.builder = builder || IOSCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;
+    this.xcodebuild = xcodebuild;
     this.signingManager = signingManager;
     this.deviceAppManager = deviceAppManager;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
@@ -323,7 +327,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     signingManager?: XcodeSigningManager,
     deviceAppManager?: DeviceAppManager,
     remoteRunner?: RemoteCtrlProxyIOSRunner,
-    hostPortAvailabilityChecker?: HostPortAvailabilityChecker
+    hostPortAvailabilityChecker?: HostPortAvailabilityChecker,
+    xcodebuild?: Xcodebuild
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager(
       device,
@@ -333,7 +338,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       signingManager,
       deviceAppManager,
       remoteRunner,
-      hostPortAvailabilityChecker
+      hostPortAvailabilityChecker,
+      xcodebuild ?? new XcodebuildClient(
+        async (file, args) => processExecutor.exec([file, ...args].join(" ")),
+        timer,
+        (command, args, options) => processExecutor.spawn(command, args, options)
+      )
     );
   }
 
@@ -1234,31 +1244,28 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.device.deviceId
     );
 
-    const command = [
-      "xcodebuild",
+    const args = [
       "test-without-building",
-      `-xctestrun "${runnerXctestrunPath}"`,
-      `-destination "platform=iOS Simulator,id=${this.device.deviceId}"`,
+      "-xctestrun", runnerXctestrunPath,
+      "-destination", `platform=iOS Simulator,id=${this.device.deviceId}`,
       "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
-      "2>&1"
-    ].join(" ");
+    ];
 
     logger.info("[IOSCtrlProxy] Using xcodebuild test-without-building to start runner on simulator");
 
-    // Uses spawn with shell:true instead of exec() to avoid the default 1MB maxBuffer limit.
-    // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB, causing
-    // "stdout maxBuffer length exceeded" crashes when using exec().
+    // The streaming client uses piped stdio rather than exec(), so verbose
+    // hierarchy dumps cannot exhaust an output buffer.
     // runnerEnv is ALSO set on the host xcodebuild process env — not for the runner
     // (it can't see host env) but so the daemon can later discover, own, and recover
     // this process by reading its env via `ps eww` (see findExternalXcodebuildCtrlProxyProcess
     // / isDaemonManagedSimulatorXcodebuildProcess).
-    // Routed through the injected processExecutor so tests can observe/control the process.
-    // detached:true makes the shell a process-group leader so terminateProcessTree can
-    // signal the whole group (`kill -- -pid`): under shell:true the tracked PID is the
-    // /bin/sh wrapper, and TERM to the shell alone does NOT propagate to the xcodebuild
-    // child (#2834 review) — group signaling reaches both. stdio pipes and the exit
-    // handler are unaffected by detachment.
-    const child = this.processExecutor.spawn(command, [], { shell: true, detached: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    // `xcodebuild` itself becomes the detached process-group leader. This keeps
+    // terminateProcessTree's group cleanup effective without a shell wrapper.
+    const child = await this.xcodebuild.startStreaming(args, {
+      detached: true,
+      env: { ...process.env, ...runnerEnv },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     child.on("error", error => {
       // Ignore events from a process we no longer track (e.g. hung-recovery already
@@ -2215,24 +2222,25 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.device.deviceId
     );
 
-    const command = [
-      "xcodebuild",
+    const args = [
       "test-without-building",
-      `-xctestrun "${runnerXctestrunPath}"`,
+      "-xctestrun", runnerXctestrunPath,
       "-destination", `id=${this.device.deviceId}`,
       "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
       ...signingArgs,
-      "2>&1"
-    ].join(" ");
+    ];
 
-    // Start in background using spawn with shell:true to avoid the default 1MB maxBuffer limit.
-    // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB.
+    // Use the streaming client so verbose hierarchy dumps are drained without a
+    // shell or an output-buffer ceiling.
     // The runner env is ALSO set on the host xcodebuild process env so the daemon
     // can later discover/own/recover this process by reading its env via `ps eww`.
-    // Routed through the injected processExecutor so tests can observe/control the process.
-    // Match the simulator path's detached shell group so stop()/forceRestart() can
-    // terminate the shell and xcodebuild child through terminateProcessTree().
-    const child = this.processExecutor.spawn(command, [], { shell: true, detached: true, env: { ...process.env, ...runnerEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    // xcodebuild itself is the detached process-group leader, so the manager's
+    // existing terminateProcessTree() ownership semantics remain intact.
+    const child = await this.xcodebuild.startStreaming(args, {
+      detached: true,
+      env: { ...process.env, ...runnerEnv },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     child.on("error", error => {
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);

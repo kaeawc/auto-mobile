@@ -45,6 +45,9 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
 const baseDependencies: IosDoctorDependencies = {
   platform: () => "darwin",
   execFile: async () => createExecResult(""),
+  xcodebuild: {
+    executeCommand: async () => createExecResult("")
+  },
   fileExists: () => true,
   readDir: async () => [],
   homedir: () => "/Users/test",
@@ -88,7 +91,7 @@ describe("iOS doctor checks", () => {
     test("passes when version meets minimum", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        execFile: async () => createExecResult("Xcode 15.2\nBuild version 15C500b")
+        xcodebuild: { executeCommand: async () => createExecResult("Xcode 15.2\nBuild version 15C500b") }
       });
 
       expect(result.status).toBe("pass");
@@ -99,7 +102,7 @@ describe("iOS doctor checks", () => {
     test("fails when Xcode version is below minimum", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        execFile: async () => createExecResult("Xcode 14.2\nBuild version 14C18")
+        xcodebuild: { executeCommand: async () => createExecResult("Xcode 14.2\nBuild version 14C18") }
       });
 
       expect(result.status).toBe("fail");
@@ -109,7 +112,7 @@ describe("iOS doctor checks", () => {
     test("fails when unable to determine version", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        execFile: async () => createExecResult("some unexpected output")
+        xcodebuild: { executeCommand: async () => createExecResult("some unexpected output") }
       });
 
       expect(result.status).toBe("fail");
@@ -129,9 +132,9 @@ describe("iOS doctor checks", () => {
     test("fails when xcodebuild throws", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        execFile: async () => {
+        xcodebuild: { executeCommand: async () => {
           throw new Error("xcodebuild not found");
-        }
+        } }
       });
 
       expect(result.status).toBe("fail");
@@ -519,7 +522,7 @@ describe("iOS doctor checks", () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
         logger,
-        execFile: throwingExecFile
+        xcodebuild: { executeCommand: throwingExecFile }
       });
 
       expect(result.status).toBe("fail");

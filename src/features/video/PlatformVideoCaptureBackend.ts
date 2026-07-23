@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
@@ -9,6 +8,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
+import { DefaultFfmpegClient, type FfmpegClient } from "../../utils/media/FfmpegClient";
 import {
   createExitTracker,
   getFileSize,
@@ -25,6 +25,8 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
+
+const FFMPEG_SCALE_TIMEOUT_MS = 60_000;
 
 interface AndroidBackendHandle {
   kind: "android";
@@ -62,7 +64,8 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly timer: Timer = defaultTimer,
-    private readonly simctlFactory: (device: BootedDevice) => SimCtl = device => new SimCtlClient(device)
+    private readonly simctlFactory: (device: BootedDevice) => SimCtl = device => new SimCtlClient(device),
+    private readonly ffmpegClient: FfmpegClient = new DefaultFfmpegClient(),
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -378,11 +381,13 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   private async isFfmpegAvailable(): Promise<boolean> {
-    return new Promise(resolve => {
-      const process = spawn("ffmpeg", ["-version"], { stdio: ["ignore", "pipe", "pipe"] });
-      process.once("error", () => resolve(false));
-      process.once("exit", code => resolve(code === 0));
-    });
+    try {
+      await this.ffmpegClient.probe();
+      return true;
+    } catch (error) {
+      logger.debug(`[PlatformVideoCaptureBackend] FFmpeg probe failed; preserving the original recording: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
   }
 
   private async scaleWithFfmpeg(
@@ -390,39 +395,27 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     outputPath: string,
     resolution: { width: number; height: number }
   ): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const args = [
-        "-y",
-        "-i",
-        inputPath,
-        "-vf",
-        `scale=${resolution.width}:${resolution.height}`,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        outputPath,
-      ];
-
-      const process = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
-      let stderr = "";
-
-      process.stderr.on("data", chunk => {
-        stderr += chunk.toString();
-      });
-
-      process.once("error", error => reject(error));
-      process.once("exit", code => {
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(stderr || `ffmpeg exited with code ${code}`));
-        }
-      });
+    const args = [
+      "-y",
+      "-i",
+      inputPath,
+      "-vf",
+      `scale=${resolution.width}:${resolution.height}`,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ];
+    await this.ffmpegClient.run({
+      args,
+      context: "iOS recording scale",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeoutMs: FFMPEG_SCALE_TIMEOUT_MS,
     });
   }
 }

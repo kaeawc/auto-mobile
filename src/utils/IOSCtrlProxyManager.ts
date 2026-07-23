@@ -4,6 +4,8 @@ import { requireBootedDevice } from "./requireBootedDevice";
 import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
+import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
+import { ActionableError } from "../models/ActionableError";
 import { resolvePinnedVersion } from "../constants/release";
 import { type ChildProcess } from "child_process";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
@@ -599,6 +601,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Internal start implementation (called within mutex)
    */
   private async startInternal(): Promise<void> {
+    // Authoritative fail-closed gate (#4221): this is the single chokepoint every
+    // launch path funnels through (startDevice, session-reuse in toolRegistry, and
+    // discovery-pooled devices that never hit verifyIosDevice/ensureCtrlProxyReady).
+    // If a local runner override is set but unusable, refuse to start rather than
+    // silently launching the released runner and driving the device with it.
+    const iosOverride = await checkIosCtrlProxyOverride();
+    if (iosOverride.present && !iosOverride.usable) {
+      throw new ActionableError(
+        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`
+      );
+    }
+
     logger.info("[IOSCtrlProxy] Starting CtrlProxy");
     this.isStopping = false;
     const perf = createGlobalPerformanceTracker();

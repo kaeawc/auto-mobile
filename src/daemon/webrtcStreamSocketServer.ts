@@ -3,7 +3,10 @@ import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { WEBRTC_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ActionableError, type BootedDevice } from "../models";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import {
+  MultiPlatformDeviceManager,
+  type PlatformDeviceManager,
+} from "../utils/deviceUtils";
 import type {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
@@ -33,12 +36,14 @@ function loadManager() {
   return import("../server/webrtcStreamManager");
 }
 
-async function defaultResolveDevice(
+export async function resolveWebRtcStreamDevice(
+  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform: "android" | "ios" = "android"
 ): Promise<BootedDevice> {
-  const devices = await DeviceSessionManager.getInstance().detectConnectedPlatforms();
-  const candidates = devices.filter(device => device.platform === platform);
+  // The request already names its platform. Querying both platforms makes an
+  // iOS stream wait for ADB (and vice versa), so keep discovery platform-scoped.
+  const candidates = await deviceManager.getBootedDevices(platform);
 
   if (deviceId) {
     const match = candidates.find(device => device.deviceId === deviceId);
@@ -59,6 +64,15 @@ async function defaultResolveDevice(
     );
   }
   return candidates[0];
+}
+
+const defaultDeviceManager = new MultiPlatformDeviceManager();
+
+async function defaultResolveDevice(
+  deviceId?: string,
+  platform: "android" | "ios" = "android"
+): Promise<BootedDevice> {
+  return resolveWebRtcStreamDevice(defaultDeviceManager, deviceId, platform);
 }
 
 /**

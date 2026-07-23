@@ -7,6 +7,7 @@ import { hashAppBundle } from "./AppBundleHasher";
 import { isProcessAlreadyGoneError } from "./iosProcessErrors";
 import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
 import { logger } from "../logger";
+import { shellQuote as quoteShell } from "../shellQuote";
 import type { Logger } from "../logger";
 
 interface DeviceAppManagerDependencies {
@@ -49,8 +50,6 @@ const defaultDependencies: DeviceAppManagerDependencies = {
   tmpdir,
   logger,
 };
-
-const quoteShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
 /**
  * Lowest major iOS version whose physical-device process management

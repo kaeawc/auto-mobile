@@ -8,6 +8,7 @@ import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../Checks
 import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader";
 import { DefaultProcessExecutor, type ProcessExecutor } from "../../ProcessExecutor";
 import { logger } from "../../logger";
+import { shellQuote } from "../../shellQuote";
 
 const LIBWEBP_VERSION = "1.6.0";
 const WEBP_DOWNLOAD_BASE_URL = "https://storage.googleapis.com/downloads.webmproject.org/releases/webp";
@@ -260,9 +261,6 @@ async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Pr
   }
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

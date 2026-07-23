@@ -173,7 +173,8 @@ export class DatabaseInspector {
    * Escape value for shell command
    */
   private escapeShellValue(value: string): string {
-    // Escape single quotes for shell
+    // This escapes content inside the single-quoted `--extra` value above;
+    // shellQuote() would add a second complete shell word and change that syntax.
     return value.replace(/'/g, "'\"'\"'");
   }
 

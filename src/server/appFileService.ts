@@ -20,6 +20,7 @@ import { defaultAdbClientFactory, type AdbClientFactory } from "../utils/android
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { shellQuote } from "../utils/shellQuote";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { logger } from "../utils/logger";
@@ -526,10 +527,6 @@ function unsupportedAppFileOperation(
   return new ActionableError(
     `${operation} is not supported for appId ${appId} in ${container} on ${platform}: ${reason}`
   );
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 type AndroidTarget =

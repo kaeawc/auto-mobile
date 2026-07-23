@@ -35,6 +35,8 @@ describe("#4308 device WebRTC integration workflow", () => {
 
     expect(filter?.uses).toBe("dorny/paths-filter@v3");
     expect(filter?.with?.filters).toContain("src/features/webrtc/**");
+    expect(filter?.with?.filters).toContain("android/video-server/**");
+    expect(filter?.with?.filters).toContain("ios/screen-capture/**");
     expect(filter?.with?.filters).toContain("src/server/webrtcStreamManager.ts");
     expect(filter?.with?.filters).toContain("src/daemon/webrtcStream*");
     expect(filter?.with?.filters).toContain("examples/mediamtx/**");
@@ -52,7 +54,9 @@ describe("#4308 device WebRTC integration workflow", () => {
       expect(job?.needs).toContain("detect-webrtc-changes");
       expect(job?.if).toContain("needs.detect-webrtc-changes.outputs.should_run == 'true'");
       expect(job?.if).toContain("github.event.pull_request.labels.*.name, 'webrtc'");
-      expect(job?.if).toContain("github.event_name == 'workflow_dispatch'");
+      expect(job?.if).toContain("inputs.platform");
     }
+    expect(android?.if).toContain("inputs.platform == 'android'");
+    expect(ios?.if).toContain("inputs.platform == 'ios'");
   });
 });

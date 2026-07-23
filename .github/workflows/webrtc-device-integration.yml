@@ -31,6 +31,8 @@ jobs:
           filters: |
             webrtc:
               - 'src/features/webrtc/**'
+              - 'android/video-server/**'
+              - 'ios/screen-capture/**'
               - 'src/server/webrtcStreamManager.ts'
               - 'src/daemon/webrtcStream*'
               - 'src/index.ts'
@@ -43,9 +45,8 @@ jobs:
     name: "Android Device Capture to WHEP"
     needs: detect-webrtc-changes
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      needs.detect-webrtc-changes.outputs.should_run == 'true' ||
-      contains(github.event.pull_request.labels.*.name, 'webrtc')
+      (github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'android')) ||
+      (github.event_name != 'workflow_dispatch' && (needs.detect-webrtc-changes.outputs.should_run == 'true' || contains(github.event.pull_request.labels.*.name, 'webrtc')))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -80,9 +81,8 @@ jobs:
     name: "iOS Device Capture to WHEP"
     needs: detect-webrtc-changes
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      needs.detect-webrtc-changes.outputs.should_run == 'true' ||
-      contains(github.event.pull_request.labels.*.name, 'webrtc')
+      (github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'ios')) ||
+      (github.event_name != 'workflow_dispatch' && (needs.detect-webrtc-changes.outputs.should_run == 'true' || contains(github.event.pull_request.labels.*.name, 'webrtc')))
     runs-on: macos-26
     timeout-minutes: 35
     steps:
@@ -98,6 +98,7 @@ jobs:
       - name: "Build iOS capture prerequisites"
         run: |
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
           (cd ios/screen-capture && swift build)
       - name: "Boot iOS Simulator"
         run: bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000

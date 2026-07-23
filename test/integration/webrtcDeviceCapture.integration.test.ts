@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -73,7 +74,13 @@ async function stop(child: ChildProcessWithoutNullStreams | undefined): Promise<
 }
 
 function chromeBinary(): string {
-  const binary = process.env.AUTOMOBILE_CHROME_BINARY ?? "/usr/bin/google-chrome";
+  const candidates = process.env.AUTOMOBILE_CHROME_BINARY
+    ? [process.env.AUTOMOBILE_CHROME_BINARY]
+    : process.platform === "darwin"
+      ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+      : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
+  const binary = candidates.find(existsSync);
+  if (!binary) {throw new Error("Chrome is required for WHEP decoding; set AUTOMOBILE_CHROME_BINARY");}
   return binary;
 }
 
@@ -99,15 +106,28 @@ async function videoSample(cdp: CdpClient): Promise<{ frames: number; width: num
   return response.result?.result?.value as { frames: number; width: number; height: number; sample: number };
 }
 
-async function launchFixtureAndChangeIt(): Promise<void> {
+async function launchFixture(): Promise<void> {
   if (platform === "android") {
     const id = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
     await execFileAsync("adb", ["-s", id, "shell", "am", "start", "-a", "android.settings.SETTINGS"]);
-    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "yes"]);
+    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"]);
     return;
   }
   if (platform === "ios") {
     await execFileAsync("xcrun", ["simctl", "launch", "booted", "com.apple.Preferences"]);
+    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"]);
+    return;
+  }
+  throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
+}
+
+async function changeFixture(): Promise<void> {
+  if (platform === "android") {
+    const id = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
+    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "yes"]);
+    return;
+  }
+  if (platform === "ios") {
     await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "dark"]);
     return;
   }
@@ -128,16 +148,25 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     let cdp: CdpClient | undefined;
     let started = false;
     try {
-      await waitFor(async () => (await fetch(`http://127.0.0.1:${webRtcPort}/`).catch(() => undefined)) !== undefined, "MediaMTX did not become ready");
+      await waitFor(async () => {
+        if (mediamtx.exitCode !== null || mediamtx.signalCode !== null) {
+          throw new Error("MediaMTX exited before it became ready; inspect scratch/webrtc-device-integration/mediamtx.log");
+        }
+        const response = await fetch(`http://127.0.0.1:${webRtcPort}/`).catch(() => undefined);
+        if (!response) {return false;}
+        await Bun.sleep(100);
+        return mediamtx.exitCode === null && mediamtx.signalCode === null;
+      }, "MediaMTX did not become ready");
       await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"]);
       started = true;
-      await launchFixtureAndChangeIt();
+      await launchFixture();
       const response = await sendWebRtcStreamRequest({ action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` });
       expect(response.success).toBe(true);
       chrome = start(chromeBinary(), ["--headless=new", "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=9222", "--no-first-run", "about:blank"], join(artifactDir, "chrome.log"));
       cdp = await openReader(chrome);
       await waitFor(async () => (await videoSample(cdp!)).frames > 0, "browser did not decode device video");
       const first = await videoSample(cdp);
+      await changeFixture();
       await Bun.sleep(1_500);
       const second = await videoSample(cdp);
       expect(first.width).toBeGreaterThan(0);
@@ -146,6 +175,8 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       expect(second.sample).not.toBe(first.sample);
       const stopped = await sendWebRtcStreamRequest({ action: "stop", id: `${streamId}-stop`, streamId });
       expect(stopped.success).toBe(true);
+      const listed = await sendWebRtcStreamRequest({ action: "list", id: `${streamId}-list` });
+      expect(listed.streams?.some(stream => stream.streamId === streamId)).toBe(false);
     } finally {
       cdp?.close();
       await stop(chrome);

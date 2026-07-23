@@ -459,6 +459,19 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
+  test("includes helper stderr when startup exits before the first frame", async () => {
+    const { source, helper } = createHarness();
+
+    const started = source.start();
+    await flush();
+    helper.emitStderr("ScreenCaptureKit failed to start capture");
+    helper.emit("exit", { code: null, signal: "SIGABRT" });
+
+    await expect(started).rejects.toThrow(
+      /screen-capture-helper exited \(code=null, signal=SIGABRT\); last stderr: ScreenCaptureKit failed to start capture/
+    );
+  });
+
   test("resolves startup quietly when stopped before the first frame", async () => {
     const helper = new FakeFrameCaptureHelper();
     const encoder = new FakeChildProcess();

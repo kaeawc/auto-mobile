@@ -13,6 +13,17 @@ func logError(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
+// ScreenCaptureKit failures can surface as Objective-C exceptions, which would
+// otherwise terminate this subprocess with only SIGABRT visible to its parent.
+// Emit the exception while stderr is still connected so the daemon artifact
+// identifies the failing capture stage.
+NSSetUncaughtExceptionHandler { exception in
+    logError(
+        "fatal: uncaught Objective-C exception \(exception.name.rawValue): "
+        + (exception.reason ?? "no reason provided")
+    )
+}
+
 func writeJSON<T: Encodable>(_ value: T) {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

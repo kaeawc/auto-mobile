@@ -136,6 +136,7 @@ export class IosH264Source implements H264CaptureSource {
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
   private rejectFirstAudioWait: ((error: Error) => void) | null = null;
+  private lastHelperStderr: string | null = null;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -172,6 +173,7 @@ export class IosH264Source implements H264CaptureSource {
     }
     await this.teardownPromise;
     this.phase = "starting";
+    this.lastHelperStderr = null;
 
     try {
       const helperPath = resolveIosScreenCaptureHelperPath(this.helperPath, {
@@ -183,6 +185,7 @@ export class IosH264Source implements H264CaptureSource {
         return;
       }
 
+      logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
       const helper = this.createHelper({ binaryPath: helperPath, target });
       this.helper = helper;
       this.wireHelperFrames(helper);
@@ -279,7 +282,8 @@ export class IosH264Source implements H264CaptureSource {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
-        const error = new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})`);
+        const stderr = this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
+        const error = new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`);
         if (firstFrameSeen) {
           this.failIfCurrentHelper(helper, error);
           return;
@@ -343,7 +347,10 @@ export class IosH264Source implements H264CaptureSource {
     });
     helper.on("stderr", line => {
       if (line.length > 0) {
-        logger.debug(`[IosH264Source] screen-capture-helper stderr: ${line}`);
+        this.lastHelperStderr = line.slice(-2_048);
+        // The helper runs in a separate process. Preserve its diagnostics in the
+        // daemon log: a SIGABRT otherwise leaves CI with only an exit signal.
+        logger.warn(`[IosH264Source] screen-capture-helper stderr: ${line}`);
       }
       if (isHelperError(line)) {
         this.failIfCurrentHelper(
@@ -528,6 +535,12 @@ export class IosH264Source implements H264CaptureSource {
       logger.debug(`[IosH264Source] helper stop failed: ${error}`);
     });
   }
+}
+
+function describeCaptureTarget(target: CaptureTarget): string {
+  return target.kind === "simulator"
+    ? `iOS Simulator window ${target.windowID} at ${target.fps ?? SIMULATOR_FPS_DEFAULT} fps`
+    : `iOS device ${target.deviceId ?? "default"}`;
 }
 
 function makeNoFramesError(target: CaptureTarget): ActionableError {

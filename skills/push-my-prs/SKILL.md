@@ -23,7 +23,7 @@ Iterate through your open PRs in the current repo and keep them moving.
 
 ## Repo Rules
 
-- Use `github-cli`, `gh-pr-workflow`, `check-ci`, and `validate` conventions.
+- Use `github-cli`, `push-pr`, `check-ci`, and `validate` conventions.
 - Prefer repo validations and scripts over ad hoc commands.
 - Never force push unless a rebase made it necessary, and then use `--force-with-lease` only.
 - Leave ambiguous comments unresolved and note them in the summary.

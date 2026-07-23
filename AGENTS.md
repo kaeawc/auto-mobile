@@ -122,7 +122,7 @@ not visible even though they are present in the shade.
 # Codex specific
 
 - GitHub interactions use the GitHub CLI (`gh`).
-- Create or edit PRs with `gh pr create`/`gh pr edit` using `--body-file` to preserve newlines.
+- Use the repo-local `push-pr` skill for publishing one branch or PR. Create or edit PRs with `gh pr create`/`gh pr edit` using `--body-file` to preserve newlines.
 - Android tasks run via the Gradle wrapper from `android/` (e.g., `(cd android && ./gradlew <task>)`).
 - Local validations live under `scripts/` (prefer existing scripts over ad-hoc checks).
 - Bun tasks are defined in `package.json` (run with `bun run <script>`).
@@ -131,7 +131,6 @@ not visible even though they are present in the shade.
 
 ### Foundation Skills
 - github-cli: Use `gh` for PRs, issues, checks, and repo metadata. Path: `skills/github-cli/SKILL.md`.
-- gh-pr-workflow: Create or update PRs without mangling newlines. Path: `skills/gh-pr-workflow/SKILL.md`.
 - android-gradlew: Run Android tasks via `android/gradlew`. Path: `skills/android-gradlew/SKILL.md`.
 - bun-tasks: Use `package.json` scripts with Bun. Path: `skills/bun-tasks/SKILL.md`.
 

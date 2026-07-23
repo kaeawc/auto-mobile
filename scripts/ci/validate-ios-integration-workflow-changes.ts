@@ -8,8 +8,17 @@ const FORCE_LABELS = new Set(["run-ios", "run-native"]);
 
 type WorkflowDocument = { jobs?: Record<string, unknown> };
 
-function jobFromWorkflow(workflow: string): unknown {
-  return (load(workflow) as WorkflowDocument).jobs?.[JOB_ID];
+function workflowWiring(workflow: string): unknown {
+  const jobs = (load(workflow) as WorkflowDocument).jobs;
+  const detectChanges = jobs?.["detect-changes"] as { steps?: unknown[] } | undefined;
+  const producerSteps = detectChanges?.steps?.filter(step =>
+    typeof step === "object" && step !== null &&
+    ["filter-native-integration", "ios_integration_should_run"].includes((step as Record<string, unknown>).id as string)
+  );
+  return {
+    job: jobs?.[JOB_ID],
+    producerSteps,
+  };
 }
 
 function executionGate(job: unknown): Pick<Record<string, unknown>, "if" | "needs"> | undefined {
@@ -47,13 +56,16 @@ function structurallyEqual(left: unknown, right: unknown): boolean {
 export function iosIntegrationWorkflowChangeError(
   baseWorkflow: string,
   headWorkflow: string,
-  labels: readonly string[]
+  labels: readonly string[],
+  xctestRunnerResult?: string
 ): string | undefined {
-  const baseJob = jobFromWorkflow(baseWorkflow);
-  const headJob = jobFromWorkflow(headWorkflow);
-  if (structurallyEqual(baseJob, headJob)) {
+  const baseWiring = workflowWiring(baseWorkflow);
+  const headWiring = workflowWiring(headWorkflow);
+  if (structurallyEqual(baseWiring, headWiring)) {
     return undefined;
   }
+  const baseJob = (baseWiring as { job: unknown }).job;
+  const headJob = (headWiring as { job: unknown }).job;
   if (!structurallyEqual(executionGate(baseJob), executionGate(headJob))) {
     return [
       `[ERROR] ${JOB_ID}'s execution gate changed, so it cannot be forced safely.`,
@@ -61,6 +73,9 @@ export function iosIntegrationWorkflowChangeError(
     ].join("\n");
   }
   if (labels.some(label => FORCE_LABELS.has(label))) {
+    if (xctestRunnerResult !== undefined && xctestRunnerResult !== "success") {
+      return `[ERROR] ${JOB_ID} was forced but did not complete successfully (result: ${xctestRunnerResult}).`;
+    }
     return undefined;
   }
 
@@ -93,7 +108,8 @@ if (import.meta.main) {
   const error = iosIntegrationWorkflowChangeError(
     baseWorkflowFromGit(baseRef),
     readFileSync(WORKFLOW_PATH, "utf8"),
-    labelsFromEnvironment()
+    labelsFromEnvironment(),
+    process.env.IOS_INTEGRATION_WORKFLOW_XCTEST_RESULT
   );
   if (error) {
     console.error(error);

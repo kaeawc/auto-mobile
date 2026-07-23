@@ -611,9 +611,12 @@ jobs:
     timeout-minutes: 20
     name: "Fast Validation"
     runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.auto_chore != 'true'
+    needs: ios-integration-workflow-change-gate
+    if: always()
     steps:
+      - name: "Require XCTestRunner workflow-change gate"
+        if: needs.ios-integration-workflow-change-gate.result != 'success'
+        run: exit 1
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
@@ -724,6 +727,28 @@ jobs:
           name: fast-validation-logs
           path: scratch/fast-validate-*/
           retention-days: 7
+
+  # Fast Validation is the required PR gate. When XCTestRunner wiring changes,
+  # this job makes that required status wait for the forced macOS result instead
+  # of allowing the separate non-required iOS roll-up to fail after merge.
+  ios-integration-workflow-change-gate:
+    timeout-minutes: 30
+    name: "iOS Integration Workflow Change Gate"
+    runs-on: ubuntu-latest
+    needs: ios-xctest-runner-simulator-tests
+    if: always()
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Require forced XCTestRunner success for workflow wiring changes"
+        shell: bash
+        env:
+          IOS_INTEGRATION_WORKFLOW_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          IOS_INTEGRATION_WORKFLOW_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          IOS_INTEGRATION_WORKFLOW_XCTEST_RESULT: ${{ needs.ios-xctest-runner-simulator-tests.result }}
+        run: bun scripts/ci/validate-ios-integration-workflow-changes.ts
 
   # Detekt used to be a step inside Fast Validation, where its ~7 minutes of
   # cold Gradle work dominated an otherwise ~1 minute job. It is its own job so

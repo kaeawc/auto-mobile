@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import { join } from "node:path";
 import { SdkManagerClient } from "../../../src/utils/android-cmdline-tools/SdkManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -77,7 +78,7 @@ describe("SdkManagerClient", () => {
 
     await expect(pending).resolves.toMatchObject({ stdout: "Installed packages:\n", exitCode: 0 });
     expect(spawns).toEqual([{
-      command: "/sdk/cmdline-tools/latest/bin/sdkmanager",
+      command: join("/sdk", "cmdline-tools", "latest", "bin", "sdkmanager"),
       args: ["--list"],
       options: expect.objectContaining({ shell: false }),
     }]);
@@ -112,7 +113,7 @@ describe("SdkManagerClient", () => {
 
   test("executes a Windows batch sdkmanager through cmd without enabling a shell", async () => {
     const { client, child, spawns } = createClient({
-      existsSync: path => !path.endsWith("/sdkmanager"),
+      existsSync: path => !/[\\/]sdkmanager$/.test(path),
       environment: { ComSpec: "C:/Windows/System32/cmd.exe" },
       platform: "win32",
     });
@@ -123,7 +124,7 @@ describe("SdkManagerClient", () => {
     await expect(pending).resolves.toMatchObject({ exitCode: 0 });
     expect(spawns).toEqual([{
       command: "C:/Windows/System32/cmd.exe",
-      args: ["/d", "/v:off", "/s", "/c", '""/sdk/cmdline-tools/latest/bin/sdkmanager.bat" "--list""'],
+      args: ["/d", "/v:off", "/s", "/c", `""${join("/sdk", "cmdline-tools", "latest", "bin", "sdkmanager.bat")}" "--list""`],
       options: expect.objectContaining({ shell: false }),
     }]);
   });

@@ -43,39 +43,15 @@ This is just the mechanics.
 ## Review threads: resolution state
 
 `GET /pulls/{n}/comments` and `gh pr view --json comments` return bodies but **not** whether a
-thread is resolved; that lives only in GraphQL. Note `first: 100` is not pagination — a PR with
-more than 100 threads truncates silently, with no error — so page properly:
+thread is resolved; that lives only in GraphQL. Collect threads through the tested helper:
 
 ```bash
-gh api graphql --paginate -f query='
-query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
-  repository(owner:$owner,name:$repo){
-    pullRequest(number:$pr){
-      reviewThreads(first:100, after:$endCursor){
-        pageInfo{ hasNextPage endCursor }
-        nodes{ id isResolved isOutdated path line originalLine diffSide
-          comments(first:20){ nodes{ author{login} body url createdAt } } } } } } }' \
-  -F owner=kaeawc -F repo=auto-mobile -F pr=<PR> \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not)
-        | "\(.id)\t\(.path):\(.line)\t\(.comments.nodes[0].author.login)"'
+scripts/ci/pr-review-threads.sh <PR> --unresolved-only
 ```
 
-**GraphQL `--paginate` does not merge.** Unlike the REST array endpoints above, it emits one
-complete JSON *document per page*, concatenated. The `--jq` form above is safe because jq
-streams every document — but redirecting the same query to a file and parsing it afterwards
-reads **only the first page**, silently, with no error. Verified on PR [#4098](https://github.com/kaeawc/auto-mobile/pull/4098) with `first: 2`
-against 4 threads: the saved file yields `nodes | length` = 2, and `pageInfo` appears twice.
-
-So when you need the whole result as a file, add `--slurp` (which cannot be combined with
-`--jq`) and index through the page array:
-
-```bash
-gh api graphql --paginate --slurp -f query='…' -F pr=<PR> > scratch/threads.json
-jq '[.[].data.repository.pullRequest.reviewThreads.nodes[]]' scratch/threads.json
-```
-
-Otherwise keep `--jq` and consume the stream directly. Never save a non-slurped GraphQL
-`--paginate` result and parse it as one document.
+It paginates review threads, emits one clean JSON array, and fails closed rather than returning a
+partial feedback ledger. Do not replace it with a saved `gh api graphql --paginate` response:
+GraphQL emits one JSON document per page, unlike the REST array endpoints above.
 
 `--paginate` advances the **outer** `reviewThreads` connection only. The nested
 `comments(first:20)` is a separate connection: a thread with more replies than that silently

@@ -9,6 +9,7 @@
     "test:image:bun": "bun scripts/ci/image-runtime-smoke.ts",
     "test:image:sharp-bun-repro": "bash scripts/validate-sharp-bun-repro.sh",
     "test:memory-leaks": "bun --expose-gc scripts/detect-memory-leaks.ts",
+    "test:integration:webrtc-mediamtx": "bash scripts/webrtc/run-mediamtx-publisher-integration.sh",
     "lint": "eslint . --fix --pass-on-unpruned-suppressions && bash scripts/check-no-new-direct-simctl.sh",
     "lint:prune": "eslint . --prune-suppressions",
     "lint:baseline": "eslint . --suppress-rule max-depth --suppress-rule complexity --suppress-rule max-nested-callbacks --suppress-rule auto-mobile/no-accumulator-foreach",

@@ -23,7 +23,7 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
   a booted **iOS** simulator with the CtrlProxy screen streaming helper and
   local `ffmpeg` available.
 - A reachable **WHIP ingest server**. Run MediaMTX with the
-  [example config](../examples/mediamtx/mediamtx.yml) — `mediamtx ./examples/mediamtx/mediamtx.yml`
+  [example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml) — `mediamtx ./examples/mediamtx/mediamtx.yml`
   (or the official container) — which serves WHIP at `/<stream>/whip` and WHEP at
   `/<stream>/whep` on port `8889`. Any WHIP-compatible SFU (LiveKit, Janus,
   Cloudflare) works too. The bundled
@@ -34,7 +34,10 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
     flows over MediaMTX's ICE **UDP** listener `webrtcLocalUDPAddress: :8189` — a
     containerized or firewalled deployment that exposes only `8889` gets WHIP/WHEP
     setup failures or black video. Map/open `8189/udp` too, or configure a
-    TURN/TCP-only path.
+    TURN/TCP-only path. Behind Docker/NAT, mapping the port is not enough if
+    MediaMTX advertises its private/container interface — set
+    `webrtcAdditionalHosts: [<public-ip-or-dns>]` so it hands out reachable ICE
+    candidates, otherwise signaling completes but ICE times out to black video.
   - **Auth:** the stock config is **localhost-only** — its active `authInternalUsers`
     entry admits `127.0.0.1`/`::1`, so a CI worker publishing from *another host*
     gets `401` until you enable the config's commented tokened `authInternalUsers`

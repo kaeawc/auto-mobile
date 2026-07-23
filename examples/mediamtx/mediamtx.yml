@@ -52,6 +52,11 @@ webrtcICEServers2:
   #   username: user
   #   password: pass
 
+# Behind Docker/NAT, MediaMTX otherwise advertises its private/container
+# interface as the ICE host, so signaling succeeds but media never connects.
+# List the public IP(s)/DNS name(s) clients use to reach the server:
+# webrtcAdditionalHosts: [1.2.3.4, mediamtx.example.com]
+
 ###############################################################################
 # Trim the surface: AutoMobile only uses WebRTC. Disable the other ingress and
 # egress protocols so nothing else is listening.

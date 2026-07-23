@@ -98,7 +98,7 @@ ingests the WHIP stream and fans it out to browsers over WHEP. It owns the
 per-subscriber RTP forwarding, keyframe recovery, and reconnect/migration that a
 multi-viewer stream needs — so AutoMobile stays out of the SFU business.
 
-Run it with the checked-in [example config](../../../../examples/mediamtx/mediamtx.yml):
+Run it with the checked-in [example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml):
 
 ```bash
 mediamtx ./examples/mediamtx/mediamtx.yml   # serves WHIP + WHEP on :8889
@@ -137,8 +137,8 @@ webrtcServerCert: server.crt
 
 then use `https://` for both `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` and the WHEP URL
 (`https://mediamtx-host:8889/ci-run-42/whip` · `…/whep`). The
-[example config](../../../../examples/mediamtx/mediamtx.yml) carries these keys
-commented out.
+[example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml)
+carries these keys commented out.
 
 The bundled reference coordination server
 ([`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/README.md))

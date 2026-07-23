@@ -12,6 +12,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -25,6 +26,7 @@ export class InstallApp {
   private simctl: SimCtlClient;
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
+  private plist: PlistReader;
 
   constructor(
     device: BootedDevice,
@@ -33,7 +35,8 @@ export class InstallApp {
     buildToolsLocator: AndroidBuildToolsLocator | null = null,
     performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
     simctl: SimCtlClient | null = null,
-    deviceAppInstaller: DeviceAppInstaller | null = null
+    deviceAppInstaller: DeviceAppInstaller | null = null,
+    plist: PlistReader = new PlistClient()
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -42,6 +45,7 @@ export class InstallApp {
     this.createPerformanceTracker = performanceTrackerFactory;
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceAppInstaller = deviceAppInstaller || new DeviceAppManager();
+    this.plist = plist;
   }
 
   private isSimulator(): boolean {
@@ -276,12 +280,7 @@ export class InstallApp {
    */
   private async resolveAppBundleId(appPath: string): Promise<string | undefined> {
     try {
-      const plistPath = path.join(appPath, "Info.plist");
-      const result = await this.hostExecutor.executeCommand(
-        "plutil",
-        ["-extract", "CFBundleIdentifier", "raw", "-o", "-", plistPath]
-      );
-      const bundleId = result.stdout.trim();
+      const bundleId = (await this.plist.extractRawFile("CFBundleIdentifier", path.join(appPath, "Info.plist"))).trim();
       return bundleId || undefined;
     } catch (error) {
       logger.warn(`[InstallApp] Failed to read bundle identifier from ${appPath}: ${error instanceof Error ? error.message : String(error)}`);

@@ -2,6 +2,7 @@ import * as os from "os";
 import * as path from "path";
 import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../../utils/logger";
+import { PlistClient } from "../../../utils/ios-cmdline-tools/PlistClient";
 import type { NotificationPolicyAccessState } from "../NotificationPolicy";
 
 /**
@@ -168,17 +169,9 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
 
 /** Wire the real deps: host `plutil`, `fs` temp files, CoreSimulator device root. */
 export function defaultBulletinBoardReader(): IosNotificationAuthorizationReader {
+  const plist = new PlistClient();
   return new BulletinBoardAuthorizationReader({
-    plutilToXml: async path => {
-      const { execFile } = await import("child_process");
-      const { promisify } = await import("util");
-      const result = await promisify(execFile)(
-        "plutil",
-        ["-convert", "xml1", "-o", "-", "--", path],
-        { maxBuffer: 16 * 1024 * 1024 }
-      );
-      return typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-    },
+    plutilToXml: path => plist.readXmlFile(path),
     writeTemp: async buf => {
       const { promises: fs } = await import("fs");
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), "automobile-bb-"));

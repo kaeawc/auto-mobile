@@ -12,6 +12,7 @@ import path from "path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
+import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -56,6 +57,16 @@ class FakeDeviceAppInstaller implements DeviceAppInstaller {
       throw this.shouldThrow;
     }
   }
+}
+
+function fakePlist(bundleId: string): PlistReader {
+  return {
+    readJsonFile: async () => ({}),
+    readJsonBytes: async () => ({}),
+    readXmlFile: async () => "",
+    readXmlBytes: async () => "",
+    extractRawFile: async () => bundleId,
+  };
 }
 
 describe("InstallApp", () => {
@@ -444,7 +455,7 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl, null, fakePlist(""));
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -462,7 +473,7 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl, null, fakePlist(""));
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -480,7 +491,7 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult("com.example.app\n"));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl, null, fakePlist("com.example.app\n"));
 
     await expect(installApp.execute(appPath)).rejects.toThrow(
       "Install reported success, but bundle com.example.app was not present"
@@ -685,7 +696,7 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult("com.example.app\n"));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, simctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, simctl, null, fakePlist("com.example.app\n"));
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -705,7 +716,7 @@ describe("InstallApp", () => {
     simctl.setListResponses([[], []]);
     fakeHost.setCommandResponse("plutil", createExecResult("")); // empty → unresolved bundle id
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, simctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, simctl, null, fakePlist(""));
 
     await expect(installApp.execute(appPath)).rejects.toThrow("bundle identifier could not be read");
     expect(simctl.wasMethodCalled("uninstallApp")).toBe(false);

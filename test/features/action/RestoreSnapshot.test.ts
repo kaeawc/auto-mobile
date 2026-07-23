@@ -487,7 +487,15 @@ describe("RestoreSnapshot", () => {
         snapshotType: "adb",
         includeAppData: true,
         includeSettings: false,
-        packages: ["com.example.app1", "com.example.app2"]
+        packages: ["com.example.app1", "com.example.app2"],
+        appDataBackup: {
+          backupFile: "backup.ab",
+          backupMethod: "adb_backup",
+          totalPackages: 2,
+          backedUpPackages: ["com.example.app1", "com.example.app2"],
+          skippedPackages: [],
+          failedPackages: []
+        }
       };
 
 
@@ -888,9 +896,11 @@ describe("RestoreSnapshot", () => {
         useVmSnapshot: false
       });
 
-      // Verify pm clear was called for both apps
+      // Only the backed-up package is cleared. app2 was never captured
+      // (backedUpPackages is [app1]), so clearing it would wipe data that
+      // cannot be restored (#4236).
       expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app1")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app2")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app2")).toBe(false);
     });
 
     it("should restore foreground app after data restore", async () => {
@@ -1018,5 +1028,91 @@ describe("RestoreSnapshot", () => {
       const duration = Date.now() - startTime;
       expect(duration).toBeLessThan(100);
     });
+  });
+});
+
+describe("RestoreSnapshot restores settings before the slow app-data phase (#4236)", () => {
+  let device: BootedDevice;
+  let fakeAdb: FakeAdbClient;
+  let fakeAdbFactory: AdbClientFactory;
+  let fakeTimer: FakeTimer;
+  let restoreSnapshot: RestoreSnapshot;
+  let store: DeviceSnapshotStore;
+  let basePath: string;
+
+  beforeEach(async () => {
+    device = { deviceId: "emulator-5554", name: "Pixel_5", platform: "android", isEmulator: true } as BootedDevice;
+    fakeAdb = new FakeAdbClient();
+    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    basePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-scope-test-"));
+    store = new DeviceSnapshotStore(basePath);
+    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+  });
+
+  afterEach(async () => {
+    try { await fs.rm(basePath, { recursive: true, force: true }); } catch { /* ignore */ }
+    fakeTimer.reset();
+  });
+
+  // manifest.packages is every installed package (getInstalledPackages), while
+  // only appDataBackup.backedUpPackages was actually captured. Clearing the
+  // former wipes data that can never be restored, and the volume of pm clear
+  // calls is what exhausted the request budget before restoreSettings ran.
+  const manifestWith = (allPackages: string[], backedUp: string[]): DeviceSnapshotManifest => ({
+    snapshotName: "scope-test",
+    timestamp: new Date().toISOString(),
+    deviceId: device.deviceId,
+    deviceName: device.name,
+    platform: "android",
+    snapshotType: "adb",
+    includeAppData: true,
+    includeSettings: true,
+    packages: allPackages,
+    settings: { system: { screen_off_timeout: "60000" }, global: {}, secure: {} },
+    appDataBackup: { backedUpPackages: backedUp, skippedPackages: [], totalPackages: allPackages.length }
+  } as unknown as DeviceSnapshotManifest);
+
+  it("clears only the backed-up packages, not every installed package (#4236 P1)", async () => {
+    // The default restore path: manifest.packages is every installed package but
+    // only a subset was backed up. Clearing all of them is what exhausted the
+    // request budget before the restore could finish.
+    const manifest = manifestWith(
+      ["com.example.app", "com.android.systemui", "com.google.android.gms"],
+      ["com.example.app"]
+    );
+
+    await restoreSnapshot.execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false }).catch(() => undefined);
+
+    expect(fakeAdb.getCommandCount("pm clear com.example.app")).toBeGreaterThan(0);
+    expect(fakeAdb.getCommandCount("pm clear com.android.systemui")).toBe(0);
+    expect(fakeAdb.getCommandCount("pm clear com.google.android.gms")).toBe(0);
+  });
+
+  it("clears nothing when no packages were backed up (#4236 P1)", async () => {
+    const manifest = manifestWith(["com.example.app", "com.android.systemui"], []);
+
+    await restoreSnapshot.execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false }).catch(() => undefined);
+
+    expect(fakeAdb.getCommandCount("pm clear")).toBe(0);
+  });
+
+  it("restores settings before clearing app data, so a slow clear cannot cost the settings", async () => {
+    // Ordering is the fix: on a real device the clear phase spans every installed
+    // package and exhausts the request budget, so settings restored afterwards
+    // never happened. Fakes are instant, so assert the command *sequence* rather
+    // than timing -- otherwise the test passes with either order.
+    const manifest = manifestWith(["com.example.app"], ["com.example.app"]);
+
+    await restoreSnapshot.execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false }).catch(() => undefined);
+
+    const commands = fakeAdb.getAllCommands();
+    const settingsAt = commands.findIndex(c => c.includes("settings put system screen_off_timeout"));
+    const clearAt = commands.findIndex(c => c.includes("pm clear"));
+
+    expect(settingsAt).toBeGreaterThanOrEqual(0);
+    expect(clearAt).toBeGreaterThanOrEqual(0);
+    expect(settingsAt).toBeLessThan(clearAt);
   });
 });

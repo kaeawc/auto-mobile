@@ -33,6 +33,7 @@ import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
 import { WebpBinaryResolver, type ResolvedWebpBinaries } from "../../utils/image/webp/WebpBinaryResolver";
 import { logger } from "../../utils/logger";
+import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
@@ -49,6 +50,10 @@ export interface DaemonStatusDependencies {
 export interface DaemonBuildIdentityDependencies {
   daemonManager?: DaemonStatusManager;
   getClientBuildIdentity?: () => BuildIdentity;
+}
+
+export interface CtrlProxyDoctorDependencies {
+  logger?: Logger;
 }
 
 export interface AutoMobileCheckDependencies {
@@ -324,8 +329,10 @@ export async function checkDaemonBuildIdentity(
  * Check CtrlProxy status on connected devices
  */
 export async function checkCtrlProxy(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  dependencies: CtrlProxyDoctorDependencies = {}
 ): Promise<CheckResult> {
+  const log = dependencies.logger ?? logger;
   try {
     const adb = adbFactory.create();
     // Validate hermetic asset configuration before device-dependent shortcuts so
@@ -468,14 +475,14 @@ export async function checkCtrlProxy(
     };
   } catch (error) {
     if (error instanceof ActionableError) {
-      logger.warn(`CtrlProxy check failed: ${error.message}`, error);
+      log.warn(`CtrlProxy check failed: ${error.message}`, error);
       return {
         name: "CtrlProxy",
         status: "fail",
         message: error.message,
       };
     }
-    logger.warn(`CtrlProxy check failed: ${error instanceof Error ? error.message : String(error)}`, error);
+    log.warn(`CtrlProxy check failed: ${error instanceof Error ? error.message : String(error)}`, error);
     return {
       name: "CtrlProxy",
       status: "skip",

@@ -7,7 +7,7 @@ import {
   AbortStrategy,
   DEFAULT_ABORT_STRATEGY,
 } from "../../models/Plan";
-import { logger } from "../logger";
+import { logger, type Logger } from "../logger";
 import { ToolRegistry, type RegisteredTool } from "../../server/toolRegistry";
 import { ActionableError } from "../../models";
 import { isDebugModeEnabled } from "../debug";
@@ -82,9 +82,11 @@ export interface PlanExecutor {
  */
 export class DefaultPlanExecutor implements PlanExecutor {
   private timer: Timer;
+  private logger: Logger;
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
     this.timer = timer;
+    this.logger = loggerInstance;
   }
 
   /**
@@ -496,7 +498,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     } catch (error) {
       const errorMessage = `${error}`;
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
-        logger.warn(`${context.logPrefix} optional step ${step.tool} threw; returning skipped status`, error);
+        this.logger.warn(`${context.logPrefix} optional step ${step.tool} threw; returning skipped status`, error);
         return {
           status: "skipped",
           error: errorMessage,
@@ -517,7 +519,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           context.deviceId,
           context.sessionUuid,
         );
-      logger.warn(`${context.logPrefix} step ${step.tool} threw; returning failed status`, error);
+      this.logger.warn(`${context.logPrefix} step ${step.tool} threw; returning failed status`, error);
       return {
         status: "failed",
         error: errorMessage,

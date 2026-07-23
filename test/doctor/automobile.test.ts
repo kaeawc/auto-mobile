@@ -23,7 +23,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
-import { logger, type Logger } from "../../src/utils/logger";
+import { FakeLogger } from "../fakes/FakeLogger";
 
 describe("checkDaemonVersion", () => {
   test("returns pass status", () => {
@@ -358,25 +358,19 @@ describe("checkCtrlProxy", () => {
   });
 
   test("logs unexpected failures at warn before returning typed skip", async () => {
-    const warnings: string[] = [];
-    const originalWarn = logger.warn;
-    logger.warn = ((message: string) => {
-      warnings.push(message);
-    }) as Logger["warn"];
-    try {
-      const result = await checkCtrlProxy({
-        create: () => {
-          throw new Error("adb unavailable");
-        },
-      });
+    const log = new FakeLogger();
+    const result = await checkCtrlProxy({
+      create: () => {
+        throw new Error("adb unavailable");
+      },
+    }, { logger: log });
 
-      expect(result.name).toBe("CtrlProxy");
-      expect(result.status).toBe("skip");
-      expect(result.message).toBe("Could not check: adb unavailable");
-      expect(warnings).toEqual(["CtrlProxy check failed: adb unavailable"]);
-    } finally {
-      logger.warn = originalWarn;
-    }
+    expect(result.name).toBe("CtrlProxy");
+    expect(result.status).toBe("skip");
+    expect(result.message).toBe("Could not check: adb unavailable");
+    expect(log.at("warn")).toContainEqual(expect.objectContaining({
+      message: "CtrlProxy check failed: adb unavailable",
+    }));
   });
 
   test("fails malformed mirror configuration even when no devices are connected (#2815)", async () => {

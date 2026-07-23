@@ -18,7 +18,7 @@ import WebSocket from "ws";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
-import { logger } from "../../../utils/logger";
+import { logger, type Logger } from "../../../utils/logger";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import {
   BootedDevice,
@@ -933,6 +933,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * injectable for tests.
    */
   private sdkEventIngestorInstance: AndroidSdkEventIngestor | null = null;
+  private readonly loggerInstance: Logger;
 
   // Logging tag for base class
   protected readonly logTag = "ACCESSIBILITY_SERVICE";
@@ -949,10 +950,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     retryExecutor?: RetryExecutor,
     crashEventSink?: CrashEventSink,
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
-    sdkEventIngestor?: AndroidSdkEventIngestor
+    sdkEventIngestor?: AndroidSdkEventIngestor,
+    loggerInstance: Logger = logger
   ) {
     super(timer ?? defaultTimer, webSocketFactory ?? defaultWebSocketFactory, {}, retryExecutor ?? defaultRetryExecutor);
     this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
+    this.loggerInstance = loggerInstance;
     this.device = device;
     this.adb = adb;
     this.installedAppsRepository = installedAppsRepository ?? null;
@@ -1072,7 +1075,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     retryExecutor?: RetryExecutor,
     crashEventSink?: CrashEventSink,
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
-    sdkEventIngestor?: AndroidSdkEventIngestor
+    sdkEventIngestor?: AndroidSdkEventIngestor,
+    loggerInstance?: Logger
   ): AndroidCtrlProxyClient {
     return new AndroidCtrlProxyClient(
       device,
@@ -1083,7 +1087,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       retryExecutor,
       crashEventSink,
       deviceConnectionLostNotifier,
-      sdkEventIngestor
+      sdkEventIngestor,
+      loggerInstance
     );
   }
 
@@ -1996,7 +2001,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const attemptsSummary = shortCircuited
         ? `${result.attempts}/${maxAttempts} verification attempts (short-circuited: identical runner error on ${VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT} consecutive attempts)`
         : `${maxAttempts} verification attempts`;
-      logger.warn(`[CTRL_PROXY] Service not ready after ${attemptsSummary}${runnerErrorSuffix}`);
+      this.loggerInstance.warn(`[CTRL_PROXY] Service not ready after ${attemptsSummary}${runnerErrorSuffix}`);
       return false;
     }
 

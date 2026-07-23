@@ -7,7 +7,7 @@
 
 import type { Timer } from "../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
-import { logger } from "../../utils/logger";
+import { logger, type Logger } from "../../utils/logger";
 import type { GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
 import type { BaseResult, GestureTimingResult, ActionTimingResult, DelegateContext } from "./shared/types";
 
@@ -171,13 +171,13 @@ export function createCacheEntry<T>(
 /**
  * Safely parse a JSON message.
  */
-export function parseMessage<T>(data: string | Buffer): T | null {
+export function parseMessage<T>(data: string | Buffer, log: Logger = logger): T | null {
   try {
     const text = typeof data === "string" ? data : data.toString();
     return JSON.parse(text) as T;
   } catch (error) {
     // Malformed delegate messages are non-fatal; callers treat null as an unparseable message.
-    logger.debug(`Failed to parse device service message: ${error instanceof Error ? error.message : String(error)}`, error);
+    log.debug(`Failed to parse device service message: ${error instanceof Error ? error.message : String(error)}`, error);
     return null;
   }
 }

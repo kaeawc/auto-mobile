@@ -4,22 +4,7 @@ import {
 } from "../../../src/features/navigation/NavigationScreenshotManager";
 import { FileSystem } from "../../../src/utils/filesystem/DefaultFileSystem";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { logger, type Logger } from "../../../src/utils/logger";
-
-function captureDebugLogs(): { messages: string[]; restore(): void } {
-  const messages: string[] = [];
-  const originalDebug = logger.debug;
-  logger.debug = ((message: string) => {
-    messages.push(message);
-  }) as Logger["debug"];
-
-  return {
-    messages,
-    restore: () => {
-      logger.debug = originalDebug;
-    },
-  };
-}
+import { FakeLogger } from "../../fakes/FakeLogger";
 
 /**
  * Normalize a path to use forward slashes for consistent comparison.
@@ -172,18 +157,21 @@ describe("NavigationScreenshotManager", () => {
   let manager: NavigationScreenshotManager;
   let fakeFs: FakeFileSystem;
   let fakeTimer: FakeTimer;
+  let fakeLogger: FakeLogger;
   const screenshotDir = "/tmp/test-screenshots";
 
   beforeEach(() => {
     NavigationScreenshotManager.resetInstance();
     fakeFs = new FakeFileSystem();
     fakeTimer = new FakeTimer();
+    fakeLogger = new FakeLogger();
 
     manager = NavigationScreenshotManager.createForTesting({
       screenshotDir,
       maxCacheSizeBytes: 1024 * 1024, // 1MB for testing
       fileSystem: fakeFs,
       timer: fakeTimer,
+      logger: fakeLogger,
     });
   });
 
@@ -273,17 +261,13 @@ describe("NavigationScreenshotManager", () => {
     });
 
     test("logs directory read failures before returning null", async () => {
-      const debugLogs = captureDebugLogs();
       fakeFs.failReaddir(new Error("directory unavailable"));
-      try {
-        const result = await manager.findExistingScreenshot("com.test.app", "HomeScreen");
+      const result = await manager.findExistingScreenshot("com.test.app", "HomeScreen");
 
-        expect(result).toBeNull();
-        expect(debugLogs.messages).toHaveLength(1);
-        expect(debugLogs.messages[0]).toContain("[NAV_SCREENSHOT] Failed to find existing screenshot");
-      } finally {
-        debugLogs.restore();
-      }
+      expect(result).toBeNull();
+      expect(fakeLogger.at("debug")).toContainEqual(expect.objectContaining({
+        message: expect.stringContaining("[NAV_SCREENSHOT] Failed to find existing screenshot"),
+      }));
     });
   });
 
@@ -303,19 +287,15 @@ describe("NavigationScreenshotManager", () => {
     });
 
     test("logs read failures before returning null", async () => {
-      const debugLogs = captureDebugLogs();
       const path = `${screenshotDir}/test.webp`;
       fakeFs.setFile(path, Buffer.from("test image data"));
       fakeFs.failReadFileBuffer(new Error("read failed"));
-      try {
-        const result = await manager.readScreenshot(path);
+      const result = await manager.readScreenshot(path);
 
-        expect(result).toBeNull();
-        expect(debugLogs.messages).toHaveLength(1);
-        expect(debugLogs.messages[0]).toContain("[NAV_SCREENSHOT] Failed to read screenshot");
-      } finally {
-        debugLogs.restore();
-      }
+      expect(result).toBeNull();
+      expect(fakeLogger.at("debug")).toContainEqual(expect.objectContaining({
+        message: expect.stringContaining("[NAV_SCREENSHOT] Failed to read screenshot"),
+      }));
     });
   });
 

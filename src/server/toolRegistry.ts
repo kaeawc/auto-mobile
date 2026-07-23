@@ -12,7 +12,7 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
-import { logger } from "../utils/logger";
+import { logger, type Logger } from "../utils/logger";
 import { DaemonState } from "../daemon/daemonState";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
@@ -222,6 +222,7 @@ interface ToolRegistryPipelineOverrides {
 }
 
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
+  constructor(private readonly logger: Logger = logger) {}
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
     const { name, args, options, deviceSessionManager } = input;
     const shouldResolveDevice = options.shouldEnsureDevice
@@ -354,7 +355,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           IOSCtrlProxyClient.getInstance(device).bindSession(sessionUuid);
         }
       } catch (error) {
-        logger.debug(`[ToolRegistry] Best-effort CtrlProxy session bind skipped for ${name}: ${error}`);
+        this.logger.debug(`[ToolRegistry] Best-effort CtrlProxy session bind skipped for ${name}: ${error}`);
       }
     }
 
@@ -474,6 +475,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 // the ToolRegistry constructor; tests instantiate it directly to exercise the
 // memory-audit wrapping decision and foreground-package lookup without a device.
 export class DefaultAuditRunner implements AuditRunner {
+  constructor(private readonly log: Logger = logger) {}
   async run(input: AuditRunnerInput): Promise<any> {
     const { name, args, device, handler, progress, signal } = input;
     if (!serverConfig.isMemPerfAuditEnabled() || device.platform !== "android") {
@@ -482,7 +484,7 @@ export class DefaultAuditRunner implements AuditRunner {
 
     const packageName = await this.getForegroundPackageName(device);
     if (!packageName) {
-      logger.warn(`[ToolRegistry] Could not determine foreground app, skipping memory audit for ${name}`);
+      this.log.warn(`[ToolRegistry] Could not determine foreground app, skipping memory audit for ${name}`);
       return handler(device, args, progress, signal);
     }
 
@@ -521,7 +523,7 @@ export class DefaultAuditRunner implements AuditRunner {
       const match = stdout.match(/\s+(\S+)\/\S+\}/);
       return match ? match[1] : null;
     } catch (error) {
-      logger.warn(`[ToolRegistry] Failed to get foreground package name: ${error}`);
+      this.log.warn(`[ToolRegistry] Failed to get foreground package name: ${error}`);
       return null;
     }
   }
@@ -722,7 +724,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
 }
 
 // The registry that holds all tools
-class ToolRegistryClass {
+export class ToolRegistryClass {
   private tools: Map<string, RegisteredTool> = new Map();
   // Every live MCP server this registry has been registered with. In daemon
   // mode `registerWithServer` runs once per HTTP session, so notifications must
@@ -741,13 +743,13 @@ class ToolRegistryClass {
   private planLifecycleManager: PlanLifecycleManager;
   private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
     this.deviceSessionManager = DeviceSessionManager.getInstance();
     this.cleanupService = new DefaultAppCleanupService();
     this.toolCallRepository = new ToolCallRepository();
     this.timer = timer;
-    this.executionTargetResolver = new DefaultExecutionTargetResolver();
-    this.auditRunner = new DefaultAuditRunner();
+    this.executionTargetResolver = new DefaultExecutionTargetResolver(loggerInstance);
+    this.auditRunner = new DefaultAuditRunner(loggerInstance);
     this.navigationToolCallRecorder = new DefaultNavigationToolCallRecorder();
     this.afterToolCall = new DefaultAfterToolCallHandler();
     this.planLifecycleManager = new DefaultPlanLifecycleManager();

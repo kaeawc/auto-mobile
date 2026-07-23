@@ -4,6 +4,7 @@ import ts from "typescript";
 
 const SOURCE_ROOT = "src";
 const OWNER = "src/utils/ios-cmdline-tools/AppBundleMetadataClient.ts";
+const repoPath = (file: string): string => relative(".", file).replaceAll("\\", "/");
 
 const sourceFiles = (directory: string): string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -82,14 +83,14 @@ const directlyExecutesCodesign = (file: string): Array<{ line: number; column: n
 // scanned, and any future source exception needs a documented entry here.
 const exceptions = new Map<string, string>([]);
 const violations = sourceFiles(SOURCE_ROOT)
-  .map(file => ({ file, repoPath: relative(".", file) }))
-  .filter(({ repoPath }) => repoPath !== OWNER && !exceptions.has(repoPath))
-  .flatMap(({ file, repoPath }) => directlyExecutesCodesign(file).map(violation => ({ repoPath, ...violation })));
+  .map(file => ({ file, path: repoPath(file) }))
+  .filter(({ path }) => path !== OWNER && !exceptions.has(path))
+  .flatMap(({ file, path }) => directlyExecutesCodesign(file).map(violation => ({ path, ...violation })));
 
 if (violations.length > 0) {
   console.error("error: codesign execution must use AppBundleMetadataClient:");
   for (const violation of violations) {
-    console.error(`${violation.repoPath}:${violation.line}:${violation.column}: ${violation.text}`);
+    console.error(`${violation.path}:${violation.line}:${violation.column}: ${violation.text}`);
   }
   process.exit(1);
 }

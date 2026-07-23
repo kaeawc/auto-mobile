@@ -48,8 +48,15 @@ teardown() {
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
 }
 
-@test "rejects xcrun codesign and concatenated aliases" {
+@test "rejects xcrun, Bun.spawn, and concatenated aliases" {
   printf '%s\n' 'execFile("xcrun", ["codesign", "-d", appPath]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
+
+  printf '%s\n' 'Bun.spawn(["codesign", "-d", appPath]);' > "$FIXTURE"
 
   run bash "$SCRIPT"
 

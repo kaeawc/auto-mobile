@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import ScreenCaptureKit
@@ -6,6 +7,11 @@ import ScreenCaptureCore
 // MARK: - Constants
 
 let simulatorPermissionTimeoutSeconds: TimeInterval = 2.0
+
+// A command-line process has no AppKit application by default. ScreenCaptureKit
+// reaches CoreGraphics when creating an SCStream, and CoreGraphics aborts with
+// CGS_REQUIRE_INIT unless this connection is initialized first.
+_ = NSApplication.shared
 
 // MARK: - Logging
 

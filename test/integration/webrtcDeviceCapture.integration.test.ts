@@ -127,7 +127,10 @@ async function launchFixture(): Promise<void> {
 async function changeFixture(): Promise<void> {
   if (platform === "android") {
     const id = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
-    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "yes"]);
+    // A Home transition guarantees a visible surface change. The emulator may
+    // accept a ui-mode setting without repainting the Settings window, which
+    // made the old theme-only fixture indistinguishable from a frozen stream.
+    await execFileAsync("adb", ["-s", id, "shell", "input", "keyevent", "HOME"]);
     return;
   }
   if (platform === "ios") {

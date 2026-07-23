@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { SimCtlClient, type SimCtlFileSystem } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 
@@ -69,30 +70,31 @@ describe("SimCtlClient listApps", () => {
     expect(apps).toEqual([{ bundleId: "com.apple.Fitness", bundleName: "Fitness" }]);
   });
 
-  test("converts plist output with argv-based plutil and removes temporary files", async () => {
+  test("converts plist output through the bytes-safe PlistClient path", async () => {
     const device: BootedDevice = { deviceId: "ios-device-plist", name: "iOS Device", platform: "ios", source: "local" };
-    const files = new Map<string, string>();
     const calls: string[] = [];
-    const fileSystem: SimCtlFileSystem = {
-      mkdtemp: async prefix => `${prefix}test`,
-      writeFile: async (path, data) => { files.set(path, data); },
-      readFile: async path => files.get(path) ?? "",
-      rm: async path => { calls.push(`rm ${path}`); },
+    let converted: Buffer | undefined;
+    const plist: PlistReader = {
+      readJsonFile: async () => ({}),
+      readJsonBytes: async bytes => {
+        converted = bytes;
+        return { "com.apple.Maps": { bundleName: "Maps" } };
+      },
+      readXmlFile: async () => "",
+      readXmlBytes: async () => "",
+      extractRawFile: async () => "",
     };
     const execAsync = async (file: string, args: string[]) => {
       calls.push(`${file} ${args.join(" ")}`);
       if (args.join(" ") === "simctl --version") {return createExecResult("simctl version 1.0.0", "");}
       if (args.join(" ") === "simctl listapps ios-device-plist --all") {return createExecResult("<plist />", "");}
-      if (file === "plutil") {
-        files.set(args[args.indexOf("-o") + 1], JSON.stringify({ "com.apple.Maps": { bundleName: "Maps" } }));
-      }
       return createExecResult("", "");
     };
 
-    const apps = await new SimCtlClient(device, execAsync, undefined, undefined, undefined, fileSystem).listApps();
+    const apps = await new SimCtlClient(device, execAsync, undefined, undefined, undefined, undefined, undefined, plist).listApps();
 
-    expect(calls.some(call => call.startsWith("plutil -convert json -o "))).toBe(true);
-    expect(calls.some(call => call.startsWith("rm "))).toBe(true);
+    expect(converted?.toString("utf8")).toBe("<plist />");
+    expect(calls.some(call => call.startsWith("plutil "))).toBe(false);
     expect(apps).toEqual([{ bundleId: "com.apple.Maps", bundleName: "Maps" }]);
   });
 });

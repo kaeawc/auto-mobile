@@ -9,6 +9,7 @@ import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } fro
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
+import { PlistClient, type PlistReader } from "./PlistClient";
 
 export interface AppleDevice {
   udid: string;
@@ -457,7 +458,8 @@ export class SimCtlClient implements SimCtl {
     platform: NodeJS.Platform = process.platform,
     spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess = defaultSpawnProcess,
     fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem,
-    bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS
+    bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
+    private readonly plist: PlistReader = new PlistClient()
   ) {
     this.device = device;
     this.usesInjectedExecAsync = execAsyncFn !== null;
@@ -1190,8 +1192,8 @@ export class SimCtlClient implements SimCtl {
       };
 
       // simctl listapps may return an old-style plist instead of JSON (Xcode
-      // 26+). Keep both stages argv-based: simctl is run through this owner,
-      // then plutil converts a private temporary file without a shell pipe.
+      // 26+). The plist owner receives the exact bytes over stdin, avoiding a
+      // shell pipe and a temporary host file.
       const listAppsJson = async (args: string[]): Promise<string> => {
         const result = await this.executeCommandArgs(["listapps", ...args]);
         try {
@@ -1199,16 +1201,7 @@ export class SimCtlClient implements SimCtl {
           return result.stdout;
         } catch (error) {
           logger.debug(`[iOS] listapps returned plist; converting with plutil: ${error}`);
-          const directory = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-simctl-listapps-"));
-          const inputPath = join(directory, "listapps.plist");
-          const outputPath = join(directory, "listapps.json");
-          try {
-            await this.fileSystem.writeFile(inputPath, result.stdout, "utf8");
-            await this.execAsync("plutil", ["-convert", "json", "-o", outputPath, inputPath]);
-            return await this.fileSystem.readFile(outputPath, "utf8");
-          } finally {
-            await this.fileSystem.rm(directory, { recursive: true, force: true });
-          }
+          return JSON.stringify(await this.plist.readJsonBytes(Buffer.from(result.stdout, "utf8")));
         }
       };
 

@@ -17,10 +17,11 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
+import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
 
 /**
  * Runs a host program (NOT `xcrun simctl`) **by argv, never via a shell**. Used
- * for `plutil`/`codesign`, which read the `.app` bundle's metadata directly on
+ * for `codesign`, which reads the `.app` bundle's metadata directly on
  * the host filesystem. Passing an argv array (rather than a command string)
  * means a malicious `.app` path containing shell metacharacters — `$(…)`,
  * backticks, `;`, … — is handed to the program as a single literal argument and
@@ -109,12 +110,14 @@ export class DeepLinkManager implements DeepLinkManager {
   private geometry: ElementGeometry;
   private simctl: SimCtlClient;
   private hostExec: HostExec;
+  private plist: PlistReader;
 
   constructor(
     device: BootedDevice | null = null,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     simctl: SimCtlClient | null = null,
-    hostExec: HostExec | null = null
+    hostExec: HostExec | null = null,
+    plist: PlistReader = new PlistClient()
   ) {
     // Detect if the argument is a factory (has create method) or an executor
     if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
@@ -132,6 +135,7 @@ export class DeepLinkManager implements DeepLinkManager {
     this.device = device;
     this.simctl = simctl ?? new SimCtlClient(device);
     this.hostExec = hostExec ?? defaultHostExec;
+    this.plist = plist;
     this.parser = new DefaultElementParser();
     this.geometry = new DefaultElementGeometry();
   }
@@ -257,11 +261,7 @@ export class DeepLinkManager implements DeepLinkManager {
       // 2. Info.plist -> JSON via host plutil. argv form (no shell): the
       //    bundle path is a literal argument, so a crafted `.app` name cannot
       //    inject host commands.
-      const plistJson = await this.hostExec(
-        "plutil",
-        ["-convert", "json", "-o", "-", "--", `${appPath}/Info.plist`]
-      );
-      const info = JSON.parse(plistJson.stdout) as IosInfoPlist;
+      const info = await this.plist.readJsonFile(`${appPath}/Info.plist`) as IosInfoPlist;
 
       const schemes = this.parseCFBundleURLSchemes(info);
       const hosts = await this.parseAssociatedDomains(appPath);
@@ -276,7 +276,7 @@ export class DeepLinkManager implements DeepLinkManager {
           supportedMimeTypes,
           intentFilters: this.synthesizeIosIntentFilters(schemes, hosts)
         },
-        rawOutput: plistJson.stdout
+        rawOutput: JSON.stringify(info)
       };
     } catch (error) {
       logger.error(`[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${error}`);
@@ -331,12 +331,7 @@ export class DeepLinkManager implements DeepLinkManager {
         "codesign",
         ["-d", "--entitlements", ":-", appPath]
       );
-      const ents = await this.hostExec(
-        "plutil",
-        ["-convert", "json", "-o", "-", "--", "-"],
-        entsXml.stdout
-      );
-      const parsed = JSON.parse(ents.stdout) as Record<string, unknown>;
+      const parsed = await this.plist.readJsonBytes(Buffer.from(entsXml.stdout, "utf8")) as Record<string, unknown>;
       const domains = parsed["com.apple.developer.associated-domains"];
       if (!Array.isArray(domains)) {
         return [];

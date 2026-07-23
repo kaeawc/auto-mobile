@@ -765,9 +765,8 @@ export class SimCtlClient implements SimCtl {
    * trailing `Status=4294967295` line is printed by *healthy* boots on
    * macOS 26 / Xcode 26 (issue #4092) so it cannot be used as a sentinel
    * either. Device state is the signal that actually differs, which is what
-   * `scripts/ios/boot-simulator.sh` checks — this keeps the product boot and
-   * the script converged, and mirrors the multi-signal readiness proof the
-   * Android emulator path already performs.
+   * AutoMobile product boot uses this state check, mirroring the multi-signal
+   * readiness proof the Android emulator path already performs.
    *
    * On a failed verification the device is shut down, a bounded backoff is
    * awaited through the injected {@link Timer}, and the boot is retried.
@@ -811,8 +810,7 @@ export class SimCtlClient implements SimCtl {
   }
 
   /**
-   * Resolve the simulator runtime identifier to target, mirroring the 3-tier
-   * fallback in `scripts/ios/boot-simulator.sh`:
+   * Resolve the simulator runtime identifier to target with a 3-tier fallback:
    *   1. exact version prefix (SDK "26.3" matches runtime "26.3.0")
    *   2. major.minor prefix (SDK "26.3.1" matches runtime "26.3.x")
    *   3. highest runtime in the same major (SDK 26.3 → 26.4 when 26.3 is absent)
@@ -820,9 +818,8 @@ export class SimCtlClient implements SimCtl {
    * The identifier is looked up rather than constructed because its format
    * varies across Xcode versions (iOS-26-3 vs iOS-26-3-0).
    *
-   * Divergence from the script, deliberately: candidates are ordered by numeric
-   * version components, where the script's `jq sort_by(.version)` compares
-   * strings (so it would rank "26.9" above "26.10").
+   * Candidates are ordered by numeric version components rather than string
+   * comparison (so "26.10" ranks above "26.9").
    *
    * @param requestedVersion - iOS version to target; defaults to the active
    *                           Xcode iphonesimulator SDK version.

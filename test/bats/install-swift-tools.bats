@@ -55,6 +55,14 @@ assert_manual_fails_on_404() {
   assert_manual_fails_on_404 scripts/swiftformat/install_swiftformat.sh SWIFTFORMAT_VERSION
 }
 
+@test "swiftformat manual installer requests the release's macOS archive" {
+  run grep -E 'download_url=.*swiftformat\.zip' scripts/swiftformat/install_swiftformat.sh
+  [ "$status" -eq 0 ]
+
+  run grep -E 'download_url=.*swiftformat_macos\.zip' scripts/swiftformat/install_swiftformat.sh
+  [ "$status" -ne 0 ]
+}
+
 @test "swiftlint install_manual fails when the download 404s" {
   assert_manual_fails_on_404 scripts/swiftlint/install_swiftlint.sh SWIFTLINT_VERSION
 }

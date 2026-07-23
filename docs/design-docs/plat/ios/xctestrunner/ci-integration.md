@@ -65,7 +65,7 @@ automobile-tests:
         path: build/DerivedData/Build/Products/
 
     - name: Boot iOS Simulator
-      run: bash scripts/ios/boot-simulator.sh
+      run: auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 300000
 
     - name: Start simulator log stream
       run: |
@@ -142,11 +142,11 @@ The artifact contains both test bundles (`YourAppTests.xctest` and
 ### 3. Boot the simulator
 
 ```bash
-bash scripts/ios/boot-simulator.sh
+auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 300000
 ```
 
-The helper script finds the simulator that matches the current Xcode SDK, creates it if missing,
-and boots it. Alternatively:
+AutoMobile product boot finds the simulator that matches the current Xcode SDK, creates it if
+missing, and boots it. Alternatively:
 
 ```bash
 xcrun simctl boot "iPhone 16"

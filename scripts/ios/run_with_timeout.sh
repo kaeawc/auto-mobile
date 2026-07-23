@@ -3,9 +3,9 @@
 # Bound a command's wall-clock time, portably.
 #
 # GNU `timeout` is not present on a stock macOS runner and `gtimeout` only
-# appears with coreutils, so this falls back to a watchdog subshell. Extracted
-# from start-simulator.sh when boot-simulator.sh became the second consumer
-# (issue #4095); previously each caller would have carried its own copy.
+# appears with coreutils, so this falls back to a watchdog subshell. It was
+# extracted from the former simulator bootstrap so callers need not carry their
+# own timeout implementation.
 #
 # Usage:  run_with_timeout <seconds> <command> [args...]
 # Returns the command's status, or 124 when the watchdog fires (matching
@@ -21,8 +21,8 @@
 #      that leaves a descendant holding stdout keeps a caller's
 #      `out="$(run_with_timeout ...)"` blocked past the deadline waiting for EOF
 #      on the pipe -- the substitution outlives the process we killed, so the
-#      bound silently does not apply. boot-simulator.sh depends on this bound to
-#      retry a stalled boot, so that failure mode would defeat the retry.
+#      bound silently does not apply. Any caller that retries a stalled command
+#      depends on this bound, so that failure mode would defeat the retry.
 #
 # This file is meant to be sourced; it only defines a function.
 

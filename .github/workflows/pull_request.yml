@@ -1633,7 +1633,15 @@ jobs:
       # after the barrier — no file fallback needed.
       - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)"
         id: ctrlproxy-simulator
-        run: ./scripts/ios/boot-simulator.sh
+        run: |
+          ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000 --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
+          simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+          if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
+            echo "::error::AutoMobile product boot returned no deviceId." >&2
+            exit 1
+          fi
+          echo "simulator_udid=${simulator_udid}" >> "${GITHUB_OUTPUT}"
         background: true
 
       - name: "Build CtrlProxy iOS for Testing"
@@ -1660,31 +1668,6 @@ jobs:
             -xctestrun "${XCTESTRUN}" \
             -destination "id=${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}" \
             -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests
-
-      # One teardown, not two. These were separate because the Xcode 26.2 leg sat
-      # between them: the first released the CtrlProxy UI simulator before 26.2
-      # started, the second released 26.2's before 26.5 started. #4110 dropped
-      # that leg (it made the 26.5 Reminders run the job's THIRD boot, which owned
-      # the entire slow tail -- median 221s vs 81-100s for boots 1-2, every boot
-      # ≥300s was that one -- and pushed the job past its 45-minute cap), so the
-      # second `shutdown all` had nothing left to shut down. Xcode-toolchain drift
-      # coverage for 26.2 lives in nightly.yml, where it does not gate merges
-      # (see also #3592).
-      - name: "Shutdown iOS Simulators"
-        if: always()
-        run: xcrun simctl shutdown all || true
-
-      # No Xcode re-selection here: the job selects 26.5 up front and, since the
-      # 26.2 leg was dropped (#4110), nothing switches the toolchain afterwards.
-      # Re-selecting and re-ensuring the runtime were pure no-ops (#4114).
-
-      - name: "Boot iOS Simulator (Xcode 26.5)"
-        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
-        # A wedged simulator boot has stalled this step ~30 min, pushing the job
-        # past its 45-min cap (issue #4078). Bound it well above the observed p95
-        # (~9 min) so a real slow boot still passes but a hang fails here.
-        timeout-minutes: 15
-        run: ./scripts/ios/boot-simulator.sh
 
       # Re-sync the backgrounded ffmpeg install before its only consumer. With the
       # install hoisted out, this step's 10-minute cap now covers the test alone.

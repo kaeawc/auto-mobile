@@ -35,7 +35,7 @@ install_manual() {
 
     if [[ "$os" == "macos" ]]; then
         # Download from GitHub releases
-        download_url="https://github.com/nicklockwood/SwiftFormat/releases/download/${SWIFTFORMAT_VERSION}/swiftformat_macos.zip"
+        download_url="https://github.com/nicklockwood/SwiftFormat/releases/download/${SWIFTFORMAT_VERSION}/swiftformat.zip"
         temp_dir=$(mktemp -d)
         trap 'rm -rf "$temp_dir"' EXIT
 

@@ -5,8 +5,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   if command -v gdate &>/dev/null; then
     gdate +%s%3N
   else
-    echo "On MacOS you need to run 'brew install coreutils' to have gdate in order to capture millisecond timestamps."
-    exit 1
+    python3 -c 'import time; print(int(time.time() * 1000))'
   fi
 else
   date +%s%3N

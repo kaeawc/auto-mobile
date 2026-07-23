@@ -79,7 +79,9 @@ EOF
   chmod +x "$STUB_DIR/swiftlint" "$STUB_DIR/swiftformat" "$STUB_DIR/shfmt"
 
   for script in scripts/swiftlint/apply_swiftlint.sh scripts/swiftlint/validate_swiftlint.sh scripts/swiftformat/apply_swiftformat.sh scripts/swiftformat/validate_swiftformat.sh scripts/shellcheck/apply_shfmt.sh; do
-    run env PATH="$STUB_DIR:$PATH" bash "$REPO_ROOT/$script"
+    # Formatter scripts prepend $HOME/.local/bin to PATH, so isolate HOME to
+    # ensure the deliberately mismatched stub is the executable under test.
+    run env HOME="$STUB_DIR/home" PATH="$STUB_DIR:$PATH" bash "$REPO_ROOT/$script"
     [ "$status" -ne 0 ]
     [[ "$output" == *"version mismatch"* ]]
   done

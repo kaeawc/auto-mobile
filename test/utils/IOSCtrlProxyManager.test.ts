@@ -189,6 +189,7 @@ describe("IOSCtrlProxyManager", function() {
   });
 
   afterEach(function() {
+    fakeTimer.reset();
     if (prevHealthMaxAttempts === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
     } else {

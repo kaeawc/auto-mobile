@@ -31,6 +31,16 @@ interface PendingInterval {
 }
 
 /**
+ * Work waiting for auto-advance dispatch.
+ */
+interface PendingAutoAdvanceTask {
+  dueAt: number;
+  registrationOrder: number;
+  callback: () => void;
+  resolveOnReset?: () => void;
+}
+
+/**
  * Fake Timer implementation for testing.
  *
  * All time-related operations are controlled manually:
@@ -42,7 +52,7 @@ interface PendingInterval {
  * Tests must explicitly advance time using advanceTime() or resolveAll().
  *
  * For tests that don't need time control, call enableAutoAdvance() to make
- * sleeps resolve immediately via setImmediate.
+ * sleeps resolve asynchronously while preserving timer deadline order.
  */
 export class FakeTimer implements Timer {
   private pendingSleeps: PendingSleep[] = [];
@@ -53,13 +63,16 @@ export class FakeTimer implements Timer {
   private nextTimeoutId: number = 1;
   private nextIntervalId: number = 1000000;
   private autoAdvance: boolean = false;
-  // Track cancelled timeout IDs for autoAdvance mode (where callbacks are scheduled via setImmediate)
+  private pendingAutoAdvanceTasks: PendingAutoAdvanceTask[] = [];
+  private nextAutoAdvanceTaskOrder: number = 1;
+  private autoAdvanceDispatchScheduled: boolean = false;
+  // Track cancelled timeout IDs for autoAdvance mode.
   private cancelledTimeoutIds: Set<number> = new Set();
-  // Track cancelled interval IDs for autoAdvance mode (where callbacks are scheduled via setImmediate)
+  // Track cancelled interval IDs for autoAdvance mode.
   private cancelledIntervalIds: Set<number> = new Set();
 
   /**
-   * Enable auto-advance mode where sleeps and timeouts resolve immediately.
+   * Enable auto-advance mode where sleeps and timeouts resolve asynchronously.
    * Use this for tests that don't need to control time explicitly.
    */
   enableAutoAdvance(): void {
@@ -69,13 +82,14 @@ export class FakeTimer implements Timer {
   /**
    * Sleep for the specified duration.
    * In normal mode: pends until advanceTime() is called.
-   * In auto-advance mode: resolves immediately via setImmediate.
+   * In auto-advance mode: resolves asynchronously at its scheduled fake time.
    */
   async sleep(ms: number): Promise<void> {
     this.sleepHistory.push(ms);
     if (this.autoAdvance) {
-      this.currentTime += ms;
-      return new Promise<void>(resolve => setImmediate(resolve));
+      return new Promise<void>(resolve => {
+        this.enqueueAutoAdvanceTask(resolve, ms, resolve);
+      });
     }
     return new Promise<void>(resolve => {
       this.pendingSleeps.push({
@@ -230,6 +244,11 @@ export class FakeTimer implements Timer {
     this.currentTime = 0;
     this.pendingTimeouts = [];
     this.pendingIntervals = [];
+    for (const task of this.pendingAutoAdvanceTasks) {
+      task.resolveOnReset?.();
+    }
+    this.pendingAutoAdvanceTasks = [];
+    this.nextAutoAdvanceTaskOrder = 1;
     this.nextTimeoutId = 1;
     this.nextIntervalId = 1000000;
     this.cancelledTimeoutIds.clear();
@@ -246,22 +265,19 @@ export class FakeTimer implements Timer {
   /**
    * Schedule a callback to be executed after a specified delay.
    * In normal mode: fires when advanceTime() moves past the delay.
-   * In auto-advance mode: fires immediately via setImmediate (but can be cancelled).
+   * In auto-advance mode: fires asynchronously at its scheduled fake time (but can be cancelled).
    */
   setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
     const id = this.nextTimeoutId as unknown as NodeJS.Timeout;
     const numericId = this.nextTimeoutId;
     this.nextTimeoutId++;
     if (this.autoAdvance) {
-      this.currentTime += ms;
-      // Wrap callback to check if it was cancelled before executing
-      setImmediate(() => {
+      this.enqueueAutoAdvanceTask(() => {
         if (!this.cancelledTimeoutIds.has(numericId)) {
           callback();
         }
-        // Clean up the cancelled ID after the callback would have run
         this.cancelledTimeoutIds.delete(numericId);
-      });
+      }, ms);
       return id;
     }
     this.pendingTimeouts.push({
@@ -285,20 +301,19 @@ export class FakeTimer implements Timer {
   /**
    * Schedule a callback to be executed repeatedly at a specified interval.
    * In normal mode: fires each time advanceTime() moves past the interval.
-   * In auto-advance mode: fires once via setImmediate (intervals should not repeat in tests).
+   * In auto-advance mode: fires once at its scheduled fake time (intervals should not repeat in tests).
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
     const id = this.nextIntervalId as unknown as NodeJS.Timeout;
     const numericId = this.nextIntervalId;
     this.nextIntervalId++;
     if (this.autoAdvance) {
-      this.currentTime += ms;
-      setImmediate(() => {
+      this.enqueueAutoAdvanceTask(() => {
         if (!this.cancelledIntervalIds.has(numericId)) {
           callback();
         }
         this.cancelledIntervalIds.delete(numericId);
-      });
+      }, ms);
       return id;
     }
     this.pendingIntervals.push({
@@ -377,5 +392,52 @@ export class FakeTimer implements Timer {
 
     if (error) {throw error;}
     return result as T;
+  }
+
+  /**
+   * Queue auto-advance work. Dispatching one task per event-loop turn gives
+   * callers a chance to schedule competing deadlines before fake time moves.
+   */
+  private enqueueAutoAdvanceTask(
+    callback: () => void,
+    ms: number,
+    resolveOnReset?: () => void
+  ): void {
+    this.pendingAutoAdvanceTasks.push({
+      dueAt: this.currentTime + Math.max(0, ms),
+      registrationOrder: this.nextAutoAdvanceTaskOrder++,
+      callback,
+      resolveOnReset
+    });
+    this.scheduleAutoAdvanceDispatch();
+  }
+
+  private scheduleAutoAdvanceDispatch(): void {
+    if (this.autoAdvanceDispatchScheduled) {
+      return;
+    }
+    this.autoAdvanceDispatchScheduled = true;
+    setImmediate(() => {
+      this.autoAdvanceDispatchScheduled = false;
+      const task = this.takeNextAutoAdvanceTask();
+      if (task === undefined) {
+        return;
+      }
+
+      this.currentTime = Math.max(this.currentTime, task.dueAt);
+      task.callback();
+      this.scheduleAutoAdvanceDispatch();
+    });
+  }
+
+  private takeNextAutoAdvanceTask(): PendingAutoAdvanceTask | undefined {
+    if (this.pendingAutoAdvanceTasks.length === 0) {
+      return undefined;
+    }
+
+    this.pendingAutoAdvanceTasks.sort(
+      (left, right) => left.dueAt - right.dueAt || left.registrationOrder - right.registrationOrder
+    );
+    return this.pendingAutoAdvanceTasks.shift();
   }
 }

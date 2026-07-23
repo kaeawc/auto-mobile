@@ -143,8 +143,11 @@ export class DeviceBootService {
   }
 
   private async waitForRunningDevice(device: BootedDevice, timeoutMs: number): Promise<BootedDevice> {
-    const ready = await this.dependencies.deviceManager.waitForDeviceReady({ ...device, isRunning: true }, timeoutMs);
-    return { ...device, ...ready };
+    const recoveryTarget: DeviceInfo = { ...device, isRunning: true };
+    return this.bootRecovery.run(recoveryTarget, async () => {
+      const ready = await this.dependencies.deviceManager.waitForDeviceReady({ ...device, isRunning: true }, timeoutMs);
+      return { ...device, ...ready };
+    });
   }
 
   private async bootImage(image: DeviceInfo, timeoutMs: number, progress: DeviceBootProgress | undefined, provisioned: boolean): Promise<DeviceBootResult> {

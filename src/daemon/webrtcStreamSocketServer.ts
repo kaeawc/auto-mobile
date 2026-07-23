@@ -165,6 +165,9 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     if (request.size) {
       overrides.size = request.size;
     }
+    if (request.iosSimulatorFps !== undefined) {
+      overrides.iosSimulatorFps = request.iosSimulatorFps;
+    }
     if (request.audio !== undefined) {
       overrides.audioEnabled = request.audio;
     }

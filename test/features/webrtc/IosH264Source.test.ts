@@ -953,7 +953,7 @@ describe("resolveIosEncoderScale", () => {
     expect(resolveIosEncoderScale({ width: 800, height: 601 })).toEqual({ width: 800, height: 600 });
   });
 
-  test("only ever scales down, and always lands inside the macroblock budget", () => {
+  test("never scales up, and always lands inside the macroblock budget", () => {
     const captures = [
       { width: 320, height: 568 },
       { width: 750, height: 1334 },
@@ -976,6 +976,13 @@ describe("resolveIosEncoderScale", () => {
         WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
       );
     }
+  });
+
+  test("raises a sub-2-pixel axis to the 4:2:0 floor, the one case it grows a dimension", () => {
+    // 4:2:0 has no legal edge below 2px, so this is a floor rather than an
+    // upscale toward some target size. No real capture produces such a frame.
+    expect(resolveIosEncoderScale({ width: 2, height: 1 })).toEqual({ width: 2, height: 2 });
+    expect(resolveIosEncoderScale({ width: 1, height: 1 })).toEqual({ width: 2, height: 2 });
   });
 
   test("stays inside the budget for an extreme aspect ratio", () => {

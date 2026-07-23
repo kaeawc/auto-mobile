@@ -209,7 +209,7 @@ Newline-delimited JSON request/response.
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale, `WIDTHxHEIGHT` |
-| `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` | iOS Simulator capture rate, integer in `[5, 60]` (default `15`) |
+| `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` | iOS Simulator capture rate, integer in `[5, 60]` (default `15`; `iosSimulatorFps` per request) |
 | `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional audio (`audio: true` per request). Android requires the persistent `video-server` jar; iOS supports Simulator-window audio only. |
 
 Per-request fields override the environment defaults.

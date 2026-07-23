@@ -166,6 +166,20 @@ describe("WebRtcStreamSocketServer", () => {
     expect(response.streams?.map(s => s.streamId).sort()).toEqual(["s1", "s2"]);
   });
 
+  test("start forwards the iOS Simulator fps override into the streaming config", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+
+    await server.simulate(socket, {
+      id: "start",
+      action: "start",
+      streamId: "fps-1",
+      iosSimulatorFps: 24,
+    });
+
+    expect(started[0].overrides).toEqual({ iosSimulatorFps: 24 });
+  });
+
   test("start forwards WHIP endpoint and stream stays visible until stop", async () => {
     const server = new TestableServer(makeDeps());
     const socket = new FakeSocket();

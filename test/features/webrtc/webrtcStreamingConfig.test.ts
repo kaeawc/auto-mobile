@@ -141,6 +141,9 @@ describe("resolveWebRtcStreamingConfig", () => {
       {} as NodeJS.ProcessEnv
     );
     expect(config.iosSimulatorFps).toBe(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT);
+    // Pin the literal too: three docs files quote 15, and asserting only the
+    // symbol would let the constant drift away from them silently.
+    expect(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT).toBe(15);
     // The generic screen-capture default is tuned for MCP observation. An
     // interactive WebRTC feed gets its own, higher, seam.
     expect(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT).toBeGreaterThan(SIMULATOR_FPS_DEFAULT);

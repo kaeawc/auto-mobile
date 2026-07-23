@@ -40,8 +40,9 @@ export interface WebRtcStreamingConfig {
   size?: { width: number; height: number };
   /**
    * Frame rate requested from the iOS Simulator screen-capture helper, in
-   * `[WEBRTC_IOS_SIMULATOR_FPS_MIN, WEBRTC_IOS_SIMULATOR_FPS_MAX]`. Ignored by
-   * Android and physical-iOS sources, which capture at their own device rate.
+   * `[WEBRTC_IOS_SIMULATOR_FPS_MIN, WEBRTC_IOS_SIMULATOR_FPS_MAX]`. Android
+   * ignores it; physical iOS captures at its own device rate but still takes
+   * its declared encoder input rate and GOP length from it.
    */
   iosSimulatorFps: number;
   /**
@@ -214,7 +215,7 @@ function validateIosSimulatorFps(value: number, raw: string = String(value)): nu
     value > WEBRTC_IOS_SIMULATOR_FPS_MAX
   ) {
     throw new ActionableError(
-      `Invalid iOS Simulator capture fps "${raw}"; expected an integer in [${WEBRTC_IOS_SIMULATOR_FPS_MIN}, ${WEBRTC_IOS_SIMULATOR_FPS_MAX}].`
+      `Invalid iOS Simulator capture fps "${raw}"; expected an integer in [${WEBRTC_IOS_SIMULATOR_FPS_MIN}, ${WEBRTC_IOS_SIMULATOR_FPS_MAX}]. Set ${WEBRTC_ENV.IOS_SIMULATOR_FPS} or pass iosSimulatorFps.`
     );
   }
   return value;

@@ -489,11 +489,17 @@ export class IosH264Source implements H264CaptureSource {
       "4.2",
       "-bf",
       "0",
-      // Cap the keyframe interval at ~2s. ffmpeg cannot be signalled to emit an
-      // IDR mid-stream over a pipe (so there is no requestKeyFrame() for this
-      // source), so a bounded GOP is what lets a late or recovering WHEP viewer
-      // decode promptly instead of waiting for a long default GOP. The h264
-      // muxer prepends SPS/PPS to each keyframe, so every IDR is self-decodable.
+      // Cap the keyframe interval at ~2s of *declared* rate. ffmpeg cannot be
+      // signalled to emit an IDR mid-stream over a pipe, so this source has no
+      // requestKeyFrame() and a bounded GOP is the only thing that lets a late
+      // or recovering WHEP viewer decode promptly. The h264 muxer prepends
+      // SPS/PPS to each keyframe, so every IDR is self-decodable.
+      //
+      // -g counts encoded frames, not seconds, and the helper delivers fewer
+      // than `fps` whenever the screen is static (SimulatorCaptureSession drops
+      // every non-.complete ScreenCaptureKit status) or the host is saturated.
+      // The wall-clock interval is therefore `-g / delivered_fps`, which only
+      // equals 2s when delivery keeps up with the request.
       "-g",
       String(Math.max(1, Math.round(this.fps * IOS_KEYFRAME_INTERVAL_SECONDS))),
       "-forced-idr",
@@ -571,11 +577,16 @@ function evenFloor(value: number): number {
  *
  * A Simulator window is routinely far smaller than 1920x1080, so scaling every
  * capture toward that box spent encoder time inventing pixels the WHEP viewer
- * gained no detail from. Instead this only ever scales *down*: native dimensions
- * are kept whenever they are even and already inside the Level 4.2 macroblock
- * budget advertised in the WHIP SDP, odd dimensions round down to even (ffmpeg's
- * 4:2:0 chroma subsampling cannot encode an odd edge), and an oversized capture
- * shrinks just far enough to fit the budget with its aspect ratio intact.
+ * gained no detail from. Instead this scales down or not at all: native
+ * dimensions are kept whenever they are even and already inside the Level 4.2
+ * macroblock budget advertised in the WHIP SDP, odd dimensions round down to
+ * even (ffmpeg's 4:2:0 chroma subsampling cannot encode an odd edge), and an
+ * oversized capture shrinks just far enough to fit the budget with its aspect
+ * ratio intact.
+ *
+ * The single exception is the `MIN_ENCODER_DIMENSION` floor: an axis of 0 or 1
+ * pixel is raised to 2, because 4:2:0 has no smaller legal edge. No real capture
+ * produces such a frame.
  */
 export function resolveIosEncoderScale(size: EncoderSize): EncoderSize | null {
   const { width, height } = size;

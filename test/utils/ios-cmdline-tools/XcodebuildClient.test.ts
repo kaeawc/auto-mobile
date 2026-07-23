@@ -69,6 +69,31 @@ describe("XcodebuildClient executeCommand timeout", () => {
     expect(result.stdout).toBe("ok");
     expect(capturedSignal?.aborted).toBe(false);
   });
+
+  test("bounds the availability probe within the command timeout", async () => {
+    const timer = new FakeTimer();
+    let probeSignal: AbortSignal | undefined;
+    const client = new XcodebuildClient(async (_file, args, _maxBuffer, signal) => {
+      if (args.join(" ") === "-version") {
+        probeSignal = signal;
+        return new Promise<ExecResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        });
+      }
+      return createExecResult("ok", "");
+    }, timer);
+
+    const promise = client.executeCommand(["-showBuildSettings"], { timeoutMs: 1234 });
+    while (!probeSignal) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(1234);
+
+    await expect(promise).rejects.toThrow(
+      "Command timed out after 1234ms: xcodebuild -showBuildSettings"
+    );
+    expect(probeSignal.aborted).toBe(true);
+  });
 });
 
 describe("XcodebuildClient streaming runner", () => {

@@ -14,11 +14,12 @@ if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
 fi
 
 quote_pattern=$'["`\x27]'
-pattern="((spawn|spawnSync|execFile|execFileSync)\\([[:space:]]*${quote_pattern}xcodebuild|exec(Sync)?\\([^)]*${quote_pattern}xcodebuild)"
+direct_process_call='(spawn|spawnSync|execFile|execFileSync|exec|execSync)'
+pattern="(${direct_process_call}\\([^;]*xcodebuild|(const|let|var)[^;=]*=[^;]*${quote_pattern}xcodebuild[^;]*;[[:space:]]*${direct_process_call}\\()"
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" || "$file" == test/* ]] && continue
-  added_lines="$(git diff --unified=0 "$base_ref" -- "$file" | awk '/^\+[^+]/ { printf "%s ", substr($0, 2) }')"
+  added_lines="$(git diff --unified=0 "$base_ref" -- "$file" | awk '/^\+[^+]/ { print substr($0, 2) }' | perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' | tr '\n' ' ')"
   [[ -z "$added_lines" ]] && continue
   if grep -Eq "$pattern" <<<"$added_lines"; then
     violations+=("$file")

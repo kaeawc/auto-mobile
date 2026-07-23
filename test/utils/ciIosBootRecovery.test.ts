@@ -22,7 +22,7 @@ describe("CI iOS boot recovery", () => {
     expect(shouldUseCiIosBootRecovery({ platform: "ios", deviceId: "personal-udid" }, environment)).toBe(false);
   });
 
-  it("matches the resolved CI-owned runtime name without stale SDK bounds", () => {
+  it("matches the resolved CI-owned runtime name without changing provisioning SDK bounds", () => {
     expect(normalizeCiIosBootRequest({
       platform: "ios",
       minOsVersion: "26.3",
@@ -30,8 +30,9 @@ describe("CI iOS boot recovery", () => {
     }, owned.name)).toEqual({
       platform: "ios",
       name: owned.name,
-      minOsVersion: undefined,
-      maxOsVersion: undefined,
+      minOsVersion: "26.3",
+      maxOsVersion: "26.3",
+      matchNamedDeviceIgnoringOsVersion: true,
     });
   });
 

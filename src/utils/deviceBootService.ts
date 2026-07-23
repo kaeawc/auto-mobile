@@ -19,6 +19,8 @@ export interface DeviceBootRequest {
   preferRunning?: boolean;
   timeoutMs?: number;
   createIfMissing?: boolean;
+  /** Internal CI policy: preserve OS bounds for provisioning while matching its exact owned name across runtime fallback. */
+  matchNamedDeviceIgnoringOsVersion?: boolean;
 }
 
 export interface DeviceBootProgress {
@@ -68,7 +70,7 @@ export class DeviceBootService {
     const booted = await deviceManager.getBootedDevices(request.platform);
     const running = booted.find(device => device.deviceId === request.deviceId);
     if (running) {
-      return { device: await this.waitForRunningDevice(running, timeoutMs), source: "booted", provisioned: false };
+      return this.waitForRunningDevice(running, timeoutMs, progress);
     }
     const images = await deviceManager.listDeviceImages(request.platform);
     const image = images.find(device => device.deviceId === request.deviceId || device.name === request.deviceId);
@@ -83,7 +85,7 @@ export class DeviceBootService {
 
   private async bootMatchingDevice(request: DeviceBootRequest, timeoutMs: number, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
     const { deviceManager, deviceMatcher, matchingStrategy } = this.dependencies;
-    const criteria: DeviceMatchCriteria = {
+    const provisionCriteria: DeviceMatchCriteria = {
       platform: request.platform,
       minOsVersion: request.minOsVersion,
       maxOsVersion: request.maxOsVersion,
@@ -91,6 +93,9 @@ export class DeviceBootService {
       formFactor: request.formFactor,
       screenSize: request.screenSize,
     };
+    const criteria = request.matchNamedDeviceIgnoringOsVersion
+      ? { ...provisionCriteria, minOsVersion: undefined, maxOsVersion: undefined }
+      : provisionCriteria;
     const images = await deviceManager.listDeviceImages(request.platform);
     const running = await this.findRunningMatch(request, criteria, images, timeoutMs, progress);
     if (running) {
@@ -100,7 +105,7 @@ export class DeviceBootService {
     if (image) {
       return this.bootMatchedImage(image, timeoutMs, progress);
     }
-    return this.provisionAndBoot(request, criteria, images, timeoutMs, progress);
+    return this.provisionAndBoot(request, provisionCriteria, images, timeoutMs, progress);
   }
 
   private async findRunningMatch(request: DeviceBootRequest, criteria: DeviceMatchCriteria, images: DeviceInfo[], timeoutMs: number, progress?: DeviceBootProgress): Promise<DeviceBootResult | undefined> {
@@ -109,7 +114,7 @@ export class DeviceBootService {
     const match = this.dependencies.deviceMatcher.matchBootedDevice(criteria, enrichBootedDevicesFromImages(booted, images), this.dependencies.matchingStrategy);
     if (!match) { return undefined; }
     await progress?.report(100, 100, "Found matching running device");
-    return { device: await this.waitForRunningDevice(match, timeoutMs), source: "booted", provisioned: false };
+    return this.waitForRunningDevice(match, timeoutMs, progress);
   }
 
   private async bootMatchedImage(image: DeviceInfo, timeoutMs: number, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
@@ -117,8 +122,8 @@ export class DeviceBootService {
     const booted = await this.dependencies.deviceManager.getBootedDevices(image.platform);
     const running = booted.find(device => device.deviceId === image.deviceId || device.name === image.name);
     if (!running) { return this.bootImage(image, timeoutMs, progress, false); }
-    const device = await this.waitForRunningDevice(running, timeoutMs);
-    return { device: enrichBootedDevice(device, image), source: "booted", provisioned: false };
+    const result = await this.waitForRunningDevice(running, timeoutMs, progress);
+    return { ...result, device: enrichBootedDevice(result.device, image) };
   }
 
   private async provisionAndBoot(request: DeviceBootRequest, criteria: DeviceMatchCriteria, images: DeviceInfo[], timeoutMs: number, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
@@ -142,11 +147,16 @@ export class DeviceBootService {
     return this.bootImage(createdImage, timeoutMs, progress, true);
   }
 
-  private async waitForRunningDevice(device: BootedDevice, timeoutMs: number): Promise<BootedDevice> {
+  private async waitForRunningDevice(device: BootedDevice, timeoutMs: number, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
     const recoveryTarget: DeviceInfo = { ...device, isRunning: true };
+    let attempts = 0;
     return this.bootRecovery.run(recoveryTarget, async () => {
+      attempts++;
+      if (attempts > 1) {
+        return this.bootImageOnce(recoveryTarget, timeoutMs, progress, false);
+      }
       const ready = await this.dependencies.deviceManager.waitForDeviceReady({ ...device, isRunning: true }, timeoutMs);
-      return { ...device, ...ready };
+      return { device: { ...device, ...ready }, source: "booted", provisioned: false };
     });
   }
 

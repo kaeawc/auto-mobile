@@ -15,6 +15,7 @@ import {
 
 const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build-tools"];
 const DEFAULT_MAX_OUTPUT_CHARS = 16_384;
+const UNBOUNDED_OUTPUT_CHARS = Number.MAX_SAFE_INTEGER;
 const DEFAULT_TERMINATION_GRACE_MS = 5_000;
 
 export interface SdkManagerExecutionOptions {
@@ -90,7 +91,10 @@ export class SdkManagerClient {
   constructor(private readonly dependencies: SdkManagerClientDependencies = defaults()) {}
 
   async list(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
-    return this.run(["--list"], { timeoutMs: 60_000 }, options);
+    return this.run(["--list"], { timeoutMs: 60_000 }, {
+      ...options,
+      maxOutputChars: options.maxOutputChars ?? UNBOUNDED_OUTPUT_CHARS,
+    });
   }
 
   async acceptLicenses(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {

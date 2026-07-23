@@ -83,6 +83,21 @@ describe("SdkManagerClient", () => {
     }]);
   });
 
+  test("does not truncate the sdkmanager catalogue by default", async () => {
+    const { client, child } = createClient();
+    const output = "available package\n".repeat(2_000);
+    const pending = client.list();
+    await settleSpawn();
+    child.stdoutText(output);
+    child.close(0);
+
+    await expect(pending).resolves.toMatchObject({
+      stdout: output,
+      outputTruncated: false,
+      exitCode: 0,
+    });
+  });
+
   test("writes repeated license confirmation to stdin without shell interpolation", async () => {
     const { client, child, spawns } = createClient();
     const pending = client.acceptLicenses();

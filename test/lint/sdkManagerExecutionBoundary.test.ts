@@ -8,7 +8,6 @@ const CLIENT = "src/utils/android-cmdline-tools/SdkManagerClient.ts";
 function directlyExecutesSdkManager(source: string): boolean {
   const launcher = /\b(?:spawn|spawnSync|spawnCommand|exec|execFile|execFileSync|Bun\.spawn)\s*\(/;
   const directLiteral = /\b(?:spawn|spawnSync|spawnCommand|exec|execFile|execFileSync)\s*\(\s*["'`][^"'`]*sdkmanager|\bBun\.spawn\s*\(\s*\[\s*["'`][^"'`]*sdkmanager/i;
-  const constructedPath = /\b(?:join|resolve)\s*\([^;\n]*["'`]sdkmanager(?:\.bat)?["'`]/i;
   const variableNames = new Set([
     ...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*[^;]*?(?:\b(?:join|resolve)\s*\([^;]*?)?["'`]sdkmanager(?:\.bat)?["'`][^;]*;/gi),
     ...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*["'`]sdkmanager(?:\.bat)?["'`]/gi),

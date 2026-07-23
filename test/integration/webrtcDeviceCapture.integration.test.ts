@@ -160,6 +160,12 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       }, "MediaMTX did not become ready");
       await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment });
       started = true;
+      await waitFor(async () => {
+        try {
+          const response = await sendWebRtcStreamRequest({ action: "list", id: `${streamId}-daemon-ready` }, { timeoutMs: 1_000 });
+          return response.success;
+        } catch { return false; }
+      }, "AutoMobile daemon did not become ready");
       await launchFixture();
       const response = await sendWebRtcStreamRequest({ action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` });
       expect(response.success).toBe(true);

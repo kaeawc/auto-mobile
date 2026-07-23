@@ -7,7 +7,7 @@
 > a coordination server over **WHIP** using [werift](https://github.com/shinyoshiaki/werift-webrtc)
 > (pure-TypeScript WebRTC). Control is via the daemon `webrtc-stream.sock` Unix
 > socket. A reference coordination server + browser viewer ships under
-> [`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/).
+> [`examples/webrtc-coordination-server/`](https://github.com/kaeawc/auto-mobile/tree/main/examples/webrtc-coordination-server).
 >
 > For the WebRTC protocol choices behind this implementation, see the
 > [WebRTC standards map](./webrtc-standards-map.md).
@@ -149,7 +149,7 @@ then use `https://` for both `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` and the WHEP URL
 carries these keys commented out.
 
 The bundled reference coordination server
-([`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/README.md))
+([`examples/webrtc-coordination-server/`](https://github.com/kaeawc/auto-mobile/tree/main/examples/webrtc-coordination-server))
 remains as a zero-dependency way to try the path locally, and is described below.
 
 ## Why the daemon socket (not an MCP tool)
@@ -158,7 +158,7 @@ Streaming is a long-lived side channel owned by the daemon, not a discrete
 agent action. It is controlled the same way as other daemon services
 (`video-recording.sock`, `device-snapshot.sock`) — a request/response Unix
 socket — so a CI worker can start/stop a stream without going through the MCP
-tool surface. See [`src/daemon/CLAUDE.md`](../../../../src/daemon/CLAUDE.md).
+tool surface. See [`src/daemon/CLAUDE.md`](https://github.com/kaeawc/auto-mobile/blob/main/src/daemon/CLAUDE.md).
 
 ## Control protocol (`~/.auto-mobile/webrtc-stream.sock`)
 
@@ -335,5 +335,5 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 - [WHEP — Internet-Draft](https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep)
 - [werift-webrtc](https://github.com/shinyoshiaki/werift-webrtc)
 - [CI worker setup guide](../../../webrtc-streaming-ci-worker.md)
-- [Reference coordination server](../../../../examples/webrtc-coordination-server/README.md)
+- [Reference coordination server](https://github.com/kaeawc/auto-mobile/tree/main/examples/webrtc-coordination-server)
 - [Desktop live mirroring (Unix socket + FFmpeg decode)](./screen-streaming.md)

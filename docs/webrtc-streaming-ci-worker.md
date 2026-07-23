@@ -27,7 +27,7 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
   (or the official container) — which serves WHIP at `/<stream>/whip` and WHEP at
   `/<stream>/whep` on port `8889`. Any WHIP-compatible SFU (LiveKit, Janus,
   Cloudflare) works too. The bundled
-  [reference server](../examples/webrtc-coordination-server/README.md) still
+  [reference server](https://github.com/kaeawc/auto-mobile/tree/main/examples/webrtc-coordination-server) still
   exists for a zero-dependency local try-out, but MediaMTX is the supported
   production fanout.
   - **Ports:** `8889` is only the WHIP/WHEP signaling listener. The media itself

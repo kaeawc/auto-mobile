@@ -17,5 +17,9 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     const source = readFileSync(CHECK, "utf8");
     expect(source).toContain("const EXCEPTIONS = new Map<string, string>();");
     expect(source).toContain("IOSCtrlProxyProcessClient.ts");
+    expect(readFileSync(join(ROOT, "package.json"), "utf8")).toContain("check:ios-ctrl-proxy-process-boundary");
+    expect(readFileSync(join(ROOT, "scripts/all_fast_validate_checks.sh"), "utf8")).toContain("ios-ctrl-proxy-process-boundary");
+    expect(readFileSync(join(ROOT, "turbo.json"), "utf8")).toContain('"check:ios-ctrl-proxy-process-boundary"');
+    expect(readFileSync(join(ROOT, ".github/workflows/pull_request.yml"), "utf8")).toContain("Check iOS CtrlProxy process execution boundary");
   });
 });

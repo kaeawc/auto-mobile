@@ -49,7 +49,7 @@
     "dead-code:ts:knip": "bunx knip",
     "prepublishOnly": "cp README.md README.md.backup && bun scripts/npm/transform-readme.js",
     "postpublish": "mv README.md.backup README.md || true",
-    "turbo:validate": "turbo run lint build test check:android-emulator-boundary check:ffmpeg-boundary",
+    "turbo:validate": "turbo run lint build test check:android-emulator-boundary check:ffmpeg-boundary check:ios-ctrl-proxy-process-boundary",
     "turbo:build": "turbo run build",
     "turbo:lint": "turbo run lint",
     "turbo:test": "turbo run test"

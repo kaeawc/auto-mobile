@@ -771,7 +771,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
+            --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
             --max-parallel 4
 
       - name: "Run BATS Tests (Ubuntu)"
@@ -1190,6 +1190,11 @@ jobs:
         if: env.RUN_MCP_BUILD_TEST == 'true'
         shell: bash
         run: bun run check:android-emulator-boundary
+
+      - name: "Check iOS CtrlProxy process execution boundary"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
+        shell: bash
+        run: bun run check:ios-ctrl-proxy-process-boundary
 
       - name: "Run Build"
         if: env.RUN_MCP_BUILD_TEST == 'true'

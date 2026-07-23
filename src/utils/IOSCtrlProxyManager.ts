@@ -23,8 +23,6 @@ import {
 import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
 import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
 import type { HostCommandExecutor } from "./HostCommandExecutor";
-import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
-import type { HostCommandExecutor } from "./HostCommandExecutor";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 /**
@@ -356,13 +354,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     );
   }
 
-  private static processClientForTesting(processExecutor: ProcessExecutor, timer: Timer): IOSCtrlProxyProcessClient {
-    const host = processExecutor as unknown as Partial<HostCommandExecutor>;
-    return typeof host.executeCommand === "function"
-      ? new IOSCtrlProxyProcessClient(host as HostCommandExecutor, timer)
-      : new IOSCtrlProxyProcessClient(undefined, timer);
-  }
-
   /**
    * Reset all instances (for testing)
    */
@@ -384,10 +375,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * behind by a previously crashed daemon.
    */
   public static async reapOrphanedRunnerProcessesOnStartup(
-    processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
+    processClient: IOSCtrlProxyProcessClient = new IOSCtrlProxyProcessClient(),
     timer: Timer = defaultTimer
   ): Promise<void> {
-    const processClient = IOSCtrlProxyManager.processClientForTesting(processExecutor, timer);
     let pids: number[] = [];
     try {
       pids = await processClient.findStartupCandidatePids();
@@ -403,7 +393,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           continue;
         }
         const rootPid = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
-          processExecutor,
+          processClient,
           {
             pid,
             port: IOSCtrlProxyManager.DEFAULT_PORT,
@@ -853,7 +843,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             // signaling only it would orphan the xcodebuild child, which keeps the
             // hung in-sim runner alive to be re-adopted or contend the port on the
             // next start (#2834 review).
-            await IOSCtrlProxyManager.terminateProcessTree(this.processExecutor, this.timer, hungPid);
+            await this.processClient.terminateProcessTree(hungPid);
           }
         } else {
           logger.warn(
@@ -928,7 +918,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (this.xcTestProcessId) {
       try {
         if (await this.isOwnRunnerProcessAlive()) {
-          await IOSCtrlProxyManager.terminateProcessTree(this.processExecutor, this.timer, this.xcTestProcessId);
+          await this.processClient.terminateProcessTree(this.xcTestProcessId);
         } else {
           logger.debug(
             `[IOSCtrlProxy] Tracked runner PID ${this.xcTestProcessId} is not an owned CtrlProxy runner; ` +
@@ -1579,7 +1569,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         // stale daemon state, not an external hot-reload runner. Let port cleanup reap
         // the owning tree instead of adopting a runner whose health endpoint is down.
         const daemonManagedRoot = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
-          this.processExecutor,
+          this.processClient,
           process
         );
         if (daemonManagedRoot !== null && daemonManagedRoot !== process.pid) {
@@ -1628,7 +1618,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `[IOSCtrlProxy] Terminating stale CtrlProxy process tree rooted at ${rootPid} ` +
             `for listener ${process.pid} on port ${this.servicePort}`
           );
-          await IOSCtrlProxyManager.terminateProcessTree(this.processExecutor, this.timer, rootPid);
+          await this.processClient.terminateProcessTree(rootPid);
         }
 
         const remainingProcesses = await this.findListeningProcessesOnPort(this.servicePort);
@@ -1644,7 +1634,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
               `[IOSCtrlProxy] CtrlProxy listener ${process.pid} still holds port ${this.servicePort}; ` +
               `force-terminating remaining owned process tree`
             );
-            await IOSCtrlProxyManager.terminateProcessTree(this.processExecutor, this.timer, process.pid);
+            await this.processClient.terminateProcessTree(process.pid);
           }
         }
 
@@ -1714,12 +1704,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async findDaemonManagedRunnerTreeRoot(process: ListeningProcess): Promise<number> {
-    return (await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(this.processExecutor, process)) ??
+    return (await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(this.processClient, process)) ??
       process.pid;
   }
 
   private static async findDaemonManagedRunnerTreeRoot(
-    processExecutor: ProcessExecutor,
+    processClient: IOSCtrlProxyProcessClient,
     process: ListeningProcess,
     options: { requireOrphanedRoot?: boolean } = {}
   ): Promise<number | null> {
@@ -1737,7 +1727,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     while (parentPid !== undefined && parentPid > 1 && !visitedPids.has(parentPid)) {
       visitedPids.add(parentPid);
-      const parentInfo = await IOSCtrlProxyManager.getProcessInfo(processExecutor, parentPid);
+      const parentInfo = await processClient.getProcessInfo(parentPid);
       if (!parentInfo) {
         break;
       }
@@ -1763,39 +1753,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return processes
       .map(process => `PID ${process.pid} (cmd: ${process.command})`)
       .join(", ");
-  }
-
-  private static async findStartupCtrlProxyCandidatePids(processExecutor: ProcessExecutor): Promise<number[]> {
-    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).findStartupCandidatePids();
-  }
-
-  private static parseLsofPids(stdout: string): number[] {
-    const pids = new Set<number>();
-    for (const line of stdout.split("\n")) {
-      const match = line.match(/^p(\d+)$/);
-      if (!match) {
-        continue;
-      }
-      const pid = Number.parseInt(match[1], 10);
-      if (!Number.isNaN(pid)) {
-        pids.add(pid);
-      }
-    }
-    return [...pids];
-  }
-
-  private static async getProcessInfo(
-    processExecutor: ProcessExecutor,
-    pid: number
-  ): Promise<{ ppid?: number; command: string; environment?: string } | null> {
-    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).getProcessInfo(pid);
-  }
-
-  private static async getProcessEnvironment(
-    processExecutor: ProcessExecutor,
-    pid: number
-  ): Promise<string | undefined> {
-    return (await IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).getProcessInfo(pid))?.environment;
   }
 
   private static hasDeviceIdentity(text: string, deviceId: string): boolean {
@@ -1825,7 +1782,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (parentPid === undefined || parentPid <= 1) {
       return false;
     }
-    const parentInfo = await IOSCtrlProxyManager.getProcessInfo(this.processExecutor, parentPid);
+    const parentInfo = await this.processClient.getProcessInfo(parentPid);
     if (!parentInfo || parentInfo.ppid !== 1) {
       return false;
     }
@@ -1865,90 +1822,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private static isDirectCtrlProxyRunnerCommand(command: string): boolean {
     return command.includes("CtrlProxyUITests-Runner");
-  }
-
-  /**
-   * Terminate a runner process TREE rooted at `pid` (TERM → wait → KILL). The process
-   * group signal handles current detached launches; the descendant fallback handles
-   * legacy/orphaned shell roots that are not process-group leaders. Scoped to this tree —
-   * deliberately NOT a machine-wide pkill sweep, which would hit other devices' runners.
-   */
-  private static async terminateProcessTree(
-    processExecutor: ProcessExecutor,
-    timer: Timer,
-    pid: number
-  ): Promise<void> {
-    await IOSCtrlProxyManager.processClientForTesting(processExecutor, timer).terminateProcessTree(pid);
-  }
-
-  private static async findDescendantProcessIds(
-    processExecutor: ProcessExecutor,
-    rootPid: number
-  ): Promise<number[]> {
-    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).findDescendantProcessIds(rootPid);
-  }
-
-  private static async signalProcessIds(
-    processExecutor: ProcessExecutor,
-    pids: number[],
-    signal: "TERM" | "KILL"
-  ): Promise<void> {
-    for (const pid of pids) {await IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).terminateProcess(pid);}
-  }
-
-  private static async terminateProcess(
-    processExecutor: ProcessExecutor,
-    timer: Timer,
-    pid: number
-  ): Promise<void> {
-    await IOSCtrlProxyManager.processClientForTesting(processExecutor, timer).terminateProcess(pid);
-  }
-
-  private static async waitForProcessesExit(
-    processExecutor: ProcessExecutor,
-    timer: Timer,
-    pids: number[]
-  ): Promise<boolean> {
-    for (let attempt = 0; attempt < IOSCtrlProxyManager.PORT_RELEASE_ATTEMPTS; attempt++) {
-      if (await IOSCtrlProxyManager.haveProcessesExited(processExecutor, pids)) {
-        return true;
-      }
-      await timer.sleep(IOSCtrlProxyManager.PORT_RELEASE_GRACE_MS);
-    }
-    return IOSCtrlProxyManager.haveProcessesExited(processExecutor, pids);
-  }
-
-  private static async haveProcessesExited(
-    processExecutor: ProcessExecutor,
-    pids: number[]
-  ): Promise<boolean> {
-    for (const pid of pids) {
-      if (await IOSCtrlProxyManager.isProcessRunningWithExecutor(processExecutor, pid)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private static async waitForProcessExit(
-    processExecutor: ProcessExecutor,
-    timer: Timer,
-    pid: number
-  ): Promise<boolean> {
-    for (let attempt = 0; attempt < IOSCtrlProxyManager.PORT_RELEASE_ATTEMPTS; attempt++) {
-      if (!await IOSCtrlProxyManager.isProcessRunningWithExecutor(processExecutor, pid)) {
-        return true;
-      }
-      await timer.sleep(IOSCtrlProxyManager.PORT_RELEASE_GRACE_MS);
-    }
-    return !await IOSCtrlProxyManager.isProcessRunningWithExecutor(processExecutor, pid);
-  }
-
-  private static async isProcessRunningWithExecutor(
-    processExecutor: ProcessExecutor,
-    pid: number
-  ): Promise<boolean> {
-    return IOSCtrlProxyManager.processClientForTesting(processExecutor, defaultTimer).isRunning(pid);
   }
 
   /**

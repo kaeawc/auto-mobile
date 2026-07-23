@@ -15,6 +15,7 @@ export * from "./CurrentFocusResult";
 export * from "./DeepLinkResult";
 export * from "./DisplayedTimeMetric";
 export * from "./Device";
+export * from "./DeviceLockState";
 export * from "./DeviceSession";
 export * from "./DragAndDropOptions";
 export * from "./DragAndDropResult";

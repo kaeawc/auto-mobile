@@ -36,6 +36,20 @@ export class DeviceStateCollector {
     }
   }
 
+  async collectDeviceLock(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+    const { adb } = this.opts;
+    try {
+      const deviceLock = await adb.getDeviceLock(signal);
+      if (deviceLock) {
+        result.deviceLock = deviceLock;
+      }
+    } catch (error) {
+      // Best-effort observability: a lock read that fails leaves deviceLock
+      // unset (the agent simply gets no signal) rather than failing observe.
+      logger.warn("Failed to get device lock state:", error);
+    }
+  }
+
   async collectBackStack(
     result: ObserveResult,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),

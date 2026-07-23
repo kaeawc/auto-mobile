@@ -1,4 +1,4 @@
-import { BootedDevice, ExecResult, AndroidUser } from "../../../models";
+import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../../models";
 import type { Readable, Writable } from "node:stream";
 
 /** The intentionally small process surface exposed by ADB streaming commands. */
@@ -77,6 +77,13 @@ export interface AdbExecutor {
    * @returns Promise with wakefulness state: "Awake", "Asleep", "Dozing", or null if unknown
    */
   getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null>;
+
+  /**
+   * Get the device lock state (keyguard showing / secure vs swipe).
+   * @returns Promise with a {@link DeviceLockState}, or null when the lock state
+   *          could not be read (the caller then leaves `deviceLock` unset).
+   */
+  getDeviceLock(signal?: AbortSignal): Promise<DeviceLockState | null>;
 
   /**
    * List all Android users on the device (personal, work profiles, etc.)

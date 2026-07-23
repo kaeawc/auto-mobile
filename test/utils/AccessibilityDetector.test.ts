@@ -48,6 +48,10 @@ class FakeAdbExecutor implements AdbExecutor {
     return "Awake";
   }
 
+  async getDeviceLock(): Promise<null> {
+    return null;
+  }
+
   async listUsers(): Promise<AndroidUser[]> {
     return [];
   }

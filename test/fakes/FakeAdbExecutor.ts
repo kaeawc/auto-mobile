@@ -1,5 +1,5 @@
 import { AdbExecutor, type AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BootedDevice, ExecResult, AndroidUser } from "../../src/models";
+import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
 
 /**
  * Fake implementation of AdbExecutor for testing
@@ -24,6 +24,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   // Configurable state
   private screenOn: boolean = true;
   private wakefulness: "Awake" | "Asleep" | "Dozing" | null = "Awake";
+  private deviceLock: DeviceLockState | null = null;
   private devices: BootedDevice[] = [];
   private users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
   private foregroundApp: { packageName: string; userId: number } | null = null;
@@ -278,6 +279,15 @@ export class FakeAdbExecutor implements AdbExecutor {
 
   async getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null> {
     return this.wakefulness;
+  }
+
+  async getDeviceLock(): Promise<DeviceLockState | null> {
+    return this.deviceLock;
+  }
+
+  /** Configure the lock state returned by getDeviceLock (null = unknown). */
+  setDeviceLock(state: DeviceLockState | null): void {
+    this.deviceLock = state;
   }
 
   async listUsers(): Promise<AndroidUser[]> {

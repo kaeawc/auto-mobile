@@ -166,6 +166,24 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     expect(parsed.perfTiming).toEqual([{ phase: "x", durationMs: 1 }]);
     expect(parsed.wakefulness).toBe("Awake");
   });
+
+  test("models the deviceLock field, secure optional (#4235)", () => {
+    const secure = observeResultSchema.parse({
+      deviceLock: { locked: true, keyguardShowing: true, secure: true },
+    }) as Record<string, unknown>;
+    expect(secure.deviceLock).toEqual({ locked: true, keyguardShowing: true, secure: true });
+
+    // `secure` may be omitted when it can't be determined over adb.
+    const noSecure = observeResultSchema.parse({
+      deviceLock: { locked: true, keyguardShowing: true },
+    }) as Record<string, unknown>;
+    expect(noSecure.deviceLock).toEqual({ locked: true, keyguardShowing: true });
+
+    // A non-boolean lock flag is rejected.
+    expect(() =>
+      observeResultSchema.parse({ deviceLock: { locked: "yes", keyguardShowing: true } })
+    ).toThrow();
+  });
 });
 
 describe("observeToolResultSchema: artifact metadata (#3480)", () => {

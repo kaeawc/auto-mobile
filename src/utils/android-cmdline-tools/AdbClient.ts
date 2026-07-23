@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { logger } from "../logger";
-import { BootedDevice, ExecResult, AndroidUser } from "../../models";
+import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import {
   AdbExecutor,
@@ -828,6 +828,66 @@ export class AdbClient implements AdbExecutor {
       logger.debug("[ADB] Failed to get wakefulness state");
       return null;
     }
+  }
+
+  /**
+   * Get the device lock state (Android only).
+   *
+   * All three signals come from a single `dumpsys window policy` read — its
+   * `KeyguardServiceDelegate` block carries `showing`, `occluded`, and `secure`
+   * (the last mirrors `KeyguardManager.isKeyguardSecure()`, i.e. a credential is
+   * set). `secure` is deliberately NOT derived from `locksettings get-disabled`:
+   * that only reports whether the lock is set to *None*, so it returns `false`
+   * for both a swipe lock and a PIN and cannot tell them apart (#4235 review).
+   *
+   * `locked` is `showing && !occluded` — an occluded keyguard (a
+   * FLAG_SHOW_WHEN_LOCKED activity like the camera) is not obscuring the app.
+   *
+   * Degrades gracefully: an unreadable policy dump, or one missing the keyguard
+   * `showing` field, yields `null` (lock state unknown → observe omits the
+   * field); a missing `secure` field yields `secure: undefined` rather than a
+   * guessed boolean, so a swipe lock is never mistaken for a secure one.
+   *
+   * The field names are the API 30+ `KeyguardServiceDelegate` dump; on a release
+   * that does not emit them the read simply returns `null` — a missing signal,
+   * never a wrong one.
+   */
+  async getDeviceLock(signal?: AbortSignal): Promise<DeviceLockState | null> {
+    let policy: string;
+    try {
+      const result = await this.executeCommand(
+        "shell dumpsys window policy",
+        undefined,
+        undefined,
+        true,
+        signal
+      );
+      policy = result.stdout;
+    } catch {
+      logger.debug("[ADB] Failed to read window policy for device lock state");
+      return null;
+    }
+
+    // Lowercase, boundary-anchored tokens: the KeyguardServiceDelegate fields are
+    // `showing=`/`occluded=`/`secure=`, which do not collide with the CamelCase
+    // siblings in the same dump (`mKeyguardOccluded=`, `mSimSecure=`, `mIsShowing=`).
+    const keyguardShowing = AdbClient.matchBool(policy, /(?:^|\s)showing=(true|false)/);
+    if (keyguardShowing === null) {
+      return null;
+    }
+    const occluded = AdbClient.matchBool(policy, /(?:^|\s)occluded=(true|false)/) ?? false;
+    const secure = AdbClient.matchBool(policy, /(?:^|\s)secure=(true|false)/);
+    return {
+      locked: keyguardShowing && !occluded,
+      keyguardShowing,
+      secure: secure ?? undefined
+    };
+  }
+
+  /** First `<field>=true|false` match as a boolean, or null when the field is absent. */
+  private static matchBool(haystack: string, pattern: RegExp): boolean | null {
+    const match = haystack.match(pattern);
+    return match ? match[1] === "true" : null;
   }
 
   /**

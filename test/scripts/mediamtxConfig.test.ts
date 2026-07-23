@@ -8,6 +8,6 @@ describe("MediaMTX WebRTC configuration", () => {
       webrtcTrackGatherTimeout?: string;
     };
 
-    expect(config.webrtcTrackGatherTimeout).toBe("10s");
+    expect(config.webrtcTrackGatherTimeout).toBe("30s");
   });
 });

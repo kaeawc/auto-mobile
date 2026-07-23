@@ -26,9 +26,11 @@ webrtc: yes
 webrtcAddress: :8889
 
 # Android persistent encoding and iOS helper startup can take several seconds
-# after the WHIP peer connects. MediaMTX defaults to 2s, which closes a valid
-# publisher before its first SPS/PPS + IDR arrives.
-webrtcTrackGatherTimeout: 10s
+# after the WHIP peer connects. The iOS source has a 15s first-frame deadline,
+# so keep the relay deadline above that source contract plus encoder startup.
+# MediaMTX's 2s default otherwise closes a valid publisher before its first
+# SPS/PPS + IDR arrives.
+webrtcTrackGatherTimeout: 30s
 
 # --- TLS / HTTPS ---
 # This listener is plain HTTP by default (webrtcEncryption: no), so its URLs are

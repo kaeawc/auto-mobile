@@ -1,6 +1,6 @@
 ---
 name: push-pr
-description: Canonical repo workflow for publishing one branch or PR: confirm scope, validate, commit, push, create or update the PR with preserved Markdown, and optionally enable automerge. Prefer this over generic publish skills such as github:yeet inside this repo.
+description: "Canonical repo workflow for publishing one branch or PR: confirm scope, validate, commit, push, create or update the PR with preserved Markdown, and optionally enable automerge. Prefer this over generic publish skills such as github:yeet inside this repo."
 ---
 
 # Push PR

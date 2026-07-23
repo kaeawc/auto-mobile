@@ -63,7 +63,7 @@ if [[ ! -d "$codex_home" ]]; then
   exit 1
 fi
 
-python3 - "$codex_home" "${titles[@]}" <<'PY'
+python3 - "$codex_home" ${titles[@]+"${titles[@]}"} <<'PY'
 import json
 import pathlib
 import sys
@@ -122,8 +122,14 @@ for path in iter_jsonl_files():
                     ts = obj.get("timestamp")
                     break
             rel = path.relative_to(codex_home)
-            first_run.setdefault(title, (ts, rel))
-            last_run[title] = (ts, rel)
+            if title not in first_run or (
+                ts is not None and (first_run[title][0] is None or ts < first_run[title][0])
+            ):
+                first_run[title] = (ts, rel)
+            if title not in last_run or (
+                ts is not None and (last_run[title][0] is None or ts > last_run[title][0])
+            ):
+                last_run[title] = (ts, rel)
 
     for idx, line in enumerate(lines, start=1):
         has_create_mode = '"mode":"create"' in line or '\\"mode\\":\\"create\\"' in line

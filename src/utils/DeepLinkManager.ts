@@ -18,11 +18,12 @@ import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
+import { AppBundleMetadataClient, type AppBundleMetadata } from "./ios-cmdline-tools/AppBundleMetadataClient";
 
 /**
  * Runs a host program (NOT `xcrun simctl`) **by argv, never via a shell**. Used
- * for `codesign`, which reads the `.app` bundle's metadata directly on
- * the host filesystem. Passing an argv array (rather than a command string)
+ * for host commands with literal argv. App-bundle metadata is delegated to
+ * dedicated typed clients. Passing an argv array (rather than a command string)
  * means a malicious `.app` path containing shell metacharacters — `$(…)`,
  * backticks, `;`, … — is handed to the program as a single literal argument and
  * can never be expanded into host command execution. The optional `stdin` feeds
@@ -111,13 +112,15 @@ export class DeepLinkManager implements DeepLinkManager {
   private simctl: SimCtlClient;
   private hostExec: HostExec;
   private plist: PlistReader;
+  private appBundleMetadata: AppBundleMetadata;
 
   constructor(
     device: BootedDevice | null = null,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     simctl: SimCtlClient | null = null,
     hostExec: HostExec | null = null,
-    plist: PlistReader = new PlistClient()
+    plist: PlistReader = new PlistClient(),
+    appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
   ) {
     // Detect if the argument is a factory (has create method) or an executor
     if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
@@ -136,6 +139,7 @@ export class DeepLinkManager implements DeepLinkManager {
     this.simctl = simctl ?? new SimCtlClient(device);
     this.hostExec = hostExec ?? defaultHostExec;
     this.plist = plist;
+    this.appBundleMetadata = appBundleMetadata;
     this.parser = new DefaultElementParser();
     this.geometry = new DefaultElementGeometry();
   }
@@ -225,8 +229,8 @@ export class DeepLinkManager implements DeepLinkManager {
    * hosts from the code-signing entitlements (`com.apple.developer.associated-domains`).
    *
    * Simulators only — the `.app` bundle is a host filesystem path
-   * (`get_app_container ... app`), so `plutil`/`codesign` read it directly on the
-   * host. Physical devices return an explicit "not yet implemented" failure.
+   * (`get_app_container ... app`), so host-side metadata clients can read it
+   * directly. Physical devices return an explicit "not yet implemented" failure.
    * @param bundleId - The iOS bundle identifier
    * @returns Promise with deep link information
    */
@@ -264,7 +268,7 @@ export class DeepLinkManager implements DeepLinkManager {
       const info = await this.plist.readJsonFile(`${appPath}/Info.plist`) as IosInfoPlist;
 
       const schemes = this.parseCFBundleURLSchemes(info);
-      const hosts = await this.parseAssociatedDomains(appPath);
+      const hosts = await this.parseAssociatedDomains(appPath, bundleId);
       const supportedMimeTypes = this.parseDocumentTypes(info);
 
       return {
@@ -318,30 +322,22 @@ export class DeepLinkManager implements DeepLinkManager {
   }
 
   /**
-   * Universal-link hosts from the bundle's entitlements (host `codesign` +
-   * `plutil`). Unsigned bundles or bundles without associated domains yield `[]`,
-   * not an error.
+   * Universal-link hosts from the bundle's typed code-signing entitlements.
+   * Unsigned bundles or bundles without associated domains yield `[]`, not an error.
    */
-  private async parseAssociatedDomains(appPath: string): Promise<string[]> {
-    try {
-      // Two argv calls (no shell pipe): `codesign` dumps the entitlements plist
-      // to stdout, which is fed to `plutil` via stdin. The bundle path is a
-      // literal argv element, so a crafted `.app` name cannot inject commands.
-      const entsXml = await this.hostExec(
-        "codesign",
-        ["-d", "--entitlements", ":-", appPath]
-      );
-      const parsed = await this.plist.readJsonBytes(Buffer.from(entsXml.stdout, "utf8")) as Record<string, unknown>;
-      const domains = parsed["com.apple.developer.associated-domains"];
-      if (!Array.isArray(domains)) {
-        return [];
-      }
-      return domains
-        .filter((d): d is string => typeof d === "string" && d.startsWith("applinks:"))
-        .map(d => d.slice("applinks:".length));
-    } catch {
+  private async parseAssociatedDomains(appPath: string, bundleId: string): Promise<string[]> {
+    const entitlements = await this.appBundleMetadata.readEntitlements({
+      appBundlePath: appPath,
+      deviceId: this.device!.deviceId,
+      bundleId,
+    });
+    const domains = entitlements?.["com.apple.developer.associated-domains"];
+    if (!Array.isArray(domains)) {
       return [];
     }
+    return domains
+      .filter((d): d is string => typeof d === "string" && d.startsWith("applinks:"))
+      .map(d => d.slice("applinks:".length));
   }
 
   /**

@@ -3,7 +3,6 @@ import "./runtime/reflectMetadata";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
 import {
   DAEMON_LAUNCH_CWD_ENV,
-  resolveDaemonLaunchWorkingDirectory,
   safeProcessCwd,
 } from "./utils/workingDirectory";
 
@@ -22,28 +21,17 @@ process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 
 import type { DaemonOptions } from "./daemon/types";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
-import type { PlanExecutionLockScope } from "./utils/ServerConfig";
-import {
-  parseOutputReductionFlags,
-  OUTPUT_REDUCTION_FLAG_SPECS,
-  type OutputReductionFlags,
-} from "./utils/outputReductionFlags";
-import type { VideoRecordingConfigInput } from "./models";
+import { OUTPUT_REDUCTION_FLAG_SPECS } from "./utils/outputReductionFlags";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { getMcpServerVersion } from "./utils/mcpVersion";
 import {
   SKIP_CTRL_PROXY_DOWNLOAD_ENV,
   SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
-  shouldSkipCtrlProxyDownload,
 } from "./utils/ctrlProxyDownloadControl";
 import { prefetchVideoServerJar } from "./features/webrtc/videoServerJar";
-import { parseToolOutputsDirConfig } from "./utils/toolOutputArtifacts";
-import {
-  parseEventAllMarkersConfig,
-  hasEventAllMarkersCliOverride,
-  EVENT_ALL_MARKERS_FLAG,
-} from "./utils/eventAllMarkers";
+import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
+import { parseArgs } from "./cli/parseArgs";
 import {
   installProcessLifecycleHandlers,
   setFatalProcessHandler,
@@ -82,335 +70,6 @@ setFatalProcessHandler(event => {
   }
   logFatal("Unhandled rejection", event.reason);
 });
-
-interface ParseLogger {
-  warn(message: string): void;
-}
-
-// Parse command line arguments
-function parseArgs(log: ParseLogger): {
-  cliMode: boolean;
-  cliArgs: string[];
-  daemonPort: number | undefined;
-  /** Set only when `--host` is passed; otherwise Daemon uses its default (IPv4 loopback). */
-  daemonHost: string | undefined;
-  debugPerf: boolean;
-  debug: boolean;
-  uiPerfMode: boolean;
-  memPerfAuditMode: boolean;
-  a11yAuditMode: boolean;
-  a11yLevel?: string;
-  a11yFailureMode?: string;
-  a11yMinSeverity?: string;
-  a11yUseBaseline: boolean;
-  safeAreaWarnings: boolean;
-  predictiveUi: boolean;
-  rawElementSearch: boolean;
-  planExecutionLockScope: PlanExecutionLockScope;
-  videoRecordingDefaults: VideoRecordingConfigInput;
-  daemonMode: boolean;
-  daemonCommand?: string;
-  daemonArgs: string[];
-  skipCtrlProxyDownload: boolean;
-  embeddedSdk: boolean;
-  networkMockable: boolean;
-  dismissKeyboardAfterInput: boolean;
-  eventAllMarkers: string[];
-  eventAllMarkersCliOverride: boolean;
-  mcpRecording: boolean;
-  navigationScreenshots: boolean;
-  noWaitForPollingOverhead: boolean;
-  noProxy: boolean;
-  noDaemon: boolean;
-  noA11yIncludeNotImportantViews: boolean;
-  noA11yReportViewIds: boolean;
-  noA11yRetrieveInteractiveWindows: boolean;
-  noOcclusion: boolean;
-  outputReduction: OutputReductionFlags;
-  toolOutputsDir: string | undefined;
-  } {
-  const args = process.argv.slice(2);
-
-  let daemonPort: number | undefined;
-  let daemonHost: string | undefined;
-
-  // Detect CLI mode based on command line flag
-  const cliMode = args.includes("--cli");
-
-  // Detect daemon mode (internal daemon process)
-  const daemonMode = args.includes("--daemon-mode");
-
-  // Detect no-proxy mode (skip daemon proxy, execute tools directly)
-  // By default, MCP server proxies to daemon for stable device management
-  // --direct is kept as an undocumented alias for backwards compatibility
-  const noProxy = args.includes("--no-proxy") || args.includes("--direct");
-
-  // Detect no-daemon mode (keep proxy architecture but disable daemon auto-start)
-  const noDaemon = args.includes("--no-daemon");
-
-  // Detect daemon management command
-  const daemonCommandIndex = args.indexOf("--daemon");
-  const daemonCommand =
-    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] : undefined;
-  const daemonArgs =
-    daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
-
-  // Detect debug-perf mode for performance timing and audit output
-  const debugPerf =
-    args.includes("--debug-perf") ||
-    args.includes("--ui-perf-debug") ||
-    process.env.AUTOMOBILE_DEBUG_PERF === "1";
-
-  // Detect debug mode to enable debug tools (debugSearch, bugReport)
-  const debug =
-    args.includes("--debug") || process.env.AUTOMOBILE_DEBUG === "1";
-
-  // UI performance mode is enabled by default (captures TTI, displayed metrics)
-  // Use --no-ui-perf-mode to disable
-  const uiPerfMode = !args.includes("--no-ui-perf-mode");
-
-  // Detect memory performance audit mode
-  const memPerfAuditMode = args.includes("--mem-perf-audit");
-
-  // Detect accessibility audit mode
-  const a11yAuditMode = args.includes("--accessibility-audit");
-  let a11yLevel: string | undefined;
-  let a11yFailureMode: string | undefined;
-  let a11yMinSeverity: string | undefined;
-  let a11yUseBaseline = false;
-  const predictiveUi = args.includes("--predictive") || args.includes("--predictive-ui");
-  const rawElementSearch = args.includes("--raw-element-search");
-  const skipCtrlProxyDownload = shouldSkipCtrlProxyDownload(args);
-  const embeddedSdk = args.includes("--embedded-sdk");
-  const networkMockable = args.includes("--network-mockable");
-  const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
-  const eventAllMarkers = parseEventAllMarkersConfig(args, process.env);
-  const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
-  const mcpRecording = args.includes("--mcp-recording");
-  const navigationScreenshots = !args.includes("--no-navigation-screenshots");
-  const noWaitForPollingOverhead = args.includes("--no-waitfor-polling-overhead");
-  const noA11yIncludeNotImportantViews = args.includes("--no-include-not-important-views");
-  const noA11yReportViewIds = args.includes("--no-report-view-ids");
-  const noA11yRetrieveInteractiveWindows = args.includes("--no-retrieve-interactive-windows");
-  const noOcclusion = args.includes("--no-occlusion");
-  const safeAreaWarnings = args.includes("--safe-area-warnings") || args.includes("--edge-to-edge-warnings");
-  // Output-size reduction flags (issue #2756): each parses from CLI OR its
-  // AUTOMOBILE_* env var, CLI winning via ||.
-  const outputReduction = parseOutputReductionFlags(args, process.env);
-  const toolOutputsDir = parseToolOutputsDirConfig(
-    args,
-    process.env,
-    resolveDaemonLaunchWorkingDirectory()
-  );
-  let planExecutionLockScope: PlanExecutionLockScope = "session";
-  const videoRecordingDefaults: VideoRecordingConfigInput = {};
-
-  const parsePositiveNumber = (
-    value: string | undefined,
-    label: string,
-    allowFloat: boolean
-  ): number | undefined => {
-    if (!value) {
-      return undefined;
-    }
-    const parsed = allowFloat ? Number(value) : parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      log.warn(`Invalid ${label}: ${value}`);
-      return undefined;
-    }
-    return allowFloat ? parsed : Math.round(parsed);
-  };
-
-  const allowedQualityPresets = new Set(["low", "medium", "high"]);
-  const allowedFormats = new Set(["mp4"]);
-
-  const applyQualityPreset = (value: string | undefined, source: string) => {
-    if (!value) {
-      return;
-    }
-    if (!allowedQualityPresets.has(value)) {
-      log.warn(`Invalid video quality preset (${source}): ${value}`);
-      return;
-    }
-    videoRecordingDefaults.qualityPreset = value;
-  };
-
-  const applyFormat = (value: string | undefined, source: string) => {
-    if (!value) {
-      return;
-    }
-    if (!allowedFormats.has(value)) {
-      log.warn(`Invalid video format (${source}): ${value}`);
-      return;
-    }
-    videoRecordingDefaults.format = value;
-  };
-
-  // @deprecated AUTO_MOBILE_VIDEO_* - use AUTOMOBILE_VIDEO_* instead
-  applyQualityPreset(
-    process.env.AUTOMOBILE_VIDEO_QUALITY_PRESET ??
-      process.env.AUTO_MOBILE_VIDEO_QUALITY_PRESET,
-    "env"
-  );
-  const envTargetBitrate = process.env.AUTOMOBILE_VIDEO_TARGET_BITRATE_KBPS ??
-    process.env.AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS;
-  const envMaxThroughput = process.env.AUTOMOBILE_VIDEO_MAX_THROUGHPUT_MBPS ??
-    process.env.AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS;
-  const envFps = process.env.AUTOMOBILE_VIDEO_FPS ??
-    process.env.AUTO_MOBILE_VIDEO_FPS;
-  const envArchiveMb = process.env.AUTOMOBILE_VIDEO_MAX_ARCHIVE_MB ??
-    process.env.AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB;
-  const envFormat = process.env.AUTOMOBILE_VIDEO_FORMAT ??
-    process.env.AUTO_MOBILE_VIDEO_FORMAT;
-
-  const parsedTargetBitrate = parsePositiveNumber(envTargetBitrate, "video target bitrate", false);
-  if (parsedTargetBitrate !== undefined) {
-    videoRecordingDefaults.targetBitrateKbps = parsedTargetBitrate;
-  }
-
-  const parsedMaxThroughput = parsePositiveNumber(envMaxThroughput, "video max throughput", true);
-  if (parsedMaxThroughput !== undefined) {
-    videoRecordingDefaults.maxThroughputMbps = parsedMaxThroughput;
-  }
-
-  const parsedFps = parsePositiveNumber(envFps, "video fps", false);
-  if (parsedFps !== undefined) {
-    videoRecordingDefaults.fps = parsedFps;
-  }
-
-  const parsedArchive = parsePositiveNumber(envArchiveMb, "video max archive size", true);
-  if (parsedArchive !== undefined) {
-    videoRecordingDefaults.maxArchiveSizeMb = parsedArchive;
-  }
-
-  applyFormat(envFormat, "env");
-
-  // Extract CLI-specific arguments (everything after --cli)
-  const cliIndex = args.indexOf("--cli");
-  const cliArgs = cliMode ? args.slice(cliIndex + 1) : [];
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-
-    // Skip CLI mode arguments
-    if (arg === "--cli") {
-      break;
-    }
-
-    if (arg === "--port") {
-      const port = parseInt(args[i + 1], 10);
-      if (!isNaN(port) && port > 0 && port < 65536) {
-        daemonPort = port;
-        i++; // Skip the port argument
-      } else {
-        log.warn(`Invalid port: ${args[i + 1]}`);
-        i++; // Skip the invalid argument
-      }
-    } else if (arg === "--host") {
-      const host = args[i + 1];
-      if (host && !host.startsWith("--")) {
-        daemonHost = host;
-        i++; // Skip the host argument
-      } else {
-        log.warn(`Invalid host: ${host}`);
-        i++; // Skip the invalid argument
-      }
-    } else if (arg === "--a11y-level") {
-      // Accessibility audit options
-      a11yLevel = args[i + 1];
-      i++;
-    } else if (arg === "--a11y-failure-mode") {
-      a11yFailureMode = args[i + 1];
-      i++;
-    } else if (arg === "--a11y-min-severity") {
-      a11yMinSeverity = args[i + 1];
-      i++;
-    } else if (arg === "--a11y-use-baseline") {
-      a11yUseBaseline = true;
-    } else if (arg === "--plan-execution-lock-scope") {
-      const scope = args[i + 1];
-      if (scope === "global" || scope === "session") {
-        planExecutionLockScope = scope;
-      } else {
-        log.warn(`Invalid plan execution lock scope: ${scope}. Using default: ${planExecutionLockScope}`);
-      }
-      i++;
-    } else if (arg === "--video-quality" || arg === "--video-quality-preset") {
-      const qualityPreset = args[i + 1];
-      applyQualityPreset(qualityPreset, "cli");
-      i++;
-    } else if (arg === "--video-target-bitrate-kbps") {
-      const parsed = parsePositiveNumber(args[i + 1], "video target bitrate", false);
-      if (parsed !== undefined) {
-        videoRecordingDefaults.targetBitrateKbps = parsed;
-      }
-      i++;
-    } else if (arg === "--video-max-throughput-mbps") {
-      const parsed = parsePositiveNumber(args[i + 1], "video max throughput", true);
-      if (parsed !== undefined) {
-        videoRecordingDefaults.maxThroughputMbps = parsed;
-      }
-      i++;
-    } else if (arg === "--video-fps") {
-      const parsed = parsePositiveNumber(args[i + 1], "video fps", false);
-      if (parsed !== undefined) {
-        videoRecordingDefaults.fps = parsed;
-      }
-      i++;
-    } else if (arg === "--video-format") {
-      const format = args[i + 1];
-      applyFormat(format, "cli");
-      i++;
-    } else if (arg === "--video-archive-size-mb") {
-      const parsed = parsePositiveNumber(args[i + 1], "video max archive size", true);
-      if (parsed !== undefined) {
-        videoRecordingDefaults.maxArchiveSizeMb = parsed;
-      }
-      i++;
-    }
-  }
-
-  return {
-    cliMode,
-    cliArgs,
-    daemonPort,
-    daemonHost,
-    debugPerf,
-    debug,
-    uiPerfMode,
-    memPerfAuditMode,
-    a11yAuditMode,
-    a11yLevel,
-    a11yFailureMode,
-    a11yMinSeverity,
-    a11yUseBaseline,
-    predictiveUi,
-    rawElementSearch,
-    planExecutionLockScope,
-    videoRecordingDefaults,
-    daemonMode,
-    daemonCommand,
-    daemonArgs,
-    skipCtrlProxyDownload,
-    embeddedSdk,
-    networkMockable,
-    dismissKeyboardAfterInput,
-    eventAllMarkers,
-    eventAllMarkersCliOverride,
-    mcpRecording,
-    navigationScreenshots,
-    noWaitForPollingOverhead,
-    noProxy,
-    noDaemon,
-    noA11yIncludeNotImportantViews,
-    noA11yReportViewIds,
-    noA11yRetrieveInteractiveWindows,
-    noOcclusion,
-    safeAreaWarnings,
-    outputReduction,
-    toolOutputsDir,
-  };
-}
 
 async function main() {
   const rawArgs = process.argv.slice(2);
@@ -510,7 +169,7 @@ async function main() {
       safeAreaWarnings,
       outputReduction,
       toolOutputsDir,
-    } = parseArgs(logger);
+    } = parseArgs(process.argv.slice(2), logger);
 
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
@@ -838,14 +497,18 @@ async function main() {
   }
 }
 
-main().catch(async err => {
-  console.error("Fatal error in main():", err);
-  fatalLogger?.error("Fatal error in main():", err);
-  fatalLogger?.close();
-  // An incomplete-extraction startup failure exits with a distinct, recoverable
-  // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);
-  // every other fatal keeps exit 1. Resolved lazily to match this file's
-  // deferred-import startup pattern.
-  const { resolveDaemonStartupExitCode } = await import("./daemon/daemonStartupGuard");
-  process.exit(resolveDaemonStartupExitCode(err));
-});
+// TypeScript's configured CommonJS module target does not model Bun's ESM entrypoint flag.
+// @ts-expect-error Bun provides import.meta.main at runtime.
+if (import.meta.main) {
+  main().catch(async err => {
+    console.error("Fatal error in main():", err);
+    fatalLogger?.error("Fatal error in main():", err);
+    fatalLogger?.close();
+    // An incomplete-extraction startup failure exits with a distinct, recoverable
+    // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);
+    // every other fatal keeps exit 1. Resolved lazily to match this file's
+    // deferred-import startup pattern.
+    const { resolveDaemonStartupExitCode } = await import("./daemon/daemonStartupGuard");
+    process.exit(resolveDaemonStartupExitCode(err));
+  });
+}

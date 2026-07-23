@@ -84,9 +84,9 @@ export function shouldUseCiIosBootRecovery(request: DeviceBootRequest, environme
   return request.platform === "ios" && !request.name && !request.deviceId && isGitHubActionsCi(environment);
 }
 
-/** Match the runtime-qualified CI-owned name rather than re-applying SDK bounds after fallback. */
+/** Match the runtime-qualified CI-owned name across fallback without changing provisioning bounds. */
 export function normalizeCiIosBootRequest(request: DeviceBootRequest, ownedSimulatorName: string): DeviceBootRequest {
-  return { ...request, name: ownedSimulatorName, minOsVersion: undefined, maxOsVersion: undefined };
+  return { ...request, name: ownedSimulatorName, matchNamedDeviceIgnoringOsVersion: true };
 }
 
 /**

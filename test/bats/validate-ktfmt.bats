@@ -21,9 +21,10 @@ setup() {
   #    pin). Tests override KTFMT_STUB_VERSION to simulate formatter-version drift,
   #    or set KTFMT_STUB_VERSION="" to simulate an unparseable/failing --version.
   #  * exits 0 for the stdin probe (`--google-style -`) and dry-run.
-  #  * for an in-place `--google-style <file>` it "reformats" (mutating the copy
-  #    the script made) only when the file contains the marker FORMAT_ME, letting
-  #    a test simulate a misformatted file deterministically.
+  #  * for an in-place `--google-style <files...>` it "reformats" (mutating the
+  #    copies the script made) only when a file contains FORMAT_ME, letting a test
+  #    simulate a misformatted file deterministically. It also records each
+  #    formatting invocation when KTFMT_STUB_LOG is set.
   STUB_BIN="$TEST_DIR/bin"
   mkdir -p "$STUB_BIN"
   cat > "$STUB_BIN/ktfmt" <<'STUB'
@@ -51,21 +52,27 @@ if [[ "$last" == "-" || " $* " == *" --dry-run "* ]]; then
   cat >/dev/null 2>&1 || true
   exit 0
 fi
-if [[ -f "$last" ]]; then
-  if grep -q 'FORMAT_ME' "$last"; then
-    sed -i.bak 's/FORMAT_ME//g' "$last" && rm -f "$last.bak"
-  fi
-  exit 0
+if [[ -n "${KTFMT_STUB_LOG:-}" ]]; then
+  printf '%s\n' "$#" >> "$KTFMT_STUB_LOG"
+  printf '%s\n' "$@" >> "$KTFMT_STUB_LOG"
 fi
+for file in "$@"; do
+  [[ "$file" == "--google-style" ]] && continue
+  if [[ -f "$file" ]] && grep -q 'FORMAT_ME' "$file"; then
+    sed -i.bak 's/FORMAT_ME//g' "$file" && rm -f "$file.bak"
+  fi
+done
 exit 0
 STUB
   chmod +x "$STUB_BIN/ktfmt"
   export PATH="$STUB_BIN:$PATH"
 
   # A throwaway git repo that becomes PROJECT_ROOT (script uses `pwd`).
-  REPO="$TEST_DIR/repo"
+  # Mirror the standard Codex worktree layout. The validator must not exclude
+  # Kotlin files merely because a parent directory is hidden (`.codex`).
+  REPO="$TEST_DIR/.codex/worktrees/ktfmt"
   mkdir -p "$REPO/app/src"
-  cd "$REPO"
+  cd "$REPO" || return 1
   git init -q
   git config user.email t@t.t
   git config user.name t
@@ -77,7 +84,7 @@ teardown() {
 }
 
 # Helper: write a clean (already-formatted) Kotlin file.
-clean_kt() { printf 'fun a() {}\n' > "$1"; }
+clean_kt() { mkdir -p "$(dirname "$1")" && printf 'fun a() {}\n' > "$1"; }
 
 @test "validator runs under strict bash mode" {
   grep -qx 'set -euo pipefail' "$SCRIPT"
@@ -124,7 +131,7 @@ clean_kt() { printf 'fun a() {}\n' > "$1"; }
   git add -A && git commit -qm base
 
   run env ONLY_CHANGED_SINCE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
-    ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+    ONLY_TOUCHED_FILES=true bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"does not resolve; falling back to a full-tree ktfmt check"* ]]
   # It must actually validate the tree, not report "No Kotlin files".
@@ -183,6 +190,39 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *"Formatting issues found"* ]]
   [[ "$output" == *"Bad.kt"* ]]
+}
+
+@test "formats isolated copies in one invocation and preserves duplicate basenames" {
+  clean_kt app/one/Same.kt
+  clean_kt app/two/Same.kt
+  local ktfmt_log="$TEST_DIR/ktfmt.log"
+
+  run env KTFMT_STUB_LOG="$ktfmt_log" ONLY_CHANGED_SINCE_SHA="" \
+    ONLY_TOUCHED_FILES=false bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+
+  # One formatter process handles both copies, and their relative paths remain
+  # distinct so a Same.kt in one directory cannot overwrite the other copy.
+  [ "$(wc -l < "$ktfmt_log")" -eq 4 ]
+  [[ "$(sed -n '1p' "$ktfmt_log")" == "3" ]]
+  [[ "$(sed -n '2p' "$ktfmt_log")" == "--google-style" ]]
+  [[ "$(sed -n '3p' "$ktfmt_log")" == */app/one/Same.kt ]]
+  [[ "$(sed -n '4p' "$ktfmt_log")" == */app/two/Same.kt ]]
+}
+
+@test "formatter input changes force a full-tree check" {
+  clean_kt app/src/Base.kt
+  git add -A && git commit -qm base
+  local base; base="$(git rev-parse HEAD)"
+  clean_kt app/src/Feature.kt
+  mkdir -p scripts/ktfmt
+  printf 'changed formatter input\n' > scripts/ktfmt/config
+  git add -A && git commit -qm formatter-change
+
+  run env ONLY_CHANGED_SINCE_SHA="$base" ONLY_TOUCHED_FILES=true bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Ktfmt inputs changed since the base SHA; running a full-tree ktfmt check"* ]]
+  [[ "$output" == *"Found 2 Kotlin file(s) to process"* ]]
 }
 
 # ---------------------------------------------------------------------------

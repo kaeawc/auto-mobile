@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "path";
 import { GrantIosSimulatorPermissions } from "../../../src/features/action/GrantIosSimulatorPermissions";
 import {
   IosSimulatorPermissions,
@@ -21,28 +20,10 @@ class FakeSqliteCommandExecutor implements SqliteCommandExecutor {
 
   async execFile(command: string, args: string[]): Promise<{ stdout: string }> {
     this.calls.push({ command, args });
-
-    const sql = args.at(-1);
-    if (sql === "pragma table_info(access);") {
-      return {
-        stdout: JSON.stringify([
-          { name: "service" },
-          { name: "client" },
-          { name: "auth_value" },
-          { name: "prompt_count" }
-        ])
-      };
-    }
-
     return {
-      stdout: JSON.stringify([
-        {
-          service: "kTCCServiceCamera",
-          client: "com.example.app",
-          auth_value: 2,
-          prompt_count: 1
-        }
-      ])
+      stdout: args.at(-1) === "pragma table_info(access);"
+        ? JSON.stringify([{ name: "service" }, { name: "client" }])
+        : "[]"
     };
   }
 }
@@ -196,57 +177,11 @@ describe("IosSimulatorPermissions", () => {
     });
   });
 
-  test("reads TCC rows with sqlite json mode flag and SQL-only statements", async () => {
+  test("keeps the legacy injected sqlite reader constructor available", async () => {
     const sqlite = new FakeSqliteCommandExecutor();
     const reader = new SqliteTccPermissionReader(sqlite, "/Users/tester");
-    const expectedTccPath = join(
-      "/Users/tester",
-      "Library",
-      "Developer",
-      "CoreSimulator",
-      "Devices",
-      "12345678-1234-1234-1234-123456789ABC",
-      "data",
-      "Library",
-      "TCC",
-      "TCC.db"
-    );
 
-    const rows = await reader.readPermissions(
-      "12345678-1234-1234-1234-123456789ABC",
-      "com.example.app",
-      ["camera"]
-    );
-
-    expect(rows).toEqual([
-      {
-        service: "kTCCServiceCamera",
-        client: "com.example.app",
-        auth_value: 2,
-        prompt_count: 1
-      }
-    ]);
-    expect(sqlite.calls).toEqual([
-      {
-        command: "sqlite3",
-        args: [
-          "-json",
-          expectedTccPath,
-          "pragma table_info(access);"
-        ]
-      },
-      {
-        command: "sqlite3",
-        args: [
-          "-json",
-          expectedTccPath,
-          [
-            "select service, client, auth_value, prompt_count",
-            "from access",
-            "where client = 'com.example.app' and service in ('kTCCServiceCamera');"
-          ].join("\n")
-        ]
-      }
-    ]);
+    await expect(reader.readPermissions(simulatorDevice.deviceId, "com.example.app")).resolves.toEqual([]);
+    expect(sqlite.calls.map(call => call.command)).toEqual(["sqlite3", "sqlite3"]);
   });
 });

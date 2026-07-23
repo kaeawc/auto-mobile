@@ -8,6 +8,12 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
+import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream";
+import {
+  CaptureStageTimeline,
+  formatCaptureStageRecord,
+  type CaptureDimensions,
+} from "../helpers/captureStageTimeline";
 
 const execFileAsync = promisify(execFile);
 const runIntegration = process.env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION === "1";
@@ -19,6 +25,10 @@ const artifactDir = resolve("scratch/webrtc-device-integration");
 // Hosted iOS runners can spend more than three minutes on daemon bootstrap,
 // Simulator commands, and Chrome startup before the bounded 30s decode checks.
 const deviceIntegrationTimeoutMs = 360_000;
+// Mirrors QualityPreset.MEDIUM.fps in android/video-server, which is the quality
+// PersistentEncoderH264Source publishes with. Pinned by
+// test/integration/webrtcDeviceCaptureLatency.test.ts so the two cannot drift.
+const ANDROID_VIDEO_SERVER_MEDIUM_FPS = 60;
 
 interface ChromeTarget { type: string; webSocketDebuggerUrl?: string }
 interface CdpResponse { id?: number; result?: { result?: { value?: unknown } }; error?: { message?: string } }
@@ -186,9 +196,46 @@ async function waitForDecodedFrames(cdp: CdpClient, minimum: number, message: st
   }
 }
 
+function androidDeviceId(): string {
+  return process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
+}
+
+interface CaptureProfile {
+  sourceSize: CaptureDimensions | null;
+  configuredFps: number | null;
+}
+
+/**
+ * Capture profile recorded with the stage timings (#4343) so latency samples
+ * from different runners can be compared like for like.
+ */
+async function captureProfile(): Promise<CaptureProfile> {
+  // Android screenrecord follows the display refresh rate, which the pipeline
+  // never configures; only the persistent encoder publishes a chosen fps.
+  const usesVideoServer =
+    Boolean(process.env.AUTOMOBILE_VIDEO_SERVER_JAR) || process.env.AUTOMOBILE_REQUIRE_VIDEO_SERVER === "1";
+  const configuredFps = platform === "android"
+    ? (usesVideoServer ? ANDROID_VIDEO_SERVER_MEDIUM_FPS : null)
+    : SIMULATOR_FPS_DEFAULT;
+  try {
+    if (platform === "android") {
+      const { stdout } = await execFileAsync("adb", ["-s", androidDeviceId(), "shell", "wm", "size"]);
+      const match = /Physical size:\s*(\d+)x(\d+)/.exec(stdout);
+      return { sourceSize: match ? { width: Number(match[1]), height: Number(match[2]) } : null, configuredFps };
+    }
+    const { stdout } = await execFileAsync("xcrun", ["simctl", "io", "booted", "enumerate"]);
+    const match = /Pixel Size:\s*\{(\d+),\s*(\d+)\}/.exec(stdout);
+    return { sourceSize: match ? { width: Number(match[1]), height: Number(match[2]) } : null, configuredFps };
+  } catch (error) {
+    // Diagnostic metadata only — a failed size query must not fail the lane.
+    console.warn(`[#4343] could not query capture source resolution: ${error}`);
+    return { sourceSize: null, configuredFps };
+  }
+}
+
 async function launchFixture(): Promise<void> {
   if (platform === "android") {
-    const id = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
+    const id = androidDeviceId();
     await execFileAsync("adb", ["-s", id, "shell", "am", "start", "-a", "android.settings.SETTINGS"]);
     await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"]);
     return;
@@ -203,7 +250,7 @@ async function launchFixture(): Promise<void> {
 
 async function changeFixture(): Promise<void> {
   if (platform === "android") {
-    const id = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
+    const id = androidDeviceId();
     // A Home transition guarantees a visible surface change. The emulator may
     // accept a ui-mode setting without repainting the Settings window, which
     // made the old theme-only fixture indistinguishable from a frozen stream.
@@ -219,7 +266,7 @@ async function changeFixture(): Promise<void> {
 
 afterEach(async () => {
   if (platform === "android") {
-    const id = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
+    const id = androidDeviceId();
     await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"]).catch(() => undefined);
   }
   if (platform === "ios") {await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"]).catch(() => undefined);}
@@ -253,6 +300,12 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     let chrome: ChildProcessWithoutNullStreams | undefined;
     let cdp: CdpClient | undefined;
     let started = false;
+    const timeline = new CaptureStageTimeline();
+    let profile: CaptureProfile = { sourceSize: null, configuredFps: null };
+    let decodedSize: CaptureDimensions | null = null;
+    let outcome: "passed" | "failed" = "failed";
+    let observingWhip = true;
+    let whipObserver: Promise<void> = Promise.resolve();
     try {
       await waitFor(async () => {
         if (mediamtx.exitCode !== null || mediamtx.signalCode !== null) {
@@ -275,6 +328,25 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         } catch { return false; }
       }, "AutoMobile daemon did not become ready");
       await launchFixture();
+      profile = await captureProfile();
+      timeline.mark("startRequest");
+      // The start request only returns once the publisher has connected AND the
+      // capture source has started, so the WHIP connect has to be observed from
+      // a concurrent poller. It never throws — a lost sample must not fail the
+      // lane, and every wait below keeps its own timeout.
+      whipObserver = (async () => {
+        while (observingWhip && !timeline.has("whipConnected")) {
+          const status = await sendWebRtcStreamRequest(
+            { action: "status", id: `${streamId}-whip-status`, streamId },
+            { socketPath: webRtcSocketPath, timeoutMs: 1_000 }
+          ).catch(() => undefined);
+          if (status?.stream?.state === "connected") {
+            timeline.mark("whipConnected");
+            return;
+          }
+          await Bun.sleep(50);
+        }
+      })();
       const response = await sendWebRtcStreamRequest(
         { action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` },
         { socketPath: webRtcSocketPath }
@@ -282,21 +354,29 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       if (!response.success) {
         throw new Error(`failed to start device WebRTC stream: ${response.error ?? "no error detail returned"}`);
       }
+      timeline.mark("sourceStarted");
       await waitFor(async () => {
         const status = await sendWebRtcStreamRequest(
           { action: "status", id: `${streamId}-capture-status`, streamId },
           { socketPath: webRtcSocketPath, timeoutMs: 1_000 }
         ).catch(() => undefined);
-        return (status?.stream?.framesSent ?? 0) > 0;
+        if ((status?.stream?.framesSent ?? 0) === 0) {
+          return false;
+        }
+        timeline.mark("firstEncodedFrame");
+        return true;
       }, "capture source did not deliver H.264 frames to the WHIP publisher");
       chrome = start(chromeBinary(), ["--headless=new", "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=9222", "--no-first-run", "about:blank"], join(artifactDir, "chrome.log"));
       cdp = await openReader(chrome);
+      timeline.mark("whepConnected");
       // The device can be idle by the time the WHEP reader connects. Trigger a
       // visible transition after subscription so the reader receives a fresh
       // encoded access unit rather than waiting on an earlier keyframe.
       await changeFixture();
       await waitForDecodedFrames(cdp, 0, "browser did not decode device video");
+      timeline.mark("firstDecodedFrame");
       const first = await videoSample(cdp);
+      decodedSize = { width: first.width, height: first.height };
       await launchFixture();
       await waitForDecodedFrames(cdp, first.frames, "browser did not receive video after returning to the fixture");
       const second = await videoSample(cdp);
@@ -314,13 +394,29 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         { socketPath: webRtcSocketPath }
       );
       expect(listed.streams?.some(stream => stream.streamId === streamId)).toBe(false);
+      outcome = "passed";
     } finally {
+      observingWhip = false;
+      await whipObserver;
       cdp?.close();
       await stop(chrome);
       if (started) {await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], { env: daemonEnvironment }).catch(() => undefined);}
       await stop(mediamtx);
       await rm(webRtcSocketDir, { recursive: true, force: true });
-      await writeFile(join(artifactDir, "result.txt"), `platform=${platform}\nstream=${streamId}\n`);
+      // Written for passing runs too: the p50/p95 baselines this feeds (#4343)
+      // need the successful samples, and a failure keeps whatever it reached.
+      const record = timeline.toRecord({
+        platform: platform ?? "unknown",
+        streamId,
+        outcome,
+        sourceSize: profile.sourceSize,
+        configuredFps: profile.configuredFps,
+        decodedSize,
+      });
+      const summary = formatCaptureStageRecord(record);
+      await writeFile(join(artifactDir, "stage-latency.json"), `${JSON.stringify(record, null, 2)}\n`);
+      await writeFile(join(artifactDir, "result.txt"), `${summary}\n`);
+      console.log(`[#4343] device capture stage latency\n${summary}`);
     }
   }, deviceIntegrationTimeoutMs);
 });

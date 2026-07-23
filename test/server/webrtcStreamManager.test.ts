@@ -560,4 +560,50 @@ describe("webrtcStreamManager", () => {
     expect(publishers[1].stopped).toBe(false);
     expect(sources[1].stopped).toBe(false);
   });
+
+  test("reports sourceStarted only once the capture source has actually started (#4343)", async () => {
+    const publishers: AsyncConnectedPublisher[] = [];
+    const sources: FakeSource[] = [];
+    let releaseSourceStart!: () => void;
+    const sourceStartGate = new Promise<void>(resolve => {
+      releaseSourceStart = resolve;
+    });
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new AsyncConnectedPublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => {
+        const source = new FakeSource();
+        source.start = async () => {
+          await sourceStartGate;
+          source.started = true;
+        };
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    // A video-only stream returns from start as soon as the publisher connects;
+    // the capture source starts afterwards, so the two are distinguishable.
+    const descriptor = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(descriptor.sourceStarted).toBe(false);
+    expect(getWebRtcStreamDescriptor(descriptor.streamId)?.sourceStarted).toBe(false);
+
+    releaseSourceStart();
+    await sourceStartGate;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sources[0].started).toBe(true);
+    expect(getWebRtcStreamDescriptor(descriptor.streamId)?.sourceStarted).toBe(true);
+    expect(listWebRtcStreams()[0].sourceStarted).toBe(true);
+  });
 });

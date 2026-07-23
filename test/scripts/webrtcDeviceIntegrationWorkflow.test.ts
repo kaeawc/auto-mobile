@@ -23,6 +23,7 @@ interface WorkflowDocument {
         filters?: string;
         "gradle-tasks"?: string;
         script?: string;
+        name?: string;
         path?: string;
         "if-no-files-found"?: string;
       };
@@ -106,6 +107,10 @@ describe("#4308 device WebRTC integration workflow", () => {
       expect(upload?.["continue-on-error"]).toBe(true);
       expect(upload?.with?.path).toBe("scratch/webrtc-device-integration/");
       expect(upload?.with?.["if-no-files-found"]).toBe("ignore");
+      // Artifacts are immutable and run-scoped, so a re-run of the lane would
+      // collide on a fixed name — and continue-on-error would swallow the 409,
+      // silently costing a sample.
+      expect(upload?.with?.name).toContain("github.run_attempt");
     }
   });
 

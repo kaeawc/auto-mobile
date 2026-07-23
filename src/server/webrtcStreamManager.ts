@@ -32,6 +32,12 @@ interface WebRtcStreamRecord {
   size?: { width: number; height: number };
   audioEnabled: boolean;
   startedAt: string;
+  /**
+   * True once this session's capture source started. Surfaced on the descriptor
+   * so an out-of-process observer can separate "WHIP publish accepted" from
+   * "capture running" — a video-only start returns before capture begins.
+   */
+  sourceStarted: boolean;
   /** Reservation token for a start that has not returned to its caller yet. */
   startToken: symbol;
 }
@@ -116,8 +122,14 @@ async function withRecord(
   }
 }
 
+/** Descriptor for a record, including the manager-owned capture-source state. */
+function describeRecord(record: WebRtcStreamRecord): WebRtcStreamDescriptor {
+  return { ...record.publisher.getDescriptor(), sourceStarted: record.sourceStarted };
+}
+
 /** Stop and clear the capture source for a stream (before each (re)establish). */
 async function stopSource(record: WebRtcStreamRecord): Promise<void> {
+  record.sourceStarted = false;
   if (record.source) {
     await record.source.stop().catch(error => {
       logger.debug(`[WebRtcStream] source stop failed: ${error}`);
@@ -166,6 +178,7 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
     await source.stop().catch(() => {});
     return false;
   }
+  record.sourceStarted = true;
   return true;
 }
 
@@ -393,6 +406,7 @@ export async function startWebRtcStream(
       size: config.size,
       audioEnabled: config.audioEnabled,
       startedAt: dependencies.now().toISOString(),
+      sourceStarted: false,
       startToken,
     };
     streams.set(streamId, record);
@@ -413,7 +427,7 @@ export async function startWebRtcStream(
       );
     }
 
-    return publisher.getDescriptor();
+    return describeRecord(record);
   } finally {
     if (startingDeviceIds.get(request.device.deviceId) === pending) {
       startingDeviceIds.delete(request.device.deviceId);
@@ -433,20 +447,20 @@ export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamD
   const record = resolveStreamRecord(streamId);
   streams.delete(record.streamId);
   cancelRecordStart(record);
-  const descriptor = record.publisher.getDescriptor();
+  const descriptor = describeRecord(record);
   await stopActiveRecord(record);
   return { ...descriptor, state: "stopped" };
 }
 
 /** List reconnect descriptors for all active streams. */
 export function listWebRtcStreams(): WebRtcStreamDescriptor[] {
-  return Array.from(streams.values()).map(record => record.publisher.getDescriptor());
+  return Array.from(streams.values()).map(describeRecord);
 }
 
 /** Get the reconnect descriptor for one stream (or null). */
 export function getWebRtcStreamDescriptor(streamId: string): WebRtcStreamDescriptor | null {
   const record = streams.get(streamId);
-  return record ? record.publisher.getDescriptor() : null;
+  return record ? describeRecord(record) : null;
 }
 
 function resolveStreamRecord(streamId?: string): WebRtcStreamRecord {

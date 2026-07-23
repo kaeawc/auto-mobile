@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   CAPTURE_STAGES,
+  CAPTURE_STAGE_RECORD_SCHEMA_VERSION,
   CaptureStageTimeline,
+  captureRunIdentity,
   formatCaptureStageRecord,
   monotonicNowMs,
   type CaptureStageContext,
@@ -25,6 +27,15 @@ const context: CaptureStageContext = {
   sourceSize: { width: 1080, height: 2400 },
   configuredFps: 60,
   decodedSize: { width: 720, height: 1600 },
+  run: {
+    runId: "30053647851",
+    runAttempt: "2",
+    commitSha: "e573c0cd5379cee61a1d9fffc1f1094fc86dc507",
+    runnerOs: "Linux",
+    runnerImage: "ubuntu24",
+    startedAtIso: "2026-07-23T23:35:08.000Z",
+  },
+  samplingIntervalsMs: { whipConnected: 100, firstDecodedFrame: 100 },
 };
 
 describe("#4343 capture stage timeline", () => {
@@ -150,6 +161,47 @@ describe("#4343 capture stage timeline", () => {
     expect(record.decodedSize).toEqual({ width: 720, height: 1600 });
   });
 
+  test("carries the run identity and sampling error bar so samples can be aggregated", () => {
+    const timeline = new CaptureStageTimeline(fakeClock().nowMs);
+    timeline.mark("startRequest");
+
+    const record = timeline.toRecord(context);
+
+    expect(record.schemaVersion).toBe(CAPTURE_STAGE_RECORD_SCHEMA_VERSION);
+    expect(record.run.runId).toBe("30053647851");
+    expect(record.run.runAttempt).toBe("2");
+    expect(record.run.commitSha).toBe("e573c0cd5379cee61a1d9fffc1f1094fc86dc507");
+    expect(record.samplingIntervalsMs.whipConnected).toBe(100);
+  });
+
+  test("reads the run identity from the CI environment, and nulls it off CI", () => {
+    const onCi = captureRunIdentity(
+      {
+        GITHUB_RUN_ID: "42",
+        GITHUB_RUN_ATTEMPT: "3",
+        GITHUB_SHA: "abc123",
+        RUNNER_OS: "macOS",
+        ImageOS: "macos26",
+      } as NodeJS.ProcessEnv,
+      () => "2026-07-23T23:35:08.000Z"
+    );
+
+    expect(onCi).toEqual({
+      runId: "42",
+      runAttempt: "3",
+      commitSha: "abc123",
+      runnerOs: "macOS",
+      runnerImage: "macos26",
+      startedAtIso: "2026-07-23T23:35:08.000Z",
+    });
+
+    const local = captureRunIdentity({} as NodeJS.ProcessEnv, () => "2026-07-23T23:35:08.000Z");
+
+    expect(local.runId).toBeNull();
+    expect(local.commitSha).toBeNull();
+    expect(local.startedAtIso).toBe("2026-07-23T23:35:08.000Z");
+  });
+
   test("rejects a stage name that is not part of the pipeline", () => {
     const timeline = new CaptureStageTimeline(fakeClock().nowMs);
 
@@ -173,6 +225,8 @@ describe("#4343 capture stage timeline", () => {
     expect(formatted).toContain("decoded=720x1600");
     expect(formatted).toContain("whipConnected");
     expect(formatted).toContain("1500ms");
+    expect(formatted).toContain("run=30053647851/2");
+    expect(formatted).toContain("sha=e573c0cd5379cee61a1d9fffc1f1094fc86dc507");
     expect(formatted).toContain("missing=sourceStarted,firstEncodedFrame,whepConnected,firstDecodedFrame");
   });
 

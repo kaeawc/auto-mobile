@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream, existsSync } from "node:fs";
@@ -9,10 +9,14 @@ import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream";
+import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import {
   CaptureStageTimeline,
+  captureRunIdentity,
   formatCaptureStageRecord,
   type CaptureDimensions,
+  type CaptureStage,
+  type CaptureStageContext,
 } from "../helpers/captureStageTimeline";
 
 const execFileAsync = promisify(execFile);
@@ -105,7 +109,13 @@ function chromeBinary(): string {
   return binary;
 }
 
-async function openReader(chrome: ChildProcessWithoutNullStreams): Promise<CdpClient> {
+/**
+ * Bring the browser up and install the peer-connection hook, without
+ * subscribing yet. Kept separate from {@link subscribeReader} so Chrome's cold
+ * start — seconds on a hosted runner — stays outside the measured window and
+ * does not land in the WHEP-connect stage (#4343).
+ */
+async function launchReader(): Promise<CdpClient> {
   let target: ChromeTarget | undefined;
   await waitFor(async () => {
     try {
@@ -129,6 +139,11 @@ async function openReader(chrome: ChildProcessWithoutNullStreams): Promise<CdpCl
       };
     })();`,
   });
+  return cdp;
+}
+
+/** Subscribe the already-running browser to the WHEP stream. */
+async function subscribeReader(cdp: CdpClient): Promise<void> {
   await cdp.command("Page.navigate", { url: `http://127.0.0.1:${webRtcPort}/${streamId}` });
   await waitFor(async () => {
     try {
@@ -142,7 +157,6 @@ async function openReader(chrome: ChildProcessWithoutNullStreams): Promise<CdpCl
       return false;
     }
   }, "browser WHEP reader did not connect");
-  return cdp;
 }
 
 async function videoSample(cdp: CdpClient): Promise<{ frames: number; width: number; height: number; sample: number }> {
@@ -208,6 +222,10 @@ interface CaptureProfile {
 /**
  * Capture profile recorded with the stage timings (#4343) so latency samples
  * from different runners can be compared like for like.
+ *
+ * `sourceSize` is the display the encoder captures, as each platform reports
+ * it: physical pixels from `wm size` on Android, logical points from SimCtl on
+ * iOS. Compare within a platform, not across one.
  */
 async function captureProfile(): Promise<CaptureProfile> {
   // Android screenrecord follows the display refresh rate, which the pipeline
@@ -223,9 +241,11 @@ async function captureProfile(): Promise<CaptureProfile> {
       const match = /Physical size:\s*(\d+)x(\d+)/.exec(stdout);
       return { sourceSize: match ? { width: Number(match[1]), height: Number(match[2]) } : null, configuredFps };
     }
-    const { stdout } = await execFileAsync("xcrun", ["simctl", "io", "booted", "enumerate"]);
-    const match = /Pixel Size:\s*\{(\d+),\s*(\d+)\}/.exec(stdout);
-    return { sourceSize: match ? { width: Number(match[1]), height: Number(match[2]) } : null, configuredFps };
+    // Not a hand-rolled `simctl io enumerate` regex: the first "Pixel Size:" in
+    // that output belongs to the CarPlay screen, so a naive match reports
+    // 720x480 for every simulator. SimCtlClient gates on the integrated display.
+    const screen = await new SimCtlClient().getScreenSize("booted");
+    return { sourceSize: { width: screen.width, height: screen.height }, configuredFps };
   } catch (error) {
     // Diagnostic metadata only — a failed size query must not fail the lane.
     console.warn(`[#4343] could not query capture source resolution: ${error}`);
@@ -272,7 +292,47 @@ afterEach(async () => {
   if (platform === "ios") {await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"]).catch(() => undefined);}
 });
 
+// Poll cadences the stages are observed with. Each measurement carries up to
+// its interval as positive bias, so the record reports them rather than leaving
+// a later percentile analysis to guess the error bar.
+const STREAM_POLL_INTERVAL_MS = 100;
+const SAMPLING_INTERVALS_MS: Partial<Record<CaptureStage, number>> = {
+  whipConnected: STREAM_POLL_INTERVAL_MS,
+  sourceStarted: STREAM_POLL_INTERVAL_MS,
+  firstEncodedFrame: STREAM_POLL_INTERVAL_MS,
+  whepConnected: STREAM_POLL_INTERVAL_MS,
+  firstDecodedFrame: STREAM_POLL_INTERVAL_MS,
+};
+
+// Held at describe scope so the record survives a test timeout: bun skips the
+// test body's `finally` when the deadline fires, but still runs afterAll. Losing
+// exactly the slowest runs would bias the p95 this feeds (#4343) low.
+const timeline = new CaptureStageTimeline();
+let profile: CaptureProfile = { sourceSize: null, configuredFps: null };
+let decodedSize: CaptureDimensions | null = null;
+let outcome: "passed" | "failed" = "failed";
+
 describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => {
+  afterAll(async () => {
+    const record = timeline.toRecord({
+      platform: platform ?? "unknown",
+      streamId,
+      outcome,
+      sourceSize: profile.sourceSize,
+      configuredFps: profile.configuredFps,
+      decodedSize,
+      run: captureRunIdentity(),
+      samplingIntervalsMs: SAMPLING_INTERVALS_MS,
+    } satisfies CaptureStageContext);
+    const summary = formatCaptureStageRecord(record);
+    console.log(`[#4343] device capture stage latency\n${summary}`);
+    // Written for passing runs too: the p50/p95 baselines this feeds need the
+    // successful samples, and a failure keeps whatever stages it reached.
+    await mkdir(artifactDir, { recursive: true });
+    await writeFile(join(artifactDir, "stage-latency.json"), `${JSON.stringify(record, null, 2)}\n`);
+    await writeFile(join(artifactDir, "result.txt"), `${summary}\n`);
+  });
+
   test("the real device capture path renders changing video and stops cleanly", async () => {
     if (!process.env.AUTOMOBILE_MEDIAMTX_BINARY) {throw new Error("MediaMTX runner did not provide AUTOMOBILE_MEDIAMTX_BINARY");}
     await mkdir(artifactDir, { recursive: true });
@@ -300,12 +360,8 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     let chrome: ChildProcessWithoutNullStreams | undefined;
     let cdp: CdpClient | undefined;
     let started = false;
-    const timeline = new CaptureStageTimeline();
-    let profile: CaptureProfile = { sourceSize: null, configuredFps: null };
-    let decodedSize: CaptureDimensions | null = null;
-    let outcome: "passed" | "failed" = "failed";
-    let observingWhip = true;
-    let whipObserver: Promise<void> = Promise.resolve();
+    let observingStart = true;
+    let startObserver: Promise<void> = Promise.resolve();
     try {
       await waitFor(async () => {
         if (mediamtx.exitCode !== null || mediamtx.signalCode !== null) {
@@ -329,22 +385,31 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       }, "AutoMobile daemon did not become ready");
       await launchFixture();
       profile = await captureProfile();
+      // Chrome is launched before the measured window opens so its cold start —
+      // seconds on a hosted runner — is not charged to the WHEP-connect stage.
+      chrome = start(chromeBinary(), ["--headless=new", "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=9222", "--no-first-run", "about:blank"], join(artifactDir, "chrome.log"));
+      cdp = await launchReader();
       timeline.mark("startRequest");
-      // The start request only returns once the publisher has connected AND the
-      // capture source has started, so the WHIP connect has to be observed from
-      // a concurrent poller. It never throws — a lost sample must not fail the
-      // lane, and every wait below keeps its own timeout.
-      whipObserver = (async () => {
-        while (observingWhip && !timeline.has("whipConnected")) {
-          const status = await sendWebRtcStreamRequest(
-            { action: "status", id: `${streamId}-whip-status`, streamId },
+      // A video-only start returns as soon as the WHIP publish is accepted; the
+      // capture source starts afterwards, so both transitions have to be
+      // observed from a concurrent poller. `list` rather than `status` because
+      // status throws (and the daemon logs an error) until the stream registers.
+      // The poller never throws — a lost sample must not fail the lane, and
+      // every wait below keeps its own timeout.
+      startObserver = (async () => {
+        while (observingStart && !(timeline.has("whipConnected") && timeline.has("sourceStarted"))) {
+          const listed = await sendWebRtcStreamRequest(
+            { action: "list", id: `${streamId}-start-observer` },
             { socketPath: webRtcSocketPath, timeoutMs: 1_000 }
           ).catch(() => undefined);
-          if (status?.stream?.state === "connected") {
+          const stream = listed?.streams?.find(candidate => candidate.streamId === streamId);
+          if (stream?.state === "connected") {
             timeline.mark("whipConnected");
-            return;
           }
-          await Bun.sleep(50);
+          if (stream?.sourceStarted === true) {
+            timeline.mark("sourceStarted");
+          }
+          await Bun.sleep(STREAM_POLL_INTERVAL_MS);
         }
       })();
       const response = await sendWebRtcStreamRequest(
@@ -354,7 +419,6 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       if (!response.success) {
         throw new Error(`failed to start device WebRTC stream: ${response.error ?? "no error detail returned"}`);
       }
-      timeline.mark("sourceStarted");
       await waitFor(async () => {
         const status = await sendWebRtcStreamRequest(
           { action: "status", id: `${streamId}-capture-status`, streamId },
@@ -366,8 +430,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         timeline.mark("firstEncodedFrame");
         return true;
       }, "capture source did not deliver H.264 frames to the WHIP publisher");
-      chrome = start(chromeBinary(), ["--headless=new", "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=9222", "--no-first-run", "about:blank"], join(artifactDir, "chrome.log"));
-      cdp = await openReader(chrome);
+      await subscribeReader(cdp);
       timeline.mark("whepConnected");
       // The device can be idle by the time the WHEP reader connects. Trigger a
       // visible transition after subscription so the reader receives a fresh
@@ -396,27 +459,19 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       expect(listed.streams?.some(stream => stream.streamId === streamId)).toBe(false);
       outcome = "passed";
     } finally {
-      observingWhip = false;
-      await whipObserver;
+      observingStart = false;
+      // Nothing in the observer rejects today; swallow anyway so a future edit
+      // cannot skip the teardown below and replace the real test failure.
+      await startObserver.catch(() => undefined);
       cdp?.close();
       await stop(chrome);
       if (started) {await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], { env: daemonEnvironment }).catch(() => undefined);}
       await stop(mediamtx);
       await rm(webRtcSocketDir, { recursive: true, force: true });
-      // Written for passing runs too: the p50/p95 baselines this feeds (#4343)
-      // need the successful samples, and a failure keeps whatever it reached.
-      const record = timeline.toRecord({
-        platform: platform ?? "unknown",
-        streamId,
-        outcome,
-        sourceSize: profile.sourceSize,
-        configuredFps: profile.configuredFps,
-        decodedSize,
-      });
-      const summary = formatCaptureStageRecord(record);
-      await writeFile(join(artifactDir, "stage-latency.json"), `${JSON.stringify(record, null, 2)}\n`);
-      await writeFile(join(artifactDir, "result.txt"), `${summary}\n`);
-      console.log(`[#4343] device capture stage latency\n${summary}`);
+      // The daemon dir lives under the artifact dir and holds its logs and DB.
+      // Now that artifacts upload on success too, keep it only for a failure to
+      // triage; a green run should ship the latency record, not a sqlite file.
+      if (outcome === "passed") {await rm(daemonDir, { recursive: true, force: true });}
     }
   }, deviceIntegrationTimeoutMs);
 });

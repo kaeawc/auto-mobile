@@ -36,11 +36,43 @@ export interface CaptureStageMeasurement {
   elapsedMs: number;
   /**
    * Milliseconds since the previous recorded stage. Negative when a stage was
-   * observed out of pipeline order — a concurrent status poller can see the
-   * first encoded frame before the start request returns, and clamping that to
-   * zero would hide the overlap rather than report it.
+   * observed out of pipeline order; clamping that to zero would hide the
+   * overlap rather than report it. Note that a negative delta and the following
+   * positive one are anti-correlated, so aggregate `elapsedMs` across runs —
+   * never `deltaMs`.
    */
   deltaMs: number;
+}
+
+/**
+ * Which CI run produced a sample. Percentiles over "several Android and iOS CI
+ * samples" are indefensible without this: identically-named artifacts are
+ * otherwise indistinguishable, so an outlier cannot be traced back to its run,
+ * and re-runs of one commit cannot be told apart from independent samples.
+ */
+export interface CaptureRunIdentity {
+  runId: string | null;
+  runAttempt: string | null;
+  commitSha: string | null;
+  runnerOs: string | null;
+  runnerImage: string | null;
+  /** Wall clock at the origin mark — ordering metadata, never a measurement. */
+  startedAtIso: string;
+}
+
+/** Read the run identity from the GitHub Actions environment. */
+export function captureRunIdentity(
+  env: NodeJS.ProcessEnv = process.env,
+  nowIso: () => string = () => new Date().toISOString()
+): CaptureRunIdentity {
+  return {
+    runId: env.GITHUB_RUN_ID ?? null,
+    runAttempt: env.GITHUB_RUN_ATTEMPT ?? null,
+    commitSha: env.GITHUB_SHA ?? null,
+    runnerOs: env.RUNNER_OS ?? null,
+    runnerImage: env.ImageOS ?? null,
+    startedAtIso: nowIso(),
+  };
 }
 
 /** Run context recorded alongside the measurements. */
@@ -54,15 +86,26 @@ export interface CaptureStageContext {
   configuredFps: number | null;
   /** Dimensions of the first frame the browser decoded. */
   decodedSize: CaptureDimensions | null;
+  run: CaptureRunIdentity;
+  /**
+   * Poll interval each stage was observed with. Every measurement carries up to
+   * that much positive bias, so an aggregate without this has no error bar.
+   */
+  samplingIntervalsMs: Partial<Record<CaptureStage, number>>;
 }
 
 export interface CaptureStageRecord extends CaptureStageContext {
+  /** Bumped when the record's shape changes, so a parser can span generations. */
+  schemaVersion: number;
   stages: CaptureStageMeasurement[];
   /** Stages never reached — populated when a run fails part-way through. */
   missingStages: CaptureStage[];
   /** Start request to first browser-decoded frame, or null when never decoded. */
   captureToBrowserMs: number | null;
 }
+
+/** Current {@link CaptureStageRecord.schemaVersion}. */
+export const CAPTURE_STAGE_RECORD_SCHEMA_VERSION = 1;
 
 /** Monotonic millisecond reader used when none is injected. */
 export function monotonicNowMs(): number {
@@ -109,6 +152,7 @@ export class CaptureStageTimeline {
     }
     return {
       ...context,
+      schemaVersion: CAPTURE_STAGE_RECORD_SCHEMA_VERSION,
       stages,
       missingStages: CAPTURE_STAGES.filter(stage => !this.marks.has(stage)),
       captureToBrowserMs: this.marks.get("firstDecodedFrame") ?? null,
@@ -126,6 +170,7 @@ export function formatCaptureStageRecord(record: CaptureStageRecord): string {
   const lines = [
     `platform=${record.platform} stream=${record.streamId} outcome=${record.outcome}`,
     `source=${formatDimensions(record.sourceSize)} fps=${record.configuredFps ?? "none"} decoded=${formatDimensions(record.decodedSize)}`,
+    `run=${record.run.runId ?? "local"}/${record.run.runAttempt ?? "1"} sha=${record.run.commitSha ?? "unknown"} runner=${record.run.runnerImage ?? record.run.runnerOs ?? "unknown"}`,
     ...record.stages.map(
       measurement =>
         `  ${measurement.stage.padEnd(width)} ${Math.round(measurement.elapsedMs)}ms (+${Math.round(measurement.deltaMs)}ms)`

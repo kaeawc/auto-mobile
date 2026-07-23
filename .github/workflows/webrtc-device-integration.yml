@@ -100,7 +100,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: android-webrtc-device-artifacts
+          name: android-webrtc-device-artifacts-${{ github.run_attempt }}
           path: scratch/webrtc-device-integration/
           if-no-files-found: ignore
           retention-days: 7
@@ -143,7 +143,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: ios-webrtc-device-artifacts
+          name: ios-webrtc-device-artifacts-${{ github.run_attempt }}
           path: scratch/webrtc-device-integration/
           if-no-files-found: ignore
           retention-days: 7

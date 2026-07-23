@@ -8,6 +8,7 @@ import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { ExecResult } from "../../src/models";
 import { PortManager } from "../../src/utils/PortManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
+import { IOSCtrlProxyProcessClient } from "../../src/utils/ios/IOSCtrlProxyProcessClient";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 import * as fs from "fs/promises";
@@ -2066,7 +2067,7 @@ describe("IOSCtrlProxyManager", function() {
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("4444\n", ""));
       fakeTimer.enableAutoAdvance();
 
-      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(fakeExecutor, fakeTimer);
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
 
       expect(orphanProcess.alive).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 4444")).toBe(true);
@@ -2085,7 +2086,7 @@ describe("IOSCtrlProxyManager", function() {
       fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("4445\n", ""));
       fakeTimer.enableAutoAdvance();
 
-      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(fakeExecutor, fakeTimer);
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
 
       expect(orphanProcess.alive).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 4445")).toBe(true);
@@ -2123,7 +2124,7 @@ describe("IOSCtrlProxyManager", function() {
       fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("4448\n", ""));
       fakeTimer.enableAutoAdvance();
 
-      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(fakeExecutor, fakeTimer);
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
 
       expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -4446")).toBe(true);
       expect(orphanedShell.alive).toBe(false);
@@ -2156,7 +2157,7 @@ describe("IOSCtrlProxyManager", function() {
       fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("", ""));
       fakeTimer.enableAutoAdvance();
 
-      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(fakeExecutor, fakeTimer);
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
 
       expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -4451")).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 4451")).toBe(false);

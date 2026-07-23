@@ -63,6 +63,17 @@
       "outputs": [],
       "outputLogs": "new-only"
     },
+    "check:ios-ctrl-proxy-process-boundary": {
+      "description": "Keep CtrlProxy PID tooling behind IOSCtrlProxyProcessClient",
+      "inputs": [
+        "src/**",
+        "scripts/check-ios-ctrl-proxy-process-boundary.ts",
+        "scripts/check-ios-ctrl-proxy-process-boundary.sh",
+        "package.json"
+      ],
+      "outputs": [],
+      "outputLogs": "new-only"
+    },
     "test:coverage": {
       "description": "Run tests with coverage reporting to coverage/",
       "inputs": [

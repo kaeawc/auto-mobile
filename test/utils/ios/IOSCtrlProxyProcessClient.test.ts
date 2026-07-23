@@ -1,0 +1,59 @@
+import { describe, expect, test } from "bun:test";
+import { IOSCtrlProxyProcessClient } from "../../../src/utils/ios/IOSCtrlProxyProcessClient";
+import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
+
+function result(stdout = "", stderr = "") {
+  return { stdout, stderr, toString: () => stdout, trim: () => stdout.trim(), includes: (text: string) => stdout.includes(text) };
+}
+
+describe("IOSCtrlProxyProcessClient", () => {
+  test("uses argv for PID lookup and preserves device identity validation", async () => {
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("pgrep -x xcodebuild", result("42\n"));
+    host.setCommandResponse("ps -p 42 -o ppid= -o args=", result("2 xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService"));
+    host.setCommandResponse("ps eww -p 42 -o command=", result("AUTOMOBILE_DEVICE_ID=DEVICE-1"));
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    const process = await client.findExternalXcodebuildCtrlProxyProcess("DEVICE-1");
+
+    expect(process).toEqual({ pid: 42, port: 8765 });
+    expect(host.getExecutedCommands()).toContain("pgrep -x xcodebuild");
+    expect(host.getExecutedCommands()).toContain("ps -p 42 -o ppid= -o args=");
+  });
+
+  test("does not identify a recycled PID as a CtrlProxy runner", async () => {
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("kill -0 42", result());
+    host.setCommandResponse("ps -p 42 -o ppid= -o args=", result("1 xcodebuild test -destination id=DEVICE-1"));
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    await expect(client.isOwnedRunnerAlive(42, "DEVICE-1")).resolves.toBe(false);
+  });
+
+  test("signals the owned process group, then descendants, and escalates after the bounded wait", async () => {
+    const host = new FakeHostCommandExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n43 42\n"));
+    host.setCommandResponse("kill -0 42", result());
+    host.setCommandResponse("kill -0 43", result());
+    const client = new IOSCtrlProxyProcessClient(host, timer, { releaseAttempts: 1, releaseGraceMs: 1 });
+
+    await client.terminateProcessTree(42);
+
+    expect(host.getExecutedCommands()).toEqual(expect.arrayContaining([
+      "kill -TERM -- -42", "kill -TERM 43", "kill -TERM 42",
+      "kill -KILL -- -42", "kill -KILL 43", "kill -KILL 42",
+    ]));
+  });
+
+  test("treats permission failures as an unavailable PID rather than signaling it", async () => {
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("kill -0 77", result("", "Operation not permitted"));
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    await expect(client.isRunning(77)).resolves.toBe(false);
+    expect(host.getExecutedCommands()).toEqual(["kill -0 77"]);
+  });
+});

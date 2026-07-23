@@ -1,12 +1,13 @@
 import type { ChildProcess, SpawnOptions } from "child_process";
 import type { ExecResult } from "../../src/models";
 import type { ProcessExecOptions, ProcessExecutor } from "../../src/utils/ProcessExecutor";
+import type { HostCommandOptions, HostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { FakeChildProcess } from "./FakeChildProcess";
 
 /**
  * Fake ProcessExecutor for testing command execution and process spawning.
  */
-export class FakeProcessExecutor implements ProcessExecutor {
+export class FakeProcessExecutor implements ProcessExecutor, HostCommandExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
   private commandHandlers: Array<{ pattern: string; handler: (command: string) => ExecResult | Promise<ExecResult> }> = [];
   private defaultResponse: ExecResult = this.createExecResult("", "");
@@ -55,6 +56,13 @@ export class FakeProcessExecutor implements ProcessExecutor {
       }
     }
     return this.defaultResponse;
+  }
+
+  async executeCommand(command: string, args: string[] = [], _options?: HostCommandOptions): Promise<ExecResult> {
+    const renderedArgs = args.map((arg, index) =>
+      command === "pgrep" && args[index - 1] === "-f" ? `'${arg}'` : arg.includes(" ") ? `'${arg}'` : arg
+    );
+    return this.exec([command, ...renderedArgs].join(" "));
   }
 
   spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess {

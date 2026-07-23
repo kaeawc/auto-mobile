@@ -1,0 +1,533 @@
+# Real 'adb shell dumpsys activity activities' capture (issue #4329).
+# API level (ro.build.version.sdk): 30
+# Android release (ro.build.version.release): 11
+# System image: system-images;android-30;google_apis;arm64-v8a
+# Build fingerprint: google/sdk_gphone_arm64/emulator_arm64:11/RSR1.240422.006/12134477:userdebug/dev-keys
+# Scenario: HOME (launcher) + Settings (with wifi sub-setting) + second app task.
+# Captured by scripts/capture-activity-activities.sh; do not hand-edit.
+#
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  Stack #11: type=standard mode=fullscreen
+  isSleeping=false
+  mBounds=Rect(0, 0 - 0, 0)
+    mResumedActivity: ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+    * Task{fc22935 #11 visible=true type=standard mode=fullscreen translucent=false A=10114:android.task.contacts U=0 StackId=11 sz=1}
+      mBounds=Rect(0, 0 - 0, 0)
+      mMinWidth=-1 mMinHeight=-1
+      userId=0 effectiveUid=u0a114 mCallingUid=2000 mUserSetupComplete=true mCallingPackage=com.android.shell mCallingFeatureId=null
+      affinity=10114:android.task.contacts
+      intent={act=android.intent.action.MAIN cat=[android.intent.category.APP_CONTACTS] flg=0x10000000 cmp=com.android.contacts/.activities.PeopleActivity}
+      mActivityComponent=com.android.contacts/.activities.PeopleActivity
+      autoRemoveRecents=false isPersistable=true activityType=1
+      rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+      Activities=[ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}]
+      askedCompatMode=false inRecents=true isAvailable=true
+      mRootProcess=ProcessRecord{250e109 4920:com.android.contacts/u0a114}
+      taskId=11 stackId=11
+      mHasBeenVisible=true
+      mResizeMode=RESIZE_MODE_RESIZEABLE mSupportsPictureInPicture=false isResizeable=true
+      lastActiveTime=23423 (inactive for 3s)
+      * Hist #0: ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+          packageName=com.android.contacts processName=com.android.contacts
+          launchedFromUid=2000 launchedFromPackage=com.android.shell launchedFromFeature=null userId=0
+          app=ProcessRecord{250e109 4920:com.android.contacts/u0a114}
+          Intent { act=android.intent.action.MAIN cat=[android.intent.category.APP_CONTACTS] flg=0x10000000 cmp=com.android.contacts/.activities.PeopleActivity }
+          rootOfTask=true task=Task{fc22935 #11 visible=true type=standard mode=fullscreen translucent=false A=10114:android.task.contacts U=0 StackId=11 sz=1}
+          taskAffinity=10114:android.task.contacts
+          mActivityComponent=com.android.contacts/.activities.PeopleActivity
+          baseDir=/product/priv-app/Contacts/Contacts.apk
+          dataDir=/data/user/0/com.android.contacts
+          stateNotNeeded=false componentSpecified=false mActivityType=standard
+          compat={160dpi} labelRes=0x7f100034 icon=0x7f0e0000 theme=0x7f110113
+          mLastReportedConfigurations:
+            mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.23}
+            mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=ff212121
+            backgroundColor=fffafafa statusBarColor=0 navigationBarColor=ff000000
+          launchFailed=false launchCount=1 lastLaunchTime=-3s55ms
+          mHaveState=false mIcicle=null
+          state=RESUMED stopped=false delayedResume=false finishing=false
+          keysPaused=false inHistory=true setToSleep=false idle=true mStartingWindowState=STARTING_WINDOW_SHOWN
+          occludesParent=true noDisplay=false immersive=false launchMode=1
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=standard
+          windows=[Window{644f668 u0 com.android.contacts/com.android.contacts.activities.PeopleActivity}]
+          windowType=2 hasVisible=true
+          mOccludesParent=true mOrientation=-1
+          mVisibleRequested=true mVisible=true mClientVisible=true reportedDrawn=true reportedVisible=true
+          mNumInterestingWindows=1 mNumDrawnWindows=1 allDrawn=true lastAllDrawn=true)
+          startingData=null firstWindowDrawn=true mIsExiting=false
+          nowVisible=true lastVisibleTime=-2s464ms
+          resizeMode=RESIZE_MODE_RESIZEABLE
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+
+  Stack #10: type=standard mode=fullscreen
+  isSleeping=false
+  mBounds=Rect(0, 0 - 0, 0)
+    mLastPausedActivity: ActivityRecord{eca7af6 u0 com.android.settings/.Settings$WifiSettings2Activity t10}
+    * Task{9ef1f74 #10 visible=true type=standard mode=fullscreen translucent=true A=1000:com.android.settings U=0 StackId=10 sz=1}
+      mBounds=Rect(0, 0 - 0, 0)
+      mMinWidth=-1 mMinHeight=-1
+      userId=0 effectiveUid=1000 mCallingUid=1000 mUserSetupComplete=true mCallingPackage=com.android.settings mCallingFeatureId=null
+      affinity=1000:com.android.settings
+      intent={act=android.settings.WIFI_SETTINGS flg=0x10000000 cmp=com.android.settings/.Settings$WifiSettingsActivity}
+      mActivityComponent=com.android.settings/.Settings$WifiSettingsActivity
+      autoRemoveRecents=false isPersistable=true activityType=1
+      rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+      Activities=[ActivityRecord{eca7af6 u0 com.android.settings/.Settings$WifiSettings2Activity t10}]
+      askedCompatMode=false inRecents=true isAvailable=true
+      mRootProcess=ProcessRecord{55947 1242:com.android.settings/1000}
+      taskId=10 stackId=10
+      mHasBeenVisible=true
+      mResizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION mSupportsPictureInPicture=false isResizeable=true
+      lastActiveTime=23423 (inactive for 3s)
+      * Hist #0: ActivityRecord{eca7af6 u0 com.android.settings/.Settings$WifiSettings2Activity t10}
+          packageName=com.android.settings processName=com.android.settings
+          launchedFromUid=1000 launchedFromPackage=com.android.settings launchedFromFeature=null userId=0
+          app=ProcessRecord{55947 1242:com.android.settings/1000}
+          Intent { act=android.settings.WIFI_SETTINGS2 cmp=com.android.settings/.Settings$WifiSettings2Activity (has extras) }
+          rootOfTask=true task=Task{9ef1f74 #10 visible=true type=standard mode=fullscreen translucent=true A=1000:com.android.settings U=0 StackId=10 sz=1}
+          taskAffinity=1000:com.android.settings
+          mActivityComponent=com.android.settings/.Settings$WifiSettings2Activity
+          baseDir=/system_ext/priv-app/Settings/Settings.apk
+          dataDir=/data/user_de/0/com.android.settings
+          stateNotNeeded=false componentSpecified=false mActivityType=standard
+          compat={160dpi} labelRes=0x7f1212ec icon=0x7f080162 theme=0x7f1302b7
+          mLastReportedConfigurations:
+            mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.31}
+            mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          taskDescription: label="null" icon=null iconResource=com.android.settings/2131231091 iconFilename=null primaryColor=ffffffff
+            backgroundColor=ffffffff statusBarColor=ffffffff navigationBarColor=0
+          launchFailed=false launchCount=0 lastLaunchTime=-5s5ms
+          mHaveState=true mIcicle=Bundle[mParcelledData.dataSize=6904]
+          state=STOPPED stopped=true delayedResume=false finishing=false
+          keysPaused=false inHistory=true setToSleep=false idle=true mStartingWindowState=STARTING_WINDOW_REMOVED
+          occludesParent=true noDisplay=false immersive=false launchMode=0
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=standard
+          windows=[Window{7f40375 u0 com.android.settings/com.android.settings.Settings$WifiSettings2Activity}]
+          windowType=2 hasVisible=true
+          mOccludesParent=true mOrientation=-1
+          mVisibleRequested=false mVisible=false mClientVisible=false reportedDrawn=false reportedVisible=false
+          mAppStopped=true
+          mNumInterestingWindows=1 mNumDrawnWindows=1 allDrawn=true lastAllDrawn=true)
+          startingData=null firstWindowDrawn=true mIsExiting=false
+          nowVisible=false lastVisibleTime=-4s265ms
+          resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+
+  Stack #9: type=standard mode=fullscreen
+  isSleeping=false
+  mBounds=Rect(0, 0 - 0, 0)
+    mLastPausedActivity: ActivityRecord{7e38e5d u0 com.android.settings/.homepage.SettingsHomepageActivity t9}
+    * Task{a3223d2 #9 visible=true type=standard mode=fullscreen translucent=false A=1000:com.android.settings.root U=0 StackId=9 sz=1}
+      mBounds=Rect(0, 0 - 0, 0)
+      mMinWidth=-1 mMinHeight=-1
+      userId=0 effectiveUid=1000 mCallingUid=2000 mUserSetupComplete=true mCallingPackage=com.android.shell mCallingFeatureId=null
+      affinity=1000:com.android.settings.root
+      intent={act=android.settings.SETTINGS flg=0x10000000 cmp=com.android.settings/.homepage.SettingsHomepageActivity}
+      mActivityComponent=com.android.settings/.homepage.SettingsHomepageActivity
+      autoRemoveRecents=false isPersistable=true activityType=1
+      rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+      Activities=[ActivityRecord{7e38e5d u0 com.android.settings/.homepage.SettingsHomepageActivity t9}]
+      askedCompatMode=false inRecents=true isAvailable=true
+      mRootProcess=ProcessRecord{55947 1242:com.android.settings/1000}
+      taskId=9 stackId=9
+      mHasBeenVisible=true
+      mResizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION mSupportsPictureInPicture=false isResizeable=true
+      lastActiveTime=21364 (inactive for 5s)
+      * Hist #0: ActivityRecord{7e38e5d u0 com.android.settings/.homepage.SettingsHomepageActivity t9}
+          packageName=com.android.settings processName=com.android.settings
+          launchedFromUid=2000 launchedFromPackage=com.android.shell launchedFromFeature=null userId=0
+          app=ProcessRecord{55947 1242:com.android.settings/1000}
+          Intent { act=android.settings.SETTINGS flg=0x10000000 cmp=com.android.settings/.homepage.SettingsHomepageActivity }
+          rootOfTask=true task=Task{a3223d2 #9 visible=true type=standard mode=fullscreen translucent=false A=1000:com.android.settings.root U=0 StackId=9 sz=1}
+          taskAffinity=1000:com.android.settings.root
+          mActivityComponent=com.android.settings/.homepage.SettingsHomepageActivity
+          baseDir=/system_ext/priv-app/Settings/Settings.apk
+          dataDir=/data/user_de/0/com.android.settings
+          stateNotNeeded=false componentSpecified=false mActivityType=standard
+          compat={160dpi} labelRes=0x7f120e31 icon=0x7f080173 theme=0x7f1302b9
+          mLastReportedConfigurations:
+            mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.31}
+            mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=ffffffff
+            backgroundColor=ffffffff statusBarColor=ffffffff navigationBarColor=0
+          launchFailed=false launchCount=0 lastLaunchTime=-7s208ms
+          mHaveState=true mIcicle=Bundle[mParcelledData.dataSize=9448]
+          state=STOPPED stopped=true delayedResume=false finishing=false
+          keysPaused=false inHistory=true setToSleep=false idle=true mStartingWindowState=STARTING_WINDOW_REMOVED
+          occludesParent=true noDisplay=false immersive=false launchMode=2
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=standard
+          windows=[Window{1ea8ef7 u0 com.android.settings/com.android.settings.homepage.SettingsHomepageActivity}]
+          windowType=2 hasVisible=true
+          mOccludesParent=true mOrientation=-1
+          mVisibleRequested=false mVisible=false mClientVisible=false reportedDrawn=false reportedVisible=false
+          mAppStopped=true
+          mNumInterestingWindows=1 mNumDrawnWindows=1 allDrawn=true lastAllDrawn=true)
+          startingData=null firstWindowDrawn=true mIsExiting=false
+          nowVisible=false lastVisibleTime=-6s713ms
+          resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+
+  Stack #1: type=home mode=fullscreen
+  isSleeping=false
+  mBounds=Rect(0, 0 - 0, 0)
+    mLastPausedActivity: ActivityRecord{7ef1c1a u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t8}
+    * Task{f763a96 #8 visible=true type=home mode=fullscreen translucent=false I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=1 sz=1}
+      mBounds=Rect(0, 0 - 0, 0)
+      mMinWidth=-1 mMinHeight=-1
+      userId=0 effectiveUid=u0a152 mCallingUid=0 mUserSetupComplete=true mCallingPackage=null mCallingFeatureId=null
+      intent={act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10010000 pkg=com.google.android.apps.nexuslauncher cmp=com.google.android.apps.nexuslauncher/.NexusLauncherActivity}
+      mActivityComponent=com.google.android.apps.nexuslauncher/.NexusLauncherActivity
+      autoRemoveRecents=false isPersistable=true activityType=2
+      rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+      Activities=[ActivityRecord{7ef1c1a u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t8}]
+      askedCompatMode=false inRecents=true isAvailable=true
+      mRootProcess=ProcessRecord{a704bc2 992:com.google.android.apps.nexuslauncher/u0a152}
+      taskId=8 stackId=1
+      mHasBeenVisible=true
+      mResizeMode=RESIZE_MODE_RESIZEABLE mSupportsPictureInPicture=false isResizeable=true
+      lastActiveTime=19290 (inactive for 7s)
+      * Hist #0: ActivityRecord{7ef1c1a u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t8}
+          packageName=com.google.android.apps.nexuslauncher processName=com.google.android.apps.nexuslauncher
+          launchedFromUid=10152 launchedFromPackage=com.google.android.apps.nexuslauncher launchedFromFeature=null userId=0
+          app=ProcessRecord{a704bc2 992:com.google.android.apps.nexuslauncher/u0a152}
+          Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10010000 pkg=com.google.android.apps.nexuslauncher cmp=com.google.android.apps.nexuslauncher/.NexusLauncherActivity (has extras) }
+          rootOfTask=true task=Task{f763a96 #8 visible=true type=home mode=fullscreen translucent=false I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=1 sz=1}
+          taskAffinity=null
+          mActivityComponent=com.google.android.apps.nexuslauncher/.NexusLauncherActivity
+          baseDir=/system_ext/priv-app/NexusLauncherRelease/NexusLauncherRelease.apk
+          dataDir=/data/user/0/com.google.android.apps.nexuslauncher
+          stateNotNeeded=true componentSpecified=false mActivityType=home
+          compat={160dpi} labelRes=0x7f10004f icon=0x7f080208 theme=0x7f11000a
+          mLastReportedConfigurations:
+            mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.46}
+            mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2}
+          RequestedOverrideConfiguration={0.0 ?mcc?mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mWindowingMode=undefined mDisplayWindowingMode=undefined mActivityType=home mAlwaysOnTop=undefined mRotation=undefined}}
+          taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=fff5f5f5
+            backgroundColor=fffafafa statusBarColor=0 navigationBarColor=0
+          launchFailed=false launchCount=0 lastLaunchTime=-12s256ms
+          mHaveState=true mIcicle=Bundle[mParcelledData.dataSize=3920]
+          state=STOPPED stopped=true delayedResume=false finishing=false
+          keysPaused=false inHistory=true setToSleep=false idle=true mStartingWindowState=STARTING_WINDOW_NOT_SHOWN
+          occludesParent=true noDisplay=false immersive=false launchMode=2
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=home
+          windows=[Window{70bc572 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}, Window{f5a961b u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}]
+          windowType=2 hasVisible=true
+          mOccludesParent=true mOrientation=5
+          mVisibleRequested=false mVisible=false mClientVisible=false reportedDrawn=false reportedVisible=false
+          mAppStopped=true
+          mNumInterestingWindows=2 mNumDrawnWindows=2 allDrawn=true lastAllDrawn=true)
+          startingData=null firstWindowDrawn=true mIsExiting=false
+          nowVisible=false lastVisibleTime=-11s396ms
+          connections={}
+          resizeMode=RESIZE_MODE_RESIZEABLE
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+
+  Stack #4: type=undefined mode=split-screen-primary
+  isSleeping=false
+  mBounds=Rect(0, 0 - 320, 327)
+
+  Stack #5: type=undefined mode=split-screen-secondary
+  isSleeping=false
+  mBounds=Rect(0, 337 - 320, 640)
+
+  Resumed activities in task display areas (from top to bottom):
+    Resumed: ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+
+  ResumedActivity: ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+
+ActivityStackSupervisor state:
+  topDisplayFocusedStack=Task{fc22935 #11 visible=true type=standard mode=fullscreen translucent=false A=10114:android.task.contacts U=0 StackId=11 sz=1}
+  mLastOrientationSource=ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+  Display: mDisplayId=0 stacks=6
+    init=320x640 160dpi cur=320x640 app=320x640 rng=320x296-640x616
+    deferred=false mLayoutNeeded=true mTouchExcludeRegion=SkRegion((0,0,320,640))
+
+  mLayoutSeq=126
+  mCurrentFocus=Window{644f668 u0 com.android.contacts/com.android.contacts.activities.PeopleActivity}
+  mFocusedApp=ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+  mLastStatusBarVisibility=0x8508
+
+  displayId=0
+  mWallpaperTarget=null
+  mLastWallpaperX=0.0 mLastWallpaperY=0.5
+
+  Task display areas in top down Z order:
+    TaskDisplayArea DefaultTaskDisplayArea
+      mLastOrientationSource=Task{fc22935 #11 visible=true type=standard mode=fullscreen translucent=false A=10114:android.task.contacts U=0 StackId=11 sz=1}
+      mPreferredTopFocusableStack=Task{fc22935 #11 visible=true type=standard mode=fullscreen translucent=false A=10114:android.task.contacts U=0 StackId=11 sz=1}
+      mLastFocusedStack=Task{fc22935 #11 visible=true type=standard mode=fullscreen translucent=false A=10114:android.task.contacts U=0 StackId=11 sz=1}
+      Application tokens in top down Z order:
+      * Task{fc22935 #11 visible=true type=standard mode=fullscreen translucent=false A=10114:android.task.contacts U=0 StackId=11 sz=1}
+        mLastOrientationSource=ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+        bounds=[0,0][320,640]
+        * ActivityRecord{59ae8d1 u0 com.android.contacts/.activities.PeopleActivity t11}
+      * Task{9ef1f74 #10 visible=true type=standard mode=fullscreen translucent=true A=1000:com.android.settings U=0 StackId=10 sz=1}
+        mLastOrientationSource=ActivityRecord{eca7af6 u0 com.android.settings/.Settings$WifiSettings2Activity t10}
+        bounds=[0,0][320,640]
+        * ActivityRecord{eca7af6 u0 com.android.settings/.Settings$WifiSettings2Activity t10}
+      * Task{a3223d2 #9 visible=true type=standard mode=fullscreen translucent=false A=1000:com.android.settings.root U=0 StackId=9 sz=1}
+        mLastOrientationSource=ActivityRecord{7e38e5d u0 com.android.settings/.homepage.SettingsHomepageActivity t9}
+        bounds=[0,0][320,640]
+        * ActivityRecord{7e38e5d u0 com.android.settings/.homepage.SettingsHomepageActivity t9}
+      * Task{ee6abf0 #1 visible=false type=home mode=fullscreen translucent=true I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=1 sz=1}
+        mLastOrientationSource=Task{f763a96 #8 visible=true type=home mode=fullscreen translucent=false I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=1 sz=1}
+        bounds=[0,0][320,640]
+        * Task{f763a96 #8 visible=true type=home mode=fullscreen translucent=false I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=1 sz=1}
+          mLastOrientationSource=ActivityRecord{7ef1c1a u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t8}
+          bounds=[0,0][320,640]
+          * ActivityRecord{7ef1c1a u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t8}
+      * Task{5d86ba3 #4 visible=false type=undefined mode=split-screen-primary translucent=true ?? U=0 StackId=4 sz=0}
+        bounds=[0,0][320,327]
+      * Task{103aea0 #5 visible=false type=undefined mode=split-screen-secondary translucent=true ?? U=0 StackId=5 sz=0}
+        bounds=[0,337][320,640]
+
+  no ScreenRotationAnimation 
+
+  homeStack=Task=1
+  splitScreenPrimaryStack=Task=4
+
+  PinnedStackController
+    mIsImeShowing=false
+    mImeHeight=0
+    mAspectRatio=-1.0
+    mMinAspectRatio=0.41841003
+    mMaxAspectRatio=2.39
+    mActions=[]
+    mDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, FLAG_SECURE, FLAG_SUPPORTS_PROTECTED_BUFFERS, FLAG_TRUSTED, real 320 x 640, largest app 640 x 616, smallest app 320 x 296, appVsyncOff 1000000, presDeadline 16666666, mode 1, defaultMode 1, modes [{id=1, width=320, height=640, fps=60.000004}], hdrCapabilities HdrCapabilities{mSupportedHdrTypes=[], mMaxLuminance=500.0, mMaxAverageLuminance=500.0, mMinLuminance=0.0}, minimalPostProcessingSupported false, rotation 0, state ON, type INTERNAL, uniqueId "local:8141241408256768", app 320 x 640, density 160 (160.0 x 160.0) dpi, layerStack 0, colorMode 0, supportedColorModes [0], address {port=0, model=0x1cec6a7a2b7b}, deviceProductInfo DeviceProductInfo{name=EMU_display_0, manufacturerPnpId=GGL, productId=1, modelYear=null, manufactureDate=ManufactureDate{week=27, year=2006}, relativeAddress=null}, removeMode 0}
+
+  DisplayFrames w=320 h=640 r=0
+    mStable=[0,24][320,640]
+    mStableFullscreen=[0,0][320,640]
+    mDock=[0,24][320,640]
+    mCurrent=[0,24][320,640]
+    mSystem=[0,0][320,640]
+    mContent=[0,24][320,640]
+    mVoiceContent=[0,24][320,640]
+    mRestricted=[0,0][320,640]
+    mUnrestricted=[0,0][320,640]
+    mDisplayCutout=WmDisplayCutout{DisplayCutout{insets=Rect(0, 0 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]}}, mFrameSize=null}
+
+  DisplayPolicy
+    mCarDockEnablesAccelerometer=true mDeskDockEnablesAccelerometer=true
+    mDockMode=EXTRA_DOCK_STATE_UNDOCKED mLidState=LID_OPEN
+    mAwake=true mScreenOnEarly=true mScreenOnFully=true
+    mKeyguardDrawComplete=true mWindowManagerDrawComplete=true
+    mHdmiPlugged=false
+    mLastSystemUiFlags=0x8508 mResettingSystemUiFlags=0x0 mForceClearedSystemUiFlags=0x0
+    mShowingDream=false mDreamingLockscreen=false    mStatusBar=Window{7aa450f u0 StatusBar}    mExpandedPanel=Window{46fce22 u0 NotificationShade} isKeyguardShowing=false
+    mFocusedWindow=Window{644f668 u0 com.android.contacts/com.android.contacts.activities.PeopleActivity}
+    mTopFullscreenOpaqueWindowState=Window{644f668 u0 com.android.contacts/com.android.contacts.activities.PeopleActivity}
+    mTopFullscreenOpaqueOrDimmingWindowState=Window{644f668 u0 com.android.contacts/com.android.contacts.activities.PeopleActivity}
+    mTopIsFullscreen=false
+    mForceStatusBar=false    mForceShowSystemBarsFromExternal=false mAllowLockscreenWhenOn=false
+    Looper state:
+      Looper (android.ui, tid 20) {89ec662}
+        (Total messages: 0, polling=true, quitting=false)
+
+  DisplayRotation
+    mCurrentAppOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+    mLastOrientation=-1
+    mRotation=0 mDeferredRotationPauseCount=0
+    mLandscapeRotation=ROTATION_90 mSeascapeRotation=ROTATION_270
+    mPortraitRotation=ROTATION_0 mUpsideDownRotation=ROTATION_180
+    mSupportAutoRotation=true
+    WindowOrientationListener
+      mEnabled=true
+      mCurrentRotation=ROTATION_0
+      mSensorType=null
+      mSensor={Sensor name="Goldfish 3-axis Accelerometer", vendor="The Android Open Source Project", version=1, type=1, maxRange=39.300007, resolution=2.480159E-4, power=3.0, minDelay=10000}
+      mRate=2
+      AccelSensorJudge
+        mProposedRotation=0
+        mPredictedRotation=0
+        mLastFilteredX=0.0
+        mLastFilteredY=9.776321
+        mLastFilteredZ=0.812345
+        mLastFilteredTimestampNanos=26447891005 (56.855087ms ago)
+        mTiltHistory={last: 5.0}
+        mFlat=false
+        mSwinging=false
+        mAccelerating=false
+        mOverhead=false
+        mTouched=false
+        mTiltToleranceConfig=[[-25, 70], [-25, 65], [-25, 60], [-25, 65]]
+
+    mCarDockRotation=-1 mDeskDockRotation=-1
+    mUserRotationMode=USER_ROTATION_FREE mUserRotation=ROTATION_0 mAllowAllRotations=false
+    mDemoHdmiRotation=ROTATION_90 mDemoHdmiRotationLock=false mUndockedHdmiRotation=-1
+    mLidOpenRotation=-1
+    mFixedToUserRotation=false
+
+  InputConsumers:
+    name=recents_animation_input_consumer pid=992 user=UserHandle{0}
+
+  WindowInsetsStateController
+    InsetsState
+      InsetsSource type=ITYPE_STATUS_BAR frame=[0,0][320,24] visible=true
+      InsetsSource type=ITYPE_TOP_GESTURES frame=[0,0][320,24] visible=true
+      InsetsSource type=ITYPE_TOP_TAPPABLE_ELEMENT frame=[0,0][320,24] visible=true
+      InsetsSource type=ITYPE_IME frame=[0,0][0,0] visible=false
+    Control map:
+    ITYPE_IME -> Window{644f668 u0 com.android.contacts/com.android.contacts.activities.PeopleActivity}
+    ITYPE_STATUS_BAR -> Window{644f668 u0 com.android.contacts/com.android.contacts.activities.PeopleActivity}
+    InsetsSourceProviders map:
+    ITYPE_IME -> 
+  InsetsSourceProvider
+   mSource=    InsetsSource type=ITYPE_IME frame=[0,0][0,0] visible=false
+   mControl=    InsetsSourceControl type=ITYPE_IME mLeash=Surface(name=Surface(name=605a6cf InputMethod)/@0x2961c3a - animation-leash)/@0xdd883f3 mSurfacePosition=Point(0, 24)
+   mFakeControl=    InsetsSourceControl type=ITYPE_IME mLeash=null mSurfacePosition=Point(0, 0)
+ mIsLeashReadyForDispatching=true mImeOverrideFrame=Rect(0, 0 - 0, 0)   mWin=    mDisplayId=0 rootTaskId=1 mSession=Session{69feb7d 1393:u0a10134} mClient=android.os.BinderProxy@a697b2e
+    mOwnerUid=10134 showForAllUsers=false package=com.google.android.inputmethod.latin appop=NONE
+    mAttrs={(0,0)(fillxfill) gr=BOTTOM CENTER_VERTICAL sim={adjust=pan forwardNavigation} ty=INPUT_METHOD fmt=TRANSPARENT wanim=0x1030056
+      fl=NOT_FOCUSABLE LAYOUT_IN_SCREEN SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+      pfl=FIT_INSETS_CONTROLLED
+      fitTypes=STATUS_BARS NAVIGATION_BARS
+      fitSides=LEFT TOP RIGHT
+      fitIgnoreVis}
+    Requested w=320 h=640 mLayoutSeq=58
+    mIsImWindow=true mIsWallpaper=false mIsFloatingLayer=true mWallpaperVisible=false
+    mHasSurface=false isReadyForDisplay()=false mWindowRemovalAllowed=false
+    ContainerAnimator:
+      mLeash=Surface(name=Surface(name=605a6cf InputMethod)/@0x2961c3a - animation-leash)/@0xdd883f3 mAnimationType=32
+      Animation: com.android.server.wm.InsetsSourceProvider$ControlAdapter@8febfba
+        ControlAdapter
+         mCapturedLeash=Surface(name=Surface(name=605a6cf InputMethod)/@0x2961c3a - animation-leash)/@0xdd883f3    WindowStateAnimator{6be7e6b InputMethod}:
+      mShownAlpha=0.0 mAlpha=1.0 mLastAlpha=0.0
+    mForceSeamlesslyRotate=false seamlesslyRotate: pending=null finishedFrameNumber=0
+    isOnScreen=false
+    isVisible=false
+   mAdapter=    ControlAdapter
+     mCapturedLeash=Surface(name=Surface(name=605a6cf InputMethod)/@0x2961c3a - animation-leash)/@0xdd883f3   mControlTarget=    mDisplayId=0 rootTaskId=11 mSession=Session{a3b9f8f 4920:u0a10114} mClient=android.os.BinderProxy@506558b
+    mOwnerUid=10114 showForAllUsers=false package=com.android.contacts appop=NONE
+    mAttrs={(0,0)(fillxfill) sim={adjust=resize forwardNavigation} ty=BASE_APPLICATION wanim=0x10302fe
+      fl=LAYOUT_IN_SCREEN LAYOUT_INSET_DECOR SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+      pfl=FORCE_DRAW_STATUS_BAR_BACKGROUND FIT_INSETS_CONTROLLED
+      vsysui=LAYOUT_STABLE LAYOUT_FULLSCREEN
+      fitSides=}
+    Requested w=320 h=640 mLayoutSeq=126
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    WindowStateAnimator{b629dc8 com.android.contacts/com.android.contacts.activities.PeopleActivity}:
+      Surface: shown=true layer=0 alpha=1.0 rect=(0.0,0.0) 320 x 640 transform=(1.0, 0.0, 1.0, 0.0)
+    mForceSeamlesslyRotate=false seamlesslyRotate: pending=null finishedFrameNumber=0
+    isOnScreen=true
+    isVisible=true
+    ITYPE_TOP_TAPPABLE_ELEMENT -> 
+  InsetsSourceProvider
+   mSource=    InsetsSource type=ITYPE_TOP_TAPPABLE_ELEMENT frame=[0,0][320,24] visible=true
+   mFakeControl=    InsetsSourceControl type=ITYPE_TOP_TAPPABLE_ELEMENT mLeash=null mSurfacePosition=Point(0, 0)
+ mIsLeashReadyForDispatching=true mImeOverrideFrame=Rect(0, 0 - 0, 0)   mWin=    mDisplayId=0 rootTaskId=1 mSession=Session{1716c1a 737:u0a10156} mClient=android.os.BinderProxy@c0bdde9
+    mOwnerUid=10156 showForAllUsers=true package=com.android.systemui appop=NONE
+    mAttrs={(0,0)(fillx24) gr=TOP CENTER_VERTICAL sim={adjust=pan} layoutInDisplayCutoutMode=always ty=STATUS_BAR fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+      pfl=COLOR_SPACE_AGNOSTIC FIT_INSETS_CONTROLLED}
+    Requested w=320 h=24 mLayoutSeq=126
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    ContainerAnimator:
+      mLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61 mAnimationType=32
+      Animation: com.android.server.wm.InsetsSourceProvider$ControlAdapter@ac91d86
+        ControlAdapter
+         mCapturedLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61    WindowStateAnimator{a449647 StatusBar}:
+      Surface: shown=true layer=0 alpha=1.0 rect=(0.0,0.0) 320 x 24 transform=(1.0, 0.0, 1.0, 0.0)
+    mLastFreezeDuration=+13s675ms
+    mForceSeamlesslyRotate=false seamlesslyRotate: pending=null finishedFrameNumber=0
+    isOnScreen=true
+    isVisible=true
+    ITYPE_TOP_GESTURES -> 
+  InsetsSourceProvider
+   mSource=    InsetsSource type=ITYPE_TOP_GESTURES frame=[0,0][320,24] visible=true
+   mFakeControl=    InsetsSourceControl type=ITYPE_TOP_GESTURES mLeash=null mSurfacePosition=Point(0, 0)
+ mIsLeashReadyForDispatching=true mImeOverrideFrame=Rect(0, 0 - 0, 0)   mWin=    mDisplayId=0 rootTaskId=1 mSession=Session{1716c1a 737:u0a10156} mClient=android.os.BinderProxy@c0bdde9
+    mOwnerUid=10156 showForAllUsers=true package=com.android.systemui appop=NONE
+    mAttrs={(0,0)(fillx24) gr=TOP CENTER_VERTICAL sim={adjust=pan} layoutInDisplayCutoutMode=always ty=STATUS_BAR fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+      pfl=COLOR_SPACE_AGNOSTIC FIT_INSETS_CONTROLLED}
+    Requested w=320 h=24 mLayoutSeq=126
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    ContainerAnimator:
+      mLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61 mAnimationType=32
+      Animation: com.android.server.wm.InsetsSourceProvider$ControlAdapter@ac91d86
+        ControlAdapter
+         mCapturedLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61    WindowStateAnimator{a449647 StatusBar}:
+      Surface: shown=true layer=0 alpha=1.0 rect=(0.0,0.0) 320 x 24 transform=(1.0, 0.0, 1.0, 0.0)
+    mLastFreezeDuration=+13s675ms
+    mForceSeamlesslyRotate=false seamlesslyRotate: pending=null finishedFrameNumber=0
+    isOnScreen=true
+    isVisible=true
+    ITYPE_STATUS_BAR -> 
+  InsetsSourceProvider
+   mSource=    InsetsSource type=ITYPE_STATUS_BAR frame=[0,0][320,24] visible=true
+   mControl=    InsetsSourceControl type=ITYPE_STATUS_BAR mLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61 mSurfacePosition=Point(0, 0)
+   mFakeControl=    InsetsSourceControl type=ITYPE_STATUS_BAR mLeash=null mSurfacePosition=Point(0, 0)
+ mIsLeashReadyForDispatching=true mImeOverrideFrame=Rect(0, 0 - 0, 0)   mWin=    mDisplayId=0 rootTaskId=1 mSession=Session{1716c1a 737:u0a10156} mClient=android.os.BinderProxy@c0bdde9
+    mOwnerUid=10156 showForAllUsers=true package=com.android.systemui appop=NONE
+    mAttrs={(0,0)(fillx24) gr=TOP CENTER_VERTICAL sim={adjust=pan} layoutInDisplayCutoutMode=always ty=STATUS_BAR fmt=TRANSLUCENT
+      fl=NOT_FOCUSABLE SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+      pfl=COLOR_SPACE_AGNOSTIC FIT_INSETS_CONTROLLED}
+    Requested w=320 h=24 mLayoutSeq=126
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    ContainerAnimator:
+      mLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61 mAnimationType=32
+      Animation: com.android.server.wm.InsetsSourceProvider$ControlAdapter@ac91d86
+        ControlAdapter
+         mCapturedLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61    WindowStateAnimator{a449647 StatusBar}:
+      Surface: shown=true layer=0 alpha=1.0 rect=(0.0,0.0) 320 x 24 transform=(1.0, 0.0, 1.0, 0.0)
+    mLastFreezeDuration=+13s675ms
+    mForceSeamlesslyRotate=false seamlesslyRotate: pending=null finishedFrameNumber=0
+    isOnScreen=true
+    isVisible=true
+   mAdapter=    ControlAdapter
+     mCapturedLeash=Surface(name=Surface(name=7aa450f StatusBar)/@0xb4fa0a8 - animation-leash)/@0x5c04e61   mControlTarget=    mDisplayId=0 rootTaskId=11 mSession=Session{a3b9f8f 4920:u0a10114} mClient=android.os.BinderProxy@506558b
+    mOwnerUid=10114 showForAllUsers=false package=com.android.contacts appop=NONE
+    mAttrs={(0,0)(fillxfill) sim={adjust=resize forwardNavigation} ty=BASE_APPLICATION wanim=0x10302fe
+      fl=LAYOUT_IN_SCREEN LAYOUT_INSET_DECOR SPLIT_TOUCH HARDWARE_ACCELERATED DRAWS_SYSTEM_BAR_BACKGROUNDS
+      pfl=FORCE_DRAW_STATUS_BAR_BACKGROUND FIT_INSETS_CONTROLLED
+      vsysui=LAYOUT_STABLE LAYOUT_FULLSCREEN
+      fitSides=}
+    Requested w=320 h=640 mLayoutSeq=126
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    WindowStateAnimator{b629dc8 com.android.contacts/com.android.contacts.activities.PeopleActivity}:
+      Surface: shown=true layer=0 alpha=1.0 rect=(0.0,0.0) 320 x 640 transform=(1.0, 0.0, 1.0, 0.0)
+    mForceSeamlesslyRotate=false seamlesslyRotate: pending=null finishedFrameNumber=0
+    isOnScreen=true
+    isVisible=true
+
+  KeyguardController:
+    mKeyguardShowing=false
+    mAodShowing=false
+    mKeyguardGoingAway=false
+    Occluded=false DismissingKeyguardActivity=null at display=0
+    mDismissalRequested=false
+
+  LockTaskController:
+    mLockTaskModeState=NONE
+    mLockTaskModeTasks=
+    mLockTaskPackages (userId:packages)=
+      u0:[]
+
+  mCurTaskIdForUser={0=11}
+  mUserStackInFront={}
+  mVisibilityTransactionDepth=0
+  isHomeRecentsComponent=true
+
+  TaskOrganizerController:
+    Per windowing mode:
+      pinned:
+        android.window.ITaskOrganizer$Stub$Proxy@6e7ce74 uid=10156:
+      split-screen-primary:
+        android.window.ITaskOrganizer$Stub$Proxy@3526f9d uid=10156:
+          Task{5d86ba3 #4 visible=false type=undefined mode=split-screen-primary translucent=true ?? U=0 StackId=4 sz=0}
+          Task{103aea0 #5 visible=false type=undefined mode=split-screen-secondary translucent=true ?? U=0 StackId=5 sz=0}
+      split-screen-secondary:
+        android.window.ITaskOrganizer$Stub$Proxy@3526f9d uid=10156:
+          Task{5d86ba3 #4 visible=false type=undefined mode=split-screen-primary translucent=true ?? U=0 StackId=4 sz=0}
+          Task{103aea0 #5 visible=false type=undefined mode=split-screen-secondary translucent=true ?? U=0 StackId=5 sz=0}

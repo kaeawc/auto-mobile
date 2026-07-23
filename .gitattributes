@@ -1,3 +1,8 @@
+# Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
+# so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
+# break the byte-exact fixture premise.
+test/features/observe/activityActivitiesDumps/*.log text eol=lf
+
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling
 

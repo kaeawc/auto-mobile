@@ -7,12 +7,17 @@ import { BackStackInfo, BootedDevice } from "../../../src/models";
 /**
  * The modern task-header line in `dumpsys activity activities` (issue #4223).
  *
- * SOURCE. No capture of this line is committed to this repo -- the 13 dumps
- * under `test/features/observe/windowDumps/` are `dumpsys window` output and
- * contain no task headers at all (checked: zero hits for `Task{`, `Task id #`
- * or `TaskRecord` across all of them). The shape below is therefore taken from
- * AOSP source rather than guessed, and every field asserted here is traceable
- * to a specific append:
+ * SOURCE. The shape below was originally taken from AOSP source rather than a
+ * capture: the 13 dumps under `test/features/observe/windowDumps/` are
+ * `dumpsys window` output and contain no task headers at all (zero hits for
+ * `Task{`, `Task id #` or `TaskRecord`). It is now corroborated by real
+ * `dumpsys activity activities` captures committed under
+ * `test/features/observe/activityActivitiesDumps/` (one per API level 24..36,
+ * issue #4329) and exercised end-to-end by `GetBackStackRealCaptures.test.ts` --
+ * the modern `A=<uid>:<pkg>` header this suite pins is observed verbatim in, for
+ * example, the API 34 capture. The hand-authored fixtures here are retained for
+ * the controlled degenerate rows a live capture cannot be driven to produce.
+ * Every field asserted here is traceable to a specific AOSP append:
  *
  *   frameworks/base/services/core/java/com/android/server/wm/TaskFragment.java
  *     dumpInner():  pw.print(prefix); pw.print("* "); pw.println(toFullString());

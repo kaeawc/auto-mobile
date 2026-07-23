@@ -115,7 +115,11 @@ function startProcess(command: string, args: string[], cwd: string): StartedProc
   return { process, logs: () => output, error: () => spawnError };
 }
 
-async function waitFor(predicate: () => boolean | Promise<boolean>, message: string, timeoutMs: number = 15_000): Promise<void> {
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  message: string | (() => string),
+  timeoutMs: number = 15_000
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await predicate()) {
@@ -124,7 +128,7 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, message: str
     await Bun.sleep(100);
   }
   if (!(await predicate())) {
-    throw new Error(message);
+    throw new Error(typeof message === "function" ? message() : message);
   }
 }
 
@@ -207,9 +211,17 @@ function resolveChromeBinary(): string {
   return binary;
 }
 
-async function waitForChromeTarget(port: string): Promise<ChromeTarget> {
+async function waitForChromeTarget(port: string, chrome: StartedProcess): Promise<ChromeTarget> {
   let targets: ChromeTarget[] = [];
   await waitFor(async () => {
+    const spawnError = chrome.error();
+    if (spawnError) {
+      throw new Error(`Chrome failed to start: ${spawnError.message}`);
+    }
+    const exited = exitedProcessDescription(chrome.process);
+    if (exited) {
+      throw new Error(`Chrome exited before DevTools started (${exited}):\n${chrome.logs()}`);
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`);
       targets = await response.json() as ChromeTarget[];
@@ -217,7 +229,7 @@ async function waitForChromeTarget(port: string): Promise<ChromeTarget> {
     } catch {
       return false;
     }
-  }, "Chrome DevTools did not expose a page target");
+  }, () => `Chrome DevTools did not expose a page target within 30000ms:\n${chrome.logs()}`, 30_000);
   const target = targets.find(candidate => candidate.type === "page" && candidate.webSocketDebuggerUrl);
   if (!target?.webSocketDebuggerUrl) {
     throw new Error("Chrome DevTools returned no debuggable page");
@@ -240,11 +252,11 @@ async function reserveLoopbackPort(): Promise<number> {
   return address.port;
 }
 
-async function openReader(chrome: ChildProcessWithoutNullStreams, debugPort: number): Promise<CdpClient> {
-  if (chrome.exitCode !== null) {
-    throw new Error(`Chrome exited before DevTools started (${chrome.exitCode})`);
+async function openReader(chrome: StartedProcess, debugPort: number): Promise<CdpClient> {
+  if (chrome.process.exitCode !== null) {
+    throw new Error(`Chrome exited before DevTools started (${chrome.process.exitCode})`);
   }
-  const target = await waitForChromeTarget(String(debugPort));
+  const target = await waitForChromeTarget(String(debugPort), chrome);
   const cdp = await CdpClient.connect(target.webSocketDebuggerUrl!);
   await cdp.command("Page.enable");
   await cdp.command("Runtime.enable");
@@ -330,7 +342,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
     const tempDir = await mkdtemp(join(tmpdir(), "automobile-mediamtx-"));
     const mediaMtx = startProcess(mediamtxBinary, [join(repoRoot, "examples/mediamtx/mediamtx.yml")], tempDir);
     let ffmpeg: ChildProcessWithoutNullStreams | undefined;
-    let chrome: ChildProcessWithoutNullStreams | undefined;
+    let chrome: StartedProcess | undefined;
     let cdp: CdpClient | undefined;
     const publisher = new WebRtcPublisher({
       streamId: STREAM_NAME,
@@ -375,7 +387,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
         "--headless=new", "--no-first-run", "--no-default-browser-check",
         "--autoplay-policy=no-user-gesture-required", `--remote-debugging-port=${debugPort}`,
         `--user-data-dir=${profileDir}`, "about:blank",
-      ], tempDir).process;
+      ], tempDir);
       cdp = await openReader(chrome, debugPort);
       const decoded = await readDecodedVideo(cdp);
 
@@ -389,7 +401,7 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       cdp?.close();
       await stopProcess(ffmpeg);
       await publisher.stop();
-      await stopProcess(chrome);
+      await stopProcess(chrome?.process);
       await stopProcess(mediaMtx.process);
       await rm(tempDir, { recursive: true, force: true });
     }

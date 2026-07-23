@@ -28,6 +28,7 @@ class FakePublisher {
   started = false;
   stopped = false;
   sourceFailedCount = 0;
+  sourceFailureErrors: Error[] = [];
   onBeforeEstablish?: () => Promise<void> | void;
   onConnected?: () => Promise<void> | void;
   constructor(
@@ -54,8 +55,11 @@ class FakePublisher {
   writePcmAudioChunk(chunk: Buffer): void {
     this.pcmAudioChunks.push(chunk);
   }
-  notifySourceFailed(): void {
+  notifySourceFailed(error?: Error): void {
     this.sourceFailedCount++;
+    if (error) {
+      this.sourceFailureErrors.push(error);
+    }
   }
   getState() {
     return this.stopped ? "stopped" : this.started ? "connected" : "idle";
@@ -345,6 +349,7 @@ describe("webrtcStreamManager", () => {
     expect(sources).toHaveLength(1);
     expect(sources[0].started).toBe(true);
     expect(publishers[0].sourceFailedCount).toBe(1);
+    expect(publishers[0].sourceFailureErrors[0].message).toBe("helper exited after first frame");
     expect(listWebRtcStreams()).toHaveLength(1);
   });
 

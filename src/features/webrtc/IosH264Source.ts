@@ -29,7 +29,7 @@ export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTU
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 const DEFAULT_IOS_WEBRTC_FPS = SIMULATOR_FPS_DEFAULT;
-const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 5_000;
+const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 /** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
 const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
@@ -136,6 +136,8 @@ export class IosH264Source implements H264CaptureSource {
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
   private rejectFirstAudioWait: ((error: Error) => void) | null = null;
+  private lastHelperStderr: string | null = null;
+  private lastEncoderStderr: string | null = null;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -172,6 +174,7 @@ export class IosH264Source implements H264CaptureSource {
     }
     await this.teardownPromise;
     this.phase = "starting";
+    this.lastHelperStderr = null;
 
     try {
       const helperPath = resolveIosScreenCaptureHelperPath(this.helperPath, {
@@ -183,6 +186,7 @@ export class IosH264Source implements H264CaptureSource {
         return;
       }
 
+      logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
       const helper = this.createHelper({ binaryPath: helperPath, target });
       this.helper = helper;
       this.wireHelperFrames(helper);
@@ -279,7 +283,8 @@ export class IosH264Source implements H264CaptureSource {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
-        const error = new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})`);
+        const stderr = this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
+        const error = new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`);
         if (firstFrameSeen) {
           this.failIfCurrentHelper(helper, error);
           return;
@@ -343,7 +348,10 @@ export class IosH264Source implements H264CaptureSource {
     });
     helper.on("stderr", line => {
       if (line.length > 0) {
-        logger.debug(`[IosH264Source] screen-capture-helper stderr: ${line}`);
+        this.lastHelperStderr = line.slice(-2_048);
+        // The helper runs in a separate process. Preserve its diagnostics in the
+        // daemon log: a SIGABRT otherwise leaves CI with only an exit signal.
+        logger.warn(`[IosH264Source] screen-capture-helper stderr: ${line}`);
       }
       if (isHelperError(line)) {
         this.failIfCurrentHelper(
@@ -396,6 +404,7 @@ export class IosH264Source implements H264CaptureSource {
     this.encoder = encoder;
     this.encoderSize = size;
     this.encoderBackpressured = false;
+    this.lastEncoderStderr = null;
 
     encoder.stdout.on("data", chunk => {
       if (this.isActive() && this.encoder === encoder) {
@@ -404,7 +413,8 @@ export class IosH264Source implements H264CaptureSource {
     });
     encoder.stderr.on("data", chunk => {
       const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8").trim() : String(chunk).trim();
-      if (text.length > 0) {
+      if (this.encoder === encoder && text.length > 0) {
+        this.lastEncoderStderr = `${this.lastEncoderStderr ?? ""}\n${text}`.trim().slice(-2_048);
         logger.debug(`[IosH264Source] ffmpeg stderr: ${text}`);
       }
     });
@@ -415,19 +425,28 @@ export class IosH264Source implements H264CaptureSource {
     });
     encoder.stdin.on("error", error => {
       if (this.encoder === encoder) {
-        this.failIfRunning(error instanceof Error ? error : new Error(String(error)));
+        this.failIfRunning(
+          this.withEncoderDiagnostics(error instanceof Error ? error : new Error(String(error)))
+        );
       }
     });
     encoder.once("error", error => {
       if (this.encoder === encoder) {
-        this.failIfRunning(error);
+        this.failIfRunning(this.withEncoderDiagnostics(error));
       }
     });
     encoder.once("exit", (code, signal) => {
       if (this.encoder === encoder) {
-        this.failIfRunning(new Error(`ffmpeg exited (code=${code}, signal=${signal})`));
+        this.failIfRunning(
+          this.withEncoderDiagnostics(new Error(`ffmpeg exited (code=${code}, signal=${signal})`))
+        );
       }
     });
+  }
+
+  private withEncoderDiagnostics(error: Error): Error {
+    const stderr = this.lastEncoderStderr;
+    return stderr === null ? error : new Error(`${error.message}; stderr: ${stderr}`);
   }
 
   private buildFfmpegArgs(size: EncoderSize): string[] {
@@ -458,6 +477,11 @@ export class IosH264Source implements H264CaptureSource {
       "-an",
       "-c:v",
       "h264_videotoolbox",
+      // Hosted macOS runners can exhaust the hardware encoder while Simulator
+      // processes are active. Keep VideoToolbox as the encoder, but allow its
+      // software implementation rather than repeatedly reconnecting forever.
+      "-allow_sw",
+      "1",
       "-profile:v",
       "baseline",
       "-level:v",
@@ -528,6 +552,12 @@ export class IosH264Source implements H264CaptureSource {
       logger.debug(`[IosH264Source] helper stop failed: ${error}`);
     });
   }
+}
+
+function describeCaptureTarget(target: CaptureTarget): string {
+  return target.kind === "simulator"
+    ? `iOS Simulator window ${target.windowID} at ${target.fps ?? SIMULATOR_FPS_DEFAULT} fps`
+    : `iOS device ${target.deviceId ?? "default"}`;
 }
 
 function makeNoFramesError(target: CaptureTarget): ActionableError {

@@ -205,6 +205,9 @@ describe("IosH264Source", () => {
     expect(encoderSpawns[0].args).toContain("2x1");
     expect(encoderSpawns[0].args).toContain("-level:v");
     expect(encoderSpawns[0].args).toContain("4.2");
+    const allowSoftwareIndex = encoderSpawns[0].args.indexOf("-allow_sw");
+    expect(allowSoftwareIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[allowSoftwareIndex + 1]).toBe("1");
     expect(encoderSpawns[0].args).toContain("scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2");
     expect(encoder.getStdinData()).toEqual(Buffer.alloc(8, 0x44));
     expect(chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x65])]);
@@ -367,14 +370,20 @@ describe("IosH264Source", () => {
     expect(encoder.killed).toBe(true);
   });
 
-  test("reports post-start encoder exits as source failures", async () => {
+  test("reports post-start encoder exits with buffered stderr as source failures", async () => {
     const { source, helper, encoder, errors } = createHarness();
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
+    encoder.stderr.push("Error: cannot create VideoToolbox compression session\n");
+    encoder.stderr.push("Try a supported frame size");
+    await flush();
     encoder.emit("exit", 1, null);
     await flush();
 
     expect(errors[0].message).toContain("ffmpeg exited");
+    expect(errors[0].message).toContain(
+      "cannot create VideoToolbox compression session\nTry a supported frame size"
+    );
   });
 
   test("reports a fatal capture-helper diagnostic after startup", async () => {
@@ -457,6 +466,19 @@ describe("IosH264Source", () => {
 
     await expect(started).rejects.toThrow(/screen-capture-helper exited/);
     expect(errors).toEqual([]);
+  });
+
+  test("includes helper stderr when startup exits before the first frame", async () => {
+    const { source, helper } = createHarness();
+
+    const started = source.start();
+    await flush();
+    helper.emitStderr("ScreenCaptureKit failed to start capture");
+    helper.emit("exit", { code: null, signal: "SIGABRT" });
+
+    await expect(started).rejects.toThrow(
+      /screen-capture-helper exited \(code=null, signal=SIGABRT\); last stderr: ScreenCaptureKit failed to start capture/
+    );
   });
 
   test("resolves startup quietly when stopped before the first frame", async () => {

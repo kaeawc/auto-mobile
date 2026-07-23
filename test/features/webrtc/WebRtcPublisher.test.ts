@@ -306,6 +306,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     expect(() => internals.fireConnected(pc as unknown as RTCPeerConnection)).not.toThrow();
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
     expect(recoveries).toBe(1);
   });
 
@@ -370,13 +371,18 @@ describe("WebRtcPublisher keyframe requests", () => {
 });
 
 describe("WebRtcPublisher frame-stall watchdog", () => {
-  function connectedPublisher(frameStallTimeoutMs: number | undefined, timer: FakeTimer) {
+  function connectedPublisher(
+    frameStallTimeoutMs: number | undefined,
+    timer: FakeTimer,
+    onConnected?: () => void | Promise<void>
+  ) {
     const pc = new FakePeerConnection();
     pc.connectionState = "connected"; // establish() fires the connected hook inline
     return new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip", frameStallTimeoutMs },
       {
         timer,
+        onConnected,
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
           ({
@@ -396,6 +402,27 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
 
     await publisher.start();
     // No frames ever written: after the stall timeout the watchdog reconnects.
+    timer.advanceTime(4000);
+    expect(recoveries).toBe(1);
+
+    await publisher.stop();
+  });
+
+  test("does not count capture-source startup time as a frame stall", async () => {
+    const timer = new FakeTimer();
+    const sourceStarted = deferred();
+    const publisher = connectedPublisher(4000, timer, () => sourceStarted.promise);
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    await publisher.start();
+    timer.advanceTime(60_000);
+    expect(recoveries).toBe(0);
+
+    sourceStarted.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     timer.advanceTime(4000);
     expect(recoveries).toBe(1);
 

@@ -10,6 +10,7 @@
     "test:image:sharp-bun-repro": "bash scripts/validate-sharp-bun-repro.sh",
     "test:memory-leaks": "bun --expose-gc scripts/detect-memory-leaks.ts",
     "test:integration:webrtc-mediamtx": "bash scripts/webrtc/run-mediamtx-publisher-integration.sh",
+    "test:integration:webrtc-device": "bash scripts/webrtc/run-mediamtx-device-integration.sh",
     "lint": "eslint . --fix --pass-on-unpruned-suppressions && bash scripts/check-no-new-direct-simctl.sh && bun scripts/check-no-direct-plutil.ts && bash scripts/check-no-new-direct-xcodebuild.sh && bash scripts/check-no-new-direct-security.sh && bash scripts/check-no-new-direct-git-metadata.sh && bash scripts/check-no-local-shell-quote.sh && bash scripts/check-app-bundle-metadata-boundary.sh && bash scripts/check-ffmpeg-execution-boundary.sh && bash scripts/check-simulator-tcc-sqlite-boundary.sh && bash scripts/check-daemon-launcher-boundary.sh",
     "lint:prune": "eslint . --prune-suppressions",
     "lint:baseline": "eslint . --suppress-rule max-depth --suppress-rule complexity --suppress-rule max-nested-callbacks --suppress-rule auto-mobile/no-accumulator-foreach",

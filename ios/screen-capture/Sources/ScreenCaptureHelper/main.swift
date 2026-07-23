@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import ScreenCaptureKit
@@ -5,12 +6,31 @@ import ScreenCaptureCore
 
 // MARK: - Constants
 
-let simulatorPermissionTimeoutSeconds: TimeInterval = 2.0
+// ScreenCaptureKit cold-starts just beyond two seconds on hosted macOS runners.
+// Keep the permission hint behind the source's first-frame timeout so startup
+// latency is not misreported as a missing Screen Recording entitlement.
+let simulatorPermissionTimeoutSeconds: TimeInterval = 10.0
+
+// A command-line process has no AppKit application by default. ScreenCaptureKit
+// reaches CoreGraphics when creating an SCStream, and CoreGraphics aborts with
+// CGS_REQUIRE_INIT unless this connection is initialized first.
+_ = NSApplication.shared
 
 // MARK: - Logging
 
 func logError(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
+}
+
+// ScreenCaptureKit failures can surface as Objective-C exceptions, which would
+// otherwise terminate this subprocess with only SIGABRT visible to its parent.
+// Emit the exception while stderr is still connected so the daemon artifact
+// identifies the failing capture stage.
+NSSetUncaughtExceptionHandler { exception in
+    logError(
+        "fatal: uncaught Objective-C exception \(exception.name.rawValue): "
+        + (exception.reason ?? "no reason provided")
+    )
 }
 
 func writeJSON<T: Encodable>(_ value: T) {

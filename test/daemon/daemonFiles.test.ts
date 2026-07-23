@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   cleanupDaemonFiles,
@@ -111,5 +111,21 @@ describe("daemon file cleanup", () => {
 
     expect(existsSync(socketPath)).toBe(true);
     expect(existsSync(pidFilePath)).toBe(true);
+  });
+});
+
+describe("WebRTC stream socket path", () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  test("uses the explicit WebRTC stream socket override", async () => {
+    process.env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH = ".auto-mobile/test-webrtc.sock";
+    const daemonFiles = await import(`../../src/daemon/daemonFiles.ts?webrtc-socket=${Date.now()}-${Math.random()}`);
+
+    expect(daemonFiles.WEBRTC_STREAM_SOCKET_CONFIG.defaultPath)
+      .toBe(resolve(".auto-mobile/test-webrtc.sock"));
   });
 });

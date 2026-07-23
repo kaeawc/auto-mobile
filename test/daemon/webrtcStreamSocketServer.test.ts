@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Socket } from "node:net";
 import {
+  resolveWebRtcStreamDevice,
   WebRtcStreamSocketServer,
   type WebRtcStreamSocketServerDependencies,
 } from "../../src/daemon/webrtcStreamSocketServer";
@@ -35,6 +36,7 @@ import {
 } from "../helpers/webrtcFakes";
 
 const ANDROID: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "a" } as BootedDevice;
+const IOS: BootedDevice = { deviceId: "simulator-1", platform: "ios", name: "iPhone 16" } as BootedDevice;
 
 function descriptor(streamId: string, state: WebRtcStreamDescriptor["state"] = "connected"): WebRtcStreamDescriptor {
   return {
@@ -103,6 +105,23 @@ function lastResponse(socket: FakeSocket): WebRtcStreamSocketResponse {
 }
 
 describe("WebRtcStreamSocketServer", () => {
+  test("device resolution scans only the requested platform", async () => {
+    const requestedPlatforms: string[] = [];
+    const device = await resolveWebRtcStreamDevice(
+      {
+        getBootedDevices: async platform => {
+          requestedPlatforms.push(platform);
+          return platform === "ios" ? [IOS] : [ANDROID];
+        },
+      },
+      undefined,
+      "ios"
+    );
+
+    expect(requestedPlatforms).toEqual(["ios"]);
+    expect(device).toBe(IOS);
+  });
+
   test("start resolves a device and returns the stream descriptor", async () => {
     const server = new TestableServer(makeDeps());
     const socket = new FakeSocket();

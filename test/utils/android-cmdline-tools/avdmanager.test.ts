@@ -235,6 +235,26 @@ Available Packages:
       expect(result[0].apiLevel).toBe(33);
       expect(result[0].tag).toBe("google_apis");
     });
+
+    test("annotates bounded diagnostics when listing fails", async () => {
+      const mockDeps = createDependencies();
+      const originalSpawn = mockDeps.spawn;
+      const fakeTimer = createFakeTimer();
+
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStderr(Buffer.from("sdkmanager failure ".repeat(2_000)));
+          child.triggerClose(1);
+        }, 0);
+        return child;
+      };
+
+      await expect(resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.listSystemImages(undefined, mockDeps)
+      )).rejects.toThrow("[output truncated]");
+    });
   });
 
   describe("listInstalledSystemImages", () => {

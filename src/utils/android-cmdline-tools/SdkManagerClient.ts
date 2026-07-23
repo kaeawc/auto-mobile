@@ -15,7 +15,7 @@ import {
 
 const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build-tools"];
 const DEFAULT_MAX_OUTPUT_CHARS = 16_384;
-const UNBOUNDED_OUTPUT_CHARS = Number.MAX_SAFE_INTEGER;
+const UNBOUNDED_STDOUT_CHARS = Number.MAX_SAFE_INTEGER;
 const DEFAULT_TERMINATION_GRACE_MS = 5_000;
 
 export interface SdkManagerExecutionOptions {
@@ -91,10 +91,10 @@ export class SdkManagerClient {
   constructor(private readonly dependencies: SdkManagerClientDependencies = defaults()) {}
 
   async list(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
-    return this.run(["--list"], { timeoutMs: 60_000 }, {
-      ...options,
-      maxOutputChars: options.maxOutputChars ?? UNBOUNDED_OUTPUT_CHARS,
-    });
+    return this.run(["--list"], {
+      timeoutMs: 60_000,
+      maxStdoutChars: UNBOUNDED_STDOUT_CHARS,
+    }, options);
   }
 
   async acceptLicenses(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
@@ -110,7 +110,7 @@ export class SdkManagerClient {
 
   private async run(
     args: string[],
-    defaultsForCommand: { input?: string; timeoutMs: number },
+    defaultsForCommand: { input?: string; timeoutMs: number; maxStdoutChars?: number },
     options: SdkManagerExecutionOptions,
   ): Promise<SdkManagerCommandResult> {
     const { path, env } = await this.resolve();
@@ -190,9 +190,13 @@ export class SdkManagerClient {
   private execute(
     path: string,
     args: string[],
-    inputOptions: { input?: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+    inputOptions: { input?: string; env: NodeJS.ProcessEnv; timeoutMs: number; maxStdoutChars?: number },
     options: SdkManagerExecutionOptions,
   ): Promise<SdkManagerCommandResult> {
+    const maxStdoutChars = options.maxOutputChars ?? inputOptions.maxStdoutChars ?? DEFAULT_MAX_OUTPUT_CHARS;
+    const maxStderrChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
+    const timeoutMs = options.timeoutMs ?? inputOptions.timeoutMs;
+    const terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
     return new Promise((resolvePromise, reject) => {
       if (options.signal?.aborted) {reject(new Error("sdkmanager command cancelled")); return;}
       const invocation = this.windowsBatchInvocation(path, args, inputOptions.env);
@@ -201,9 +205,6 @@ export class SdkManagerClient {
         stdio: ["pipe", "pipe", "pipe"],
         shell: false,
       });
-      const maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
-      const timeoutMs = options.timeoutMs ?? inputOptions.timeoutMs;
-      const terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
       let stdout = "";
       let stderr = "";
       let outputTruncated = false;
@@ -235,12 +236,12 @@ export class SdkManagerClient {
 
       this.dependencies.logger.info(`Executing: ${path} ${args.join(" ")}`);
       child.stdout?.on("data", data => {
-        const appended = appendBounded(stdout, data.toString(), maxOutputChars);
+        const appended = appendBounded(stdout, data.toString(), maxStdoutChars);
         stdout = appended.value;
         outputTruncated ||= appended.truncated;
       });
       child.stderr?.on("data", data => {
-        const appended = appendBounded(stderr, data.toString(), maxOutputChars);
+        const appended = appendBounded(stderr, data.toString(), maxStderrChars);
         stderr = appended.value;
         outputTruncated ||= appended.truncated;
       });

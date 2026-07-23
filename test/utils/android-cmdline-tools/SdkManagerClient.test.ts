@@ -99,6 +99,23 @@ describe("SdkManagerClient", () => {
     });
   });
 
+  test("keeps list diagnostics bounded while preserving the catalogue", async () => {
+    const { client, child } = createClient();
+    const catalogue = "available package\n".repeat(2_000);
+    const diagnostics = "sdkmanager failure\n".repeat(2_000);
+    const pending = client.list();
+    await settleSpawn();
+    child.stdoutText(catalogue);
+    child.stderrText(diagnostics);
+    child.close(1);
+
+    const result = await pending;
+    expect(result.stdout).toBe(catalogue);
+    expect(result.stderr).toHaveLength(16_384);
+    expect(result.outputTruncated).toBe(true);
+    expect(result.exitCode).toBe(1);
+  });
+
   test("writes repeated license confirmation to stdin without shell interpolation", async () => {
     const { client, child, spawns } = createClient();
     const pending = client.acceptLicenses();

@@ -27,11 +27,14 @@ import { BackStackInfo, BootedDevice } from "../../../src/models";
  * The genuine legacy headers are line-anchored: `Task id #N`, and the
  * `"    * " + task` line printed by `ActivityStack.dumpActivitiesLocked`.
  *
- * The MODERN fixtures remain AOSP-shaped and UNVERIFIED against a real
- * capture -- unchanged from #4253. What they pin here is only that the root
+ * The MODERN fixtures are AOSP-shaped and are now VERIFIED against real
+ * captures committed under `test/features/observe/activityActivitiesDumps/`
+ * (one per API level 24..36, issue #4329), exercised by
+ * `GetBackStackRealCaptures.test.ts`. What they pin here is only that the root
  * component falls back to the task's own `Hist #0` row, since `A=` carries
  * `Task.affinity` (uid-prefixed on Android 11+, app-declarable, possibly empty)
- * and is not a package name.
+ * and is not a package name -- a fallback the real modern captures confirm
+ * (e.g. API 34's `A=1000:com.android.settings` alongside a Hist #0 root).
  */
 
 const device: BootedDevice = { name: "test", platform: "android", deviceId: "test-device" };

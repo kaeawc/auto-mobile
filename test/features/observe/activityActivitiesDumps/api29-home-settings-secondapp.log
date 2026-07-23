@@ -1,0 +1,240 @@
+# Real 'adb shell dumpsys activity activities' capture (issue #4329).
+# API level (ro.build.version.sdk): 29
+# Android release (ro.build.version.release): 10
+# System image: system-images;android-29;google_apis;arm64-v8a
+# Build fingerprint: google/sdk_gphone64_arm64/emulator64_arm64:10/QSR1.211112.011/13135432:userdebug/dev-keys
+# Scenario: HOME (launcher) + Settings (with wifi sub-setting) + second app task.
+# Captured by scripts/capture-activity-activities.sh; do not hand-edit.
+#
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+
+  Stack #2: type=standard mode=fullscreen
+  isSleeping=false
+  mBounds=Rect(0, 0 - 0, 0)
+    Task id #7
+    mBounds=Rect(0, 0 - 0, 0)
+    mMinWidth=-1
+    mMinHeight=-1
+    mLastNonFullscreenBounds=null
+    * TaskRecord{43e0316 #7 A=android.task.contacts U=0 StackId=2 sz=1}
+      userId=0 effectiveUid=u0a114 mCallingUid=2000 mUserSetupComplete=true mCallingPackage=null
+      affinity=android.task.contacts
+      intent={act=android.intent.action.MAIN cat=[android.intent.category.APP_CONTACTS] flg=0x10000000 cmp=com.android.contacts/.activities.PeopleActivity}
+      mActivityComponent=com.android.contacts/.activities.PeopleActivity
+      autoRemoveRecents=false isPersistable=true numFullscreen=1 activityType=1
+      rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+      Activities=[ActivityRecord{50c661 u0 com.android.contacts/.activities.PeopleActivity t7}]
+      askedCompatMode=false inRecents=true isAvailable=true
+      mRootProcess=ProcessRecord{c5c3497 3061:com.android.contacts/u0a114}
+      stackId=2
+      hasBeenVisible=true mResizeMode=RESIZE_MODE_RESIZEABLE mSupportsPictureInPicture=false isResizeable=true lastActiveTime=15695 (inactive for 3s)
+      * Hist #0: ActivityRecord{50c661 u0 com.android.contacts/.activities.PeopleActivity t7}
+          packageName=com.android.contacts processName=com.android.contacts
+          launchedFromUid=2000 launchedFromPackage=null userId=0
+          app=ProcessRecord{c5c3497 3061:com.android.contacts/u0a114}
+          Intent { act=android.intent.action.MAIN cat=[android.intent.category.APP_CONTACTS] flg=0x10000000 cmp=com.android.contacts/.activities.PeopleActivity }
+          frontOfTask=true task=TaskRecord{43e0316 #7 A=android.task.contacts U=0 StackId=2 sz=1}
+          taskAffinity=android.task.contacts
+          mActivityComponent=com.android.contacts/.activities.PeopleActivity
+          baseDir=/system/product/priv-app/Contacts/Contacts.apk
+          dataDir=/data/user/0/com.android.contacts
+          stateNotNeeded=false componentSpecified=false mActivityType=standard
+          compat={160dpi} labelRes=0x7f100034 icon=0x7f0e0000 theme=0x7f110113
+          mLastReportedConfigurations:
+           mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.21}
+           mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          taskDescription: label="null" icon=null iconResource=0 iconFilename=null primaryColor=ff212121
+           backgroundColor=fffafafa
+           statusBarColor=ff1c3aa9
+           navigationBarColor=ff000000
+          launchFailed=false launchCount=1 lastLaunchTime=-3s42ms
+          haveState=false icicle=null
+          state=RESUMED stopped=false delayedResume=false finishing=false
+          keysPaused=false inHistory=true visible=true sleeping=false idle=true mStartingWindowState=STARTING_WINDOW_SHOWN
+          fullscreen=true noDisplay=false immersive=false launchMode=1
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=standard
+           nowVisible=true lastVisibleTime=-2s423ms
+          resizeMode=RESIZE_MODE_RESIZEABLE
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+
+    Running activities (most recent first):
+      TaskRecord{43e0316 #7 A=android.task.contacts U=0 StackId=2 sz=1}
+        Run #0: ActivityRecord{50c661 u0 com.android.contacts/.activities.PeopleActivity t7}
+
+    mResumedActivity: ActivityRecord{50c661 u0 com.android.contacts/.activities.PeopleActivity t7}
+
+  Stack #1: type=standard mode=fullscreen
+  isSleeping=false
+  mBounds=Rect(0, 0 - 0, 0)
+
+    Task id #6
+    mBounds=Rect(0, 0 - 0, 0)
+    mMinWidth=-1
+    mMinHeight=-1
+    mLastNonFullscreenBounds=null
+    * TaskRecord{6d0c5f7 #6 A=com.android.settings U=0 StackId=1 sz=2}
+      userId=0 effectiveUid=1000 mCallingUid=2000 mUserSetupComplete=true mCallingPackage=null
+      affinity=com.android.settings
+      intent={act=android.settings.SETTINGS flg=0x10000000 cmp=com.android.settings/.homepage.SettingsHomepageActivity}
+      mActivityComponent=com.android.settings/.homepage.SettingsHomepageActivity
+      autoRemoveRecents=false isPersistable=true numFullscreen=2 activityType=1
+      rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+      Activities=[ActivityRecord{30f1df1 u0 com.android.settings/.homepage.SettingsHomepageActivity t6}, ActivityRecord{5cbb188 u0 com.android.settings/.Settings$WifiSettingsActivity t6}]
+      askedCompatMode=false inRecents=true isAvailable=true
+      mRootProcess=ProcessRecord{2a77ab3 919:com.android.settings/1000}
+      stackId=1
+      hasBeenVisible=true mResizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION mSupportsPictureInPicture=false isResizeable=true lastActiveTime=15605 (inactive for 3s)
+      * Hist #1: ActivityRecord{5cbb188 u0 com.android.settings/.Settings$WifiSettingsActivity t6}
+          packageName=com.android.settings processName=com.android.settings
+          launchedFromUid=2000 launchedFromPackage=null userId=0
+          app=ProcessRecord{2a77ab3 919:com.android.settings/1000}
+          Intent { act=android.settings.WIFI_SETTINGS flg=0x10000000 cmp=com.android.settings/.Settings$WifiSettingsActivity }
+          frontOfTask=false task=TaskRecord{6d0c5f7 #6 A=com.android.settings U=0 StackId=1 sz=2}
+          taskAffinity=com.android.settings
+          mActivityComponent=com.android.settings/.Settings$WifiSettingsActivity
+          baseDir=/system/product/priv-app/Settings/Settings.apk
+          dataDir=/data/user_de/0/com.android.settings
+          stateNotNeeded=false componentSpecified=false mActivityType=standard
+          compat={160dpi} labelRes=0x7f121165 icon=0x7f080243 theme=0x7f1302a7
+          mLastReportedConfigurations:
+           mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.28}
+           mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          taskDescription: label="null" icon=null iconResource=2131231054 iconFilename=null primaryColor=ffffffff
+           backgroundColor=ffffffff
+           statusBarColor=ffffffff
+           navigationBarColor=0
+          launchFailed=false launchCount=0 lastLaunchTime=-5s236ms
+          haveState=true icicle=Bundle[mParcelledData.dataSize=4880]
+          state=STOPPED stopped=true delayedResume=false finishing=false
+          keysPaused=false inHistory=true visible=false sleeping=false idle=true mStartingWindowState=STARTING_WINDOW_NOT_SHOWN
+          fullscreen=true noDisplay=false immersive=false launchMode=0
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=standard
+           nowVisible=false lastVisibleTime=-4s554ms
+          resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+      * Hist #0: ActivityRecord{30f1df1 u0 com.android.settings/.homepage.SettingsHomepageActivity t6}
+          packageName=com.android.settings processName=com.android.settings
+          launchedFromUid=2000 launchedFromPackage=null userId=0
+          app=ProcessRecord{2a77ab3 919:com.android.settings/1000}
+          Intent { act=android.settings.SETTINGS flg=0x10000000 cmp=com.android.settings/.homepage.SettingsHomepageActivity }
+          frontOfTask=true task=TaskRecord{6d0c5f7 #6 A=com.android.settings U=0 StackId=1 sz=2}
+          taskAffinity=com.android.settings
+          mActivityComponent=com.android.settings/.homepage.SettingsHomepageActivity
+          baseDir=/system/product/priv-app/Settings/Settings.apk
+          dataDir=/data/user_de/0/com.android.settings
+          stateNotNeeded=false componentSpecified=false mActivityType=standard
+          compat={160dpi} labelRes=0x7f120ce4 icon=0x7f08014e theme=0x7f1302a8
+          mLastReportedConfigurations:
+           mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.28}
+           mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.1}
+          taskDescription: label="null" icon=null iconResource=0 iconFilename=null primaryColor=ffffffff
+           backgroundColor=ffffffff
+           statusBarColor=ffffffff
+           navigationBarColor=0
+          launchFailed=false launchCount=0 lastLaunchTime=-7s302ms
+          haveState=true icicle=Bundle[mParcelledData.dataSize=7244]
+          state=STOPPED stopped=true delayedResume=false finishing=false
+          keysPaused=false inHistory=true visible=false sleeping=false idle=true mStartingWindowState=STARTING_WINDOW_REMOVED
+          fullscreen=true noDisplay=false immersive=false launchMode=2
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=standard
+           nowVisible=false lastVisibleTime=-7s1ms
+          resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+
+    Running activities (most recent first):
+      TaskRecord{6d0c5f7 #6 A=com.android.settings U=0 StackId=1 sz=2}
+        Run #1: ActivityRecord{5cbb188 u0 com.android.settings/.Settings$WifiSettingsActivity t6}
+        Run #0: ActivityRecord{30f1df1 u0 com.android.settings/.homepage.SettingsHomepageActivity t6}
+
+    mLastPausedActivity: ActivityRecord{5cbb188 u0 com.android.settings/.Settings$WifiSettingsActivity t6}
+
+  Stack #0: type=home mode=fullscreen
+  isSleeping=false
+  mBounds=Rect(0, 0 - 0, 0)
+
+    Task id #5
+    mBounds=Rect(0, 0 - 0, 0)
+    mMinWidth=-1
+    mMinHeight=-1
+    mLastNonFullscreenBounds=null
+    * TaskRecord{80cdea9 #5 I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=0 sz=1}
+      userId=0 effectiveUid=u0a104 mCallingUid=0 mUserSetupComplete=true mCallingPackage=null
+      intent={act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10000100 cmp=com.google.android.apps.nexuslauncher/.NexusLauncherActivity}
+      mActivityComponent=com.google.android.apps.nexuslauncher/.NexusLauncherActivity
+      autoRemoveRecents=false isPersistable=true numFullscreen=1 activityType=2
+      rootWasReset=false mNeverRelinquishIdentity=true mReuseTask=false mLockTaskAuth=LOCK_TASK_AUTH_PINNABLE
+      Activities=[ActivityRecord{52dd2e0 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t5}]
+      askedCompatMode=false inRecents=true isAvailable=true
+      mRootProcess=ProcessRecord{8518d22 1005:com.google.android.apps.nexuslauncher/u0a104}
+      stackId=0
+      hasBeenVisible=true mResizeMode=RESIZE_MODE_RESIZEABLE mSupportsPictureInPicture=false isResizeable=true lastActiveTime=11431 (inactive for 7s)
+      * Hist #0: ActivityRecord{52dd2e0 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t5}
+          packageName=com.google.android.apps.nexuslauncher processName=com.google.android.apps.nexuslauncher
+          launchedFromUid=0 launchedFromPackage=null userId=0
+          app=ProcessRecord{8518d22 1005:com.google.android.apps.nexuslauncher/u0a104}
+          Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10000100 cmp=com.google.android.apps.nexuslauncher/.NexusLauncherActivity }
+          frontOfTask=true task=TaskRecord{80cdea9 #5 I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=0 sz=1}
+          taskAffinity=null
+          mActivityComponent=com.google.android.apps.nexuslauncher/.NexusLauncherActivity
+          baseDir=/system/product/priv-app/NexusLauncherRelease/NexusLauncherRelease.apk
+          dataDir=/data/user/0/com.google.android.apps.nexuslauncher
+          stateNotNeeded=true componentSpecified=false mActivityType=home
+          compat={160dpi} labelRes=0x7f11004b icon=0x7f0700a6 theme=0x7f12000a
+          mLastReportedConfigurations:
+           mGlobalConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.25}
+           mOverrideConfig={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2}
+          CurrentConfiguration={1.0 310mcc260mnc [en_US] ldltr sw320dp w320dp h616dp 160dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 320, 640) mAppBounds=Rect(0, 0 - 320, 640) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2}
+          RequestedOverrideConfiguration={0.0 ?mcc?mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mWindowingMode=undefined mDisplayWindowingMode=undefined mActivityType=home mAlwaysOnTop=undefined mRotation=undefined}}
+          taskDescription: label="null" icon=null iconResource=0 iconFilename=null primaryColor=fff5f5f5
+           backgroundColor=fffafafa
+           statusBarColor=0
+           navigationBarColor=0
+          launchFailed=false launchCount=0 lastLaunchTime=-12s383ms
+          haveState=true icicle=Bundle[mParcelledData.dataSize=3164]
+          state=STOPPED stopped=true delayedResume=false finishing=false
+          keysPaused=false inHistory=true visible=false sleeping=false idle=true mStartingWindowState=STARTING_WINDOW_REMOVED
+          fullscreen=true noDisplay=false immersive=false launchMode=2
+          frozenBeforeDestroy=false forceNewConfig=false
+          mActivityType=home
+           nowVisible=false lastVisibleTime=-12s9ms
+          connections=com.android.server.wm.ActivityServiceConnectionsHolder@6cd9d91
+          resizeMode=RESIZE_MODE_RESIZEABLE
+          mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+
+    Running activities (most recent first):
+      TaskRecord{80cdea9 #5 I=com.google.android.apps.nexuslauncher/.NexusLauncherActivity U=0 StackId=0 sz=1}
+        Run #0: ActivityRecord{52dd2e0 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t5}
+
+    mLastPausedActivity: ActivityRecord{52dd2e0 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t5}
+
+ ResumedActivity:ActivityRecord{50c661 u0 com.android.contacts/.activities.PeopleActivity t7}
+
+  ResumedActivity: ActivityRecord{50c661 u0 com.android.contacts/.activities.PeopleActivity t7}
+
+ActivityStackSupervisor state:
+  topDisplayFocusedStack=ActivityStack{ab474f6 stackId=2 type=standard mode=fullscreen visible=true translucent=false, 1 tasks}
+  displayId=0 stacks=3
+   mHomeStack=ActivityStack{6bcf0f7 stackId=0 type=home mode=fullscreen visible=false translucent=true, 1 tasks}
+   mPreferredTopFocusableStack=ActivityStack{ab474f6 stackId=2 type=standard mode=fullscreen visible=true translucent=false, 1 tasks}
+   mLastFocusedStack=ActivityStack{ab474f6 stackId=2 type=standard mode=fullscreen visible=true translucent=false, 1 tasks}
+  mCurTaskIdForUser={0=7}
+  mUserStackInFront={}
+  isHomeRecentsComponent=true  KeyguardController:
+    mKeyguardShowing=false
+    mAodShowing=false
+    mKeyguardGoingAway=false
+    Occluded=false DismissingKeyguardActivity=null at display=0
+    mDismissalRequested=false
+    mVisibilityTransactionDepth=0
+  LockTaskController
+    mLockTaskModeState=NONE
+    mLockTaskModeTasks=
+    mLockTaskPackages (userId:packages)=
+      u0:[]

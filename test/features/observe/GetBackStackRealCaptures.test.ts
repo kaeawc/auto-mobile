@@ -1,0 +1,243 @@
+import { describe, expect, test } from "bun:test";
+import * as fs from "fs";
+import * as path from "path";
+import { GetBackStack } from "../../../src/features/observe/GetBackStack";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { BackStackInfo, BootedDevice } from "../../../src/models";
+
+/**
+ * `GetBackStack` asserted against REAL `dumpsys activity activities` captures
+ * (issue #4329).
+ *
+ * Every fixture under `activityActivitiesDumps/` is a verbatim capture from a
+ * booted emulator -- one per supported API level 24..36, driven to a known
+ * back stack (home launcher + a Settings task with depth + a second app task)
+ * by `scripts/capture-activity-activities.sh`. Provenance (API level, release,
+ * system image, build fingerprint) is recorded in the `#`-prefixed header of
+ * each file.
+ *
+ * These are the FIRST real `activity activities` samples in the repo. Before
+ * #4329 the only committed captures were `dumpsys window windows` output
+ * (`windowDumps/`), which carries no `Task{`, `Hist #N`, or `A=`/`I=` tokens,
+ * so the modern task-header and Hist-row parsing added by #4197/#4223/#4263 was
+ * pinned only against AOSP-sourced, hand-authored strings. This suite replaces
+ * that assumption with observation: it fails if the modern `Task{...}` header or
+ * the `Hist  #N` activity row stops parsing on any real level, which is exactly
+ * the "prove the fixtures are load-bearing, not decorative" requirement.
+ *
+ * The generic block asserts invariants that must hold on every real capture; the
+ * per-level block spot-checks exact values a specific capture is known to carry.
+ */
+
+const CAPTURE_DIR = path.join(__dirname, "activityActivitiesDumps");
+const device: BootedDevice = { name: "test", platform: "android", deviceId: "test-device" };
+
+function readCapture(file: string): string {
+  return fs.readFileSync(path.join(CAPTURE_DIR, file), "utf8");
+}
+
+async function parse(stdout: string): Promise<BackStackInfo> {
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("dumpsys activity activities", { stdout, stderr: "" });
+  return new GetBackStack(device, new FakeAdbClientFactory(adb)).execute();
+}
+
+/**
+ * Task ids that appear in a REAL header position -- the same three anchored
+ * shapes `parseTaskHeader` accepts: modern `* Task{<hash> #id`, legacy
+ * `Task id #id`, and legacy `* TaskRecord{<hash> #id`. Inline references such as
+ * `rootOfTask=false task=Task{... #id}` are deliberately excluded, so a parser
+ * that invented tasks from them would produce ids not in this set.
+ */
+function headerTaskIds(raw: string): Set<number> {
+  const ids = new Set<number>();
+  for (const line of raw.split("\n")) {
+    const m =
+      line.match(/^\s*\*\s*Task\{\S+\s+#(\d+)\b/) ||
+      line.match(/^\s*Task id #(\d+)\b/) ||
+      line.match(/^\s*\*?\s*TaskRecord\{\S+\s+#(\d+)\b/);
+    if (m) {
+      ids.add(parseInt(m[1], 10));
+    }
+  }
+  return ids;
+}
+
+/**
+ * The `dumpsys activity activities` TEXT format flips at API 30 (Android 11):
+ * 24..29 print the legacy `Task id #N` / `* TaskRecord{...}` headers, 30..36
+ * print the modern `* Task{...}` header. (The internal `TaskRecord`->`Task`
+ * rename landed in Android 10/API 29, but that release still emits the legacy
+ * dump layout -- a distinction only a real capture reveals.) Observed across the
+ * committed captures; asserted per level below so both parser paths stay pinned
+ * to real output.
+ */
+const MODERN_FORMAT_MIN_API = 30;
+
+function hasModernHeader(raw: string): boolean {
+  return raw.split("\n").some(l => /^\s*\*\s*Task\{\S+\s+#\d+\b/.test(l));
+}
+
+function hasLegacyHeader(raw: string): boolean {
+  return raw.split("\n").some(l => /^\s*(?:Task id #\d+|\*?\s*TaskRecord\{\S+\s+#\d+)\b/.test(l));
+}
+
+/** All `.log` captures, sorted by API level for stable test ordering. */
+const captureFiles = fs.existsSync(CAPTURE_DIR)
+  ? fs
+    .readdirSync(CAPTURE_DIR)
+    .filter(f => f.endsWith(".log"))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/api(\d+)/)?.[1] ?? "0", 10);
+      const nb = parseInt(b.match(/api(\d+)/)?.[1] ?? "0", 10);
+      return na - nb;
+    })
+  : [];
+
+describe("GetBackStack against real captures (#4329)", () => {
+  test("the capture directory is populated", () => {
+    // A green suite with zero fixtures would be vacuous. Fail loudly instead.
+    expect(captureFiles.length).toBeGreaterThan(0);
+  });
+
+  test("covers every supported API level 24..36", () => {
+    const levels = captureFiles.map(f => parseInt(f.match(/api(\d+)/)![1], 10)).sort((a, b) => a - b);
+    const expected = Array.from({ length: 36 - 24 + 1 }, (_, i) => 24 + i);
+    expect(levels).toEqual(expected);
+  });
+
+  test("the corpus exercises BOTH the legacy and modern header formats", () => {
+    // Guards against a future edit that deletes all of one era's captures and
+    // silently stops covering that parser path.
+    const anyLegacy = captureFiles.some(f => hasLegacyHeader(readCapture(f)));
+    const anyModern = captureFiles.some(f => hasModernHeader(readCapture(f)));
+    expect(anyLegacy).toBe(true);
+    expect(anyModern).toBe(true);
+  });
+
+  for (const file of captureFiles) {
+    const apiLevel = parseInt(file.match(/api(\d+)/)?.[1] ?? "0", 10);
+
+    describe(`${file} (API ${apiLevel})`, () => {
+      test("parses at least one real task", async () => {
+        const result = await parse(readCapture(file));
+        expect(result.tasks.length).toBeGreaterThan(0);
+        for (const task of result.tasks) {
+          expect(Number.isInteger(task.id)).toBe(true);
+          expect(task.id).toBeGreaterThan(0);
+        }
+      });
+
+      test("invents no task from an inline task=Task{...} reference", async () => {
+        const raw = readCapture(file);
+        const result = await parse(raw);
+        const headers = headerTaskIds(raw);
+        // Every parsed task id must trace back to a real anchored header line.
+        for (const task of result.tasks) {
+          expect(headers.has(task.id)).toBe(true);
+        }
+      });
+
+      test("resolves the foreground activity to a real component", async () => {
+        const raw = readCapture(file);
+        const result = await parse(raw);
+        expect(result.currentActivity).toBeDefined();
+        expect(result.currentActivity!.name.length).toBeGreaterThan(0);
+        // The resolved current activity's simple/class name must actually occur
+        // in the dump -- not be an artifact of a mis-anchored regex.
+        expect(raw).toContain(result.currentActivity!.name.split(".").pop()!);
+      });
+
+      test("marks at least one activity as the task root", async () => {
+        const result = await parse(readCapture(file));
+        expect(result.activities.length).toBeGreaterThan(0);
+        expect(result.activities.some(a => a.isTaskRoot === true)).toBe(true);
+      });
+
+      test("never glues a brace or whitespace onto an activity component", async () => {
+        // The API 33 shape closes the component with its own "}" before the task
+        // id; a component ending in "}" means the brace-stripping regressed.
+        const result = await parse(readCapture(file));
+        for (const activity of result.activities) {
+          expect(activity.name).not.toContain("}");
+          expect(activity.name).not.toContain("{");
+          expect(activity.name.trim()).toBe(activity.name);
+          expect(activity.name.length).toBeGreaterThan(0);
+        }
+      });
+
+      test("gives every activity a task id carried by a real task", async () => {
+        const raw = readCapture(file);
+        const result = await parse(raw);
+        const headers = headerTaskIds(raw);
+        for (const activity of result.activities) {
+          expect(activity.taskId).toBeGreaterThan(0);
+          expect(headers.has(activity.taskId)).toBe(true);
+        }
+      });
+
+      test("parses tasks via the header format this level actually emits", async () => {
+        // Ties each level to the parser path it exercises: a modern-format level
+        // whose `* Task{...}` parsing regressed, or a legacy-format level whose
+        // `TaskRecord{...}`/`Task id #` parsing regressed, would yield zero tasks
+        // and fail here. This is what makes the real captures load-bearing.
+        const raw = readCapture(file);
+        const result = await parse(raw);
+        if (apiLevel >= MODERN_FORMAT_MIN_API) {
+          expect(hasModernHeader(raw)).toBe(true);
+          expect(hasLegacyHeader(raw)).toBe(false);
+        } else {
+          expect(hasLegacyHeader(raw)).toBe(true);
+          expect(hasModernHeader(raw)).toBe(false);
+        }
+        expect(result.tasks.length).toBeGreaterThan(0);
+      });
+    });
+  }
+
+  // Exact spot-checks against two representative captures. Values are copied
+  // from the committed (immutable) fixtures, so they pin real, observed output
+  // rather than an assumed shape.
+  describe("api24 legacy capture, exact values", () => {
+    test("parses the driven home + settings + contacts back stack", async () => {
+      const result = await parse(readCapture("api24-home-settings-secondapp.log"));
+
+      expect(result.currentActivity?.name).toBe("com.android.contacts.activities.PeopleActivity");
+      expect(result.currentTaskId).toBe(5);
+      // Contacts (foreground), Settings, and the launcher -- three real tasks.
+      expect(result.tasks.map(t => t.rootActivity)).toEqual([
+        "com.android.contacts/.activities.PeopleActivity",
+        "com.android.settings/.Settings",
+        "com.android.launcher3/.Launcher"
+      ]);
+    });
+
+    test("legacy A= affinity is NOT uid-prefixed (bare package)", async () => {
+      const result = await parse(readCapture("api24-home-settings-secondapp.log"));
+      // Pre-Android-11 affinity is the bare package; contrast api34 below.
+      expect(result.tasks[1].affinity).toBe("com.android.settings");
+    });
+  });
+
+  describe("api34 modern capture, exact values", () => {
+    test("parses the modern Task{...} headers and uid-prefixed affinity", async () => {
+      const result = await parse(readCapture("api34-home-settings-secondapp.log"));
+
+      const settings = result.tasks.find(t => t.packageName === "com.android.settings");
+      expect(settings).toBeDefined();
+      // Android 11+ prepends the uid to Task.affinity (b/35954083); observed
+      // verbatim here as `A=1000:com.android.settings`.
+      expect(settings!.affinity).toBe("1000:com.android.settings");
+    });
+
+    test("resolves the foreground contacts activity and its task", async () => {
+      const result = await parse(readCapture("api34-home-settings-secondapp.log"));
+
+      expect(result.currentActivity?.name).toBe(
+        "com.google.android.apps.contacts.activities.OnboardingSignInActivity"
+      );
+      expect(result.currentTaskId).toBe(10);
+    });
+  });
+});

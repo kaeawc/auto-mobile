@@ -103,6 +103,11 @@ check "src/constants/release.ts registry[0].version" "$registry_version"
 # exists to catch. Read via the shared entry-anchored helper (single source of
 # truth with nightly.yml + verify-artifact-sha256.sh).
 runner_sha="$(bun "$RELEASE_READER" runnerSha256 "$RELEASE_TS")"
+runner_sha_target="$(bun "$RELEASE_READER" runnerSha256Target "$RELEASE_TS")"
+
+if [ "$runner_sha_target" != "xctest" ]; then
+  errors+=("registry[0].runnerSha256Target must be 'xctest', got '${runner_sha_target:-missing}'")
+fi
 
 sha256_stdin() {
   if command -v sha256sum >/dev/null 2>&1; then

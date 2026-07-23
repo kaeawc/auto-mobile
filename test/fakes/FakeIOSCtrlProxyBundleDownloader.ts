@@ -8,6 +8,8 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
   public extractedPaths: string[] = [];
   public checksum: string = "fake-checksum";
   public runnerChecksum: string = resolveRunnerChecksum();
+  public legacyRunnerChecksum: string = resolveRunnerChecksum();
+  public checksummedFilePaths: string[] = [];
   public checksumSource: Sha256Source = "node";
   public extractedSubdir: string = "";
 
@@ -19,8 +21,12 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
   }
 
   public async computeFileSha256(filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
-    if (path.basename(filePath) === "CtrlProxyUITests-Runner") {
+    this.checksummedFilePaths.push(filePath);
+    if (path.basename(filePath) === "CtrlProxyUITests") {
       return { checksum: this.runnerChecksum, source: this.checksumSource };
+    }
+    if (path.basename(filePath) === "CtrlProxyUITests-Runner") {
+      return { checksum: this.legacyRunnerChecksum, source: this.checksumSource };
     }
     return { checksum: this.checksum, source: this.checksumSource };
   }
@@ -38,6 +44,9 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     const runnerDir = path.join(productsDir, "CtrlProxyUITests-Runner.app");
     await fs.mkdir(runnerDir, { recursive: true });
     await fs.writeFile(path.join(runnerDir, "CtrlProxyUITests-Runner"), "fake runner");
+    const xctestBinary = path.join(runnerDir, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
+    await fs.mkdir(path.dirname(xctestBinary), { recursive: true });
+    await fs.writeFile(xctestBinary, "fake CtrlProxy code");
     await fs.mkdir(path.join(productsDir, "CtrlProxyTests.xctest"), { recursive: true });
   }
 }

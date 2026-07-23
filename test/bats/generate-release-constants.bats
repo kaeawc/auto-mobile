@@ -36,6 +36,7 @@ teardown() {
   grep -q "apkSha256: \"${APK_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q "ipaSha256: \"${IPA_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+  grep -q 'runnerSha256Target: "xctest"' "${TEST_ROOT}/src/constants/release.ts"
 }
 
 @test "writes runnerSha256 in release mode" {
@@ -48,6 +49,7 @@ teardown() {
 
   [ "$status" -eq 0 ]
   grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+  grep -q 'runnerSha256Target: "xctest"' "${TEST_ROOT}/src/constants/release.ts"
 }
 
 # Read a field from the block anchored on `version: "$1"` (either a registry
@@ -79,6 +81,8 @@ read_field_for_version() {
   # The nightly slot moved.
   nightly_runner="$(read_field_for_version nightly runnerSha256 "${TEST_ROOT}/src/constants/release.ts")"
   [ "$nightly_runner" = "$RUNNER_SHA" ]
+  nightly_target="$(read_field_for_version nightly runnerSha256Target "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$nightly_target" = "xctest" ]
   # The tagged release entry (registry[0], 0.0.44) is untouched.
   release_runner_after="$(read_field_for_version 0.0.44 runnerSha256 "${TEST_ROOT}/src/constants/release.ts")"
   [ "$release_runner_after" = "$release_runner_before" ]

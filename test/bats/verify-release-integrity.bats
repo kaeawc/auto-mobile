@@ -56,6 +56,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     apkSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ipaSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     runnerSha256: "${runner}",
+    runnerSha256Target: "${runner_target:-xctest}",
   },
 ];
 export const IOS_CTRL_PROXY_APP_HASH: string = "";
@@ -209,6 +210,16 @@ PY
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
   [[ "$output" == *"registry[0].runnerSha256"* ]]
+}
+
+@test "fails when runner sha256 target is not the CtrlProxy xctest executable" {
+  runner_target="runner"
+  write_fixtures "0.0.40" "0.0.40-SNAPSHOT" "0.0.40" "$RUNNER_SHA"
+
+  run_gate "0.0.40"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runnerSha256Target must be 'xctest'"* ]]
 }
 
 @test "binds recorded runner sha to the CtrlProxy executable inside the IPA (match passes)" {

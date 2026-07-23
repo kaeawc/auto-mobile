@@ -202,6 +202,7 @@ nav:
   - 'Contributing':
       - 'Overview': contributing.md
       - 'Standard Library First': contributing/stdlib-first.md
+      - 'Codex Automation Thread Report': codex-automation-thread-spam-report.md
   - 'GitHub Discussions': https://github.com/kaeawc/auto-mobile/discussions
   - 'FAQ': faq.md
   - 'Change Log': changelog.md

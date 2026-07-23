@@ -232,7 +232,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
   /**
    * Turn a generic Android hierarchy failure into a lock-specific message when
-   * the keyguard is showing (#4281).
+   * the keyguard is actually blocking the app (#4281).
    *
    * A locked device — most commonly a fresh boot before the keyguard is first
    * dismissed — blocks Android from binding non-encryption-aware accessibility
@@ -266,7 +266,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     }
     try {
       const lock = await this.adbFactory.create(this.device).getDeviceLock(signal);
-      if (!lock?.keyguardShowing) {
+      if (!lock?.locked) {
         return fallback;
       }
       const preamble =

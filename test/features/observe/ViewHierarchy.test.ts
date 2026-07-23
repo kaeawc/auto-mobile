@@ -251,6 +251,16 @@ describe("ViewHierarchy", function() {
       expect(error.toLowerCase()).not.toContain("keyguard");
     });
 
+    test("keeps the generic message when a keyguard is showing but occluded (#4281)", async function() {
+      // `locked` is false when a show-when-locked activity occludes the keyguard;
+      // that state cannot explain an accessibility-service binding failure.
+      fakeAdb.setDeviceLock({ locked: false, keyguardShowing: true, secure: true });
+      const result = await viewHierarchy.getAndroidViewHierarchy();
+      const error = String((result.hierarchy as any).error);
+      expect(error).toContain("Failed to retrieve view hierarchy");
+      expect(error.toLowerCase()).not.toContain("device is locked");
+    });
+
     test("falls back to the generic message when the lock read fails (#4281)", async function() {
       (fakeAdb as any).getDeviceLock = async () => { throw new Error("dumpsys boom"); };
       const result = await viewHierarchy.getAndroidViewHierarchy();

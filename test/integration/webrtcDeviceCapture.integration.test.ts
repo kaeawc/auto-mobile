@@ -202,7 +202,9 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         { action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` },
         { socketPath: webRtcSocketPath }
       );
-      expect(response.success).toBe(true);
+      if (!response.success) {
+        throw new Error(`failed to start device WebRTC stream: ${response.error ?? "no error detail returned"}`);
+      }
       await waitFor(async () => {
         const status = await sendWebRtcStreamRequest(
           { action: "status", id: `${streamId}-capture-status`, streamId },
@@ -212,10 +214,14 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       }, "capture source did not deliver H.264 frames to the WHIP publisher");
       chrome = start(chromeBinary(), ["--headless=new", "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=9222", "--no-first-run", "about:blank"], join(artifactDir, "chrome.log"));
       cdp = await openReader(chrome);
+      // The device can be idle by the time the WHEP reader connects. Trigger a
+      // visible transition after subscription so the reader receives a fresh
+      // encoded access unit rather than waiting on an earlier keyframe.
+      await changeFixture();
       await waitFor(async () => (await videoSample(cdp!)).frames > 0, "browser did not decode device video");
       const first = await videoSample(cdp);
-      await changeFixture();
-      await Bun.sleep(1_500);
+      await launchFixture();
+      await waitFor(async () => (await videoSample(cdp!)).frames > first.frames, "browser did not receive video after returning to the fixture");
       const second = await videoSample(cdp);
       expect(first.width).toBeGreaterThan(0);
       expect(first.height).toBeGreaterThan(0);

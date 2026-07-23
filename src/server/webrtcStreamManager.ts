@@ -147,8 +147,8 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
       device: record.device,
       onData: chunk => record.publisher.writeH264Chunk(chunk),
       onAudioData: chunk => record.publisher.writePcmAudioChunk(chunk),
-      onError: () => {
-        record.publisher.notifySourceFailed();
+      onError: error => {
+        record.publisher.notifySourceFailed(error);
       },
       bitrateBps: record.bitrateBps,
       size: record.size,

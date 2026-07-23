@@ -137,6 +137,7 @@ export class IosH264Source implements H264CaptureSource {
   private cancelFirstAudioWait: (() => void) | null = null;
   private rejectFirstAudioWait: ((error: Error) => void) | null = null;
   private lastHelperStderr: string | null = null;
+  private lastEncoderStderr: string | null = null;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -403,6 +404,7 @@ export class IosH264Source implements H264CaptureSource {
     this.encoder = encoder;
     this.encoderSize = size;
     this.encoderBackpressured = false;
+    this.lastEncoderStderr = null;
 
     encoder.stdout.on("data", chunk => {
       if (this.isActive() && this.encoder === encoder) {
@@ -411,7 +413,8 @@ export class IosH264Source implements H264CaptureSource {
     });
     encoder.stderr.on("data", chunk => {
       const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8").trim() : String(chunk).trim();
-      if (text.length > 0) {
+      if (this.encoder === encoder && text.length > 0) {
+        this.lastEncoderStderr = `${this.lastEncoderStderr ?? ""}\n${text}`.trim().slice(-2_048);
         logger.debug(`[IosH264Source] ffmpeg stderr: ${text}`);
       }
     });
@@ -422,19 +425,28 @@ export class IosH264Source implements H264CaptureSource {
     });
     encoder.stdin.on("error", error => {
       if (this.encoder === encoder) {
-        this.failIfRunning(error instanceof Error ? error : new Error(String(error)));
+        this.failIfRunning(
+          this.withEncoderDiagnostics(error instanceof Error ? error : new Error(String(error)))
+        );
       }
     });
     encoder.once("error", error => {
       if (this.encoder === encoder) {
-        this.failIfRunning(error);
+        this.failIfRunning(this.withEncoderDiagnostics(error));
       }
     });
     encoder.once("exit", (code, signal) => {
       if (this.encoder === encoder) {
-        this.failIfRunning(new Error(`ffmpeg exited (code=${code}, signal=${signal})`));
+        this.failIfRunning(
+          this.withEncoderDiagnostics(new Error(`ffmpeg exited (code=${code}, signal=${signal})`))
+        );
       }
     });
+  }
+
+  private withEncoderDiagnostics(error: Error): Error {
+    const stderr = this.lastEncoderStderr;
+    return stderr === null ? error : new Error(`${error.message}; stderr: ${stderr}`);
   }
 
   private buildFfmpegArgs(size: EncoderSize): string[] {

@@ -224,11 +224,14 @@ export class WebRtcPublisher {
    * source would leave the viewer on a frozen frame with no recovery. Triggers
    * the reconnect loop, which tears down and re-establishes (restarting capture).
    */
-  notifySourceFailed(): void {
+  notifySourceFailed(error?: Error): void {
     if (this.closed) {
       return;
     }
-    logger.warn(`[WebRTC] stream ${this.config.streamId} capture source failed; reconnecting`);
+    const detail = error ? `: ${error.message}` : "";
+    logger.warn(
+      `[WebRTC] stream ${this.config.streamId} capture source failed${detail}; reconnecting`
+    );
     this.controller.notifyConnectionLost();
   }
 

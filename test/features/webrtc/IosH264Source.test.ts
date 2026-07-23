@@ -367,14 +367,20 @@ describe("IosH264Source", () => {
     expect(encoder.killed).toBe(true);
   });
 
-  test("reports post-start encoder exits as source failures", async () => {
+  test("reports post-start encoder exits with buffered stderr as source failures", async () => {
     const { source, helper, encoder, errors } = createHarness();
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
+    encoder.stderr.push("Error: cannot create VideoToolbox compression session\n");
+    encoder.stderr.push("Try a supported frame size");
+    await flush();
     encoder.emit("exit", 1, null);
     await flush();
 
     expect(errors[0].message).toContain("ffmpeg exited");
+    expect(errors[0].message).toContain(
+      "cannot create VideoToolbox compression session\nTry a supported frame size"
+    );
   });
 
   test("reports a fatal capture-helper diagnostic after startup", async () => {

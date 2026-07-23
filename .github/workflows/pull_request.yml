@@ -46,6 +46,7 @@ jobs:
       android_should_run: ${{ steps.android_should_run.outputs.should_run }}
       ios_should_run: ${{ steps.ios_should_run.outputs.should_run }}
       ios_integration_should_run: ${{ steps.ios_integration_should_run.outputs.should_run }}
+      webrtc_should_run: ${{ steps.webrtc_should_run.outputs.should_run }}
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -403,6 +404,53 @@ jobs:
           FORCE_NATIVE: ${{ contains(github.event.pull_request.labels.*.name, 'run-native') || contains(github.event.pull_request.labels.*.name, 'run-ios') }}
         run: |
           if [[ ( "${{ steps.filter-native-integration.outputs.native_integration }}" == "true" || "$FORCE_NATIVE" == "true" ) && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The MediaMTX-backed WebRTC publisher integration test (#4290) exercises
+      # the real WHIP publisher contract. It is heavy (browser + SFU + FFmpeg),
+      # so it runs only when WebRTC is actually in play — see webrtc_should_run.
+      - name: "Check for WebRTC publisher changes"
+        id: filter-webrtc
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            webrtc:
+              - 'src/features/webrtc/**'
+              - 'src/server/webrtcStreamManager.ts'
+              - 'src/daemon/webrtc*'
+              - 'examples/mediamtx/**'
+              - 'test/integration/mediamtxWebRtcPublisher.integration.test.ts'
+              - 'test/bats/mediamtx-webrtc-integration.bats'
+              - 'scripts/webrtc/**'
+              # This workflow controls WebRTC-job gating, so a change to it must
+              # exercise the job rather than being silently skipped.
+              - '.github/workflows/pull_request.yml'
+
+      # Run the WebRTC integration test when the publisher surface is touched, OR
+      # when a human explicitly opts in by labelling the PR `webrtc` or mentioning
+      # `webrtc` in the title/body (case-insensitive). The explicit signals are an
+      # intentional override, so unlike the native gates this deliberately does NOT
+      # exclude docs_only — a docs PR that says `webrtc` opts in on purpose. Title
+      # and body are passed via env, never interpolated into the script, so a
+      # crafted PR title cannot inject shell.
+      - name: "Decide if the WebRTC integration test should run"
+        id: webrtc_should_run
+        env:
+          PATH_MATCH: ${{ steps.filter-webrtc.outputs.webrtc }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'webrtc') }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SHA256_ONLY: ${{ steps.check-sha256.outputs.sha256_only }}
+          AUTO_CHORE: ${{ steps.check-auto-chore.outputs.auto_chore }}
+        run: |
+          mention=false
+          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | tr '[:upper:]' '[:lower:]' | grep -q 'webrtc'; then
+            mention=true
+          fi
+          if [[ ( "$PATH_MATCH" == "true" || "$HAS_LABEL" == "true" || "$mention" == "true" ) && "$SHA256_ONLY" != "true" && "$AUTO_CHORE" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -2559,6 +2607,63 @@ jobs:
   # below ("iOS Build"), which this gate reuses so the build-leg membership is
   # declared in exactly one place (add a new iOS *build* job to ios-build-gate,
   # not here).
+  # =============================================================================
+  # WebRTC publisher integration test (#4290 / #4328)
+  # Real WHIP publisher contract: FFmpeg H.264 -> WebRtcPublisher -> MediaMTX ->
+  # headless-Chrome WHEP decode. Heavy (browser + SFU + FFmpeg + UDP), so it runs
+  # only when WebRTC is in play (webrtc_should_run). Reported through the stable
+  # "WebRTC" gate below; advisory until that gate is added to the ruleset.
+  # =============================================================================
+  webrtc-integration-test:
+    name: "WebRTC Publisher Integration (MediaMTX)"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.webrtc_should_run == 'true'
+    timeout-minutes: 20
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      # FFmpeg generates the synthetic H.264 the publisher ingests. Chrome
+      # (google-chrome) is preinstalled on ubuntu-latest and resolved by the test;
+      # fail early with a clear message if the image ever drops it.
+      - name: "Install FFmpeg and verify a browser is present"
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          if ! command -v google-chrome >/dev/null 2>&1 \
+            && ! command -v chromium >/dev/null 2>&1 \
+            && ! command -v chromium-browser >/dev/null 2>&1; then
+            echo "::error::No Chrome/Chromium found on the runner; the WHEP decode step needs one"
+            exit 1
+          fi
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
+      # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      # Cache the checksum-pinned MediaMTX release so only the first run downloads
+      # it. Keyed on the runner script, so a version bump there invalidates it.
+      - name: "Cache MediaMTX binary"
+        uses: actions/cache@v4
+        with:
+          path: scratch/mediamtx
+          key: mediamtx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/webrtc/run-mediamtx-publisher-integration.sh') }}
+
+      - name: "Run MediaMTX WebRTC publisher integration test"
+        shell: bash
+        run: bun run test:integration:webrtc-mediamtx
+
   ios-gate:
     timeout-minutes: 10
     name: "iOS"
@@ -2745,6 +2850,41 @@ jobs:
             r="${results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::Shell Tests gate dependency ${name} = ${r}"
+              fail=1
+            fi
+          done
+          if [[ -n "${fail}" ]]; then
+            echo "One or more jobs failed or were cancelled"
+            exit 1
+          fi
+
+  # Stable roll-up of the WebRTC integration test so it can be promoted to a
+  # required check. The test is conditional (webrtc_should_run); when it is gated
+  # out its result is "skipped" (not failure), so this gate passes and does not
+  # wedge non-WebRTC PRs. NOTE: advisory until "WebRTC" is added to the green-main
+  # ruleset's required checks — a manual repo-settings step.
+  webrtc-gate:
+    timeout-minutes: 10
+    name: "WebRTC"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - webrtc-integration-test
+    # Roll-up only reads needs.*.result — it needs no token scopes.
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check results"
+        run: |
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [webrtc-integration-test]="${{ needs.webrtc-integration-test.result }}"
+          )
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "::error::WebRTC gate dependency ${name} = ${r}"
               fail=1
             fi
           done

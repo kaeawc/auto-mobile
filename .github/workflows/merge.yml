@@ -342,6 +342,53 @@ jobs:
       - name: "Run BATS Tests"
         run: bats test/bats/
 
+  # Always exercise the real WHIP publisher contract post-merge on main:
+  # FFmpeg H.264 -> WebRtcPublisher -> MediaMTX -> headless-Chrome WHEP decode.
+  # On PRs this runs only when WebRTC is in play (pull_request.yml); here it is
+  # unconditional so the publisher contract is verified on every merge.
+  webrtc-integration-test:
+    name: "WebRTC Publisher Integration (MediaMTX)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Install FFmpeg and verify a browser is present"
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          if ! command -v google-chrome >/dev/null 2>&1 \
+            && ! command -v chromium >/dev/null 2>&1 \
+            && ! command -v chromium-browser >/dev/null 2>&1; then
+            echo "::error::No Chrome/Chromium found on the runner; the WHEP decode step needs one"
+            exit 1
+          fi
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
+      # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Cache MediaMTX binary"
+        uses: actions/cache@v4
+        with:
+          path: scratch/mediamtx
+          key: mediamtx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/webrtc/run-mediamtx-publisher-integration.sh') }}
+
+      - name: "Run MediaMTX WebRTC publisher integration test"
+        shell: bash
+        run: bun run test:integration:webrtc-mediamtx
+
   validate-mkdocs-nav:
     name: "Validate MkDocs Navigation"
     runs-on: ubuntu-latest

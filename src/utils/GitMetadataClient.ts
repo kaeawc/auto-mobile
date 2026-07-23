@@ -1,6 +1,5 @@
 import { createHash } from "crypto";
 import { spawnSync } from "child_process";
-import { logger } from "./logger";
 
 export interface GitVersionInfo {
   shortSha: string;
@@ -28,22 +27,21 @@ const PACKAGE_NAME = "@kaeawc/auto-mobile";
 const GIT_TIMEOUT_MS = 2_000;
 
 const defaultRunner: GitCommandRunner = (_command, args, { cwd, timeoutMs }) => {
+  let result: ReturnType<typeof spawnSync> | null = null;
   try {
-    const result = spawnSync("git", args, {
+    result = spawnSync("git", args, {
       cwd,
       encoding: "utf-8",
       timeout: timeoutMs,
       killSignal: "SIGTERM",
     });
-    if (result.status !== 0 || result.error) {
-      return null;
-    }
-    return result.stdout.trim();
-  } catch (error) {
-    // Git metadata is optional; package/env versions remain usable without it.
-    logger.debug(`[GitMetadataClient] Git metadata probe failed: ${error}`);
+  } catch {
+    // Version probing runs before logger initialization; metadata is optional.
+  }
+  if (!result || result.status !== 0 || result.error) {
     return null;
   }
+  return result.stdout.trim();
 };
 
 /**

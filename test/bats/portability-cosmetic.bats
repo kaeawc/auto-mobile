@@ -60,7 +60,7 @@ teardown() {
   run env OSTYPE=darwin PATH="/usr/bin:/bin" bash scripts/utils/get_timestamp.sh
 
   [ "$status" -eq 0 ]
-  [[ "$output" =~ ^[0-9]+000$ ]]
+  [[ "$output" =~ ^[0-9]{13}$ ]]
 }
 
 # --- C ---------------------------------------------------------------------

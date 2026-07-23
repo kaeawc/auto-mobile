@@ -16,6 +16,9 @@ const platform = process.env.AUTOMOBILE_WEBRTC_DEVICE_PLATFORM;
 const webRtcPort = 8889;
 const streamId = `device-capture-${platform ?? "unknown"}`;
 const artifactDir = resolve("scratch/webrtc-device-integration");
+// Hosted iOS runners can spend more than three minutes on daemon bootstrap,
+// Simulator commands, and Chrome startup before the bounded 30s decode checks.
+const deviceIntegrationTimeoutMs = 360_000;
 
 interface ChromeTarget { type: string; webSocketDebuggerUrl?: string }
 interface CdpResponse { id?: number; result?: { result?: { value?: unknown } }; error?: { message?: string } }
@@ -319,5 +322,5 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       await rm(webRtcSocketDir, { recursive: true, force: true });
       await writeFile(join(artifactDir, "result.txt"), `platform=${platform}\nstream=${streamId}\n`);
     }
-  }, 240_000);
+  }, deviceIntegrationTimeoutMs);
 });

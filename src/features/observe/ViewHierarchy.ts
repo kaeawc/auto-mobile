@@ -213,7 +213,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
       return {
         hierarchy: {
-          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy from accessibility service")
+          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy from accessibility service", signal)
         },
         updatedAt: this.timer.now()
       };
@@ -223,7 +223,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       logger.warn(`[VIEW_HIERARCHY] Failed to get hierarchy from accessibility service after ${duration}ms:`, err);
       return {
         hierarchy: {
-          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy")
+          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy", signal)
         },
         updatedAt: this.timer.now()
       };
@@ -244,12 +244,20 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * falls back to `fallback`, so this never turns a real transport error into a
    * misleading "device is locked".
    */
-  private async describeHierarchyFailure(fallback: string): Promise<string> {
+  private async describeHierarchyFailure(fallback: string, signal?: AbortSignal): Promise<string> {
     if (this.device.platform !== "android") {
       return fallback;
     }
+    // Never spend time improving the error wording past the caller's deadline: a
+    // short-budget caller (e.g. the keyboard confirmation loop) may already have
+    // consumed its per-read budget in getAccessibilityHierarchy, so skip the probe
+    // when the signal is aborted, and thread it in so an in-flight dumpsys aborts
+    // with the request rather than blocking on its own (#4281 review).
+    if (signal?.aborted) {
+      return fallback;
+    }
     try {
-      const lock = await this.adbFactory.create(this.device).getDeviceLock();
+      const lock = await this.adbFactory.create(this.device).getDeviceLock(signal);
       if (!lock?.keyguardShowing) {
         return fallback;
       }

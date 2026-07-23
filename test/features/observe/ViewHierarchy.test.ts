@@ -257,6 +257,25 @@ describe("ViewHierarchy", function() {
       expect(String((result.hierarchy as any).error)).toContain("Failed to retrieve view hierarchy");
     });
 
+    test("skips the lock probe when the caller's budget is already spent (#4281 review)", async function() {
+      // Locked device, but the caller's deadline has already fired: the diagnostic
+      // must not start an unbounded dumpsys just to reword the error.
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
+      let probed = false;
+      const originalGetDeviceLock = fakeAdb.getDeviceLock.bind(fakeAdb);
+      (fakeAdb as any).getDeviceLock = async (signal?: AbortSignal) => {
+        probed = true;
+        return originalGetDeviceLock(signal);
+      };
+      const controller = new AbortController();
+      controller.abort();
+
+      const result = await viewHierarchy.getAndroidViewHierarchy(undefined, undefined, false, 0, controller.signal);
+
+      expect(probed).toBe(false);
+      expect(String((result.hierarchy as any).error)).toContain("Failed to retrieve view hierarchy");
+    });
+
     test("surfaces iOS CtrlProxy reconnect cooldown as retry metadata", async function() {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",

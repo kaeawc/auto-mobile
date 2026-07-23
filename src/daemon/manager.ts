@@ -1,10 +1,9 @@
-import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { execSync } from "node:child_process";
 import { open, readFile, rm, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { logger } from "../utils/logger";
-import { releaseVersion } from "../utils/mcpVersion";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   INCOMPLETE_EXTRACTION_CODE,
@@ -25,7 +24,6 @@ import {
   LOCK_FILE_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
-  DAEMON_VERSION,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
 } from "./constants";
@@ -63,22 +61,13 @@ import {
   TOOL_OUTPUT_DIR_FLAG_ALIAS,
   TOOL_OUTPUTS_DIR_ENV,
 } from "../utils/toolOutputArtifacts";
+import {
+  DaemonLauncher,
+  type DaemonLaunchCommand,
+  type DaemonProcessSpawner,
+} from "./DaemonLauncher";
 
-/**
- * Check that bunx is available on PATH.
- * Returns "bunx" if found, or null if not.
- */
-function resolvePackageRunner(): string | null {
-  try {
-    execSync("which bunx", { stdio: "ignore" });
-    return "bunx";
-  } catch (error) {
-    // `which bunx` throws when bunx isn't on PATH; that's a normal "not found"
-    // outcome, not a failure worth surfacing, so we report null and move on.
-    logger.debug(`src/daemon/manager.ts bunx lookup failed: ${error}`, error);
-    return null;
-  }
-}
+export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 
 /**
  * Write a message to stderr so it never corrupts the MCP stdio channel.
@@ -87,11 +76,6 @@ function resolvePackageRunner(): string | null {
  */
 function stderrLog(message: string): void {
   process.stderr.write(message + "\n");
-}
-
-export interface DaemonLaunchCommand {
-  command: string;
-  args: string[];
 }
 
 export interface DaemonProcessRecord {
@@ -259,14 +243,6 @@ export function createDefaultDaemonProcessFinder(
   return platform === "win32" ? new WindowsDaemonProcessFinder() : new PsDaemonProcessFinder();
 }
 
-export interface DaemonProcessSpawner {
-  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
-}
-
-const nodeDaemonProcessSpawner: DaemonProcessSpawner = {
-  spawn: nodeSpawn,
-};
-
 export interface ExtractionCleaner {
   removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
 }
@@ -308,52 +284,11 @@ const fileSystemExtractionCleaner: ExtractionCleaner = {
   },
 };
 
-type DaemonLaunchCommandResolver = () => DaemonLaunchCommand;
-
 function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivenessChecker {
   return typeof (value as Partial<DaemonProcessLivenessChecker> | undefined)?.isProcessRunning === "function";
 }
 
 const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
-
-function resolvePackageSpecifier(version: string): string {
-  // Strip any dev build metadata (`0.0.39+g<sha>.dirty`): a stamped version is
-  // not an installable npm tag, so bunx must pin the published release. This
-  // mirrors the DaemonVersionMismatchError restart hint, which also installs the
-  // release portion (a dev SHA cannot be fetched from npm regardless).
-  const trimmedVersion = releaseVersion(version.trim());
-  if (trimmedVersion.length === 0 || trimmedVersion === "unknown") {
-    throw new ActionableError(
-      "Cannot spawn AutoMobile daemon via bunx because the current package version is unknown. Run from an installed auto-mobile binary or set MCP_SERVER_VERSION."
-    );
-  }
-  return `@kaeawc/auto-mobile@${trimmedVersion}`;
-}
-
-export function resolveDaemonLaunchCommand(
-  entryScript: string | undefined = process.argv[1],
-  packageRunner: string | null = resolvePackageRunner(),
-  version: string = DAEMON_VERSION
-): DaemonLaunchCommand {
-  if (entryScript) {
-    return {
-      command: process.execPath,
-      args: [entryScript, "--daemon-mode"],
-    };
-  }
-
-  if (packageRunner) {
-    return {
-      command: packageRunner,
-      args: ["-y", resolvePackageSpecifier(version), "--daemon-mode"],
-    };
-  }
-
-  return {
-    command: "auto-mobile",
-    args: ["--daemon-mode"],
-  };
-}
 
 /**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
@@ -383,10 +318,11 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly pidFilePath: string;
   private readonly socketPath: string;
   private readonly processFinder: DaemonProcessFinder;
-  private readonly processSpawner: DaemonProcessSpawner;
   private readonly processLivenessChecker: DaemonProcessLivenessChecker;
   private readonly extractionCleaner: ExtractionCleaner;
-  private readonly launchCommandResolver: DaemonLaunchCommandResolver;
+  private readonly launcher: DaemonLauncher;
+  private readonly fallbackLauncher: DaemonLauncher;
+  private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -396,9 +332,9 @@ export class DaemonManager implements DaemonManagerLike {
     pidFilePath: string = PID_FILE_PATH,
     socketPath: string = SOCKET_PATH,
     processFinderOrSpawner: DaemonProcessFinder | DaemonProcessSpawner = createDefaultDaemonProcessFinder(),
-    processSpawner: DaemonProcessSpawner = nodeDaemonProcessSpawner,
+    processSpawner: DaemonProcessSpawner | undefined = undefined,
     extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
-    launchCommandResolver: DaemonLaunchCommandResolver = () => resolveDaemonLaunchCommand()
+    launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
@@ -407,18 +343,24 @@ export class DaemonManager implements DaemonManagerLike {
     this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(socketPath);
     if ("findDaemonProcesses" in processFinderOrSpawner) {
       this.processFinder = processFinderOrSpawner;
-      this.processSpawner = processSpawner;
       this.processLivenessChecker = hasProcessLivenessChecker(processFinderOrSpawner)
         ? processFinderOrSpawner
         : createDefaultDaemonProcessFinder();
     } else {
       const processFinder = createDefaultDaemonProcessFinder();
       this.processFinder = processFinder;
-      this.processSpawner = processFinderOrSpawner;
       this.processLivenessChecker = processFinder;
+      processSpawner = processFinderOrSpawner;
     }
     this.extractionCleaner = extractionCleaner;
-    this.launchCommandResolver = launchCommandResolver;
+    this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
+    this.launcher = (typeof launcher === "object" ? launcher : undefined) ?? new DaemonLauncher({
+      spawn: processSpawner?.spawn.bind(processSpawner),
+    });
+    this.fallbackLauncher = new DaemonLauncher({
+      entryScript: null,
+      spawn: processSpawner?.spawn.bind(processSpawner),
+    });
     this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
 
@@ -616,7 +558,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Resolve the current binary so the daemon uses the same version.
     // process.argv[1] is the entry script (e.g. dist/src/index.js).
     // Falls back to bunx to avoid requiring a global install.
-    let { command: autoMobileCmd, args } = this.withDaemonOptions(this.launchCommandResolver(), options);
+    let { command: autoMobileCmd, args } = this.withDaemonOptions(this.resolveLaunchCommand(), options);
 
     // Redirect the detached daemon's stdout/stderr into the STABLE logs dir
     // (`~/.auto-mobile/logs` by default) rather than an ephemeral
@@ -652,19 +594,21 @@ export class DaemonManager implements DaemonManagerLike {
     try {
       let retriedIncompleteExtraction = false;
       while (true) {
-        const daemonProcess = this.processSpawner.spawn(autoMobileCmd, args, {
-          detached: true,
-          cwd: resolveStableDaemonWorkingDirectory(),
-          stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
-          shell: true, // Use shell to resolve command from PATH
-          env: childEnv,
-        });
-
-        // Unref so parent process can exit
-        daemonProcess.unref();
-
         try {
-          await this.waitForDaemonStartup(daemonProcess, logPath, DAEMON_STARTUP_TIMEOUT_MS);
+          await this.launcher.launchAndWait({
+            command: autoMobileCmd,
+            args,
+            spawnOptions: {
+              detached: true,
+              cwd: resolveStableDaemonWorkingDirectory(),
+              stdio: ["ignore", logFd, logFd],
+              env: childEnv,
+            },
+            timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,
+            waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
+            formatFailure: summary => this.createDaemonStartupFailure(summary, logPath),
+            formatExitFailure: (code, signal) => this.createDaemonExitFailure(code, signal, logPath),
+          });
           break;
         } catch (error) {
           if (!this.isIncompleteExtractionStartupError(error) || retriedIncompleteExtraction) {
@@ -684,7 +628,7 @@ export class DaemonManager implements DaemonManagerLike {
           if (!removed) {
             throw error;
           }
-          ({ command: autoMobileCmd, args } = this.withDaemonOptions(resolveDaemonLaunchCommand(undefined), options));
+          ({ command: autoMobileCmd, args } = this.withDaemonOptions(this.fallbackLauncher.resolveCommand(), options));
           stderrLog(`Detected incomplete daemon package extraction (${INCOMPLETE_EXTRACTION_CODE}); removed it and retrying once...`);
         }
       }
@@ -801,70 +745,29 @@ export class DaemonManager implements DaemonManagerLike {
     return { command: launch.command, args };
   }
 
-  private async waitForDaemonStartup(
-    daemonProcess: ChildProcess,
-    logPath: string,
-    timeoutMs: number
-  ): Promise<void> {
-    let cleanupProcessListeners = () => {};
+  private resolveLaunchCommand(): DaemonLaunchCommand {
+    return this.launchCommandResolver?.() ?? this.launcher.resolveCommand();
+  }
 
-    const readinessAbort = new AbortController();
-    const processFailure = new Promise<never>((_, reject) => {
-      const rejectWithContext = (summary: string) => {
-        void this.formatDaemonStartupFailure(summary, logPath).then(
-          message => {
-            const error = new ActionableError(message);
-            if (this.isIncompleteExtractionStartupSummary(summary)) {
-              (error as { code?: string }).code = INCOMPLETE_EXTRACTION_CODE;
-            }
-            reject(error);
-            readinessAbort.abort();
-          },
-          () => {
-            reject(new ActionableError(summary));
-            readinessAbort.abort();
-          }
-        );
-      };
-
-      const onError = (error: Error) => {
-        rejectWithContext(`Daemon subprocess failed to spawn: ${this.formatRawSpawnError(error)}`);
-      };
-      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-        const exitCode = code === null ? "unknown" : code.toString();
-        const signalDetail = signal ? `, signal ${signal}` : "";
-        if (code === INCOMPLETE_EXTRACTION_EXIT_CODE) {
-          rejectWithContext(this.formatIncompleteExtractionStartupSummary(exitCode, signalDetail));
-          return;
-        }
-        rejectWithContext(`Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail})`);
-      };
-
-      daemonProcess.once("error", onError);
-      daemonProcess.once("exit", onExit);
-      cleanupProcessListeners = () => {
-        daemonProcess.off("error", onError);
-        daemonProcess.off("exit", onExit);
-      };
-    });
-
-    try {
-      const ready = await Promise.race([
-        this.waitForReady(timeoutMs, readinessAbort.signal),
-        processFailure,
-      ]);
-      if (!ready) {
-        throw new ActionableError(
-          await this.formatDaemonStartupFailure(
-            `Daemon failed to start within ${timeoutMs}ms`,
-            logPath
-          )
-        );
-      }
-    } finally {
-      readinessAbort.abort();
-      cleanupProcessListeners();
+  private async createDaemonStartupFailure(summary: string, logPath: string): Promise<Error> {
+    const error = new ActionableError(await this.formatDaemonStartupFailure(summary, logPath));
+    if (this.isIncompleteExtractionStartupSummary(summary)) {
+      (error as { code?: string }).code = INCOMPLETE_EXTRACTION_CODE;
     }
+    return error;
+  }
+
+  private async createDaemonExitFailure(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    logPath: string,
+  ): Promise<Error> {
+    const exitCode = code === null ? "unknown" : code.toString();
+    const signalDetail = signal ? `, signal ${signal}` : "";
+    const summary = code === INCOMPLETE_EXTRACTION_EXIT_CODE
+      ? this.formatIncompleteExtractionStartupSummary(exitCode, signalDetail)
+      : `Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail})`;
+    return this.createDaemonStartupFailure(summary, logPath);
   }
 
   private formatIncompleteExtractionStartupSummary(exitCode: string, signalDetail: string): string {
@@ -886,16 +789,6 @@ export class DaemonManager implements DaemonManagerLike {
 
   private describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
-  }
-
-  private formatRawSpawnError(error: Error): string {
-    const details = error as NodeJS.ErrnoException;
-    const additions = [
-      details.code && !error.message.includes(details.code) ? `code ${details.code}` : undefined,
-      details.syscall && !error.message.includes(details.syscall) ? `syscall ${details.syscall}` : undefined,
-      details.path && !error.message.includes(details.path) ? `path ${details.path}` : undefined,
-    ].filter((value): value is string => value !== undefined);
-    return additions.length > 0 ? `${error.message} (${additions.join(", ")})` : error.message;
   }
 
   private async formatDaemonStartupFailure(summary: string, logPath: string): Promise<string> {

@@ -11,10 +11,10 @@ import {
   DaemonManager,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
-  resolveDaemonLaunchCommand,
   runDaemonCommand,
   WindowsDaemonProcessFinder,
 } from "../../src/daemon/manager";
+import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonStatus } from "../../src/daemon/types";
 import type {
@@ -145,9 +145,13 @@ class FakeExtractionCleaner implements ExtractionCleaner {
   }
 }
 
-describe("resolveDaemonLaunchCommand", () => {
+describe("DaemonLauncher command resolution", () => {
   test("uses the current entry script when one is available", () => {
-    const launch = resolveDaemonLaunchCommand("/tmp/auto-mobile/dist/src/index.js", "bunx", "1.2.3");
+    const launch = new DaemonLauncher({
+      entryScript: "/tmp/auto-mobile/dist/src/index.js",
+      version: "1.2.3",
+      processExecPath: process.execPath,
+    }).resolveCommand();
 
     expect(launch).toEqual({
       command: process.execPath,
@@ -156,16 +160,27 @@ describe("resolveDaemonLaunchCommand", () => {
   });
 
   test("pins bunx fallback to the initiating package version", () => {
-    const launch = resolveDaemonLaunchCommand("", "bunx", "1.2.3");
+    const launch = new DaemonLauncher({
+      entryScript: null,
+      version: "1.2.3",
+      environment: { PATH: "/tools" },
+      platform: "linux",
+      executableExists: path => path === "/tools/bunx",
+    }).resolveCommand();
 
     expect(launch).toEqual({
-      command: "bunx",
+      command: "/tools/bunx",
       args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
     });
   });
 
   test("rejects unknown versions instead of falling back to latest", () => {
-    expect(() => resolveDaemonLaunchCommand("", "bunx", "unknown")).toThrow(
+    expect(() => new DaemonLauncher({
+      entryScript: null,
+      version: "unknown",
+      environment: { PATH: "/tools" },
+      executableExists: () => true,
+    }).resolveCommand()).toThrow(
       "current package version is unknown"
     );
   });
@@ -173,10 +188,16 @@ describe("resolveDaemonLaunchCommand", () => {
   test("strips a dev git-SHA stamp so the bunx specifier is an installable release", () => {
     // A dev build reports e.g. "0.0.39+g1a2b3c4.dirty"; that is not an installable
     // npm tag, so the bunx fallback must pin the published release portion.
-    const launch = resolveDaemonLaunchCommand("", "bunx", "0.0.39+g1a2b3c4d5e6f.dirty.abc123def456");
+    const launch = new DaemonLauncher({
+      entryScript: null,
+      version: "0.0.39+g1a2b3c4d5e6f.dirty.abc123def456",
+      environment: { PATH: "/tools" },
+      platform: "linux",
+      executableExists: () => true,
+    }).resolveCommand();
 
     expect(launch).toEqual({
-      command: "bunx",
+      command: "/tools/bunx",
       args: ["-y", "@kaeawc/auto-mobile@0.0.39", "--daemon-mode"],
     });
   });

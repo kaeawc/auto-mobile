@@ -19,6 +19,22 @@
  * downstream callbacks. Instead the decoder enters a resynchronizing state:
  * it reports the corruption exactly once, then scans forward byte by byte for
  * the next structurally plausible header and resumes there.
+ *
+ * Structural plausibility is not enough on its own. The payload is BGRA pixel
+ * data, so its bytes reflect what is on the captured screen — a byte sequence
+ * someone can influence. Probability bounds ("a random offset parses as a
+ * header only once in 2^38") say nothing about chosen bytes: a payload can
+ * simply contain two header-shaped ranges spaced by the first one's declared
+ * payload length, and structural corroboration accepts it. So resync is also
+ * bounded by the stream's own geometry, which the decoder cannot be talked out
+ * of: see `admissible()`.
+ *
+ * What that does *not* close: chosen pixels at the geometry the stream is
+ * already using. Nothing in the wire format distinguishes a crafted byte
+ * sequence from a genuine one — there is no sync marker and no checksum — so
+ * only a format change could. It is a much smaller residual: the dimensions
+ * the encoder configures on can no longer be influenced, and whoever can choose
+ * payload pixels is already drawing on the screen being captured.
  */
 
 export const FRAME_HEADER_SIZE = 16;
@@ -76,6 +92,22 @@ export interface MalformedFrameError {
   header: FrameHeader;
 }
 
+/**
+ * Result of walking past a run of audio records to the next video boundary.
+ * `unsettled` carries `at`, the furthest offset the walk reached before running
+ * out of bytes, so the next chunk resumes from there instead of restarting.
+ */
+type AudioSkip =
+  | { kind: "video"; header: FrameHeader }
+  | { kind: "unsettled"; at: number }
+  | { kind: "reject" };
+
+/** A resync candidate awaiting corroboration, with its audio-skip resume point. */
+interface Candidate {
+  offset: number;
+  resumeAt: number;
+}
+
 export class FrameDecoder {
   private buffer: Buffer = Buffer.alloc(0);
   private pendingHeader: FrameHeader | null = null;
@@ -86,11 +118,16 @@ export class FrameDecoder {
    */
   private resynchronizing: boolean = false;
   /**
-   * Offsets into `buffer`, ascending, whose corroboration is still pending
-   * because the bytes that would settle them have not arrived. These are the
-   * only already-examined offsets a later chunk can change the verdict of.
+   * Candidates into `buffer`, ascending by `offset`, whose corroboration is
+   * still pending because the bytes that would settle them have not arrived.
+   * These are the only already-examined offsets a later chunk can change the
+   * verdict of. `resumeAt` carries how far the audio-skip walk to this
+   * candidate's successor has already progressed, so re-asking it after each
+   * chunk parses only the newly arrived records rather than re-walking a
+   * growing audio run from the start — the difference between linear and
+   * quadratic when a recovered frame is followed by a long audio-only gap.
    */
-  private unsettled: number[] = [];
+  private unsettled: Candidate[] = [];
   /**
    * How many leading bytes of `buffer` the forward scan has already examined.
    * Offsets below this are settled for good: a 16-byte window is immutable once
@@ -100,6 +137,21 @@ export class FrameDecoder {
    * than re-parsing the whole retained buffer on every chunk.
    */
   private scanned: number = 0;
+  /**
+   * Geometry of the most recently decoded frame — the geometry this stream is
+   * using. Resync is locked to it, so the point where the decoder re-enters
+   * synchronized decoding can never be a frame of a size the stream was not
+   * already producing, however many header-shaped ranges a damaged payload
+   * contains.
+   *
+   * That bounds the resync *boundary*, which is what the fabrication cases
+   * exploited; it is not a guarantee that no chosen-size frame can ever be
+   * emitted. The synchronized path deliberately does not consult the anchor,
+   * because a genuine mid-stream reconfigure has to be honored, so an attacker
+   * who can supply a long enough run of chosen bytes still gets there
+   * eventually. Only a wire-format marker closes that — see #4270.
+   */
+  private anchor: FrameHeader | null = null;
 
   /**
    * Append bytes from the helper's stdout stream and return any frames that
@@ -140,6 +192,7 @@ export class FrameDecoder {
         onAudio?.({ pcm16le: payload });
       } else {
         frames.push({ header: pending, pixels: payload });
+        this.anchor = pending;
       }
       this.pendingHeader = null;
     }
@@ -187,14 +240,26 @@ export class FrameDecoder {
    * offset is a plausible header with probability ~2^-38.
    */
   private resynchronize(): boolean {
-    const pending: number[] = [];
+    const pending: Candidate[] = [];
     // Ascending offset order overall — every retained candidate sits below the
     // scan cursor, every newly examinable offset at or above it — so this still
     // accepts the lowest-offset candidate that corroborates, as a single
-    // whole-buffer pass did.
-    let accepted = this.scan(this.unsettled, pending);
+    // whole-buffer pass did. Retained candidates resume their audio-skip walk
+    // where it stopped; fresh offsets start it at their payload's end.
+    let accepted = this.rescan(this.unsettled, pending);
     if (accepted < 0) {
-      accepted = this.scan(range(this.scanned, this.buffer.length - FRAME_HEADER_SIZE), pending);
+      // Every retained candidate has already confirmed contiguous audio out to
+      // its `resumeAt`; a fresh audio offset below that high-water mark is in
+      // the same run and settles identically, so it need not be retained as its
+      // own candidate. Without this, a run of N audio records arriving one per
+      // chunk retains N equivalent candidates and re-walks them, O(N²) — the
+      // exact shape resync exists to avoid.
+      const coveredTo = pending.reduce((max, c) => Math.max(max, c.resumeAt), 0);
+      accepted = this.scanFresh(
+        range(this.scanned, this.buffer.length - FRAME_HEADER_SIZE),
+        pending,
+        coveredTo
+      );
     }
 
     if (accepted >= 0) {
@@ -217,17 +282,47 @@ export class FrameDecoder {
   }
 
   /**
-   * Examine `offsets` in order, returning the first that corroborates, or -1.
-   * Offsets whose verdict more bytes could still change are appended to
+   * Re-examine already-retained candidates, resuming each one's audio-skip walk
+   * from where it stopped so a growing audio run is never re-walked from the
+   * start. Returns the first offset that corroborates, or -1; survivors are
+   * appended to `pending` with their advanced resume point.
+   */
+  private rescan(candidates: Candidate[], pending: Candidate[]): number {
+    for (const candidate of candidates) {
+      const header = parseHeader(this.buffer, candidate.offset);
+      const verdict = this.corroborate(header, candidate.resumeAt);
+      if (verdict.kind === "accept") {return candidate.offset;}
+      if (verdict.kind === "unsettled") {
+        candidate.resumeAt = verdict.resumeAt;
+        pending.push(candidate);
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Examine fresh byte offsets in order, returning the first that corroborates,
+   * or -1. Offsets whose verdict more bytes could still change are appended to
    * `pending`; settled ones are dropped and never looked at again.
    */
-  private scan(offsets: Iterable<number>, pending: number[]): number {
+  private scanFresh(offsets: Iterable<number>, pending: Candidate[], coveredTo: number): number {
     for (const offset of offsets) {
       const header = parseHeader(this.buffer, offset);
       if (headerError(header) !== null) {continue;}
-      const verdict = this.corroborate(offset, header);
-      if (verdict === "accept") {return offset;}
-      if (verdict === "unsettled") {pending.push(offset);}
+      if (!this.admissible(header)) {continue;}
+      // Subsumed by an already-retained candidate's confirmed audio run: it
+      // skips to the same handoff and would settle identically, so retaining it
+      // separately only multiplies the re-walk. Video candidates are never
+      // skipped this way — a differently-anchored video inside the run is a
+      // reject the retained candidate already accounts for.
+      if (isAudioHeader(header) && offset < coveredTo) {continue;}
+      const from = offset + FRAME_HEADER_SIZE + payloadSize(header);
+      const verdict = this.corroborate(header, from);
+      if (verdict.kind === "accept") {return offset;}
+      if (verdict.kind === "unsettled") {
+        pending.push({ offset, resumeAt: verdict.resumeAt });
+        coveredTo = Math.max(coveredTo, verdict.resumeAt);
+      }
     }
     return -1;
   }
@@ -239,12 +334,15 @@ export class FrameDecoder {
   private discardSettledPrefix(): void {
     const keepFrom =
       this.unsettled.length > 0
-        ? this.unsettled[0]
+        ? this.unsettled[0].offset
         : Math.max(0, this.buffer.length - (FRAME_HEADER_SIZE - 1));
     if (keepFrom === 0) {return;}
     // Copy so the discarded chunk allocation can be freed.
     this.buffer = Buffer.from(this.buffer.subarray(keepFrom));
-    this.unsettled = this.unsettled.map(offset => offset - keepFrom);
+    this.unsettled = this.unsettled.map(candidate => ({
+      offset: candidate.offset - keepFrom,
+      resumeAt: candidate.resumeAt - keepFrom,
+    }));
     this.scanned = Math.max(0, this.scanned - keepFrom);
   }
 
@@ -276,11 +374,80 @@ export class FrameDecoder {
    * the candidate and re-asks once more data arrives. Retention is bounded by
    * the same payload ceiling that bounds normal decoding.
    */
-  private corroborate(offset: number, header: FrameHeader): "accept" | "unsettled" | "reject" {
-    const end = offset + FRAME_HEADER_SIZE + payloadSize(header);
-    if (this.buffer.length - end < FRAME_HEADER_SIZE) {return "unsettled";}
-    return headerError(parseHeader(this.buffer, end)) === null ? "accept" : "reject";
+  private corroborate(
+    header: FrameHeader,
+    from: number
+  ): { kind: "accept" | "reject" } | { kind: "unsettled"; resumeAt: number } {
+    // Walk from `from` (a candidate's payload end, or where its earlier walk
+    // stopped) to the first *video* header, stepping over self-describing audio
+    // records on the way. That video header is where resync hands control back
+    // to the synchronized path, which emits video frames without consulting the
+    // anchor — so it is the boundary that must match, not merely whatever record
+    // sits physically next to the candidate. `SimulatorCaptureSession` writes
+    // screen and audio to one queue, so an audio record routinely lands between
+    // two video frames; stopping at that audio would either stall recovery on
+    // every real stream, or — worse — accept the candidate and hand the
+    // unchecked video *after* the audio, of any geometry, straight to the
+    // encoder.
+    const handoff = this.skipAudio(from);
+    if (handoff.kind === "reject") {return { kind: "reject" };}
+    if (handoff.kind === "unsettled") {return { kind: "unsettled", resumeAt: handoff.at };}
+    // `handoff.header` is the video header resync would hand back at. It must
+    // belong to the same stream — before the first frame decodes there is no
+    // anchor and whatever arrives first defines the geometry (admissible()
+    // allows it), so the candidate and this successor must simply agree.
+    if (!this.admissible(handoff.header)) {return { kind: "reject" };}
+    // An audio candidate carries no geometry of its own, so a corroborating
+    // video handoff is all it needs — that keeps a valid audio record that
+    // lands right after a corrupt frame decodable, rather than dropped.
+    if (isAudioHeader(header)) {return { kind: "accept" };}
+    return { kind: sameGeometry(header, handoff.header) ? "accept" : "reject" };
   }
+
+  /**
+   * Follow the chain of audio records starting at `cursor` to the first video
+   * header. Returns that terminal video header; `unsettled` with the furthest
+   * offset reached if the run runs off the end of the buffer before a video
+   * (so the caller resumes there next chunk rather than restarting); or
+   * `reject` if a malformed header interrupts the run. Iterative so a long
+   * audio run cannot overflow the stack.
+   */
+  private skipAudio(cursor: number): AudioSkip {
+    for (;;) {
+      if (this.buffer.length - cursor < FRAME_HEADER_SIZE) {return { kind: "unsettled", at: cursor };}
+      const header = parseHeader(this.buffer, cursor);
+      if (headerError(header) !== null) {return { kind: "reject" };}
+      if (!isAudioHeader(header)) {return { kind: "video", header };}
+      cursor += FRAME_HEADER_SIZE + payloadSize(header);
+    }
+  }
+
+  /**
+   * Whether a resync candidate may be considered at all. Audio records are
+   * self-describing and carry no geometry. A video candidate must match the
+   * geometry the stream is already using; before the first frame decodes there
+   * is nothing to match, and nothing downstream to poison either — whatever
+   * geometry arrives first *is* the stream's geometry, corrupt or not.
+   *
+   * The trade, pinned by a test so it stays deliberate: the helper does change
+   * geometry mid-stream (`SimulatorCaptureSession` reconfigures `SCStream` when
+   * the simulator window resizes), and if that change lands inside a corruption
+   * window the decoder will not resynchronize — the stream needs a restart.
+   * There is no way to allow it safely: a genuine reconfigure and a crafted run
+   * of frames at a new size are byte-identical on a wire with no sync marker,
+   * so any rule permitting the first permits the second. Preferring the
+   * observable failure (no frames, corruption already reported) over silent
+   * injection into the encoder is the same trade this decoder already makes
+   * when it drops an uncorroborated recovered frame.
+   */
+  private admissible(header: FrameHeader): boolean {
+    if (isAudioHeader(header) || this.anchor === null) {return true;}
+    return sameGeometry(header, this.anchor);
+  }
+}
+
+function sameGeometry(a: FrameHeader, b: FrameHeader): boolean {
+  return a.width === b.width && a.height === b.height && a.bytesPerRow === b.bytesPerRow;
 }
 
 /** Lazily yields `from..toInclusive`, so a scan never materializes the range. */

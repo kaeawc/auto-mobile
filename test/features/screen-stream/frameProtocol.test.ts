@@ -128,7 +128,7 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
 
     const errors: MalformedFrameError[] = [];
     const out = decoder.push(
-      Buffer.concat([corrupt, good, confirmingFrame()]),
+      Buffer.concat([corrupt, good, confirmingFrameLike(2, 2, 8)]),
       err => errors.push(err)
     );
 
@@ -202,7 +202,7 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     const stream = Buffer.concat([
       pseudoRandomPayload(1024 * 1024),
       makeFrameBytes(4, 4, 16, 909, 0x0f),
-      confirmingFrame(),
+      confirmingFrameLike(4, 4, 16),
     ]);
     for (let offset = 0; offset < stream.length; offset += 65_536) {
       const out = decoder.push(stream.subarray(offset, offset + 65_536), err =>
@@ -291,6 +291,242 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     expect(out.map(f => f.header.timestampMs)).not.toContain(777);
   });
 
+  test("two coordinated header-shaped ranges in a payload do not fabricate a frame", () => {
+    const decoder = new FrameDecoder();
+    // The payload of the damaged frame carries two header-shaped byte ranges,
+    // spaced by exactly the first one's declared payload length, so the second
+    // corroborates the first. Structural corroboration alone therefore accepts
+    // it and emits payload bytes as a 32x32 frame — dimensions of the attacker's
+    // choosing, fed straight to the encoder. The payload is BGRA pixel data, so
+    // its bytes reflect what is on the captured screen; probability bounds do
+    // not apply to a byte sequence someone can choose.
+    const errors: MalformedFrameError[] = [];
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        encodeHeader(32, 32, 128, 4242),
+        Buffer.alloc(32 * 128, 0xa5),
+        encodeHeader(1, 1, 4, 7),
+      ]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out).toHaveLength(0);
+  });
+
+  test("resync cannot introduce a geometry the stream was not already using", () => {
+    const decoder = new FrameDecoder();
+    // Once a frame has decoded on the synchronized path its geometry is the
+    // stream's geometry, and resync is locked to it. A crafted pair of matching
+    // header-shaped ranges therefore cannot poison the encoder's frame size,
+    // however self-consistent the pair is.
+    const errors: MalformedFrameError[] = [];
+    const established = decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01));
+    expect(established.map(f => f.header.width)).toEqual([4]);
+
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        encodeHeader(32, 32, 128, 4242),
+        Buffer.alloc(32 * 128, 0xa5),
+        encodeHeader(32, 32, 128, 4243),
+        Buffer.alloc(32 * 128, 0xa5),
+        encodeHeader(32, 32, 128, 4244),
+      ]),
+      err => errors.push(err)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out).toHaveLength(0);
+  });
+
+  test("an audio-shaped record in the damaged bytes is not a way around the anchor", () => {
+    const decoder = new FrameDecoder();
+    // Audio records carry no geometry, so they are admissible on their own.
+    // That made them a handoff point: resync could end at the audio record and
+    // let the synchronized path — which does not consult the anchor — decode
+    // whatever video header followed. The successor is checked for exactly
+    // this reason.
+    const errors: MalformedFrameError[] = [];
+    const audio: Buffer[] = [];
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0),
+        Buffer.alloc(32, 0x00),
+        encodeHeader(0, 8_000, 1, 8),
+        Buffer.alloc(8, 0x07),
+        makeFrameBytes(32, 32, 128, 4242, 0xa5),
+        encodeHeader(32, 32, 128, 4243),
+      ]),
+      err => errors.push(err),
+      rec => audio.push(rec.pcm16le)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out).toHaveLength(0);
+    expect(audio).toHaveLength(0);
+  });
+
+  test("resynchronizes through interleaved audio on an anchored stream", () => {
+    const decoder = new FrameDecoder();
+    // The real helper (`SimulatorCaptureSession`) writes screen and audio to one
+    // queue, so a recovered video frame's immediate successor is routinely an
+    // audio header, not another video header. An audio record is a valid
+    // corroborator — it proves the candidate's payload ran to a real boundary —
+    // and audio does not disturb the anchor-locked recovery point. Holding the
+    // successor to video-only geometry instead would leave this common stream
+    // unable to resync at all: no video frame is ever immediately followed by a
+    // video header, so nothing would corroborate and the stream would stall.
+    const errors: MalformedFrameError[] = [];
+    const audio: Buffer[] = [];
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 16), Buffer.alloc(16, fill)]);
+
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0), // corruption
+        makeFrameBytes(4, 4, 16, 2, 0x02), // V — recovery point, anchor geometry
+        audioRecord(0xa1), // A — the successor that corroborates it
+        makeFrameBytes(4, 4, 16, 3, 0x03), // V
+        audioRecord(0xa2), // A
+        makeFrameBytes(4, 4, 16, 4, 0x04), // V
+      ]),
+      err => errors.push(err),
+      rec => audio.push(rec.pcm16le)
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(out.map(f => f.header.timestampMs)).toEqual([2, 3, 4]);
+    expect(audio).toHaveLength(2);
+  });
+
+  test("an audio successor does not let a different-size video through resync", () => {
+    const decoder = new FrameDecoder();
+    // The fabrication path an audio successor must not open: an anchor-geometry
+    // candidate whose successor is audio cannot be accepted on the audio alone,
+    // because the video frame *after* the audio is where synchronized decoding
+    // resumes and it is emitted unchecked. If that video is a different size,
+    // accepting the candidate hands a fabricated-geometry frame to the encoder
+    // from one damaged frame. Corroboration must scan through the audio and hold
+    // the next video boundary to the anchor.
+    const errors: MalformedFrameError[] = [];
+    const audio: Buffer[] = [];
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 16), Buffer.alloc(16, fill)]);
+
+    const out = decoder.push(
+      Buffer.concat([
+        encodeHeader(0, 1, 4, 0), // corruption
+        makeFrameBytes(4, 4, 16, 2, 0x02), // V — anchor-geometry candidate
+        audioRecord(0xa1), // A — must not corroborate the candidate by itself
+        makeFrameBytes(32, 32, 128, 3, 0x03), // V — different size, would-be fabrication
+      ]),
+      err => errors.push(err),
+      rec => audio.push(rec.pcm16le)
+    );
+
+    // The 32x32 frame must never surface, and the anchor-mismatched candidate is
+    // not corroborated, so resync stalls rather than emitting anything.
+    expect(errors).toHaveLength(1);
+    expect(out.map(f => `${f.header.width}x${f.header.height}`)).not.toContain("32x32");
+    expect(out).toHaveLength(0);
+  });
+
+  test("resync stays linear across a long audio-only gap", () => {
+    // Walking past audio to the video handoff must be memoized: every audio
+    // record is itself an admissible candidate, so without memoization each of
+    // N audio offsets re-walks the O(N) tail — one audio-interleaved corruption
+    // window costs O(N²) parses, the disproportionate-work shape this whole
+    // change exists to remove. `SimulatorCaptureSession` writes audio
+    // independently of screen frames, so a long audio-only gap after a corrupt
+    // frame is a real stream shape, not a contrived one.
+    const decoder = new FrameDecoder();
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 8), Buffer.alloc(8, fill)]);
+    const audioRun = Buffer.concat(
+      Array.from({ length: 500 }, (_unused, i) => audioRecord(i & 0xff))
+    );
+
+    let out: DecodedFrame[] = [];
+    const parses = countHeaderParses(() => {
+      out = decoder.push(
+        Buffer.concat([encodeHeader(0, 1, 4, 0), audioRun]),
+        () => {}
+      );
+    });
+
+    // No video after the audio yet, so resync correctly emits nothing and holds
+    // the bytes — but the work to reach that verdict must be linear in the gap,
+    // not quadratic. The pre-memoization walk cost ~140k parses here.
+    expect(out).toHaveLength(0);
+    expect(parses).toBeLessThan(audioRun.length * 1.2);
+  });
+
+  test("resync stays linear when audio arrives one record per chunk after a recovery frame", () => {
+    // The cross-chunk shape: a recovered video frame followed by audio that
+    // arrives one record per `push()` before the next video. Each retained
+    // candidate must resume its audio-skip walk where it stopped and audio
+    // offsets already inside a retained run must not be re-retained, or every
+    // chunk re-walks the whole buffered gap — 12k / 45k / 170k parses for
+    // N=100 / 200 / 400 in the report. `SimulatorCaptureSession` writes audio
+    // independently and can delay screen samples, so this is a real shape.
+    const audioRecord = (fill: number): Buffer =>
+      Buffer.concat([encodeHeader(0, 8_000, 1, 8), Buffer.alloc(8, fill)]);
+
+    const parsesFor = (n: number): number => {
+      const decoder = new FrameDecoder();
+      decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01));
+      // Corruption then a 4x4 recovery frame, so a video candidate is retained
+      // across the whole audio gap — the case that re-walks without a resume
+      // cursor.
+      decoder.push(Buffer.concat([encodeHeader(0, 1, 4, 0), makeFrameBytes(4, 4, 16, 2, 0x02)]));
+      return countHeaderParses(() => {
+        for (let i = 0; i < n; i++) {decoder.push(audioRecord(i & 0xff));}
+      });
+    };
+
+    // Linear, not quadratic: doubling the gap must roughly double the work, and
+    // stay far below the quadratic curve the report measured.
+    expect(parsesFor(200)).toBeLessThan(parsesFor(100) * 2.5);
+    expect(parsesFor(400)).toBeLessThan(400 * 40);
+  });
+
+  test("does not resynchronize when the capture geometry changes inside the corruption", () => {
+    const decoder = new FrameDecoder();
+    // Deliberate trade, pinned so it stays deliberate. The helper does change
+    // geometry mid-stream — SimulatorCaptureSession reconfigures SCStream when
+    // the simulator window resizes — and a change landing inside a corruption
+    // window leaves the decoder unable to resync, so the stream needs a
+    // restart. There is no safe way to allow it: on a wire with no sync marker
+    // a genuine reconfigure and a crafted run of frames at a new size are the
+    // same bytes, so any rule that readmits the first readmits the second.
+    const errors: MalformedFrameError[] = [];
+    expect(decoder.push(makeFrameBytes(4, 4, 16, 1, 0x01))).toHaveLength(1);
+    decoder.push(Buffer.concat([encodeHeader(0, 1, 4, 0), Buffer.alloc(50, 0x00)]), err =>
+      errors.push(err)
+    );
+
+    let recovered = 0;
+    for (let i = 0; i < 20; i++) {
+      recovered += decoder.push(makeFrameBytes(8, 8, 32, 10 + i, 0x02), err =>
+        errors.push(err)
+      ).length;
+    }
+
+    // Corruption reported once, then silence — not a fabricated 8x8 frame.
+    expect(errors).toHaveLength(1);
+    expect(recovered).toBe(0);
+  });
+
   test("resynchronizes across a chunk boundary that splits the recovery header", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
@@ -313,7 +549,7 @@ describe("FrameDecoder corrupt-header resynchronization", () => {
     // the rest of it arrives. The decoder must not lock onto earlier garbage.
     const corrupt = Buffer.concat([encodeHeader(0, 1, 4, 0), pseudoRandomPayload(3_000)]);
     const good = makeFrameBytes(64, 64, 256, 121, 0xee);
-    const all = Buffer.concat([corrupt, good, confirmingFrame()]);
+    const all = Buffer.concat([corrupt, good, confirmingFrameLike(64, 64, 256)]);
     const half = corrupt.length + 1_000;
 
     expect(decoder.push(all.subarray(0, half), err => errors.push(err))).toHaveLength(0);
@@ -400,7 +636,16 @@ const CONFIRM_TS = 1000;
 
 /** The frame that corroborates the recovered one preceding it. */
 function confirmingFrame(): Buffer {
-  return makeFrameBytes(1, 1, 4, CONFIRM_TS, 0x01);
+  return confirmingFrameLike(1, 1, 4);
+}
+/**
+ * The confirming frame for a recovery frame of a given geometry. A capture
+ * session emits one frame size for its lifetime, and resync now requires the
+ * corroborating successor to agree, so a confirming frame has to match the
+ * frame it confirms.
+ */
+function confirmingFrameLike(width: number, height: number, bytesPerRow: number): Buffer {
+  return makeFrameBytes(width, height, bytesPerRow, CONFIRM_TS, 0x01);
 }
 /** Deterministic pseudo-random filler — reproducible across runs. */
 function pseudoRandomPayload(length: number): Buffer {

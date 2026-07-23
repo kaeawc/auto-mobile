@@ -184,7 +184,7 @@ export class GetBackStack implements BackStack {
    */
   private parseActivities(dumpsysOutput: string): ActivityInfo[] {
     const activities: ActivityInfo[] = [];
-    const lines = dumpsysOutput.split("\n");
+    const lines = dumpsysOutput.split(/\r?\n/);
 
     let currentTaskId = -1;
     let currentTaskAffinity: string | undefined;
@@ -249,7 +249,7 @@ export class GetBackStack implements BackStack {
    */
   private parseTasks(dumpsysOutput: string): TaskInfo[] {
     const tasks: Map<number, TaskInfo> = new Map();
-    const lines = dumpsysOutput.split("\n");
+    const lines = dumpsysOutput.split(/\r?\n/);
 
     let currentTaskId = -1;
     let currentTask: Partial<TaskInfo> = {};
@@ -380,7 +380,7 @@ export class GetBackStack implements BackStack {
    * @returns Current ActivityInfo or undefined
    */
   private getCurrentActivity(dumpsysOutput: string): ActivityInfo | undefined {
-    const lines = dumpsysOutput.split("\n");
+    const lines = dumpsysOutput.split(/\r?\n/);
 
     for (const line of lines) {
       // Match mResumedActivity or mFocusedActivity

@@ -1,22 +1,37 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { load } from "js-yaml";
 
 const WORKFLOW_PATH = ".github/workflows/pull_request.yml";
 const JOB_ID = "ios-xctest-runner-simulator-tests";
 const FORCE_LABELS = new Set(["run-ios", "run-native"]);
 
-type WorkflowDocument = { jobs?: Record<string, unknown> };
+type WorkflowDocument = {
+  jobs?: Record<string, unknown>;
+  on?: { pull_request?: { types?: unknown } };
+};
 
 function workflowWiring(workflow: string): unknown {
-  const jobs = (load(workflow) as WorkflowDocument).jobs;
-  const detectChanges = jobs?.["detect-changes"] as { steps?: unknown[] } | undefined;
+  const document = load(workflow) as WorkflowDocument;
+  const jobs = document.jobs;
+  const detectChanges = jobs?.["detect-changes"] as {
+    outputs?: Record<string, unknown>;
+    steps?: unknown[];
+  } | undefined;
   const producerSteps = detectChanges?.steps?.filter(step =>
     typeof step === "object" && step !== null &&
-    ["filter-native-integration", "ios_integration_should_run"].includes((step as Record<string, unknown>).id as string)
+    [
+      "filter",
+      "check-sha256",
+      "check-auto-chore",
+      "filter-native-integration",
+      "ios_integration_should_run",
+    ].includes((step as Record<string, unknown>).id as string)
   );
   return {
     job: jobs?.[JOB_ID],
+    pullRequestTypes: document.on?.pull_request?.types,
+    producerOutput: detectChanges?.outputs?.ios_integration_should_run,
     producerSteps,
   };
 }
@@ -66,7 +81,13 @@ export function iosIntegrationWorkflowChangeError(
   }
   const baseJob = (baseWiring as { job: unknown }).job;
   const headJob = (headWiring as { job: unknown }).job;
-  if (!structurallyEqual(executionGate(baseJob), executionGate(headJob))) {
+  if (
+    !structurallyEqual(executionGate(baseJob), executionGate(headJob)) ||
+    !structurallyEqual(
+      (baseWiring as { pullRequestTypes: unknown }).pullRequestTypes,
+      (headWiring as { pullRequestTypes: unknown }).pullRequestTypes
+    )
+  ) {
     return [
       `[ERROR] ${JOB_ID}'s execution gate changed, so it cannot be forced safely.`,
       "        Keep its needs and if wiring unchanged, then apply run-ios (or run-native) for step changes.",
@@ -84,6 +105,17 @@ export function iosIntegrationWorkflowChangeError(
     "        Apply the run-ios label (or run-native) and wait for the resulting run before merge.",
     "        This avoids charging unrelated pull_request.yml edits 20-25 macOS minutes.",
   ].join("\n");
+}
+
+export function requiresXctestRunnerResult(
+  baseWorkflow: string,
+  headWorkflow: string,
+  labels: readonly string[]
+): boolean {
+  return (
+    !structurallyEqual(workflowWiring(baseWorkflow), workflowWiring(headWorkflow)) &&
+    labels.some(label => FORCE_LABELS.has(label))
+  );
 }
 
 function labelsFromEnvironment(): string[] {
@@ -105,14 +137,19 @@ if (import.meta.main) {
     throw new Error("IOS_INTEGRATION_WORKFLOW_BASE_REF must name the PR base commit.");
   }
 
+  const baseWorkflow = baseWorkflowFromGit(baseRef);
+  const headWorkflow = readFileSync(WORKFLOW_PATH, "utf8");
+  const labels = labelsFromEnvironment();
   const error = iosIntegrationWorkflowChangeError(
-    baseWorkflowFromGit(baseRef),
-    readFileSync(WORKFLOW_PATH, "utf8"),
-    labelsFromEnvironment(),
+    baseWorkflow,
+    headWorkflow,
+    labels,
     process.env.IOS_INTEGRATION_WORKFLOW_XCTEST_RESULT
   );
   if (error) {
     console.error(error);
     process.exitCode = 1;
+  } else if (process.env.GITHUB_OUTPUT && requiresXctestRunnerResult(baseWorkflow, headWorkflow, labels)) {
+    appendFileSync(process.env.GITHUB_OUTPUT, "requires_xctest_result=true\n");
   }
 }

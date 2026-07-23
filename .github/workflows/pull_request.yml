@@ -667,6 +667,19 @@ jobs:
 
       - wait: install-fast-validation-deps
 
+      # Keep edits to the XCTestRunner job's own wiring from landing without the
+      # job being exercised. This is intentionally an always-run Ubuntu guard,
+      # rather than adding pull_request.yml to native_integration: the latter
+      # would spend roughly 20-25 macOS minutes on every unrelated workflow edit.
+      # A relevant change must carry run-ios (or run-native), which starts a new
+      # run and lets the existing force-label logic execute the macOS job.
+      - name: "Require an iOS run for XCTestRunner workflow wiring changes"
+        shell: bash
+        env:
+          IOS_INTEGRATION_WORKFLOW_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          IOS_INTEGRATION_WORKFLOW_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: bun scripts/ci/validate-ios-integration-workflow-changes.ts
+
       - name: "Run fast validation checks"
         shell: bash
         env:

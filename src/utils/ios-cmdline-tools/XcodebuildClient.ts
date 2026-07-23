@@ -1,18 +1,32 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { promisify } from "node:util";
 import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
 import { defaultTimer, Timer } from "../SystemTimer";
 
-interface XcodebuildCommandOptions {
+export interface XcodebuildCommandOptions {
   timeoutMs?: number;
   maxBuffer?: number;
 }
 
+export interface XcodebuildStreamingOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly detached?: boolean;
+  readonly stdio?: SpawnOptions["stdio"];
+  readonly timeoutMs?: number;
+}
+
+export type XcodebuildSpawner = (
+  command: string,
+  args: string[],
+  options: SpawnOptions
+) => ChildProcess;
+
 export interface Xcodebuild {
   executeCommand(args: string[], options?: XcodebuildCommandOptions): Promise<ExecResult>;
   isAvailable(): Promise<boolean>;
+  startStreaming(args: string[], options?: XcodebuildStreamingOptions): Promise<ChildProcess>;
 }
 
 const execAsync = async (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal): Promise<ExecResult> => {
@@ -35,7 +49,8 @@ export class XcodebuildClient implements Xcodebuild {
 
   constructor(
     execAsyncFn: ((file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    private readonly spawnProcess: XcodebuildSpawner = spawn
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
@@ -52,26 +67,30 @@ export class XcodebuildClient implements Xcodebuild {
 
     logger.debug(`[iOS] Executing command: ${fullCommand}`);
 
-    if (!(await this.isLocalXcodebuildAvailable())) {
-      throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
-    }
-
     const runCommand = (signal?: AbortSignal) => this.execAsync("xcodebuild", args, maxBuffer, signal);
+    const isAvailabilityProbe = args.length === 1 && args[0] === "-version";
+    const run = async (signal?: AbortSignal): Promise<ExecResult> => {
+      if (!isAvailabilityProbe && !(await this.isLocalXcodebuildAvailable(signal))) {
+        throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
+      }
+      return runCommand(signal);
+    };
 
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
       const controller = new AbortController();
+      const timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`);
       const timeoutPromise = new Promise<ExecResult>((_, reject) => {
         timeoutId = this.timer.setTimeout(
           () => {
             controller.abort();
-            reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
+            reject(timeoutError);
           },
           timeoutMs
         );
       });
 
-      const runPromise = runCommand(controller.signal);
+      const runPromise = run(controller.signal);
       // Once the timeout wins the race the aborted run promise rejects with an
       // AbortError; keep it handled so it can't surface as an unhandledRejection.
       runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
@@ -84,14 +103,14 @@ export class XcodebuildClient implements Xcodebuild {
       } catch (error) {
         const duration = this.timer.now() - startTime;
         logger.warn(`[iOS] Command failed after ${duration}ms: ${fullCommand} - ${(error as Error).message}`);
-        throw error;
+        throw controller.signal.aborted ? timeoutError : error;
       } finally {
         clearTimeout(timeoutId!);
       }
     }
 
     try {
-      const result = await runCommand();
+      const result = await run();
       const duration = this.timer.now() - startTime;
       logger.debug(`[iOS] Command completed in ${duration}ms: ${fullCommand}`);
       return result;
@@ -102,11 +121,58 @@ export class XcodebuildClient implements Xcodebuild {
     }
   }
 
-  private async isLocalXcodebuildAvailable(): Promise<boolean> {
+  /**
+   * Launch a long-lived xcodebuild invocation without a shell. Callers retain
+   * lifecycle ownership of the returned child, while this boundary owns binary
+   * resolution, availability diagnostics, and argv-safe process creation.
+   */
+  async startStreaming(
+    args: string[],
+    options: XcodebuildStreamingOptions = {}
+  ): Promise<ChildProcess> {
+    if (!(await this.isAvailableWithin(options.timeoutMs ?? 5000))) {
+      throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
+    }
+
+    const child = this.spawnProcess("xcodebuild", args, {
+      detached: options.detached,
+      env: options.env,
+      stdio: options.stdio,
+      shell: false,
+    });
+
+    if (!child.pid) {
+      child.kill();
+      throw new ActionableError("xcodebuild failed to start: no process ID was assigned.");
+    }
+
+    return child;
+  }
+
+  private async isAvailableWithin(timeoutMs: number): Promise<boolean> {
+    const controller = new AbortController();
+    let timeoutId: NodeJS.Timeout;
+    const timeout = new Promise<boolean>((_, reject) => {
+      timeoutId = this.timer.setTimeout(() => {
+        controller.abort();
+        reject(new Error(`xcodebuild availability check timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
     try {
-      await this.execAsync("xcodebuild", ["-version"]);
+      return await Promise.race([this.isLocalXcodebuildAvailable(controller.signal), timeout]);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
+  }
+
+  private async isLocalXcodebuildAvailable(signal?: AbortSignal): Promise<boolean> {
+    try {
+      await this.execAsync("xcodebuild", ["-version"], undefined, signal);
       return true;
     } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
       // `xcodebuild -version` fails when Xcode/command-line tools aren't installed; that just means it's unavailable.
       logger.debug(`src/utils/ios-cmdline-tools/XcodebuildClient.ts fallback failed: ${error}`, error);
       return false;

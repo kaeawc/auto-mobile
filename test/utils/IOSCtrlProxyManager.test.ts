@@ -1493,8 +1493,10 @@ describe("IOSCtrlProxyManager", function() {
         expect(writeCalls[0].deviceId).toBe(testDevice.deviceId);
 
         // xcodebuild is pointed at the per-launch copy, not the cached source.
-        expect(spawn.command).toContain("-xctestrun \"/tmp/automobile-runner-SIM.xctestrun\"");
-        expect(spawn.command).not.toContain("-xctestrun \"/tmp/test.xctestrun\"");
+        expect(spawn.command).toBe("xcodebuild");
+        expect(spawn.args).toContain("/tmp/automobile-runner-SIM.xctestrun");
+        expect(spawn.args).not.toContain("/tmp/test.xctestrun");
+        expect(spawn.options?.shell).toBe(false);
 
         // Host env still carries the identity vars used for daemon-side process
         // discovery/ownership — but NOT the dead SIMCTL_CHILD_* prefixes.
@@ -1581,10 +1583,10 @@ describe("IOSCtrlProxyManager", function() {
         await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
 
         // Read back the port the runner WILL read from its own ProcessInfo.environment.
-        const spawnCommand = fakeExecutor.getSpawnedProcesses()[0].command;
-        const match = spawnCommand.match(/-xctestrun "([^"]+)"/);
-        expect(match).not.toBeNull();
-        const runnerXctestrunPath = match![1];
+        const spawnArgs = fakeExecutor.getSpawnedProcesses()[0].args;
+        const xctestrunArgIndex = spawnArgs.indexOf("-xctestrun");
+        expect(xctestrunArgIndex).toBeGreaterThanOrEqual(0);
+        const runnerXctestrunPath = spawnArgs[xctestrunArgIndex + 1];
         const root = await parsePlist(await fs.readFile(runnerXctestrunPath, "utf-8")) as Map<string, unknown>;
         const uiTarget = root.get("CtrlProxyUITests") as Map<string, unknown>;
         const env = uiTarget.get("EnvironmentVariables") as Map<string, unknown>;
@@ -1648,8 +1650,10 @@ describe("IOSCtrlProxyManager", function() {
         expect(writeCalls[0].deviceId).toBe(physicalDevice.deviceId);
 
         // xcodebuild points at the per-launch copy; the bare build-setting token is gone.
-        expect(spawn.command).toContain("-xctestrun \"/tmp/automobile-runner-DEV.xctestrun\"");
-        expect(spawn.command).not.toMatch(/(?:^|\s)CTRL_PROXY_IOS_PORT=/);
+        expect(spawn.command).toBe("xcodebuild");
+        expect(spawn.args).toContain("/tmp/automobile-runner-DEV.xctestrun");
+        expect(spawn.args).not.toContain("CTRL_PROXY_IOS_PORT=8767");
+        expect(spawn.options?.shell).toBe(false);
         expect(spawn.options?.detached).toBe(true);
 
         // Host env still carries identity vars for daemon-side process discovery.

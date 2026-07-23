@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
 import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
+import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
 import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 
@@ -348,12 +349,30 @@ export function parseCliArgs(args: string[]): { toolName: string; sessionUuid?: 
  * call (#2744): a stale different-version/build daemon on the shared socket is
  * restarted to this CLI's build instead of rejecting the request with no self-heal.
  */
+/**
+ * Factory for the daemon proxy, overridable in tests so the CLI's option
+ * threading can be observed without globally mocking the daemonMcpProxy module
+ * (which would replace the real DaemonMcpProxy that daemonMcpProxy.test.ts needs).
+ */
+let daemonProxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy =
+  config => new DaemonMcpProxy(config);
+
+export function setDaemonProxyFactoryForTesting(
+  factory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy
+): void {
+  daemonProxyFactory = factory;
+}
+
+export function resetDaemonProxyFactoryForTesting(): void {
+  daemonProxyFactory = config => new DaemonMcpProxy(config);
+}
+
 async function runToolViaDaemon(
   toolName: string,
   params: Record<string, any>,
   daemonOptions?: DaemonOptions
 ): Promise<any> {
-  const proxy = new DaemonMcpProxy({ daemonOptions });
+  const proxy = daemonProxyFactory({ daemonOptions });
 
   try {
     const result = await proxy.callTool(toolName, params);

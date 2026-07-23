@@ -432,6 +432,7 @@ describe("DaemonMcpProxy", () => {
     describe("startup option mismatch handling", () => {
       function runningStatus(options: {
         embeddedSdk?: boolean;
+        networkMockable?: boolean;
         safeAreaWarnings?: boolean;
         toolResultsNoStructuredContent?: boolean;
         toolOutputsDir?: string;
@@ -471,6 +472,34 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ embeddedSdk: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when network-mockable mode differs (issue #4247)", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ networkMockable: false }), // ensureVersionMatches
+          runningStatus({ networkMockable: false }), // ensureBuildMatches
+          runningStatus({ networkMockable: false }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ networkMockable: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { networkMockable: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ networkMockable: true });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

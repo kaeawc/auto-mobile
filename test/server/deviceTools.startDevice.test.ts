@@ -9,6 +9,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceUtils";
+import * as os from "os";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -98,6 +99,36 @@ describe("startDevice handler", () => {
     expect(result.osVersion).toBe("14");
     expect(result.sessionId).toBeDefined();
     expect(typeof result.sessionId).toBe("string");
+  });
+
+  it("fails closed on an unusable iOS runner override, before touching the cached runner (#4221)", async () => {
+    // Use the DEFAULT ensureCtrlProxyReady (not the beforeEach stub) so the real
+    // fail-closed check runs. It sits at the top of that function, before any
+    // manager access, so a directory-valued override rejects without booting a
+    // real CtrlProxy.
+    resetDeviceToolsDependencies();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => fakeDeviceUtils,
+      deviceMatcherFactory: () => fakeMatcher,
+      notifyResourcesChanged: async () => {},
+      // deliberately no ensureCtrlProxyReady -> default closure with the check
+    });
+    registerDeviceTools();
+
+    fakeDeviceUtils.setBootedDevices("ios", [iosDevice]);
+    fakeMatcher.setBootedResult(iosDevice);
+
+    const original = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+    process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = os.tmpdir(); // a directory
+    try {
+      await expect(callStartDevice({ platform: "ios" })).rejects.toThrow(/BUNDLE_PATH.*unusable|directory|runnable .ipa/);
+    } finally {
+      if (original === undefined) {
+        delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+      } else {
+        process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = original;
+      }
+    }
   });
 
   it("waits for readiness before returning a matched booted device", async () => {

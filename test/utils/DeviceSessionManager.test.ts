@@ -16,11 +16,20 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { promises as fs } from "fs";
+import * as path from "path";
+import * as os from "os";
 
 // Inline minimal AndroidCtrlProxy where each test sets only the methods it
 // exercises — the Android fake lacks per-call `waitForConnection` /
 // `verifyServiceReady` toggles needed to cover the cache-stale and
 // "connected but not responsive" branches independently.
+function ipaBytes(): Buffer {
+  // A real CtrlProxy .ipa is a zip over 10KB; the override guard validates
+  // magic + size (#4221 review), so a usable-override fixture must be genuine.
+  return Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(11_000)]);
+}
+
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
   return overrides as unknown as AndroidCtrlProxy;
 }
@@ -585,6 +594,46 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     await expect(
       manager.ensureDeviceReady("either")
     ).rejects.toThrow("Both Android and iOS devices are connected");
+  });
+
+  test("fails closed when an unusable iOS runner override is set (#4221)", async () => {
+    // A directory-valued AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH cannot load, and
+    // the cached-start path skips the builder that would validate it. The
+    // override must fail closed rather than silently run the cached runner.
+    const original = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+    process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = os.tmpdir(); // a directory
+    try {
+      const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+      await expect(
+        manager.verifyIosDevice(iosDevice.deviceId, { skipCtrlProxyDownload: true })
+      ).rejects.toThrow(/BUNDLE_PATH.*unusable|directory/);
+    } finally {
+      if (original === undefined) {
+        delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+      } else {
+        process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = original;
+      }
+    }
+  });
+
+  test("does not fail closed when a usable .ipa override is set (#4221)", async () => {
+    const original = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dsm-override-"));
+    const ipa = path.join(dir, "runner.ipa");
+    await fs.writeFile(ipa, ipaBytes());
+    process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = ipa;
+    try {
+      const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+      const result = await manager.ensureDeviceReady("ios", iosDevice.deviceId, { skipCtrlProxyDownload: true });
+      expect(result.platform).toBe("ios");
+    } finally {
+      if (original === undefined) {
+        delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+      } else {
+        process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = original;
+      }
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
   });
 
   test("should resolve to ios when setActiveDevice was called with ios", async () => {

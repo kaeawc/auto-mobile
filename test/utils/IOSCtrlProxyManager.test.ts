@@ -218,6 +218,28 @@ describe("IOSCtrlProxyManager", function() {
     });
   });
 
+  describe("start fail-closed on unusable runner override (#4221)", function() {
+    test("start() rejects before any launch work when the override is a directory", async function() {
+      // A directory is the canonical unusable override (pointing at a derived-data
+      // tree instead of the packaged .ipa). This must fail closed on EVERY launch
+      // path, including a device pooled by discovery that never went through
+      // verifyIosDevice/ensureCtrlProxyReady -- start()/startInternal() is that
+      // single chokepoint, so the check lives there.
+      const prev = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = os.tmpdir();
+      try {
+        const manager = IOSCtrlProxyManager.getInstance(testDevice);
+        await expect(manager.start()).rejects.toThrow(/set but unusable/);
+      } finally {
+        if (prev === undefined) {
+          delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+        } else {
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = prev;
+        }
+      }
+    });
+  });
+
   describe("getInstance", function() {
     test("should return same instance for same device", function() {
       const instance1 = IOSCtrlProxyManager.getInstance(testDevice);

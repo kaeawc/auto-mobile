@@ -7,6 +7,7 @@ import { buildNetworkMockRules } from "./networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
+import { isIosCtrlProxyOverrideUsableSync } from "../utils/iosCtrlProxyOverride";
 import { ActionableError } from "../models";
 import { defaultTimer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
@@ -142,12 +143,11 @@ function compareDottedVersion(a: string, b: string): number {
 }
 
 function hasIosCtrlProxyRunnerOverride(env: NodeJS.ProcessEnv = process.env): boolean {
-  const ipaPath = env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
-  const bundlePath = env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
-  return (
-    (ipaPath !== undefined && ipaPath.length > 0) ||
-    (bundlePath !== undefined && bundlePath.length > 0)
-  );
+  // A non-empty string is not enough: a directory or a missing path resolves to
+  // no runnable artifact, so treating it as "capability present" made mockNetwork
+  // bypass its min-release gate on the strength of a value that never loads
+  // (#4221). Require the override to resolve to a real .ipa file.
+  return isIosCtrlProxyOverrideUsableSync(env);
 }
 
 export function isIosNetworkErrorSimulationAvailable(

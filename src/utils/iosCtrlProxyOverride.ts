@@ -1,4 +1,4 @@
-import { promises as fs, statSync } from "fs";
+import { promises as fs, statSync, openSync, readSync, closeSync } from "fs";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 import { logger } from "./logger";
 
@@ -32,6 +32,44 @@ export function getIosCtrlProxyOverridePath(env: NodeJS.ProcessEnv = process.env
   return raw === null ? null : resolvePathFromDaemonLaunchWorkingDirectory(raw);
 }
 
+/**
+ * An IPA is a zip archive, and a real CtrlProxy bundle is well over this size.
+ * Requiring both rejects a path that exists but cannot be a runner bundle -- a
+ * text file like /etc/hosts, a stale .xctestrun, or a tiny fixture -- which
+ * otherwise reported `usable: true` and let the capability guard open on a value
+ * that never loads (#4221 review). Mirrors IOSCtrlProxyBuilder's own
+ * MIN_BUNDLE_SIZE_BYTES / verifyBundle checks.
+ */
+const MIN_BUNDLE_SIZE_BYTES = 10_000;
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b]); // "PK", the start of every zip/ipa
+
+function hasZipMagic(path: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const head = Buffer.alloc(2);
+    const bytes = readSync(fd, head, 0, 2, 0);
+    return bytes === 2 && head.equals(ZIP_MAGIC);
+  } catch (error) {
+    // Unreadable file is simply not a usable bundle; a debug trace suffices.
+    logger.debug(`[iosCtrlProxyOverride] could not read magic bytes of ${path}: ${error}`);
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch (closeError) {
+        logger.debug(`[iosCtrlProxyOverride] fd close failed for ${path}: ${closeError}`);
+      }
+    }
+  }
+}
+
+/** True when the file at `path` looks like a runnable .ipa (zip, non-trivial). */
+function looksLikeRunnerBundle(path: string, sizeBytes: number): boolean {
+  return sizeBytes >= MIN_BUNDLE_SIZE_BYTES && hasZipMagic(path);
+}
+
 export interface IosCtrlProxyOverrideCheck {
   /** True when an override env var is set at all. */
   present: boolean;
@@ -61,16 +99,26 @@ export async function checkIosCtrlProxyOverride(
 
   try {
     const stats = await fs.stat(path);
-    if (stats.isFile()) {
-      return { present: true, usable: true, path };
+    if (!stats.isFile()) {
+      return {
+        present: true,
+        usable: false,
+        path,
+        reason: `expected an .ipa file but ${path} is a directory. For a local xcodebuild `
+          + `output, set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to the derived-data root instead.`
+      };
     }
-    return {
-      present: true,
-      usable: false,
-      path,
-      reason: `expected an .ipa file but ${path} is a directory. For a local xcodebuild `
-        + `output, set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to the derived-data root instead.`
-    };
+    if (!looksLikeRunnerBundle(path, stats.size)) {
+      return {
+        present: true,
+        usable: false,
+        path,
+        reason: `${path} is not a runnable .ipa bundle (a packaged CtrlProxy runner is a `
+          + `zip archive over ${MIN_BUNDLE_SIZE_BYTES} bytes). For a local xcodebuild output, `
+          + `set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to the derived-data root instead.`
+      };
+    }
+    return { present: true, usable: true, path };
   } catch (error) {
     // A missing path is the expected "override set but unusable" case, not a
     // failure of this check; log at debug so there is a trace without noise.
@@ -95,7 +143,8 @@ export function isIosCtrlProxyOverrideUsableSync(env: NodeJS.ProcessEnv = proces
     return false;
   }
   try {
-    return statSync(path).isFile();
+    const stats = statSync(path);
+    return stats.isFile() && looksLikeRunnerBundle(path, stats.size);
   } catch (error) {
     // Missing/unstatable path is simply "not usable"; a debug trace suffices.
     logger.debug(`[iosCtrlProxyOverride] override path not statable (sync): ${path} (${error})`);

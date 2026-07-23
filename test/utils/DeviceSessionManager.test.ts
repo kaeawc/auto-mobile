@@ -24,6 +24,12 @@ import * as os from "os";
 // exercises — the Android fake lacks per-call `waitForConnection` /
 // `verifyServiceReady` toggles needed to cover the cache-stale and
 // "connected but not responsive" branches independently.
+function ipaBytes(): Buffer {
+  // A real CtrlProxy .ipa is a zip over 10KB; the override guard validates
+  // magic + size (#4221 review), so a usable-override fixture must be genuine.
+  return Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(11_000)]);
+}
+
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
   return overrides as unknown as AndroidCtrlProxy;
 }
@@ -614,7 +620,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const original = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dsm-override-"));
     const ipa = path.join(dir, "runner.ipa");
-    await fs.writeFile(ipa, "x");
+    await fs.writeFile(ipa, ipaBytes());
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = ipa;
     try {
       const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);

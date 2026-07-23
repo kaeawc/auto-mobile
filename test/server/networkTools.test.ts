@@ -13,6 +13,12 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 
+function ipaBytes(): Buffer {
+  // A real CtrlProxy .ipa is a zip over 10KB; the override guard validates
+  // magic + size (#4221 review), so fixtures cannot be one byte.
+  return Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(11_000)]);
+}
+
 function parseToolJson(response: any): any {
   return JSON.parse(response.content[0].text);
 }
@@ -104,7 +110,7 @@ describe("network tool schema", () => {
   async function allowLocalIosRunner(): Promise<void> {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "nettools-local-runner-"));
     localRunnerIpa = path.join(dir, "CtrlProxyUITests-Runner.ipa");
-    await fs.writeFile(localRunnerIpa, "x");
+    await fs.writeFile(localRunnerIpa, ipaBytes());
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = localRunnerIpa;
   }
 
@@ -402,7 +408,7 @@ describe("network tool schema", () => {
   test("a usable .ipa override opens the gate even when the released runner is too old (#4221)", async () => {
     const overrideDir = await fs.mkdtemp(path.join(os.tmpdir(), "nettools-override-"));
     const ipa = path.join(overrideDir, "runner.ipa");
-    await fs.writeFile(ipa, "x");
+    await fs.writeFile(ipa, ipaBytes());
     try {
       const oldRegistry = [{ version: "0.0.40", apkSha256: "a", ipaSha256: "i", runnerSha256: "r" }];
       expect(isIosNetworkErrorSimulationAvailable(

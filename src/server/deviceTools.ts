@@ -10,6 +10,7 @@ import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from ".
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -238,6 +239,19 @@ export function registerDeviceTools() {
   ) {
     if (device.platform !== "ios") {
       return;
+    }
+
+    // Fail closed on an unusable runner override before any warm-path return.
+    // startDevice has its own enforcement here, and it returns early when the
+    // CtrlProxy client is already connected -- skipping the builder that would
+    // validate the override -- so a directory- or typo-valued
+    // AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH would otherwise silently reuse the
+    // cached released runner (#4221).
+    const iosOverride = await checkIosCtrlProxyOverride();
+    if (iosOverride.present && !iosOverride.usable) {
+      throw new ActionableError(
+        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`
+      );
     }
 
     perf.startOperation("ensureCtrlProxy");

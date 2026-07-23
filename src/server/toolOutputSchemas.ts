@@ -404,6 +404,13 @@ const observeElementsSchema = z.object({
  * (perf timing, back stack, wakefulness, user id, errors, …) pass through so the
  * advertisement never rejects a real observation.
  */
+/** Android device-lock signal (issue #4235); `secure` omitted when undeterminable. */
+export const deviceLockSchema = z.object({
+  locked: z.boolean(),
+  keyguardShowing: z.boolean(),
+  secure: z.boolean().optional(),
+});
+
 export const observeResultSchema = z.object({
   screenSize: screenSizeSchema.optional(),
   systemInsets: systemInsetsSchema.optional(),
@@ -419,7 +426,8 @@ export const observeResultSchema = z.object({
   awaitedElement: elementSchema.optional(),
   freshness: freshnessSchema.optional(),
   predictions: predictionsSchema.optional(),
-  accessibilityState: accessibilityStateSchema.optional()
+  accessibilityState: accessibilityStateSchema.optional(),
+  deviceLock: deviceLockSchema.optional()
 }).passthrough();
 
 export const observeToolResultSchema = z.union([

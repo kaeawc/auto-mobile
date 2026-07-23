@@ -1,4 +1,5 @@
 import { Element } from "./Element";
+import { DeviceLockState } from "./DeviceLockState";
 import { ScreenSize } from "./ScreenSize";
 import { SystemInsets } from "./SystemInsets";
 import { ActiveWindowInfo } from "./ActiveWindowInfo";
@@ -148,6 +149,14 @@ export interface ObserveResult {
    * - "Dozing": Device is in ambient display / always-on mode
    */
   wakefulness?: "Awake" | "Asleep" | "Dozing";
+
+  /**
+   * Structured device-lock signal (Android only). Present when the lock state
+   * could be read; absent when it could not. Lets an agent detect it is looking
+   * at the keyguard rather than the app, and decide whether to dismiss a swipe
+   * lock itself or stop and ask the user for a PIN (issue #4235).
+   */
+  deviceLock?: DeviceLockState;
 
   /**
    * Android user ID for the foreground app (Android only)

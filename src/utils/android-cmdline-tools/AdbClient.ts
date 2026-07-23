@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { logger } from "../logger";
-import { BootedDevice, ExecResult, AndroidUser } from "../../models";
+import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import {
   AdbExecutor,
@@ -827,6 +827,73 @@ export class AdbClient implements AdbExecutor {
     } catch {
       logger.debug("[ADB] Failed to get wakefulness state");
       return null;
+    }
+  }
+
+  /**
+   * Get the device lock state (Android only).
+   *
+   * `keyguardShowing` (and, since they coincide on Android, `locked`) come from
+   * `dumpsys window`; `secure` comes from `locksettings get-disabled` (a disabled
+   * lock is a non-secure swipe lock). Any read failure degrades gracefully:
+   * an unreadable keyguard state yields `null` (lock state unknown), and an
+   * unreadable/unparseable secure signal yields `secure: undefined` rather than a
+   * guessed boolean, so a secure lock is never mistaken for a swipe lock (#4235).
+   */
+  async getDeviceLock(signal?: AbortSignal): Promise<DeviceLockState | null> {
+    const keyguardShowing = await this.readKeyguardShowing(signal);
+    if (keyguardShowing === null) {
+      return null;
+    }
+    const secure = await this.readLockSecure(signal);
+    return { locked: keyguardShowing, keyguardShowing, secure };
+  }
+
+  /** Parse keyguard visibility from `dumpsys window`; null when undeterminable. */
+  private async readKeyguardShowing(signal?: AbortSignal): Promise<boolean | null> {
+    try {
+      const result = await this.executeCommand(
+        "shell dumpsys window",
+        undefined,
+        undefined,
+        true,
+        signal
+      );
+      const match = result.stdout.match(
+        /(?:isKeyguardShowing|mShowingLockscreen|mKeyguardShowing|mDreamingLockscreen)=(true|false)/
+      );
+      return match ? match[1] === "true" : null;
+    } catch {
+      logger.debug("[ADB] Failed to read keyguard state");
+      return null;
+    }
+  }
+
+  /**
+   * Parse secure-vs-swipe from `locksettings get-disabled`.
+   * Output "true" = lock screen disabled → not secure; "false" = a lock is set →
+   * secure. Anything else (permission denied, unexpected text) → undefined.
+   */
+  private async readLockSecure(signal?: AbortSignal): Promise<boolean | undefined> {
+    try {
+      const result = await this.executeCommand(
+        "shell locksettings get-disabled",
+        undefined,
+        undefined,
+        true,
+        signal
+      );
+      const value = result.stdout.trim().toLowerCase();
+      if (value === "true") {
+        return false;
+      }
+      if (value === "false") {
+        return true;
+      }
+      return undefined;
+    } catch {
+      logger.debug("[ADB] Failed to read lock secure state");
+      return undefined;
     }
   }
 

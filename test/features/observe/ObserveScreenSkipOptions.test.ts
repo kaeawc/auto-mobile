@@ -49,9 +49,10 @@ class FakeHierarchyCollector implements Pick<HierarchyCollector, "collect" | "co
   }
 }
 
-class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBackStack" | "collectWakefulness" | "collectActiveWindow"> {
+class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"> {
   backStackCalls = 0;
   activeWindowCalls = 0;
+  deviceLockCalls = 0;
 
   async collectBackStack(result: ObserveResult, _perf: PerformanceTracker, _signal?: AbortSignal): Promise<void> {
     this.backStackCalls++;
@@ -60,6 +61,11 @@ class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBac
 
   async collectWakefulness(result: ObserveResult): Promise<void> {
     result.wakefulness = "Awake";
+  }
+
+  async collectDeviceLock(result: ObserveResult): Promise<void> {
+    this.deviceLockCalls++;
+    result.deviceLock = { locked: false, keyguardShowing: false, secure: false };
   }
 
   async collectActiveWindow(result: ObserveResult): Promise<void> {

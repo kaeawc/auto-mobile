@@ -3,6 +3,7 @@ export * from "./ActionableError";
 export * from "./ActiveWindowInfo";
 export * from "./AndroidDeviceShellToolResult";
 export * from "./AndroidUser";
+export * from "./DeviceLockState";
 export * from "./BackStack";
 export * from "./BaseActionResult";
 export * from "./BiometricAuthResult";

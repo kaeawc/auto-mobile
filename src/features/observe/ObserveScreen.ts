@@ -443,6 +443,7 @@ export class RealObserveScreen implements ObserveScreen {
           } else {
             parallelTasks.push(perf.track("wakefulness", () => this.deviceStateCollector.collectWakefulness(result, signal)));
           }
+          parallelTasks.push(perf.track("deviceLock", () => this.deviceStateCollector.collectDeviceLock(result, signal)));
           if (!skipBackStack) {
             parallelTasks.push(perf.track("backStack", () => this.deviceStateCollector.collectBackStack(result, perf, signal)));
           }
@@ -454,6 +455,7 @@ export class RealObserveScreen implements ObserveScreen {
           logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
           const tasks: Promise<void>[] = [
             perf.track("wakefulness", () => this.deviceStateCollector.collectWakefulness(result, signal)),
+            perf.track("deviceLock", () => this.deviceStateCollector.collectDeviceLock(result, signal)),
           ];
           if (!skipBackStack) {
             tasks.push(perf.track("backStack", () => this.deviceStateCollector.collectBackStack(result, perf, signal)));

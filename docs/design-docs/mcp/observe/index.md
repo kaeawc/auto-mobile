@@ -21,6 +21,7 @@ All collected data is assembled into an object containing (fields may be omitted
 - `focusedElement`: currently focused UI element (if any)
 - `intentChooserDetected`: whether a system intent chooser is visible
 - `wakefulness` and `backStack`: Android-specific state
+- `deviceLock`: Android-specific `{ locked, keyguardShowing, secure? }` — present when the lock state could be read. Lets an agent detect it is looking at the keyguard rather than the app, and decide whether to dismiss a swipe lock itself or stop and ask the user for a PIN when `secure` is true. `secure` is omitted when it could not be determined over adb
 - `displayedTimeMetrics` (Android launchApp "Displayed" startup timings), `performanceAudit`, and `accessibilityAudit`: present when the relevant modes are enabled
 - `perfTiming`: collected internally for debug/perf capture diagnostics but stripped from the sanitized MCP tool output to reduce payload size
 - `gfxMetrics`: emitted in sanitized output for action UI-stability summaries; frame timing fields may be trimmed when `performanceAudit.metrics` already carries non-null computed replacements

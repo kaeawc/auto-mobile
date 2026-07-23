@@ -5250,6 +5250,25 @@
           ],
           "additionalProperties": {}
         },
+        "deviceLock": {
+          "type": "object",
+          "properties": {
+            "locked": {
+              "type": "boolean"
+            },
+            "keyguardShowing": {
+              "type": "boolean"
+            },
+            "secure": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "locked",
+            "keyguardShowing"
+          ],
+          "additionalProperties": false
+        },
         "artifact": {
           "type": "object",
           "properties": {

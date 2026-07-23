@@ -82,6 +82,39 @@ describe("DeviceStateCollector", () => {
     });
   });
 
+  describe("collectDeviceLock", () => {
+    test("populates deviceLock on success (secure lock)", async () => {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
+      const result = makeResult();
+      await collector.collectDeviceLock(result);
+      expect(result.deviceLock).toEqual({ locked: true, keyguardShowing: true, secure: true });
+    });
+
+    test("carries secure=false through for a swipe-only lock", async () => {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: false });
+      const result = makeResult();
+      await collector.collectDeviceLock(result);
+      expect(result.deviceLock?.secure).toBe(false);
+    });
+
+    test("leaves deviceLock unset when the lock state is unknown (adb returns null)", async () => {
+      fakeAdb.setDeviceLock(null);
+      const result = makeResult();
+      await collector.collectDeviceLock(result);
+      expect(result.deviceLock).toBeUndefined();
+    });
+
+    test("does not append error on failure (logs only)", async () => {
+      (fakeAdb as any).getDeviceLock = async () => {
+        throw new Error("lock fail");
+      };
+      const result = makeResult();
+      await collector.collectDeviceLock(result);
+      expect(result.deviceLock).toBeUndefined();
+      expect(result.errors).toBeUndefined();
+    });
+  });
+
   describe("collectBackStack", () => {
     test("populates backStack on success", async () => {
       const result = makeResult();

@@ -118,9 +118,13 @@ Browsers subscribe at the matching WHEP URL `http://mediamtx-host:8889/ci-run-42
 Any WHIP/WHEP-compatible SFU (LiveKit, Janus, Cloudflare) works the same way.
 
 **HTTPS.** The stock config is plain HTTP. For a reachable deployment, terminate
-TLS on the WebRTC listener: generate a certificate and enable it in the config —
+TLS on the WebRTC listener with a **publicly-trusted** certificate (e.g. Let's
+Encrypt) — AutoMobile's WHIP client (Bun's `fetch`) and browser WHEP clients both
+reject an untrusted cert, so a self-signed cert works only if its CA is trusted on
+every publisher and viewer host. Enable it in the config —
 
 ```bash
+# publicly-trusted cert preferred; self-signed shown for a CA-trusted intranet:
 openssl genrsa -out server.key 2048
 openssl req -new -x509 -sha256 -key server.key -out server.crt -days 3650
 ```

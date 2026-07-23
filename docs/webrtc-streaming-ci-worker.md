@@ -30,6 +30,11 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
   [reference server](../examples/webrtc-coordination-server/README.md) still
   exists for a zero-dependency local try-out, but MediaMTX is the supported
   production fanout.
+  - **Ports:** `8889` is only the WHIP/WHEP signaling listener. The media itself
+    flows over MediaMTX's ICE **UDP** listener `webrtcLocalUDPAddress: :8189` — a
+    containerized or firewalled deployment that exposes only `8889` gets WHIP/WHEP
+    setup failures or black video. Map/open `8189/udp` too, or configure a
+    TURN/TCP-only path.
 
 ## 1. Point the worker at your WHIP server
 
@@ -39,7 +44,10 @@ that MediaMTX ignores). The stock config serves plain **HTTP** on `:8889`, so us
 `http://`. For a reachable deployment, enable TLS and switch to `https://` — see
 [HTTPS](./design-docs/mcp/observe/webrtc-streaming.md#production-fanout-mediamtx)
 in the design doc for the certificate + `webrtcEncryption` steps. Set these
-before (or when) starting the daemon:
+before (or when) starting the daemon. Because MediaMTX keys the stream from the
+path, a **per-job** stream must carry its id in the endpoint path — the `start`
+request's `streamId` alone only sets the ignored query (see [Typical CI
+shape](#typical-ci-shape) for deriving both from `$CI_JOB_ID`):
 
 ```bash
 export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx.example.com:8889/ci-run-42/whip"
@@ -126,8 +134,11 @@ echo '{"action":"status","streamId":"ci-run-42"}' | nc -U ~/.auto-mobile/webrtc-
 
 ```bash
 # 1. boot emulator/simulator + start daemon (project-specific)
-# 2. begin streaming so humans can watch the run live
-echo '{"action":"start","streamId":"'"$CI_JOB_ID"'"}' | nc -U ~/.auto-mobile/webrtc-stream.sock
+# 2. begin streaming so humans can watch the run live.
+#    Put $CI_JOB_ID in the WHIP *path* so each job is its own MediaMTX stream —
+#    passing only streamId would leave every job publishing to the same path.
+WHIP="http://mediamtx.example.com:8889/$CI_JOB_ID/whip"
+echo '{"action":"start","streamId":"'"$CI_JOB_ID"'","whipEndpoint":"'"$WHIP"'"}' | nc -U ~/.auto-mobile/webrtc-stream.sock
 # 3. run your AutoMobile test plan ...
 # 4. stop streaming on teardown (best-effort)
 echo '{"action":"stop","streamId":"'"$CI_JOB_ID"'"}'  | nc -U ~/.auto-mobile/webrtc-stream.sock || true

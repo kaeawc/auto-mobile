@@ -12,8 +12,8 @@
 #
 # This config targets MediaMTX v1.x. Keys occasionally change across releases;
 # the authoritative reference is the bundled mediamtx.yml in the MediaMTX repo.
-# Its functional correctness against a live server is exercised by the
-# publisher -> MediaMTX -> WHEP integration test (see issue #4290).
+# Its functional correctness against a live server is exercised by a dedicated
+# publisher -> MediaMTX -> WHEP integration test.
 
 ###############################################################################
 # WebRTC (WHIP ingest + WHEP egress)
@@ -28,7 +28,11 @@ webrtcAddress: :8889
 # This listener is plain HTTP by default (webrtcEncryption: no), so its URLs are
 # http://…:8889/… — use those for the local try-out. For a reachable deployment,
 # terminate TLS here and switch the URLs (and AUTOMOBILE_WEBRTC_WHIP_ENDPOINT) to
-# https://. MediaMTX does not ship a certificate; generate one, e.g.:
+# https://. MediaMTX does not ship a certificate. Use a publicly-trusted
+# certificate (e.g. Let's Encrypt): AutoMobile's WHIP client is Bun's `fetch` and
+# browser WHEP clients both reject an untrusted cert, so a self-signed cert only
+# works if its CA is installed/trusted on every publisher and viewer host. A
+# self-signed cert can be generated for such a setup with:
 #
 #   openssl genrsa -out server.key 2048
 #   openssl req -new -x509 -sha256 -key server.key -out server.crt -days 3650
@@ -56,6 +60,7 @@ rtsp: no
 rtmp: no
 hls: no
 srt: no
+moq: no
 
 ###############################################################################
 # Authentication

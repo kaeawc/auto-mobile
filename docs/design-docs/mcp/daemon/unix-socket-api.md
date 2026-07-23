@@ -485,7 +485,7 @@ Presses a device or navigation button.
 |---|---|---|---|
 | `platform` | `"android" \| "ios"` | Yes | Target platform. |
 | `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `button` | `"back" \| "home" \| "app_switch" \| "volume_up" \| "volume_down" \| "power" \| "enter"` plus MCP aliases `"menu"` and `"recent"` | Yes | Button to press. Unsupported buttons fail with `success: false`. |
+| `button` | `"back" \| "home" \| "app_switch" \| "volume_up" \| "volume_down" \| "power"` plus MCP aliases `"menu"` and `"recent"` | Yes | Button to press. Unsupported buttons fail with `success: false`. |
 
 **Request**
 
@@ -529,10 +529,8 @@ Examples for supported Android navigation and hardware actions:
 `app_switch` is the socket API name for the app switcher and maps to the MCP
 `recent` button implementation. The daemon also accepts the MCP alias `recent`.
 
-`enter` is reserved by the socket contract but is not implemented by
-`input/pressButton`; callers should use `input/key` for a discrete Enter press
-or `input/typeText` for committed text. `enter` currently returns a clear
-unsupported error instead of being treated as an unknown field value.
+`enter` is not a supported `input/pressButton` value. Callers should use
+`input/key` for a discrete Enter press or `input/typeText` for committed text.
 
 iOS supports `home`, `back`, and `app_switch` through CtrlProxy navigation. On
 physical iOS devices, `power`, `volume_up`, and `volume_down` route to the

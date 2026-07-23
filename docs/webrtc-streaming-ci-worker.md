@@ -35,10 +35,13 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
 
 MediaMTX derives the stream name from the URL **path**, so set the endpoint to a
 per-stream WHIP URL (the publisher also appends a harmless `?streamId=` query
-that MediaMTX ignores). Set these before (or when) starting the daemon:
+that MediaMTX ignores). The stock config serves plain **HTTP** on `:8889`, so use
+`http://` — enable TLS (`webrtcEncryption` + cert/key in the config) and switch
+to `https://` for any reachable deployment. Set these before (or when) starting
+the daemon:
 
 ```bash
-export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="https://mediamtx.example.com:8889/ci-run-42/whip"
+export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx.example.com:8889/ci-run-42/whip"
 # Optional:
 export AUTOMOBILE_WEBRTC_WHIP_TOKEN="<bearer token, if the server requires one>"
 export AUTOMOBILE_WEBRTC_ICE_SERVERS="stun:stun.l.google.com:19302"
@@ -74,7 +77,7 @@ Response:
 ```json
 {"success":true,"type":"webrtc_stream_response","action":"start",
  "stream":{"streamId":"ci-run-42","state":"connected",
-           "resourceUrl":"https://mediamtx.example.com:8889/ci-run-42/whip/<session>", ...}}
+           "resourceUrl":"http://mediamtx.example.com:8889/ci-run-42/whip/<session>", ...}}
 ```
 
 If multiple devices are attached, pass `"deviceId":"emulator-5554"` or the iOS
@@ -97,8 +100,8 @@ console.log(res.stream?.resourceUrl);
 ## 3. Watch it
 
 Point a browser WHEP viewer at the matching WHEP URL — for the stream above,
-`https://mediamtx.example.com:8889/ci-run-42/whep`. MediaMTX serves a built-in
-reader page at `https://mediamtx.example.com:8889/ci-run-42`; any WHEP-capable
+`http://mediamtx.example.com:8889/ci-run-42/whep`. MediaMTX serves a built-in
+reader page at `http://mediamtx.example.com:8889/ci-run-42`; any WHEP-capable
 `<video>` client works too.
 
 ## 4. Stop the stream

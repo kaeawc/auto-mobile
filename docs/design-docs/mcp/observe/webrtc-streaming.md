@@ -106,14 +106,15 @@ mediamtx ./examples/mediamtx/mediamtx.yml   # serves WHIP + WHEP on :8889
 
 Then point the worker at a **per-stream** WHIP URL — MediaMTX takes the stream
 name from the URL path (`/<stream>/whip`); the publisher additionally appends a
-harmless `?streamId=` query that MediaMTX ignores:
+harmless `?streamId=` query that MediaMTX ignores. The stock config serves plain
+HTTP on `:8889` (enable `webrtcEncryption` for `https://`):
 
 ```bash
-export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="https://mediamtx-host:8889/ci-run-42/whip"
+export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx-host:8889/ci-run-42/whip"
 ```
 
-Browsers subscribe at the matching WHEP URL `https://mediamtx-host:8889/ci-run-42/whep`
-(MediaMTX also serves a built-in reader page at `https://mediamtx-host:8889/ci-run-42`).
+Browsers subscribe at the matching WHEP URL `http://mediamtx-host:8889/ci-run-42/whep`
+(MediaMTX also serves a built-in reader page at `http://mediamtx-host:8889/ci-run-42`).
 Any WHIP/WHEP-compatible SFU (LiveKit, Janus, Cloudflare) works the same way.
 
 The bundled reference coordination server

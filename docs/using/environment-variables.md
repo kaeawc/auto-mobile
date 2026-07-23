@@ -109,7 +109,7 @@ overridden per request on the `webrtc-stream.sock` control socket.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL. For MediaMTX use a per-stream path, e.g. `https://host:8889/<stream>/whip`. Required to start a stream unless passed per request. | unset |
+| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL. For MediaMTX use a per-stream path, e.g. `http://host:8889/<stream>/whip` (the stock config is plain HTTP; enable `webrtcEncryption` for `https://`). Required to start a stream unless passed per request. | unset |
 | `AUTOMOBILE_WEBRTC_WHIP_TOKEN` | Bearer token sent as `Authorization: Bearer <token>` on WHIP ingest. | unset |
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`. | `stun:stun.l.google.com:19302` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |

@@ -20,7 +20,10 @@
 ###############################################################################
 
 # Enable the WebRTC server. It serves WHIP at /<name>/whip and WHEP at
-# /<name>/whep on webrtcAddress.
+# /<name>/whep on webrtcAddress. This listener is plain HTTP by default
+# (webrtcEncryption is off), so its URLs are http://…:8889/… — use those for the
+# local try-out. For a reachable deployment, set `webrtcEncryption: yes` with
+# `webrtcServerCert`/`webrtcServerKey` and switch the URLs to https://.
 webrtc: yes
 webrtcAddress: :8889
 
@@ -46,19 +49,29 @@ srt: no
 ###############################################################################
 # Authentication
 ###############################################################################
-# By default MediaMTX permits anonymous publish/read only from localhost. For a
-# reachable deployment, require the bearer token AutoMobile sends as
-# `Authorization: Bearer <token>` (AUTOMOBILE_WEBRTC_WHIP_TOKEN). Configure an
-# internal user or JWT auth — see
-# https://github.com/bluenviron/mediamtx#authentication. Example (publish
-# requires a token; anyone may read):
+# IMPORTANT: out of the box MediaMTX allows anonymous publish AND read from ANY
+# IP (its built-in `any` user has an empty `ips` list). On a reachable host that
+# is an open WHIP/WHEP endpoint. This example overrides that default to restrict
+# anonymous access to localhost, so copying it verbatim does not expose an open
+# ingest — the local try-out still works with no credentials.
+authInternalUsers:
+  - user: any
+    ips: ["127.0.0.1", "::1"]
+    permissions:
+      - action: publish
+      - action: read
+
+# Reachable deployment (the CI-worker use case): require the token AutoMobile
+# sends. Under internal auth MediaMTX reads credentials from an
+# `Authorization: Bearer <user>:<pass>` header, so set
+# AUTOMOBILE_WEBRTC_WHIP_TOKEN to "<user>:<pass>". Replace the block above with:
 #
 # authInternalUsers:
-#   - user: publisher
-#     pass: <the same value as AUTOMOBILE_WEBRTC_WHIP_TOKEN>
+#   - user: automobile
+#     pass: <choose-a-strong-secret>   # AUTOMOBILE_WEBRTC_WHIP_TOKEN="automobile:<choose-a-strong-secret>"
 #     permissions:
 #       - action: publish
-#   - user: any
+#   - user: any                        # readers open; tokenize the same way to lock down
 #     permissions:
 #       - action: read
 

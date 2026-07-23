@@ -477,7 +477,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
    */
   public async verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
     const allDevices = await this.adb.getBootedAndroidDevices();
-    const device = allDevices.find(device => device.name === deviceId);
+    const device = allDevices.find(device => device.deviceId === deviceId);
 
     if (!device) {
       throw new ActionableError(

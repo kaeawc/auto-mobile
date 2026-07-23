@@ -31,6 +31,13 @@ import { WhipClient, type WhipClientOptions } from "./WhipClient";
  */
 export const ICE_GATHERING_TIMEOUT_MS = 5000;
 
+/**
+ * Minimum spacing between keyframe requests forwarded to the capture source.
+ * A burst of viewer PLIs (e.g. several browsers joining at once) collapses to at
+ * most one IDR request per interval so the encoder is not thrashed.
+ */
+export const KEYFRAME_REQUEST_MIN_INTERVAL_MS = 1000;
+
 export interface WebRtcPublisherConfig {
   /** Stable identifier for this stream (also useful to the coordination server). */
   streamId: string;
@@ -49,6 +56,15 @@ export interface WebRtcPublisherConfig {
   trickleIce?: boolean;
   /** Add a sendonly PCMU audio track alongside video. Defaults to false. */
   audioEnabled?: boolean;
+  /**
+   * If set (> 0), while the connection is `connected` the publisher watches for
+   * the frame counter to stop advancing. A source that stays alive but stops
+   * producing frames (a wedged encoder, a frozen capture helper) does not change
+   * the peer `connectionState`, so without this the viewer sits on a frozen frame
+   * forever. On a stall the publisher routes through the reconnect path. Disabled
+   * when unset.
+   */
+  frameStallTimeoutMs?: number;
 }
 
 export interface WebRtcPublisherDeps {
@@ -69,6 +85,13 @@ export interface WebRtcPublisherDeps {
    * live connection instead of being dropped before DTLS is ready.
    */
   onConnected?: () => Promise<void> | void;
+  /**
+   * Called when the remote (coordination server, relaying a WHEP viewer's PLI)
+   * requests a keyframe. The manager forwards it to the capture source so the
+   * encoder emits a fresh IDR, letting a late or recovering viewer decode
+   * without waiting for the periodic IDR interval. Throttled by the publisher.
+   */
+  onKeyFrameRequest?: () => void;
   onStateChange?: (state: ReconnectState) => void;
 }
 
@@ -107,6 +130,7 @@ export class WebRtcPublisher {
   private readonly timer: Timer;
   private readonly onBeforeEstablish?: () => Promise<void> | void;
   private readonly onConnected?: () => Promise<void> | void;
+  private readonly onKeyFrameRequest?: () => void;
   private readonly controller: ReconnectController;
 
   private readonly trickleIce: boolean;
@@ -123,6 +147,10 @@ export class WebRtcPublisher {
   private connectedFired = false;
   private trickle: TrickleIceForwarder | null = null;
   private candidateSub: { unSubscribe: () => void } | null = null;
+  private lastKeyFrameRequestMs = Number.NEGATIVE_INFINITY;
+  private frameWatchdogHandle: NodeJS.Timeout | null = null;
+  private frameWatchdogLastFrames = 0;
+  private frameWatchdogLastAdvanceMs = 0;
 
   constructor(config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps = {}) {
     this.config = config;
@@ -131,6 +159,7 @@ export class WebRtcPublisher {
     this.timer = deps.timer ?? defaultTimer;
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
+    this.onKeyFrameRequest = deps.onKeyFrameRequest;
     this.createPeerConnection =
       deps.createPeerConnection ??
       (iceServers =>
@@ -203,6 +232,28 @@ export class WebRtcPublisher {
     this.controller.notifyConnectionLost();
   }
 
+  /**
+   * Forward a keyframe request to the capture source, throttled and guarded on
+   * the peer connection identity so a PLI arriving for a superseded session (or
+   * after close) is ignored.
+   */
+  private handleKeyFrameRequest(pc: RTCPeerConnection): void {
+    if (this.closed || this.pc !== pc || !this.onKeyFrameRequest) {
+      return;
+    }
+    const now = this.timer.now();
+    if (now - this.lastKeyFrameRequestMs < KEYFRAME_REQUEST_MIN_INTERVAL_MS) {
+      return;
+    }
+    this.lastKeyFrameRequestMs = now;
+    logger.debug(`[WebRTC] stream ${this.config.streamId} received PLI; requesting keyframe`);
+    try {
+      this.onKeyFrameRequest();
+    } catch (error) {
+      logger.debug(`[WebRTC] keyframe request failed for ${this.config.streamId}: ${error}`);
+    }
+  }
+
   getState(): ReconnectState {
     return this.state;
   }
@@ -255,6 +306,10 @@ export class WebRtcPublisher {
       // WHIP permits exactly one MediaStream; both media tracks share its id.
       const track = new MediaStreamTrack({ kind: "video", streamId: this.config.streamId });
       const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
+      // A downstream WHEP viewer that cannot decode sends a PLI; the coordination
+      // server relays it here. Ask the capture source for a fresh IDR so the
+      // viewer recovers promptly instead of waiting for the periodic keyframe.
+      transceiver.sender.onPictureLossIndication.subscribe(() => this.handleKeyFrameRequest(pc));
       this.writer = new RtpH264TrackWriter({
         sink: track,
         ssrc: transceiver.sender.ssrc,
@@ -400,6 +455,7 @@ export class WebRtcPublisher {
       return;
     }
     this.connectedFired = true;
+    this.startFrameWatchdog(pc);
     void Promise.resolve().then(() => this.onConnected?.()).catch(error => {
       // Capture failed to start (e.g. adb/screenrecord spawn failed) even though
       // the peer connected. Without this the stream would report connected with
@@ -407,6 +463,51 @@ export class WebRtcPublisher {
       logger.warn(`[WebRTC] capture start failed for ${this.config.streamId}: ${error}; reconnecting`);
       this.notifySourceFailed();
     });
+  }
+
+  /**
+   * Watch for a connected-but-stalled stream: the source is alive (no
+   * connection-state change) yet the frame counter stops advancing. Baselined at
+   * connect, so a source that never produces a first frame within the timeout is
+   * also caught. On a stall, route through reconnect (which restarts capture).
+   */
+  private startFrameWatchdog(pc: RTCPeerConnection): void {
+    const timeout = this.config.frameStallTimeoutMs;
+    if (!timeout || timeout <= 0) {
+      return;
+    }
+    this.stopFrameWatchdog();
+    this.frameWatchdogLastFrames = this.writer?.stats.framesWritten ?? 0;
+    this.frameWatchdogLastAdvanceMs = this.timer.now();
+    const intervalMs = Math.max(500, Math.min(timeout, 2000));
+    this.frameWatchdogHandle = this.timer.setInterval(() => this.checkFrameProgress(pc, timeout), intervalMs);
+  }
+
+  private checkFrameProgress(pc: RTCPeerConnection, timeoutMs: number): void {
+    if (this.closed || this.establishing || this.pc !== pc || pc.connectionState !== "connected") {
+      return;
+    }
+    const frames = this.writer?.stats.framesWritten ?? 0;
+    if (frames > this.frameWatchdogLastFrames) {
+      this.frameWatchdogLastFrames = frames;
+      this.frameWatchdogLastAdvanceMs = this.timer.now();
+      return;
+    }
+    if (this.timer.now() - this.frameWatchdogLastAdvanceMs >= timeoutMs) {
+      logger.warn(
+        `[WebRTC] stream ${this.config.streamId} produced no frames for ${timeoutMs}ms while connected ` +
+          `(framesSent=${frames}); treating capture as stalled and reconnecting`
+      );
+      this.stopFrameWatchdog();
+      this.notifySourceFailed();
+    }
+  }
+
+  private stopFrameWatchdog(): void {
+    if (this.frameWatchdogHandle) {
+      this.timer.clearInterval(this.frameWatchdogHandle);
+      this.frameWatchdogHandle = null;
+    }
   }
 
   /**
@@ -459,6 +560,7 @@ export class WebRtcPublisher {
   }
 
   private async teardownActiveSession(): Promise<void> {
+    this.stopFrameWatchdog();
     const pc = this.pc;
     const resourceUrl = this.resourceUrl;
     this.pc = null;

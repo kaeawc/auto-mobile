@@ -26,11 +26,20 @@ const READY_MARKER = "Waiting for client connection";
 /** Server stdout line printed after capture has fully started. */
 const STREAMING_STARTED_MARKER = "Streaming started";
 
+/**
+ * Host→device command byte written back over the (bidirectional) socket to ask
+ * the encoder for a fresh IDR. Keep in sync with
+ * `VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME` in the Kotlin video-server.
+ */
+export const VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME = 0x01;
+
 /** Minimal socket surface the source needs, for injectable testing. */
 export interface StreamSocket {
   on(event: "data", listener: (chunk: Buffer) => void): void;
   on(event: "error", listener: (error: Error) => void): void;
   on(event: "close", listener: () => void): void;
+  /** Send bytes device-ward (e.g. a keyframe-request command). */
+  write(chunk: Buffer): void;
   destroy(): void;
 }
 
@@ -129,6 +138,25 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     this.running = false;
     await this.beginTeardown();
+  }
+
+  /**
+   * Ask the on-device encoder to emit a fresh IDR by sending the request-keyframe
+   * command over the socket. The encoder (MediaCodec) honors it via
+   * PARAMETER_KEY_REQUEST_SYNC_FRAME, so a late/recovering WHEP viewer decodes
+   * without waiting for the 10s I-frame interval. The publisher throttles calls.
+   */
+  requestKeyFrame(): void {
+    const socket = this.socket;
+    if (!this.running || !socket) {
+      return;
+    }
+    try {
+      socket.write(Buffer.from([VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME]));
+    } catch (error) {
+      // Best-effort: a dropped socket surfaces via its own error/close handler.
+      logger.debug(`[PersistentEncoderH264Source] keyframe request write failed: ${error}`);
+    }
   }
 
   private async launch(): Promise<void> {

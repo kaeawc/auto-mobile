@@ -25,4 +25,12 @@ export interface H264CaptureSource {
   start(): Promise<void>;
   /** Stop capturing and release device-side resources. */
   stop(): Promise<void>;
+  /**
+   * Ask the encoder to emit a fresh IDR as soon as possible, in response to a
+   * downstream keyframe request (WHEP viewer PLI relayed through the publisher).
+   * Optional: sources that cannot signal their encoder mid-stream omit it and
+   * rely on the periodic IDR interval. Implementations must be safe to call
+   * frequently (throttle internally) and before/after the stream is running.
+   */
+  requestKeyFrame?(): void;
 }

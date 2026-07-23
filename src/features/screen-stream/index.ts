@@ -1,6 +1,9 @@
 export {
   FRAME_HEADER_SIZE,
+  FRAME_MAGIC,
   FrameDecoder,
+  crc32,
+  encodeFrameHeader,
   type DecodedFrame,
   type DecodedAudio,
   type FrameHeader,

@@ -108,6 +108,43 @@ describe("RtpH264TrackWriter", () => {
     expect(sink.packets[1].header.sequenceNumber).toBe(0);
   });
 
+  test("re-injects cached SPS/PPS before a later IDR that lacks them", () => {
+    const sink = new RecordingSink();
+    const writer = new RtpH264TrackWriter({ sink, ssrc: 1 });
+    const sps = Buffer.from([0x67, 0x42, 0xe0, 0x2a]);
+    const pps = Buffer.from([0x68, 0xce, 0x3c, 0x80]);
+
+    // First keyframe carries parameter sets (as screenrecord/jar emit at start).
+    writer.writeChunk(annexB(sps, pps, makeNal(5, 20)));
+    writer.writeChunk(annexB(makeNal(1, 20))); // completes the first AU
+    // A later bare IDR (no SPS/PPS) — the persistent encoder's steady state.
+    writer.writeChunk(annexB(makeNal(5, 20)));
+    writer.writeChunk(annexB(makeNal(1, 20))); // completes the bare IDR AU
+    writer.flush();
+
+    const nalTypes = sink.packets.map(packet => packet.payload[0] & 0x1f);
+    // Two IDR (type 5) frames were written; each must be preceded by SPS(7)+PPS(8).
+    const idrIndices = nalTypes.flatMap((type, index) => (type === 5 ? [index] : []));
+    expect(idrIndices).toHaveLength(2);
+    for (const idrIndex of idrIndices) {
+      expect(nalTypes[idrIndex - 2]).toBe(7);
+      expect(nalTypes[idrIndex - 1]).toBe(8);
+    }
+  });
+
+  test("does not duplicate parameter sets an IDR access unit already carries", () => {
+    const sink = new RecordingSink();
+    const writer = new RtpH264TrackWriter({ sink, ssrc: 1 });
+    writer.writeChunk(annexB(makeNal(7, 4), makeNal(8, 4), makeNal(5, 20)));
+    writer.writeChunk(annexB(makeNal(1, 20)));
+    writer.flush();
+
+    const nalTypes = sink.packets.map(packet => packet.payload[0] & 0x1f);
+    // Exactly one SPS and one PPS — no injected duplicates.
+    expect(nalTypes.filter(type => type === 7)).toHaveLength(1);
+    expect(nalTypes.filter(type => type === 8)).toHaveLength(1);
+  });
+
   test("observes an SPS before packetizing its access unit", () => {
     const sink = new RecordingSink();
     const observed: Buffer[] = [];

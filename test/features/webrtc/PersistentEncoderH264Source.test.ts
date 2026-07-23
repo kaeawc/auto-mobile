@@ -46,8 +46,12 @@ class FakeProcess extends EventEmitter implements SpawnedProcess {
 
 class FakeSocket extends EventEmitter implements StreamSocket {
   destroyed = false;
+  readonly written: Buffer[] = [];
   destroy(): void {
     this.destroyed = true;
+  }
+  write(chunk: Buffer): void {
+    this.written.push(Buffer.from(chunk));
   }
   feed(chunk: Buffer): void {
     this.emit("data", chunk);
@@ -197,6 +201,19 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x67])]);
 
     await ctx.source.stop();
+  });
+
+  test("requestKeyFrame sends the request-keyframe command byte to the device", async () => {
+    const ctx = makeSource();
+    await startReady(ctx);
+
+    ctx.source.requestKeyFrame();
+    expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
+
+    await ctx.source.stop();
+    // After stop, no socket is available; the request is a safe no-op.
+    ctx.source.requestKeyFrame();
+    expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
   });
 
   test("passes --audio and routes muxed PCM audio packets separately from video", async () => {

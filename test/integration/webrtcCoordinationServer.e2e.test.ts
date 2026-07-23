@@ -361,6 +361,106 @@ describe("WebRTC coordination server e2e", () => {
   );
 
   test(
+    "a viewer joining mid-stream receives a gap-free sequence across the replay->live seam",
+    async () => {
+      // This is the regression guard for the render bug: a late viewer got a
+      // replayed cached keyframe (old publisher sequence numbers) followed by
+      // live RTP (current, much larger sequence numbers). The gap made libwebrtc
+      // treat the range as lost — an unanswerable NACK/PLI storm — so it never
+      // rendered. The server now rewrites each subscriber's sequence into one
+      // contiguous space; this test proves the seam is gap-free.
+      const http = new HttpCoordinationServer({ iceServers: [] });
+      const port = await http.listen(0, "127.0.0.1");
+      const base = `http://127.0.0.1:${port}`;
+      const publisher = new WebRtcPublisher({
+        streamId: "mid-join",
+        whipEndpoint: `${base}/whip?streamId=mid-join`,
+      });
+      const viewer = new RTCPeerConnection({ codecs: { video: [useH264()] } });
+      const received: RtpPacket[] = [];
+      viewer.onTrack.subscribe((track: MediaStreamTrack) => {
+        track.onReceiveRtp.subscribe((rtp: RtpPacket) => received.push(rtp));
+      });
+
+      const isIdr = (rtp: RtpPacket): boolean => {
+        const type = rtp.payload[0] & 0x1f;
+        return type === 5 || (type === 28 && (rtp.payload[1] & 0x1f) === 5);
+      };
+
+      try {
+        await publisher.start();
+        await waitFor(() => publisher.getState() === "connected", 8000);
+
+        // Frames flow BEFORE the viewer joins so the server caches an IDR. werift
+        // drops RTP written before its DTLS is fully connected, so keep feeding
+        // keyframes until the server actually reports forwarded frames.
+        let framesForwarded = 0;
+        for (let i = 0; i < 150 && framesForwarded < 3; i++) {
+          publisher.writeH264Chunk(keyframe());
+          publisher.writeH264Chunk(pFrame(0x40));
+          publisher.writeH264Chunk(pFrame(0x41)); // flush the IDR + P access units
+          await sleep(40);
+          const descriptor = (await (await fetch(`${base}/api/streams/mid-join`)).json()) as { framesForwarded: number };
+          framesForwarded = descriptor.framesForwarded;
+        }
+        expect(framesForwarded).toBeGreaterThanOrEqual(3);
+        // Advance the live sequence well past the cached IDR — the exact condition
+        // that produced the seam gap.
+        for (let i = 0; i < 40; i++) {
+          publisher.writeH264Chunk(pFrame(0x50 + (i % 32)));
+        }
+        publisher.writeH264Chunk(pFrame(0x71)); // flush the last access unit
+        await sleep(200);
+
+        // Viewer joins mid-stream.
+        viewer.addTransceiver("video", { direction: "recvonly" });
+        await viewer.setLocalDescription(await viewer.createOffer());
+        await waitForIce(viewer);
+        const response = await fetch(`${base}/whep/mid-join`, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: viewer.localDescription?.sdp ?? "",
+        });
+        expect(response.status).toBe(201);
+        await viewer.setRemoteDescription({ type: "answer", sdp: await response.text() });
+        await waitFor(() => viewer.connectionState === "connected", 8000);
+
+        // Let the cached keyframe replay, then keep live frames flowing.
+        await sleep(250);
+        for (let i = 0; i < 20; i++) {
+          publisher.writeH264Chunk(pFrame(0x80 + (i % 32)));
+          await sleep(10);
+        }
+        publisher.writeH264Chunk(pFrame(0x62)); // flush the last access unit
+
+        await waitFor(() => received.filter(rtp => rtp.header.marker).length >= 2, 5000);
+
+        // 1) Parameter sets precede the first IDR, so the viewer can initialize.
+        const firstSpsIndex = received.findIndex(rtp => (rtp.payload[0] & 0x1f) === 7);
+        const firstIdrIndex = received.findIndex(isIdr);
+        expect(firstSpsIndex).toBeGreaterThanOrEqual(0);
+        expect(firstIdrIndex).toBeGreaterThan(firstSpsIndex);
+
+        // 2) The received sequence numbers form one gap-free, duplicate-free range
+        //    across replay AND live — the property libwebrtc needs to keep decoding.
+        const sequences = received.map(rtp => rtp.header.sequenceNumber);
+        const min = Math.min(...sequences);
+        const max = Math.max(...sequences);
+        expect(max - min + 1).toBe(received.length); // no duplicates
+        expect(new Set(sequences).size).toBe(max - min + 1); // no gaps
+
+        // 3) Live frames continued after the replayed keyframe (not a single still).
+        expect(received.filter(rtp => rtp.header.marker).length).toBeGreaterThanOrEqual(2);
+      } finally {
+        await publisher.stop();
+        await viewer.close();
+        await http.close();
+      }
+    },
+    30000
+  );
+
+  test(
     "trickle ICE: publisher PATCHes candidates and frames still forward end-to-end",
     async () => {
       const http = new HttpCoordinationServer({ iceServers: [] });

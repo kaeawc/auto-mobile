@@ -44,7 +44,7 @@ class FakePeerConnection {
   iceGatheringStateChange = { watch: async () => {} };
   localDescription = { sdp: "v=0" };
   addTransceiver() {
-    return { sender: { ssrc: 1 } };
+    return { sender: { ssrc: 1, onPictureLossIndication: { subscribe: () => {} } } };
   }
   async createOffer() {
     return { type: "offer", sdp: "v=0" };

@@ -5,6 +5,10 @@ import {
   H264AccessUnitAssembler,
   H264AnnexBParser,
   isKeyFrameNal,
+  nalUnitType,
+  NAL_TYPE_IDR,
+  NAL_TYPE_PPS,
+  NAL_TYPE_SPS,
   packetizeAccessUnit,
 } from "./h264";
 
@@ -62,6 +66,8 @@ export class RtpH264TrackWriter {
   private framesWritten = 0;
   private packetsWritten = 0;
   private sawKeyFrame = false;
+  private cachedSps: Buffer | null = null;
+  private cachedPps: Buffer | null = null;
 
   constructor(options: RtpH264TrackWriterOptions) {
     this.sink = options.sink;
@@ -103,8 +109,16 @@ export class RtpH264TrackWriter {
   }
 
   private consumeNal(nal: Buffer): void {
-    if ((nal[0] & 0x1f) === 7) {
+    const type = nalUnitType(nal);
+    if (type === NAL_TYPE_SPS) {
+      // Cache the parameter sets so every later IDR can be made self-decodable
+      // even when the encoder emits them only once (the persistent on-device
+      // encoder does; screenrecord repeats them only at segment starts). Copy —
+      // the parser reuses its backing buffer.
+      this.cachedSps = Buffer.from(nal);
       this.onSps?.(nal);
+    } else if (type === NAL_TYPE_PPS) {
+      this.cachedPps = Buffer.from(nal);
     }
     if (isKeyFrameNal(nal)) {
       this.sawKeyFrame = true;
@@ -125,7 +139,7 @@ export class RtpH264TrackWriter {
 
   private writeAccessUnit(accessUnit: Buffer[], startMs: number): void {
     const timestamp = this.rtpTimestamp(startMs);
-    const units = packetizeAccessUnit(accessUnit, this.mtu);
+    const units = packetizeAccessUnit(this.withParameterSets(accessUnit), this.mtu);
     if (units.length === 0) {
       return;
     }
@@ -147,6 +161,29 @@ export class RtpH264TrackWriter {
     this.framesWritten++;
   }
 
+  /**
+   * Prepend cached SPS/PPS to an IDR access unit that lacks them, so every
+   * keyframe is a decoder-initialization point. A viewer that joins (or recovers
+   * from loss) mid-stream can then decode from the next IDR instead of waiting
+   * for the encoder to re-emit parameter sets — which the persistent encoder
+   * never does, and screenrecord does only every ~175s at a segment boundary.
+   * RFC 6184 §8.4 permits parameter sets to be repeated in-band before an IDR.
+   */
+  private withParameterSets(accessUnit: Buffer[]): Buffer[] {
+    const present = accessUnitNalPresence(accessUnit);
+    if (!present.hasIdr || (present.hasSps && present.hasPps)) {
+      return accessUnit;
+    }
+    const prefix: Buffer[] = [];
+    if (!present.hasSps && this.cachedSps) {
+      prefix.push(this.cachedSps);
+    }
+    if (!present.hasPps && this.cachedPps) {
+      prefix.push(this.cachedPps);
+    }
+    return prefix.length === 0 ? accessUnit : [...prefix, ...accessUnit];
+  }
+
   private rtpTimestamp(startMs: number): number {
     if (this.baseTimeMs === null) {
       this.baseTimeMs = startMs;
@@ -154,4 +191,26 @@ export class RtpH264TrackWriter {
     const elapsedMs = Math.max(0, startMs - this.baseTimeMs);
     return Math.round(elapsedMs * (H264_CLOCK_RATE / 1000)) >>> 0;
   }
+}
+
+/** Which of IDR / SPS / PPS an access unit already contains. */
+function accessUnitNalPresence(accessUnit: Buffer[]): {
+  hasIdr: boolean;
+  hasSps: boolean;
+  hasPps: boolean;
+} {
+  let hasIdr = false;
+  let hasSps = false;
+  let hasPps = false;
+  for (const nal of accessUnit) {
+    const type = nalUnitType(nal);
+    if (type === NAL_TYPE_IDR) {
+      hasIdr = true;
+    } else if (type === NAL_TYPE_SPS) {
+      hasSps = true;
+    } else if (type === NAL_TYPE_PPS) {
+      hasPps = true;
+    }
+  }
+  return { hasIdr, hasSps, hasPps };
 }

@@ -32,11 +32,16 @@ export function h264SpsLevelIdc(nal: Buffer): number | undefined {
 
 /** Whether a profile-level-id is compatible with AutoMobile constrained baseline. */
 export function isCompatibleConstrainedBaselineProfile(profileLevelId: string): boolean {
-  // RFC 6184 Table 5 defines constrained baseline as profile_idc 66 with
-  // constraint_set1_flag set and the lower four constraint bits clear. The
-  // other constraint flags may vary, so accept every valid representation.
+  // Accept the whole Baseline family (profile_idc 66 / 0x42), regardless of the
+  // constraint flags. Constrained Baseline (constraint_set1_flag set) is a subset
+  // of Baseline and decodes identically for a screen-capture stream; the earlier
+  // `(iop & 0x4f) === 0x40` check rejected the plain-Baseline SPS that Android
+  // device encoders routinely emit (`42 80 xx`, constraint_set0 only, or
+  // `42 00 xx`). Because reconnecting cannot change a fixed-profile encoder, that
+  // rejection turned into an endless reconnect loop that never rendered a frame.
+  // Non-Baseline profiles (Main 0x4d, High 0x64) are still rejected — those
+  // genuinely differ and are handled by the caller.
   // https://www.rfc-editor.org/rfc/rfc6184.html#section-8.2.2
   const profileIdc = Number.parseInt(profileLevelId.slice(0, 2), 16);
-  const profileIop = Number.parseInt(profileLevelId.slice(2, 4), 16);
-  return profileIdc === 0x42 && (profileIop & 0x4f) === 0x40;
+  return profileIdc === 0x42;
 }

@@ -110,11 +110,13 @@ Then per-packet: pts_flags (8) + size (4) + H.264 data
 
 **iOS (Raw BGRA):**
 ```
-┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
-│ width (4)       │ height (4)      │ bytesPerRow (4) │ timestamp (4)   │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
+┌──────────┬─────────────┬──────────┬───────────┬─────────────┬───────────┐
+│ magic(4) │ checksum(4) │ width(4) │ height(4) │ bytesPerRow │ timestamp │
+└──────────┴─────────────┴──────────┴───────────┴─────────────┴───────────┘
 Then: height * bytesPerRow bytes of BGRA pixel data
 ```
+`magic` ("AMF1") + CRC-32 `checksum` over the field bytes make frame boundaries
+self-describing, so corruption recovery is deterministic (issue #4270).
 
 ### Stream Control
 

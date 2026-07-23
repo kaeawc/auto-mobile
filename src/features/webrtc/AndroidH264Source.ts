@@ -19,6 +19,13 @@ export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
  */
 export const ANDROID_STREAM_SEGMENT_ROTATE_MS = (ANDROID_SCREENRECORD_MAX_SECONDS - 5) * 1000;
 const DEFAULT_SCREENRECORD_SIZE = { width: 1280, height: 720 };
+/**
+ * Minimum spacing between keyframe-driven forced segment rotations. screenrecord
+ * has no way to request an IDR mid-stream, so a keyframe request restarts the
+ * segment (which re-emits SPS/PPS + IDR). That is disruptive, so a burst of
+ * viewer PLIs collapses to at most one forced rotation per this interval.
+ */
+export const ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS = 3000;
 
 export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
   adbFactory?: AdbClientFactory;
@@ -49,6 +56,7 @@ export class AndroidH264Source implements H264CaptureSource {
   private running = false;
   private segmentCount = 0;
   private resolvedSize: { width: number; height: number } | null = null;
+  private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
 
   constructor(options: AndroidH264SourceOptions) {
     this.options = options;
@@ -97,6 +105,26 @@ export class AndroidH264Source implements H264CaptureSource {
     // device-wide `pkill screenrecord` (unlike the file-recording backend): it
     // would also kill a concurrent `videoRecording` on the same device. Since a
     // live stream writes no file, there is no moov atom to flush cleanly.
+    process.kill("SIGINT");
+  }
+
+  /**
+   * Serve a downstream keyframe request. screenrecord cannot be signalled to
+   * emit an IDR mid-stream, so rotate the segment — restarting it re-emits
+   * SPS/PPS + IDR. Throttled, and a no-op when not actively streaming.
+   */
+  requestKeyFrame(): void {
+    const process = this.current;
+    if (!this.running || !process) {
+      return;
+    }
+    const now = this.timer.now();
+    if (now - this.lastForcedKeyFrameMs < ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS) {
+      return;
+    }
+    this.lastForcedKeyFrameMs = now;
+    logger.info(`[AndroidH264Source] keyframe requested; rotating segment ${this.segmentCount} to emit a fresh IDR`);
+    // Terminating triggers the exit handler, which starts the next segment.
     process.kill("SIGINT");
   }
 

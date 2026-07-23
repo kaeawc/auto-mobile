@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import {
-  FRAME_HEADER_SIZE,
+  encodeFrameHeader,
   IOSScreenCaptureHelper,
   type CaptureTarget,
   type DecodedFrame,
@@ -16,20 +16,12 @@ function encodeFrame(
   timestampMs: number,
   fill: number
 ): Buffer {
-  const header = Buffer.alloc(FRAME_HEADER_SIZE);
-  header.writeUInt32LE(width, 0);
-  header.writeUInt32LE(height, 4);
-  header.writeUInt32LE(bytesPerRow, 8);
-  header.writeUInt32LE(timestampMs, 12);
+  const header = encodeFrameHeader({ width, height, bytesPerRow, timestampMs });
   return Buffer.concat([header, Buffer.alloc(height * bytesPerRow, fill)]);
 }
 
 function encodeAudio(pcm16le: Buffer): Buffer {
-  const header = Buffer.alloc(FRAME_HEADER_SIZE);
-  header.writeUInt32LE(0, 0);
-  header.writeUInt32LE(8_000, 4);
-  header.writeUInt32LE(1, 8);
-  header.writeUInt32LE(pcm16le.length, 12);
+  const header = encodeFrameHeader({ width: 0, height: 8_000, bytesPerRow: 1, timestampMs: pcm16le.length });
   return Buffer.concat([header, pcm16le]);
 }
 
@@ -170,11 +162,8 @@ describe("IOSScreenCaptureHelper", () => {
     helper.on("malformed", e => malformed.push(e));
     helper.start();
 
-    const badHeader = Buffer.alloc(FRAME_HEADER_SIZE);
-    badHeader.writeUInt32LE(0, 0);
-    badHeader.writeUInt32LE(1, 4);
-    badHeader.writeUInt32LE(4, 8);
-    badHeader.writeUInt32LE(0, 12);
+    // Valid marker + checksum, but a zero-width frame is implausible.
+    const badHeader = encodeFrameHeader({ width: 0, height: 1, bytesPerRow: 4, timestampMs: 0 });
     fake.stdout.push(badHeader);
     await flush();
 

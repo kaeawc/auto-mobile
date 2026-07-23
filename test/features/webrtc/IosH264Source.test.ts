@@ -318,6 +318,12 @@ describe("IosH264Source", () => {
     expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 15 }]);
     expect(encoderSpawns[0].args).toContain("-r");
     expect(encoderSpawns[0].args).toContain("15");
+    // Bounded GOP so a late/recovering WHEP viewer decodes within ~2s: at 15fps
+    // that is a keyframe every 30 frames. ffmpeg can't be signalled mid-pipe.
+    const gopIndex = encoderSpawns[0].args.indexOf("-g");
+    expect(gopIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[gopIndex + 1]).toBe("30");
+    expect(encoderSpawns[0].args).toContain("-forced-idr");
   });
 
   test("passes bitrate and output size overrides to ffmpeg", async () => {

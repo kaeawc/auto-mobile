@@ -1,5 +1,10 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { DaemonOptions } from "../../src/daemon/types";
+import {
+  runCliCommand,
+  setDaemonProxyFactoryForTesting,
+  resetDaemonProxyFactoryForTesting,
+} from "../../src/cli";
 
 /**
  * Regression test for issue #4247: the CLI parses `--embedded-sdk` and
@@ -7,34 +12,31 @@ import type { DaemonOptions } from "../../src/daemon/types";
  * `--cli` starts or reuses, so SDK- and network-gated tools were unreachable.
  *
  * `runCliCommand` routes tool execution through `DaemonMcpProxy`, constructing it
- * with the `daemonOptions` it receives. This test replaces the proxy with a fake
- * that records the options it is constructed with, then asserts both flags are
- * forwarded end to end from `runCliCommand` — no real daemon involved.
+ * with the `daemonOptions` it receives. This test injects a fake proxy via the
+ * `setDaemonProxyFactoryForTesting` seam — deliberately NOT `mock.module`, which
+ * is global in Bun and would replace the real DaemonMcpProxy module for every
+ * other suite in the run (breaking daemonMcpProxy.test.ts's import of the real
+ * error classes). The fake records the options it is constructed with, then the
+ * test asserts both flags are forwarded end to end.
  */
 describe("runCliCommand daemon-option threading (issue #4247)", () => {
   const constructedWith: Array<DaemonOptions | undefined> = [];
 
   afterEach(() => {
     constructedWith.length = 0;
-    mock.restore();
+    resetDaemonProxyFactoryForTesting();
   });
 
   test("forwards embeddedSdk and networkMockable into the DaemonMcpProxy", async () => {
-    mock.module("../../src/daemon/daemonMcpProxy", () => ({
-      DaemonMcpProxy: class {
-        constructor(config: { daemonOptions?: DaemonOptions }) {
-          constructedWith.push(config.daemonOptions);
-        }
-        async callTool(): Promise<any> {
-          return { success: true };
-        }
-        async close(): Promise<void> {
+    setDaemonProxyFactoryForTesting((config): any => {
+      constructedWith.push(config.daemonOptions);
+      return {
+        callTool: async (): Promise<any> => ({ success: true }),
+        close: async (): Promise<void> => {
           // no-op fake
-        }
-      },
-    }));
-
-    const { runCliCommand } = await import("../../src/cli");
+        },
+      };
+    });
 
     await runCliCommand(["listApps", "--platform", "android"], {
       safeAreaWarnings: false,

@@ -35,6 +35,11 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
     containerized or firewalled deployment that exposes only `8889` gets WHIP/WHEP
     setup failures or black video. Map/open `8189/udp` too, or configure a
     TURN/TCP-only path.
+  - **Auth:** the stock config is **localhost-only** — its active `authInternalUsers`
+    entry admits `127.0.0.1`/`::1`, so a CI worker publishing from *another host*
+    gets `401` until you enable the config's commented tokened `authInternalUsers`
+    block. Then set `AUTOMOBILE_WEBRTC_WHIP_TOKEN` to that user's `<user>:<pass>`
+    (MediaMTX reads internal credentials from `Authorization: Bearer <user>:<pass>`).
 
 ## 1. Point the worker at your WHIP server
 
@@ -52,7 +57,7 @@ shape](#typical-ci-shape) for deriving both from `$CI_JOB_ID`):
 ```bash
 export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx.example.com:8889/ci-run-42/whip"
 # Optional:
-export AUTOMOBILE_WEBRTC_WHIP_TOKEN="<bearer token, if the server requires one>"
+export AUTOMOBILE_WEBRTC_WHIP_TOKEN="<user>:<pass>"  # for cross-host MediaMTX; matches the tokened authInternalUsers block
 export AUTOMOBILE_WEBRTC_ICE_SERVERS="stun:stun.l.google.com:19302"
 # Optional tuning:
 export AUTOMOBILE_WEBRTC_BITRATE_KBPS="4000"
@@ -155,7 +160,7 @@ Simulator windows.
 |---------|--------------------|
 | `No WHIP endpoint configured` | Set `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` or pass `whipEndpoint`. |
 | `No connected android devices found` | Emulator/device not booted, or pass the right `deviceId`. |
-| `WHIP ingest failed: … 401` | The WHIP server requires a token — set `AUTOMOBILE_WEBRTC_WHIP_TOKEN` (for MediaMTX, matching the `authInternalUsers` publish password). |
+| `WHIP ingest failed: … 401` | The WHIP server requires auth, or you're publishing cross-host against the localhost-only stock config. Enable the tokened `authInternalUsers` block and set `AUTOMOBILE_WEBRTC_WHIP_TOKEN` to that user's `<user>:<pass>`. |
 | Stream shows `connected` but the browser video is black | ICE could not traverse NAT — add a TURN server. |
 | Brief hitch every ~3 minutes | Expected `screenrecord` segment rotation (180 s cap). Build/provide `automobile-video.jar` to use the persistent encoder. |
 | Audio-enabled stream fails to start | The persistent `video-server` jar is missing, or the device build does not allow shell `REMOTE_SUBMIX` capture. Disable audio or use a compatible Android image. |

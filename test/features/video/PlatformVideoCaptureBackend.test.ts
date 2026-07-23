@@ -17,6 +17,26 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   let backend: PlatformVideoCaptureBackend;
   let tempDir: string;
 
+  test("gives iOS FFmpeg scaling a bounded media-processing timeout", async () => {
+    let request: { timeoutMs?: number } | undefined;
+    const ffmpegClient = {
+      run: async (value: { timeoutMs?: number }) => {
+        request = value;
+        return { stdout: "", stderr: "", exitCode: 0, signal: null };
+      },
+    };
+    const backend = new PlatformVideoCaptureBackend(
+      undefined,
+      undefined,
+      undefined,
+      ffmpegClient as any,
+    );
+
+    await (backend as any).scaleWithFfmpeg("/tmp/input.mov", "/tmp/output.mp4", { width: 1280, height: 720 });
+
+    expect(request?.timeoutMs).toBeGreaterThan(5_000);
+  });
+
   beforeEach(async () => {
     backend = new PlatformVideoCaptureBackend();
     tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-test-"));

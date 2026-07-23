@@ -1,4 +1,3 @@
-import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
@@ -16,6 +15,12 @@ import type {
 } from "../screen-stream";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../utils/logger";
+import {
+  DefaultFfmpegClient,
+  resolveFfmpegBinary,
+  type FfmpegClient,
+  type FfmpegProcess,
+} from "../../utils/media/FfmpegClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 
@@ -68,6 +73,21 @@ interface CommandResult {
 
 type CommandRunner = (command: string, args: string[]) => Promise<CommandResult>;
 
+const defaultCommandRunner: CommandRunner = (command, args) =>
+  new Promise((resolve, reject) => {
+    const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", chunk => {
+      stdout += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    });
+    child.stderr.on("data", chunk => {
+      stderr += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    });
+    child.once("error", error => reject(error));
+    child.once("exit", (exitCode, signal) => resolve({ stdout, stderr, exitCode, signal }));
+  });
+
 export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   helperPath?: string;
   ffmpegPath?: string;
@@ -76,6 +96,7 @@ export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   spawner?: IosH264EncoderSpawner;
   simulatorWindowResolver?: IosSimulatorWindowResolver;
   commandRunner?: CommandRunner;
+  ffmpegClient?: FfmpegClient;
   helperPathExists?: (candidate: string) => boolean;
   timer?: Timer;
   firstFrameTimeoutMs?: number;
@@ -95,33 +116,12 @@ interface EncoderSize {
 
 type IosH264SourcePhase = "idle" | "starting" | "running" | "stopping";
 
-const defaultEncoderSpawner: IosH264EncoderSpawner = (command, args) => {
-  const child = nodeSpawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
-  // eslint-disable-next-line auto-mobile/no-unknown-cast -- node's ChildProcessByStdio has the stdin/stdout/stderr members this source requires; the stricter local interface keeps tests injectable.
-  return child as unknown as IosH264EncoderProcess;
-};
-
-const defaultCommandRunner: CommandRunner = (command, args) =>
-  new Promise((resolve, reject) => {
-    const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", chunk => {
-      stdout += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-    });
-    child.stderr.on("data", chunk => {
-      stderr += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-    });
-    child.once("error", error => reject(error));
-    child.once("exit", (exitCode, signal) => resolve({ stdout, stderr, exitCode, signal }));
-  });
-
 export class IosH264Source implements H264CaptureSource {
   private readonly helperPath?: string;
   private readonly ffmpegPath: string;
   private readonly fps: number;
   private readonly createHelper: IosFrameCaptureHelperFactory;
-  private readonly spawner: IosH264EncoderSpawner;
+  private readonly ffmpegClient: FfmpegClient;
   private readonly simulatorWindowResolver: IosSimulatorWindowResolver;
   private readonly commandRunner: CommandRunner;
   private readonly helperPathExists?: (candidate: string) => boolean;
@@ -141,12 +141,21 @@ export class IosH264Source implements H264CaptureSource {
   constructor(private readonly options: IosH264SourceOptions) {
     this.helperPath = options.helperPath;
     this.ffmpegPath =
-      options.ffmpegPath ??
-      readEnvWithLegacy(process.env, IOS_WEBRTC_FFMPEG_ENV, IOS_WEBRTC_FFMPEG_ENV_ALIAS) ??
-      "ffmpeg";
+      resolveFfmpegBinary({
+        explicitPath: options.ffmpegPath,
+        environmentKeys: [IOS_WEBRTC_FFMPEG_ENV, IOS_WEBRTC_FFMPEG_ENV_ALIAS],
+      });
     this.fps = options.fps ?? DEFAULT_IOS_WEBRTC_FPS;
     this.createHelper = options.createHelper ?? (helperOptions => new IOSScreenCaptureHelper(helperOptions));
-    this.spawner = options.spawner ?? defaultEncoderSpawner;
+    this.ffmpegClient = options.ffmpegClient ?? new DefaultFfmpegClient({
+      binaryPath: this.ffmpegPath,
+      spawn: options.spawner
+        ? (binaryPath, args) => {
+          // eslint-disable-next-line auto-mobile/no-unknown-cast -- The injected test spawner implements the process members FfmpegClient consumes.
+          return options.spawner!(binaryPath, args) as unknown as FfmpegProcess;
+        }
+        : undefined,
+    });
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     this.helperPathExists = options.helperPathExists;
     this.timer = options.timer ?? defaultTimer;
@@ -168,7 +177,7 @@ export class IosH264Source implements H264CaptureSource {
       const helperPath = resolveIosScreenCaptureHelperPath(this.helperPath, {
         exists: this.helperPathExists,
       });
-      await validateFfmpegAvailability(this.ffmpegPath, this.commandRunner);
+      await validateFfmpegAvailability(this.ffmpegClient, this.ffmpegPath, this.options.commandRunner);
       const target = await this.resolveCaptureTarget(helperPath);
       if (!this.isActive()) {
         return;
@@ -375,7 +384,15 @@ export class IosH264Source implements H264CaptureSource {
   private startEncoder(size: EncoderSize): void {
     const args = this.buildFfmpegArgs(size);
     logger.info(`[IosH264Source] starting ffmpeg encoder: ${this.ffmpegPath} ${args.join(" ")}`);
-    const encoder = this.spawner(this.ffmpegPath, args);
+    const { process } = this.ffmpegClient.start({
+      args,
+      context: "iOS WebRTC H.264 encoder",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    // The argv above requests piped stdin/stdout/stderr; narrow the generic
+    // client process surface to the encoder contract used by this source.
+    // eslint-disable-next-line auto-mobile/no-unknown-cast -- The piped-stdio contract supplies every encoder process member used below.
+    const encoder = process as unknown as IosH264EncoderProcess;
     this.encoder = encoder;
     this.encoderSize = size;
     this.encoderBackpressured = false;
@@ -614,8 +631,33 @@ function uniquePaths(paths: string[]): string[] {
 }
 
 async function validateFfmpegAvailability(
+  ffmpegClient: FfmpegClient,
   ffmpegPath: string,
-  commandRunner: CommandRunner
+  testCommandRunner?: CommandRunner,
+): Promise<void> {
+  // `commandRunner` is a long-standing test seam. Production probes must stay
+  // behind FfmpegClient, while injected fakes can retain their narrow runner.
+  if (testCommandRunner) {
+    return validateFfmpegAvailabilityWithRunner(ffmpegPath, testCommandRunner);
+  }
+  try {
+    await ffmpegClient.probe({ requiredEncoders: ["h264_videotoolbox"] });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("missing required encoder")) {
+      throw new ActionableError(
+        "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder."
+      );
+    }
+    throw new ActionableError(
+      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${message}`
+    );
+  }
+}
+
+async function validateFfmpegAvailabilityWithRunner(
+  ffmpegPath: string,
+  commandRunner: CommandRunner,
 ): Promise<void> {
   let version: CommandResult;
   try {
@@ -680,3 +722,4 @@ async function defaultResolveSimulatorWindowId(
     `Multiple iOS Simulator windows matched ${device.name}; close extras or use a more specific device.`
   );
 }
+import { spawn as nodeSpawn } from "node:child_process";

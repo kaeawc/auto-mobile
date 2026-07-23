@@ -10,6 +10,12 @@ export interface H264CaptureSourceOptions {
   onError?: (error: Error) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  /**
+   * Capture frame rate requested from the source. Only the iOS Simulator source
+   * honours it — Android and physical-iOS capture at their own device rate — so
+   * it carries `WebRtcStreamingConfig.iosSimulatorFps`.
+   */
+  fps?: number;
   audioEnabled?: boolean;
 }
 

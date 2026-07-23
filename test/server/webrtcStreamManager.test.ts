@@ -463,6 +463,29 @@ describe("webrtcStreamManager", () => {
     expect(publishers[0].pcmAudioChunks).toEqual([Buffer.from([1, 2, 3, 4])]);
   });
 
+  test("threads the resolved iOS Simulator fps into the capture source options", async () => {
+    let capturedSourceOptions:
+      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | undefined;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: options => {
+        capturedSourceOptions = options;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-23T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT, iosSimulatorFps: 24 },
+    });
+
+    expect(capturedSourceOptions?.fps).toBe(24);
+  });
+
   test("rejects audio stream start when the initial async source start fails", async () => {
     const publishers: AsyncConnectedPublisher[] = [];
     const sources: FakeSource[] = [];

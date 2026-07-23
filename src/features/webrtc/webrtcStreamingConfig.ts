@@ -1,6 +1,26 @@
 import { ActionableError } from "../../models";
 import type { RTCIceServer } from "werift";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
+import { SIMULATOR_FPS_MAX, SIMULATOR_FPS_MIN } from "../screen-stream/IOSScreenCaptureHelper";
+
+/**
+ * Safe range for the iOS Simulator WebRTC capture rate. These mirror the
+ * screen-capture helper's own bounds so a configured value can never be
+ * rejected downstream by the helper's argv validation.
+ */
+export const WEBRTC_IOS_SIMULATOR_FPS_MIN = SIMULATOR_FPS_MIN;
+export const WEBRTC_IOS_SIMULATOR_FPS_MAX = SIMULATOR_FPS_MAX;
+/**
+ * Conservative default for an interactive WebRTC feed, deliberately separate
+ * from `SIMULATOR_FPS_DEFAULT` (which is tuned for one-shot MCP observation,
+ * where 5 fps is plenty). 15 fps is smooth enough to follow a gesture or an
+ * animation while leaving headroom on a hosted macOS runner, where the Simulator
+ * processes and VideoToolbox share one CPU/encoder budget and `-allow_sw` may
+ * put the encoder in software. 30/60 leaves no such margin. Raise it per-worker
+ * with `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` once the hosted-lane decode and
+ * first-frame timings show the host can afford it.
+ */
+export const WEBRTC_IOS_SIMULATOR_FPS_DEFAULT = 15;
 
 /**
  * WebRTC streaming configuration. On a CI worker this is typically supplied
@@ -19,6 +39,12 @@ export interface WebRtcStreamingConfig {
   /** Optional capture downscale. */
   size?: { width: number; height: number };
   /**
+   * Frame rate requested from the iOS Simulator screen-capture helper, in
+   * `[WEBRTC_IOS_SIMULATOR_FPS_MIN, WEBRTC_IOS_SIMULATOR_FPS_MAX]`. Ignored by
+   * Android and physical-iOS sources, which capture at their own device rate.
+   */
+  iosSimulatorFps: number;
+  /**
    * Use trickle ICE: publish the WHIP offer immediately and send local
    * candidates incrementally (HTTP PATCH) instead of blocking on ICE gathering.
    * Opt-in — the ingest server must support the WHIP PATCH trickle extension.
@@ -34,6 +60,7 @@ export interface WebRtcStreamingOverrides {
   iceServers?: RTCIceServer[];
   bitrateKbps?: number;
   size?: { width: number; height: number };
+  iosSimulatorFps?: number;
   trickleIce?: boolean;
   audioEnabled?: boolean;
 }
@@ -45,6 +72,7 @@ export const WEBRTC_ENV = {
   ICE_SERVERS: "AUTOMOBILE_WEBRTC_ICE_SERVERS",
   BITRATE_KBPS: "AUTOMOBILE_WEBRTC_BITRATE_KBPS",
   MAX_SIZE: "AUTOMOBILE_WEBRTC_MAX_SIZE",
+  IOS_SIMULATOR_FPS: "AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS",
   TRICKLE_ICE: "AUTOMOBILE_WEBRTC_TRICKLE_ICE",
   AUDIO: "AUTOMOBILE_WEBRTC_AUDIO",
 } as const;
@@ -154,6 +182,9 @@ export function resolveWebRtcStreamingConfig(
   const size = overrides.size === undefined
     ? parseSize(env[WEBRTC_ENV.MAX_SIZE])
     : validateSize(overrides.size);
+  const iosSimulatorFps = overrides.iosSimulatorFps === undefined
+    ? parseIosSimulatorFps(env[WEBRTC_ENV.IOS_SIMULATOR_FPS]) ?? WEBRTC_IOS_SIMULATOR_FPS_DEFAULT
+    : validateIosSimulatorFps(overrides.iosSimulatorFps);
   const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
   const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
 
@@ -163,9 +194,30 @@ export function resolveWebRtcStreamingConfig(
     iceServers,
     bitrateKbps,
     size,
+    iosSimulatorFps,
     trickleIce,
     audioEnabled,
   };
+}
+
+function parseIosSimulatorFps(raw: string | undefined): number | undefined {
+  if (!raw || !raw.trim()) {
+    return undefined;
+  }
+  return validateIosSimulatorFps(Number(raw.trim()), raw.trim());
+}
+
+function validateIosSimulatorFps(value: number, raw: string = String(value)): number {
+  if (
+    !Number.isInteger(value) ||
+    value < WEBRTC_IOS_SIMULATOR_FPS_MIN ||
+    value > WEBRTC_IOS_SIMULATOR_FPS_MAX
+  ) {
+    throw new ActionableError(
+      `Invalid iOS Simulator capture fps "${raw}"; expected an integer in [${WEBRTC_IOS_SIMULATOR_FPS_MIN}, ${WEBRTC_IOS_SIMULATOR_FPS_MAX}].`
+    );
+  }
+  return value;
 }
 
 function validateBitrate(value: number): number {

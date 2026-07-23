@@ -2,10 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { ActionableError, type BootedDevice } from "../../models";
-import {
-  IOSScreenCaptureHelper,
-  SIMULATOR_FPS_DEFAULT,
-} from "../screen-stream/IOSScreenCaptureHelper";
+import { IOSScreenCaptureHelper } from "../screen-stream/IOSScreenCaptureHelper";
 import type {
   CaptureTarget,
   DecodedAudio,
@@ -23,16 +20,22 @@ import {
 } from "../../utils/media/FfmpegClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
+import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
+import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 
 export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
 export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER";
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
-const DEFAULT_IOS_WEBRTC_FPS = SIMULATOR_FPS_DEFAULT;
+const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 /** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
 const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
+/** H.264 macroblock edge, in pixels. */
+const H264_MACROBLOCK_SIZE = 16;
+/** Smallest dimension ffmpeg can encode as 4:2:0 chroma-subsampled video. */
+const MIN_ENCODER_DIMENSION = 2;
 
 export interface IosFrameCaptureHelper {
   start(): void;
@@ -91,7 +94,6 @@ const defaultCommandRunner: CommandRunner = (command, args) =>
 export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   helperPath?: string;
   ffmpegPath?: string;
-  fps?: number;
   createHelper?: IosFrameCaptureHelperFactory;
   spawner?: IosH264EncoderSpawner;
   simulatorWindowResolver?: IosSimulatorWindowResolver;
@@ -109,7 +111,7 @@ interface SimulatorWindowInfo {
   bundleIdentifier?: string;
 }
 
-interface EncoderSize {
+export interface EncoderSize {
   width: number;
   height: number;
 }
@@ -465,13 +467,12 @@ export class IosH264Source implements H264CaptureSource {
       "-i",
       "pipe:0",
     ];
-    if (this.options.size) {
-      args.push("-vf", `scale=${this.options.size.width}:${this.options.size.height}`);
-    } else {
-      // Keep an unconstrained macOS capture inside the Level 4.2 capability
-      // advertised in the WHIP SDP. Explicit sizes are validated before source
-      // creation by webrtcStreamingConfig.
-      args.push("-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2");
+    // Explicit sizes are validated before source creation by
+    // webrtcStreamingConfig; otherwise keep the capture native unless it has to
+    // shrink to stay inside the Level 4.2 capability advertised in the WHIP SDP.
+    const scale = this.options.size ?? resolveIosEncoderScale(size);
+    if (scale) {
+      args.push("-vf", `scale=${scale.width}:${scale.height}`);
     }
     args.push(
       "-an",
@@ -556,8 +557,58 @@ export class IosH264Source implements H264CaptureSource {
 
 function describeCaptureTarget(target: CaptureTarget): string {
   return target.kind === "simulator"
-    ? `iOS Simulator window ${target.windowID} at ${target.fps ?? SIMULATOR_FPS_DEFAULT} fps`
+    ? `iOS Simulator window ${target.windowID} at ${target.fps ?? DEFAULT_IOS_WEBRTC_FPS} fps`
     : `iOS device ${target.deviceId ?? "default"}`;
+}
+
+function evenFloor(value: number): number {
+  return Math.max(MIN_ENCODER_DIMENSION, Math.floor(value / 2) * 2);
+}
+
+/**
+ * Resolve the ffmpeg output size for a captured frame, or `null` when the frame
+ * can be encoded at its native size.
+ *
+ * A Simulator window is routinely far smaller than 1920x1080, so scaling every
+ * capture toward that box spent encoder time inventing pixels the WHEP viewer
+ * gained no detail from. Instead this only ever scales *down*: native dimensions
+ * are kept whenever they are even and already inside the Level 4.2 macroblock
+ * budget advertised in the WHIP SDP, odd dimensions round down to even (ffmpeg's
+ * 4:2:0 chroma subsampling cannot encode an odd edge), and an oversized capture
+ * shrinks just far enough to fit the budget with its aspect ratio intact.
+ */
+export function resolveIosEncoderScale(size: EncoderSize): EncoderSize | null {
+  const { width, height } = size;
+  if (h264MacroblocksPerFrame(width, height) <= WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME) {
+    const even = { width: evenFloor(width), height: evenFloor(height) };
+    return even.width === width && even.height === height ? null : even;
+  }
+
+  // Shrink the macroblock grid rather than the pixel dimensions: flooring both
+  // axes of an area-preserving scale keeps `columns * rows` inside the budget by
+  // construction, so no iterative search (and no risk of overshoot) is needed.
+  const columns = Math.ceil(width / H264_MACROBLOCK_SIZE);
+  const rows = Math.ceil(height / H264_MACROBLOCK_SIZE);
+  const factor = Math.sqrt(WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME / (columns * rows));
+  const targetRows = clampMacroblockAxis(Math.floor(rows * factor));
+  const targetColumns = clampMacroblockAxis(
+    // An extreme aspect ratio can floor one axis to the 1-macroblock clamp, which
+    // would otherwise let the product escape the budget; re-cap the other axis.
+    Math.min(
+      Math.floor(columns * factor),
+      Math.floor(WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME / targetRows)
+    )
+  );
+
+  const scale = Math.min(
+    (targetColumns * H264_MACROBLOCK_SIZE) / width,
+    (targetRows * H264_MACROBLOCK_SIZE) / height
+  );
+  return { width: evenFloor(width * scale), height: evenFloor(height * scale) };
+}
+
+function clampMacroblockAxis(value: number): number {
+  return Math.min(WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME, Math.max(1, value));
 }
 
 function makeNoFramesError(target: CaptureTarget): ActionableError {

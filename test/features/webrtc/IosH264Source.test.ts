@@ -12,9 +12,15 @@ import {
   IOS_WEBRTC_FFMPEG_ENV,
   IOS_WEBRTC_FFMPEG_ENV_ALIAS,
   IosH264Source,
+  resolveIosEncoderScale,
   resolveIosScreenCaptureHelperPath,
   type IosFrameCaptureHelper,
 } from "../../../src/features/webrtc/IosH264Source";
+import {
+  WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
+  h264MacroblocksPerFrame,
+} from "../../../src/features/webrtc/h264Level";
+import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../../src/features/webrtc/webrtcStreamingConfig";
 import type { CaptureTarget, DecodedFrame } from "../../../src/features/screen-stream";
 
 const IOS_DEVICE: BootedDevice = {
@@ -195,22 +201,65 @@ describe("IosH264Source", () => {
   test("captures a physical device, encodes BGRA frames, and forwards Annex-B output", async () => {
     const { source, helper, encoder, helperTargets, encoderSpawns, chunks } = createHarness();
 
-    await startWithFrame(source, helper, frame(2, 1, 0x44));
+    await startWithFrame(source, helper, frame(2, 2, 0x44));
     encoder.stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
     await flush();
 
     expect(helper.started).toBe(true);
     expect(helperTargets).toEqual([{ kind: "device", deviceId: IOS_DEVICE.deviceId }]);
     expect(encoderSpawns[0].command).toBe("ffmpeg");
-    expect(encoderSpawns[0].args).toContain("2x1");
+    expect(encoderSpawns[0].args).toContain("2x2");
     expect(encoderSpawns[0].args).toContain("-level:v");
     expect(encoderSpawns[0].args).toContain("4.2");
     const allowSoftwareIndex = encoderSpawns[0].args.indexOf("-allow_sw");
     expect(allowSoftwareIndex).toBeGreaterThanOrEqual(0);
     expect(encoderSpawns[0].args[allowSoftwareIndex + 1]).toBe("1");
-    expect(encoderSpawns[0].args).toContain("scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2");
-    expect(encoder.getStdinData()).toEqual(Buffer.alloc(8, 0x44));
+    expect(encoder.getStdinData()).toEqual(Buffer.alloc(16, 0x44));
     expect(chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x65])]);
+  });
+
+  test("encodes a Simulator-sized capture natively instead of upscaling toward 1920x1080", async () => {
+    const { source, helper, encoderSpawns } = createHarness(IOS_SIMULATOR);
+
+    await startWithFrame(source, helper, frame(750, 1334, 0x11));
+
+    expect(encoderSpawns[0].args).toContain("750x1334");
+    // No scale filter at all: the frame is already even and inside the Level 4.2
+    // macroblock budget, so upscaling would only cost encoder time.
+    expect(encoderSpawns[0].args).not.toContain("-vf");
+    expect(encoderSpawns[0].args.some(arg => arg.startsWith("scale="))).toBe(false);
+  });
+
+  test("downscales an oversized capture into the Level 4.2 macroblock budget", async () => {
+    const { source, helper, encoderSpawns } = createHarness(IOS_SIMULATOR);
+
+    await startWithFrame(source, helper, frame(3840, 2160, 0x11));
+
+    const filterIndex = encoderSpawns[0].args.indexOf("-vf");
+    expect(filterIndex).toBeGreaterThanOrEqual(0);
+    const filter = encoderSpawns[0].args[filterIndex + 1];
+    const match = /^scale=(\d+):(\d+)$/.exec(filter);
+    expect(match).not.toBeNull();
+    const width = Number(match![1]);
+    const height = Number(match![2]);
+    expect(width).toBeLessThan(3840);
+    expect(height).toBeLessThan(2160);
+    expect(width % 2).toBe(0);
+    expect(height % 2).toBe(0);
+    expect(h264MacroblocksPerFrame(width, height)).toBeLessThanOrEqual(
+      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+    );
+    // 16:9 in, 16:9 out (within one even-pixel rounding step).
+    expect(Math.abs(width / height - 3840 / 2160)).toBeLessThan(0.02);
+  });
+
+  test("rounds an odd capture down to even dimensions ffmpeg can encode", async () => {
+    const { source, helper, encoderSpawns } = createHarness(IOS_SIMULATOR);
+
+    await startWithFrame(source, helper, frame(801, 601, 0x11));
+
+    expect(encoderSpawns[0].args).toContain("-vf");
+    expect(encoderSpawns[0].args).toContain("scale=800:600");
   });
 
   test("resolves simulator window ids before starting simulator capture", async () => {
@@ -218,7 +267,9 @@ describe("IosH264Source", () => {
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
 
-    expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 5 }]);
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
   });
 
   test("requests simulator audio and forwards its PCM16LE chunks unchanged", async () => {
@@ -234,7 +285,9 @@ describe("IosH264Source", () => {
     helper.emit("audio", { pcm16le: Buffer.from([0x34, 0x12]) });
     await started;
 
-    expect(helperTargets).toEqual([{ kind: "simulator", windowID: 42, fps: 5, audio: true }]);
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT, audio: true },
+    ]);
     expect(audio).toEqual([Buffer.from([0x34, 0x12])]);
   });
 
@@ -327,6 +380,22 @@ describe("IosH264Source", () => {
     expect(gopIndex).toBeGreaterThanOrEqual(0);
     expect(encoderSpawns[0].args[gopIndex + 1]).toBe("30");
     expect(encoderSpawns[0].args).toContain("-forced-idr");
+  });
+
+  test("keeps the two-second IDR cadence at the default streaming fps", async () => {
+    const { source, helper, encoderSpawns } = createHarness(IOS_SIMULATOR);
+
+    await startWithFrame(source, helper, frame(750, 1334, 0x11));
+
+    const rateIndex = encoderSpawns[0].args.indexOf("-r");
+    expect(rateIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[rateIndex + 1]).toBe(String(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT));
+    const gopIndex = encoderSpawns[0].args.indexOf("-g");
+    expect(gopIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[gopIndex + 1]).toBe(String(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT * 2));
+    expect(encoderSpawns[0].args).toContain("-forced-idr");
+    expect(encoderSpawns[0].args).toContain("baseline");
+    expect(encoderSpawns[0].args).toContain("4.2");
   });
 
   test("passes bitrate and output size overrides to ffmpeg", async () => {
@@ -859,5 +928,62 @@ describe("IosH264Source", () => {
         process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS] = originalLegacy;
       }
     }
+  });
+});
+
+describe("resolveIosEncoderScale", () => {
+  test("returns null for even frames already inside the Level 4.2 budget", () => {
+    expect(resolveIosEncoderScale({ width: 750, height: 1334 })).toBeNull();
+    expect(resolveIosEncoderScale({ width: 828, height: 1792 })).toBeNull();
+    expect(resolveIosEncoderScale({ width: 1920, height: 1080 })).toBeNull();
+  });
+
+  test("still downscales a native capture that exceeds the budget on its own", () => {
+    // iPhone 14 Pro backing store: 74 x 159 macroblocks, well past the 8192 cap.
+    const scale = resolveIosEncoderScale({ width: 1170, height: 2532 })!;
+    expect(scale.width).toBeLessThan(1170);
+    expect(scale.height).toBeLessThan(2532);
+    expect(h264MacroblocksPerFrame(scale.width, scale.height)).toBeLessThanOrEqual(
+      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+    );
+  });
+
+  test("rounds odd dimensions down to even without changing the other axis", () => {
+    expect(resolveIosEncoderScale({ width: 801, height: 600 })).toEqual({ width: 800, height: 600 });
+    expect(resolveIosEncoderScale({ width: 800, height: 601 })).toEqual({ width: 800, height: 600 });
+  });
+
+  test("only ever scales down, and always lands inside the macroblock budget", () => {
+    const captures = [
+      { width: 320, height: 568 },
+      { width: 750, height: 1334 },
+      { width: 828, height: 1792 },
+      { width: 1179, height: 2556 },
+      { width: 1920, height: 1080 },
+      { width: 2048, height: 1536 },
+      { width: 2778, height: 1284 },
+      { width: 3840, height: 2160 },
+      { width: 5120, height: 2880 },
+    ];
+
+    for (const capture of captures) {
+      const scale = resolveIosEncoderScale(capture) ?? capture;
+      expect(scale.width).toBeLessThanOrEqual(capture.width);
+      expect(scale.height).toBeLessThanOrEqual(capture.height);
+      expect(scale.width % 2).toBe(0);
+      expect(scale.height % 2).toBe(0);
+      expect(h264MacroblocksPerFrame(scale.width, scale.height)).toBeLessThanOrEqual(
+        WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+      );
+    }
+  });
+
+  test("stays inside the budget for an extreme aspect ratio", () => {
+    const scale = resolveIosEncoderScale({ width: 16_000, height: 200 })!;
+    expect(h264MacroblocksPerFrame(scale.width, scale.height)).toBeLessThanOrEqual(
+      WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME
+    );
+    expect(scale.width).toBeGreaterThan(0);
+    expect(scale.height).toBeGreaterThan(0);
   });
 });

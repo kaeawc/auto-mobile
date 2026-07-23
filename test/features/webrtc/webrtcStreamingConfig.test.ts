@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   WEBRTC_ENV,
+  WEBRTC_IOS_SIMULATOR_FPS_DEFAULT,
+  WEBRTC_IOS_SIMULATOR_FPS_MAX,
+  WEBRTC_IOS_SIMULATOR_FPS_MIN,
   parseIceServers,
   parseSize,
   resolveWebRtcStreamingConfig,
 } from "../../../src/features/webrtc/webrtcStreamingConfig";
+import { SIMULATOR_FPS_DEFAULT } from "../../../src/features/screen-stream/IOSScreenCaptureHelper";
 
 describe("parseIceServers", () => {
   test("parses a comma-separated URL list", () => {
@@ -129,6 +133,54 @@ describe("resolveWebRtcStreamingConfig", () => {
       resolveWebRtcStreamingConfig({ whipEndpoint: "https://coord/whip", bitrateKbps: 0 })
     ).toThrow(/positive number/);
     expect(() => resolveWebRtcStreamingConfig({ whipEndpoint: "not a URL" })).toThrow(/absolute http/);
+  });
+
+  test("defaults the iOS Simulator capture rate to the streaming default, not the observation default", () => {
+    const config = resolveWebRtcStreamingConfig(
+      { whipEndpoint: "https://coord/whip" },
+      {} as NodeJS.ProcessEnv
+    );
+    expect(config.iosSimulatorFps).toBe(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT);
+    // The generic screen-capture default is tuned for MCP observation. An
+    // interactive WebRTC feed gets its own, higher, seam.
+    expect(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT).toBeGreaterThan(SIMULATOR_FPS_DEFAULT);
+    expect(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT).toBeGreaterThanOrEqual(WEBRTC_IOS_SIMULATOR_FPS_MIN);
+    expect(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT).toBeLessThanOrEqual(WEBRTC_IOS_SIMULATOR_FPS_MAX);
+  });
+
+  test("reads the iOS Simulator capture rate from the environment", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.IOS_SIMULATOR_FPS]: "30",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({}, env).iosSimulatorFps).toBe(30);
+  });
+
+  test("iOS Simulator fps override takes precedence over the environment", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.IOS_SIMULATOR_FPS]: "30",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({ iosSimulatorFps: 10 }, env).iosSimulatorFps).toBe(10);
+  });
+
+  test("rejects an iOS Simulator fps outside the documented safe range", () => {
+    const endpoint = { whipEndpoint: "https://coord/whip" };
+    expect(() =>
+      resolveWebRtcStreamingConfig({ ...endpoint, iosSimulatorFps: WEBRTC_IOS_SIMULATOR_FPS_MIN - 1 })
+    ).toThrow(/integer in \[5, 60\]/);
+    expect(() =>
+      resolveWebRtcStreamingConfig({ ...endpoint, iosSimulatorFps: WEBRTC_IOS_SIMULATOR_FPS_MAX + 1 })
+    ).toThrow(/integer in \[5, 60\]/);
+    expect(() =>
+      resolveWebRtcStreamingConfig({ ...endpoint, iosSimulatorFps: 12.5 })
+    ).toThrow(/integer in \[5, 60\]/);
+    expect(() =>
+      resolveWebRtcStreamingConfig({}, {
+        [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+        [WEBRTC_ENV.IOS_SIMULATOR_FPS]: "not-a-number",
+      } as NodeJS.ProcessEnv)
+    ).toThrow(/integer in \[5, 60\]/);
   });
 
   test("falls back to a default STUN server", () => {

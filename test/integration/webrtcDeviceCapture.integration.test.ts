@@ -19,6 +19,11 @@ const artifactDir = resolve("scratch/webrtc-device-integration");
 
 interface ChromeTarget { type: string; webSocketDebuggerUrl?: string }
 interface CdpResponse { id?: number; result?: { result?: { value?: unknown } }; error?: { message?: string } }
+interface ReaderDiagnostics {
+  connectionStates: string[];
+  inboundVideo: Array<Record<string, unknown>>;
+  video: { frames: number; width: number; height: number; readyState: number };
+}
 
 class CdpClient {
   private nextId = 1;
@@ -99,7 +104,31 @@ async function openReader(chrome: ChildProcessWithoutNullStreams): Promise<CdpCl
   const cdp = await CdpClient.connect(target!.webSocketDebuggerUrl!);
   await cdp.command("Page.enable");
   await cdp.command("Runtime.enable");
+  await cdp.command("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      const NativePeerConnection = window.RTCPeerConnection;
+      window.__automobilePeerConnections = [];
+      window.RTCPeerConnection = class extends NativePeerConnection {
+        constructor(...args) {
+          super(...args);
+          window.__automobilePeerConnections.push(this);
+        }
+      };
+    })();`,
+  });
   await cdp.command("Page.navigate", { url: `http://127.0.0.1:${webRtcPort}/${streamId}` });
+  await waitFor(async () => {
+    try {
+      const response = await cdp.command("Runtime.evaluate", {
+        expression: `Array.from(window.__automobilePeerConnections ?? [])
+          .some(connection => connection.connectionState === "connected")`,
+        returnByValue: true,
+      });
+      return response.result?.result?.value === true;
+    } catch {
+      return false;
+    }
+  }, "browser WHEP reader did not connect");
   return cdp;
 }
 
@@ -107,6 +136,51 @@ async function videoSample(cdp: CdpClient): Promise<{ frames: number; width: num
   const expression = `(() => { const v = document.querySelector('video'); const q = v?.getVideoPlaybackQuality?.(); if (!v || !v.videoWidth) return {frames: 0, width: 0, height: 0, sample: 0}; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let sum = 0; for (let i = 0; i < d.length; i += 97) sum = (sum + d[i] + d[i + 1] + d[i + 2]) >>> 0; return {frames: q?.totalVideoFrames ?? 0, width: v.videoWidth, height: v.videoHeight, sample: sum}; })()`;
   const response = await cdp.command("Runtime.evaluate", { expression, returnByValue: true });
   return response.result?.result?.value as { frames: number; width: number; height: number; sample: number };
+}
+
+async function readerDiagnostics(cdp: CdpClient): Promise<ReaderDiagnostics> {
+  const expression = `(async () => {
+    const connections = Array.from(window.__automobilePeerConnections ?? []);
+    const reports = (await Promise.all(connections.map(connection => connection.getStats())))
+      .flatMap(report => Array.from(report.values()));
+    const video = document.querySelector("video");
+    return {
+      connectionStates: connections.map(connection => connection.connectionState),
+      inboundVideo: reports
+        .filter(stat => stat.type === "inbound-rtp" && stat.kind === "video")
+        .map(stat => ({
+          packetsReceived: stat.packetsReceived,
+          packetsLost: stat.packetsLost,
+          bytesReceived: stat.bytesReceived,
+          framesReceived: stat.framesReceived,
+          framesDecoded: stat.framesDecoded,
+          keyFramesDecoded: stat.keyFramesDecoded,
+          pliCount: stat.pliCount,
+          nackCount: stat.nackCount,
+        })),
+      video: {
+        frames: video?.getVideoPlaybackQuality?.().totalVideoFrames ?? 0,
+        width: video?.videoWidth ?? 0,
+        height: video?.videoHeight ?? 0,
+        readyState: video?.readyState ?? 0,
+      },
+    };
+  })()`;
+  const response = await cdp.command("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  return response.result?.result?.value as ReaderDiagnostics;
+}
+
+async function waitForDecodedFrames(cdp: CdpClient, minimum: number, message: string): Promise<void> {
+  try {
+    await waitFor(async () => (await videoSample(cdp)).frames > minimum, message);
+  } catch {
+    const diagnostics = await readerDiagnostics(cdp).catch(() => undefined);
+    throw new Error(`${message}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`);
+  }
 }
 
 async function launchFixture(): Promise<void> {
@@ -218,10 +292,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       // visible transition after subscription so the reader receives a fresh
       // encoded access unit rather than waiting on an earlier keyframe.
       await changeFixture();
-      await waitFor(async () => (await videoSample(cdp!)).frames > 0, "browser did not decode device video");
+      await waitForDecodedFrames(cdp, 0, "browser did not decode device video");
       const first = await videoSample(cdp);
       await launchFixture();
-      await waitFor(async () => (await videoSample(cdp!)).frames > first.frames, "browser did not receive video after returning to the fixture");
+      await waitForDecodedFrames(cdp, first.frames, "browser did not receive video after returning to the fixture");
       const second = await videoSample(cdp);
       expect(first.width).toBeGreaterThan(0);
       expect(first.height).toBeGreaterThan(0);

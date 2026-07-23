@@ -42,8 +42,9 @@ class VideoEncoder(
         // Frame rate hint (actual rate is variable based on display updates)
         setInteger(MediaFormat.KEY_FRAME_RATE, fps)
 
-        // I-frame interval: 10 seconds
-        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 10)
+        // Keep late WebRTC readers within one short GOP of a decodable IDR.
+        // Idle displays still repeat frames below, so this remains bounded.
+        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
 
         // Surface input (zero-copy from GPU)
         setInteger(

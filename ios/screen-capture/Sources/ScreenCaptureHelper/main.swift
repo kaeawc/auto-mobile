@@ -6,7 +6,10 @@ import ScreenCaptureCore
 
 // MARK: - Constants
 
-let simulatorPermissionTimeoutSeconds: TimeInterval = 2.0
+// ScreenCaptureKit cold-starts just beyond two seconds on hosted macOS runners.
+// Keep the permission hint behind the source's first-frame timeout so startup
+// latency is not misreported as a missing Screen Recording entitlement.
+let simulatorPermissionTimeoutSeconds: TimeInterval = 10.0
 
 // A command-line process has no AppKit application by default. ScreenCaptureKit
 // reaches CoreGraphics when creating an SCStream, and CoreGraphics aborts with

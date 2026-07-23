@@ -455,21 +455,30 @@ export class WebRtcPublisher {
       return;
     }
     this.connectedFired = true;
-    this.startFrameWatchdog(pc);
-    void Promise.resolve().then(() => this.onConnected?.()).catch(error => {
-      // Capture failed to start (e.g. adb/screenrecord spawn failed) even though
-      // the peer connected. Without this the stream would report connected with
-      // no media and never recover — route it through the reconnect path.
-      logger.warn(`[WebRTC] capture start failed for ${this.config.streamId}: ${error}; reconnecting`);
-      this.notifySourceFailed();
-    });
+    void Promise.resolve()
+      .then(() => this.onConnected?.())
+      .then(() => {
+        if (!this.closed && this.pc === pc) {
+          // Source startup can include device discovery, permission checks, and
+          // encoder launch. Only measure frame stalls once that work succeeds.
+          this.startFrameWatchdog(pc);
+        }
+      })
+      .catch(error => {
+        // Capture failed to start (e.g. adb/screenrecord spawn failed) even though
+        // the peer connected. Without this the stream would report connected with
+        // no media and never recover — route it through the reconnect path.
+        logger.warn(`[WebRTC] capture start failed for ${this.config.streamId}: ${error}; reconnecting`);
+        this.notifySourceFailed();
+      });
   }
 
   /**
    * Watch for a connected-but-stalled stream: the source is alive (no
    * connection-state change) yet the frame counter stops advancing. Baselined at
    * connect, so a source that never produces a first frame within the timeout is
-   * also caught. On a stall, route through reconnect (which restarts capture).
+   * also caught after capture startup completes. On a stall, route through
+   * reconnect (which restarts capture).
    */
   private startFrameWatchdog(pc: RTCPeerConnection): void {
     const timeout = this.config.frameStallTimeoutMs;

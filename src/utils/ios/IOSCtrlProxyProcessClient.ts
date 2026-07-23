@@ -2,14 +2,15 @@ import type { HostCommandExecutor } from "../HostCommandExecutor";
 import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import type { Timer } from "../SystemTimer";
 import { defaultTimer } from "../SystemTimer";
+import { logger } from "../logger";
 
-export interface IOSCtrlProxyProcessInfo {
+export interface CtrlProxyProcessInfo {
   readonly ppid?: number;
   readonly command: string;
   readonly environment?: string;
 }
 
-export interface IOSCtrlProxyExternalProcess {
+export interface CtrlProxyExternalProcess {
   readonly pid: number;
   readonly port: number;
 }
@@ -42,7 +43,7 @@ export class IOSCtrlProxyProcessClient {
   async findExternalXcodebuildCtrlProxyProcess(
     deviceId: string,
     excludedPid?: number
-  ): Promise<IOSCtrlProxyExternalProcess | null> {
+  ): Promise<CtrlProxyExternalProcess | null> {
     const pids = await this.findPids("xcodebuild", true);
     for (const pid of pids) {
       if (pid === excludedPid) {
@@ -84,12 +85,13 @@ export class IOSCtrlProxyProcessClient {
         const match = line.match(/^p(\d+)$/);
         return match ? [Number.parseInt(match[1], 10)] : [];
       }))];
-    } catch {
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Failed to find listener PIDs for port ${port}: ${error}`);
       return [];
     }
   }
 
-  async getProcessInfo(pid: number): Promise<IOSCtrlProxyProcessInfo | null> {
+  async getProcessInfo(pid: number): Promise<CtrlProxyProcessInfo | null> {
     try {
       const { stdout } = await this.host.executeCommand("ps", ["-p", String(pid), "-o", "ppid=", "-o", "args="]);
       const output = stdout.trim();
@@ -99,7 +101,8 @@ export class IOSCtrlProxyProcessClient {
       const environment = await this.getProcessEnvironment(pid);
       const match = output.match(/^(\d+)\s+([\s\S]+)$/);
       return match ? { ppid: Number.parseInt(match[1], 10), command: match[2], environment } : { command: output, environment };
-    } catch {
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Failed to inspect PID ${pid}: ${error}`);
       return null;
     }
   }
@@ -108,7 +111,8 @@ export class IOSCtrlProxyProcessClient {
     try {
       const result = await this.host.executeCommand("kill", ["-0", String(pid)]);
       return !/operation not permitted|permission denied/i.test(result.stderr);
-    } catch {
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Failed to check PID ${pid}: ${error}`);
       return false;
     }
   }
@@ -144,7 +148,8 @@ export class IOSCtrlProxyProcessClient {
         queue.push(...(children.get(pid) ?? []));
       }
       return descendants;
-    } catch {
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Failed to enumerate descendants of PID ${rootPid}: ${error}`);
       return [];
     }
   }
@@ -179,7 +184,7 @@ export class IOSCtrlProxyProcessClient {
     return command.includes("CtrlProxyUITests-Runner");
   }
 
-  isDaemonManagedSimulatorXcodebuildProcess(process: IOSCtrlProxyProcessInfo): boolean {
+  isDaemonManagedSimulatorXcodebuildProcess(process: CtrlProxyProcessInfo): boolean {
     const command = process.command;
     const shape = command.includes("xcodebuild") && command.includes("test-without-building") && command.includes("-xctestrun") && command.includes("platform=iOS Simulator") && command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") && !command.includes("CTRL_PROXY_IOS_PORT=") && !command.includes("AUTOMOBILE_DEVICE_ID=");
     return shape && (process.ppid === 1 || !this.hasExternalXcodebuildIdentity(process.environment ?? ""));
@@ -192,7 +197,8 @@ export class IOSCtrlProxyProcessClient {
         const pid = Number.parseInt(line, 10);
         return Number.isNaN(pid) ? [] : [pid];
       });
-    } catch {
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Failed to enumerate ${pattern} PIDs: ${error}`);
       return [];
     }
   }
@@ -201,7 +207,8 @@ export class IOSCtrlProxyProcessClient {
     try {
       const { stdout } = await this.host.executeCommand("ps", ["eww", "-p", String(pid), "-o", "command="]);
       return stdout.trim() || undefined;
-    } catch {
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] Failed to inspect environment for PID ${pid}: ${error}`);
       return undefined;
     }
   }
@@ -216,12 +223,20 @@ export class IOSCtrlProxyProcessClient {
   }
 
   private async signalGroup(pid: number, signal: "TERM" | "KILL"): Promise<void> {
-    try { await this.host.executeCommand("kill", [`-${signal}`, "--", `-${pid}`]); } catch { /* not a group leader */ }
+    try {
+      await this.host.executeCommand("kill", [`-${signal}`, "--", `-${pid}`]);
+    } catch (error) {
+      logger.debug(`[IOSCtrlProxy] PID ${pid} is not a signalable process group: ${error}`);
+    }
   }
 
   private async signalPids(pids: number[], signal: "TERM" | "KILL"): Promise<void> {
     for (const pid of pids) {
-      try { await this.host.executeCommand("kill", [`-${signal}`, String(pid)]); } catch { /* exited race */ }
+      try {
+        await this.host.executeCommand("kill", [`-${signal}`, String(pid)]);
+      } catch (error) {
+        logger.debug(`[IOSCtrlProxy] PID ${pid} exited before ${signal}: ${error}`);
+      }
     }
   }
 

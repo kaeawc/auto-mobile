@@ -328,7 +328,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     device: BootedDevice,
     timer: Timer,
     builder: IOSCtrlProxyBuilder | undefined,
-    processExecutor: ProcessExecutor,
+    processExecutor: ProcessExecutor & HostCommandExecutor,
     signingManager?: XcodeSigningManager,
     deviceAppManager?: DeviceAppManager,
     remoteRunner?: RemoteCtrlProxyIOSRunner,
@@ -350,7 +350,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         timer,
         (command, args, options) => processExecutor.spawn(command, args, options)
       ),
-      processClient ?? IOSCtrlProxyManager.processClientForTesting(processExecutor, timer)
+      processClient ?? new IOSCtrlProxyProcessClient(processExecutor, timer)
     );
   }
 

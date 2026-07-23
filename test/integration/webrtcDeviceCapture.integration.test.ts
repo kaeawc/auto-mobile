@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
@@ -15,7 +15,6 @@ const platform = process.env.AUTOMOBILE_WEBRTC_DEVICE_PLATFORM;
 const webRtcPort = 8889;
 const streamId = `device-capture-${platform ?? "unknown"}`;
 const artifactDir = resolve("scratch/webrtc-device-integration");
-const daemonEnvironment = { ...process.env, AUTOMOBILE_DB_PATH: ":memory:" };
 
 interface ChromeTarget { type: string; webSocketDebuggerUrl?: string }
 interface CdpResponse { id?: number; result?: { result?: { value?: unknown } }; error?: { message?: string } }
@@ -144,6 +143,9 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
   test("the real device capture path renders changing video and stops cleanly", async () => {
     if (!process.env.AUTOMOBILE_MEDIAMTX_BINARY) {throw new Error("MediaMTX runner did not provide AUTOMOBILE_MEDIAMTX_BINARY");}
     await mkdir(artifactDir, { recursive: true });
+    const daemonDbDir = await mkdtemp(join(artifactDir, "daemon-db-"));
+    const daemonEnvironment = { ...process.env, AUTOMOBILE_DB_DIR: daemonDbDir };
+    delete daemonEnvironment.AUTOMOBILE_DB_PATH;
     const mediamtx = start(process.env.AUTOMOBILE_MEDIAMTX_BINARY, ["examples/mediamtx/mediamtx.yml"], join(artifactDir, "mediamtx.log"));
     let chrome: ChildProcessWithoutNullStreams | undefined;
     let cdp: CdpClient | undefined;

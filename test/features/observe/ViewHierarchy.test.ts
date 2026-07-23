@@ -216,6 +216,47 @@ describe("ViewHierarchy", function() {
       expect(result.hierarchy).toHaveProperty("error");
     });
 
+    // #4281: a fresh-boot / locked device blocks the accessibility service from
+    // binding, producing the same generic hierarchy error as the #4039 transport
+    // failure. When the keyguard is showing, name the real cause instead.
+    test("names a secure keyguard as the cause of a null hierarchy (#4281)", async function() {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
+      const result = await viewHierarchy.getAndroidViewHierarchy();
+      const error = String((result.hierarchy as any).error).toLowerCase();
+      expect(error).toContain("locked");
+      expect(error).toContain("unlock");
+    });
+
+    test("names a swipe keyguard as the cause of a hierarchy error (#4281)", async function() {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: false });
+      const throwingClient = {
+        getLatestHierarchy: async () => null,
+        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
+        convertAccessibilityNode: () => ({}),
+        getAccessibilityHierarchy: async () => { throw new Error("Accessibility service error"); }
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb), throwingClient);
+
+      const result = await vh.getAndroidViewHierarchy();
+      const error = String((result.hierarchy as any).error).toLowerCase();
+      expect(error).toContain("locked");
+      expect(error).toContain("dismiss");
+    });
+
+    test("keeps the generic message when the device is not locked (#4281/#4039)", async function() {
+      fakeAdb.setDeviceLock({ locked: false, keyguardShowing: false, secure: false });
+      const result = await viewHierarchy.getAndroidViewHierarchy();
+      const error = String((result.hierarchy as any).error);
+      expect(error).toContain("Failed to retrieve view hierarchy");
+      expect(error.toLowerCase()).not.toContain("keyguard");
+    });
+
+    test("falls back to the generic message when the lock read fails (#4281)", async function() {
+      (fakeAdb as any).getDeviceLock = async () => { throw new Error("dumpsys boom"); };
+      const result = await viewHierarchy.getAndroidViewHierarchy();
+      expect(String((result.hierarchy as any).error)).toContain("Failed to retrieve view hierarchy");
+    });
+
     test("surfaces iOS CtrlProxy reconnect cooldown as retry metadata", async function() {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",

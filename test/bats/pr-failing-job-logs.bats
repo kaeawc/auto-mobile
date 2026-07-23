@@ -19,6 +19,7 @@ case "$*" in
     case "${GH_SCENARIO:?}" in
       no-fail) printf '%s\n' '[{"name":"Build","state":"SUCCESS","bucket":"pass","link":"https://github.com/o/r/actions/runs/100"},{"name":"Skipped","state":"SKIPPED","bucket":"skipping","link":"https://github.com/o/r/actions/runs/200"},{"name":"Cancelled","state":"CANCELLED","bucket":"cancel","link":"https://github.com/o/r/actions/runs/300"}]' ;;
       fail-log|fail-live) printf '%s\n' '[{"name":"Failing","state":"FAILURE","bucket":"fail","link":"https://github.com/o/r/actions/runs/123"},{"name":"Skipped","state":"SKIPPED","bucket":"skipping","link":"https://github.com/o/r/actions/runs/200"},{"name":"Cancelled","state":"CANCELLED","bucket":"cancel","link":"https://github.com/o/r/actions/runs/300"}]' ;;
+      fail-check-run) printf '%s\n' '[{"name":"JUnit report","state":"FAILURE","bucket":"fail","link":"https://github.com/o/r/runs/456"}]' ;;
     esac
     ;;
   "api repos/kaeawc/auto-mobile/actions/runs/123/jobs "*)
@@ -80,6 +81,15 @@ run_script() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"No failures"* ]]
   ! grep -q 'actions/runs/' "${TEST_ROOT}/gh-calls"
+}
+
+@test "reports a failed generic check-run link without querying it as an Actions run" {
+  run_script fail-check-run
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Unable to retrieve job logs for failed non-workflow check link(s):"* ]]
+  [[ "$output" == *"https://github.com/o/r/runs/456"* ]]
+  ! grep -q 'actions/runs/456/jobs' "${TEST_ROOT}/gh-calls"
 }
 
 @test "uses BSD-compatible extended grep rather than GNU grep -P" {

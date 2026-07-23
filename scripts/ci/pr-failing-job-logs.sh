@@ -72,11 +72,22 @@ if [ "$FAILED" -eq 0 ]; then
   exit 0
 fi
 
-# Resolve run ids from the check links, then walk run -> jobs -> the failed job's log.
+# Resolve workflow-run ids from Actions check links, then walk run -> jobs -> the
+# failed job's log. Generic GitHub check-run links use /runs/<check-run-id>, but
+# that id returns 404 from the Actions runs API, so report it rather than trying
+# to retrieve the wrong resource.
 # grep -oE (POSIX-ish) rather than grep -oP: macOS /usr/bin/grep has no -P.
 RUN_IDS=$(printf '%s' "$CHECKS_JSON" |
   jq -r '.[] | select(.bucket == "fail") | .link' |
-  grep -oE 'runs/[0-9]+' | cut -d/ -f2 | sort -u)
+  grep -oE 'actions/runs/[0-9]+' | cut -d/ -f3 | sort -u)
+
+UNSUPPORTED_CHECK_LINKS=$(printf '%s' "$CHECKS_JSON" |
+  jq -r '.[] | select(.bucket == "fail") | .link
+         | select(test("/runs/[0-9]+") and (test("/actions/runs/[0-9]+") | not))')
+if [ -n "$UNSUPPORTED_CHECK_LINKS" ]; then
+  echo "Unable to retrieve job logs for failed non-workflow check link(s):"
+  printf '%s\n' "$UNSUPPORTED_CHECK_LINKS" | sed 's/^/  /'
+fi
 
 mkdir -p scratch
 for RUN_ID in $RUN_IDS; do

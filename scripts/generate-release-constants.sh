@@ -167,6 +167,7 @@ if [ -n "$release_version" ]; then
     apkSha256: \"${apk_checksum}\",
     ipaSha256: \"${ios_checksum}\",
     runnerSha256: \"${ios_runner_sha256}\",
+    runnerSha256Target: \"xctest\",
     videoJarSha256: \"${video_jar_checksum}\",
   },"
 
@@ -222,6 +223,7 @@ else
 
   if [ -n "$ios_runner_sha256" ]; then
     update_registry_field "$tmp_file" "nightly" "runnerSha256" "$ios_runner_sha256"
+    update_registry_field "$tmp_file" "nightly" "runnerSha256Target" "xctest"
   fi
 
   if [ -n "$video_jar_checksum" ]; then
@@ -249,6 +251,7 @@ fi
 if [ -n "$ios_runner_sha256" ]; then
   if [ -n "$release_version" ]; then
     update_registry_field "$tmp_file" "$release_version" "runnerSha256" "$ios_runner_sha256"
+    update_registry_field "$tmp_file" "$release_version" "runnerSha256Target" "xctest"
   fi
   echo "   iOS runner SHA256: ${ios_runner_sha256}"
 fi

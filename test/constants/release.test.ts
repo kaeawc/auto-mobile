@@ -24,6 +24,7 @@ import {
   resolveLatestVersion,
   resolvePinnedVersion,
   resolveRunnerChecksum,
+  resolveRunnerChecksumTarget,
   resolveVideoJarChecksum,
   resolveVideoJarUrl,
   VIDEO_SERVER_JAR_FILENAME,
@@ -292,6 +293,24 @@ describe("resolveRunnerChecksum", function() {
 
   test("unknown pinned version yields an empty checksum", function() {
     expect(resolveRunnerChecksum({ AUTOMOBILE_VERSION: "99.99.99" })).toBe("");
+  });
+});
+
+describe("resolveRunnerChecksumTarget", function() {
+  test("legacy entries without a target retain the outer XCTRunner checksum target", function() {
+    expect(resolveRunnerChecksumTarget({ AUTOMOBILE_VERSION: "0.0.44" })).toBe("runner");
+  });
+
+  test("uses the target recorded by a newer release entry", function() {
+    const registry: ReleaseChecksumEntry[] = [{
+      version: "0.0.45",
+      apkSha256: "apk45",
+      ipaSha256: "ipa45",
+      runnerSha256: "runner45",
+      runnerSha256Target: "xctest",
+    }];
+
+    expect(resolveRunnerChecksumTarget({}, registry)).toBe("xctest");
   });
 });
 

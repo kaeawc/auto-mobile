@@ -345,7 +345,10 @@ describe("IOSCtrlProxyBuilder", function() {
 
       const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
 
-      expect(await builder.getRunnerBinaryPath()).toBe(xctestBinary);
+      expect(await builder.getRunnerBinaryPath("simulator", "xctest")).toBe(xctestBinary);
+      expect(await builder.getRunnerBinaryPath("simulator", "runner")).toBe(
+        path.join(runnerDir, "CtrlProxyUITests-Runner")
+      );
     });
   });
 
@@ -632,6 +635,49 @@ describe("IOSCtrlProxyBuilder", function() {
 
       expect(result.success).toBe(true);
       expect(buildProducts).toBe(path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator"));
+    });
+
+    test("verifies the xctest executable for releases that record an xctest checksum", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "xctest-checksum";
+      downloader.legacyRunnerChecksum = "xctrunner-stub-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+
+      expect(result.success).toBe(true);
+      expect(downloader.checksummedFilePaths).toContain(
+        path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator", "CtrlProxyUITests-Runner.app", "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests")
+      );
+    });
+
+    test("fails when the xctest executable checksum differs", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "wrong-xctest-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("expected-xctest-checksum", "xctest");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("runner binary SHA256 mismatch");
     });
 
     test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {

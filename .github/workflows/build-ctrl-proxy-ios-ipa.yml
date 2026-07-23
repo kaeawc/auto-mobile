@@ -7,7 +7,7 @@ on:
         description: "SHA256 checksum of the built IPA"
         value: ${{ jobs.build.outputs.sha256 }}
       runner_sha256:
-        description: "SHA256 checksum of the CtrlProxyUITests-Runner binary"
+        description: "SHA256 checksum of the CtrlProxyUITests xctest executable"
         value: ${{ jobs.build.outputs.runner_sha256 }}
 
 jobs:

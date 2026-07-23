@@ -13,7 +13,9 @@ import {
   resolveIpaChecksum,
   resolveIpaUrl,
   resolvePinnedVersion,
-  resolveRunnerChecksum
+  resolveRunnerChecksum,
+  resolveRunnerChecksumTarget,
+  type RunnerSha256Target
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -94,6 +96,7 @@ export class IOSCtrlProxyBuilder {
   private static prefetchError: Error | null = null;
   private static expectedChecksumOverride: string | null = null;
   private static expectedRunnerChecksumOverride: string | null = null;
+  private static expectedRunnerChecksumTargetOverride: RunnerSha256Target | null = null;
   private static timer: Timer = defaultTimer;
 
   // Singleton instances per configuration
@@ -158,6 +161,7 @@ export class IOSCtrlProxyBuilder {
     IOSCtrlProxyBuilder.prefetchError = null;
     IOSCtrlProxyBuilder.expectedChecksumOverride = null;
     IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
+    IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = null;
     IOSCtrlProxyBuilder.timer = defaultTimer;
   }
 
@@ -175,8 +179,12 @@ export class IOSCtrlProxyBuilder {
     IOSCtrlProxyBuilder.expectedChecksumOverride = checksum;
   }
 
-  public static setExpectedRunnerChecksumForTesting(checksum: string | null): void {
+  public static setExpectedRunnerChecksumForTesting(
+    checksum: string | null,
+    target: RunnerSha256Target | null = null
+  ): void {
     IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = checksum;
+    IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = target;
   }
 
   /**
@@ -651,22 +659,19 @@ export class IOSCtrlProxyBuilder {
     }
   }
 
-  /**
-   * Get the CtrlProxy xctest executable path for runner checksum verification.
-   * Returns: <buildPath>/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests
-   */
-  public async getRunnerBinaryPath(platform: IOSCtrlProxyPlatform = "simulator"): Promise<string | null> {
+  /** Get the executable represented by the selected release's runner checksum. */
+  public async getRunnerBinaryPath(
+    platform: IOSCtrlProxyPlatform = "simulator",
+    target: RunnerSha256Target = this.getExpectedRunnerChecksumTarget()
+  ): Promise<string | null> {
     const buildPath = await this.getBuildProductsPath(platform);
     if (!buildPath) {
       return null;
     }
-    const runnerBinaryPath = path.join(
-      buildPath,
-      "CtrlProxyUITests-Runner.app",
-      "PlugIns",
-      "CtrlProxyUITests.xctest",
-      "CtrlProxyUITests"
-    );
+    const runnerAppPath = path.join(buildPath, "CtrlProxyUITests-Runner.app");
+    const runnerBinaryPath = target === "xctest"
+      ? path.join(runnerAppPath, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests")
+      : path.join(runnerAppPath, "CtrlProxyUITests-Runner");
     try {
       await fs.access(runnerBinaryPath);
       return runnerBinaryPath;
@@ -712,6 +717,14 @@ export class IOSCtrlProxyBuilder {
       return override;
     }
     return resolveRunnerChecksum();
+  }
+
+  private getExpectedRunnerChecksumTarget(): RunnerSha256Target {
+    const override = IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride;
+    if (override !== null) {
+      return override;
+    }
+    return resolveRunnerChecksumTarget();
   }
 
   public getExpectedAppHash(platform: IOSCtrlProxyPlatform): string {
@@ -966,11 +979,12 @@ export class IOSCtrlProxyBuilder {
       logger.warn(`[IOSCtrlProxyBuilder] App bundle hash verification skipped for ${platform} (no hash provided)`);
     }
 
-    // Verify runner binary SHA256 for simulator (used by simctl spawn)
+    // Verify the release-selected runner executable SHA256 for simulator.
     if (platform === "simulator") {
       const expectedRunnerSha256 = this.getExpectedRunnerChecksum();
       if (expectedRunnerSha256 && expectedRunnerSha256.length > 0) {
-        const runnerBinaryPath = await this.getRunnerBinaryPath(platform);
+        const runnerChecksumTarget = this.getExpectedRunnerChecksumTarget();
+        const runnerBinaryPath = await this.getRunnerBinaryPath(platform, runnerChecksumTarget);
         if (!runnerBinaryPath) {
           throw new Error(`CtrlProxy runner binary missing for ${platform}`);
         }

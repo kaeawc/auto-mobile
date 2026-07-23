@@ -29,11 +29,19 @@ import { ActionableError } from "../models/ActionableError";
 
 export const LATEST_RELEASE_VERSION = "latest";
 
+/** Executable whose SHA-256 is recorded in a release entry. */
+export type RunnerSha256Target = "runner" | "xctest";
+
 export interface ReleaseChecksumEntry {
   version: string;
   apkSha256: string;
   ipaSha256: string;
   runnerSha256: string;
+  /**
+   * The executable represented by runnerSha256. Missing fields predate the
+   * xctest migration and deliberately retain the legacy XCTRunner-stub target.
+   */
+  runnerSha256Target?: RunnerSha256Target;
   /**
    * SHA-256 of the persistent on-device H.264 encoder jar
    * (`automobile-video.jar`, #3776/#3830). Optional so registry entries that
@@ -250,6 +258,25 @@ export function resolveRunnerChecksum(
     ? registry[0]
     : registry.find(e => e.version === pinned);
   return entry?.runnerSha256 ?? "";
+}
+
+/**
+ * Resolve the executable represented by the selected runner checksum.
+ * Existing entries omit this field because their hashes were taken from the
+ * outer XCTRunner stub before CtrlProxy's code executable was adopted.
+ */
+export function resolveRunnerChecksumTarget(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): RunnerSha256Target {
+  if (registry.length === 0) {
+    return "runner";
+  }
+  const pinned = resolvePinnedVersion(env);
+  const entry = pinned === LATEST_RELEASE_VERSION
+    ? registry[0]
+    : registry.find(e => e.version === pinned);
+  return entry?.runnerSha256Target ?? "runner";
 }
 
 /**
@@ -474,7 +501,7 @@ export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
 export const IOS_CTRL_PROXY_IPA_URL: string = resolveIpaUrl({});
 export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveIpaChecksum({});
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
-// SHA256 of the simulator runner binary (CtrlProxyUITests-Runner), empty = skip
-// verification. Resolved through RELEASE_CHECKSUM_REGISTRY so pinned iOS
-// downloads verify against the runner hash recorded for the same release entry.
+// SHA256 of the simulator runner executable, empty = skip verification. The
+// per-release target records whether that is the legacy XCTRunner stub or the
+// CtrlProxy xctest executable.
 export const IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM: string = resolveRunnerChecksum({});

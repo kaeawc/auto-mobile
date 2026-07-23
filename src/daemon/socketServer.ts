@@ -1293,7 +1293,7 @@ export class UnixSocketServer {
     if (typeof args.button !== "string") {
       throw new Error("input/pressButton requires button");
     }
-    const supportedButtons = ["home", "back", "menu", "power", "volume_up", "volume_down", "recent", "app_switch", "enter"];
+    const supportedButtons = ["home", "back", "menu", "power", "volume_up", "volume_down", "recent", "app_switch"];
     if (!supportedButtons.includes(args.button)) {
       throw new Error(`input/pressButton button must be one of: ${supportedButtons.join(", ")}`);
     }

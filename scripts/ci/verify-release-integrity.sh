@@ -5,7 +5,7 @@
 #   1. Version equality — the npm version, every release manifest, the checksum
 #      registry, and the git tag must all name the SAME version. Nothing else
 #      enforces this; bump-versions.sh merely writes them together.
-#   2. iOS runner-binary checksum — registry[0].runnerSha256 must be a real
+#   2. iOS CtrlProxy executable checksum — registry[0].runnerSha256 must be a real
 #      sha256, not the "" default. Empty silently disables runner integrity
 #      verification for the simulator path.
 #
@@ -15,7 +15,7 @@
 #
 # Usage: verify-release-integrity.sh <version> [ipa-path]
 #   <version>  release version / git tag. A leading "v" is stripped.
-#   [ipa-path] optional built control-proxy.ipa. When given, the runner binary is
+#   [ipa-path] optional built control-proxy.ipa. When given, the CtrlProxy xctest executable is
 #              hashed straight out of the IPA and required to match the recorded
 #              registry[0].runnerSha256 — this *binds* the recorded hash to the
 #              artifact that ships. Without it, only the syntactic (64-hex,
@@ -98,7 +98,7 @@ check "android/gradle.properties VERSION_NAME (base)" "${gradle_version%-SNAPSHO
 registry_version="$(bun "$RELEASE_READER" version "$RELEASE_TS")"
 check "src/constants/release.ts registry[0].version" "$registry_version"
 
-# Runner-binary checksum must be populated on the newest registry entry. Empty
+# CtrlProxy executable checksum must be populated on the newest registry entry. Empty
 # means integrity verification is silently skipped — exactly the gap this gate
 # exists to catch. Read via the shared entry-anchored helper (single source of
 # truth with nightly.yml + verify-artifact-sha256.sh).
@@ -113,22 +113,22 @@ sha256_stdin() {
 }
 
 if [ -n "$IPA_PATH" ]; then
-  # Bind the recorded sha to the runner binary inside the shipped IPA (a zip of
-  # Build/Products), so this proves the constant matches what actually ships —
-  # not merely that some 64-hex string was written.
+  # Bind the recorded sha to the CtrlProxy xctest executable inside the shipped
+  # IPA (a zip of Build/Products), so this proves the constant matches the code
+  # that ships — not Xcode's generic XCTRunner stub.
   if [ ! -f "$IPA_PATH" ]; then
     errors+=("runner-sha binding: IPA not found at ${IPA_PATH}")
   else
     runner_entry="$(unzip -Z1 "$IPA_PATH" 2>/dev/null \
-      | grep -E 'CtrlProxyUITests-Runner\.app/CtrlProxyUITests-Runner$' | head -1 || true)"
+      | grep -E 'CtrlProxyUITests-Runner\.app/PlugIns/CtrlProxyUITests\.xctest/CtrlProxyUITests$' | head -1 || true)"
     if [ -z "$runner_entry" ]; then
-      errors+=("runner-sha binding: CtrlProxyUITests-Runner not found inside ${IPA_PATH}")
+      errors+=("runner-sha binding: CtrlProxyUITests not found inside ${IPA_PATH}")
     else
       actual_runner_sha="$(unzip -p "$IPA_PATH" "$runner_entry" | sha256_stdin)"
       if [ "$runner_sha" = "$actual_runner_sha" ]; then
-        echo "  OK  registry[0].runnerSha256 matches the runner inside the IPA"
+        echo "  OK  registry[0].runnerSha256 matches the CtrlProxy executable inside the IPA"
       else
-        errors+=("registry[0].runnerSha256 ('${runner_sha:-empty}') does not match the runner binary shipped in ${IPA_PATH} ('${actual_runner_sha}')")
+        errors+=("registry[0].runnerSha256 ('${runner_sha:-empty}') does not match the CtrlProxy executable shipped in ${IPA_PATH} ('${actual_runner_sha}')")
       fi
     fi
   fi
@@ -146,7 +146,7 @@ if [ "${#errors[@]}" -gt 0 ]; then
   done
   echo ""
   echo "All manifests + the checksum registry + the git tag must name the same"
-  echo "version, and the iOS runner checksum must be populated, before releasing."
+  echo "version, and the iOS CtrlProxy executable checksum must be populated, before releasing."
   exit 1
 fi
 

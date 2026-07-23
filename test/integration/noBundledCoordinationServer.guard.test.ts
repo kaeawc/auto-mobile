@@ -38,6 +38,12 @@ describe("bundled coordination server is retired (issue #4291)", () => {
     if (result.error) {
       throw result.error;
     }
+    // Fail closed: git grep exits 0 (matches) or 1 (no matches); anything else is
+    // an error (bad pathspec, not a repo) whose empty stdout would otherwise read
+    // as a false pass.
+    if (result.status !== 0 && result.status !== 1) {
+      throw new Error(`git grep failed (exit ${result.status}): ${result.stderr}`);
+    }
 
     const offenders = result.stdout.split("\n").filter(line => line.length > 0);
     expect(offenders, `these tracked files still reference ${REMOVED_DIR}:\n${offenders.join("\n")}`).toEqual([]);

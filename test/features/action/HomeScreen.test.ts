@@ -72,13 +72,15 @@ describe("HomeScreen", () => {
     test("should work with progress callback", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
+      let callbackCalled = false;
       const progressCallback = async () => {
-        // callback for progress tracking
+        callbackCalled = true;
       };
       const result = await homeScreen.execute(progressCallback);
 
       expect(result.success).toBe(true);
       expect(result.navigationMethod).toBe("hardware");
+      expect(callbackCalled).toBe(true);
     });
 
     test("should include observation in result", async () => {
@@ -119,14 +121,9 @@ describe("HomeScreen", () => {
 
   describe("error handling", () => {
     test("should propagate errors when hardware navigation fails", async () => {
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "Hardware failed" });
+      fakeAdb.setCommandError("shell input keyevent 3", new Error("hardware home failed"));
 
-      try {
-        await homeScreen.execute();
-        throw new Error("Should have thrown an error");
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await expect(homeScreen.execute()).rejects.toThrow("hardware home failed");
     });
   });
 

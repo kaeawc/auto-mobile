@@ -297,19 +297,6 @@ describe("ImeAction", () => {
     });
   });
 
-  describe("constructor", () => {
-    test("should work with device object", () => {
-      const imeActionInstance = new ImeAction(testDevice);
-      expect(imeActionInstance).toBeDefined();
-    });
-
-    test("should work with custom FakeAdbExecutor", () => {
-      const customAdb = new FakeAdbExecutor();
-      const imeActionInstance = new ImeAction(testDevice, customAdb);
-      expect(imeActionInstance).toBeDefined();
-    });
-  });
-
   describe("timing", () => {
     test("should complete quickly via accessibility service", async () => {
       fakeA11yService.setHierarchyData({
@@ -345,12 +332,7 @@ describe("ImeAction", () => {
       fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", new Error("Cannot perform action without view hierarchy"));
       fakeObserveScreen.setFailureMode("execute", new Error("Cannot perform action without view hierarchy"));
 
-      try {
-        await imeAction.execute("done");
-        throw new Error("Expected an error to be thrown");
-      } catch (caughtError) {
-        expect((caughtError as Error).message).toContain("Cannot perform action without view hierarchy");
-      }
+      await expect(imeAction.execute("done")).rejects.toThrow("Cannot perform action without view hierarchy");
     });
 
     test("should handle observation failure", async () => {
@@ -364,14 +346,7 @@ describe("ImeAction", () => {
       const observationError = new Error("Failed to observe screen");
       fakeObserveScreen.setFailureMode("execute", observationError);
 
-      try {
-        const result = await imeAction.execute("done");
-        // If we get here, BaseVisualChange handled the observation error
-        expect(result.action).toBe("done");
-      } catch (caughtError) {
-        // If the error bubbled up, that's also valid behavior
-        expect((caughtError as Error).message).toContain("Failed to observe screen");
-      }
+      await expect(imeAction.execute("done")).rejects.toThrow("Failed to observe screen");
     });
 
     test("should handle null action gracefully", async () => {

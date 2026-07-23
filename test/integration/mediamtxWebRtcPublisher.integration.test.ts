@@ -116,16 +116,16 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, message: str
   }
 }
 
-async function stopProcess(process: ChildProcessWithoutNullStreams | undefined): Promise<void> {
-  if (!process || process.exitCode !== null || process.killed) {
+async function stopProcess(process: ChildProcessWithoutNullStreams | undefined, graceMs: number = 3_000): Promise<void> {
+  if (!process || process.exitCode !== null || process.signalCode !== null) {
     return;
   }
   process.kill("SIGTERM");
   await Promise.race([
     once(process, "exit"),
-    Bun.sleep(3_000),
+    Bun.sleep(graceMs),
   ]);
-  if (process.exitCode === null && !process.killed) {
+  if (process.exitCode === null && process.signalCode === null) {
     process.kill("SIGKILL");
     await once(process, "exit");
   }
@@ -202,6 +202,18 @@ async function readDecodedVideo(cdp: CdpClient): Promise<DecodedVideo> {
   }
   return value;
 }
+
+test.skipIf(process.platform === "win32")("force-kills a child that ignores SIGTERM", async () => {
+  const child = spawn("/bin/sh", ["-c", 'trap "" TERM; printf ready; while :; do sleep 1; done'], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await once(child.stdout, "data");
+
+  await stopProcess(child, 10);
+
+  expect(child.exitCode).toBeNull();
+  expect(child.signalCode).toBe("SIGKILL");
+});
 
 describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
   test("publishes real H.264 through WHIP and Chrome decodes the MediaMTX WHEP reader", async () => {

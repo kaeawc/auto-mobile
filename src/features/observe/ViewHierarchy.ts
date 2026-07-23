@@ -33,6 +33,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   private parser: ElementParser;
   private geometry: ElementGeometry;
   private accessibilityServiceClient: AndroidCtrlProxyClient;
+  private adbFactory: AdbClientFactory;
   private timer: Timer;
 
   /**
@@ -52,6 +53,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     this.geometry = new DefaultElementGeometry();
 
     this.accessibilityServiceClient = accessibilityServiceClient || AndroidCtrlProxyClient.getInstance(device, adbFactory);
+    this.adbFactory = adbFactory;
     this.timer = timer;
   }
 
@@ -211,7 +213,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
       return {
         hierarchy: {
-          error: "Failed to retrieve view hierarchy from accessibility service"
+          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy from accessibility service", signal, timeoutMs)
         },
         updatedAt: this.timer.now()
       };
@@ -221,10 +223,67 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       logger.warn(`[VIEW_HIERARCHY] Failed to get hierarchy from accessibility service after ${duration}ms:`, err);
       return {
         hierarchy: {
-          error: "Failed to retrieve view hierarchy"
+          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy", signal, timeoutMs)
         },
         updatedAt: this.timer.now()
       };
+    }
+  }
+
+  /**
+   * Turn a generic Android hierarchy failure into a lock-specific message when
+   * the keyguard is actually blocking the app (#4281).
+   *
+   * A locked device — most commonly a fresh boot before the keyguard is first
+   * dismissed — blocks Android from binding non-encryption-aware accessibility
+   * services, so the hierarchy read fails with a message that points at the
+   * service even though it is healthy. That is indistinguishable from the #4039
+   * transport failure, which emits the identical string. Reading the lock state
+   * over adb (a `dumpsys` path that works even while the service is unbound) lets
+   * us name the real cause. Best-effort: any failure to read the lock state
+   * falls back to `fallback`, so this never turns a real transport error into a
+   * misleading "device is locked".
+   */
+  private async describeHierarchyFailure(
+    fallback: string,
+    signal?: AbortSignal,
+    timeoutMs?: number
+  ): Promise<string> {
+    if (this.device.platform !== "android") {
+      return fallback;
+    }
+    // Only reword the error for an unbudgeted (interactive) observe. A caller that
+    // bounds each read -- an aborted signal, or a per-read `timeoutMs` like the
+    // keyboard confirmation poll -- is latency-sensitive, and getDeviceLock's
+    // `dumpsys window policy` is not itself bounded when no signal aborts it (the
+    // keyboard path relies on `timeoutMs`, not a signal). So skip the probe rather
+    // than risk blocking past the caller's deadline just to improve wording; the
+    // main observe path (HierarchyCollector) passes no timeoutMs and still gets the
+    // lock-specific message (#4281 review). The signal is still threaded through so
+    // an in-flight dumpsys aborts with the request when one is present.
+    if (signal?.aborted || timeoutMs !== undefined) {
+      return fallback;
+    }
+    try {
+      const lock = await this.adbFactory.create(this.device).getDeviceLock(signal);
+      if (!lock?.locked) {
+        return fallback;
+      }
+      const preamble =
+        "Device is locked; a locked device blocks the accessibility service from binding, "
+        + "so no view hierarchy is available.";
+      if (lock.secure === true) {
+        return `${preamble} Unlock the device (PIN/pattern/password) — you may need to ask the user — before observing.`;
+      }
+      if (lock.secure === false) {
+        return `${preamble} Dismiss the keyguard (e.g. swipe up) before observing.`;
+      }
+      return `${preamble} Unlock or dismiss the keyguard before observing.`;
+    } catch (error) {
+      // Never let a lock-read failure mask a genuine transport error (#4039); a
+      // debug trace is enough since the caller still returns an actionable error.
+      logger.debug(`[VIEW_HIERARCHY] Could not read lock state for failure message: ${error}`);
+      return fallback;
     }
   }
 

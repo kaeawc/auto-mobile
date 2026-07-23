@@ -157,6 +157,32 @@ describe("diffObserveResult", () => {
     expect(diff.fields!.wakefulness).toBeUndefined();
   });
 
+  test("a deviceLock change surfaces in the action diff (#4235)", () => {
+    // A device becoming locked/unlocked between an action's before and after must
+    // not be dropped from a diffed action observation — it is exactly what an
+    // agent needs to notice it is now looking at the keyguard.
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { deviceLock: { locked: false, keyguardShowing: false, secure: true } });
+    const next = obs({ ...node }, { deviceLock: { locked: true, keyguardShowing: true, secure: true } });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.fields).toBeDefined();
+    expect(diff.fields!.deviceLock).toEqual({
+      from: { locked: false, keyguardShowing: false, secure: true },
+      to: { locked: true, keyguardShowing: true, secure: true },
+    });
+  });
+
+  test("an unchanged deviceLock is not reported as a diff", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const lock = { locked: true, keyguardShowing: true, secure: true };
+    const diff = diffObserveResult(
+      obs({ ...node }, { deviceLock: { ...lock } }),
+      obs({ ...node }, { deviceLock: { ...lock } })
+    );
+    expect(diff.fields?.deviceLock).toBeUndefined();
+  });
+
   test("`updatedAt` churn is never reported as a scalar change", () => {
     const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
     const baseline = obs({ ...node }, { updatedAt: 100 });

@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import WebSocket from "ws";
@@ -164,13 +165,26 @@ async function waitForChromeTarget(port: string): Promise<ChromeTarget> {
   return target;
 }
 
-async function openReader(chrome: ChildProcessWithoutNullStreams, profileDir: string): Promise<CdpClient> {
-  await waitFor(() => existsSync(join(profileDir, "DevToolsActivePort")), "Chrome did not create DevToolsActivePort");
+async function reserveLoopbackPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Could not reserve a loopback port for Chrome DevTools");
+  }
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  return address.port;
+}
+
+async function openReader(chrome: ChildProcessWithoutNullStreams, debugPort: number): Promise<CdpClient> {
   if (chrome.exitCode !== null) {
     throw new Error(`Chrome exited before DevTools started (${chrome.exitCode})`);
   }
-  const [port] = (await readFile(join(profileDir, "DevToolsActivePort"), "utf8")).split("\n");
-  const target = await waitForChromeTarget(port);
+  const target = await waitForChromeTarget(String(debugPort));
   const cdp = await CdpClient.connect(target.webSocketDebuggerUrl!);
   await cdp.command("Page.enable");
   await cdp.command("Runtime.enable");
@@ -258,12 +272,13 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
 
       await waitFor(() => publisher.getDescriptor().framesSent >= 10, "publisher did not send synthetic H.264 frames");
       const profileDir = join(tempDir, "chrome-profile");
+      const debugPort = await reserveLoopbackPort();
       chrome = startProcess(resolveChromeBinary(), [
         "--headless=new", "--no-first-run", "--no-default-browser-check",
-        "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=0",
+        "--autoplay-policy=no-user-gesture-required", `--remote-debugging-port=${debugPort}`,
         `--user-data-dir=${profileDir}`, "about:blank",
       ], tempDir).process;
-      cdp = await openReader(chrome, profileDir);
+      cdp = await openReader(chrome, debugPort);
       const decoded = await readDecodedVideo(cdp);
 
       expect(publisher.getDescriptor().framesSent).toBeGreaterThanOrEqual(10);

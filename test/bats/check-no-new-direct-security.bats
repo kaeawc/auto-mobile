@@ -47,6 +47,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "rejects absolute, commented, and Bun.spawn security execution" {
+  printf '%s\n' 'execFile("/usr/bin/security", ["find-identity"]);' 'execFile(/* signing */ "security", ["find-identity"]);' 'Bun.spawn(["security", "find-identity"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-security.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "allows SecurityClient to own the invocation" {
   printf '%s\n' 'execFile("security", ["find-identity"]);' > "$repo_dir/src/utils/ios-cmdline-tools/SecurityClient.ts"
   git -C "$repo_dir" add src/utils/ios-cmdline-tools/SecurityClient.ts

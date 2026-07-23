@@ -29,6 +29,20 @@ describe("SecurityClient", () => {
     await expect(client.listCodeSigningIdentities()).resolves.toEqual([]);
   });
 
+  test("uses the successful help command for availability diagnostics", async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const client = new SecurityClient({
+      platform: () => "darwin",
+      execute: async (file, args) => {
+        calls.push({ file, args });
+        return createExecResult("security commands", "");
+      }
+    });
+
+    await expect(client.getDiagnostics({ timeoutMs: 1234 })).resolves.toEqual({ available: true, version: null });
+    expect(calls).toEqual([{ file: "security", args: ["help"] }]);
+  });
+
   test("decodes CMS with the profile path as one argv value", async () => {
     const calls: Array<{ file: string; args: string[] }> = [];
     const profilePath = "/tmp/a profile; $(not-a-command).mobileprovision";
@@ -59,10 +73,12 @@ describe("SecurityClient", () => {
   test("aborts the child when CMS decoding times out", async () => {
     const timer = new FakeTimer();
     let signal: AbortSignal | undefined;
+    let killSignal: NodeJS.Signals | undefined;
     const client = new SecurityClient({
       platform: () => "darwin",
       execute: async (_file, _args, options) => {
         signal = options?.signal;
+        killSignal = options?.killSignal;
         return new Promise((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
         });
@@ -75,6 +91,7 @@ describe("SecurityClient", () => {
 
     await expect(decoding).rejects.toThrow("Security CMS decoding timed out after 1234ms");
     expect(signal?.aborted).toBe(true);
+    expect(killSignal).toBe("SIGKILL");
   });
 
   test("does not execute when cancelled before the command starts", async () => {

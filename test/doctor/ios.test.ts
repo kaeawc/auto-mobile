@@ -356,6 +356,22 @@ describe("iOS doctor checks", () => {
       expect(result.message).toContain("does not report a standalone version");
     });
 
+    test("uses the configured doctor timeout for the security probe", async () => {
+      let timeoutMs: number | undefined;
+      await checkSecurityCli({
+        ...baseDependencies,
+        securityClient: {
+          ...baseDependencies.securityClient,
+          getDiagnostics: async options => {
+            timeoutMs = options?.timeoutMs;
+            return { available: true, version: null };
+          }
+        } as SecurityClient
+      });
+
+      expect(timeoutMs).toBe(5000);
+    });
+
     test("fails when the security client is unavailable", async () => {
       const result = await checkSecurityCli({
         ...baseDependencies,

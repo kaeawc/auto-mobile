@@ -663,7 +663,7 @@ export async function checkCodeSigning(
   }
 
   try {
-    const identities = await dependencies.securityClient.listCodeSigningIdentities();
+    const identities = await dependencies.securityClient.listCodeSigningIdentities({ timeoutMs: DOCTOR_EXEC_TIMEOUT_MS });
     const count = identities.length;
 
     if (count > 0) {
@@ -702,7 +702,7 @@ export async function checkSecurityCli(
   }
 
   try {
-    const diagnostics = await dependencies.securityClient.getDiagnostics();
+    const diagnostics = await dependencies.securityClient.getDiagnostics({ timeoutMs: DOCTOR_EXEC_TIMEOUT_MS });
     if (diagnostics.available) {
       return {
         name,

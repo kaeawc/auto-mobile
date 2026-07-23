@@ -21,8 +21,10 @@ if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
   fi
 fi
 
-# Normalize added lines so multiline argv invocations are checked together.
-pattern="((spawn|spawnSync|execFile|execFileSync)\\([[:space:]]*(\"|\\\`|')security|exec(Sync)?\\([^)]*(\"|\\\`|')security[[:space:]]|\"/bin/sh\".*security)"
+# Only SecurityClient may introduce a literal macOS security command. The
+# conservative literal check covers argv, shell, absolute-path, Bun.spawn, and
+# constructed-path forms without guessing which launch API receives it.
+pattern="(\"|\\\`|')(/usr/bin/)?security([[:space:]]|\"|\\\`|')"
 
 while IFS= read -r file; do
   [[ "$file" == "$owner" ]] && continue

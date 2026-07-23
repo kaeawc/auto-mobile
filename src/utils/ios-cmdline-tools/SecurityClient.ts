@@ -26,6 +26,7 @@ export interface SecurityCommandOptions {
 
 interface SecurityExecutionOptions {
   signal?: AbortSignal;
+  killSignal?: NodeJS.Signals;
 }
 
 export interface SecurityClientDependencies {
@@ -35,7 +36,7 @@ export interface SecurityClientDependencies {
 }
 
 export interface SecurityClientApi {
-  getDiagnostics(): Promise<SecurityDiagnostics>;
+  getDiagnostics(options?: SecurityCommandOptions): Promise<SecurityDiagnostics>;
   listCodeSigningIdentities(options?: SecurityCommandOptions): Promise<SecurityIdentity[]>;
   decodeCms(path: string, options?: SecurityCommandOptions): Promise<string>;
 }
@@ -45,7 +46,7 @@ const defaultExecute = async (
   args: string[],
   options: SecurityExecutionOptions = {}
 ): Promise<ExecResult> => {
-  const result = await promisify(execFile)(file, args, { signal: options.signal });
+  const result = await promisify(execFile)(file, args, { signal: options.signal, killSignal: options.killSignal ?? "SIGKILL" });
   const stdout = String(result.stdout);
   const stderr = String(result.stderr);
   return createExecResult(stdout, stderr);
@@ -79,13 +80,13 @@ export class SecurityClient implements SecurityClientApi {
     this.timer = dependencies.timer ?? defaultTimer;
   }
 
-  public async getDiagnostics(): Promise<SecurityDiagnostics> {
+  public async getDiagnostics(options: SecurityCommandOptions = {}): Promise<SecurityDiagnostics> {
     if (this.dependencies.platform() !== "darwin") {
       return { available: false, version: null };
     }
 
     try {
-      await this.run("availability probe", ["-v"]);
+      await this.run("availability probe", ["help"], options);
       return { available: true, version: null };
     } catch (error) {
       logger.debug(`[SecurityClient] Availability probe failed: ${error instanceof Error ? error.name : "unknown error"}`);
@@ -146,7 +147,7 @@ export class SecurityClient implements SecurityClientApi {
         reject(new Error(`Security ${operation} timed out after ${timeoutMs}ms.`));
       }, timeoutMs);
     });
-    const execution = this.dependencies.execute(SECURITY_COMMAND, args, { signal: controller.signal });
+    const execution = this.dependencies.execute(SECURITY_COMMAND, args, { signal: controller.signal, killSignal: "SIGKILL" });
     execution.catch(() => { /* handled by the race when aborting a child */ });
 
     try {

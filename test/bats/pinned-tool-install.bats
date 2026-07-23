@@ -64,15 +64,15 @@ teardown() {
 }
 
 @test "write paths reject a formatter whose version differs from the pin" {
-  cat > "$STUB_DIR/swiftlint" <<'EOF'
+  cat >"$STUB_DIR/swiftlint" <<'EOF'
 #!/usr/bin/env bash
 echo 0.0.0
 EOF
-  cat > "$STUB_DIR/swiftformat" <<'EOF'
+  cat >"$STUB_DIR/swiftformat" <<'EOF'
 #!/usr/bin/env bash
 echo 0.0.0
 EOF
-  cat > "$STUB_DIR/shfmt" <<'EOF'
+  cat >"$STUB_DIR/shfmt" <<'EOF'
 #!/usr/bin/env bash
 echo v0.0.0
 EOF
@@ -88,15 +88,15 @@ EOF
 }
 
 @test "version gates reject prerelease formatter builds" {
-  cat > "$STUB_DIR/swiftlint" <<'EOF'
+  cat >"$STUB_DIR/swiftlint" <<'EOF'
 #!/usr/bin/env bash
 echo 0.57.0-rc.1
 EOF
-  cat > "$STUB_DIR/swiftformat" <<'EOF'
+  cat >"$STUB_DIR/swiftformat" <<'EOF'
 #!/usr/bin/env bash
 echo 0.54.6-beta.1
 EOF
-  cat > "$STUB_DIR/shfmt" <<'EOF'
+  cat >"$STUB_DIR/shfmt" <<'EOF'
 #!/usr/bin/env bash
 echo v3.10.0-rc.1
 EOF

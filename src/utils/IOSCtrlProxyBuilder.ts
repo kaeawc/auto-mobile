@@ -652,15 +652,21 @@ export class IOSCtrlProxyBuilder {
   }
 
   /**
-   * Get the runner binary path for simctl spawn
-   * Returns: <buildPath>/CtrlProxyUITests-Runner.app/CtrlProxyUITests-Runner
+   * Get the CtrlProxy xctest executable path for runner checksum verification.
+   * Returns: <buildPath>/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests
    */
   public async getRunnerBinaryPath(platform: IOSCtrlProxyPlatform = "simulator"): Promise<string | null> {
     const buildPath = await this.getBuildProductsPath(platform);
     if (!buildPath) {
       return null;
     }
-    const runnerBinaryPath = path.join(buildPath, "CtrlProxyUITests-Runner.app", "CtrlProxyUITests-Runner");
+    const runnerBinaryPath = path.join(
+      buildPath,
+      "CtrlProxyUITests-Runner.app",
+      "PlugIns",
+      "CtrlProxyUITests.xctest",
+      "CtrlProxyUITests"
+    );
     try {
       await fs.access(runnerBinaryPath);
       return runnerBinaryPath;

@@ -70,6 +70,11 @@ run_gate_ipa() {
   run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' '$1' '$2'"
 }
 
+@test "IPA producer hashes the CtrlProxy xctest executable" {
+  grep -Fq 'RUNNER_BINARY="${SIM_DIR}/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests"' \
+    scripts/ios/ctrl-proxy-create-ipa.sh
+}
+
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
     printf '%s' "$1" | sha256sum | cut -d' ' -f1
@@ -79,18 +84,36 @@ sha256_of() {
 }
 
 # make_ipa <runner-binary-content> <out.ipa> — build a zip mirroring the real
-# IPA layout (a zip of Build/Products) with the runner binary at the expected
-# path, and echo the sha256 of that binary's content.
+# IPA layout (a zip of Build/Products) with the CtrlProxy xctest executable at
+# the expected path, and echo the sha256 of that binary's content.
 make_ipa() {
   local content="$1" out="$2"
-  local stage runner_dir
+  local stage xctest_dir
   stage="$(mktemp -d)"
-  runner_dir="${stage}/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app"
-  mkdir -p "$runner_dir"
-  printf '%s' "$content" > "${runner_dir}/CtrlProxyUITests-Runner"
+  xctest_dir="${stage}/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest"
+  mkdir -p "$xctest_dir"
+  printf '%s' "$content" > "${xctest_dir}/CtrlProxyUITests"
   ( cd "$stage" && zip -qr "$out" Build/Products/ )
   rm -rf "$stage"
   sha256_of "$content"
+}
+
+# make_ipa_with_stub <stub-content> <xctest-content> <out.ipa> — create the
+# full layout, including Xcode's generic runner stub, and return the hash of
+# the CtrlProxy code executable. The values deliberately differ so a consumer
+# that targets the stub cannot accidentally pass.
+make_ipa_with_stub() {
+  local stub_content="$1" xctest_content="$2" out="$3"
+  local stage runner_dir xctest_dir
+  stage="$(mktemp -d)"
+  runner_dir="${stage}/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app"
+  xctest_dir="${runner_dir}/PlugIns/CtrlProxyUITests.xctest"
+  mkdir -p "$xctest_dir"
+  printf '%s' "$stub_content" > "${runner_dir}/CtrlProxyUITests-Runner"
+  printf '%s' "$xctest_content" > "${xctest_dir}/CtrlProxyUITests"
+  ( cd "$stage" && zip -qr "$out" Build/Products/ )
+  rm -rf "$stage"
+  sha256_of "$xctest_content"
 }
 
 @test "passes when all versions align and runner sha is populated" {
@@ -188,23 +211,32 @@ PY
   [[ "$output" == *"registry[0].runnerSha256"* ]]
 }
 
-@test "binds recorded runner sha to the runner inside the IPA (match passes)" {
+@test "binds recorded runner sha to the CtrlProxy executable inside the IPA (match passes)" {
   local ipa="${TEST_ROOT}/control-proxy.ipa" sha
   sha="$(make_ipa "fake-runner-binary-bytes" "$ipa")"
   write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$sha"
   run_gate_ipa "$VERSION" "$ipa"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"matches the runner inside the IPA"* ]]
+  [[ "$output" == *"matches the CtrlProxy executable inside the IPA"* ]]
 }
 
-@test "fails when recorded runner sha does not match the IPA runner (substitution)" {
+@test "binds recorded runner sha to the CtrlProxy xctest executable, not the XCTRunner stub" {
+  local ipa="${TEST_ROOT}/control-proxy.ipa" sha
+  sha="$(make_ipa_with_stub "generic-xctrunner-stub" "ctrl-proxy-code" "$ipa")"
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$sha"
+  run_gate_ipa "$VERSION" "$ipa"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"matches the CtrlProxy executable inside the IPA"* ]]
+}
+
+@test "fails when recorded runner sha does not match the IPA CtrlProxy executable (substitution)" {
   local ipa="${TEST_ROOT}/control-proxy.ipa"
   make_ipa "the-real-shipped-runner" "$ipa" >/dev/null
   # Record a valid-looking but WRONG sha (as if a tampered/stale runner shipped).
   write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA"
   run_gate_ipa "$VERSION" "$ipa"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"does not match the runner binary shipped"* ]]
+  [[ "$output" == *"does not match the CtrlProxy executable shipped"* ]]
 }
 
 @test "fails when the IPA path is given but the file is missing" {
@@ -214,7 +246,7 @@ PY
   [[ "$output" == *"IPA not found"* ]]
 }
 
-@test "fails when the IPA lacks the runner binary" {
+@test "fails when the IPA lacks the CtrlProxy xctest executable" {
   local ipa="${TEST_ROOT}/empty.ipa" stage
   stage="$(mktemp -d)"
   mkdir -p "${stage}/Build/Products/Debug-iphonesimulator"
@@ -224,5 +256,5 @@ PY
   write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA"
   run_gate_ipa "$VERSION" "$ipa"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"CtrlProxyUITests-Runner not found inside"* ]]
+  [[ "$output" == *"CtrlProxyUITests not found inside"* ]]
 }

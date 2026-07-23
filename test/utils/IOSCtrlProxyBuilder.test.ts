@@ -334,6 +334,21 @@ describe("IOSCtrlProxyBuilder", function() {
     });
   });
 
+  describe("getRunnerBinaryPath", function() {
+    test("returns the CtrlProxy xctest executable rather than the XCTRunner stub", async function() {
+      const buildDir = path.join(tempDir, "Build", "Products", "Debug-iphonesimulator");
+      const runnerDir = path.join(buildDir, "CtrlProxyUITests-Runner.app");
+      const xctestBinary = path.join(runnerDir, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
+      await fs.mkdir(path.dirname(xctestBinary), { recursive: true });
+      await fs.writeFile(path.join(runnerDir, "CtrlProxyUITests-Runner"), "xctrunner-stub");
+      await fs.writeFile(xctestBinary, "ctrl-proxy-code");
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ derivedDataPath: tempDir });
+
+      expect(await builder.getRunnerBinaryPath()).toBe(xctestBinary);
+    });
+  });
+
   describe("getXctestrunPath", function() {
     test("should return null when xctestrun doesn't exist", async function() {
       const builder = IOSCtrlProxyBuilder.getInstance({

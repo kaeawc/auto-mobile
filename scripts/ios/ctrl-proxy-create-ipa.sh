@@ -172,8 +172,10 @@ cd "${PROJECT_ROOT}"
 IPA_SHA256=$(shasum -a 256 "${OUTPUT_PATH}" | cut -d' ' -f1)
 IPA_SIZE=$(stat -f%z "${OUTPUT_PATH}" 2>/dev/null || stat -c%s "${OUTPUT_PATH}" 2>/dev/null)
 
-# Compute SHA256 of runner binary
-RUNNER_BINARY="${SIM_DIR}/CtrlProxyUITests-Runner.app/CtrlProxyUITests-Runner"
+# Compute SHA256 of the CtrlProxy code executable. The outer
+# CtrlProxyUITests-Runner binary is Xcode's generic XCTRunner stub; the xctest
+# bundle is where the shipped CtrlProxy implementation lives.
+RUNNER_BINARY="${SIM_DIR}/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests"
 RUNNER_SHA256=$(shasum -a 256 "${RUNNER_BINARY}" | cut -d' ' -f1)
 
 echo ""

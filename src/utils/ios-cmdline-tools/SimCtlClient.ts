@@ -492,7 +492,7 @@ export class SimCtlClient implements SimCtl {
   }
 
   async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
-    return this.executeCommandArgv(args, timeoutMs, args.map(arg => JSON.stringify(arg)).join(" "));
+    return this.executeCommandArgv(args, timeoutMs, args.join(" "));
   }
 
   async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
@@ -633,7 +633,7 @@ export class SimCtlClient implements SimCtl {
   private async listSimulators(): Promise<SimulatorList> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("simctlListDevices");
-    const result = await this.executeCommand("list devices --json");
+    const result = await this.executeCommandArgs(["list", "devices", "--json"]);
     perf.endOperation("simctlListDevices");
 
     try {
@@ -696,7 +696,7 @@ export class SimCtlClient implements SimCtl {
     return {
       pid: undefined,
       kill: (): boolean => {
-        void this.executeCommand(`shutdown ${udid}`).catch(error => {
+        void this.executeCommandArgs(["shutdown", udid]).catch(error => {
           logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
         });
         return true;
@@ -710,12 +710,12 @@ export class SimCtlClient implements SimCtl {
 
   async killSimulator(device: BootedDevice): Promise<void> {
     logger.debug(`Killing iOS simulator ${device.deviceId}`);
-    await this.executeCommand(`shutdown ${device.deviceId}`);
+    await this.executeCommandArgs(["shutdown", device.deviceId]);
   }
 
   async eraseSimulator(udid: string): Promise<void> {
     logger.debug(`Erasing iOS simulator ${udid}`);
-    await this.executeCommand(`erase ${udid}`);
+    await this.executeCommandArgs(["erase", udid]);
   }
 
   async waitForSimulatorReady(
@@ -780,7 +780,7 @@ export class SimCtlClient implements SimCtl {
       // reports itself and has consumed the caller's timeout budget, so it
       // propagates unchanged rather than being retried. The retry here exists
       // for the silent case: exit 0 with a device that never became Booted.
-      await this.executeCommand(`bootstatus ${udid} -b`, timeoutMs);
+      await this.executeCommandArgs(["bootstatus", udid, "-b"], timeoutMs);
 
       const state = await this.readSimulatorState(udid);
       if (state === "Booted") {
@@ -794,7 +794,7 @@ export class SimCtlClient implements SimCtl {
         // Best-effort: shutting down an already-shutdown device errors, and that
         // is fine — the next attempt re-boots from whatever state it is in.
         try {
-          await this.executeCommand(`shutdown ${udid}`);
+          await this.executeCommandArgs(["shutdown", udid]);
         } catch (error) {
           logger.debug(`[iOS] shutdown before boot retry failed for ${udid}: ${error}`);
         }
@@ -869,7 +869,7 @@ export class SimCtlClient implements SimCtl {
 
   /** List installed iOS simulator runtimes that are actually available. */
   private async listIosRuntimes(): Promise<AppleDeviceRuntime[]> {
-    const result = await this.executeCommand("list runtimes iOS --json");
+    const result = await this.executeCommandArgs(["list", "runtimes", "iOS", "--json"]);
     try {
       const parsed = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
       return (parsed.runtimes ?? []).filter(runtime => runtime.isAvailable !== false);
@@ -1096,7 +1096,7 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with array of device types
    */
   async getDeviceTypes(): Promise<AppleDeviceType[]> {
-    const result = await this.executeCommand("list devicetypes --json");
+    const result = await this.executeCommandArgs(["list", "devicetypes", "--json"]);
     try {
       const data = JSON.parse(result.stdout);
       return data.devicetypes ?? [];
@@ -1111,7 +1111,7 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with array of runtimes
    */
   async getRuntimes(): Promise<AppleDeviceRuntime[]> {
-    const result = await this.executeCommand("list runtimes --json");
+    const result = await this.executeCommandArgs(["list", "runtimes", "--json"]);
     try {
       const data = JSON.parse(result.stdout);
       return (data.runtimes ?? []).filter((runtime: AppleDeviceRuntime) => runtime.isAvailable);
@@ -1130,7 +1130,7 @@ export class SimCtlClient implements SimCtl {
    */
   async createSimulator(name: string, deviceType: string, runtime: string): Promise<string> {
     logger.debug(`Creating iOS simulator: ${name} (${deviceType}, ${runtime})`);
-    const result = await this.executeCommand(`create "${name}" "${deviceType}" "${runtime}"`);
+    const result = await this.executeCommandArgs(["create", name, deviceType, runtime]);
     const simulatorUdid = result.stdout.trim();
 
     if (!simulatorUdid) {
@@ -1158,7 +1158,7 @@ export class SimCtlClient implements SimCtl {
    */
   async deleteSimulator(udid: string): Promise<void> {
     logger.debug(`Deleting iOS simulator ${udid}`);
-    await this.executeCommand(`delete ${udid}`);
+    await this.executeCommandArgs(["delete", udid]);
   }
 
   /**
@@ -1241,7 +1241,7 @@ export class SimCtlClient implements SimCtl {
     logger.debug(`Launching app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
-      const result = await this.executeCommand(`launch ${targetDevice} ${bundleId}`);
+      const result = await this.executeCommandArgs(["launch", targetDevice, bundleId]);
 
       // Parse the output to extract PID if available
       // Example output: "com.example.app: 12345"
@@ -1272,7 +1272,7 @@ export class SimCtlClient implements SimCtl {
     logger.debug(`Terminating app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
-      await this.executeCommand(`terminate ${targetDevice} ${bundleId}`);
+      await this.executeCommandArgs(["terminate", targetDevice, bundleId]);
     } catch (error) {
       logger.warn(`Failed to terminate iOS app ${bundleId}: ${error}`);
       throw error;
@@ -1282,13 +1282,13 @@ export class SimCtlClient implements SimCtl {
   async installApp(appPath: string, deviceId?: string): Promise<void> {
     const targetDevice = deviceId || (this.device?.deviceId) || "booted";
     logger.debug(`Installing app ${appPath} on iOS simulator ${targetDevice}`);
-    await this.executeCommand(`install ${targetDevice} "${appPath}"`);
+    await this.executeCommandArgs(["install", targetDevice, appPath]);
   }
 
   async uninstallApp(bundleId: string, deviceId?: string): Promise<void> {
     const targetDevice = deviceId || (this.device?.deviceId) || "booted";
     logger.debug(`Uninstalling app ${bundleId} from iOS simulator ${targetDevice}`);
-    await this.executeCommand(`uninstall ${targetDevice} ${bundleId}`);
+    await this.executeCommandArgs(["uninstall", targetDevice, bundleId]);
   }
 
   /**
@@ -1302,7 +1302,7 @@ export class SimCtlClient implements SimCtl {
     logger.info(`[iOS] Getting screen size for simulator ${targetDevice}`);
 
     // Use simctl io enumerate to get display information
-    const result = await this.executeCommand(`io ${targetDevice} enumerate`);
+    const result = await this.executeCommandArgs(["io", targetDevice, "enumerate"]);
 
     // Parse the text output to find LCD screen information
     const lines = result.stdout.split("\n");
@@ -1359,7 +1359,7 @@ export class SimCtlClient implements SimCtl {
 
   async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {
     const targetDevice = deviceId || this.device?.deviceId || "booted";
-    await this.executeCommand(`ui ${targetDevice} appearance ${mode}`);
+    await this.executeCommandArgs(["ui", targetDevice, "appearance", mode]);
   }
 
   /**
@@ -1373,7 +1373,7 @@ export class SimCtlClient implements SimCtl {
       await fsPromises.writeFile(file, payloadJson, "utf-8");
       // `xcrun simctl push <udid> <bundleId> <file>`; bundleId may be omitted when the
       // payload carries "Simulator Target Bundle", but passing it explicitly is harmless.
-      const result = await this.executeCommand(`push ${deviceId} ${bundleId} "${file}"`);
+      const result = await this.executeCommandArgs(["push", deviceId, bundleId, file]);
       if ((result.stderr || "").trim().length > 0) {
         return { success: false, error: result.stderr.trim() };
       }

@@ -29,6 +29,50 @@ const TRICKY_VALUES: ReadonlyArray<{ label: string; value: string }> = [
 ];
 
 describe("simctl argv integrity (#4196)", () => {
+  describe("SimCtlClient command methods preserve caller values (#4234)", () => {
+    const cases: ReadonlyArray<{
+      label: string;
+      expectedArgs: string[];
+      invoke: (client: Simctl) => Promise<unknown>;
+    }> = [
+      {
+        label: "simulator name containing a space, quote, and backslash",
+        expectedArgs: [
+          "create",
+          "Test \"Simulator\" \\ Name",
+          "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+        ],
+        invoke: client => client.createSimulator(
+          "Test \"Simulator\" \\ Name",
+          "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+        ),
+      },
+      {
+        label: "app path containing a space, quote, and backslash",
+        expectedArgs: ["install", UDID, "/tmp/Test \"App\" \\ Build.app"],
+        invoke: client => client.installApp("/tmp/Test \"App\" \\ Build.app", UDID),
+      },
+    ];
+
+    for (const { label, expectedArgs, invoke } of cases) {
+      test(`issues exact argv for ${label}`, async () => {
+        const seen: string[][] = [];
+        const client = new Simctl(null, async (_file, args) => {
+          if (args.join(" ") !== "simctl --version") {
+            seen.push(args);
+          }
+          return createExecResult("created-udid\n", "");
+        });
+
+        await invoke(client);
+
+        expect(seen).toEqual([["simctl", ...expectedArgs]]);
+      });
+    }
+  });
+
   describe("restoreIosSettings issues an argv array, preserving every value", () => {
     for (const { label, value } of TRICKY_VALUES) {
       test(`defaults write survives ${label}`, async () => {

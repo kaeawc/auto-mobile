@@ -213,7 +213,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
       return {
         hierarchy: {
-          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy from accessibility service", signal)
+          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy from accessibility service", signal, timeoutMs)
         },
         updatedAt: this.timer.now()
       };
@@ -223,7 +223,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       logger.warn(`[VIEW_HIERARCHY] Failed to get hierarchy from accessibility service after ${duration}ms:`, err);
       return {
         hierarchy: {
-          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy", signal)
+          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy", signal, timeoutMs)
         },
         updatedAt: this.timer.now()
       };
@@ -244,16 +244,24 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * falls back to `fallback`, so this never turns a real transport error into a
    * misleading "device is locked".
    */
-  private async describeHierarchyFailure(fallback: string, signal?: AbortSignal): Promise<string> {
+  private async describeHierarchyFailure(
+    fallback: string,
+    signal?: AbortSignal,
+    timeoutMs?: number
+  ): Promise<string> {
     if (this.device.platform !== "android") {
       return fallback;
     }
-    // Never spend time improving the error wording past the caller's deadline: a
-    // short-budget caller (e.g. the keyboard confirmation loop) may already have
-    // consumed its per-read budget in getAccessibilityHierarchy, so skip the probe
-    // when the signal is aborted, and thread it in so an in-flight dumpsys aborts
-    // with the request rather than blocking on its own (#4281 review).
-    if (signal?.aborted) {
+    // Only reword the error for an unbudgeted (interactive) observe. A caller that
+    // bounds each read -- an aborted signal, or a per-read `timeoutMs` like the
+    // keyboard confirmation poll -- is latency-sensitive, and getDeviceLock's
+    // `dumpsys window policy` is not itself bounded when no signal aborts it (the
+    // keyboard path relies on `timeoutMs`, not a signal). So skip the probe rather
+    // than risk blocking past the caller's deadline just to improve wording; the
+    // main observe path (HierarchyCollector) passes no timeoutMs and still gets the
+    // lock-specific message (#4281 review). The signal is still threaded through so
+    // an in-flight dumpsys aborts with the request when one is present.
+    if (signal?.aborted || timeoutMs !== undefined) {
       return fallback;
     }
     try {

@@ -257,7 +257,7 @@ describe("ViewHierarchy", function() {
       expect(String((result.hierarchy as any).error)).toContain("Failed to retrieve view hierarchy");
     });
 
-    test("skips the lock probe when the caller's budget is already spent (#4281 review)", async function() {
+    test("skips the lock probe when the caller's signal is already aborted (#4281 review)", async function() {
       // Locked device, but the caller's deadline has already fired: the diagnostic
       // must not start an unbounded dumpsys just to reword the error.
       fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
@@ -271,6 +271,24 @@ describe("ViewHierarchy", function() {
       controller.abort();
 
       const result = await viewHierarchy.getAndroidViewHierarchy(undefined, undefined, false, 0, controller.signal);
+
+      expect(probed).toBe(false);
+      expect(String((result.hierarchy as any).error)).toContain("Failed to retrieve view hierarchy");
+    });
+
+    test("skips the lock probe when a per-read timeoutMs budget is supplied (#4281 review)", async function() {
+      // The keyboard confirmation poll bounds each read with timeoutMs and passes
+      // no signal; the unbounded dumpsys probe must not run for such a caller.
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
+      let probed = false;
+      const originalGetDeviceLock = fakeAdb.getDeviceLock.bind(fakeAdb);
+      (fakeAdb as any).getDeviceLock = async (signal?: AbortSignal) => {
+        probed = true;
+        return originalGetDeviceLock(signal);
+      };
+
+      // timeoutMs supplied (5th arg signal omitted, 6th arg timeoutMs=500).
+      const result = await viewHierarchy.getAndroidViewHierarchy(undefined, undefined, false, 0, undefined, 500);
 
       expect(probed).toBe(false);
       expect(String((result.hierarchy as any).error)).toContain("Failed to retrieve view hierarchy");

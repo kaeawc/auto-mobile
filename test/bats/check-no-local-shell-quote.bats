@@ -60,3 +60,12 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"ShellQuoteBoundaryFixture.ts"* ]]
 }
+
+@test "rejects a helper that returns only an escaped shell value" {
+  printf '%s\n' "export function escapeShellValue(value: string): string { return value.replace(/'/g, \"'\\\"'\\\"'\"); }" > "$FIXTURE"
+
+  run env SHELL_QUOTE_SOURCE_ROOT="$fixture_root" bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ShellQuoteBoundaryFixture.ts"* ]]
+}

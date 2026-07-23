@@ -31,15 +31,11 @@ function isFunctionValue(expression: ts.Expression | undefined): boolean {
   return !!expression && (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression));
 }
 
-function isCanonicalShellQuoteExpression(expression: ts.Expression): boolean {
-  if (!ts.isTemplateExpression(expression) || expression.head.text !== "'" || expression.templateSpans.length !== 1) {
+function isSingleQuoteEscapeCall(expression: ts.Expression): boolean {
+  if (!ts.isCallExpression(expression)) {
     return false;
   }
-  const [span] = expression.templateSpans;
-  if (!span || span.literal.text !== "'" || !ts.isCallExpression(span.expression)) {
-    return false;
-  }
-  const call = span.expression;
+  const call = expression;
   if (
     !ts.isPropertyAccessExpression(call.expression) ||
     !["replace", "replaceAll"].includes(call.expression.name.text) ||
@@ -51,7 +47,19 @@ function isCanonicalShellQuoteExpression(expression: ts.Expression): boolean {
   const replacesSingleQuotes =
     (ts.isRegularExpressionLiteral(search) && search.text === "/'/g") ||
     (ts.isStringLiteral(search) && search.text === "'");
-  return replacesSingleQuotes && ts.isStringLiteral(replacement) && replacement.text === "'\\''";
+  return (
+    replacesSingleQuotes &&
+    ts.isStringLiteral(replacement) &&
+    ["'\\''", "'\"'\"'"].includes(replacement.text)
+  );
+}
+
+function isCanonicalShellQuoteExpression(expression: ts.Expression): boolean {
+  if (!ts.isTemplateExpression(expression) || expression.head.text !== "'" || expression.templateSpans.length !== 1) {
+    return false;
+  }
+  const [span] = expression.templateSpans;
+  return !!span && span.literal.text === "'" && isSingleQuoteEscapeCall(span.expression);
 }
 
 function hasCanonicalShellQuoteReturn(body: ts.Block | ts.Expression | undefined): boolean {
@@ -62,7 +70,10 @@ function hasCanonicalShellQuoteReturn(body: ts.Block | ts.Expression | undefined
     return isCanonicalShellQuoteExpression(body);
   }
   return body.statements.some(
-    statement => ts.isReturnStatement(statement) && !!statement.expression && isCanonicalShellQuoteExpression(statement.expression),
+    statement =>
+      ts.isReturnStatement(statement) &&
+      !!statement.expression &&
+      (isCanonicalShellQuoteExpression(statement.expression) || isSingleQuoteEscapeCall(statement.expression)),
   );
 }
 

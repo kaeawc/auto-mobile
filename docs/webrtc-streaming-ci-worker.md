@@ -26,10 +26,8 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
   [example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml) — `mediamtx ./examples/mediamtx/mediamtx.yml`
   (or the official container) — which serves WHIP at `/<stream>/whip` and WHEP at
   `/<stream>/whep` on port `8889`. Any WHIP-compatible SFU (LiveKit, Janus,
-  Cloudflare) works too. The bundled
-  [reference server](../examples/webrtc-coordination-server/README.md) still
-  exists for a zero-dependency local try-out, but MediaMTX is the supported
-  production fanout.
+  Cloudflare) works too. MediaMTX is the supported production fanout; browsers
+  watch a stream with its built-in WHEP reader at `http://<host>:8889/<stream>`.
   - **Ports:** `8889` is only the WHIP/WHEP signaling listener. The media itself
     flows over MediaMTX's ICE **UDP** listener `webrtcLocalUDPAddress: :8189` — a
     containerized or firewalled deployment that exposes only `8889` gets WHIP/WHEP

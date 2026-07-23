@@ -113,7 +113,7 @@ CI/dev case, so it is only a partial answer.
 
 1. Ship the helper + ffmpeg `IosH264Source` path for physical devices and
    visible simulator windows.
-2. Add end-to-end manual coverage against a WHIP coordination server on a Mac
+2. Add end-to-end manual coverage against a WHIP fanout server (MediaMTX) on a Mac
    with Screen Recording permission granted.
 3. Consider moving H.264 encoding into Swift (`VTCompressionSession`) once the
    helper path is proven, reducing the external `ffmpeg` dependency.

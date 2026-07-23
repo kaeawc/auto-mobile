@@ -2,6 +2,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-too
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
 import * as fs from "fs/promises";
+import type { Dirent } from "fs";
 import * as path from "path";
 import { ActionableError, BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
@@ -368,6 +369,63 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
     AndroidCtrlProxyManager.prefetchPromise = null;
     AndroidCtrlProxyManager.prefetchError = null;
+  }
+
+  /** Prefix shared by every prefetch scratch dir, including the `-upgrade-` variant. */
+  private static readonly PREFETCH_DIR_PREFIX = "auto-mobile-prefetch-";
+  /**
+   * Only prefetch dirs older than this are swept, so an in-flight prefetch
+   * (this process's or a concurrent one's) is never removed. Matches the
+   * `-mmin +60` guard from the issue's workaround (#4334).
+   */
+  private static readonly STALE_PREFETCH_MAX_AGE_MS = 60 * 60 * 1000;
+
+  /**
+   * Best-effort startup sweep for orphaned `auto-mobile-prefetch-*` scratch
+   * directories. On success `doPrefetch` intentionally retains its dir as the
+   * reusable APK cache; it is removed only by {@link cleanupPrefetchedApk} in the
+   * graceful-shutdown handler. Any process that is SIGKILLed or crashes therefore
+   * leaks one dir (~20+ MB) per lifecycle, growing the runtime dir without bound
+   * (#4334). This reclaims the leaked ones left by previous runs, skipping any
+   * dir younger than {@link STALE_PREFETCH_MAX_AGE_MS} so in-flight work is safe.
+   */
+  public static async sweepStalePrefetchDirsOnStartup(
+    tempRoot: string = os.tmpdir(),
+    timer: Timer = defaultTimer
+  ): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(tempRoot, { withFileTypes: true });
+    } catch (error) {
+      // A missing/unreadable temp root is expected on some hosts; nothing to sweep.
+      logger.debug(`[CTRL_PROXY] Prefetch sweep skipped: cannot read ${tempRoot}: ${error}`);
+      return;
+    }
+
+    const now = timer.now();
+    let reclaimed = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX)) {
+        continue;
+      }
+      const dir = path.join(tempRoot, entry.name);
+      try {
+        const stats = await fs.stat(dir);
+        if (now - stats.mtimeMs < AndroidCtrlProxyManager.STALE_PREFETCH_MAX_AGE_MS) {
+          continue;
+        }
+        await fs.rm(dir, { recursive: true, force: true });
+        reclaimed++;
+      } catch (error) {
+        // Per-entry best-effort: a concurrent process may remove the same dir,
+        // or it may vanish mid-sweep. Skip it and keep going.
+        logger.debug(`[CTRL_PROXY] Failed to sweep stale prefetch dir ${dir}: ${error}`);
+      }
+    }
+
+    if (reclaimed > 0) {
+      logger.info(`[CTRL_PROXY] Swept ${reclaimed} stale prefetch dir(s) from ${tempRoot}`);
+    }
   }
 
   /**

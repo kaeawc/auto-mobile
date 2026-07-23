@@ -62,6 +62,9 @@ teardown() {
   if [ -n "${SURVIVOR_PID_FILE:-}" ] && [ -s "${SURVIVOR_PID_FILE}" ]; then
     kill -KILL "$(cat "${SURVIVOR_PID_FILE}")" 2> /dev/null || true
   fi
+  if [ -n "${WATCHDOG_SLEEP_PID_FILE:-}" ] && [ -s "${WATCHDOG_SLEEP_PID_FILE}" ]; then
+    kill -KILL "$(cat "${WATCHDOG_SLEEP_PID_FILE}")" 2> /dev/null || true
+  fi
   export PATH="${ORIG_PATH}"
   "$RM" -rf "${TEST_DIR}"
 }
@@ -135,6 +138,39 @@ require_real_timeout() {
   run run_bounded_install "Installing thing" /bin/echo hello
   [ "$status" -eq 0 ]
   [[ "$output" == *"Installing thing: ok"* ]]
+}
+
+@test "a successful watchdog fallback reaps its pending sleep" {
+  # macOS bash can leave the watcher's `sleep` alive when only the watcher PID
+  # is signalled. That made otherwise-complete BATS runs wait the full default
+  # 600-second package-install timeout after printing their final assertion.
+  hide_real_timeout
+  export WATCHDOG_SLEEP_PID_FILE="${TEST_DIR}/watchdog-sleep.pid"
+  "$RM" -f "${STUB_BIN}/sleep"
+  cat > "${STUB_BIN}/sleep" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "30" ]]; then
+  printf '%s\n' "$$" > "${WATCHDOG_SLEEP_PID_FILE}"
+fi
+exec /bin/sleep "$@"
+STUB
+  cat > "${STUB_BIN}/wait-for-watchdog" <<'STUB'
+#!/usr/bin/env bash
+for _ in {1..100}; do
+  [[ -s "${WATCHDOG_SLEEP_PID_FILE}" ]] && exit 0
+  sleep 0.01
+done
+exit 1
+STUB
+  "$CHMOD" +x "${STUB_BIN}/sleep" "${STUB_BIN}/wait-for-watchdog"
+
+  PACKAGE_INSTALL_TIMEOUT_SECONDS=30
+  run run_bounded_install "Installing thing" wait-for-watchdog
+
+  [ "$status" -eq 0 ]
+  [ -s "${WATCHDOG_SLEEP_PID_FILE}" ]
+  run kill -0 "$(cat "${WATCHDOG_SLEEP_PID_FILE}")"
+  [ "$status" -ne 0 ]
 }
 
 @test "run_bounded_install still bounds a stall when no timeout binary exists" {

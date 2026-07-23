@@ -20,12 +20,23 @@
 ###############################################################################
 
 # Enable the WebRTC server. It serves WHIP at /<name>/whip and WHEP at
-# /<name>/whep on webrtcAddress. This listener is plain HTTP by default
-# (webrtcEncryption is off), so its URLs are http://…:8889/… — use those for the
-# local try-out. For a reachable deployment, set `webrtcEncryption: yes` with
-# `webrtcServerCert`/`webrtcServerKey` and switch the URLs to https://.
+# /<name>/whep on webrtcAddress.
 webrtc: yes
 webrtcAddress: :8889
+
+# --- TLS / HTTPS ---
+# This listener is plain HTTP by default (webrtcEncryption: no), so its URLs are
+# http://…:8889/… — use those for the local try-out. For a reachable deployment,
+# terminate TLS here and switch the URLs (and AUTOMOBILE_WEBRTC_WHIP_ENDPOINT) to
+# https://. MediaMTX does not ship a certificate; generate one, e.g.:
+#
+#   openssl genrsa -out server.key 2048
+#   openssl req -new -x509 -sha256 -key server.key -out server.crt -days 3650
+#
+# then uncomment (paths are relative to MediaMTX's working directory):
+# webrtcEncryption: yes
+# webrtcServerKey: server.key
+# webrtcServerCert: server.crt
 
 # STUN/TURN for NAT traversal. Mirror whatever you pass to the publisher via
 # AUTOMOBILE_WEBRTC_ICE_SERVERS so both peers agree on how to connect.

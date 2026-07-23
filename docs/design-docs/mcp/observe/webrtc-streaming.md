@@ -117,6 +117,25 @@ Browsers subscribe at the matching WHEP URL `http://mediamtx-host:8889/ci-run-42
 (MediaMTX also serves a built-in reader page at `http://mediamtx-host:8889/ci-run-42`).
 Any WHIP/WHEP-compatible SFU (LiveKit, Janus, Cloudflare) works the same way.
 
+**HTTPS.** The stock config is plain HTTP. For a reachable deployment, terminate
+TLS on the WebRTC listener: generate a certificate and enable it in the config —
+
+```bash
+openssl genrsa -out server.key 2048
+openssl req -new -x509 -sha256 -key server.key -out server.crt -days 3650
+```
+
+```yaml
+webrtcEncryption: yes
+webrtcServerKey: server.key
+webrtcServerCert: server.crt
+```
+
+then use `https://` for both `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` and the WHEP URL
+(`https://mediamtx-host:8889/ci-run-42/whip` · `…/whep`). The
+[example config](../../../../examples/mediamtx/mediamtx.yml) carries these keys
+commented out.
+
 The bundled reference coordination server
 ([`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/README.md))
 remains as a zero-dependency way to try the path locally, and is described below.

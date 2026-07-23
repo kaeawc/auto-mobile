@@ -36,9 +36,10 @@ CI worker (AutoMobile daemon) ──WHIP──▶ MediaMTX (SFU) ──WHEP─�
 MediaMTX derives the stream name from the URL **path**, so set the endpoint to a
 per-stream WHIP URL (the publisher also appends a harmless `?streamId=` query
 that MediaMTX ignores). The stock config serves plain **HTTP** on `:8889`, so use
-`http://` — enable TLS (`webrtcEncryption` + cert/key in the config) and switch
-to `https://` for any reachable deployment. Set these before (or when) starting
-the daemon:
+`http://`. For a reachable deployment, enable TLS and switch to `https://` — see
+[HTTPS](./design-docs/mcp/observe/webrtc-streaming.md#production-fanout-mediamtx)
+in the design doc for the certificate + `webrtcEncryption` steps. Set these
+before (or when) starting the daemon:
 
 ```bash
 export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx.example.com:8889/ci-run-42/whip"

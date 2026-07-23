@@ -34,7 +34,11 @@ const CAPTURE_DIR = path.join(__dirname, "activityActivitiesDumps");
 const device: BootedDevice = { name: "test", platform: "android", deviceId: "test-device" };
 
 function readCapture(file: string): string {
-  return fs.readFileSync(path.join(CAPTURE_DIR, file), "utf8");
+  // Normalize CRLF -> LF. The fixtures are committed LF (and pinned `eol=lf` in
+  // .gitattributes), but a Windows checkout with core.autocrlf=true can still
+  // materialize them as CRLF; the parser targets the LF output a device's adb
+  // emits, and its `Task{...}(.*)$` header anchor does not match a trailing \r.
+  return fs.readFileSync(path.join(CAPTURE_DIR, file), "utf8").replace(/\r\n/g, "\n");
 }
 
 async function parse(stdout: string): Promise<BackStackInfo> {
@@ -53,9 +57,12 @@ async function parse(stdout: string): Promise<BackStackInfo> {
 function headerTaskIds(raw: string): Set<number> {
   const ids = new Set<number>();
   for (const line of raw.split("\n")) {
+    // Whitespace matched with `\s+` (not literal spaces) so these mirror the
+    // parser's own anchoring in GetBackStack.ts exactly -- a build that printed
+    // `Task id  #N` would be parsed by the parser and must be seen here too.
     const m =
       line.match(/^\s*\*\s*Task\{\S+\s+#(\d+)\b/) ||
-      line.match(/^\s*Task id #(\d+)\b/) ||
+      line.match(/^\s*Task\s+id\s+#(\d+)\b/) ||
       line.match(/^\s*\*?\s*TaskRecord\{\S+\s+#(\d+)\b/);
     if (m) {
       ids.add(parseInt(m[1], 10));
@@ -83,11 +90,14 @@ function hasLegacyHeader(raw: string): boolean {
   return raw.split("\n").some(l => /^\s*(?:Task id #\d+|\*?\s*TaskRecord\{\S+\s+#\d+)\b/.test(l));
 }
 
-/** All `.log` captures, sorted by API level for stable test ordering. */
+/** All `apiNN-*.log` captures, sorted by API level for stable test ordering. */
 const captureFiles = fs.existsSync(CAPTURE_DIR)
   ? fs
     .readdirSync(CAPTURE_DIR)
-    .filter(f => f.endsWith(".log"))
+    // Match the `apiNN-` naming, not just `.log`, so a stray non-capture file
+    // fails the coverage assertion cleanly rather than throwing on the
+    // `.match(/api(\d+)/)!` below.
+    .filter(f => /^api\d+.*\.log$/.test(f))
     .sort((a, b) => {
       const na = parseInt(a.match(/api(\d+)/)?.[1] ?? "0", 10);
       const nb = parseInt(b.match(/api(\d+)/)?.[1] ?? "0", 10);

@@ -56,7 +56,15 @@ trap cleanup EXIT
 # 1. Ensure the system image is present (install once; kept afterwards).
 if [ ! -d "$SDK/system-images/android-${API_LEVEL}/${TAG}/${ABI}" ]; then
   log "installing $PKG"
-  yes | "$SDKMANAGER" "$PKG" >/dev/null
+  # `yes` feeds the license prompts. It dies of SIGPIPE (141) when sdkmanager
+  # exits before draining stdin, which under `pipefail` would abort this script
+  # even on a SUCCESSFUL install -- so tolerate the pipeline status and decide
+  # success by whether the image directory now exists.
+  yes | "$SDKMANAGER" "$PKG" >/dev/null || true
+  [ -d "$SDK/system-images/android-${API_LEVEL}/${TAG}/${ABI}" ] || {
+    log "image install failed: $PKG"
+    exit 1
+  }
 fi
 
 # 2. Create a throwaway AVD for this capture.
@@ -83,31 +91,35 @@ done
 log "boot completed"
 sleep 3
 
-sh_cmd() { "$ADB" -s "$SERIAL" shell "$@"; }
+# adb-shell prefix as an ARRAY, not a function: a function invoked in an `|| true`
+# best-effort condition disables `set -e` inside it, which the shell-sete gate
+# rejects (SC2310, issues #3637/#3640). An external command in `||` does not.
+ADB_SH=("$ADB" -s "$SERIAL" shell)
 
-# 4. Drive a known back stack.
-sh_cmd input keyevent 82 >/dev/null 2>&1 || true   # wake
-sh_cmd wm dismiss-keyguard >/dev/null 2>&1 || true
-sh_cmd input keyevent 3 >/dev/null 2>&1 || true    # HOME -> launcher task baseline
+# 4. Drive a known back stack. These steps are best-effort: a failed wake or a
+# missing second app must not abort the capture, hence `|| true`.
+"${ADB_SH[@]}" input keyevent 82 >/dev/null 2>&1 || true   # wake
+"${ADB_SH[@]}" wm dismiss-keyguard >/dev/null 2>&1 || true
+"${ADB_SH[@]}" input keyevent 3 >/dev/null 2>&1 || true    # HOME -> launcher task baseline
 sleep 1
 # Settings task, then a sub-setting to add depth (a second Hist row in one task).
-sh_cmd am start -a android.settings.SETTINGS >/dev/null 2>&1 || true
+"${ADB_SH[@]}" am start -a android.settings.SETTINGS >/dev/null 2>&1 || true
 sleep 2
-sh_cmd am start -a android.settings.WIFI_SETTINGS >/dev/null 2>&1 || true
+"${ADB_SH[@]}" am start -a android.settings.WIFI_SETTINGS >/dev/null 2>&1 || true
 sleep 2
 # A second, distinct app -> a separate task (multi-task modern Task{} blocks).
-sh_cmd am start -a android.intent.action.MAIN -c android.intent.category.APP_CONTACTS >/dev/null 2>&1 \
-  || sh_cmd am start -a android.intent.action.MAIN -c android.intent.category.APP_CALCULATOR >/dev/null 2>&1 \
+"${ADB_SH[@]}" am start -a android.intent.action.MAIN -c android.intent.category.APP_CONTACTS >/dev/null 2>&1 \
+  || "${ADB_SH[@]}" am start -a android.intent.action.MAIN -c android.intent.category.APP_CALCULATOR >/dev/null 2>&1 \
   || true
 sleep 3
 
 # 5. Capture verbatim.
 mkdir -p "$OUT_DIR"
 OUT_FILE="$OUT_DIR/api${API_LEVEL}-home-settings-secondapp.log"
-RELEASE="$(sh_cmd getprop ro.build.version.release | tr -d '\r')"
-SDK_INT="$(sh_cmd getprop ro.build.version.sdk | tr -d '\r')"
-FINGERPRINT="$(sh_cmd getprop ro.build.fingerprint | tr -d '\r')"
-DUMP="$(sh_cmd dumpsys activity activities)"
+RELEASE="$("${ADB_SH[@]}" getprop ro.build.version.release | tr -d '\r')"
+SDK_INT="$("${ADB_SH[@]}" getprop ro.build.version.sdk | tr -d '\r')"
+FINGERPRINT="$("${ADB_SH[@]}" getprop ro.build.fingerprint | tr -d '\r')"
+DUMP="$("${ADB_SH[@]}" dumpsys activity activities)"
 
 {
   echo "# Real 'adb shell dumpsys activity activities' capture (issue #4329)."

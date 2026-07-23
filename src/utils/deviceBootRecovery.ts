@@ -79,6 +79,11 @@ export function isGitHubActionsCi(environment: NodeJS.ProcessEnv): boolean {
   return environment.CI === "true" && environment.GITHUB_ACTIONS === "true";
 }
 
+/** CI recovery owns only the un-targeted product boot used by the workflow. */
+export function shouldUseCiIosBootRecovery(request: DeviceBootRequest, environment: NodeJS.ProcessEnv): boolean {
+  return request.platform === "ios" && !request.name && !request.deviceId && isGitHubActionsCi(environment);
+}
+
 /**
  * Give daemon-free product boot a deterministic, CI-owned iOS simulator and
  * its erase-on-final-retry policy. All other callers retain the no-op default.
@@ -87,7 +92,7 @@ export async function createCiIosBootConfiguration(
   request: DeviceBootRequest,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<CiIosBootConfiguration | undefined> {
-  if (request.platform !== "ios" || !isGitHubActionsCi(environment)) {
+  if (!shouldUseCiIosBootRecovery(request, environment)) {
     return undefined;
   }
   const simctl = new SimCtlClient();

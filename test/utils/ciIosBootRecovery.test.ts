@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { CiIosBootRecovery, isGitHubActionsCi, NoopDeviceBootRecovery } from "../../src/utils/deviceBootRecovery";
+import { CiIosBootRecovery, isGitHubActionsCi, NoopDeviceBootRecovery, shouldUseCiIosBootRecovery } from "../../src/utils/deviceBootRecovery";
 import type { DeviceInfo } from "../../src/models";
 
 const owned: DeviceInfo = {
@@ -13,6 +13,13 @@ describe("CI iOS boot recovery", () => {
   it("activates only under both GitHub Actions CI markers", () => {
     expect(isGitHubActionsCi({ CI: "true" })).toBe(false);
     expect(isGitHubActionsCi({ CI: "true", GITHUB_ACTIONS: "true" })).toBe(true);
+  });
+
+  it("does not replace an explicitly targeted CI simulator", () => {
+    const environment = { CI: "true", GITHUB_ACTIONS: "true" };
+    expect(shouldUseCiIosBootRecovery({ platform: "ios" }, environment)).toBe(true);
+    expect(shouldUseCiIosBootRecovery({ platform: "ios", name: "My Simulator" }, environment)).toBe(false);
+    expect(shouldUseCiIosBootRecovery({ platform: "ios", deviceId: "personal-udid" }, environment)).toBe(false);
   });
 
   it("leaves ordinary product boot as a single no-op attempt", async () => {

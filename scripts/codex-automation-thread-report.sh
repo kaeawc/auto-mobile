@@ -132,11 +132,6 @@ for path in iter_jsonl_files():
                 last_run[title] = (ts, rel)
 
     for idx, line in enumerate(lines, start=1):
-        has_create_mode = '"mode":"create"' in line or '\\"mode\\":\\"create\\"' in line
-        if "automation_update" not in line or not has_create_mode:
-            continue
-        if not any(title in line for title in titles):
-            continue
         obj = json_obj(line)
         if not obj:
             continue
@@ -145,10 +140,16 @@ for path in iter_jsonl_files():
             continue
 
         raw_args = payload.get("arguments", "{}")
+        if not isinstance(raw_args, str):
+            continue
         try:
             args = json.loads(raw_args)
         except json.JSONDecodeError:
             args = {}
+        if not isinstance(args, dict):
+            continue
+        if args.get("mode") != "create":
+            continue
         title = args.get("name")
         if title not in titles:
             continue

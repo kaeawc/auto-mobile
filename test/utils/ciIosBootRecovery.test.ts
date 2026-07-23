@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { CiIosBootRecovery, isGitHubActionsCi, NoopDeviceBootRecovery, shouldUseCiIosBootRecovery } from "../../src/utils/deviceBootRecovery";
+import { CiIosBootRecovery, isGitHubActionsCi, NoopDeviceBootRecovery, normalizeCiIosBootRequest, shouldUseCiIosBootRecovery } from "../../src/utils/deviceBootRecovery";
 import type { DeviceInfo } from "../../src/models";
 
 const owned: DeviceInfo = {
@@ -20,6 +20,19 @@ describe("CI iOS boot recovery", () => {
     expect(shouldUseCiIosBootRecovery({ platform: "ios" }, environment)).toBe(true);
     expect(shouldUseCiIosBootRecovery({ platform: "ios", name: "My Simulator" }, environment)).toBe(false);
     expect(shouldUseCiIosBootRecovery({ platform: "ios", deviceId: "personal-udid" }, environment)).toBe(false);
+  });
+
+  it("matches the resolved CI-owned runtime name without stale SDK bounds", () => {
+    expect(normalizeCiIosBootRequest({
+      platform: "ios",
+      minOsVersion: "26.3",
+      maxOsVersion: "26.3",
+    }, owned.name)).toEqual({
+      platform: "ios",
+      name: owned.name,
+      minOsVersion: undefined,
+      maxOsVersion: undefined,
+    });
   });
 
   it("leaves ordinary product boot as a single no-op attempt", async () => {

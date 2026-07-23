@@ -84,6 +84,11 @@ export function shouldUseCiIosBootRecovery(request: DeviceBootRequest, environme
   return request.platform === "ios" && !request.name && !request.deviceId && isGitHubActionsCi(environment);
 }
 
+/** Match the runtime-qualified CI-owned name rather than re-applying SDK bounds after fallback. */
+export function normalizeCiIosBootRequest(request: DeviceBootRequest, ownedSimulatorName: string): DeviceBootRequest {
+  return { ...request, name: ownedSimulatorName, minOsVersion: undefined, maxOsVersion: undefined };
+}
+
 /**
  * Give daemon-free product boot a deterministic, CI-owned iOS simulator and
  * its erase-on-final-retry policy. All other callers retain the no-op default.
@@ -100,7 +105,7 @@ export async function createCiIosBootConfiguration(
   const ownedSimulatorName = `${CI_SIMULATOR_NAME} (${runtime})`;
   const deviceManager = new MultiPlatformDeviceManager(null, simctl);
   return {
-    request: { ...request, name: ownedSimulatorName },
+    request: normalizeCiIosBootRequest(request, ownedSimulatorName),
     deviceManager,
     deviceProvisioner: new DefaultDeviceProvisioner({
       iosCreator: () => simctl,

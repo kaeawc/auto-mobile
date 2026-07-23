@@ -4,6 +4,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Build
+import android.os.Bundle
 import android.view.Surface
 
 /**
@@ -105,6 +106,22 @@ class VideoEncoder(
   /** Release the output buffer at the given index. */
   fun releaseOutputBuffer(index: Int) {
     codec?.releaseOutputBuffer(index, false)
+  }
+
+  /**
+   * Ask the encoder to emit an IDR as soon as possible, rather than waiting for the 10s I-frame
+   * interval. Serves a downstream keyframe request (a WHEP viewer PLI relayed by the host) so a
+   * late or recovering viewer decodes promptly. Safe to call from any thread and after the codec
+   * has been released.
+   */
+  fun requestKeyFrame() {
+    try {
+      codec?.setParameters(
+        Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }
+      )
+    } catch (_: IllegalStateException) {
+      // Codec released concurrently with the request; the next frame recovers.
+    }
   }
 
   /** Stop and release the encoder. */

@@ -74,6 +74,12 @@ const streams = new Map<string, WebRtcStreamRecord>();
 const startingDeviceIds = new Map<string, PendingWebRtcStart>();
 const startingStreamIds = new Map<string, PendingWebRtcStart>();
 const INITIAL_AUDIO_SOURCE_START_TIMEOUT_MS = 30_000;
+/**
+ * Reconnect if a connected stream produces no frames for this long. Covers an
+ * encoder/capture that wedges without dropping the peer connection (which would
+ * otherwise leave the viewer on a frozen frame with no recovery).
+ */
+const FRAME_STALL_TIMEOUT_MS = 10_000;
 
 /** Override manager dependencies (tests). */
 export function setWebRtcStreamManagerDependencies(
@@ -341,9 +347,16 @@ export async function startWebRtcStream(
         bitrateBps,
         trickleIce: config.trickleIce,
         audioEnabled: config.audioEnabled,
+        frameStallTimeoutMs: FRAME_STALL_TIMEOUT_MS,
       },
       {
         onBeforeEstablish: () => withRecord(streamId, stopSource),
+        onKeyFrameRequest: () => {
+          // Route a relayed WHEP viewer PLI to the live capture source so its
+          // encoder emits a fresh IDR. Sources that cannot signal their encoder
+          // omit requestKeyFrame and rely on their periodic keyframe interval.
+          streams.get(streamId)?.source?.requestKeyFrame?.();
+        },
         onConnected: async () => {
           const currentRecord = streams.get(streamId);
           if (!currentRecord || currentRecord.publisher !== publisherRef.current) {

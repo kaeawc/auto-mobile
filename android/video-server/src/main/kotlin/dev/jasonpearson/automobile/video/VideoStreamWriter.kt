@@ -106,6 +106,33 @@ class VideoStreamWriter(
     }
   }
 
+  /**
+   * Read host→device command bytes on a background daemon thread, invoking [onCommand] for each
+   * byte. The LocalSocket is bidirectional; the host writes single-byte commands (e.g.
+   * [VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME]). The video stream is strictly server→client,
+   * so this is the only reader of the client input stream. Returns immediately; the thread exits on
+   * EOF or stop().
+   */
+  fun startCommandReader(onCommand: (Int) -> Unit) {
+    val input = clientSocket?.inputStream ?: return
+    Thread(
+        {
+          try {
+            while (!stopped) {
+              val command = input.read()
+              if (command < 0) break // EOF: the host closed the connection.
+              onCommand(command)
+            }
+          } catch (_: IOException) {
+            // Socket closed during shutdown; nothing to recover.
+          }
+        },
+        "video-command-reader",
+      )
+      .apply { isDaemon = true }
+      .start()
+  }
+
   private fun writeLegacyHeader() {
     outputStream!!.write(VideoStreamProtocol.legacyHeader(width, height))
     outputStream!!.flush()

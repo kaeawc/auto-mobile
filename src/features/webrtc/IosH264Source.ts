@@ -26,6 +26,8 @@ export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 const DEFAULT_IOS_WEBRTC_FPS = SIMULATOR_FPS_DEFAULT;
 const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 5_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
+/** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
+const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
 
 export interface IosFrameCaptureHelper {
   start(): void;
@@ -444,7 +446,16 @@ export class IosH264Source implements H264CaptureSource {
       "-level:v",
       "4.2",
       "-bf",
-      "0"
+      "0",
+      // Cap the keyframe interval at ~2s. ffmpeg cannot be signalled to emit an
+      // IDR mid-stream over a pipe (so there is no requestKeyFrame() for this
+      // source), so a bounded GOP is what lets a late or recovering WHEP viewer
+      // decode promptly instead of waiting for a long default GOP. The h264
+      // muxer prepends SPS/PPS to each keyframe, so every IDR is self-decodable.
+      "-g",
+      String(Math.max(1, Math.round(this.fps * IOS_KEYFRAME_INTERVAL_SECONDS))),
+      "-forced-idr",
+      "1"
     );
     if (this.options.bitrateBps && this.options.bitrateBps > 0) {
       args.push("-b:v", String(Math.round(this.options.bitrateBps)));

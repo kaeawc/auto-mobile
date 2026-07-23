@@ -23,7 +23,7 @@ export class FakeConnectedPeerConnection {
   localDescription = { sdp: "v=0" };
 
   addTransceiver() {
-    return { sender: { ssrc: 1 } };
+    return { sender: { ssrc: 1, onPictureLossIndication: { subscribe: () => {} } } };
   }
 
   async createOffer() {

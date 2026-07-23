@@ -31,7 +31,7 @@ object VideoServer {
 
   @Volatile private var running = true
 
-  private var encoder: VideoEncoder? = null
+  @Volatile private var encoder: VideoEncoder? = null
   private var capture: ScreenCapture? = null
   private var audioCapture: AudioCapture? = null
   private var streamWriter: VideoStreamWriter? = null
@@ -220,6 +220,15 @@ object VideoServer {
     // Create stream writer
     streamWriter = VideoStreamWriter(SOCKET_NAME, width, height, audioEnabled)
     streamWriter!!.start()
+
+    // Read host→device commands (e.g. a relayed WHEP viewer PLI) and ask the
+    // encoder for a fresh IDR so late/recovering viewers decode without waiting
+    // for the 10s I-frame interval.
+    streamWriter!!.startCommandReader { command ->
+      if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {
+        encoder?.requestKeyFrame()
+      }
+    }
 
     if (audioEnabled) {
       audioCapture = AudioCapture()

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
+  ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   AndroidH264Source,
   type SpawnedProcess,
 } from "../../../src/features/webrtc/AndroidH264Source";
@@ -129,6 +130,34 @@ describe("AndroidH264Source", () => {
     expect(processes.length).toBeGreaterThanOrEqual(2);
     expect(spawnArgs.length).toBeGreaterThanOrEqual(2);
     expect(source.segmentsStarted).toBeGreaterThanOrEqual(2);
+
+    await source.stop();
+  });
+
+  test("requestKeyFrame forces a segment rotation to emit a fresh IDR, throttled", async () => {
+    const { source, processes, timer } = makeSource({ segmentRotateMs: 1_000_000 });
+    await source.start();
+    expect(processes).toHaveLength(1);
+
+    // screenrecord cannot be signalled for an IDR mid-stream; a request rotates.
+    source.requestKeyFrame();
+    expect(processes[0].killed).toContain("SIGINT");
+    const killsAfterFirst = processes[0].killed.length;
+
+    // A second request within the throttle window is coalesced away.
+    source.requestKeyFrame();
+    expect(processes[0].killed).toHaveLength(killsAfterFirst);
+
+    // Complete the rotation so a fresh segment is running.
+    processes[0].simulateExit(0, "SIGINT");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(processes.length).toBeGreaterThanOrEqual(2);
+
+    // After the throttle interval, a request rotates the new segment.
+    timer.advanceTime(ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS);
+    source.requestKeyFrame();
+    expect(processes[processes.length - 1].killed).toContain("SIGINT");
 
     await source.stop();
   });

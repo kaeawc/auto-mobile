@@ -151,6 +151,13 @@ class VideoStreamProtocolTest {
   }
 
   @Test
+  fun requestKeyFrameCommandByteMatchesHostContract() {
+    // The host (PersistentEncoderH264Source.ts) writes this exact byte to request
+    // a fresh IDR. Changing it silently would break keyframe-on-demand.
+    assertEquals(0x01, VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME)
+  }
+
+  @Test
   fun audioPacketHeaderUsesAudioTrackWithoutFlags() {
     assertArrayEquals(
       byteArrayOf(

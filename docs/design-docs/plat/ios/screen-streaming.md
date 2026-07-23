@@ -258,15 +258,30 @@ The Android path needs an H.264 decoder because the device encodes on-device. iO
 
 Since iOS provides raw frames (not H.264), use a simpler protocol:
 
-### Frame Header (16 bytes)
+### Frame Header (24 bytes)
 ```
-┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
-│ width (4)       │ height (4)      │ bytesPerRow (4) │ timestamp (4)   │
-│ uint32 LE       │ uint32 LE       │ uint32 LE       │ uint32 LE (ms)  │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
+┌──────────┬─────────────┬──────────┬───────────┬─────────────┬─────────────┐
+│ magic(4) │ checksum(4) │ width(4) │ height(4) │ bytesPerRow │ timestamp   │
+│ uint32LE │ uint32LE    │ uint32LE │ uint32LE  │ uint32LE    │ uint32LE ms │
+└──────────┴─────────────┴──────────┴───────────┴─────────────┴─────────────┘
 
 Followed by `height * bytesPerRow` bytes of BGRA pixel data.
 ```
+
+`magic` is a fixed sync marker (`0x3146_4D41`, "AMF1" on the wire) and `checksum`
+is a CRC-32 (IEEE 802.3, polynomial `0xEDB88320`) over the 16 field bytes that
+follow it. Together they make frame boundaries self-describing: after a corrupt
+or lost stretch of stream the decoder scans forward to the next marker whose
+checksum validates and resumes there, deterministically, instead of inferring
+boundaries from structural plausibility (issue #4270). The marker + checksum
+defeat random corruption with certainty; because CRC-32 is not a MAC, an
+attacker who controls the captured pixels can still embed a valid header in the
+payload, which is out of scope here.
+
+The Swift encoder (`ios/screen-capture/.../FrameProtocol.swift`) and the
+TypeScript decoder (`src/features/screen-stream/frameProtocol.ts`) must produce
+identical bytes; a shared CRC-32 check vector (`crc32("123456789") ==
+0xCBF43926`) is asserted on both sides to pin that.
 
 For explicitly enabled Simulator audio, the same transport reserves `width =
 0`; `height = 8000`, `bytesPerRow = 1`, and `timestamp = payload length`.

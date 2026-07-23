@@ -13,6 +13,14 @@ object VideoStreamProtocol {
   const val TRACK_ID_AUDIO = 2
   private const val MUX_VERSION = 1
 
+  /**
+   * Host→device command byte: request that the encoder emit a sync frame (IDR) as soon as possible.
+   * Sent when a downstream WHEP viewer PLI is relayed to the publisher; keep in sync with
+   * `VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME` in
+   * `src/features/webrtc/PersistentEncoderH264Source.ts`.
+   */
+  const val COMMAND_REQUEST_KEY_FRAME = 0x01
+
   /** Bit 63: codec configuration data */
   const val PACKET_FLAG_CONFIG = 1L shl 63
 

@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { RTCPeerConnection } from "werift";
-import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
+import {
+  KEYFRAME_REQUEST_MIN_INTERVAL_MS,
+  WebRtcPublisher,
+} from "../../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient, WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const ACCEPTED_VIDEO_ANSWER = [
   "v=0",
@@ -24,8 +28,15 @@ class FakePeerConnection {
   connectionStateChange = { subscribe: () => {} };
   iceGatheringStateChange = { watch: async () => {} };
   localDescription = { sdp: "v=0" };
+  /** PLI callbacks the publisher subscribed on video senders (fire to simulate a relayed PLI). */
+  pliSubscribers: Array<() => void> = [];
   addTransceiver() {
-    return { sender: { ssrc: 1 } };
+    return {
+      sender: {
+        ssrc: 1,
+        onPictureLossIndication: { subscribe: (cb: () => void) => this.pliSubscribers.push(cb) },
+      },
+    };
   }
   async createOffer() {
     return { type: "offer", sdp: "v=0" };
@@ -41,7 +52,12 @@ class RecordingPeerConnection extends FakePeerConnection {
   transceiverKinds: string[] = [];
   addTransceiver(track: { kind: string }) {
     this.transceiverKinds.push(track.kind);
-    return { sender: { ssrc: this.transceiverKinds.length } };
+    return {
+      sender: {
+        ssrc: this.transceiverKinds.length,
+        onPictureLossIndication: { subscribe: (cb: () => void) => this.pliSubscribers.push(cb) },
+      },
+    };
   }
 }
 
@@ -316,6 +332,116 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     publisher.writeH264Chunk(Buffer.from([0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 0, 1]));
 
     expect(recoveries).toBe(1);
+  });
+});
+
+describe("WebRtcPublisher keyframe requests", () => {
+  test("forwards a relayed PLI to onKeyFrameRequest, throttled", async () => {
+    const pc = new FakePeerConnection();
+    const timer = new FakeTimer();
+    let requests = 0;
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        timer,
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+        onKeyFrameRequest: () => { requests++; },
+      }
+    );
+    await publisher.start();
+    expect(pc.pliSubscribers).toHaveLength(1);
+
+    // A relayed WHEP viewer PLI requests a keyframe from the source.
+    pc.pliSubscribers[0]();
+    expect(requests).toBe(1);
+    // A second PLI within the throttle window is coalesced away.
+    pc.pliSubscribers[0]();
+    expect(requests).toBe(1);
+    // After the throttle interval, the next PLI is honored.
+    timer.advanceTime(KEYFRAME_REQUEST_MIN_INTERVAL_MS);
+    pc.pliSubscribers[0]();
+    expect(requests).toBe(2);
+  });
+});
+
+describe("WebRtcPublisher frame-stall watchdog", () => {
+  function connectedPublisher(frameStallTimeoutMs: number | undefined, timer: FakeTimer) {
+    const pc = new FakePeerConnection();
+    pc.connectionState = "connected"; // establish() fires the connected hook inline
+    return new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", frameStallTimeoutMs },
+      {
+        timer,
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+  }
+
+  test("reconnects when a connected stream produces no frames within the timeout", async () => {
+    const timer = new FakeTimer();
+    const publisher = connectedPublisher(4000, timer);
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    await publisher.start();
+    // No frames ever written: after the stall timeout the watchdog reconnects.
+    timer.advanceTime(4000);
+    expect(recoveries).toBe(1);
+
+    await publisher.stop();
+  });
+
+  test("does not reconnect while frames keep advancing", async () => {
+    const timer = new FakeTimer();
+    const publisher = connectedPublisher(4000, timer);
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    await publisher.start();
+    const START = Buffer.from([0, 0, 0, 1]);
+    // SPS(42e02a) + PPS + IDR — a real keyframe the writer accepts.
+    publisher.writeH264Chunk(
+      Buffer.concat([
+        START, Buffer.from([0x67, 0x42, 0xe0, 0x2a]),
+        START, Buffer.from([0x68, 0xce, 0x3c, 0x80]),
+        START, Buffer.from([0x65, 0x80, 0x00]),
+      ])
+    );
+    // Feed a P-frame each step; each completes the previous access unit, so the
+    // frame counter advances well within every timeout window.
+    for (let step = 0; step < 6; step++) {
+      publisher.writeH264Chunk(Buffer.concat([START, Buffer.from([0x41, 0x80, step + 1])]));
+      timer.advanceTime(1500);
+    }
+    expect(recoveries).toBe(0);
+
+    await publisher.stop();
+  });
+
+  test("is disabled when no timeout is configured", async () => {
+    const timer = new FakeTimer();
+    const publisher = connectedPublisher(undefined, timer);
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    await publisher.start();
+    timer.advanceTime(60_000);
+    expect(recoveries).toBe(0);
+
+    await publisher.stop();
   });
 });
 

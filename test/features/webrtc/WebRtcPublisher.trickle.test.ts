@@ -25,7 +25,7 @@ class FakeTricklePc {
   };
   localDescription = { sdp: ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 102", "a=mid:0", "a=ice-ufrag:u", "a=ice-pwd:p"].join("\r\n") };
   addTransceiver() {
-    return { sender: { ssrc: 1 } };
+    return { sender: { ssrc: 1, onPictureLossIndication: { subscribe: () => {} } } };
   }
   async createOffer() {
     return { type: "offer", sdp: "v=0" };

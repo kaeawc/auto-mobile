@@ -27,18 +27,17 @@ needs a deliberate disposition. See `github-cli` for the underlying command mech
    - conversation: `gh api --paginate "repos/<owner>/<repo>/issues/<pr>/comments?per_page=100"`
    - review verdicts: `gh api --paginate "repos/<owner>/<repo>/pulls/<pr>/reviews?per_page=100"`
    - inline: `gh api --paginate "repos/<owner>/<repo>/pulls/<pr>/comments?per_page=100"`
-   - GraphQL review threads, paginated with `first: 100`, `$endCursor`, and `pageInfo`,
-     requesting `id`, `isResolved`, `isOutdated`, `path`, `line`, `originalLine`, `diffSide`,
-     and every comment's author, body, URL, and timestamp.
+   - GraphQL review threads: `scripts/ci/pr-review-threads.sh <pr>`, which returns a complete
+     JSON array containing `id`, `isResolved`, `isOutdated`, `path`, `line`, `originalLine`,
+     `diffSide`, and each requested comment's author, body, URL, and timestamp. Add
+     `--unresolved-only` only when the full resolved-thread history is not needed.
 
    Query thread state even when the flat inline list is empty.
 
    The three REST endpoints return top-level arrays and `--paginate` merges them, so saving
    and parsing those is safe — do not add `--slurp`, which would yield an array *of pages* and
-   is rejected alongside `--jq`. **GraphQL is the opposite**: `--paginate` emits one document
-   per page, so a saved-then-parsed result silently contains only page one. Either consume it
-   through `--jq`, or add `--slurp` and index `[.[].data…nodes[]]`. A ledger built from page
-   one looks complete and is not.
+   is rejected alongside `--jq`. GraphQL is the opposite, which is why review threads must use
+   `pr-review-threads.sh`; a ledger built from only its first page looks complete and is not.
 4. Build the ledger — one row per unresolved thread, review request, inline comment, and
    conversation comment: source URL, head SHA, requested behavior, file/line, disposition
    (`fix`, `wrong reason, right change`, `already addressed`, `not actionable`, `duplicate`,

@@ -35,7 +35,6 @@ jobs:
               - 'ios/screen-capture/**'
               - 'src/server/webrtcStreamManager.ts'
               - 'src/daemon/webrtcStream*'
-              - 'src/index.ts'
               - 'examples/mediamtx/**'
               - 'scripts/webrtc/**'
               - 'test/integration/webrtcDeviceCapture.integration.test.ts'

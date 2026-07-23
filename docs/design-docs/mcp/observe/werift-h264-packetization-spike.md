@@ -68,8 +68,6 @@ The focused regression suite also passed:
 ```text
 bun test test/features/webrtc/RtpH264TrackWriter.test.ts \
   test/features/webrtc/WebRtcPublisher.test.ts
-
-30 pass, 0 fail
 ```
 
 Those tests cover FU-A boundaries, marker placement, 90 kHz timestamps,

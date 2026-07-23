@@ -7,6 +7,7 @@ import {
   checkIosCtrlProxyRunner,
   checkIosObserveRoundTrip,
   checkProvisioningProfiles,
+  checkSecurityCli,
   checkSimctlAvailable,
   checkSimulatorRuntimes,
   checkXcodeCommandLineTools,
@@ -24,6 +25,7 @@ import type {
   IosRunnerInspectorHooks
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
+import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
@@ -46,6 +48,10 @@ const baseDependencies: IosDoctorDependencies = {
   fileExists: () => true,
   readDir: async () => [],
   homedir: () => "/Users/test",
+  securityClient: {
+    getDiagnostics: async () => ({ available: true, version: null }),
+    listCodeSigningIdentities: async () => []
+  } as SecurityClient,
   logger: new FakeLogger(),
   createSimctlClient: () => ({
     setDevice: () => {},
@@ -318,7 +324,10 @@ describe("iOS doctor checks", () => {
     test("warns when no code signing identities are present", async () => {
       const result = await checkCodeSigning({
         ...baseDependencies,
-        execFile: async () => createExecResult("  0 valid identities found")
+        securityClient: {
+          ...baseDependencies.securityClient,
+          listCodeSigningIdentities: async () => []
+        } as SecurityClient
       });
 
       expect(result.status).toBe("warn");
@@ -328,11 +337,53 @@ describe("iOS doctor checks", () => {
     test("passes when code signing identities exist", async () => {
       const result = await checkCodeSigning({
         ...baseDependencies,
-        execFile: async () => createExecResult("  1) ABC123 \"Apple Development: test@test.com\"\n  1 valid identities found")
+        securityClient: {
+          ...baseDependencies.securityClient,
+          listCodeSigningIdentities: async () => [{ fingerprint: "ABC123", name: "Apple Development: test@test.com" }]
+        } as SecurityClient
       });
 
       expect(result.status).toBe("pass");
       expect(result.message).toContain("1 code signing identity");
+    });
+  });
+
+  describe("checkSecurityCli", () => {
+    test("reports the centralized security client diagnostics", async () => {
+      const result = await checkSecurityCli(baseDependencies);
+
+      expect(result.status).toBe("pass");
+      expect(result.message).toContain("does not report a standalone version");
+    });
+
+    test("fails when the security client is unavailable", async () => {
+      const result = await checkSecurityCli({
+        ...baseDependencies,
+        securityClient: {
+          ...baseDependencies.securityClient,
+          getDiagnostics: async () => ({ available: false, version: null })
+        } as SecurityClient
+      });
+
+      expect(result.status).toBe("fail");
+      expect(result.recommendation).toContain("command line tools");
+    });
+
+    test("logs and returns a diagnostic failure when the client probe throws", async () => {
+      const logger = new FakeLogger();
+      const result = await checkSecurityCli({
+        ...baseDependencies,
+        logger,
+        securityClient: {
+          ...baseDependencies.securityClient,
+          getDiagnostics: async () => {
+            throw new Error("security probe failed");
+          }
+        } as SecurityClient
+      });
+
+      expect(result.status).toBe("fail");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
   });
 
@@ -522,7 +573,12 @@ describe("iOS doctor checks", () => {
       const result = await checkCodeSigning({
         ...baseDependencies,
         logger,
-        execFile: throwingExecFile
+        securityClient: {
+          ...baseDependencies.securityClient,
+          listCodeSigningIdentities: async () => {
+            throw new Error("security exploded");
+          }
+        } as SecurityClient
       });
 
       expect(result.status).toBe("warn");

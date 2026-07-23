@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep macOS security execution in SecurityClient. This is a diff ratchet: it
+# permits no production exceptions because doctor and Xcode signing both use
+# the same injected client. Test fixtures are outside the scanned src/ tree.
+base_ref="${1:-origin/main}"
+owner="src/utils/ios-cmdline-tools/SecurityClient.ts"
+violations=()
+
+if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
+  if [[ "$base_ref" == 'origin/main' && "${GITHUB_ACTIONS:-}" == 'true' && -n "${GITHUB_BASE_REF:-}" ]]; then
+    base_ref="origin/$GITHUB_BASE_REF"
+    git fetch --no-tags --depth=1 origin \
+      "refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
+  fi
+
+  if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
+    printf 'Cannot check new security calls: base ref %s does not exist.\n' "$base_ref" >&2
+    exit 2
+  fi
+fi
+
+# Normalize added lines so multiline argv invocations are checked together.
+pattern="((spawn|spawnSync|execFile|execFileSync)\\([[:space:]]*(\"|\\\`|')security|exec(Sync)?\\([^)]*(\"|\\\`|')security[[:space:]]|\"/bin/sh\".*security)"
+
+while IFS= read -r file; do
+  [[ "$file" == "$owner" ]] && continue
+  added_lines="$(git diff --unified=0 "$base_ref" -- "$file" | awk '/^\+[^+]/ { printf "%s ", substr($0, 2) }')"
+  [[ -z "$added_lines" ]] && continue
+  if grep -Eq "$pattern" <<<"$added_lines"; then
+    violations+=("$file")
+  fi
+done < <(git diff --name-only "$base_ref" -- src)
+
+if ((${#violations[@]})); then
+  printf '%s\n' 'New production security execution must go through SecurityClient:' >&2
+  printf '  %s\n' "${violations[@]}" >&2
+  exit 1
+fi

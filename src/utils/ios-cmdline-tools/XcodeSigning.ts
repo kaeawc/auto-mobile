@@ -3,11 +3,10 @@ import { homedir } from "os";
 import { join } from "path";
 import { createHash, X509Certificate } from "crypto";
 import { Parser } from "xml2js";
-import type { ExecResult } from "../../models";
 import { logger } from "../logger";
-import { shellQuote } from "../shellQuote";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
+import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
 
 type SigningStyle = "automatic" | "manual";
 
@@ -54,7 +53,7 @@ interface SigningResolution {
 
 interface XcodeSigningDependencies {
   platform: () => NodeJS.Platform;
-  exec: (command: string) => Promise<ExecResult>;
+  securityClient: SecurityClientApi;
   xcodebuild: Xcodebuild;
   readDir: (path: string) => Promise<string[]>;
   readFile: (path: string) => Promise<string>;
@@ -79,20 +78,7 @@ type PlistNode = {
 
 const createDefaultDependencies = (): XcodeSigningDependencies => ({
   platform: () => process.platform,
-  exec: async command => {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const result = await promisify(exec)(command);
-    const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-    const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
-    return {
-      stdout,
-      stderr,
-      toString() { return stdout; },
-      trim() { return stdout.trim(); },
-      includes(searchString: string) { return stdout.includes(searchString); }
-    };
-  },
+  securityClient: new SecurityClient(),
   xcodebuild: new XcodebuildClient(),
   readDir: async path => fs.readdir(path),
   readFile: async path => fs.readFile(path, "utf-8"),
@@ -145,22 +131,6 @@ const parsePlist = async (xml: string): Promise<unknown> => {
   const parsed = await plistParser.parseStringPromise(xml) as PlistNode;
   const root = parsed["#name"] === "plist" ? parsed.$$?.[0] : parsed;
   return parsePlistValue(root);
-};
-
-const parseSigningIdentities = (output: string): SigningIdentity[] => {
-  const identities: SigningIdentity[] = [];
-  const lines = output.split("\n");
-  for (const line of lines) {
-    const match = line.match(/^\s*\d+\)\s+([0-9A-F]{40,64})\s+\"([^\"]+)\"/i);
-    if (!match) {
-      continue;
-    }
-    identities.push({
-      fingerprint: match[1].toUpperCase(),
-      name: match[2]
-    });
-  }
-  return identities;
 };
 
 const fingerprintFromCertificate = (base64Der: string): CertificateInfo | null => {
@@ -325,8 +295,7 @@ export class XcodeSigningManager {
     if (this.dependencies.platform() !== "darwin") {
       return [];
     }
-    const result = await this.dependencies.exec("security find-identity -v -p codesigning");
-    return parseSigningIdentities(result.stdout);
+    return this.dependencies.securityClient.listCodeSigningIdentities();
   }
 
   public async detectTeamIdsFromXcode(): Promise<string[]> {
@@ -497,9 +466,8 @@ export class XcodeSigningManager {
 
   private async parseProvisioningProfile(path: string): Promise<ProvisioningProfile | null> {
     try {
-      const cmsCommand = `security cms -D -i ${shellQuote(path)}`;
-      const decoded = await this.dependencies.exec(cmsCommand);
-      const plist = await parsePlist(decoded.stdout);
+      const decoded = await this.dependencies.securityClient.decodeCms(path);
+      const plist = await parsePlist(decoded);
       if (!plist || typeof plist !== "object") {
         return null;
       }
@@ -546,7 +514,7 @@ export class XcodeSigningManager {
         path
       };
     } catch (error) {
-      logger.warn(`[XcodeSigning] Failed to parse profile '${path}': ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn(`[XcodeSigning] Failed to parse provisioning profile: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }

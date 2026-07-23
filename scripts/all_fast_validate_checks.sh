@@ -45,6 +45,7 @@ add_check "dependabot" "\"$PROJECT_ROOT/scripts/validate_dependabot.sh\"" "confi
 add_check "debug-tags" "\"$PROJECT_ROOT/scripts/validate-no-debug-log-tags.sh\"" "lint" "Reject stray [*-DEBUG] log tags in src/"
 add_check "dependency-decisions" "\"$PROJECT_ROOT/scripts/check-stdlib-first.sh\"" "lint,dependencies" "Require a decision record for new direct dependencies"
 add_check "shell-quote-boundary" "bun \"$PROJECT_ROOT/scripts/check-no-local-shell-quote.ts\"" "lint,conventions" "Require the canonical shell-quoting helper"
+add_check "security-boundary" "bash \"$PROJECT_ROOT/scripts/check-no-new-direct-security.sh\"" "lint,conventions" "Require SecurityClient for macOS security execution"
 add_check "datetime-now-literal" "\"$PROJECT_ROOT/scripts/validate-no-datetime-now-literal.sh\"" "lint" "Reject string-literal SQL time-expression defaults in migrations"
 add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-desktop-core-unified.sh\"" "lint,android" "Reject abandoned desktop-core unified socket-client package"
 add_check "workflow-assertion-triggers" "\"$PROJECT_ROOT/scripts/ci/validate_workflow_assertion_triggers.sh\"" "config,ci" "Ensure workflow-YAML assertion tests are triggered by the paths they assert"

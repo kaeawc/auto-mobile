@@ -6,6 +6,7 @@ import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { logger } from "../utils/logger";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
   defaultPath: path.join(os.homedir(), ".auto-mobile", "video-recording.sock"),
@@ -52,8 +53,15 @@ export const TELEMETRY_PUSH_SOCKET_CONFIG: SocketServerConfig = {
 };
 
 export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "webrtc-stream.sock"),
+  defaultPath: resolveWebRtcStreamSocketPath(),
 };
+
+function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
+  return override
+    ? resolvePathFromDaemonLaunchWorkingDirectory(override)
+    : path.join(os.homedir(), ".auto-mobile", "webrtc-stream.sock");
+}
 
 /**
  * Canonical registry of every auxiliary daemon socket, keyed by its published

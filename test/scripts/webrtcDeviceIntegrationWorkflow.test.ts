@@ -12,7 +12,7 @@ interface WorkflowDocument {
   jobs?: Record<string, {
     needs?: string | string[];
     if?: string;
-    steps?: Array<{ id?: string; name?: string; uses?: string; with?: { filters?: string; "gradle-tasks"?: string } }>;
+    steps?: Array<{ id?: string; name?: string; uses?: string; with?: { filters?: string; "gradle-tasks"?: string; script?: string } }>;
   }>;
 }
 
@@ -39,6 +39,11 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(filter?.with?.filters).toContain("ios/screen-capture/**");
     expect(filter?.with?.filters).toContain("src/server/webrtcStreamManager.ts");
     expect(filter?.with?.filters).toContain("src/daemon/webrtcStream*");
+    expect(filter?.with?.filters).toContain("src/daemon/videoStreamSocket*");
+    expect(filter?.with?.filters).toContain("src/daemon/videoStreamFraming.ts");
+    expect(filter?.with?.filters).toContain("src/daemon/daemonFiles.ts");
+    expect(filter?.with?.filters).toContain("src/daemon/socketServer/**");
+    expect(filter?.with?.filters).not.toContain("src/index.ts");
     expect(filter?.with?.filters).toContain("examples/mediamtx/**");
     expect(filter?.with?.filters).toContain("scripts/webrtc/**");
     expect(filter?.with?.filters).toContain("test/integration/webrtcDeviceCapture.integration.test.ts");
@@ -68,5 +73,15 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(buildIndex).toBeGreaterThanOrEqual(0);
     expect(androidSteps[buildIndex]?.with?.["gradle-tasks"]).toContain(":control-proxy:assembleDebug");
     expect(emulatorIndex).toBeGreaterThan(buildIndex);
+  });
+
+  test("uses the checkout's video-server jar for Android capture", () => {
+    const androidSteps = workflow().jobs?.["android-device-webrtc"]?.steps ?? [];
+    const build = androidSteps.find(step => step.name === "Build video-server jar");
+    const emulator = androidSteps.find(step => step.uses === "./.github/actions/android-emulator");
+
+    expect(build?.with?.["gradle-tasks"]).toContain(":video-server:d8Dex");
+    expect(emulator?.with?.script).toContain("AUTOMOBILE_VIDEO_SERVER_JAR");
+    expect(emulator?.with?.script).toContain("AUTOMOBILE_REQUIRE_VIDEO_SERVER=1");
   });
 });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -52,8 +52,10 @@ class CdpClient {
 
 function start(command: string, args: string[], logFile: string): ChildProcessWithoutNullStreams {
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-  child.stdout.on("data", chunk => writeFile(logFile, chunk, { flag: "a" }));
-  child.stderr.on("data", chunk => writeFile(logFile, chunk, { flag: "a" }));
+  const log = createWriteStream(logFile, { flags: "a" });
+  child.stdout.pipe(log, { end: false });
+  child.stderr.pipe(log, { end: false });
+  child.once("close", () => log.end());
   return child;
 }
 
@@ -146,13 +148,22 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
   test("the real device capture path renders changing video and stops cleanly", async () => {
     if (!process.env.AUTOMOBILE_MEDIAMTX_BINARY) {throw new Error("MediaMTX runner did not provide AUTOMOBILE_MEDIAMTX_BINARY");}
     await mkdir(artifactDir, { recursive: true });
-    const daemonDbDir = await mkdtemp(join(artifactDir, "daemon-db-"));
+    const daemonDir = await mkdtemp(join(artifactDir, "daemon-"));
+    const daemonDbDir = join(daemonDir, "db");
+    const webRtcSocketPath = join(daemonDir, "webrtc-stream.sock");
+    await mkdir(daemonDbDir);
     const daemonEnvironment = {
       ...process.env,
+      AUTOMOBILE_DATA_DIR: daemonDir,
       AUTOMOBILE_DB_DIR: daemonDbDir,
       AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000",
+      AUTOMOBILE_DAEMON_SOCKET_PATH: join(daemonDir, "daemon.sock"),
+      AUTOMOBILE_DAEMON_PID_FILE_PATH: join(daemonDir, "daemon.pid"),
+      AUTOMOBILE_DAEMON_LOCK_FILE_PATH: join(daemonDir, "daemon.lock"),
+      AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: webRtcSocketPath,
     };
     delete daemonEnvironment.AUTOMOBILE_DB_PATH;
+    delete daemonEnvironment.AUTO_MOBILE_DB_PATH;
     const mediamtx = start(process.env.AUTOMOBILE_MEDIAMTX_BINARY, ["examples/mediamtx/mediamtx.yml"], join(artifactDir, "mediamtx.log"));
     let chrome: ChildProcessWithoutNullStreams | undefined;
     let cdp: CdpClient | undefined;
@@ -171,13 +182,26 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment }).catch(() => undefined);
       await waitFor(async () => {
         try {
-          const response = await sendWebRtcStreamRequest({ action: "list", id: `${streamId}-daemon-ready` }, { timeoutMs: 1_000 });
+          const response = await sendWebRtcStreamRequest(
+            { action: "list", id: `${streamId}-daemon-ready` },
+            { socketPath: webRtcSocketPath, timeoutMs: 1_000 }
+          );
           return response.success;
         } catch { return false; }
       }, "AutoMobile daemon did not become ready");
       await launchFixture();
-      const response = await sendWebRtcStreamRequest({ action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` });
+      const response = await sendWebRtcStreamRequest(
+        { action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` },
+        { socketPath: webRtcSocketPath }
+      );
       expect(response.success).toBe(true);
+      await waitFor(async () => {
+        const status = await sendWebRtcStreamRequest(
+          { action: "status", id: `${streamId}-capture-status`, streamId },
+          { socketPath: webRtcSocketPath, timeoutMs: 1_000 }
+        ).catch(() => undefined);
+        return (status?.stream?.framesSent ?? 0) > 0;
+      }, "capture source did not deliver H.264 frames to the WHIP publisher");
       chrome = start(chromeBinary(), ["--headless=new", "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=9222", "--no-first-run", "about:blank"], join(artifactDir, "chrome.log"));
       cdp = await openReader(chrome);
       await waitFor(async () => (await videoSample(cdp!)).frames > 0, "browser did not decode device video");
@@ -189,9 +213,15 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       expect(first.height).toBeGreaterThan(0);
       expect(second.frames).toBeGreaterThan(first.frames);
       expect(second.sample).not.toBe(first.sample);
-      const stopped = await sendWebRtcStreamRequest({ action: "stop", id: `${streamId}-stop`, streamId });
+      const stopped = await sendWebRtcStreamRequest(
+        { action: "stop", id: `${streamId}-stop`, streamId },
+        { socketPath: webRtcSocketPath }
+      );
       expect(stopped.success).toBe(true);
-      const listed = await sendWebRtcStreamRequest({ action: "list", id: `${streamId}-list` });
+      const listed = await sendWebRtcStreamRequest(
+        { action: "list", id: `${streamId}-list` },
+        { socketPath: webRtcSocketPath }
+      );
       expect(listed.streams?.some(stream => stream.streamId === streamId)).toBe(false);
     } finally {
       cdp?.close();
@@ -200,5 +230,5 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       await stop(mediamtx);
       await writeFile(join(artifactDir, "result.txt"), `platform=${platform}\nstream=${streamId}\n`);
     }
-  }, 120_000);
+  }, 240_000);
 });

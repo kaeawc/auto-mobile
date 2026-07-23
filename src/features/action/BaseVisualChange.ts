@@ -6,7 +6,7 @@ import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { Window } from "../observe/Window";
 import { logger } from "../../utils/logger";
 import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../utils/constants";
-import { ActionableError, BootedDevice, GfxMetrics, ObserveResult } from "../../models";
+import { ActionableError, BootedDevice, DeviceLockState, GfxMetrics, ObserveResult } from "../../models";
 import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { NodeCryptoService } from "../../utils/crypto";
@@ -206,7 +206,7 @@ export class BaseVisualChange {
       }
     }
 
-    return await this.takeObservation(blockResult, previousObserveResult, {
+    const observed = await this.takeObservation(blockResult, previousObserveResult, {
       changeExpected: options.changeExpected,
       tolerancePercent: options.tolerancePercent ?? DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
       queryOptions: options.queryOptions,
@@ -215,6 +215,42 @@ export class BaseVisualChange {
       actionStartTime: options.overrideMinTimestamp ?? observationStartTime,
       predictionContext
     });
+    this.annotateDeviceLock(observed, previousObserveResult);
+    return observed;
+  }
+
+  /**
+   * Flag when an interaction ran against a locked Android keyguard (#4280).
+   *
+   * The gesture is deliberately NOT blocked — a swipe-to-dismiss or a PIN-digit
+   * tap is exactly how an agent recovers — but the result must never read as a
+   * clean success when it likely never reached the app. We attach the pre-action
+   * lock state (so an agent can branch on `secure`) plus a human-readable
+   * warning. Android-only: `deviceLock` is only collected on Android observe.
+   */
+  private annotateDeviceLock(result: any, previousObserveResult: ObserveResult | null): void {
+    if (!result || this.device.platform !== "android") {
+      return;
+    }
+    const lock = previousObserveResult?.deviceLock;
+    if (!lock?.locked) {
+      return;
+    }
+    result.deviceLock = lock;
+    result.deviceLockWarning = BaseVisualChange.buildDeviceLockWarning(lock);
+    logger.warn(`[BaseVisualChange] ${result.deviceLockWarning}`);
+  }
+
+  private static buildDeviceLockWarning(lock: DeviceLockState): string {
+    const preamble =
+      "Device is locked; this interaction likely did not reach the app under test.";
+    if (lock.secure === true) {
+      return `${preamble} The lock is secure (PIN/pattern/password) — ask the user to unlock the device before continuing.`;
+    }
+    if (lock.secure === false) {
+      return `${preamble} The lock is a swipe lock — dismiss the keyguard (e.g. swipe up) before continuing.`;
+    }
+    return `${preamble} Unlock or dismiss the keyguard before continuing.`;
   }
 
   private async takeObservation(

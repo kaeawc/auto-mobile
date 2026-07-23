@@ -1,0 +1,116 @@
+name: "WebRTC Device Integration"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Device lane to run for diagnosis"
+        required: true
+        default: "all"
+        type: choice
+        options: [all, android, ios]
+
+permissions:
+  contents: read
+
+jobs:
+  detect-webrtc-changes:
+    name: "Detect WebRTC Device-Coverage Changes"
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.filter.outputs.webrtc }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            webrtc:
+              - 'src/features/webrtc/**'
+              - 'src/server/webrtcStreamManager.ts'
+              - 'src/daemon/webrtcStream*'
+              - 'src/index.ts'
+              - 'examples/mediamtx/**'
+              - 'scripts/webrtc/**'
+              - 'test/integration/webrtcDeviceCapture.integration.test.ts'
+              - '.github/workflows/webrtc-device-integration.yml'
+
+  android-device-webrtc:
+    name: "Android Device Capture to WHEP"
+    needs: detect-webrtc-changes
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-webrtc-changes.outputs.should_run == 'true' ||
+      contains(github.event.pull_request.labels.*.name, 'webrtc')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Install Chrome for WHEP decoding"
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes google-chrome-stable || sudo apt-get install --yes chromium-browser
+      - uses: ./.github/actions/android-emulator
+        with:
+          script: |
+            cd "$GITHUB_WORKSPACE"
+            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION=1 \
+            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android \
+            AUTOMOBILE_ANDROID_H264_DEVICE_ID=emulator-5554 \
+              bun run test:integration:webrtc-device
+          working-directory: './android/'
+          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+      - name: "Upload WebRTC failure artifacts"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-webrtc-device-artifacts
+          path: scratch/webrtc-device-integration/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ios-device-webrtc:
+    name: "iOS Device Capture to WHEP"
+    needs: detect-webrtc-changes
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      needs.detect-webrtc-changes.outputs.should_run == 'true' ||
+      contains(github.event.pull_request.labels.*.name, 'webrtc')
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+      - name: "Build iOS capture prerequisites"
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          (cd ios/screen-capture && swift build)
+      - name: "Boot iOS Simulator"
+        run: bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000
+      - name: "Run iOS device capture integration"
+        env:
+          AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"
+          AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios
+        run: bun run test:integration:webrtc-device
+      - name: "Upload WebRTC failure artifacts"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-webrtc-device-artifacts
+          path: scratch/webrtc-device-integration/
+          if-no-files-found: ignore
+          retention-days: 7

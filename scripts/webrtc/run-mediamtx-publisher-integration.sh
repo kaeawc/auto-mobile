@@ -8,7 +8,7 @@
 set -euo pipefail
 
 readonly MEDIAMTX_VERSION="1.19.2"
-readonly TEST_FILE="test/integration/mediamtxWebRtcPublisher.integration.test.ts"
+readonly TEST_FILE="${AUTOMOBILE_MEDIAMTX_TEST_FILE:-test/integration/mediamtxWebRtcPublisher.integration.test.ts}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cache_dir="${AUTOMOBILE_MEDIAMTX_CACHE_DIR:-${repo_root}/scratch/mediamtx}"

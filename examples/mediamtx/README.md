@@ -55,3 +55,20 @@ The test uses localhost-only MediaMTX authentication from `mediamtx.yml` and
 temporarily binds the WebRTC HTTP listener to port 8889. Stop a conflicting
 local MediaMTX process before running it. The normal `bun test` suite leaves
 this test skipped; it does not require MediaMTX, FFmpeg, or Chrome.
+
+## Device capture coverage
+
+`bun run test:integration:webrtc-device` runs the separate, opt-in device path:
+real Android emulator or iOS Simulator capture → AutoMobile daemon socket → WHIP
+→ MediaMTX → WHEP → headless Chrome. Set
+`AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION=1` and
+`AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android` or `ios`; the selected device must
+already be booted. The test launches the platform settings fixture, toggles its
+appearance, and requires both browser frame progression and a changed rendered
+sample.
+
+In pull requests, maintainers apply the `webrtc` label to force both device
+lanes. Otherwise they run only when the WebRTC pipeline, MediaMTX runner, daemon
+socket lifecycle, or device integration test changes. Use the **WebRTC Device
+Integration** workflow's manual dispatch with an `android`, `ios`, or `all`
+platform selection for diagnosis.

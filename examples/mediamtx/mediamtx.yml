@@ -10,10 +10,11 @@
 # Point AUTOMOBILE_WEBRTC_WHIP_ENDPOINT at a per-stream WHIP URL served here
 # (see the note on stream naming at the bottom of this file).
 #
-# This config targets MediaMTX v1.x. Keys occasionally change across releases;
-# the authoritative reference is the bundled mediamtx.yml in the MediaMTX repo.
-# Its functional correctness against a live server is exercised by a dedicated
-# publisher -> MediaMTX -> WHEP integration test.
+# This config requires MediaMTX v1.19.2 or newer. Keys occasionally change
+# across releases; the authoritative reference is the bundled mediamtx.yml in
+# the MediaMTX repo.
+# Validate this configuration against the MediaMTX release you deploy before
+# exposing it outside a local try-out.
 
 ###############################################################################
 # WebRTC (WHIP ingest + WHEP egress)

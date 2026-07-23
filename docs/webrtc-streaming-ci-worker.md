@@ -152,10 +152,10 @@ echo '{"action":"start","streamId":"'"$CI_JOB_ID"'","whipEndpoint":"'"$WHIP"'"}'
 echo '{"action":"stop","streamId":"'"$CI_JOB_ID"'"}'  | nc -U ~/.auto-mobile/webrtc-stream.sock || true
 ```
 
-The publisher reconnects automatically if the network blips; MediaMTX keeps the
-WHEP path stable so the browser viewer reconnects to the same URL. Video
-streaming supports Android and iOS; optional audio works on Android and iOS
-Simulator windows.
+The publisher reconnects automatically if the network blips. MediaMTX keeps the
+WHEP path stable, but a browser WHEP client must retry or recreate its peer
+connection after the publisher reconnects. Video streaming supports Android and
+iOS; optional audio works on Android and iOS Simulator windows.
 
 ## Troubleshooting
 

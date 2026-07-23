@@ -1,0 +1,90 @@
+# MediaMTX configuration for AutoMobile WebRTC screen streaming.
+#
+# MediaMTX (https://github.com/bluenviron/mediamtx) is a single-binary media
+# server that ingests a WebRTC stream over WHIP and fans it out to browsers over
+# WHEP. It replaces the hand-rolled reference coordination server as the
+# supported production fanout: it owns per-subscriber RTP forwarding, keyframe
+# recovery, and reconnect/migration — so AutoMobile only has to publish.
+#
+# The AutoMobile publisher is unchanged: it is a standard RFC 9725 WHIP client.
+# Point AUTOMOBILE_WEBRTC_WHIP_ENDPOINT at a per-stream WHIP URL served here
+# (see the note on stream naming at the bottom of this file).
+#
+# This config targets MediaMTX v1.x. Keys occasionally change across releases;
+# the authoritative reference is the bundled mediamtx.yml in the MediaMTX repo.
+# Its functional correctness against a live server is exercised by the
+# publisher -> MediaMTX -> WHEP integration test (see issue #4290).
+
+###############################################################################
+# WebRTC (WHIP ingest + WHEP egress)
+###############################################################################
+
+# Enable the WebRTC server. It serves WHIP at /<name>/whip and WHEP at
+# /<name>/whep on webrtcAddress.
+webrtc: yes
+webrtcAddress: :8889
+
+# STUN/TURN for NAT traversal. Mirror whatever you pass to the publisher via
+# AUTOMOBILE_WEBRTC_ICE_SERVERS so both peers agree on how to connect.
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+  # TURN example — uncomment and fill in for CI workers behind NAT that a plain
+  # STUN server cannot traverse:
+  # - url: turn:turn.example.com:3478
+  #   username: user
+  #   password: pass
+
+###############################################################################
+# Trim the surface: AutoMobile only uses WebRTC. Disable the other ingress and
+# egress protocols so nothing else is listening.
+###############################################################################
+rtsp: no
+rtmp: no
+hls: no
+srt: no
+
+###############################################################################
+# Authentication
+###############################################################################
+# By default MediaMTX permits anonymous publish/read only from localhost. For a
+# reachable deployment, require the bearer token AutoMobile sends as
+# `Authorization: Bearer <token>` (AUTOMOBILE_WEBRTC_WHIP_TOKEN). Configure an
+# internal user or JWT auth — see
+# https://github.com/bluenviron/mediamtx#authentication. Example (publish
+# requires a token; anyone may read):
+#
+# authInternalUsers:
+#   - user: publisher
+#     pass: <the same value as AUTOMOBILE_WEBRTC_WHIP_TOKEN>
+#     permissions:
+#       - action: publish
+#   - user: any
+#     permissions:
+#       - action: read
+
+###############################################################################
+# Paths (streams)
+###############################################################################
+# One path per stream, created on demand. AutoMobile publishes to
+# /<streamId>/whip and browsers subscribe at /<streamId>/whep. `all_others`
+# accepts any stream name without pre-declaring it.
+paths:
+  all_others:
+
+###############################################################################
+# Stream naming — how to set AUTOMOBILE_WEBRTC_WHIP_ENDPOINT
+###############################################################################
+# MediaMTX derives the stream name from the URL *path* (/<name>/whip), whereas
+# the AutoMobile publisher additionally appends a harmless `?streamId=<id>`
+# query parameter (a coordination-server convention MediaMTX ignores). So put
+# the stream name in the path:
+#
+#   export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx-host:8889/ci-run-42/whip"
+#
+# or override per request over the control socket so the path carries the job id:
+#
+#   {"action":"start","whipEndpoint":"http://mediamtx-host:8889/$CI_JOB_ID/whip"}
+#
+# Watch it in a browser at the matching WHEP URL:
+#
+#   http://mediamtx-host:8889/ci-run-42/whep

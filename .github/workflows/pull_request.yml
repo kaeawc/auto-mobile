@@ -806,7 +806,7 @@ jobs:
           retention-days: 7
 
   bats-tests:
-    timeout-minutes: 30
+    timeout-minutes: 5
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes

@@ -23,6 +23,31 @@ export const runTimerContract = (
       await timer.sleep(capabilities.realTime ? 1 : 10);
     });
 
+    test("setTimeout fires its callback", async function() {
+      const timer = makeTimer();
+      let fired = false;
+
+      timer.setTimeout(() => {
+        fired = true;
+      }, capabilities.realTime ? 5 : 10);
+
+      await timer.sleep(capabilities.realTime ? 20 : 20);
+
+      expect(fired).toBe(true);
+    });
+
+    test("setTimeout dispatches shorter delays before longer delays", async function() {
+      const timer = makeTimer();
+      const calls: string[] = [];
+
+      timer.setTimeout(() => calls.push("late"), capabilities.realTime ? 20 : 100);
+      timer.setTimeout(() => calls.push("early"), capabilities.realTime ? 5 : 10);
+
+      await timer.sleep(capabilities.realTime ? 40 : 101);
+
+      expect(calls).toEqual(["early", "late"]);
+    });
+
     test("setTimeout callback can be cancelled", async function() {
       const timer = makeTimer();
       let fired = false;

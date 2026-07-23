@@ -205,6 +205,9 @@ describe("IosH264Source", () => {
     expect(encoderSpawns[0].args).toContain("2x1");
     expect(encoderSpawns[0].args).toContain("-level:v");
     expect(encoderSpawns[0].args).toContain("4.2");
+    const allowSoftwareIndex = encoderSpawns[0].args.indexOf("-allow_sw");
+    expect(allowSoftwareIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[allowSoftwareIndex + 1]).toBe("1");
     expect(encoderSpawns[0].args).toContain("scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2");
     expect(encoder.getStdinData()).toEqual(Buffer.alloc(8, 0x44));
     expect(chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x65])]);

@@ -477,6 +477,11 @@ export class IosH264Source implements H264CaptureSource {
       "-an",
       "-c:v",
       "h264_videotoolbox",
+      // Hosted macOS runners can exhaust the hardware encoder while Simulator
+      // processes are active. Keep VideoToolbox as the encoder, but allow its
+      // software implementation rather than repeatedly reconnecting forever.
+      "-allow_sw",
+      "1",
       "-profile:v",
       "baseline",
       "-level:v",

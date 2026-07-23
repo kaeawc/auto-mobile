@@ -20,7 +20,7 @@ import { PortManager } from "../../../src/utils/PortManager";
 import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
-import { logger } from "../../../src/utils/logger";
+import { FakeLogger } from "../../fakes/FakeLogger";
 import {
   startDeviceDataStreamSocketServer,
   stopDeviceDataStreamSocketServer,
@@ -1597,7 +1597,6 @@ describe("AndroidCtrlProxyClient", function() {
       // failures (issue #2985). Without a consumer branch the awaiter would hang to timeout; this
       // asserts the pending request resolves immediately with a failed result carrying the message.
       const errorTimer = new FakeTimer();
-
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
@@ -2274,19 +2273,20 @@ describe("AndroidCtrlProxyClient", function() {
       // log line (not just the dropped per-attempt debug), attributing the deterministic handler
       // failure instead of an anonymous "no hierarchy". Spy on the module logger's warn.
       const errorTimer = new FakeTimer();
+      const log = new FakeLogger();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        log
       );
-
-      const warnMessages: string[] = [];
-      const originalWarn = logger.warn;
-      logger.warn = (message: string) => {
-        warnMessages.push(message);
-      };
 
       try {
         testClient.invalidateCache();
@@ -2313,11 +2313,9 @@ describe("AndroidCtrlProxyClient", function() {
         const ready = await errorTimer.resolvePromise(verifyPromise);
 
         expect(ready).toBe(false);
-        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
-        expect(terminalWarn).toBeDefined();
-        expect(terminalWarn).toContain(runnerText);
+        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        expect(terminalWarn?.message).toContain(runnerText);
       } finally {
-        logger.warn = originalWarn;
         await testClient.close();
       }
     });
@@ -2376,8 +2374,10 @@ describe("AndroidCtrlProxyClient", function() {
       testClient: AndroidCtrlProxyClient;
       getSocket: () => CapturingWebSocket | null;
       timer: FakeTimer;
+      log: FakeLogger;
     } => {
       const timer = new FakeTimer();
+      const log = new FakeLogger();
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
@@ -2386,23 +2386,17 @@ describe("AndroidCtrlProxyClient", function() {
         timer,
         undefined,
         // Retry delays must run on the SAME fake timer so the test controls them.
-        new DefaultRetryExecutor(timer)
+        new DefaultRetryExecutor(timer),
+        undefined,
+        undefined,
+        undefined,
+        log
       );
-      return { testClient, getSocket, timer };
-    };
-
-    const captureWarns = (): { warnMessages: string[]; restore: () => void } => {
-      const warnMessages: string[] = [];
-      const originalWarn = logger.warn;
-      logger.warn = (message: string) => {
-        warnMessages.push(message);
-      };
-      return { warnMessages, restore: () => { logger.warn = originalWarn; } };
+      return { testClient, getSocket, timer, log };
     };
 
     test("identical runner error on 2 consecutive attempts short-circuits the remaining retries", async function() {
-      const { testClient, getSocket, timer } = createShortCircuitTestClient();
-      const { warnMessages, restore } = captureWarns();
+      const { testClient, getSocket, timer, log } = createShortCircuitTestClient();
 
       try {
         testClient.invalidateCache();
@@ -2430,13 +2424,11 @@ describe("AndroidCtrlProxyClient", function() {
         expect(ready).toBe(false);
         // Short-circuited after 2 attempts: attempts 3-5 never sent a request.
         expect(sentHierarchyRequests(socket).length).toBe(2);
-        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
-        expect(terminalWarn).toBeDefined();
-        expect(terminalWarn).toContain("short-circuited");
-        expect(terminalWarn).toContain("2/5 verification attempts");
-        expect(terminalWarn).toContain(runnerText);
+        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        expect(terminalWarn?.message).toContain("short-circuited");
+        expect(terminalWarn?.message).toContain("2/5 verification attempts");
+        expect(terminalWarn?.message).toContain(runnerText);
       } finally {
-        restore();
         await testClient.close();
       }
     });
@@ -2445,8 +2437,7 @@ describe("AndroidCtrlProxyClient", function() {
       // The regression guard for the startup path this method exists to verify: ONE handler
       // error during bring-up must not conclude "deterministic" — the retry still runs and a
       // successful push flips the verification to ready.
-      const { testClient, getSocket, timer } = createShortCircuitTestClient();
-      const { warnMessages, restore } = captureWarns();
+      const { testClient, getSocket, timer, log } = createShortCircuitTestClient();
 
       try {
         testClient.invalidateCache();
@@ -2478,16 +2469,14 @@ describe("AndroidCtrlProxyClient", function() {
         const ready = await timer.resolvePromise(verifyPromise);
 
         expect(ready).toBe(true);
-        expect(warnMessages.find(m => m.includes("Service not ready"))).toBeUndefined();
+        expect(log.at("warn").find(({ message }) => message.includes("Service not ready"))).toBeUndefined();
       } finally {
-        restore();
         await testClient.close();
       }
     });
 
     test("differing runner error texts never short-circuit (full retry budget)", async function() {
-      const { testClient, getSocket, timer } = createShortCircuitTestClient();
-      const { warnMessages, restore } = captureWarns();
+      const { testClient, getSocket, timer, log } = createShortCircuitTestClient();
 
       try {
         testClient.invalidateCache();
@@ -2509,13 +2498,11 @@ describe("AndroidCtrlProxyClient", function() {
         expect(ready).toBe(false);
         // All 3 attempts ran: varying error text is not treated as deterministic.
         expect(sentHierarchyRequests(socket).length).toBe(3);
-        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
-        expect(terminalWarn).toBeDefined();
-        expect(terminalWarn).not.toContain("short-circuited");
-        expect(terminalWarn).toContain("after 3 verification attempts");
-        expect(terminalWarn).toContain("distinct cause 3");
+        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        expect(terminalWarn?.message).not.toContain("short-circuited");
+        expect(terminalWarn?.message).toContain("after 3 verification attempts");
+        expect(terminalWarn?.message).toContain("distinct cause 3");
       } finally {
-        restore();
         await testClient.close();
       }
     });
@@ -2524,8 +2511,7 @@ describe("AndroidCtrlProxyClient", function() {
       // error X -> timeout -> error X -> error X with maxAttempts=5: the timeout on attempt 2
       // breaks the streak, so the short-circuit lands after attempt 4 (streak rebuilt on 3+4),
       // not after attempt 3 (which a no-reset implementation would produce).
-      const { testClient, getSocket, timer } = createShortCircuitTestClient();
-      const { warnMessages, restore } = captureWarns();
+      const { testClient, getSocket, timer, log } = createShortCircuitTestClient();
 
       try {
         testClient.invalidateCache();
@@ -2561,12 +2547,10 @@ describe("AndroidCtrlProxyClient", function() {
         expect(ready).toBe(false);
         // 4 attempts, not 3 (timeout reset the streak) and not 5 (short-circuit stopped attempt 5).
         expect(sentHierarchyRequests(socket).length).toBe(4);
-        const terminalWarn = warnMessages.find(m => m.includes("Service not ready"));
-        expect(terminalWarn).toBeDefined();
-        expect(terminalWarn).toContain("short-circuited");
-        expect(terminalWarn).toContain("4/5 verification attempts");
+        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        expect(terminalWarn?.message).toContain("short-circuited");
+        expect(terminalWarn?.message).toContain("4/5 verification attempts");
       } finally {
-        restore();
         await testClient.close();
       }
     });

@@ -1,6 +1,6 @@
 import path from "path";
 import crypto from "crypto";
-import { logger } from "../../utils/logger";
+import { logger, type Logger } from "../../utils/logger";
 import { Image } from "../../utils/image-utils";
 import { TakeScreenshot } from "../observe/TakeScreenshot";
 import { BootedDevice } from "../../models";
@@ -24,6 +24,7 @@ interface NavigationScreenshotManagerOptions {
   webpQuality?: number;
   fileSystem?: FileSystem;
   timer?: Timer;
+  logger?: Logger;
 }
 
 /**
@@ -41,6 +42,7 @@ export class NavigationScreenshotManager {
   private readonly webpQuality: number;
   private readonly fs: FileSystem;
   private readonly timer: Timer;
+  private readonly logger: Logger;
 
   // Track pending captures to avoid duplicate work
   private pendingCaptures: Map<string, Promise<string | null>> = new Map();
@@ -53,10 +55,11 @@ export class NavigationScreenshotManager {
     this.webpQuality = options.webpQuality ?? 65;
     this.fs = options.fileSystem ?? new CanonicalDefaultFileSystem();
     this.timer = options.timer ?? defaultTimer;
+    this.logger = options.logger ?? logger;
 
     // Ensure directory exists
     this.fs.ensureDir(this.screenshotDir).catch(err => {
-      logger.warn(`[NAV_SCREENSHOT] Failed to create screenshot directory: ${err}`);
+      this.logger.warn(`[NAV_SCREENSHOT] Failed to create screenshot directory: ${err}`);
     });
   }
 
@@ -133,7 +136,7 @@ export class NavigationScreenshotManager {
       return path.join(this.screenshotDir, matching[0]);
     } catch (error) {
       // Screenshot lookup is best-effort; callers can capture a fresh image when lookup fails.
-      logger.debug(`[NAV_SCREENSHOT] Failed to find existing screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
+      this.logger.debug(`[NAV_SCREENSHOT] Failed to find existing screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
       return null;
     }
   }
@@ -376,7 +379,7 @@ export class NavigationScreenshotManager {
       return await this.fs.readFileBuffer(screenshotPath);
     } catch (error) {
       // Screenshot reads are best-effort; callers treat null as an unavailable image.
-      logger.debug(`[NAV_SCREENSHOT] Failed to read screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
+      this.logger.debug(`[NAV_SCREENSHOT] Failed to read screenshot: ${error instanceof Error ? error.message : String(error)}`, error);
       return null;
     }
   }

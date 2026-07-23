@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
+import { DefaultAfterToolCallHandler, ToolRegistry, ToolRegistryClass } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { logger } from "../../src/utils/logger";
+import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import type { ObservationArtifactPayload, ObservationArtifactWriter } from "../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
@@ -156,13 +156,12 @@ describe("ToolRegistry device-aware pipeline", () => {
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([device]);
-    const originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     const originalGetInstance = (AndroidCtrlProxyClient as any).getInstance;
-    const originalDebug = logger.debug;
-    const debugMessages: string[] = [];
+    const log = new FakeLogger();
+    const registry = new ToolRegistryClass(undefined, log);
 
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
-    (ToolRegistry as any).toolCallRepository = {
+    (registry as any).deviceSessionManager = fakeDeviceSessionManager;
+    (registry as any).toolCallRepository = {
       async recordToolCall(): Promise<void> {},
     };
     (AndroidCtrlProxyClient as any).getInstance = () => ({
@@ -170,27 +169,21 @@ describe("ToolRegistry device-aware pipeline", () => {
         throw new Error("bind unavailable");
       },
     });
-    logger.debug = (message: string) => {
-      debugMessages.push(message);
-    };
-
     try {
-      ToolRegistry.registerDeviceAware(
+      registry.registerDeviceAware(
         "bindFailureProbe",
         "Bind failure probe",
         z.object({}),
         async () => ({ success: true })
       );
 
-      const tool = ToolRegistry.getTool("bindFailureProbe")!;
+      const tool = registry.getTool("bindFailureProbe")!;
       await expect(tool.handler({ platform: "android", sessionUuid: "session-1" })).resolves.toEqual({ success: true });
-      expect(debugMessages).toEqual([
-        expect.stringContaining("[ToolRegistry] Best-effort CtrlProxy session bind skipped for bindFailureProbe: Error: bind unavailable"),
-      ]);
+      expect(log.at("debug")).toContainEqual(expect.objectContaining({
+        message: expect.stringContaining("[ToolRegistry] Best-effort CtrlProxy session bind skipped for bindFailureProbe: Error: bind unavailable"),
+      }));
     } finally {
-      (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
       (AndroidCtrlProxyClient as any).getInstance = originalGetInstance;
-      logger.debug = originalDebug;
     }
   });
 });

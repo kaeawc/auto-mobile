@@ -10,7 +10,7 @@ import type { BootedDevice } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { logger } from "../../src/utils/logger";
+import { FakeLogger } from "../fakes/FakeLogger";
 
 // Direct, fast unit coverage for the two ToolRegistry pipeline collaborators
 // called out in issue #3208. Both reach module-level singletons, so each test
@@ -106,30 +106,23 @@ describe("DefaultAuditRunner", () => {
       } as unknown as ReturnType<typeof originalCreate>;
     }) as typeof originalCreate;
 
-    const warnMessages: string[] = [];
-    const originalWarn = logger.warn;
-    logger.warn = ((message: string) => {
-      warnMessages.push(message);
-    }) as typeof logger.warn;
+    const log = new FakeLogger();
+    let handlerCalled = false;
+    const runner = new DefaultAuditRunner(log);
+    const result = await runner.run(
+      makeInput(androidDevice, async () => {
+        handlerCalled = true;
+        return { success: true, sentinel: "no-package" };
+      })
+    );
 
-    try {
-      let handlerCalled = false;
-      const runner = new DefaultAuditRunner();
-      const result = await runner.run(
-        makeInput(androidDevice, async () => {
-          handlerCalled = true;
-          return { success: true, sentinel: "no-package" };
-        })
-      );
-
-      expect(receivedCommand).toContain("dumpsys window");
-      expect(receivedCommand).toContain("mCurrentFocus");
-      expect(handlerCalled).toBe(true);
-      expect(result).toEqual({ success: true, sentinel: "no-package" });
-      expect(warnMessages.some(m => m.includes("skipping memory audit"))).toBe(true);
-    } finally {
-      logger.warn = originalWarn;
-    }
+    expect(receivedCommand).toContain("dumpsys window");
+    expect(receivedCommand).toContain("mCurrentFocus");
+    expect(handlerCalled).toBe(true);
+    expect(result).toEqual({ success: true, sentinel: "no-package" });
+    expect(log.at("warn")).toContainEqual(expect.objectContaining({
+      message: expect.stringContaining("skipping memory audit"),
+    }));
   });
 
   test("swallows adb failures during foreground lookup and still runs the handler", async () => {
@@ -140,23 +133,16 @@ describe("DefaultAuditRunner", () => {
       },
     })) as unknown as typeof originalCreate;
 
-    const warnMessages: string[] = [];
-    const originalWarn = logger.warn;
-    logger.warn = ((message: string) => {
-      warnMessages.push(message);
-    }) as typeof logger.warn;
+    const log = new FakeLogger();
+    const runner = new DefaultAuditRunner(log);
+    const result = await runner.run(
+      makeInput(androidDevice, async () => ({ success: true, sentinel: "adb-error" }))
+    );
 
-    try {
-      const runner = new DefaultAuditRunner();
-      const result = await runner.run(
-        makeInput(androidDevice, async () => ({ success: true, sentinel: "adb-error" }))
-      );
-
-      expect(result).toEqual({ success: true, sentinel: "adb-error" });
-      expect(warnMessages.some(m => m.includes("Failed to get foreground package name"))).toBe(true);
-    } finally {
-      logger.warn = originalWarn;
-    }
+    expect(result).toEqual({ success: true, sentinel: "adb-error" });
+    expect(log.at("warn")).toContainEqual(expect.objectContaining({
+      message: expect.stringContaining("Failed to get foreground package name"),
+    }));
   });
 });
 

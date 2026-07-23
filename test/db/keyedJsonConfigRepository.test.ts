@@ -9,8 +9,8 @@ import {
   createVideoRecordingConfigRepository,
 } from "../../src/db/keyedJsonConfigRepository";
 import type { Database } from "../../src/db/types";
-import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
+import { FakeLogger } from "../fakes/FakeLogger";
 
 describe("KeyedJsonConfigRepository", () => {
   let db: Kysely<Database>;
@@ -149,33 +149,26 @@ describe("KeyedJsonConfigRepository", () => {
   });
 
   test("returns null and logs a warning for malformed config JSON", async () => {
-    const warnings: string[] = [];
-    const originalWarn = logger.warn;
-    logger.warn = (message: string) => {
-      warnings.push(message);
-    };
+    const log = new FakeLogger();
+    const repo = new KeyedJsonConfigRepository<{ autoCapture: boolean }>({
+      tableName: "device_snapshot_configs",
+      loggerTag: "DeviceSnapshotConfigRepository",
+      db,
+      logger: log,
+    });
+    await db
+      .insertInto("device_snapshot_configs")
+      .values({
+        key: "global",
+        config_json: "{not-json",
+        updated_at: new Date().toISOString(),
+      })
+      .execute();
 
-    try {
-      const repo = new KeyedJsonConfigRepository<{ autoCapture: boolean }>({
-        tableName: "device_snapshot_configs",
-        loggerTag: "DeviceSnapshotConfigRepository",
-        db,
-      });
-      await db
-        .insertInto("device_snapshot_configs")
-        .values({
-          key: "global",
-          config_json: "{not-json",
-          updated_at: new Date().toISOString(),
-        })
-        .execute();
-
-      expect(await repo.getConfig()).toBeNull();
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain("[DeviceSnapshotConfigRepository] Failed to parse config JSON:");
-    } finally {
-      logger.warn = originalWarn;
-    }
+    expect(await repo.getConfig()).toBeNull();
+    expect(log.at("warn")).toContainEqual(expect.objectContaining({
+      message: expect.stringContaining("[DeviceSnapshotConfigRepository] Failed to parse config JSON:"),
+    }));
   });
 
   test("removes the per-table wrapper modules", () => {

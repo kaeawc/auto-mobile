@@ -4,7 +4,7 @@ import type {
   DeviceSnapshotConfig,
   VideoRecordingConfig,
 } from "../models";
-import { logger } from "../utils/logger";
+import { logger, type Logger } from "../utils/logger";
 import { ensureMigrations, getDatabase } from "./database";
 import type { Database } from "./types";
 
@@ -19,6 +19,7 @@ export interface KeyedJsonConfigRepositoryOptions {
   tableName: KeyedJsonConfigTableName;
   loggerTag?: string;
   db?: Kysely<Database>;
+  logger?: Logger;
 }
 
 const KEYED_JSON_CONFIG_TABLES = {
@@ -49,11 +50,13 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
   private readonly tableName: KeyedJsonConfigTableName;
   private readonly loggerTag: string;
   private readonly db: Kysely<Database> | null;
+  private readonly logger: Logger;
 
   constructor(options: KeyedJsonConfigRepositoryOptions) {
     this.tableName = options.tableName;
     this.loggerTag = options.loggerTag ?? "KeyedJsonConfigRepository";
     this.db = options.db ?? null;
+    this.logger = options.logger ?? logger;
   }
 
   private async getDb(): Promise<Kysely<Database>> {
@@ -79,7 +82,7 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
     try {
       return JSON.parse(row.config_json) as TConfig;
     } catch (error) {
-      logger.warn(`[${this.loggerTag}] Failed to parse config JSON: ${error}`);
+      this.logger.warn(`[${this.loggerTag}] Failed to parse config JSON: ${error}`);
       return null;
     }
   }

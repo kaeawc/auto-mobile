@@ -71,7 +71,7 @@ export AUTOMOBILE_WEBRTC_AUDIO="1"
 
 > **NAT/firewall:** CI workers are usually behind NAT. Add a **TURN** server to
 > `AUTOMOBILE_WEBRTC_ICE_SERVERS` (JSON form) if a plain STUN server cannot
-> establish connectivity to your coordination server:
+> establish connectivity to your WHIP server:
 >
 > ```bash
 > export AUTOMOBILE_WEBRTC_ICE_SERVERS='[{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]'

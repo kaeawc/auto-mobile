@@ -113,6 +113,14 @@ HTTP on `:8889` (enable `webrtcEncryption` for `https://`):
 export AUTOMOBILE_WEBRTC_WHIP_ENDPOINT="http://mediamtx-host:8889/ci-run-42/whip"
 ```
 
+> **Reachable/containerized hosts** need more than `:8889` (which is only
+> signaling): expose the ICE media port `webrtcLocalUDPAddress: :8189/udp` (add
+> `webrtcAdditionalHosts` behind NAT, or use TURN), and enable auth — the stock
+> config is localhost-only, so a cross-host worker `401`s until the tokened
+> `authInternalUsers` block is enabled and `AUTOMOBILE_WEBRTC_WHIP_TOKEN` is set to
+> `<user>:<pass>`. See the CI guide's
+> [Prerequisites](../../../webrtc-streaming-ci-worker.md#prerequisites) for both.
+
 Browsers subscribe at the matching WHEP URL `http://mediamtx-host:8889/ci-run-42/whep`
 (MediaMTX also serves a built-in reader page at `http://mediamtx-host:8889/ci-run-42`).
 Any WHIP/WHEP-compatible SFU (LiveKit, Janus, Cloudflare) works the same way.

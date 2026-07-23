@@ -7,7 +7,6 @@ export type AndroidToolsSource = "homebrew" | "android_home" | "android_sdk_root
 export interface AndroidToolsLocation {
   path: string;
   source: AndroidToolsSource;
-  version?: string;
   available_tools: string[];
 }
 
@@ -364,7 +363,6 @@ async function detectAndroidToolsInPath(systemDetection = createDefaultSystemDet
   return {
     path: basePath,
     source: "path",
-    version: undefined, // Cannot determine version reliably from PATH
     available_tools: availableTools
   };
 }

@@ -420,7 +420,6 @@ describe("Android Command Line Tools - Detection", () => {
       systemDetection.addExistingFile("/android/sdk/cmdline-tools/latest");
       systemDetection.addExistingFile("/android/sdk/cmdline-tools/latest/bin");
       systemDetection.addExistingFile(join("/android/sdk/cmdline-tools/latest/bin", "apkanalyzer"));
-      systemDetection.setExecResponse("sdkmanager --version", "26.1.1\n");
 
       const result = await detectAndroidSdkTools(systemDetection);
 
@@ -439,7 +438,6 @@ describe("Android Command Line Tools - Detection", () => {
       systemDetection.addExistingFile(homebrewPath);
       systemDetection.addExistingFile(`${homebrewPath}/bin`);
       systemDetection.addExistingFile(`${homebrewPath}/bin/sdkmanager`);
-      systemDetection.setExecResponse(`${homebrewPath}/bin/sdkmanager --version`, "1.0\n");
       systemDetection.setExecResponse("which sdkmanager", `${homebrewPath}/bin/sdkmanager\n`);
 
       const sdkPath = "/android/sdk/cmdline-tools/latest";
@@ -447,7 +445,6 @@ describe("Android Command Line Tools - Detection", () => {
       systemDetection.addExistingFile(sdkPath);
       systemDetection.addExistingFile(`${sdkPath}/bin`);
       systemDetection.addExistingFile(`${sdkPath}/bin/sdkmanager`);
-      systemDetection.setExecResponse(`${sdkPath}/bin/sdkmanager --version`, "2.0\n");
 
       const result = await detectAndroidCommandLineTools(systemDetection);
 

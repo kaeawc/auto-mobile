@@ -27,8 +27,15 @@ function directlyExecutesSdkManager(source: string): boolean {
     ts.ScriptKind.TS,
   );
   const launcherAliases = new Set(LAUNCHER_NAMES);
-  const initializers = new Map<string, ts.Expression>();
+  const initializers = new Map<string, ts.Expression[]>();
   const declarations: ts.VariableDeclaration[] = [];
+  // Bindings are keyed by bare name, not by scope, and every value bound to a name is
+  // consulted — so a name bound anywhere in the file poisons every use of that name. That
+  // errs toward over-detection deliberately: a false CI failure is loud and fixable, a missed
+  // `spawn(sdkmanager)` is not.
+  const bindValue = (name: string, value: ts.Expression): void => {
+    initializers.set(name, [...(initializers.get(name) ?? []), value]);
+  };
 
   const collect = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) &&
@@ -44,7 +51,7 @@ function directlyExecutesSdkManager(source: string): boolean {
     if (ts.isVariableDeclaration(node)) {
       declarations.push(node);
       if (ts.isIdentifier(node.name) && node.initializer) {
-        initializers.set(node.name.text, node.initializer);
+        bindValue(node.name.text, node.initializer);
       }
       if (ts.isObjectBindingPattern(node.name)) {
         for (const element of node.name.elements) {
@@ -57,12 +64,29 @@ function directlyExecutesSdkManager(source: string): boolean {
         }
       }
     }
+    // `let command: string; command = ...;` carries no declaration initializer, so the
+    // deferred assignment is the only place the value is visible.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left)) {
+      bindValue(node.left.text, node.right);
+    }
     ts.forEachChild(node, collect);
   };
   collect(sourceFile);
 
+  // `promisify(execFile)` is the dominant launcher idiom in src/, so both the stored alias
+  // (`const run = promisify(exec); run(...)`) and the immediate call (`promisify(exec)(...)`)
+  // have to read as launcher references.
+  const isPromisifiedLauncher = (node: ts.Expression): boolean => {
+    if (!ts.isCallExpression(node) || node.arguments.length !== 1) {return false;}
+    const callee = node.expression;
+    const calleeName = ts.isIdentifier(callee) ? callee.text
+      : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
+    return calleeName === "promisify" && isLauncherReference(node.arguments[0]);
+  };
   const isLauncherReference = (node: ts.Expression): boolean => {
     if (ts.isIdentifier(node)) {return launcherAliases.has(node.text);}
+    if (ts.isCallExpression(node)) {return isPromisifiedLauncher(node);}
     return ts.isPropertyAccessExpression(node) && LAUNCHER_NAMES.has(node.name.text);
   };
   let aliasesChanged = true;
@@ -81,6 +105,11 @@ function directlyExecutesSdkManager(source: string): boolean {
   const staticText = (node: ts.Expression): string | undefined => {
     if (ts.isStringLiteralLike(node)) {return node.text;}
     if (ts.isParenthesizedExpression(node)) {return staticText(node.expression);}
+    // Join the static chunks of a template with a separator no identifier can contain, so
+    // `sdkmanager` is only matched when it sits wholly inside one chunk.
+    if (ts.isTemplateExpression(node)) {
+      return [node.head.text, ...node.templateSpans.map(span => span.literal.text)].join("\u0000");
+    }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = staticText(node.left);
       const right = staticText(node.right);
@@ -92,12 +121,15 @@ function directlyExecutesSdkManager(source: string): boolean {
     if (ts.isExpression(node) && staticText(node)?.toLowerCase().includes("sdkmanager")) {
       return true;
     }
+    // `exec(`${sdkmanagerPath} --version`)` hides the tool name in the identifier, not in any
+    // static chunk of the template.
+    if (ts.isIdentifier(node) && node.text.toLowerCase().includes("sdkmanager")) {return true;}
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      const initializer = initializers.get(node.text);
-      if (initializer) {
+      const boundValues = initializers.get(node.text) ?? [];
+      if (boundValues.length > 0) {
         const nextSeen = new Set(seen);
         nextSeen.add(node.text);
-        if (mentionsSdkManager(initializer, nextSeen)) {return true;}
+        if (boundValues.some(value => mentionsSdkManager(value, nextSeen))) {return true;}
       }
     }
     let found = false;
@@ -135,6 +167,8 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
       // Keep production diagnostics out of this list unless they cannot use the client.
     ]);
     const files = sourceFiles(join(ROOT, "src"));
+    // A silently-empty scan yields zero offenders and passes green while checking nothing.
+    expect(files.length).toBeGreaterThan(100);
     const sources = await Promise.all(files.map(async file => ({
       file,
       source: await Bun.file(file).text(),
@@ -157,6 +191,28 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
     expect(directlyExecutesSdkManager('const binary = "sdk" + "manager"; execFile(binary, args);')).toBe(true);
   });
 
+  test("detects template-literal paths", () => {
+    expect(directlyExecutesSdkManager("spawn(`${dir}/bin/sdkmanager`, [\"--list\"]);")).toBe(true);
+    expect(directlyExecutesSdkManager("exec(`${command} sdkmanager --list`);")).toBe(true);
+    expect(directlyExecutesSdkManager("const binary = `${root}/bin/sdkmanager`; execFile(binary, args);")).toBe(true);
+    expect(directlyExecutesSdkManager("spawn(`${dir}/bin/avdmanager`, [\"list\"]);")).toBe(false);
+    // Known blind spot, and the price of not matching across chunk boundaries: a tool name
+    // split by an interpolation reads as two unrelated chunks.
+    expect(directlyExecutesSdkManager("spawn(`${dir}/bin/sdk${x}manager`, []);")).toBe(false);
+  });
+
+  test("detects sdkmanager reached through deferred assignment", () => {
+    expect(directlyExecutesSdkManager(
+      "let command: string;\ncommand = `${sdkmanagerPath} --version`;\nsystemDetection.exec(command);",
+    )).toBe(true);
+    expect(directlyExecutesSdkManager(
+      'let binary;\nbinary = "sdkmanager";\nexecFile(binary, ["--list"]);',
+    )).toBe(true);
+    expect(directlyExecutesSdkManager(
+      'let binary;\nbinary = "avdmanager";\nexecFile(binary, ["list"]);',
+    )).toBe(false);
+  });
+
   test("detects aliased launchers and shell wrappers", () => {
     expect(directlyExecutesSdkManager('const { spawn: launch } = childProcess; launch("sdkmanager", ["--list"]);')).toBe(true);
     expect(directlyExecutesSdkManager('const run = childProcess.spawn; run("sdkmanager", ["--list"]);')).toBe(true);
@@ -165,13 +221,31 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
     expect(directlyExecutesSdkManager('execSync("sdkmanager --list");')).toBe(true);
   });
 
+  test("detects promisified launchers, the dominant idiom in src/", () => {
+    expect(directlyExecutesSdkManager(
+      'const execFileAsync = promisify(execFile); await execFileAsync(sdkmanagerPath, ["--list"]);',
+    )).toBe(true);
+    expect(directlyExecutesSdkManager(
+      "const execAsync = promisify(exec); await execAsync(`${sdkmanagerPath} --list`);",
+    )).toBe(true);
+    expect(directlyExecutesSdkManager('await promisify(execFile)(sdkmanagerPath, ["--list"]);')).toBe(true);
+    expect(directlyExecutesSdkManager(
+      'const execAsync = util.promisify(exec); await execAsync("sdkmanager --list");',
+    )).toBe(true);
+    expect(directlyExecutesSdkManager(
+      "const readFileAsync = promisify(readFile); await readFileAsync(sdkmanagerPath);",
+    )).toBe(false);
+  });
+
   test("allows diagnostic text that does not execute sdkmanager", () => {
     expect(directlyExecutesSdkManager('logger.info("Install with sdkmanager --list");')).toBe(false);
   });
 
   test("does not allow tool discovery to execute sdkmanager for version probing", () => {
     const detection = readFileSync(join(ROOT, "src/utils/android-cmdline-tools/detection.ts"), "utf8");
-    expect(detection).not.toContain("sdkmanagerPath} --version");
-    expect(detection).not.toContain("sdkmanagerBatPath} --version");
+    expect(directlyExecutesSdkManager(detection)).toBe(false);
+    // The predicate above duplicates the src-wide scan, so keep one pin the detector cannot
+    // give: a version probe routed through a launcher this file does not recognize.
+    expect(detection).not.toMatch(/sdkmanager[A-Za-z]*(Path|BatPath)\}\s*--version/i);
   });
 });

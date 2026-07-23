@@ -863,7 +863,7 @@
       "count": 1
     },
     "complexity": {
-      "count": 2
+      "count": 1
     },
     "max-depth": {
       "count": 2
@@ -1075,9 +1075,6 @@
     }
   },
   "src/utils/DeepLinkManager.ts": {
-    "auto-mobile/catch-convention": {
-      "count": 1
-    },
     "complexity": {
       "count": 2
     },
@@ -1111,13 +1108,13 @@
   },
   "src/utils/IOSCtrlProxyManager.ts": {
     "auto-mobile/catch-convention": {
-      "count": 10
+      "count": 2
     },
     "complexity": {
       "count": 8
     },
     "max-depth": {
-      "count": 16
+      "count": 12
     }
   },
   "src/utils/KeepScreenAwakeManager.ts": {
@@ -1161,11 +1158,6 @@
   },
   "src/utils/android-cmdline-tools/AvdConfigReader.ts": {
     "complexity": {
-      "count": 1
-    }
-  },
-  "src/utils/android-cmdline-tools/avdmanager.ts": {
-    "max-depth": {
       "count": 1
     }
   },
@@ -1251,7 +1243,7 @@
   },
   "src/utils/mcpVersion.ts": {
     "auto-mobile/catch-convention": {
-      "count": 3
+      "count": 2
     }
   },
   "src/utils/plan/PlanExecutor.ts": {

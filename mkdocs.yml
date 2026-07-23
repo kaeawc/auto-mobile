@@ -110,6 +110,7 @@ nav:
              - 'Screen Streaming': design-docs/mcp/observe/screen-streaming.md
              - 'WebRTC Streaming (WHIP)': design-docs/mcp/observe/webrtc-streaming.md
              - 'WebRTC Standards Map': design-docs/mcp/observe/webrtc-standards-map.md
+             - 'werift H.264 Packetization Spike': design-docs/mcp/observe/werift-h264-packetization-spike.md
              - 'iOS WebRTC Streaming': design-docs/mcp/observe/ios-webrtc-streaming.md
              - 'Video Recording': design-docs/mcp/observe/video-recording.md
              - 'Vision Fallback': design-docs/mcp/observe/vision-fallback.md

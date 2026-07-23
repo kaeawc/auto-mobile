@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import ts from "typescript";
 
 const SOURCE_ROOT = "src";
@@ -13,28 +13,58 @@ const sourceFiles = (directory: string): string[] =>
       : entry.isFile() && entry.name.endsWith(".ts") ? [path] : [];
   });
 
+const EXECUTION_METHODS = new Set([
+  "exec", "execFile", "execFileSync", "execSync", "execute", "execAsync",
+  "hostExec", "spawn", "spawnSync",
+]);
+
+const staticString = (expression: ts.Expression): string | undefined => {
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return expression.text;
+  }
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticString(expression.left);
+    const right = staticString(expression.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
+  return undefined;
+};
+
+const isExecutionCall = (expression: ts.Expression): boolean => {
+  if (ts.isIdentifier(expression)) {
+    return EXECUTION_METHODS.has(expression.text);
+  }
+  return ts.isPropertyAccessExpression(expression) && EXECUTION_METHODS.has(expression.name.text);
+};
+
 const directlyExecutesCodesign = (file: string): Array<{ line: number; column: number; text: string }> => {
   const source = readFileSync(file, "utf8");
-  if (!/\bcodesign\b/i.test(source)) {
-    return [];
-  }
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const codesignAliases = new Set<string>();
   const violations: Array<{ line: number; column: number; text: string }> = [];
+  const isCodesignExecutable = (expression: ts.Expression): boolean => {
+    const value = staticString(expression);
+    if (value !== undefined) {
+      return basename(value) === "codesign";
+    }
+    if (ts.isIdentifier(expression)) {
+      return codesignAliases.has(expression.text);
+    }
+    if (ts.isArrayLiteralExpression(expression)) {
+      return expression.elements.some(element => ts.isExpression(element) && isCodesignExecutable(element));
+    }
+    return false;
+  };
   const visit = (node: ts.Node): void => {
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
-      ts.isStringLiteral(node.initializer) &&
-      node.initializer.text === "codesign"
+      isCodesignExecutable(node.initializer)
     ) {
       codesignAliases.add(node.name.text);
     }
-    if (ts.isCallExpression(node) && node.arguments.some(argument =>
-      (ts.isStringLiteral(argument) && argument.text === "codesign") ||
-      (ts.isIdentifier(argument) && codesignAliases.has(argument.text))
-    )) {
+    if (ts.isCallExpression(node) && isExecutionCall(node.expression) && node.arguments.some(isCodesignExecutable)) {
       const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       violations.push({
         line: position.line + 1,

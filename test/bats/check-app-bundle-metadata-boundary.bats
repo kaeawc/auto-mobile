@@ -31,3 +31,35 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
 }
+
+@test "rejects no-substitution template and absolute-path codesign invocations" {
+  printf '%s\n' 'hostExec(`codesign`, ["-d", appPath]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
+
+  printf '%s\n' 'execFile("/usr/bin/codesign", ["-d", appPath]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
+}
+
+@test "rejects xcrun codesign and concatenated aliases" {
+  printf '%s\n' 'execFile("xcrun", ["codesign", "-d", appPath]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
+
+  printf '%s\n' 'const tool = "code" + "sign"; hostExec(tool, ["-d", appPath]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
+}

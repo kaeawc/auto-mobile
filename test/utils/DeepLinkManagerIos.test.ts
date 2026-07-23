@@ -167,6 +167,25 @@ describe("DeepLinkManager iOS", () => {
     expect(result.deepLinks.hosts).toEqual([]);
   });
 
+  test("metadata inspection errors make iOS deep-link discovery fail", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(
+      ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
+      "/sim/MyApp.app"
+    );
+    const infoPlist = JSON.stringify({ CFBundleURLTypes: [{ CFBundleURLSchemes: ["myapp"] }] });
+    const { exec } = fakeHostExec([{ match: "plutil -convert json", stdout: infoPlist }]);
+    const metadata: AppBundleMetadata = {
+      readEntitlements: async () => { throw new Error("codesign is unavailable"); },
+    };
+    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, metadata);
+
+    const result = await manager.getDeepLinks("com.example.myapp");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("codesign is unavailable");
+  });
+
   test("app not installed returns success:false with descriptive error", async () => {
     const simctl = new FakeSimCtlClient();
     // get_app_container ... app returns empty (FakeSimCtlClient default for app variant)

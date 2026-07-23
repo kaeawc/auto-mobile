@@ -8,6 +8,7 @@ import {
   type GitVersionInfo,
   type McpVersionDeps,
 } from "../../src/utils/mcpVersion";
+import { DefaultGitMetadataClient } from "../../src/utils/GitMetadataClient";
 import { compareVersions } from "../../src/server/deviceMatcher";
 
 const git = (shortSha: string, dirty = false, dirtyHash: string | null = null): GitVersionInfo =>
@@ -116,34 +117,38 @@ describe("readGitVersion", () => {
       if (args[0] === "diff") {return responses.diff ?? null;}
       return null;
     };
+  const fakeClient = (responses: Record<string, string | null>) => {
+    const run = fakeRun(responses);
+    return new DefaultGitMetadataClient((_command, args, { cwd }) => run(cwd, [...args]));
+  };
   const ownsRepo = () => OWN;
 
   test("returns null for a node_modules location without consulting git (dependency install)", () => {
     let called = false;
-    const run = (_c: string, _a: string[]) => { called = true; return null; };
-    expect(readGitVersion("/host/node_modules/@kaeawc/auto-mobile/dist", run, ownsRepo)).toBeNull();
+    const client = new DefaultGitMetadataClient(() => { called = true; return null; });
+    expect(readGitVersion("/host/node_modules/@kaeawc/auto-mobile/dist", client, ownsRepo)).toBeNull();
     expect(called).toBe(false);
   });
 
   test("returns null when not inside a git work tree (release install)", () => {
-    expect(readGitVersion("/opt/app", fakeRun({ toplevel: null }), ownsRepo)).toBeNull();
+    expect(readGitVersion("/opt/app", fakeClient({ toplevel: null }), ownsRepo)).toBeNull();
   });
 
   test("returns null when the enclosing repo is a different project (vendored release install)", () => {
     // git rev-parse walks upward; a copy nested in a host repo must not be
     // stamped with the host's commit.
-    const run = fakeRun({ toplevel: "/host/repo", sha: "deadbeefcafe" });
-    expect(readGitVersion("/host/repo/vendor/auto-mobile", run, () => "some-host-app")).toBeNull();
+    const client = fakeClient({ toplevel: "/host/repo", sha: "deadbeefcafe" });
+    expect(readGitVersion("/host/repo/vendor/auto-mobile", client, () => "some-host-app")).toBeNull();
   });
 
   test("returns null when HEAD has no resolvable short SHA", () => {
-    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: null });
-    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toBeNull();
+    const client = fakeClient({ toplevel: "/src/auto-mobile", sha: null });
+    expect(readGitVersion("/src/auto-mobile", client, ownsRepo)).toBeNull();
   });
 
   test("stamps a clean checkout of AutoMobile's own repo", () => {
-    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: "" });
-    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({
+    const client = fakeClient({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: "" });
+    expect(readGitVersion("/src/auto-mobile", client, ownsRepo)).toEqual({
       shortSha: "1a2b3c4d5e6f",
       dirty: false,
       dirtyHash: null,
@@ -151,13 +156,13 @@ describe("readGitVersion", () => {
   });
 
   test("marks the checkout dirty and hashes the tracked diff", () => {
-    const run = fakeRun({
+    const client = fakeClient({
       toplevel: "/src/auto-mobile",
       sha: "1a2b3c4d5e6f",
       status: " M src/index.ts",
       diff: "diff --git a/src/index.ts b/src/index.ts\n+console.log('a')",
     });
-    const result = readGitVersion("/src/auto-mobile", run, ownsRepo);
+    const result = readGitVersion("/src/auto-mobile", client, ownsRepo);
     expect(result?.shortSha).toBe("1a2b3c4d5e6f");
     expect(result?.dirty).toBe(true);
     expect(result?.dirtyHash).toMatch(/^[0-9a-f]{12}$/);
@@ -165,14 +170,14 @@ describe("readGitVersion", () => {
 
   test("two different dirty diffs produce different dirty hashes", () => {
     const base = { toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M src/index.ts" };
-    const a = readGitVersion("/src/auto-mobile", fakeRun({ ...base, diff: "edit A" }), ownsRepo);
-    const b = readGitVersion("/src/auto-mobile", fakeRun({ ...base, diff: "edit B" }), ownsRepo);
+    const a = readGitVersion("/src/auto-mobile", fakeClient({ ...base, diff: "edit A" }), ownsRepo);
+    const b = readGitVersion("/src/auto-mobile", fakeClient({ ...base, diff: "edit B" }), ownsRepo);
     expect(a?.dirtyHash).not.toBe(b?.dirtyHash);
   });
 
   test("falls back to a bare dirty marker when the diff is unavailable", () => {
-    const run = fakeRun({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M x", diff: null });
-    expect(readGitVersion("/src/auto-mobile", run, ownsRepo)).toEqual({
+    const client = fakeClient({ toplevel: "/src/auto-mobile", sha: "1a2b3c4d5e6f", status: " M x", diff: null });
+    expect(readGitVersion("/src/auto-mobile", client, ownsRepo)).toEqual({
       shortSha: "1a2b3c4d5e6f",
       dirty: true,
       dirtyHash: null,

@@ -291,9 +291,9 @@ final class RemindersPlanContentTests: XCTestCase {
     func testPullRequestWorkflowRunsRemindersLegAfterEarlierFailureUnlessCancelled() throws {
         let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
 
-        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
+        assertWorkflowStepRunsWhenNotCancelled(
             workflow,
-            afterStepName: nil
+            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)"
         )
         assertWorkflowStepRunsWhenNotCancelled(
             workflow,

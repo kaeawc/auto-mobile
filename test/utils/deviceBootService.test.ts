@@ -3,6 +3,7 @@ import { DeviceBootService } from "../../src/utils/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { DeviceInfo } from "../../src/models";
+import type { DeviceBootRecovery } from "../../src/utils/deviceBootRecovery";
 
 const image: DeviceInfo = {
   name: "Pixel_9_API_35",
@@ -11,13 +12,14 @@ const image: DeviceInfo = {
   osVersion: "35",
 };
 
-function service(deviceManager: FakeDeviceUtils, matcher = new FakeDeviceMatcher()): DeviceBootService {
+function service(deviceManager: FakeDeviceUtils, matcher = new FakeDeviceMatcher(), bootRecovery?: DeviceBootRecovery): DeviceBootService {
   return new DeviceBootService({
     deviceManager,
     deviceMatcher: matcher,
     deviceCreationGate: { isCreationAllowed: () => false, describeSource: () => "test" },
     deviceProvisioner: { provision: async () => { throw new Error("unexpected provision"); } },
     matchingStrategy: "LATEST",
+    bootRecovery,
   });
 }
 
@@ -66,5 +68,43 @@ describe("DeviceBootService", () => {
 
     await expect(service(devices, matcher).boot({ platform: "android" })).rejects.toThrow("not ready");
     expect(killed).toBe(true);
+  });
+
+  it("applies an injected recovery policy at the cold product boot boundary", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const recovered: string[] = [];
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    const bootRecovery: DeviceBootRecovery = {
+      run: async (target, boot) => {
+        recovered.push(target.name);
+        return boot();
+      },
+    };
+
+    await service(devices, matcher, bootRecovery).boot({ platform: "android" });
+
+    expect(recovered).toEqual([image.name]);
+  });
+
+  it("applies an injected recovery policy while awaiting an adopted running device", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const running = { name: image.name, platform: "android" as const, deviceId: "emulator-5554" };
+    const recovered: string[] = [];
+    devices.setDeviceImages("android", [image]);
+    devices.setBootedDevices("android", [running]);
+    matcher.setBootedResult(running);
+    const bootRecovery: DeviceBootRecovery = {
+      run: async (target, boot) => {
+        recovered.push(target.deviceId ?? target.name);
+        return boot();
+      },
+    };
+
+    await service(devices, matcher, bootRecovery).boot({ platform: "android" });
+
+    expect(recovered).toEqual(["emulator-5554"]);
   });
 });

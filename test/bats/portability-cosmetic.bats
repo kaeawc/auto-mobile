@@ -56,6 +56,13 @@ teardown() {
   [ "$output" -ge 1 ]
 }
 
+@test "timestamp helper stays numeric on macOS without coreutils" {
+  run env OSTYPE=darwin PATH="/usr/bin:/bin" bash scripts/utils/get_timestamp.sh
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[0-9]{13}$ ]]
+}
+
 # --- C ---------------------------------------------------------------------
 @test "format_xml does not write the formatter's stderr into the file" {
   local abs

@@ -5,6 +5,7 @@ import type { DeviceCreationGate } from "./deviceCreationGate";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS, type PlatformDeviceManager, waitForDeviceReadyOrCancel } from "./deviceUtils";
 import type { DeviceMatcher } from "./deviceMatcher";
 import type { DeviceProvisioner } from "./deviceProvisioning";
+import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 
 /** Inputs which affect device discovery, creation, and readiness, but not MCP sessions or automation setup. */
 export interface DeviceBootRequest {
@@ -37,6 +38,8 @@ export interface DeviceBootServiceDependencies {
   deviceCreationGate: DeviceCreationGate;
   deviceProvisioner: DeviceProvisioner;
   matchingStrategy: MatchingStrategy;
+  /** Defaults to no recovery so normal product and MCP boot never erases devices. */
+  bootRecovery?: DeviceBootRecovery;
 }
 
 /**
@@ -46,7 +49,11 @@ export interface DeviceBootServiceDependencies {
  * CtrlProxy. Those are application concerns layered on by `startDevice`.
  */
 export class DeviceBootService {
-  constructor(private readonly dependencies: DeviceBootServiceDependencies) {}
+  private readonly bootRecovery: DeviceBootRecovery;
+
+  constructor(private readonly dependencies: DeviceBootServiceDependencies) {
+    this.bootRecovery = dependencies.bootRecovery ?? new NoopDeviceBootRecovery();
+  }
 
   async boot(request: DeviceBootRequest, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
     const timeoutMs = request.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
@@ -136,14 +143,21 @@ export class DeviceBootService {
   }
 
   private async waitForRunningDevice(device: BootedDevice, timeoutMs: number): Promise<BootedDevice> {
-    const ready = await this.dependencies.deviceManager.waitForDeviceReady({ ...device, isRunning: true }, timeoutMs);
-    return { ...device, ...ready };
+    const recoveryTarget: DeviceInfo = { ...device, isRunning: true };
+    return this.bootRecovery.run(recoveryTarget, async () => {
+      const ready = await this.dependencies.deviceManager.waitForDeviceReady({ ...device, isRunning: true }, timeoutMs);
+      return { ...device, ...ready };
+    });
   }
 
   private async bootImage(image: DeviceInfo, timeoutMs: number, progress: DeviceBootProgress | undefined, provisioned: boolean): Promise<DeviceBootResult> {
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
+    return this.bootRecovery.run(image, async () => this.bootImageOnce(image, timeoutMs, progress, provisioned));
+  }
+
+  private async bootImageOnce(image: DeviceInfo, timeoutMs: number, progress: DeviceBootProgress | undefined, provisioned: boolean): Promise<DeviceBootResult> {
     const handle = await this.dependencies.deviceManager.startDevice(image, timeoutMs);
     await progress?.report(60, 100, "Device started, waiting for readiness...");
     const ready = await waitForDeviceReadyOrCancel(this.dependencies.deviceManager, image, handle, timeoutMs);

@@ -39,11 +39,11 @@ describe("#4124 ffmpeg install hoist", () => {
     expect(install?.id).toBe("install-ffmpeg");
   });
 
-  test("the ffmpeg install starts before the Xcode 26.5 simulator boot", () => {
+  test("the ffmpeg install starts before the CtrlProxy UI simulator boot", () => {
     // AC1: it must run concurrently with the boot, so it has to be started
     // earlier in the step list than the boot it overlaps.
     const installIndex = indexOfNamed(steps, "Install ffmpeg");
-    const bootIndex = indexOfNamed(steps, "Boot iOS Simulator (Xcode 26.5)");
+    const bootIndex = indexOfNamed(steps, "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)");
 
     expect(installIndex).toBeGreaterThanOrEqual(0);
     expect(bootIndex).toBeGreaterThanOrEqual(0);

@@ -5,6 +5,7 @@ import { DeviceBootService, type DeviceBootRequest } from "../utils/deviceBootSe
 import { DefaultDeviceMatcher } from "../utils/deviceMatcher";
 import { createDefaultDeviceProvisioner } from "../utils/deviceProvisioning";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
+import { createCiIosBootConfiguration } from "../utils/deviceBootRecovery";
 
 function readValue(args: string[], index: number, flag: string): string {
   const value = args[index + 1];
@@ -53,15 +54,17 @@ function applyBootDeviceArgument(request: Partial<DeviceBootRequest>, args: stri
  * session, downloading CtrlProxy, or initializing an automation runner.
  */
 export async function runBootDeviceCommand(args: string[]): Promise<void> {
-  const request = parseBootDeviceArgs(args);
+  const parsedRequest = parseBootDeviceArgs(args);
+  const ciConfiguration = await createCiIosBootConfiguration(parsedRequest);
   const service = new DeviceBootService({
-    deviceManager: new MultiPlatformDeviceManager(),
+    deviceManager: ciConfiguration?.deviceManager ?? new MultiPlatformDeviceManager(),
     deviceMatcher: new DefaultDeviceMatcher(),
     deviceCreationGate: getDeviceCreationGate(),
-    deviceProvisioner: createDefaultDeviceProvisioner(),
+    deviceProvisioner: ciConfiguration?.deviceProvisioner ?? createDefaultDeviceProvisioner(),
     matchingStrategy: DEVICE_POOL_MATCHING,
+    bootRecovery: ciConfiguration?.recovery,
   });
-  const result = await service.boot(request);
+  const result = await service.boot(ciConfiguration?.request ?? parsedRequest);
   console.log(JSON.stringify({
     deviceId: result.device.deviceId,
     name: result.device.name,

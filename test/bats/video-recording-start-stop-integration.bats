@@ -62,6 +62,50 @@ SCRIPT
   [ "$(sed -n '2p' "$INVOCATIONS_FILE")" = "test test/integration/iosVideoRecordingStartStop.integration.test.ts" ]
 }
 
+@test "uses AutoMobile product boot when no iPhone simulator is already booted" {
+  make_mock_commands
+  cat > "${MOCK_BIN}/xcrun" <<SCRIPT
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${INVOCATIONS_FILE}"
+if [[ "\$1" == "simctl" && "\$2" == "list" ]]; then
+  printf '%s\n' '{"devices":{}}'
+  exit 0
+fi
+if [[ "\$1" == "--sdk" && "\$2" == "iphonesimulator" && "\$3" == "--show-sdk-version" ]]; then
+  printf '%s\n' '26.5'
+  exit 0
+fi
+if [[ "\$1" == "simctl" && "\$2" == "io" && "\$4" == "screenshot" ]]; then
+  printf 'warm display frame\n' > "\$5"
+  exit 0
+fi
+exit 1
+SCRIPT
+  cat > "${MOCK_BIN}/bun" <<SCRIPT
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${INVOCATIONS_FILE}"
+if [[ "\$1" == "run" && "\$2" == "src/index.ts" ]]; then
+  printf '%s\n' '{"deviceId":"PRODUCT-UDID"}'
+fi
+SCRIPT
+  cat > "${MOCK_BIN}/jq" <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "$1" == "-r" && "$2" == ".deviceId" ]]; then
+  cat >/dev/null
+  printf '%s\n' 'PRODUCT-UDID'
+else
+  cat >/dev/null
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun" "${MOCK_BIN}/bun" "${MOCK_BIN}/jq"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  grep -q -- "run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000 --min-os-version 26.5 --max-os-version 26.5" "$INVOCATIONS_FILE"
+  grep -q -- "simctl io PRODUCT-UDID screenshot" "$INVOCATIONS_FILE"
+}
+
 @test "fails before the integration test when the simulator cannot produce a warm-up frame" {
   make_mock_commands
   cat > "${MOCK_BIN}/xcrun" <<SCRIPT

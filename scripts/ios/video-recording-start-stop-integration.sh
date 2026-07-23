@@ -43,7 +43,13 @@ if [[ -z "${DEVICE_ID}" ]]; then
 fi
 
 if [[ -z "${DEVICE_ID}" ]]; then
-  DEVICE_ID="$("${PROJECT_ROOT}/scripts/ios/boot-simulator.sh")"
+  ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+  boot_result="$(cd "${PROJECT_ROOT}" && bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000 --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
+  DEVICE_ID="$(printf '%s' "${boot_result}" | jq -r '.deviceId')"
+  if [[ -z "${DEVICE_ID}" || "${DEVICE_ID}" == "null" ]]; then
+    echo "error: AutoMobile product boot returned no deviceId" >&2
+    exit 1
+  fi
 fi
 
 export AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION=1

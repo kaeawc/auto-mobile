@@ -248,7 +248,7 @@ Run the real iOS simulator `videoRecording` start -> stop regression test:
 scripts/ios/video-recording-start-stop-integration.sh
 ```
 
-The script uses an already booted iPhone simulator when available, otherwise it boots one with `scripts/ios/boot-simulator.sh`. It requires `bun`, `xcrun`, `jq`, `ffmpeg`, and `ffprobe`, records for `AUTOMOBILE_IOS_VIDEO_RECORDING_WAIT_MS` milliseconds when set, and fails if the finalized `.mp4` is missing, empty, unreadable, or lacks a video stream.
+The script uses an already booted iPhone simulator when available, otherwise it uses AutoMobile product boot. It requires `bun`, `xcrun`, `jq`, `ffmpeg`, and `ffprobe`, records for `AUTOMOBILE_IOS_VIDEO_RECORDING_WAIT_MS` milliseconds when set, and fails if the finalized `.mp4` is missing, empty, unreadable, or lacks a video stream.
 
 ## CI Integration
 

@@ -1,0 +1,125 @@
+import type { DeviceInfo } from "../models";
+import type { DeviceBootRequest } from "./deviceBootService";
+import { DefaultDeviceProvisioner, createDefaultAndroidAvdCreator } from "./deviceProvisioning";
+import type { DeviceProvisioner } from "./deviceProvisioning";
+import { MultiPlatformDeviceManager } from "./deviceUtils";
+import type { PlatformDeviceManager } from "./deviceUtils";
+import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
+import { logger } from "./logger";
+
+const CI_SIMULATOR_NAME = "AutoMobile CI iPhone";
+
+/** Recovery policy for a cold device boot. Product callers default to no recovery. */
+export interface DeviceBootRecovery {
+  run<T>(target: DeviceInfo, boot: () => Promise<T>): Promise<T>;
+}
+
+/** The default product policy: surface the first boot failure unchanged. */
+export class NoopDeviceBootRecovery implements DeviceBootRecovery {
+  run<T>(_target: DeviceInfo, boot: () => Promise<T>): Promise<T> {
+    return boot();
+  }
+}
+
+export interface CiIosBootRecoveryDependencies {
+  ownedSimulatorName: string;
+  shutdown(target: DeviceInfo): Promise<void>;
+  erase(udid: string): Promise<void>;
+}
+
+/**
+ * GitHub Actions-only recovery for the deterministic simulator AutoMobile owns.
+ * It is deliberately not a general iOS recovery policy: arbitrary simulators
+ * must never be erased by product boot.
+ */
+export class CiIosBootRecovery implements DeviceBootRecovery {
+  constructor(private readonly dependencies: CiIosBootRecoveryDependencies) {}
+
+  async run<T>(target: DeviceInfo, boot: () => Promise<T>): Promise<T> {
+    if (!this.isOwnedTarget(target)) {
+      return boot();
+    }
+    let firstFailure: unknown;
+    try {
+      return await boot();
+    } catch (error) {
+      firstFailure = error;
+    }
+    await this.recover(() => this.dependencies.shutdown(target));
+    await this.recover(() => this.dependencies.erase(target.deviceId!));
+    try {
+      return await boot();
+    } catch {
+      throw firstFailure;
+    }
+  }
+
+  private isOwnedTarget(target: DeviceInfo): boolean {
+    return target.platform === "ios" && target.name === this.dependencies.ownedSimulatorName && Boolean(target.deviceId);
+  }
+
+  private async recover(action: () => Promise<void>): Promise<void> {
+    try {
+      await action();
+    } catch (error) {
+      logger.debug(`[CI iOS boot] recovery command failed: ${error}`);
+    }
+  }
+}
+
+export interface CiIosBootConfiguration {
+  request: DeviceBootRequest;
+  deviceManager: PlatformDeviceManager;
+  deviceProvisioner: DeviceProvisioner;
+  recovery: DeviceBootRecovery;
+}
+
+/** True only in the CI environment where AutoMobile owns the simulator lifecycle. */
+export function isGitHubActionsCi(environment: NodeJS.ProcessEnv): boolean {
+  return environment.CI === "true" && environment.GITHUB_ACTIONS === "true";
+}
+
+/** CI recovery owns only the un-targeted product boot used by the workflow. */
+export function shouldUseCiIosBootRecovery(request: DeviceBootRequest, environment: NodeJS.ProcessEnv): boolean {
+  return request.platform === "ios" && !request.name && !request.deviceId && isGitHubActionsCi(environment);
+}
+
+/** Match the runtime-qualified CI-owned name rather than re-applying SDK bounds after fallback. */
+export function normalizeCiIosBootRequest(request: DeviceBootRequest, ownedSimulatorName: string): DeviceBootRequest {
+  return { ...request, name: ownedSimulatorName, minOsVersion: undefined, maxOsVersion: undefined };
+}
+
+/**
+ * Give daemon-free product boot a deterministic, CI-owned iOS simulator and
+ * its erase-on-final-retry policy. All other callers retain the no-op default.
+ */
+export async function createCiIosBootConfiguration(
+  request: DeviceBootRequest,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<CiIosBootConfiguration | undefined> {
+  if (!shouldUseCiIosBootRecovery(request, environment)) {
+    return undefined;
+  }
+  const simctl = new SimCtlClient();
+  const runtime = await simctl.resolveRuntimeIdentifier(request.minOsVersion);
+  const ownedSimulatorName = `${CI_SIMULATOR_NAME} (${runtime})`;
+  const deviceManager = new MultiPlatformDeviceManager(null, simctl);
+  return {
+    request: normalizeCiIosBootRequest(request, ownedSimulatorName),
+    deviceManager,
+    deviceProvisioner: new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: createDefaultAndroidAvdCreator,
+      createdDeviceName: () => ownedSimulatorName,
+    }),
+    recovery: new CiIosBootRecovery({
+      ownedSimulatorName,
+      shutdown: target => deviceManager.killDevice({
+        name: target.name,
+        platform: "ios",
+        deviceId: target.deviceId!,
+      }),
+      erase: udid => simctl.eraseSimulator(udid),
+    }),
+  };
+}

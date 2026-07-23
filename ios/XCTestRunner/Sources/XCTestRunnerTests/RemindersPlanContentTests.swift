@@ -257,16 +257,15 @@ final class RemindersPlanContentTests: XCTestCase {
 
     /// The XCTest bundle must be compiled before the target-app warm-up (#3851 direction 4):
     /// otherwise `swift test` in the timed Reminders step compiles first, re-cooling the
-    /// freshly-warmed simulator/app and reintroducing the cold observe timeout. The pre-build
-    /// must also follow the leg's CtrlProxy warm-up (which runs after the leg's Xcode is
-    /// selected) so the build cache matches the `swift test` that follows.
+    /// freshly-warmed simulator/app and reintroducing the cold observe timeout. The Xcode
+    /// toolchain is selected by the earlier simulator bring-up, so this pre-build may overlap
+    /// daemon and CtrlProxy warm-up, but it must finish before target-app warm-up.
     func testPullRequestWorkflowPreBuildsXCTestBundleBeforeWarmUp() throws {
         let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
 
         assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
             workflow,
             preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.5)",
-            afterCtrlProxyStepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
             warmupStepName: "Warm up Reminders target app (Xcode 26.5)"
         )
     }
@@ -893,14 +892,28 @@ private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
 private func assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
     _ workflow: String,
     preBuildStepName: String,
-    afterCtrlProxyStepName: String,
+    afterCtrlProxyStepName: String? = nil,
     warmupStepName: String,
     file: StaticString = #filePath,
     line: UInt = #line
 ) {
-    guard let ctrlProxyRange = workflow.range(of: #"name: "\#(afterCtrlProxyStepName)""#) else {
-        XCTFail("Workflow is missing step named \(afterCtrlProxyStepName)", file: file, line: line)
-        return
+    if let afterCtrlProxyStepName {
+        guard let ctrlProxyRange = workflow.range(of: #"name: "\#(afterCtrlProxyStepName)""#) else {
+            XCTFail("Workflow is missing step named \(afterCtrlProxyStepName)", file: file, line: line)
+            return
+        }
+        guard let preBuildRange = workflow.range(of: #"name: "\#(preBuildStepName)""#) else {
+            XCTFail("Workflow is missing step named \(preBuildStepName)", file: file, line: line)
+            return
+        }
+        XCTAssertLessThan(
+            ctrlProxyRange.lowerBound,
+            preBuildRange.lowerBound,
+            "\(preBuildStepName) must run after \(afterCtrlProxyStepName) so the leg's Xcode toolchain "
+                + "is already selected and the pre-build cache matches the swift test that follows",
+            file: file,
+            line: line
+        )
     }
     guard let preBuildRange = workflow.range(of: #"name: "\#(preBuildStepName)""#) else {
         XCTFail("Workflow is missing step named \(preBuildStepName)", file: file, line: line)
@@ -911,14 +924,6 @@ private func assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
         return
     }
 
-    XCTAssertLessThan(
-        ctrlProxyRange.lowerBound,
-        preBuildRange.lowerBound,
-        "\(preBuildStepName) must run after \(afterCtrlProxyStepName) so the leg's Xcode toolchain "
-            + "is already selected and the pre-build cache matches the swift test that follows",
-        file: file,
-        line: line
-    )
     XCTAssertLessThan(
         preBuildRange.lowerBound,
         warmupRange.lowerBound,

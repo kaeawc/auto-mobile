@@ -1667,6 +1667,17 @@ jobs:
         timeout-minutes: 10
         run: ./scripts/ios/video-recording-start-stop-integration.sh
 
+      # The Xcode toolchain was selected by the bring-up above. XCTest compilation
+      # is CPU-bound, while the daemon and CtrlProxy warm-ups are mostly wait-bound,
+      # so overlap them (#4131). The barrier before the target-app warm-up keeps
+      # `swift test` from compiling after the final warm-up and re-cooling the sim.
+      - name: "Pre-build Reminders XCTest bundle (Xcode 26.5)"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        timeout-minutes: 15
+        background: true
+        id: prebuild-xctest
+        run: ./scripts/ci/prebuild-reminders-xctest-bundle.sh
+
       # This is a freshly-booted sim, so bring the daemon to ready and warm
       # CtrlProxy before the Reminders run. Pre-starting the daemon and waiting
       # for readiness makes a startup failure surface loudly here instead of
@@ -1686,15 +1697,9 @@ jobs:
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
 
-      # Compile the XCTest bundle BEFORE the target-app warm-up. Otherwise `swift test`
-      # in the timed Reminders step spends tens of seconds compiling first, letting the
-      # freshly-warmed simulator/app go cold again and reintroducing the cold observe
-      # timeout (#3851 direction 4). Runs after the leg's Xcode is selected so the build
-      # cache matches the `swift test` that follows.
-      - name: "Pre-build Reminders XCTest bundle (Xcode 26.5)"
-        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
-        timeout-minutes: 15
-        run: ./scripts/ci/prebuild-reminders-xctest-bundle.sh
+      # A background failure surfaces at this barrier. Do not start the target-app
+      # warm-up until the test bundle is complete, or `swift test` can re-cool it.
+      - wait: prebuild-xctest
 
       # Keep target-app cold bring-up outside the timed Reminders plan. CtrlProxy
       # is already warm above; this leaves Reminders foregrounded so the plan's

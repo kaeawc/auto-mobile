@@ -183,6 +183,15 @@ describe("daemon input API consumer docs", () => {
     expect(unixSocketApi).toContain("iOS simulators return clear unsupported errors for");
   });
 
+  test("documents pressButton values that the socket actually accepts", async () => {
+    const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
+
+    expect(unixSocketApi).toContain('"back" \\| "home" \\| "app_switch" \\| "volume_up" \\| "volume_down" \\| "power"');
+    expect(unixSocketApi).toContain("`input/key` for a discrete Enter press");
+    expect(unixSocketApi).not.toContain('"power" \\| "enter"');
+    expect(unixSocketApi).not.toContain("`enter` is reserved by the socket contract");
+  });
+
   test("links future IDE screen control docs to the daemon input API", async () => {
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
     const screenStreaming = await readRepoFile("docs/design-docs/mcp/observe/screen-streaming.md");

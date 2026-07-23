@@ -375,7 +375,7 @@ describe("UnixSocketServer input/pressButton", () => {
     expect(press).toHaveBeenCalledWith("menu", expect.any(Number));
   });
 
-  test("accepts enter as a socket contract button and reports the current platform unsupported result", async () => {
+  test("rejects enter before calling the platform button handler", async () => {
     const press = mock(async (button: string): Promise<PressButtonResult> => ({
       success: false,
       button,
@@ -394,8 +394,10 @@ describe("UnixSocketServer input/pressButton", () => {
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toBe("Unsupported button: enter");
-    expect(press).toHaveBeenCalledWith("enter", expect.any(Number));
+    expect(response.error).toBe(
+      "input/pressButton button must be one of: home, back, menu, power, volume_up, volume_down, recent, app_switch"
+    );
+    expect(press).not.toHaveBeenCalled();
   });
 
   test("rejects missing, non-string, and unsupported button values with actionable errors", async () => {
@@ -421,7 +423,7 @@ describe("UnixSocketServer input/pressButton", () => {
     expect(nonString.error).toBe("input/pressButton requires button");
     expect(unsupported.success).toBe(false);
     expect(unsupported.error).toBe(
-      "input/pressButton button must be one of: home, back, menu, power, volume_up, volume_down, recent, app_switch, enter"
+      "input/pressButton button must be one of: home, back, menu, power, volume_up, volume_down, recent, app_switch"
     );
   });
 });

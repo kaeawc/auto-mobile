@@ -11,6 +11,7 @@ export interface ExecSeamOptions {
   timeout?: number;
   maxBuffer?: number;
   cwd?: string;
+  signal?: AbortSignal;
 }
 
 /** Raw stdout/stderr an exec seam resolves with, before Buffer coercion. */
@@ -27,6 +28,7 @@ export interface ExecRequestOptions {
   timeoutMs?: number;
   maxBuffer?: number;
   cwd?: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -47,6 +49,7 @@ export async function runExecSeam(
       timeout: options.timeoutMs,
       maxBuffer: options.maxBuffer,
       cwd: options.cwd,
+      signal: options.signal,
     });
     return createExecResult(stdout, stderr);
   } catch (error) {

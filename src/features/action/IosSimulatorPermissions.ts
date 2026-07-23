@@ -1,8 +1,9 @@
-import { execFile } from "child_process";
-import { homedir } from "os";
-import { join } from "path";
-import { promisify } from "util";
 import type { BootedDevice, ExecResult } from "../../models";
+import {
+  SimulatorTccSqliteClient,
+  type TccPermissionReader,
+} from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
@@ -49,32 +50,39 @@ export interface IosSimulatorPrivacyClient {
   executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
 }
 
-interface TccPermissionRow {
-  service: string;
-  client: string;
-  auth_value?: number | null;
-  allowed?: number | null;
-  prompt_count?: number | null;
-}
+export {
+  type TccPermissionReader,
+  type TccPermissionRow,
+} from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 
-interface SqliteColumnInfo {
-  name: string;
-}
-
+/** @deprecated Inject SimulatorTccSqliteClient dependencies directly in new callers. */
 export interface SqliteCommandExecutor {
   execFile(command: string, args: string[]): Promise<{ stdout: string }>;
 }
 
-export interface TccPermissionReader {
-  readPermissions(deviceId: string, appId: string, permissions?: string[]): Promise<TccPermissionRow[]>;
+class LegacySqliteCommandExecutorAdapter implements HostCommandExecutor {
+  constructor(private readonly sqlite: SqliteCommandExecutor) {}
+
+  async executeCommand(file: string, args: string[] = []): Promise<ExecResult> {
+    const { stdout } = await this.sqlite.execFile(file, args);
+    return {
+      stdout,
+      stderr: "",
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (search: string) => stdout.includes(search),
+    };
+  }
 }
 
-const execFileAsync = promisify(execFile);
-
-class NodeSqliteCommandExecutor implements SqliteCommandExecutor {
-  async execFile(command: string, args: string[]): Promise<{ stdout: string }> {
-    const { stdout } = await execFileAsync(command, args);
-    return { stdout };
+/** @deprecated Use SimulatorTccSqliteClient. Retains the prior injected-executor constructor contract. */
+export class SqliteTccPermissionReader extends SimulatorTccSqliteClient {
+  constructor(sqlite?: SqliteCommandExecutor, homeDirectory?: string) {
+    super({
+      ...(sqlite ? { executor: new LegacySqliteCommandExecutorAdapter(sqlite) } : {}),
+      ...(sqlite ? { fileSystem: { stat: async () => ({ isFile: () => true }) } } : {}),
+      ...(homeDirectory ? { homeDirectory } : {}),
+    });
   }
 }
 
@@ -143,52 +151,6 @@ function stateFromAllowed(value: number | null | undefined): IosSimulatorPermiss
   return "unknown";
 }
 
-export class SqliteTccPermissionReader implements TccPermissionReader {
-  constructor(
-    private readonly sqlite: SqliteCommandExecutor = new NodeSqliteCommandExecutor(),
-    private readonly homeDirectory: string = homedir()
-  ) {}
-
-  async readPermissions(deviceId: string, appId: string, permissions?: string[]): Promise<TccPermissionRow[]> {
-    const tccPath = join(
-      this.homeDirectory,
-      "Library",
-      "Developer",
-      "CoreSimulator",
-      "Devices",
-      deviceId,
-      "data",
-      "Library",
-      "TCC",
-      "TCC.db"
-    );
-    const services = permissions && permissions.length > 0
-      ? permissions.map(tccServiceForPermission)
-      : [];
-    const serviceFilter = services.length > 0
-      ? ` and service in (${services.map(service => `'${service.replace(/'/g, "''")}'`).join(",")})`
-      : "";
-    const columns = await this.readAccessColumns(tccPath);
-    const optionalColumns = ["auth_value", "allowed", "prompt_count"]
-      .filter(column => columns.has(column));
-    const selectColumns = ["service", "client", ...optionalColumns].join(", ");
-    const query = [
-      `select ${selectColumns}`,
-      "from access",
-      `where client = '${appId.replace(/'/g, "''")}'${serviceFilter};`
-    ].join("\n");
-
-    const { stdout } = await this.sqlite.execFile("sqlite3", ["-json", tccPath, query]);
-    return JSON.parse(stdout.trim() || "[]") as TccPermissionRow[];
-  }
-
-  private async readAccessColumns(tccPath: string): Promise<Set<string>> {
-    const { stdout } = await this.sqlite.execFile("sqlite3", ["-json", tccPath, "pragma table_info(access);"]);
-    const columns = JSON.parse(stdout.trim() || "[]") as SqliteColumnInfo[];
-    return new Set(columns.map(column => column.name));
-  }
-}
-
 export class IosSimulatorPermissions {
   private device: BootedDevice;
   private simctl: IosSimulatorPrivacyClient;
@@ -201,7 +163,7 @@ export class IosSimulatorPermissions {
   ) {
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
-    this.tccReader = tccReader || new SqliteTccPermissionReader();
+    this.tccReader = tccReader || new SimulatorTccSqliteClient();
   }
 
   async setPermissions(

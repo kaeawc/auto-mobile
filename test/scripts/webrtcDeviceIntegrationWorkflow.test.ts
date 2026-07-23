@@ -5,6 +5,7 @@ import { load } from "js-yaml";
 const WORKFLOW_PATH = ".github/workflows/webrtc-device-integration.yml";
 
 interface WorkflowDocument {
+  permissions?: Record<string, string>;
   on?: {
     pull_request?: { types?: string[] };
     workflow_dispatch?: { inputs?: Record<string, unknown> };
@@ -27,6 +28,7 @@ describe("#4308 device WebRTC integration workflow", () => {
 
     expect(document.on?.pull_request?.types).toContain("labeled");
     expect(document.on?.workflow_dispatch?.inputs).toHaveProperty("platform");
+    expect(document.permissions?.["pull-requests"]).toBe("read");
   });
 
   test("defines the exact WebRTC path set that enables device lanes", () => {

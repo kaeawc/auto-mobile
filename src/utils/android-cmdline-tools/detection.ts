@@ -255,35 +255,6 @@ export function getAvailableToolsInDirectory(toolsDir: string, systemDetection =
 }
 
 /**
- * Get version information for Android command line tools at a specific location
- */
-async function getAndroidToolsVersion(toolsPath: string, systemDetection = createDefaultSystemDetection()): Promise<string | undefined> {
-  try {
-    // Try to get version from various tools
-    const binDir = join(toolsPath, "bin");
-
-    // Try sdkmanager first
-    const sdkmanagerPath = join(binDir, "sdkmanager");
-    const sdkmanagerBatPath = join(binDir, "sdkmanager.bat");
-
-    let command: string;
-    if (systemDetection.fileExistsSync(sdkmanagerPath)) {
-      command = `${sdkmanagerPath} --version`;
-    } else if (systemDetection.fileExistsSync(sdkmanagerBatPath)) {
-      command = `${sdkmanagerBatPath} --version`;
-    } else {
-      return undefined;
-    }
-
-    const result = await systemDetection.exec(command);
-    return result.stdout.trim() || result.stderr.trim() || undefined;
-  } catch (error) {
-    logger.warn(`Failed to get Android tools version at ${toolsPath}: ${(error as Error).message}`);
-    return undefined;
-  }
-}
-
-/**
  * Detect Android command line tools installation from Homebrew (macOS only)
  */
 export async function detectHomebrewAndroidTools(systemDetection = createDefaultSystemDetection()): Promise<AndroidToolsLocation | null> {
@@ -297,12 +268,9 @@ export async function detectHomebrewAndroidTools(systemDetection = createDefault
     return null;
   }
 
-  const version = await getAndroidToolsVersion(homebrewPath, systemDetection);
-
   return {
     path: homebrewPath,
     source: "homebrew",
-    version,
     available_tools: availableTools
   };
 }
@@ -321,13 +289,11 @@ export async function detectAndroidSdkTools(systemDetection = createDefaultSyste
     const availableTools = getAvailableToolsInDirectory(cmdlineToolsPath, systemDetection);
 
     if (availableTools.length > 0) {
-      const version = await getAndroidToolsVersion(cmdlineToolsPath, systemDetection);
       const source = systemDetection.getEnvVar("ANDROID_HOME") ? "android_home" : "android_sdk_root";
 
       locations.push({
         path: cmdlineToolsPath,
         source,
-        version,
         available_tools: availableTools
       });
     }
@@ -348,12 +314,9 @@ export async function detectAndroidSdkTools(systemDetection = createDefaultSyste
     const availableTools = getAvailableToolsInDirectory(cmdlineToolsPath, systemDetection);
 
     if (availableTools.length > 0) {
-      const version = await getAndroidToolsVersion(cmdlineToolsPath, systemDetection);
-
       locations.push({
         path: cmdlineToolsPath,
         source: "typical",
-        version,
         available_tools: availableTools
       });
     }

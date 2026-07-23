@@ -10,6 +10,10 @@ const EXCEPTIONS = new Map<string, string>([
   ["src/features/performance/PerformanceMonitor.ts", "Collects app metrics, not CtrlProxy lifecycle state."],
 ]);
 
+export function repositoryPath(file: string): string {
+  return relative(".", file).replaceAll("\\", "/");
+}
+
 export interface Violation {
   readonly file: string;
   readonly line: number;
@@ -60,7 +64,7 @@ export function findViolationsInSource(file: string, source: string): Violation[
 
 export function findViolations(): Violation[] {
   return sourceFiles(SOURCE_ROOT)
-    .filter(file => relative(".", file) !== OWNER && !EXCEPTIONS.has(relative(".", file)))
+    .filter(file => repositoryPath(file) !== OWNER && !EXCEPTIONS.has(repositoryPath(file)))
     .flatMap(file => findViolationsInSource(file, readFileSync(file, "utf8")));
 }
 

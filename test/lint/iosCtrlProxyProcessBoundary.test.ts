@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { findViolationsInSource } from "../../scripts/check-ios-ctrl-proxy-process-boundary";
+import { findViolationsInSource, repositoryPath } from "../../scripts/check-ios-ctrl-proxy-process-boundary";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = join(ROOT, "src/utils/ios/IOSCtrlProxyProcessClient.ts");
@@ -29,5 +29,11 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     expect(readFileSync(join(ROOT, "scripts/all_fast_validate_checks.sh"), "utf8")).toContain("ios-ctrl-proxy-process-boundary");
     expect(readFileSync(join(ROOT, "turbo.json"), "utf8")).toContain('"check:ios-ctrl-proxy-process-boundary"');
     expect(readFileSync(join(ROOT, ".github/workflows/pull_request.yml"), "utf8")).toContain("Check iOS CtrlProxy process execution boundary");
+  });
+
+  test("normalizes Windows separators before applying ownership exceptions", () => {
+    expect(repositoryPath("src\\utils\\ios\\IOSCtrlProxyProcessClient.ts")).toBe(
+      "src/utils/ios/IOSCtrlProxyProcessClient.ts",
+    );
   });
 });

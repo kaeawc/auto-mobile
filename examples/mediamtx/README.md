@@ -1,4 +1,31 @@
-# MediaMTX integration test
+# MediaMTX example config
+
+[MediaMTX](https://github.com/bluenviron/mediamtx) is the supported WHIP/WHEP
+fanout for AutoMobile's WebRTC screen streaming: the daemon publishes a device's
+screen to it over WHIP, and browsers watch over WHEP. It replaces the retired
+hand-rolled reference coordination server — MediaMTX owns per-subscriber RTP
+forwarding, keyframe recovery, and reconnect, so AutoMobile only has to publish.
+The checked-in `mediamtx.yml` is a ready-to-run config for a local try-out; point
+`AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` at a per-stream WHIP URL it serves (see
+[`mediamtx.yml`](./mediamtx.yml) for the URL scheme and the
+[CI worker guide](../../docs/webrtc-streaming-ci-worker.md) for a full walkthrough).
+
+## Watch a stream in a browser
+
+MediaMTX ships a **built-in WHEP reader**, so no separate viewer needs to be
+shipped or maintained. With the stock config running (`mediamtx ./mediamtx.yml`,
+serving on `:8889`), open the stream name in a browser:
+
+```
+http://localhost:8889/<stream>
+```
+
+For example, a stream published to `http://localhost:8889/ci-run-42/whip` is
+watchable at `http://localhost:8889/ci-run-42`. This is the "watch the stream in
+a browser" path; MediaMTX also serves the raw WHEP endpoint at
+`/<stream>/whep` for embedding in a custom page.
+
+## Integration test
 
 The checked-in `mediamtx.yml` is exercised by an opt-in integration test. It
 uses the actual AutoMobile `WebRtcPublisher` to ingest a synthetic, valid H.264

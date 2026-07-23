@@ -6,8 +6,10 @@
 > Android or iOS device screen video is captured as H.264, packetized to RTP, and pushed to
 > a coordination server over **WHIP** using [werift](https://github.com/shinyoshiaki/werift-webrtc)
 > (pure-TypeScript WebRTC). Control is via the daemon `webrtc-stream.sock` Unix
-> socket. A reference coordination server + browser viewer ships under
-> [`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/).
+> socket. The supported fanout is [MediaMTX](https://github.com/bluenviron/mediamtx);
+> a ready-to-run config ships under
+> [`examples/mediamtx/`](../../../../examples/mediamtx/), and browsers watch the
+> stream with MediaMTX's built-in WHEP reader.
 >
 > For the WebRTC protocol choices behind this implementation, see the
 > [WebRTC standards map](./webrtc-standards-map.md).
@@ -63,8 +65,7 @@ by common media servers (MediaMTX, LiveKit, Janus, Cloudflare).
 
 > The supported production fanout is **MediaMTX**; the AutoMobile publisher is
 > unchanged (a standard WHIP client). See
-> [Production fanout: MediaMTX](#production-fanout-mediamtx) below. The bundled
-> reference coordination server remains for zero-dependency local try-out.
+> [Production fanout: MediaMTX](#production-fanout-mediamtx) below.
 
 ### Components (in `src/features/webrtc/`)
 
@@ -148,10 +149,6 @@ then use `https://` for both `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` and the WHEP URL
 [example config](https://github.com/kaeawc/auto-mobile/blob/main/examples/mediamtx/mediamtx.yml)
 carries these keys commented out.
 
-The bundled reference coordination server
-([`examples/webrtc-coordination-server/`](../../../../examples/webrtc-coordination-server/README.md))
-remains as a zero-dependency way to try the path locally, and is described below.
-
 ## Why the daemon socket (not an MCP tool)
 
 Streaming is a long-lived side channel owned by the daemon, not a discrete
@@ -225,11 +222,10 @@ Two independent reconnection layers:
    over WHIP with backoff, restarting the capture source so a new SPS/PPS +
    keyframe follows immediately. The WHIP `Location` resource URL is retained so
    the stale session can be `DELETE`d.
-2. **Browser → server.** The coordination server's reconnect API
-   (`GET /api/streams`, `GET /api/streams/{id}`) returns a `StreamDescriptor`
-   containing the `whepUrl` and `iceServers` — everything a frontend needs to
-   (re)connect. The reference `viewer.html` re-subscribes automatically when its
-   peer connection drops.
+2. **Browser → server.** The browser's WHEP client re-subscribes to the same
+   MediaMTX WHEP URL when its peer connection drops. MediaMTX replays cached
+   SPS/PPS and a keyframe so a late or reconnecting viewer decodes immediately —
+   this is server-side and needs no AutoMobile involvement.
 
 ## Quality / bitrate
 
@@ -297,9 +293,8 @@ initialize on the device build, stream start fails instead of silently publishin
 video-only audio. Physical iOS playback capture is unavailable through public APIs.
 
 Android playback capture is policy-limited: some apps/usages cannot be captured,
-and `REMOTE_SUBMIX` is privileged. The reference coordination server forwards
-both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
-`audioPacketsForwarded` in its reconnect descriptor.
+and `REMOTE_SUBMIX` is privileged. MediaMTX forwards both the H.264 and PCMU
+tracks to WHEP subscribers.
 
 ## Known limitations / future work
 
@@ -315,18 +310,13 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 - **Audio is opt-in and platform-constrained.** iOS audio requires Simulator-window
   capture; physical devices remain video-only. Android audio depends on
   `REMOTE_SUBMIX` availability for the shell-owned `video-server` process.
-- **Reference server is single-process/in-memory.** It exists for local
-  try-out only. Use the supported [MediaMTX](#production-fanout-mediamtx) fanout
-  (or another hardened WHIP/WHEP SFU — LiveKit, Janus, Cloudflare) in production;
-  the publisher is unchanged.
 - **Trickle ICE is opt-in.** By default the publisher gathers candidates before
   POSTing the WHIP offer (non-trickle), which is simplest and widely compatible.
   Set `AUTOMOBILE_WEBRTC_TRICKLE_ICE=1` (or `trickleIce: true`) to publish the
   offer immediately and PATCH candidates incrementally
   (`application/trickle-ice-sdpfrag`) so setup doesn't stall on the gathering
   timeout — requires an ingest server that supports the WHIP trickle extension
-  (the bundled reference server does; see `trickleIce.ts` /
-  `WhipClient.patchCandidate`).
+  (see `trickleIce.ts` / `WhipClient.patchCandidate` for the publisher side).
 
 ## References
 
@@ -335,5 +325,5 @@ both the H.264 and PCMU tracks to WHEP subscribers and exposes `audio` plus
 - [WHEP — Internet-Draft](https://datatracker.ietf.org/doc/html/draft-ietf-wish-whep)
 - [werift-webrtc](https://github.com/shinyoshiaki/werift-webrtc)
 - [CI worker setup guide](../../../webrtc-streaming-ci-worker.md)
-- [Reference coordination server](../../../../examples/webrtc-coordination-server/README.md)
+- [MediaMTX example config](../../../../examples/mediamtx/README.md)
 - [Desktop live mirroring (Unix socket + FFmpeg decode)](./screen-streaming.md)

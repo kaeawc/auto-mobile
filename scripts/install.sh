@@ -1480,6 +1480,12 @@ bounded_watchdog_run() {
 
     local grace="${BOUNDED_KILL_GRACE_SECONDS}"
     local waited=0
+    # The watcher also starts a child (`sleep`). Give it a separate process
+    # group so cancelling a successful install cannot leave that sleep alive
+    # until PACKAGE_INSTALL_TIMEOUT_SECONDS expires on macOS bash.
+    local watcher_had_monitor=0
+    case "$-" in *m*) watcher_had_monitor=1 ;; esac
+    set -m
     (
         sleep "${secs}"
         if kill -0 "${cmd_pid}" 2> /dev/null; then
@@ -1508,6 +1514,7 @@ bounded_watchdog_run() {
         fi
     ) > /dev/null 2>&1 3>&- &
     local watcher_pid=$!
+    if [[ ${watcher_had_monitor} -eq 0 ]]; then set +m; fi
 
     local status=0
     wait "${cmd_pid}" 2> /dev/null || status=$?
@@ -1524,7 +1531,10 @@ bounded_watchdog_run() {
         wait "${watcher_pid}" 2> /dev/null || true
         status=124
     else
-        kill "${watcher_pid}" 2> /dev/null || true
+        # The watcher may have forked its `sleep` rather than exec'd it. Kill
+        # its process group too, otherwise that child can keep a BATS run alive
+        # for the full default 600-second package-install budget.
+        kill -TERM -"${watcher_pid}" 2> /dev/null || kill "${watcher_pid}" 2> /dev/null || true
         wait "${watcher_pid}" 2> /dev/null || true
         # The watcher can fire between the `wait` above and the kill here.
         if [[ -s "${fired_marker}" ]]; then status=124; fi

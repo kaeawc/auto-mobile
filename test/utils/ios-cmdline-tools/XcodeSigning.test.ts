@@ -61,39 +61,18 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
   fakeTimer.enableAutoAdvance();
   const writtenFiles: string[] = [];
   const xcodebuildArgs: string[][] = [];
-  const exec = async (command: string) => {
-    if (command.includes("security cms -D -i")) {
-      return {
-        stdout: profileXml,
-        stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
-      };
-    }
-    if (command.includes("security find-identity")) {
-      const output = options?.identities ?? "";
-      return {
-        stdout: output,
-        stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(searchString: string) { return this.stdout.includes(searchString); }
-      };
-    }
-    return {
-      stdout: "",
-      stderr: "",
-      toString() { return this.stdout; },
-      trim() { return this.stdout.trim(); },
-      includes(searchString: string) { return this.stdout.includes(searchString); }
-    };
-  };
-
   return {
     deps: {
       platform: () => "darwin" as const,
-      exec,
+      securityClient: {
+        getDiagnostics: async () => ({ available: true, version: null }),
+        listCodeSigningIdentities: async () => {
+          const output = options?.identities ?? "";
+          const match = output.match(/^\s*\d+\)\s+([0-9A-F]{40,64})\s+"([^\"]+)"/im);
+          return match ? [{ fingerprint: match[1].toUpperCase(), name: match[2] }] : [];
+        },
+        decodeCms: async () => profileXml
+      },
       xcodebuild: {
         executeCommand: async (args: string[]) => {
           xcodebuildArgs.push([...args]);

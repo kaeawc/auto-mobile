@@ -20,6 +20,7 @@ import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBu
 import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import { createExecResult } from "../../utils/execResult";
+import { SecurityClient, type SecurityClientApi } from "../../utils/ios-cmdline-tools/SecurityClient";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -87,6 +88,7 @@ export interface IosDoctorDependencies {
   fileExists: (path: string) => boolean;
   readDir: (path: string) => Promise<string[]>;
   homedir: () => string;
+  securityClient: SecurityClientApi;
   logger: Logger;
   createSimctlClient: () => SimCtl;
   runnerInspector: IosCtrlProxyRunnerInspector;
@@ -360,6 +362,7 @@ const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   fileExists: existsSync,
   readDir: async path => fs.readdir(path),
   homedir,
+  securityClient: new SecurityClient(),
   logger,
   createSimctlClient: () => new SimCtlClient(),
   runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger),
@@ -660,9 +663,8 @@ export async function checkCodeSigning(
   }
 
   try {
-    const result = await dependencies.execFile("security", ["find-identity", "-v", "-p", "codesigning"]);
-    const match = result.stdout.match(/(\d+)\s+valid identities found/);
-    const count = match ? Number(match[1]) : 0;
+    const identities = await dependencies.securityClient.listCodeSigningIdentities({ timeoutMs: DOCTOR_EXEC_TIMEOUT_MS });
+    const count = identities.length;
 
     if (count > 0) {
       return {
@@ -686,6 +688,42 @@ export async function checkCodeSigning(
       status: "warn",
       message: `Code signing check failed: ${normalizeErrorMessage(error)}`,
       recommendation: "Sign in to Xcode and install a development certificate for device testing.",
+    };
+  }
+}
+
+/** Check that the centralized macOS security CLI boundary is available. */
+export async function checkSecurityCli(
+  dependencies = createIosDoctorDependencies()
+): Promise<CheckResult> {
+  const name = "Security CLI";
+  if (dependencies.platform() !== "darwin") {
+    return { name, status: "skip", message: "macOS security is only available on macOS" };
+  }
+
+  try {
+    const diagnostics = await dependencies.securityClient.getDiagnostics({ timeoutMs: DOCTOR_EXEC_TIMEOUT_MS });
+    if (diagnostics.available) {
+      return {
+        name,
+        status: "pass",
+        message: "macOS security CLI available (the tool does not report a standalone version)",
+        value: diagnostics.version
+      };
+    }
+    return {
+      name,
+      status: "fail",
+      message: "macOS security CLI is unavailable",
+      recommendation: "Install or repair the macOS command line tools, then re-run doctor."
+    };
+  } catch (error) {
+    dependencies.logger.warn(`Security CLI check failed: ${normalizeErrorMessage(error)}`, error);
+    return {
+      name,
+      status: "fail",
+      message: "Could not check macOS security CLI availability",
+      recommendation: "Install or repair the macOS command line tools, then re-run doctor."
     };
   }
 }
@@ -1076,6 +1114,7 @@ export async function runIosChecks(
   results.push(await checkXcrunAvailable(dependencies));
   results.push(await checkSimctlAvailable(dependencies));
   results.push(await checkSimulatorRuntimes(dependencies));
+  results.push(await checkSecurityCli(dependencies));
   results.push(await checkCodeSigning(dependencies));
   results.push(await checkAppleDeveloperAccount(dependencies));
   results.push(await checkProvisioningProfiles(dependencies));

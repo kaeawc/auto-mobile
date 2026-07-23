@@ -35,6 +35,7 @@ describe("#4308 device WebRTC integration workflow", () => {
 
     expect(filter?.uses).toBe("dorny/paths-filter@v3");
     expect(filter?.with?.filters).toContain("src/features/webrtc/**");
+    expect(filter?.with?.filters).toContain("src/features/screen-stream/**");
     expect(filter?.with?.filters).toContain("android/video-server/**");
     expect(filter?.with?.filters).toContain("ios/screen-capture/**");
     expect(filter?.with?.filters).toContain("src/server/webrtcStreamManager.ts");

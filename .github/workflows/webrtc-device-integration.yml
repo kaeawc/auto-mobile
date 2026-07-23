@@ -31,6 +31,7 @@ jobs:
           filters: |
             webrtc:
               - 'src/features/webrtc/**'
+              - 'src/features/screen-stream/**'
               - 'android/video-server/**'
               - 'ios/screen-capture/**'
               - 'src/server/webrtcStreamManager.ts'

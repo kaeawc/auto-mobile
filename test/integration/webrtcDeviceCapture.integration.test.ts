@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
@@ -150,7 +151,11 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     await mkdir(artifactDir, { recursive: true });
     const daemonDir = await mkdtemp(join(artifactDir, "daemon-"));
     const daemonDbDir = join(daemonDir, "db");
-    const webRtcSocketPath = join(daemonDir, "webrtc-stream.sock");
+    // macOS limits Unix-domain socket paths to 104 bytes. The artifact directory
+    // is deliberately descriptive and can exceed that limit on hosted runners,
+    // so keep only this control socket in a short, isolated temp directory.
+    const webRtcSocketDir = await mkdtemp(join(tmpdir(), "am-ws-"));
+    const webRtcSocketPath = join(webRtcSocketDir, "stream.sock");
     await mkdir(daemonDbDir);
     const daemonEnvironment = {
       ...process.env,
@@ -228,6 +233,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       await stop(chrome);
       if (started) {await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], { env: daemonEnvironment }).catch(() => undefined);}
       await stop(mediamtx);
+      await rm(webRtcSocketDir, { recursive: true, force: true });
       await writeFile(join(artifactDir, "result.txt"), `platform=${platform}\nstream=${streamId}\n`);
     }
   }, 240_000);

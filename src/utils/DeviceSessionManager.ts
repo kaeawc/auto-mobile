@@ -22,6 +22,7 @@ import { createPerformanceTracker, createGlobalPerformanceTracker } from "./Perf
 import { storeSetupTiming } from "../server/ToolExecutionContext";
 import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
 import { disableStylusHandwriting } from "./disableStylusHandwriting";
+import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 
 /**
  * Render a device list for a "not found" error.
@@ -654,6 +655,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * Verify an iOS device is connected and ready
    */
   public async verifyIosDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
+    // An explicit runner override that cannot be used must fail closed before any
+    // other path, whatever the simulator/runner state. Every downstream branch
+    // (already-connected, already-running, cached-start) skips the builder that
+    // would validate it, so otherwise a directory- or typo-valued
+    // AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH would silently run the cached released
+    // runner and the caller would attribute results to a local build that never
+    // loaded (#4221).
+    const iosOverride = await checkIosCtrlProxyOverride();
+    if (iosOverride.present && !iosOverride.usable) {
+      throw new ActionableError(
+        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`
+      );
+    }
+
     if (!this.simctl) {
       throw new ActionableError("iOS simulator tools not available");
     }

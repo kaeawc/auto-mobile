@@ -9,6 +9,9 @@ import {
 } from "../../src/server/networkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { promises as fs } from "fs";
+import * as path from "path";
+import * as os from "os";
 
 function parseToolJson(response: any): any {
   return JSON.parse(response.content[0].text);
@@ -69,13 +72,17 @@ describe("network tool schema", () => {
     registerNetworkTools();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     ToolRegistry.clearTools();
     NetworkState.resetInstance();
     serverConfig.setEmbeddedSdkEnabled(false);
     serverConfig.setNetworkMockableEnabled(false);
     iosGetInstanceSpy.mockRestore();
     androidGetInstanceSpy.mockRestore();
+    if (localRunnerIpa) {
+      await fs.rm(path.dirname(localRunnerIpa), { recursive: true, force: true }).catch(() => undefined);
+      localRunnerIpa = undefined;
+    }
     restoreEnv("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH", originalIosBundlePath);
     restoreEnv("AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH", originalIosIpaPath);
     restoreEnv("AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD", originalSkipDownload);
@@ -89,8 +96,16 @@ describe("network tool schema", () => {
     process.env[key] = value;
   }
 
-  function allowLocalIosRunner(): void {
-    process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = "/tmp/CtrlProxyUITests-Runner.app";
+  let localRunnerIpa: string | undefined;
+
+  // Point the override at a REAL .ipa file. hasIosCtrlProxyRunnerOverride now
+  // validates that the override resolves to a file (#4221), so a bare
+  // non-existent path no longer counts as an available local runner.
+  async function allowLocalIosRunner(): Promise<void> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "nettools-local-runner-"));
+    localRunnerIpa = path.join(dir, "CtrlProxyUITests-Runner.ipa");
+    await fs.writeFile(localRunnerIpa, "x");
+    process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = localRunnerIpa;
   }
 
   test("requires durationSeconds when starting error simulation", () => {
@@ -120,7 +135,7 @@ describe("network tool schema", () => {
   });
 
   test("network simulateErrors syncs iOS error simulation through IOSCtrlProxyClient", async () => {
-    allowLocalIosRunner();
+    await allowLocalIosRunner();
     const tool = ToolRegistry.getTool("network");
 
     const response = await tool!.deviceAwareHandler!(iosDevice, {
@@ -148,7 +163,7 @@ describe("network tool schema", () => {
   });
 
   test("network simulateErrors rounds fractional iOS expiry before syncing", async () => {
-    allowLocalIosRunner();
+    await allowLocalIosRunner();
     const state = NetworkState.getInstance();
     const nowSpy = spyOn(state.timer, "now").mockReturnValue(1_000);
     const tool = ToolRegistry.getTool("network");
@@ -179,7 +194,7 @@ describe("network tool schema", () => {
   });
 
   test("network simulateErrors on iOS reuses device expiry for local state", async () => {
-    allowLocalIosRunner();
+    await allowLocalIosRunner();
     let nowMs = 1_000;
     const state = NetworkState.getInstance();
     const nowSpy = spyOn(state.timer, "now").mockImplementation(() => nowMs);
@@ -211,7 +226,7 @@ describe("network tool schema", () => {
   });
 
   test("network simulateErrors cancel clears iOS error simulation on device", async () => {
-    allowLocalIosRunner();
+    await allowLocalIosRunner();
     const tool = ToolRegistry.getTool("network");
 
     await tool!.deviceAwareHandler!(iosDevice, {
@@ -239,7 +254,7 @@ describe("network tool schema", () => {
   });
 
   test("network simulateErrors cancel clears local iOS state when device sync fails", async () => {
-    allowLocalIosRunner();
+    await allowLocalIosRunner();
     const tool = ToolRegistry.getTool("network");
 
     await tool!.deviceAwareHandler!(iosDevice, {
@@ -272,7 +287,7 @@ describe("network tool schema", () => {
   });
 
   test("network simulateErrors on iOS fails closed when CtrlProxy rejects the command", async () => {
-    allowLocalIosRunner();
+    await allowLocalIosRunner();
     iosGetInstanceSpy.mockRestore();
     iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       setNetworkErrorSimulation: async () => ({
@@ -371,6 +386,32 @@ describe("network tool schema", () => {
       ipaSha256: "ipa",
       runnerSha256: "runner",
     }])).toBe(true);
+  });
+
+  test("an unusable override does not open the gate when the released runner is too old (#4221)", () => {
+    // Below-min registry forces the version gate closed, so only a usable
+    // override could open it. A directory or missing path must not.
+    const oldRegistry = [{ version: "0.0.40", apkSha256: "a", ipaSha256: "i", runnerSha256: "r" }];
+
+    expect(isIosNetworkErrorSimulationAvailable(
+      { AUTOMOBILE_VERSION: "0.0.40", AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH: "/no/such/runner.ipa" },
+      oldRegistry
+    )).toBe(false);
+  });
+
+  test("a usable .ipa override opens the gate even when the released runner is too old (#4221)", async () => {
+    const overrideDir = await fs.mkdtemp(path.join(os.tmpdir(), "nettools-override-"));
+    const ipa = path.join(overrideDir, "runner.ipa");
+    await fs.writeFile(ipa, "x");
+    try {
+      const oldRegistry = [{ version: "0.0.40", apkSha256: "a", ipaSha256: "i", runnerSha256: "r" }];
+      expect(isIosNetworkErrorSimulationAvailable(
+        { AUTOMOBILE_VERSION: "0.0.40", AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH: ipa },
+        oldRegistry
+      )).toBe(true);
+    } finally {
+      await fs.rm(overrideDir, { recursive: true, force: true });
+    }
   });
 
   test("network simulateErrors still syncs Android through AndroidCtrlProxyClient", async () => {

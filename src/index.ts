@@ -179,6 +179,10 @@ async function main() {
     serverConfig.setNetworkMockableEnabled(networkMockable);
     serverConfig.setDismissKeyboardAfterInputEnabled(dismissKeyboardAfterInput);
     serverConfig.setEventAllMarkers(eventAllMarkers);
+    // Reclaim any auto-mobile-prefetch-* scratch dirs leaked by a previously
+    // crashed/killed daemon before its shutdown cleanup ran (#4334). Runs even
+    // when downloads are disabled, since leaked dirs still need reclaiming.
+    await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup();
     if (skipCtrlProxyDownload) {
       logger.info(`CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
     } else {

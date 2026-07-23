@@ -2144,4 +2144,84 @@ describe("CtrlProxyManager", function() {
       }
     });
   });
+
+  describe("sweepStalePrefetchDirsOnStartup", function() {
+    // Fixed reference "now" used to age fixtures deterministically.
+    const NOW_MS = 1_700_000_000_000;
+    const HOUR_MS = 60 * 60 * 1000;
+
+    let scratchRoot: string;
+    let sweepTimer: FakeTimer;
+
+    async function makeAgedDir(name: string, ageMs: number): Promise<string> {
+      const dir = path.join(scratchRoot, name);
+      await fs.mkdir(dir, { recursive: true });
+      // Put a payload file inside so it mirrors a real prefetch dir.
+      await fs.writeFile(path.join(dir, "control-proxy.apk"), Buffer.from("x"));
+      const when = new Date(NOW_MS - ageMs);
+      await fs.utimes(dir, when, when);
+      return dir;
+    }
+
+    beforeEach(async function() {
+      scratchRoot = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-sweep-root-"));
+      sweepTimer = new FakeTimer();
+      sweepTimer.setCurrentTime(NOW_MS);
+    });
+
+    afterEach(async function() {
+      await fs.rm(scratchRoot, { recursive: true, force: true });
+    });
+
+    async function exists(target: string): Promise<boolean> {
+      try {
+        await fs.stat(target);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    test("removes stale prefetch dirs older than the 60-minute threshold", async function() {
+      const stale = await makeAgedDir("auto-mobile-prefetch-zzP8qH", 2 * HOUR_MS);
+
+      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+      expect(await exists(stale)).toBe(false);
+    });
+
+    test("also removes stale prefetch-upgrade dirs", async function() {
+      const staleUpgrade = await makeAgedDir("auto-mobile-prefetch-upgrade-abc123", 2 * HOUR_MS);
+
+      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+      expect(await exists(staleUpgrade)).toBe(false);
+    });
+
+    test("preserves fresh prefetch dirs within the threshold (in-flight guard)", async function() {
+      const fresh = await makeAgedDir("auto-mobile-prefetch-fresh01", 60 * 1000);
+
+      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+      expect(await exists(fresh)).toBe(true);
+    });
+
+    test("preserves sibling caches and the installed package even when old", async function() {
+      const bunxCache = await makeAgedDir("bunx-1234-auto-mobile", 5 * HOUR_MS);
+      const sharedCache = await makeAgedDir("automobile-bun-cache-shared", 5 * HOUR_MS);
+
+      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+      expect(await exists(bunxCache)).toBe(true);
+      expect(await exists(sharedCache)).toBe(true);
+    });
+
+    test("is best-effort: a missing temp root does not throw", async function() {
+      const missing = path.join(scratchRoot, "does-not-exist");
+
+      await expect(
+        AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(missing, sweepTimer)
+      ).resolves.toBeUndefined();
+    });
+  });
 });

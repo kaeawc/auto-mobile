@@ -117,6 +117,47 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, message: str
   }
 }
 
+function exitedProcessDescription(process: ChildProcessWithoutNullStreams): string | undefined {
+  if (process.exitCode !== null) {
+    return `exit code ${process.exitCode}`;
+  }
+  if (process.signalCode !== null) {
+    return `signal ${process.signalCode}`;
+  }
+  return undefined;
+}
+
+async function waitForHttpServer(
+  process: ChildProcessWithoutNullStreams,
+  logs: () => string,
+  url: string,
+  name: string,
+): Promise<void> {
+  await waitFor(async () => {
+    const exited = exitedProcessDescription(process);
+    if (exited) {
+      throw new Error(`${name} exited before readiness (${exited}):\n${logs()}`);
+    }
+    try {
+      const response = await fetch(url);
+      if (response.status >= 500) {
+        return false;
+      }
+      await Bun.sleep(100);
+      const exitedAfterProbe = exitedProcessDescription(process);
+      if (exitedAfterProbe) {
+        throw new Error(`${name} exited before readiness (${exitedAfterProbe}):\n${logs()}`);
+      }
+      return true;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith(`${name} exited before readiness`)) {
+        throw error;
+      }
+      return false;
+    }
+  }, `${name} did not start:\n${logs()}`);
+}
+
 async function stopProcess(process: ChildProcessWithoutNullStreams | undefined, graceMs: number = 3_000): Promise<void> {
   if (!process || process.exitCode !== null || process.signalCode !== null) {
     return;
@@ -229,6 +270,16 @@ test.skipIf(process.platform === "win32")("force-kills a child that ignores SIGT
   expect(child.signalCode).toBe("SIGKILL");
 });
 
+test.skipIf(process.platform === "win32")("rejects a stale listener when the server child has already exited", async () => {
+  const child = spawn("/bin/sh", ["-c", "exit 7"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await once(child, "exit");
+
+  await expect(waitForHttpServer(child, () => "address already in use", "http://127.0.0.1:8889/", "MediaMTX"))
+    .rejects.toThrow("MediaMTX exited before readiness (exit code 7):\naddress already in use");
+});
+
 describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
   test("publishes real H.264 through WHIP and Chrome decodes the MediaMTX WHEP reader", async () => {
     const mediamtxBinary = process.env.AUTOMOBILE_MEDIAMTX_BINARY;
@@ -248,13 +299,12 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
     });
 
     try {
-      await waitFor(async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${WEBRTC_PORT}/`)).status < 500;
-        } catch {
-          return false;
-        }
-      }, `MediaMTX did not start:\n${mediaMtx.logs()}`);
+      await waitForHttpServer(
+        mediaMtx.process,
+        mediaMtx.logs,
+        `http://127.0.0.1:${WEBRTC_PORT}/`,
+        "MediaMTX",
+      );
 
       await publisher.start();
       ffmpeg = spawn("ffmpeg", [

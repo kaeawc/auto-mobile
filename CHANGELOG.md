@@ -1,5 +1,36 @@
 # Changelog
 
+## [v0.0.46] - 2026-07-24
+### Added
+- feat(observe): wire settleObserve + waitForCondition into MCP tools + waitFor DSL ([#4398](https://github.com/kaeawc/auto-mobile/issues/4398))
+- feat(observe): Wait-For-Condition + Settle-Loop Observe primitives ([#4389](https://github.com/kaeawc/auto-mobile/issues/4389)) (performance)
+- feat(observe): Interactable Skeleton Projection — actionable-only observe output ([#4388](https://github.com/kaeawc/auto-mobile/issues/4388)) (performance)
+- feat(observe): add deferred waitFor settled, absence, and openLink integration ([#3490](https://github.com/kaeawc/auto-mobile/issues/3490))
+### Changed
+- Remove dead utils/interfaces barrel + @deprecated re-export shims ([#3504](https://github.com/kaeawc/auto-mobile/issues/3504)) (dead-code)
+### Fixed
+- fix(database): DatabaseInspectorProvider failure replies should carry a structured envelope, not raw Bundle.toString values ([#4216](https://github.com/kaeawc/auto-mobile/issues/4216))
+### Other
+- iOS WebRTC device-capture lane flakes on macos26 (headless Chrome): add diagnostics + launch retry ([#4409](https://github.com/kaeawc/auto-mobile/issues/4409))
+- Skip iOS CtrlProxy prefetch when Xcode prerequisites (xcrun/xcodebuild) are unavailable ([#4407](https://github.com/kaeawc/auto-mobile/issues/4407))
+- Skip Android CtrlProxy APK prefetch when Android prerequisites are unavailable ([#4404](https://github.com/kaeawc/auto-mobile/issues/4404))
+- Ship a prebuilt iOS screen-capture helper with npm releases ([#4392](https://github.com/kaeawc/auto-mobile/issues/4392))
+- Android WebRTC stream can starve late viewers on a static screen ([#4383](https://github.com/kaeawc/auto-mobile/issues/4383))
+- test(webrtc): assert iOS WHEP PLI recovery to a fresh IDR on the hosted device lane ([#4376](https://github.com/kaeawc/auto-mobile/issues/4376))
+- perf(webrtc): collect CI egress/decoded-fps samples and set a p50/p95 baseline for the iOS bitrate default ([#4375](https://github.com/kaeawc/auto-mobile/issues/4375))
+- sdkmanager boundary detector: residual bounded false-negatives (class field, callback param, member-assigned fn) ([#4368](https://github.com/kaeawc/auto-mobile/issues/4368))
+- fix(action): inputText unlocks a secure keyguard but reports setText failure; tapOn cannot fit the lock-screen budget ([#4360](https://github.com/kaeawc/auto-mobile/issues/4360))
+- fix(observe): parseTasks histRoots picks a Hist #0 row that rootOfTask says is not the task root ([#4359](https://github.com/kaeawc/auto-mobile/issues/4359))
+- test(webrtc): iOS device capture lane fails in a teardown hook after a fully successful capture ([#4354](https://github.com/kaeawc/auto-mobile/issues/4354))
+- test(release): release.test.ts pins RELEASE_CHECKSUM_REGISTRY[0] by version, so every version bump reds main ([#4353](https://github.com/kaeawc/auto-mobile/issues/4353))
+- build(turbo): test task inputs omit android/**, so Kotlin-reading guards can be cached away ([#4351](https://github.com/kaeawc/auto-mobile/issues/4351))
+- perf(webrtc): measure and cap iOS native-resolution encoder load and egress bitrate ([#4349](https://github.com/kaeawc/auto-mobile/issues/4349))
+- perf(webrtc): bound iOS WebRTC keyframe recovery under a delivery shortfall ([#4348](https://github.com/kaeawc/auto-mobile/issues/4348))
+- perf(webrtc): tighten MediaMTX track-gather timeout from device metrics ([#4345](https://github.com/kaeawc/auto-mobile/issues/4345))
+- memory-leak stress test flakes on windows-latest: 200-iteration loop has no explicit timeout ([#4342](https://github.com/kaeawc/auto-mobile/issues/4342))
+- sdkmanager boundary guard: interprocedural gap, Bun.$ coverage, and fast-validate registration ([#4341](https://github.com/kaeawc/auto-mobile/issues/4341))
+- fix(observe): GetBackStack infers isTaskRoot from the Hist index instead of dumpsys rootOfTask ([#4340](https://github.com/kaeawc/auto-mobile/issues/4340))
+
 ## [v0.0.45] - 2026-07-24
 ### Added
 - ci(webrtc): exercise the MediaMTX publisher integration test on webrtc PRs and always on merge ([#4328](https://github.com/kaeawc/auto-mobile/issues/4328)) (video)

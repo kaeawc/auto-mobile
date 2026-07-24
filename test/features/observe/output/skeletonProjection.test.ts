@@ -94,6 +94,43 @@ describe("toSkeleton — acceptance criteria", () => {
       });
     }
 
+    test("tap derives from accessibility actions when the clickable boolean is absent", () => {
+      // Compose / iOS captures carry `actions:["click"]` with no `clickable`
+      // attribute; the collector still buckets them as clickable, and `tapOn`
+      // acts on them — so the skeleton must expose `tap`.
+      const composeButton: Element = {
+        "bounds": bounds(0, 0, 100, 50),
+        "resource-id": "compose-btn",
+        "actions": ["click"],
+      };
+      const skeleton = toSkeleton(makeElements({ clickable: [composeButton] }));
+      expect(skeleton).toHaveLength(1);
+      expect(skeleton[0].affordances).toEqual(["tap"]);
+    });
+
+    test("long-press derives from actions 'long_click' and from longClickable (iOS)", () => {
+      const viaAction: Element = {
+        "bounds": bounds(0, 0, 10, 10),
+        "resource-id": "a",
+        "actions": ["click", "long_click"],
+      };
+      const viaCamelCase: Element = {
+        "bounds": bounds(0, 20, 10, 30),
+        "resource-id": "b",
+        "longClickable": "true",
+      };
+      const skeleton = toSkeleton(makeElements({ clickable: [viaAction, viaCamelCase] }));
+      expect(findById(skeleton, "a")?.affordances).toEqual(["tap", "long-press"]);
+      expect(findById(skeleton, "b")?.affordances).toEqual(["long-press"]);
+    });
+
+    test("an actions-only clickable with no label is kept (not dropped as inert)", () => {
+      const el: Element = { bounds: bounds(0, 0, 10, 10), actions: ["click"] };
+      const skeleton = toSkeleton(makeElements({ clickable: [el] }));
+      expect(skeleton).toHaveLength(1);
+      expect(skeleton[0].affordances).toEqual(["tap"]);
+    });
+
     test("focusable alone (no EditText class, no input-type) is not input", () => {
       const el: Element = {
         "bounds": bounds(0, 0, 10, 10),

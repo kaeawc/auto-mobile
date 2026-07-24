@@ -4266,7 +4266,7 @@
                     "type": "number"
                   }
                 ],
-                "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
+                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, independent of the --observe-result-compact flag."
               },
               "affordances": {
                 "type": "array",

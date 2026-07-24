@@ -251,6 +251,10 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     const observeCfg: SanitizeObserveConfig = { ...cfg, project: resolveObserveProjection(ctx.args) };
     const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, observeCfg);
     if (canDiff) {
+      // A skeleton-projected observe stores a hierarchy-less baseline, so the next
+      // action's diff sees `!hasRenderableHierarchy(baseline)` and falls back to a
+      // full emit (reason `unrenderable_hierarchy`) for that one step before
+      // self-healing — graceful, and the observe tool itself is never diffed.
       pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
     }
     sanitizedPayload = sanitized as unknown as Record<string, unknown>;

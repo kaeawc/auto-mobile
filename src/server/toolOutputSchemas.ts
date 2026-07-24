@@ -422,7 +422,10 @@ export const deviceLockSchema = z.object({
 export const skeletonElementSchema = z.object({
   id: z.string().optional(),
   label: z.string().optional(),
-  bounds: compactBoundsTupleSchema,
+  bounds: compactBoundsTupleSchema.describe(
+    "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
+      "for skeleton entries, independent of the --observe-result-compact flag."
+  ),
   affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
   checked: z.boolean().optional()
 }).passthrough();

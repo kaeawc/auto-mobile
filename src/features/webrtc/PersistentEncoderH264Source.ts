@@ -136,6 +136,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private resolveStartupAudioHeader: ((header: VideoServerStreamHeader) => void) | undefined;
   private resolveStartupAudioPacket: ((packet: VideoServerPacket) => void) | undefined;
   private socketReconnectPromise: Promise<void> | null = null;
+  private socketReconnectAbortController: AbortController | null = null;
   private telemetryInitialized = false;
   private lastEncodedFrameTimestampUs: number | null = null;
   private lastIdrTimestampUs: number | null = null;
@@ -544,12 +545,17 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     this.socket = null;
     failedSocket.destroy();
-    this.socketReconnectPromise = this.tryReconnectSocket(error).finally(() => {
+    const controller = new AbortController();
+    this.socketReconnectAbortController = controller;
+    this.socketReconnectPromise = this.tryReconnectSocket(error, controller.signal).finally(() => {
+      if (this.socketReconnectAbortController === controller) {
+        this.socketReconnectAbortController = null;
+      }
       this.socketReconnectPromise = null;
     });
   }
 
-  private async tryReconnectSocket(initialError: Error): Promise<void> {
+  private async tryReconnectSocket(initialError: Error, signal: AbortSignal): Promise<void> {
     const port = this.forwardedPort;
     if (port === null) {
       this.failIfRunning(initialError);
@@ -558,10 +564,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
 
     const deadline = this.timer.now() + this.localSocketReconnectWindowMs;
     let lastError = initialError;
-    while (this.running && this.server !== null) {
+    while (this.running && this.server !== null && !signal.aborted) {
       try {
-        const socket = await this.connectBeforeDeadline(port, deadline);
-        if (!this.running || this.server === null) {
+        const socket = await this.connectBeforeDeadline(port, deadline, signal);
+        if (!this.running || this.server === null || signal.aborted) {
           socket.destroy();
           return;
         }
@@ -577,9 +583,12 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       if (remainingMs <= 0) {
         break;
       }
-      await this.timer.sleep(Math.min(this.localSocketReconnectRetryMs, remainingMs));
+      await this.waitForReconnectRetry(Math.min(this.localSocketReconnectRetryMs, remainingMs), signal);
     }
 
+    if (signal.aborted) {
+      return;
+    }
     this.failIfRunning(
       new Error(
         `video-server socket did not reconnect within ${this.localSocketReconnectWindowMs}ms: ${lastError.message}`
@@ -587,7 +596,33 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     );
   }
 
-  private async connectBeforeDeadline(port: number, deadline: number): Promise<StreamSocket> {
+  private waitForReconnectRetry(ms: number, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
+      return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+      let finished = false;
+      const finish = (): void => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        this.timer.clearTimeout(timeout);
+        signal.removeEventListener("abort", finish);
+        resolve();
+      };
+
+      const timeout = this.timer.setTimeout(finish, ms);
+      signal.addEventListener("abort", finish, { once: true });
+    });
+  }
+
+  private async connectBeforeDeadline(
+    port: number,
+    deadline: number,
+    reconnectSignal: AbortSignal
+  ): Promise<StreamSocket> {
     const remainingMs = deadline - this.timer.now();
     if (remainingMs <= 0) {
       throw new Error("video-server socket reconnect deadline elapsed");
@@ -595,26 +630,41 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
 
     const controller = new AbortController();
     let timedOut = false;
+    const abortForTeardown = (): void => controller.abort();
+    if (reconnectSignal.aborted) {
+      abortForTeardown();
+    } else {
+      reconnectSignal.addEventListener("abort", abortForTeardown, { once: true });
+    }
     const connection = this.connector(port, controller.signal);
     const timeout = this.timer.setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, remainingMs);
     const timeoutFailure = new Promise<never>((_, reject) => {
-      controller.signal.addEventListener(
-        "abort",
-        () => reject(new Error("video-server socket reconnect attempt timed out")),
-        { once: true }
-      );
+      const rejectOnAbort = (): void =>
+        reject(
+          new Error(
+            timedOut
+              ? "video-server socket reconnect attempt timed out"
+              : "video-server socket reconnect attempt aborted"
+          )
+        );
+      if (controller.signal.aborted) {
+        rejectOnAbort();
+      } else {
+        controller.signal.addEventListener("abort", rejectOnAbort, { once: true });
+      }
     });
 
     try {
       return await Promise.race([connection, timeoutFailure]);
     } finally {
       this.timer.clearTimeout(timeout);
-      if (timedOut) {
+      reconnectSignal.removeEventListener("abort", abortForTeardown);
+      if (controller.signal.aborted) {
         // A connector that ignored cancellation may still resolve. Do not leave
-        // that late local socket open after the source has failed its deadline.
+        // that late local socket open after either deadline or source teardown.
         void connection.then(socket => socket.destroy(), () => {});
       }
     }
@@ -638,6 +688,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private async teardown(): Promise<void> {
+    const reconnectAbortController = this.socketReconnectAbortController;
+    this.socketReconnectAbortController = null;
+    reconnectAbortController?.abort();
+
     const socket = this.socket;
     this.socket = null;
     socket?.destroy();

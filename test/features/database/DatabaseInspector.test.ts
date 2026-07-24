@@ -281,6 +281,61 @@ describe("DatabaseInspector", () => {
     });
   });
 
+  describe("structured error envelope (SDK wire format)", () => {
+    // Newer SDK builds put the failure payload in a single JSON envelope under `result=`,
+    // exactly as the success path does, so `errorType`/`error` values are JSON-escaped and
+    // can no longer collide with Bundle.toString() delimiters (", ", "=", "}]"). The TS side
+    // reads this with the balanced-brace `extractJsonFromBundle`, and falls back to the flat
+    // form for older SDK builds still in the field (see "error envelope parsing" above).
+    const errorFor = async (response: string): Promise<string> => {
+      fakeAdb.setCommandResult(
+        `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
+        response
+      );
+      try {
+        await inspector.listDatabases(appId);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error("expected listDatabases to reject");
+    };
+
+    test("round-trips a caller-controlled fragment that mimics a delimiter", async () => {
+      // The value contains a literal `, error=` sequence; the flat parser cuts it short, the
+      // envelope carries it verbatim because it is inside a JSON string.
+      const message = await errorFor(
+        `Bundle[{success=false, result={"errorType":"SQLiteException","error":"near \\"x, error=y\\": syntax"}}]`
+      );
+
+      expect(message).toBe(`Database error (SQLiteException): near "x, error=y": syntax`);
+    });
+
+    test("round-trips values containing every Bundle delimiter", async () => {
+      const message = await errorFor(
+        `Bundle[{success=false, result={"errorType":"SQL, errorType=Error}]","error":"no such column: foo, bar}] errorType=x"}}]`
+      );
+
+      expect(message).toBe(
+        `Database error (SQL, errorType=Error}]): no such column: foo, bar}] errorType=x`
+      );
+    });
+
+    test("reads the envelope regardless of Bundle entry order", async () => {
+      // Bundle is backed by a hash-ordered ArrayMap, so `result` may print before `success`.
+      const message = await errorFor(
+        `Bundle[{result={"errorType":"SQLiteException","error":"disk I/O error"}, success=false}]`
+      );
+
+      expect(message).toBe("Database error (SQLiteException): disk I/O error");
+    });
+
+    test("falls back to UNKNOWN when the envelope omits the fields", async () => {
+      const message = await errorFor(`Bundle[{success=false, result={}}]`);
+
+      expect(message).toBe("Database error (UNKNOWN): Unknown error");
+    });
+  });
+
   describe("error handling", () => {
     test("throws ActionableError when ContentProvider not found", async () => {
       // Simulate when the app doesn't have the SDK or provider

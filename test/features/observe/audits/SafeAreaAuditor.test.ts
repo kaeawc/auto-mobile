@@ -60,6 +60,33 @@ describe("SafeAreaAuditor", () => {
     expect(new SafeAreaAuditor().inspect(result)[0]?.insetTypes).toEqual(["systemBars"]);
   });
 
+  test("ignores fully off-screen content", () => {
+    const result = observation();
+    result.insets!.systemBars!.visible.left = 16;
+    result.insets!.systemGestures!.left = 16;
+    result.viewHierarchy!.hierarchy.node = [{
+      "text": "Previous page",
+      "clickable": "true",
+      "view-id": "previous-page",
+      "bounds": { left: -100, top: 50, right: 0, bottom: 100 },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toEqual([]);
+  });
+
+  test("only reports content overlap on sides with an inset", () => {
+    const result = observation();
+    result.viewHierarchy!.hierarchy.node = [{
+      "text": "Title",
+      "view-id": "title",
+      "bounds": { left: -5, top: 8, right: 60, bottom: 28 },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+      { sides: ["top"], insetTypes: ["systemBars"] },
+    ]);
+  });
+
   test("uses the iOS safe area rather than Android bar fields", () => {
     const result = observation();
     result.insets = {

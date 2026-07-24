@@ -30,6 +30,19 @@ webrtcAddress: :8889
 # so keep the relay deadline above that source contract plus encoder startup.
 # MediaMTX's 2s default otherwise closes a valid publisher before its first
 # SPS/PPS + IDR arrives.
+#
+# 30s is a measured value, not a guess. Elapsed WHIP-connected -> first H.264
+# frame on the hosted device lanes (issue #4345, instrumentation from #4343):
+#
+#   iOS     n=6: 3357, 4164, 6158, 6436, 10571, 15065 ms  -> p50 6297, p95 15065
+#   Android n=3: 5141, 5164, 5924 ms
+#
+# iOS is bimodal — a 3-6s cluster and a 10-15s tail — so the p95 is ~15s and this
+# deadline sits at roughly 2x it. Do NOT tighten this toward 10s: that is below
+# observed samples, and tightening it without the iOS first-frame deadline (or
+# vice versa) closes publishers that are still inside their own budget. The
+# invariant is enforced by test/scripts/mediamtxConfig.test.ts; shrinking the
+# iOS startup tail is the prerequisite for any future reduction.
 webrtcTrackGatherTimeout: 30s
 
 # --- TLS / HTTPS ---

@@ -9,10 +9,9 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 
 /**
- * Writes encoded video packets to a LocalSocket using the VideoStreamProtocol
- * binary framing. A disconnected client is replaceable: the writer retains
- * codec configuration plus the latest complete keyframe and replays them before
- * live packets to the next client.
+ * Writes encoded video packets to a LocalSocket using the VideoStreamProtocol binary framing. A
+ * disconnected client is replaceable: the writer retains codec configuration plus the latest
+ * complete keyframe and replays them before live packets to the next client.
  */
 class VideoStreamWriter(
   private val socketName: String,
@@ -57,8 +56,8 @@ class VideoStreamWriter(
   /**
    * Bind the abstract LocalSocket and accept clients in the background.
    *
-   * The callback runs after the cached packets are written, so callers can
-   * request a current IDR without delaying initial decoder setup.
+   * The callback runs after the cached packets are written, so callers can request a current IDR
+   * without delaying initial decoder setup.
    */
   fun start(onClientConnected: () -> Unit = {}) {
     serverSocket = LocalServerSocket(socketName)
@@ -72,9 +71,9 @@ class VideoStreamWriter(
   }
 
   /**
-   * Registers a callback for every current or future bidirectional client.
-   * The reader is deliberately owned by the writer so reconnects do not lose
-   * the keyframe-request control channel.
+   * Registers a callback for every current or future bidirectional client. The reader is
+   * deliberately owned by the writer so reconnects do not lose the keyframe-request control
+   * channel.
    */
   fun startCommandReader(onCommand: (Int) -> Unit) {
     synchronized(lock) {
@@ -149,8 +148,8 @@ class VideoStreamWriter(
   }
 
   /**
-   * Write one encoded video packet. It is cached before writing, allowing a
-   * later client to decode immediately even if this client fails mid-write.
+   * Write one encoded video packet. It is cached before writing, allowing a later client to decode
+   * immediately even if this client fails mid-write.
    */
   fun writePacket(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo): Boolean {
     val data = ByteArray(bufferInfo.size)
@@ -270,7 +269,7 @@ internal class VideoPacketCache {
     val cachedIdr = idr
     return when {
       cachedConfig == null && cachedIdr == null -> emptyList()
-      cachedConfig == null -> listOf(cachedIdr!!.copyPacket())
+      cachedConfig == null -> listOfNotNull(cachedIdr).map(CachedVideoPacket::copyPacket)
       cachedIdr == null -> listOf(cachedConfig.copyPacket())
       cachedConfig.ptsAndFlags == cachedIdr.ptsAndFlags &&
         cachedConfig.data.contentEquals(cachedIdr.data) -> listOf(cachedConfig.copyPacket())
@@ -280,7 +279,7 @@ internal class VideoPacketCache {
 }
 
 internal class ClientReconnectWindow(
-  private val windowMs: Long = VideoStreamWriter.CLIENT_RECONNECT_WINDOW_MS,
+  private val windowMs: Long = VideoStreamWriter.CLIENT_RECONNECT_WINDOW_MS
 ) {
   private var hasConnected = false
   private var disconnectedAtMs: Long? = null
@@ -296,6 +295,5 @@ internal class ClientReconnectWindow(
     }
   }
 
-  fun hasExpired(nowMs: Long): Boolean =
-    disconnectedAtMs?.let { nowMs - it >= windowMs } ?: false
+  fun hasExpired(nowMs: Long): Boolean = disconnectedAtMs?.let { nowMs - it >= windowMs } ?: false
 }

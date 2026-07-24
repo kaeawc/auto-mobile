@@ -27,8 +27,8 @@ data class WebRtcIceServer(
 )
 
 /**
- * Readiness observations from the encoder/publisher path. Null counters and
- * timestamps mean that the corresponding producer has not initialized yet.
+ * Readiness observations from the encoder/publisher path. Null counters and timestamps mean that
+ * the corresponding producer has not initialized yet.
  */
 @Serializable
 data class WebRtcStreamReadiness(

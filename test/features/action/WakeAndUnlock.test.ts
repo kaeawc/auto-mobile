@@ -11,6 +11,8 @@ import type { BootedDevice, DeviceLockState } from "../../../src/models";
 
 const LOCKED_SECURE: DeviceLockState = { locked: true, keyguardShowing: true, secure: true };
 const LOCKED_SWIPE: DeviceLockState = { locked: true, keyguardShowing: true, secure: false };
+// `secure` unreadable (dumpsys emitted showing= but not secure=): stays undefined.
+const LOCKED_UNKNOWN_SECURE: DeviceLockState = { locked: true, keyguardShowing: true };
 const UNLOCKED: DeviceLockState = { locked: false, keyguardShowing: false, secure: true };
 
 class FakeCredentialStore implements LockCredentialStore {
@@ -154,11 +156,85 @@ describe("WakeAndUnlock", () => {
     expect(store.remembered).toEqual([]);
   });
 
-  test("secure lock, non-key-event-mappable credential: throws an actionable error", async () => {
+  test("secure lock, non-key-event-mappable credential: throws without echoing the credential", async () => {
     adb.setScreenState(true, "Awake");
     adb.setDeviceLock(LOCKED_SECURE);
 
-    await expect(android().execute("你好")).rejects.toThrow(/cannot be sent as a key event/i);
+    const promise = android().execute("你好");
+    await expect(promise).rejects.toThrow(/cannot be sent as a key event/i);
+    // The offending character must be described by position, never echoed (leak).
+    await expect(promise).rejects.toThrow(/position 1/);
+    await promise.catch((error: unknown) => {
+      expect(String((error as Error).message)).not.toContain("你");
+    });
+  });
+
+  test("unreadable lock state: reports failure, never a false unlock, and issues no keyguard commands", async () => {
+    adb.setScreenState(false, "Asleep");
+    adb.setDeviceLock(null); // getDeviceLock() returns null (dumpsys unavailable)
+
+    const result = await android().execute("1234");
+
+    expect(result.success).toBe(false);
+    expect(result.unlocked).toBe(false);
+    expect(result.error).toMatch(/lock state/i);
+    // Woke the device, but never guessed at the keyguard.
+    expect(adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_WAKEUP"]);
+  });
+
+  test("unknown secure status with a pin: attempts the credential path and unlocks", async () => {
+    adb.setScreenState(true, "Awake");
+    adb.setAndroidApiLevel(35);
+    adb.setDeviceLockSequence([LOCKED_UNKNOWN_SECURE, UNLOCKED]);
+
+    const result = await android().execute("1234");
+
+    expect(result.success).toBe(true);
+    expect(result.unlocked).toBe(true);
+    expect(result.secure).toBe(true); // a credential unlocked it → it was secure
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell wm dismiss-keyguard",
+      "shell input keyevent KEYCODE_1",
+      "shell input keyevent KEYCODE_2",
+      "shell input keyevent KEYCODE_3",
+      "shell input keyevent KEYCODE_4",
+      "shell input keyevent KEYCODE_ENTER"
+    ]);
+  });
+
+  test("unknown secure status, no pin, dismiss-keyguard clears it: treated as a swipe unlock", async () => {
+    adb.setScreenState(true, "Awake");
+    // dismiss-keyguard cleared it → the disambiguation poll sees it unlocked.
+    adb.setDeviceLockSequence([LOCKED_UNKNOWN_SECURE, UNLOCKED]);
+
+    const result = await android().execute();
+
+    expect(result.success).toBe(true);
+    expect(result.unlocked).toBe(true);
+    expect(result.secure).toBeUndefined(); // never guessed
+    expect(store.remembered).toEqual([{ deviceId: "wau-android", lockType: "swipe", credential: null }]);
+    expect(adb.getExecutedCommands().some(c => c.includes("KEYCODE_1"))).toBe(false);
+  });
+
+  test("unknown secure status, no pin, stays locked: throws asking for a pin", async () => {
+    adb.setScreenState(true, "Awake");
+    adb.setDeviceLock(LOCKED_UNKNOWN_SECURE); // never clears
+
+    await expect(android().execute()).rejects.toThrow(/secure status could not be read/i);
+  });
+
+  test("a recorded pin that fails is forgotten (avoids re-submitting a stale pin into lockout)", async () => {
+    adb.setScreenState(true, "Awake");
+    adb.setAndroidApiLevel(35);
+    adb.setDeviceLock(LOCKED_SECURE); // never clears → recorded pin fails
+    store.recorded = "1234";
+
+    const result = await android().execute();
+
+    expect(result.success).toBe(false);
+    expect(result.usedRecordedCredential).toBe(true);
+    // The stale recorded credential is cleared so it is not retried next time.
+    expect(store.remembered).toEqual([{ deviceId: "wau-android", lockType: "pin", credential: null }]);
   });
 
   test("iOS: delegates to the iOS unlocker and ignores the pin", async () => {

@@ -132,8 +132,22 @@ export class WakeAndUnlock {
     }
 
     const lock = await this.adb.getDeviceLock();
-    if (!lock?.locked) {
-      return { success: true, platform: "android", wasAsleep, wasLocked: false, secure: lock?.secure, unlocked: true };
+    if (lock === null) {
+      // Unreadable lock state (dumpsys unavailable/unparsable). Never claim
+      // "unlocked" from an absent signal — the device was woken, but its lock
+      // status is unknown, so report that rather than a false success.
+      logger.warn("[WakeAndUnlock] device woken but lock state could not be read");
+      return {
+        success: false,
+        platform: "android",
+        wasAsleep,
+        wasLocked: false,
+        unlocked: false,
+        error: "Could not read device lock state (dumpsys window policy unavailable); the device was woken but its lock status is unknown"
+      };
+    }
+    if (!lock.locked) {
+      return { success: true, platform: "android", wasAsleep, wasLocked: false, secure: lock.secure, unlocked: true };
     }
 
     // wm dismiss-keyguard fully dismisses a swipe lock and raises the bouncer on
@@ -141,9 +155,13 @@ export class WakeAndUnlock {
     // requirement.
     await this.adb.executeCommand("shell wm dismiss-keyguard");
 
-    return lock.secure === true
-      ? this.unlockSecure(wasAsleep, pin)
-      : this.dismissSwipe(wasAsleep);
+    // Only a *definitely* non-secure lock takes the pure swipe path. A secure
+    // lock — or one whose `secure` field could not be read (`undefined`) — goes
+    // through the credential path, which handles the unknown case rather than
+    // guessing it is a swipe lock.
+    return lock.secure === false
+      ? this.dismissSwipe(wasAsleep)
+      : this.unlockSecure(wasAsleep, pin, lock.secure);
   }
 
   private async dismissSwipe(wasAsleep: boolean): Promise<WakeAndUnlockResult> {
@@ -162,14 +180,35 @@ export class WakeAndUnlock {
     };
   }
 
-  private async unlockSecure(wasAsleep: boolean, pin?: string): Promise<WakeAndUnlockResult> {
+  /**
+   * @param secure - The pre-dismiss `secure` reading: `true` (definitely secure)
+   *   or `undefined` (unknown). Never `false` here — that takes the swipe path.
+   */
+  private async unlockSecure(
+    wasAsleep: boolean,
+    pin: string | undefined,
+    secure: boolean | undefined
+  ): Promise<WakeAndUnlockResult> {
     const recorded = pin ? null : await this.getRecordedCredential();
     const effectivePin = pin ?? recorded;
     const usedRecordedCredential = !pin && !!recorded;
+
     if (!effectivePin) {
+      if (secure === true) {
+        throw new ActionableError(
+          "Device is secure-locked (PIN/pattern/password); provide `pin` to unlock it. " +
+          "Unlocking once with a `pin` lets AutoMobile remember it for later in this session."
+        );
+      }
+      // Unknown secure status and no credential: dismiss-keyguard (already
+      // issued) may have cleared a swipe lock, so check before demanding a PIN.
+      const cleared = await this.pollUnlocked();
+      if (cleared) {
+        await this.rememberLock("swipe", null);
+        return { success: true, platform: "android", wasAsleep, wasLocked: true, secure: undefined, unlocked: true };
+      }
       throw new ActionableError(
-        "Device is secure-locked (PIN/pattern/password); provide `pin` to unlock it. " +
-        "Unlocking once with a `pin` lets AutoMobile remember it for later in this session."
+        "Device is locked and its secure status could not be read; provide `pin` to unlock it if it is secure."
       );
     }
 
@@ -186,12 +225,19 @@ export class WakeAndUnlock {
     const cleared = await this.pollUnlocked();
     if (!cleared) {
       logger.warn("[WakeAndUnlock] device remained locked after credential entry");
+      // A *recorded* credential that failed is stale (the device PIN likely
+      // changed). Forget it, so the next call does not re-submit it and drive
+      // the keyguard retry throttle toward a lockout — it falls back to asking
+      // for a PIN instead.
+      if (usedRecordedCredential) {
+        await this.rememberLock("pin", null);
+      }
       return {
         success: false,
         platform: "android",
         wasAsleep,
         wasLocked: true,
-        secure: true,
+        secure,
         unlocked: false,
         usedRecordedCredential,
         error: "Device remained locked after PIN entry (wrong credential or entry failed)"
@@ -203,18 +249,22 @@ export class WakeAndUnlock {
     if (pin) {
       await this.rememberLock("pin", pin);
     }
+    // A credential unlocked it, so it was in fact secure.
     return { success: true, platform: "android", wasAsleep, wasLocked: true, secure: true, unlocked: true, usedRecordedCredential };
   }
 
   /** Expand a credential into its key-event commands, or throw if unmappable. */
   private async buildCredentialCommands(credential: string): Promise<string[]> {
     const supportsCombination = await this.supportsKeyCombination();
+    const chars = Array.from(credential);
     const commands: string[] = [];
-    for (const char of Array.from(credential)) {
-      const plan = buildAsciiKeyEventPlan(char, supportsCombination);
+    for (let index = 0; index < chars.length; index++) {
+      const plan = buildAsciiKeyEventPlan(chars[index] ?? "", supportsCombination);
       if (!plan) {
+        // Describe the offending character by position, never by value — the
+        // credential must not leak into a tool-result error message.
         throw new ActionableError(
-          `wakeAndUnlock: credential character ${JSON.stringify(char)} cannot be sent as a key event on this device`
+          `wakeAndUnlock: the credential character at position ${index + 1} cannot be sent as a key event on this device`
         );
       }
       commands.push(...plan.commands);

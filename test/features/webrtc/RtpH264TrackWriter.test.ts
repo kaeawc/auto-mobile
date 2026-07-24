@@ -132,6 +132,20 @@ describe("RtpH264TrackWriter", () => {
     }
   });
 
+  test("uses parameter sets captured before this writer was attached", () => {
+    const sink = new RecordingSink();
+    const writer = new RtpH264TrackWriter({ sink, ssrc: 1 });
+    const sps = Buffer.from([0x67, 0x42, 0xe0, 0x2a]);
+    const pps = Buffer.from([0x68, 0xce, 0x3c, 0x80]);
+
+    writer.primeParameterSets(sps, pps);
+    writer.writeChunk(annexB(makeNal(5, 20)));
+    writer.writeChunk(annexB(makeNal(1, 20)));
+    writer.flush();
+
+    expect(sink.packets.map(packet => packet.payload[0] & 0x1f)).toEqual([7, 8, 5, 1]);
+  });
+
   test("does not duplicate parameter sets an IDR access unit already carries", () => {
     const sink = new RecordingSink();
     const writer = new RtpH264TrackWriter({ sink, ssrc: 1 });

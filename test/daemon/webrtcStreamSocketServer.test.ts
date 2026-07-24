@@ -237,6 +237,69 @@ describe("WebRtcStreamSocketServer", () => {
     expect(afterStop.streams).toEqual([]);
   });
 
+  test("await returns a typed screenshot fallback when capture degrades", async () => {
+    const server = new TestableServer({
+      resolveDevice: async () => ANDROID,
+      startStream: async () => descriptor("unused"),
+      stopStream: async () => descriptor("unused", "stopped"),
+      listStreams: () => [],
+      getStream: () => null,
+      awaitReadiness: async () => ({
+        ...descriptor("debug-1"),
+        lifecycleState: "degraded",
+        failure: {
+          code: "capture_runtime_failed",
+          message: "adb forward lost",
+          at: "2026-07-24T00:00:00.000Z",
+        },
+        fallback: { mode: "screenshots", reason: "capture_runtime_failed" },
+      }),
+    });
+    const socket = new FakeSocket();
+
+    await server.simulate(socket, {
+      id: "await-degraded",
+      action: "await",
+      streamId: "debug-1",
+      readiness: "publishing",
+      timeoutMs: 100,
+    });
+
+    const response = lastResponse(socket);
+    expect(response.success).toBe(false);
+    expect(response.failure?.code).toBe("capture_runtime_failed");
+    expect(response.stream?.fallback).toEqual({
+      mode: "screenshots",
+      reason: "capture_runtime_failed",
+    });
+  });
+
+  test("start returns a typed screenshot fallback when capture preparation fails", async () => {
+    const server = new TestableServer(makeDeps({
+      startStream: async () => ({
+        ...descriptor("debug-1"),
+        lifecycleState: "degraded",
+        failure: {
+          code: "capture_start_failed",
+          message: "adb forward failed",
+          at: "2026-07-24T00:00:00.000Z",
+        },
+        fallback: { mode: "screenshots", reason: "capture_start_failed" },
+      }),
+    }));
+    const socket = new FakeSocket();
+
+    await server.simulate(socket, { id: "start-degraded", action: "start" });
+
+    const response = lastResponse(socket);
+    expect(response.success).toBe(false);
+    expect(response.failure?.code).toBe("capture_start_failed");
+    expect(response.stream?.fallback).toEqual({
+      mode: "screenshots",
+      reason: "capture_start_failed",
+    });
+  });
+
   test("start reaches the real manager, posts WHIP, and remains visible until stop", async () => {
     const posts: RecordedWhipRequest[] = [];
     const sources: FakeH264Source[] = [];

@@ -92,13 +92,17 @@ Response:
 
 ```json
 {"success":true,"type":"webrtc_stream_response","action":"start",
- "stream":{"streamId":"ci-run-42","state":"connected",
-           "resourceUrl":"http://mediamtx.example.com:8889/ci-run-42/whip/<session>", ...}}
+ "stream":{"streamId":"ci-run-42","lifecycleState":"capture_ready",
+           "lease":{"id":"lease_...","expiresAt":"..."},
+           "resourceUrl":null, ...}}
 ```
 
 If multiple devices are attached, pass `"deviceId":"emulator-5554"` or the iOS
 simulator UDID. You can also override any config per call, e.g.
 `{"action":"start","whipEndpoint":"https://other/whip","bitrateKbps":2000}`.
+Keep the returned lease ID and include it in `await`, `status`, and `stop`
+requests. Leases expire after one minute without renewal, so abandoned CI
+workers do not retain a capture helper or encoder.
 For audio, pass `"audio":true`. Android requires the persistent `video-server`
 jar because `screenrecord` is video-only. iOS supports audio for Simulator-window
 capture through ScreenCaptureKit; physical iOS playback capture is unavailable.
@@ -108,7 +112,9 @@ capture through ScreenCaptureKit; physical iOS playback capture is unavailable.
 ```ts
 import { sendWebRtcStreamRequest } from "auto-mobile/dist/.../webrtcStreamClient"; // or import from source
 const res = await sendWebRtcStreamRequest({ action: "start", streamId: "ci-run-42" });
-console.log(res.stream?.resourceUrl);
+const streamId = res.stream!.streamId;
+const leaseId = res.stream!.lease!.id;
+await sendWebRtcStreamRequest({ action: "await", streamId, leaseId, readiness: "publishing" });
 ```
 
 (The client is `src/daemon/webrtcStreamClient.ts`.)
@@ -123,7 +129,7 @@ reader page at `http://mediamtx.example.com:8889/ci-run-42`; any WHEP-capable
 ## 4. Stop the stream
 
 ```bash
-echo '{"action":"stop","streamId":"ci-run-42"}' | nc -U ~/.auto-mobile/webrtc-stream.sock
+echo '{"action":"stop","streamId":"ci-run-42","leaseId":"lease_..."}' | nc -U ~/.auto-mobile/webrtc-stream.sock
 ```
 
 Omit `streamId` if there is exactly one active stream.

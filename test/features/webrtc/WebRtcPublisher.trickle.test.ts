@@ -14,7 +14,13 @@ class FakeTricklePc {
   connectionState = "connected";
   iceGatheringState = "gathering";
   private candidateCb?: (candidate: unknown) => void;
-  connectionStateChange = { subscribe: () => ({ unSubscribe: () => {} }) };
+  private connectionStateCb?: (state: string) => void;
+  connectionStateChange = {
+    subscribe: (callback: (state: string) => void) => {
+      this.connectionStateCb = callback;
+      return { unSubscribe: () => { this.connectionStateCb = undefined; } };
+    },
+  };
   // Never resolves: proves the trickle path does not block on gathering.
   iceGatheringStateChange = { watch: () => new Promise<void>(() => {}) };
   onIceCandidate = {
@@ -35,8 +41,12 @@ class FakeTricklePc {
   async close() {
     this.closed = true;
   }
-  emitCandidate(candidate: { candidate: string; sdpMid?: string; sdpMLineIndex?: number }): void {
+  emitCandidate(candidate: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } | null): void {
     this.candidateCb?.(candidate);
+  }
+  emitConnectionState(state: "connected" | "failed" | "disconnected"): void {
+    this.connectionState = state;
+    this.connectionStateCb?.(state);
   }
 }
 
@@ -89,5 +99,49 @@ describe("WebRtcPublisher trickle ICE", () => {
 
     pc.emitCandidate({ candidate: "candidate:2 1 udp 1 1.2.3.4 6000 typ host", sdpMid: "0" });
     expect(patched).toHaveLength(0);
+  });
+
+  test("ignores late candidates from a replaced peer and forwards end-of-candidates for the current peer", async () => {
+    const first = new FakeTricklePc();
+    const second = new FakeTricklePc();
+    const peers = [first, second];
+    const patched: Array<{ url: string; fragment: string }> = [];
+    let peerIndex = 0;
+    let publishIndex = 0;
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", trickleIce: true, maxReconnectAttempts: 1 },
+      {
+        createPeerConnection: () => peers[peerIndex++] as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({
+              answerSdp: VIDEO_ONLY_WHIP_ANSWER,
+              resourceUrl: `https://coord/whip/session-${++publishIndex}`,
+              etag: "\"etag\"",
+            }),
+            patchCandidate: async (url: string, _etag: string, fragment: string) => {
+              patched.push({ url, fragment });
+            },
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+
+    await publisher.start();
+    first.emitConnectionState("failed");
+    for (let turn = 0; turn < 12; turn++) {
+      await Promise.resolve();
+    }
+
+    first.emitCandidate({ candidate: "candidate:stale 1 udp 1 1.2.3.4 7000 typ host", sdpMid: "0" });
+    second.emitCandidate({ candidate: "candidate:current 1 udp 1 1.2.3.4 8000 typ host", sdpMid: "0" });
+    second.emitCandidate(null);
+
+    expect(patched).toHaveLength(2);
+    expect(patched.every(patch => patch.url === "https://coord/whip/session-2")).toBe(true);
+    expect(patched[0].fragment).toContain("candidate:current");
+    expect(patched[1].fragment).toContain("a=end-of-candidates");
+
+    await publisher.stop();
   });
 });

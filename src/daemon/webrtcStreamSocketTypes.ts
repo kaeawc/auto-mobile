@@ -1,7 +1,7 @@
 import type { SocketRequest, SocketResponse } from "./socketServer/index";
 import type { WebRtcStreamDescriptor } from "../features/webrtc";
 
-export type WebRtcStreamAction = "start" | "stop" | "status" | "list";
+export type WebRtcStreamAction = "start" | "stop" | "status" | "list" | "await";
 
 export interface WebRtcIceServerInput {
   urls: string;
@@ -21,6 +21,8 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
   deviceId?: string;
   platform?: "android" | "ios";
   streamId?: string;
+  /** Lease returned by start; renew it with status/await or release it with stop. */
+  leaseId?: string;
   whipEndpoint?: string;
   whipToken?: string;
   iceServers?: WebRtcIceServerInput[];
@@ -30,6 +32,12 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
   iosSimulatorFps?: number;
   /** Enable optional audio capture/publishing. */
   audio?: boolean;
+  /** Override the environment's Trickle ICE setting for this stream. */
+  trickleIce?: boolean;
+  /** Readiness phase for the `await` action. */
+  readiness?: "capture_ready" | "publishing";
+  /** Bounded wait for the `await` action. */
+  timeoutMs?: number;
 }
 
 export interface WebRtcStreamSocketResponse extends SocketResponse {
@@ -39,4 +47,6 @@ export interface WebRtcStreamSocketResponse extends SocketResponse {
   stream?: WebRtcStreamDescriptor;
   /** Reconnect descriptors for all active streams (list). */
   streams?: WebRtcStreamDescriptor[];
+  /** Stable reason a stream degraded, suitable for screenshot fallback. */
+  failure?: { code: string; message: string; at: string } | null;
 }

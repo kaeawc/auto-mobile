@@ -97,6 +97,21 @@ export class RtpH264TrackWriter {
     }
   }
 
+  /**
+   * Seed a newly attached writer with parameter sets captured before its RTP
+   * track existed. The next IDR is then self-describing even when a persistent
+   * encoder only emitted SPS/PPS during its initial warm-up burst.
+   */
+  primeParameterSets(sps: Buffer | null, pps: Buffer | null): void {
+    if (sps) {
+      this.cachedSps = Buffer.from(sps);
+      this.onSps?.(sps);
+    }
+    if (pps) {
+      this.cachedPps = Buffer.from(pps);
+    }
+  }
+
   /** Flush the trailing NAL unit / access unit at end of stream. */
   flush(): void {
     for (const nal of this.parser.flush()) {

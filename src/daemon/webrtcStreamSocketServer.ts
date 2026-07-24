@@ -12,6 +12,7 @@ import type {
   listWebRtcStreams,
   startWebRtcStream,
   stopWebRtcStream,
+  waitForWebRtcStreamReadiness,
 } from "../server/webrtcStreamManager";
 import type {
   WebRtcStreamSocketRequest,
@@ -26,6 +27,7 @@ export interface WebRtcStreamSocketServerDependencies {
   stopStream: typeof stopWebRtcStream;
   listStreams: typeof listWebRtcStreams;
   getStream: typeof getWebRtcStreamDescriptor;
+  awaitReadiness?: typeof waitForWebRtcStreamReadiness;
 }
 
 /**
@@ -75,6 +77,35 @@ async function defaultResolveDevice(
   return resolveWebRtcStreamDevice(defaultDeviceManager, deviceId, platform);
 }
 
+function resolveStartOverrides(request: WebRtcStreamSocketRequest): WebRtcStreamingOverrides {
+  const overrides: WebRtcStreamingOverrides = {};
+  if (request.whipEndpoint) {
+    overrides.whipEndpoint = request.whipEndpoint;
+  }
+  if (request.whipToken) {
+    overrides.bearerToken = request.whipToken;
+  }
+  if (request.iceServers && request.iceServers.length > 0) {
+    overrides.iceServers = request.iceServers;
+  }
+  if (request.bitrateKbps !== undefined) {
+    overrides.bitrateKbps = request.bitrateKbps;
+  }
+  if (request.size) {
+    overrides.size = request.size;
+  }
+  if (request.iosSimulatorFps !== undefined) {
+    overrides.iosSimulatorFps = request.iosSimulatorFps;
+  }
+  if (request.audio !== undefined) {
+    overrides.audioEnabled = request.audio;
+  }
+  if (request.trickleIce !== undefined) {
+    overrides.trickleIce = request.trickleIce;
+  }
+  return overrides;
+}
+
 /**
  * Unix-socket control plane for WebRTC screen streaming. A CI worker (or IDE)
  * connects to `~/.auto-mobile/webrtc-stream.sock` and sends newline-delimited
@@ -113,6 +144,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
         stopStream: manager.stopWebRtcStream,
         listStreams: manager.listWebRtcStreams,
         getStream: manager.getWebRtcStreamDescriptor,
+        awaitReadiness: manager.waitForWebRtcStreamReadiness,
       };
     }
     return this.resolvedDeps;
@@ -126,7 +158,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       case "start":
         return this.handleStart(deps, request);
       case "stop": {
-        const stream = await deps.stopStream(request.streamId);
+        const stream = await deps.stopStream(request.streamId, request.leaseId);
         return { id: request.id, success: true, type: "webrtc_stream_response", action: "stop", stream };
       }
       case "status":
@@ -139,6 +171,8 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
           action: "list",
           streams: deps.listStreams(),
         };
+      case "await":
+        return this.handleAwait(deps, request);
       default:
         throw new ActionableError(`Unsupported webrtcStream action: ${request.action}`);
     }
@@ -149,32 +183,49 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     request: WebRtcStreamSocketRequest
   ): Promise<WebRtcStreamSocketResponse> {
     const device = await deps.resolveDevice(request.deviceId, request.platform ?? "android");
-    const overrides: WebRtcStreamingOverrides = {};
-    if (request.whipEndpoint) {
-      overrides.whipEndpoint = request.whipEndpoint;
-    }
-    if (request.whipToken) {
-      overrides.bearerToken = request.whipToken;
-    }
-    if (request.iceServers !== undefined) {
-      overrides.iceServers = request.iceServers;
-    }
-    if (request.bitrateKbps !== undefined) {
-      overrides.bitrateKbps = request.bitrateKbps;
-    }
-    if (request.size) {
-      overrides.size = request.size;
-    }
-    if (request.iosSimulatorFps !== undefined) {
-      overrides.iosSimulatorFps = request.iosSimulatorFps;
-    }
-    if (request.audio !== undefined) {
-      overrides.audioEnabled = request.audio;
-    }
-
-    const stream = await deps.startStream({ device, streamId: request.streamId, overrides });
+    const stream = await deps.startStream({
+      device,
+      streamId: request.streamId,
+      leaseId: request.leaseId,
+      overrides: resolveStartOverrides(request),
+    });
     logger.info(`[WebRtcStream] started stream ${stream.streamId} for device ${device.deviceId}`);
-    return { id: request.id, success: true, type: "webrtc_stream_response", action: "start", stream };
+    return {
+      id: request.id,
+      success: stream.failure === null || stream.failure === undefined,
+      type: "webrtc_stream_response",
+      action: "start",
+      stream,
+      failure: stream.failure ?? null,
+      error: stream.failure?.message,
+    };
+  }
+
+  private async handleAwait(
+    deps: WebRtcStreamSocketServerDependencies,
+    request: WebRtcStreamSocketRequest
+  ): Promise<WebRtcStreamSocketResponse> {
+    if (!request.streamId) {
+      throw new ActionableError("The WebRTC await action requires streamId.");
+    }
+    if (!deps.awaitReadiness) {
+      throw new ActionableError("WebRTC readiness waiting is unavailable.");
+    }
+    const stream = await deps.awaitReadiness(
+      request.streamId,
+      request.readiness ?? "publishing",
+      request.timeoutMs,
+      request.leaseId
+    );
+    return {
+      id: request.id,
+      success: stream.failure === null || stream.failure === undefined,
+      type: "webrtc_stream_response",
+      action: "await",
+      stream,
+      failure: stream.failure ?? null,
+      error: stream.failure?.message,
+    };
   }
 
   private handleStatus(
@@ -182,11 +233,19 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     request: WebRtcStreamSocketRequest
   ): WebRtcStreamSocketResponse {
     if (request.streamId) {
-      const stream = deps.getStream(request.streamId);
+      const stream = deps.getStream(request.streamId, request.leaseId);
       if (!stream) {
         throw new ActionableError(`No active WebRTC stream with id ${request.streamId}.`);
       }
-      return { id: request.id, success: true, type: "webrtc_stream_response", action: "status", stream };
+      return {
+        id: request.id,
+        success: stream.failure === null || stream.failure === undefined,
+        type: "webrtc_stream_response",
+        action: "status",
+        stream,
+        failure: stream.failure ?? null,
+        error: stream.failure?.message,
+      };
     }
     return {
       id: request.id,

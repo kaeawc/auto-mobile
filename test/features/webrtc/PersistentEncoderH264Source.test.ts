@@ -66,9 +66,9 @@ function streamHeader(width: number, height: number): Buffer {
   return buf;
 }
 
-function framedPacket(payload: Buffer): Buffer {
+function framedPacket(payload: Buffer, flags: bigint = 0n): Buffer {
   const header = Buffer.alloc(12);
-  header.writeBigUInt64BE(0n, 0);
+  header.writeBigUInt64BE(flags, 0);
   header.writeUInt32BE(payload.length, 8);
   return Buffer.concat([header, payload]);
 }
@@ -214,6 +214,59 @@ describe("PersistentEncoderH264Source", () => {
     // After stop, no socket is available; the request is a safe no-op.
     ctx.source.requestKeyFrame();
     expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
+  });
+
+  test("reports null-before-initialization and then precise IDR readiness telemetry", async () => {
+    const ctx = makeSource();
+    expect(ctx.source.getTelemetry()).toEqual({
+      lastEncodedFrameTimestampUs: null,
+      lastIdrTimestampUs: null,
+      idrRequestCount: null,
+      idrCompletionCount: null,
+      encodedAccessUnitCount: null,
+    });
+    await startReady(ctx);
+
+    ctx.sockets[0].feed(streamHeader(480, 1040));
+    ctx.sockets[0].feed(
+      framedPacket(
+        Buffer.from([0, 0, 0, 1, 0x65, 0x80]),
+        0x4000000000000000n | 123n
+      )
+    );
+
+    expect(ctx.source.getTelemetry()).toEqual({
+      lastEncodedFrameTimestampUs: 123,
+      lastIdrTimestampUs: 123,
+      idrRequestCount: 1,
+      idrCompletionCount: 1,
+      encodedAccessUnitCount: 1,
+    });
+
+    await ctx.source.stop();
+  });
+
+  test("does not count a replayed IDR as completion of the new keyframe request", async () => {
+    const ctx = makeSource();
+    await startReady(ctx);
+
+    ctx.sockets[0].feed(streamHeader(480, 1040));
+    ctx.sockets[0].feed(
+      framedPacket(
+        Buffer.from([0, 0, 0, 1, 0x65, 0x80]),
+        0x6000000000000000n | 123n
+      )
+    );
+
+    expect(ctx.source.getTelemetry()).toEqual({
+      lastEncodedFrameTimestampUs: 123,
+      lastIdrTimestampUs: 123,
+      idrRequestCount: 1,
+      idrCompletionCount: 0,
+      encodedAccessUnitCount: 0,
+    });
+
+    await ctx.source.stop();
   });
 
   test("passes --audio and routes muxed PCM audio packets separately from video", async () => {
@@ -363,12 +416,94 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.errors).toEqual([]);
   });
 
-  test("surfaces a post-start socket close via onError", async () => {
+  test("reconnects a post-start socket close without failing the retained encoder source", async () => {
     const ctx = makeSource();
     await startReady(ctx);
+
     ctx.sockets[0].emit("close");
+    await tick();
+
+    expect(ctx.sockets).toHaveLength(2);
+    expect(ctx.sockets[0].destroyed).toBe(true);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(true);
+
+    ctx.sockets[1].feed(streamHeader(480, 1040));
+    expect(ctx.sockets[1].written).toEqual([Buffer.from([0x01])]);
+
+    await ctx.source.stop();
+  });
+
+  test("fails after the bounded local socket reconnect window", async () => {
+    const firstSocket = new FakeSocket();
+    let connectAttempts = 0;
+    const ctx = makeSource({
+      localSocketReconnectWindowMs: 200,
+      localSocketReconnectRetryMs: 100,
+      connector: async () => {
+        connectAttempts++;
+        if (connectAttempts === 1) {
+          return firstSocket;
+        }
+        throw new Error("forward unavailable");
+      },
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+    ctx.processes[0].ready();
+    await tick();
+    await startPromise;
+
+    firstSocket.emit("close");
+    await tick(); // first failed retry is now waiting 100ms
+    ctx.timer.advanceTime(100);
+    await tick(); // second failed retry is now waiting 100ms
+    ctx.timer.advanceTime(100);
+    await tick(); // deadline expires before another connection attempt
+
+    expect(connectAttempts).toBe(3);
     expect(ctx.errors).toHaveLength(1);
+    expect(ctx.errors[0].message).toContain("did not reconnect within 200ms");
     expect(ctx.source.isRunning).toBe(false);
+  });
+
+  test("fails a hung reconnect attempt at the deadline and closes a late socket", async () => {
+    const firstSocket = new FakeSocket();
+    const lateSocket = new FakeSocket();
+    let resolveHangingConnect: ((socket: StreamSocket) => void) | undefined;
+    let connectAttempts = 0;
+    const ctx = makeSource({
+      localSocketReconnectWindowMs: 200,
+      connector: async () => {
+        connectAttempts++;
+        if (connectAttempts === 1) {
+          return firstSocket;
+        }
+        return new Promise<StreamSocket>(resolve => {
+          resolveHangingConnect = resolve;
+        });
+      },
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+    ctx.processes[0].ready();
+    await tick();
+    await startPromise;
+
+    firstSocket.emit("close");
+    await tick();
+    ctx.timer.advanceTime(200);
+    await tick();
+
+    expect(ctx.errors).toHaveLength(1);
+    expect(ctx.errors[0].message).toContain("did not reconnect within 200ms");
+    expect(ctx.source.isRunning).toBe(false);
+
+    resolveHangingConnect?.(lateSocket);
+    await tick();
+    expect(lateSocket.destroyed).toBe(true);
   });
 
   test("surfaces a post-start server exit via onError", async () => {

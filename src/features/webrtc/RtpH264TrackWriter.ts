@@ -40,6 +40,12 @@ export interface RtpH264TrackWriterOptions {
   initialSequenceNumber?: number;
   /** Observes each complete SPS before it can be sent to the negotiated peer. */
   onSps?: (nal: Buffer) => void;
+  /** Observes each complete H.264 access unit after it is published to RTP. */
+  onAccessUnit?: (event: {
+    timestampMs: number;
+    isIdr: boolean;
+    rtpPacketCount: number;
+  }) => void;
 }
 
 /**
@@ -57,6 +63,7 @@ export class RtpH264TrackWriter {
   private readonly mtu: number;
   private readonly timer: Timer;
   private readonly onSps?: (nal: Buffer) => void;
+  private readonly onAccessUnit?: RtpH264TrackWriterOptions["onAccessUnit"];
   private readonly parser = new H264AnnexBParser();
   private readonly assembler = new H264AccessUnitAssembler();
 
@@ -79,6 +86,7 @@ export class RtpH264TrackWriter {
     }
     this.timer = options.timer ?? defaultTimer;
     this.onSps = options.onSps;
+    this.onAccessUnit = options.onAccessUnit;
     this.sequenceNumber = (options.initialSequenceNumber ?? 0) & 0xffff;
   }
 
@@ -139,6 +147,7 @@ export class RtpH264TrackWriter {
 
   private writeAccessUnit(accessUnit: Buffer[], startMs: number): void {
     const timestamp = this.rtpTimestamp(startMs);
+    const isIdr = accessUnit.some(isKeyFrameNal);
     const units = packetizeAccessUnit(this.withParameterSets(accessUnit), this.mtu);
     if (units.length === 0) {
       return;
@@ -159,6 +168,11 @@ export class RtpH264TrackWriter {
     }
 
     this.framesWritten++;
+    this.onAccessUnit?.({
+      timestampMs: startMs,
+      isIdr,
+      rtpPacketCount: units.length,
+    });
   }
 
   /**

@@ -84,6 +84,9 @@ class VideoEncoder(
 
     encoder.start()
     codec = encoder
+    // The first surface submission can otherwise be a non-IDR on some devices.
+    // Make decoder readiness an explicit startup requirement.
+    requestKeyFrame()
 
     return surface
   }

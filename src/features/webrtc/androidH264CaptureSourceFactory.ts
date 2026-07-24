@@ -62,6 +62,15 @@ class FallbackH264CaptureSource implements H264CaptureSource {
     this.active = null;
     await active?.stop();
   }
+
+  requestKeyFrame(): void {
+    this.active?.requestKeyFrame?.();
+  }
+
+  get getTelemetry(): H264CaptureSource["getTelemetry"] {
+    const active = this.active;
+    return active?.getTelemetry?.bind(active);
+  }
 }
 
 /**

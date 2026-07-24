@@ -23,6 +23,18 @@ export interface H264CaptureSourceOptions {
 }
 
 /**
+ * Source-side encoder observations. `null` means that the source has not
+ * initialized that measurement yet; a zero counter is therefore meaningful.
+ */
+export interface H264CaptureSourceTelemetry {
+  lastEncodedFrameTimestampUs: number | null;
+  lastIdrTimestampUs: number | null;
+  idrRequestCount: number | null;
+  idrCompletionCount: number | null;
+  encodedAccessUnitCount: number | null;
+}
+
+/**
  * Common contract for a device H.264 capture source feeding the WebRTC
  * publisher. Both the segment-rotated `screenrecord` source
  * (`AndroidH264Source`) and the persistent on-device encoder source
@@ -42,4 +54,6 @@ export interface H264CaptureSource {
    * frequently (throttle internally) and before/after the stream is running.
    */
   requestKeyFrame?(): void;
+  /** Optional precise encoder telemetry for the stream-status control plane. */
+  getTelemetry?(): H264CaptureSourceTelemetry;
 }

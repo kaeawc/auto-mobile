@@ -76,6 +76,18 @@ class FakePublisher {
       iceServers: [],
       framesSent: 0,
       packetsSent: 0,
+      audioPacketsSent: 0,
+      audioSamplesSent: 0,
+      readiness: {
+        lastEncodedFrameTimestampUs: null,
+        lastIdrTimestampUs: null,
+        idrRequestCount: null,
+        idrCompletionCount: null,
+        encodedAccessUnitCount: null,
+        publisherRtpPacketCount: null,
+        captureSourceState: "not_initialized",
+        lastSourceError: null,
+      },
     };
   }
 }
@@ -145,6 +157,8 @@ describe("webrtcStreamManager", () => {
     // onBeforeEstablish started the capture source.
     expect(sources[0].started).toBe(true);
     expect(listWebRtcStreams()).toHaveLength(1);
+    expect(descriptor.readiness.captureSourceState).toBe("running");
+    expect(descriptor.readiness.lastSourceError).toBeNull();
   });
 
   test("relays a downstream keyframe request (WHEP viewer PLI) to the capture source", async () => {

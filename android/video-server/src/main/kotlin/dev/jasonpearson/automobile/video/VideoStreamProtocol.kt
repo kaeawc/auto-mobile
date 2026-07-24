@@ -27,8 +27,11 @@ object VideoStreamProtocol {
   /** Bit 62: key frame (I-frame) */
   const val PACKET_FLAG_KEY_FRAME = 1L shl 62
 
-  /** Mask for PTS (bits 0-61) */
-  const val PTS_MASK = (1L shl 62) - 1
+  /** Bit 61: cached packet replayed for a replacement LocalSocket client. */
+  const val PACKET_FLAG_REPLAYED = 1L shl 61
+
+  /** Mask for PTS (bits 0-60). */
+  const val PTS_MASK = (1L shl 61) - 1
 
   fun legacyHeader(width: Int, height: Int): ByteArray =
     ByteBuffer.allocate(12).putInt(CODEC_ID_H264).putInt(width).putInt(height).array()
@@ -58,6 +61,8 @@ object VideoStreamProtocol {
     }
     return ptsAndFlags
   }
+
+  fun replayed(ptsAndFlags: Long): Long = ptsAndFlags or PACKET_FLAG_REPLAYED
 
   fun packetHeader(audioEnabled: Boolean, trackId: Int, ptsAndFlags: Long, size: Int): ByteArray =
     if (audioEnabled) {

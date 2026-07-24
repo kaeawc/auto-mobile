@@ -3,63 +3,37 @@ package dev.jasonpearson.automobile.video
 import android.media.MediaCodec
 import android.net.LocalServerSocket
 import android.net.LocalSocket
+import android.os.SystemClock
 import java.io.IOException
 import java.io.OutputStream
 import java.nio.ByteBuffer
 
 /**
- * Writes encoded video packets to a LocalSocket using a binary protocol.
- *
- * ## Protocol
- *
- * ### Stream Header (12 bytes)
- *
- * ```
- * ┌─────────────────┬─────────────────┬─────────────────┐
- * │ codec_id (4)    │ width (4)       │ height (4)      │
- * │ big-endian      │ big-endian      │ big-endian      │
- * └─────────────────┴─────────────────┴─────────────────┘
- * ```
- *
- * codec_id values:
- * - 0x68323634 = "h264" (H.264/AVC)
- *
- * ### Packet Header (12 bytes per packet)
- *
- * ```
- * ┌─────────────────────────────────────┬─────────────────┐
- * │ pts_and_flags (8)                   │ size (4)        │
- * │ big-endian                          │ big-endian      │
- * └─────────────────────────────────────┴─────────────────┘
- * ```
- *
- * pts_and_flags bit layout:
- * - bit 63: CONFIG flag (codec config data, not a frame)
- * - bit 62: KEY_FRAME flag (I-frame)
- * - bits 0-61: presentation timestamp in microseconds
- *
- * Followed by `size` bytes of encoded frame data.
- *
- * When audio is enabled, the stream uses a multiplexed header:
- * ```
- * amux header: magic "amux" (4) | version (4) | track_count (4)
- * track:       track_id (4) | codec_id (4) | param1 (4) | param2 (4)
- * packet:      track_id (4) | pts_and_flags (8) | size (4) | payload
- * ```
+ * Writes encoded video packets to a LocalSocket using the VideoStreamProtocol binary framing. A
+ * disconnected client is replaceable: the writer retains codec configuration plus the latest
+ * complete keyframe and replays them before live packets to the next client.
  */
 class VideoStreamWriter(
   private val socketName: String,
   private val width: Int,
   private val height: Int,
   private val audioEnabled: Boolean = false,
+  private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
   private var serverSocket: LocalServerSocket? = null
   private var clientSocket: LocalSocket? = null
   private var outputStream: OutputStream? = null
+  private var commandHandler: ((Int) -> Unit)? = null
+  private val lock = Any()
+  private val packetCache = VideoPacketCache()
+  private val reconnectWindow = ClientReconnectWindow()
 
   @Volatile private var stopped = false
 
   companion object {
+    /** Keep capture warm long enough for ADB/daemon local-socket recovery. */
+    const val CLIENT_RECONNECT_WINDOW_MS = 5_000L
+
     /** "h264" as big-endian int: 0x68323634 */
     const val CODEC_ID_H264 = VideoStreamProtocol.CODEC_ID_H264
     /** "amux" as big-endian int: 0x616d7578 */
@@ -80,51 +54,91 @@ class VideoStreamWriter(
   }
 
   /**
-   * Start the server and wait for a client connection.
+   * Bind the abstract LocalSocket and accept clients in the background.
    *
-   * This method blocks until a client connects.
-   *
-   * @throws IOException if the socket cannot be created or written to
+   * The callback runs after the cached packets are written, so callers can request a current IDR
+   * without delaying initial decoder setup.
    */
-  fun start() {
-    // Create LocalServerSocket in abstract namespace
+  fun start(onClientConnected: () -> Unit = {}) {
     serverSocket = LocalServerSocket(socketName)
     println("Waiting for client connection on localabstract:$socketName")
-
-    // Accept a single client connection (blocking)
-    val client = serverSocket!!.accept()
-    clientSocket = client
-    outputStream = client.outputStream
-
-    println("Client connected, writing stream header")
-
-    // Write stream header
-    if (audioEnabled) {
-      writeMuxHeader()
-    } else {
-      writeLegacyHeader()
-    }
+    Thread(
+        { acceptClients(onClientConnected) },
+        "video-client-acceptor",
+      )
+      .apply { isDaemon = true }
+      .start()
   }
 
   /**
-   * Read host→device command bytes on a background daemon thread, invoking [onCommand] for each
-   * byte. The LocalSocket is bidirectional; the host writes single-byte commands (e.g.
-   * [VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME]). The video stream is strictly server→client,
-   * so this is the only reader of the client input stream. Returns immediately; the thread exits on
-   * EOF or stop().
+   * Registers a callback for every current or future bidirectional client. The reader is
+   * deliberately owned by the writer so reconnects do not lose the keyframe-request control
+   * channel.
    */
   fun startCommandReader(onCommand: (Int) -> Unit) {
-    val input = clientSocket?.inputStream ?: return
+    synchronized(lock) {
+      commandHandler = onCommand
+    }
+  }
+
+  private fun acceptClients(onClientConnected: () -> Unit) {
+    while (!stopped) {
+      val client =
+        try {
+          serverSocket?.accept() ?: return
+        } catch (e: IOException) {
+          if (!stopped) {
+            println("Error accepting video client: ${e.message}")
+          }
+          return
+        }
+
+      val attached =
+        synchronized(lock) {
+          closeClientLocked()
+          clientSocket = client
+          outputStream = client.outputStream
+          try {
+            writeStreamHeaderLocked()
+            replayCachedVideoLocked()
+            reconnectWindow.onClientConnected()
+            true
+          } catch (e: IOException) {
+            println("Error attaching video client: ${e.message}")
+            closeClientLocked()
+            reconnectWindow.onClientDisconnected(nowMs())
+            false
+          }
+        }
+      if (!attached) {
+        continue
+      }
+
+      println("Client connected, writing stream header")
+      startCommandReaderFor(client)
+      onClientConnected()
+    }
+  }
+
+  private fun startCommandReaderFor(client: LocalSocket) {
+    val input = client.inputStream
     Thread(
         {
           try {
             while (!stopped) {
               val command = input.read()
-              if (command < 0) break // EOF: the host closed the connection.
-              onCommand(command)
+              if (command < 0) break
+              commandHandler?.invoke(command)
             }
           } catch (_: IOException) {
-            // Socket closed during shutdown; nothing to recover.
+            // The write path or a replacement connection owns cleanup.
+          } finally {
+            synchronized(lock) {
+              if (clientSocket === client) {
+                closeClientLocked()
+                reconnectWindow.onClientDisconnected(nowMs())
+              }
+            }
           }
         },
         "video-command-reader",
@@ -133,29 +147,9 @@ class VideoStreamWriter(
       .start()
   }
 
-  private fun writeLegacyHeader() {
-    outputStream!!.write(VideoStreamProtocol.legacyHeader(width, height))
-    outputStream!!.flush()
-  }
-
-  private fun writeMuxHeader() {
-    outputStream!!.write(
-      VideoStreamProtocol.muxHeader(
-        width,
-        height,
-        AudioCapture.SAMPLE_RATE_HZ,
-        AudioCapture.CHANNELS,
-      )
-    )
-    outputStream!!.flush()
-  }
-
   /**
-   * Write an encoded packet to the stream.
-   *
-   * @param buffer The encoded data buffer
-   * @param bufferInfo The buffer info from MediaCodec
-   * @return true if the packet was written successfully, false if the stream was closed
+   * Write one encoded video packet. It is cached before writing, allowing a later client to decode
+   * immediately even if this client fails mid-write.
    */
   fun writePacket(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo): Boolean {
     val data = ByteArray(bufferInfo.size)
@@ -167,49 +161,139 @@ class VideoStreamWriter(
         (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0,
         (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
       )
-
-    return writePacketData(TRACK_ID_VIDEO, ptsAndFlags, data)
+    synchronized(lock) {
+      packetCache.remember(CachedVideoPacket(ptsAndFlags, data))
+      return writePacketDataLocked(TRACK_ID_VIDEO, ptsAndFlags, data)
+    }
   }
 
-  fun writeAudioPacket(data: ByteArray, ptsUs: Long): Boolean {
-    return writePacketData(TRACK_ID_AUDIO, ptsUs and PTS_MASK, data)
+  fun writeAudioPacket(data: ByteArray, ptsUs: Long): Boolean =
+    synchronized(lock) {
+      writePacketDataLocked(TRACK_ID_AUDIO, ptsUs and PTS_MASK, data)
+    }
+
+  /** True once a prior client has failed to reconnect inside the bounded window. */
+  fun reconnectWindowExpired(): Boolean =
+    synchronized(lock) {
+      reconnectWindow.hasExpired(nowMs())
+    }
+
+  private fun writeStreamHeaderLocked() {
+    if (audioEnabled) {
+      outputStream!!.write(
+        VideoStreamProtocol.muxHeader(
+          width,
+          height,
+          AudioCapture.SAMPLE_RATE_HZ,
+          AudioCapture.CHANNELS,
+        )
+      )
+    } else {
+      outputStream!!.write(VideoStreamProtocol.legacyHeader(width, height))
+    }
+    outputStream!!.flush()
   }
 
-  @Synchronized
-  private fun writePacketData(trackId: Int, ptsAndFlags: Long, data: ByteArray): Boolean {
+  private fun replayCachedVideoLocked() {
+    for (packet in packetCache.replay()) {
+      writePacketDataLocked(
+        TRACK_ID_VIDEO,
+        VideoStreamProtocol.replayed(packet.ptsAndFlags),
+        packet.data,
+      )
+    }
+  }
+
+  private fun writePacketDataLocked(trackId: Int, ptsAndFlags: Long, data: ByteArray): Boolean {
     if (stopped) return false
 
-    val output = outputStream ?: return false
-
+    // Keep the encoder alive during local client recovery. Video data is cached;
+    // audio resumes live when the replacement mux client attaches.
+    val output = outputStream ?: return true
     try {
       output.write(VideoStreamProtocol.packetHeader(audioEnabled, trackId, ptsAndFlags, data.size))
       output.write(data)
-
       return true
     } catch (e: IOException) {
       println("Error writing packet: ${e.message}")
-      return false
+      closeClientLocked()
+      reconnectWindow.onClientDisconnected(nowMs())
+      return true
     }
+  }
+
+  private fun closeClientLocked() {
+    try {
+      outputStream?.close()
+    } catch (_: IOException) {}
+    try {
+      clientSocket?.close()
+    } catch (_: IOException) {}
+    outputStream = null
+    clientSocket = null
   }
 
   /** Stop the stream writer and close all sockets. */
   fun stop() {
     stopped = true
-
-    try {
-      outputStream?.close()
-    } catch (_: IOException) {}
-
-    try {
-      clientSocket?.close()
-    } catch (_: IOException) {}
-
+    synchronized(lock) {
+      closeClientLocked()
+    }
     try {
       serverSocket?.close()
     } catch (_: IOException) {}
-
-    outputStream = null
-    clientSocket = null
     serverSocket = null
   }
+}
+
+/** Cached decoder setup and latest complete keyframe for a replacement client. */
+internal data class CachedVideoPacket(val ptsAndFlags: Long, val data: ByteArray) {
+  fun copyPacket(): CachedVideoPacket = CachedVideoPacket(ptsAndFlags, data.copyOf())
+}
+
+internal class VideoPacketCache {
+  private var config: CachedVideoPacket? = null
+  private var idr: CachedVideoPacket? = null
+
+  fun remember(packet: CachedVideoPacket) {
+    if ((packet.ptsAndFlags and VideoStreamProtocol.PACKET_FLAG_CONFIG) != 0L) {
+      config = packet.copyPacket()
+    }
+    if ((packet.ptsAndFlags and VideoStreamProtocol.PACKET_FLAG_KEY_FRAME) != 0L) {
+      idr = packet.copyPacket()
+    }
+  }
+
+  fun replay(): List<CachedVideoPacket> {
+    val cachedConfig = config
+    val cachedIdr = idr
+    return when {
+      cachedConfig == null && cachedIdr == null -> emptyList()
+      cachedConfig == null -> listOfNotNull(cachedIdr).map(CachedVideoPacket::copyPacket)
+      cachedIdr == null -> listOf(cachedConfig.copyPacket())
+      cachedConfig.ptsAndFlags == cachedIdr.ptsAndFlags &&
+        cachedConfig.data.contentEquals(cachedIdr.data) -> listOf(cachedConfig.copyPacket())
+      else -> listOf(cachedConfig.copyPacket(), cachedIdr.copyPacket())
+    }
+  }
+}
+
+internal class ClientReconnectWindow(
+  private val windowMs: Long = VideoStreamWriter.CLIENT_RECONNECT_WINDOW_MS
+) {
+  private var hasConnected = false
+  private var disconnectedAtMs: Long? = null
+
+  fun onClientConnected() {
+    hasConnected = true
+    disconnectedAtMs = null
+  }
+
+  fun onClientDisconnected(nowMs: Long) {
+    if (hasConnected && disconnectedAtMs == null) {
+      disconnectedAtMs = nowMs
+    }
+  }
+
+  fun hasExpired(nowMs: Long): Boolean = disconnectedAtMs?.let { nowMs - it >= windowMs } ?: false
 }

@@ -151,6 +151,24 @@ class VideoStreamProtocolTest {
   }
 
   @Test
+  fun replayedPacketFlagPreservesTheOriginalFlagsAndPts() {
+    val original =
+      VideoStreamProtocol.ptsAndFlags(
+        presentationTimeUs = 123,
+        isConfig = false,
+        isKeyFrame = true,
+      )
+
+    val replayed = VideoStreamProtocol.replayed(original)
+
+    assertEquals(
+      VideoStreamProtocol.PACKET_FLAG_REPLAYED or VideoStreamProtocol.PACKET_FLAG_KEY_FRAME or 123,
+      replayed,
+    )
+    assertEquals(123, replayed and VideoStreamProtocol.PTS_MASK)
+  }
+
+  @Test
   fun requestKeyFrameCommandByteMatchesHostContract() {
     // The host (PersistentEncoderH264Source.ts) writes this exact byte to request
     // a fresh IDR. Changing it silently would break keyframe-on-demand.
@@ -185,5 +203,49 @@ class VideoStreamProtocolTest {
         size = 4,
       ),
     )
+  }
+
+  @Test
+  fun cachedDecoderStateReplaysConfigThenLatestIdr() {
+    val cache = VideoPacketCache()
+    cache.remember(
+      CachedVideoPacket(
+        VideoStreamProtocol.PACKET_FLAG_CONFIG or 10,
+        byteArrayOf(0, 0, 0, 1, 0x67),
+      )
+    )
+    cache.remember(
+      CachedVideoPacket(
+        VideoStreamProtocol.PACKET_FLAG_KEY_FRAME or 20,
+        byteArrayOf(0, 0, 0, 1, 0x65, 1),
+      )
+    )
+    cache.remember(
+      CachedVideoPacket(
+        VideoStreamProtocol.PACKET_FLAG_KEY_FRAME or 30,
+        byteArrayOf(0, 0, 0, 1, 0x65, 2),
+      )
+    )
+
+    val replay = cache.replay()
+
+    assertEquals(2, replay.size)
+    assertEquals(VideoStreamProtocol.PACKET_FLAG_CONFIG or 10, replay[0].ptsAndFlags)
+    assertEquals(VideoStreamProtocol.PACKET_FLAG_KEY_FRAME or 30, replay[1].ptsAndFlags)
+    assertArrayEquals(byteArrayOf(0, 0, 0, 1, 0x65, 2), replay[1].data)
+  }
+
+  @Test
+  fun reconnectWindowOnlyExpiresAfterAConnectedClientIsLost() {
+    val window = ClientReconnectWindow(windowMs = 5_000)
+
+    assertEquals(false, window.hasExpired(10_000))
+    window.onClientConnected()
+    window.onClientDisconnected(100)
+    assertEquals(false, window.hasExpired(5_099))
+    assertEquals(true, window.hasExpired(5_100))
+
+    window.onClientConnected()
+    assertEquals(false, window.hasExpired(10_000))
   }
 }

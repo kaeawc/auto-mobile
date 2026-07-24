@@ -12,6 +12,8 @@ import {
 
 const FLAG_CONFIG = 1n << 63n;
 const FLAG_KEY_FRAME = 1n << 62n;
+const FLAG_REPLAYED = 1n << 61n;
+const PTS_MASK = FLAG_REPLAYED - 1n;
 
 function streamHeader(width: number, height: number): Buffer {
   const buf = Buffer.alloc(12);
@@ -23,7 +25,7 @@ function streamHeader(width: number, height: number): Buffer {
 
 function packet(payload: Buffer, flags: bigint, ptsUs: number): Buffer {
   const header = Buffer.alloc(12);
-  header.writeBigUInt64BE(flags | (BigInt(ptsUs) & (FLAG_KEY_FRAME - 1n)), 0);
+  header.writeBigUInt64BE(flags | (BigInt(ptsUs) & PTS_MASK), 0);
   header.writeUInt32BE(payload.length, 8);
   return Buffer.concat([header, payload]);
 }
@@ -47,7 +49,7 @@ function muxHeader(): Buffer {
 function muxPacket(trackId: number, payload: Buffer, flags: bigint, ptsUs: number): Buffer {
   const header = Buffer.alloc(16);
   header.writeUInt32BE(trackId, 0);
-  header.writeBigUInt64BE(flags | (BigInt(ptsUs) & (FLAG_KEY_FRAME - 1n)), 4);
+  header.writeBigUInt64BE(flags | (BigInt(ptsUs) & PTS_MASK), 4);
   header.writeUInt32BE(payload.length, 12);
   return Buffer.concat([header, payload]);
 }
@@ -81,6 +83,7 @@ describe("VideoServerStreamParser", () => {
       data: Buffer.from([0, 0, 0, 1, 0x67]),
       config: true,
       keyFrame: false,
+      replayed: false,
       ptsUs: 0,
     });
     expect(packets[1]).toEqual({
@@ -89,6 +92,7 @@ describe("VideoServerStreamParser", () => {
       data: Buffer.from([0, 0, 0, 1, 0x65]),
       config: false,
       keyFrame: true,
+      replayed: false,
       ptsUs: 1234,
     });
   });
@@ -126,6 +130,20 @@ describe("VideoServerStreamParser", () => {
     ]);
     parser.push(combined);
     expect(packets.map(p => p.data[0])).toEqual([0xaa, 0xbb, 0xcc]);
+  });
+
+  test("reports replayed packets without changing their flags or timestamp", () => {
+    const { parser, packets } = collect();
+    parser.push(Buffer.concat([
+      streamHeader(1, 1),
+      packet(Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME | FLAG_REPLAYED, 20),
+    ]));
+
+    expect(packets[0]).toMatchObject({
+      keyFrame: true,
+      replayed: true,
+      ptsUs: 20,
+    });
   });
 
   test("parses muxed video and audio packets", () => {

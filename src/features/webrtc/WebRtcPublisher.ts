@@ -95,6 +95,29 @@ export interface WebRtcPublisherDeps {
   onStateChange?: (state: ReconnectState) => void;
 }
 
+export type WebRtcCaptureSourceState =
+  | "not_initialized"
+  | "starting"
+  | "running"
+  | "failed"
+  | "stopped";
+
+/**
+ * Readiness observations exposed through the stream coordinator's status API.
+ * Timestamp and counter fields use `null` until their producer is initialized,
+ * avoiding ambiguity between absent data and a measured zero.
+ */
+export interface WebRtcStreamReadiness {
+  lastEncodedFrameTimestampUs: number | null;
+  lastIdrTimestampUs: number | null;
+  idrRequestCount: number | null;
+  idrCompletionCount: number | null;
+  encodedAccessUnitCount: number | null;
+  publisherRtpPacketCount: number | null;
+  captureSourceState: WebRtcCaptureSourceState;
+  lastSourceError: string | null;
+}
+
 /** Reconnect descriptor surfaced to callers and the coordination-server API. */
 export interface WebRtcStreamDescriptor {
   streamId: string;
@@ -107,6 +130,7 @@ export interface WebRtcStreamDescriptor {
   packetsSent: number;
   audioPacketsSent: number;
   audioSamplesSent: number;
+  readiness: WebRtcStreamReadiness;
   /**
    * True once the capture source for the current session has started. A
    * video-only stream connects and *then* starts capture, so `state` alone
@@ -159,6 +183,14 @@ export class WebRtcPublisher {
   private frameWatchdogHandle: NodeJS.Timeout | null = null;
   private frameWatchdogLastFrames = 0;
   private frameWatchdogLastAdvanceMs = 0;
+  private mediaTelemetryInitialized = false;
+  private lastEncodedFrameTimestampUs: number | null = null;
+  private lastIdrTimestampUs: number | null = null;
+  private idrRequestCount = 0;
+  private idrCompletionCount = 0;
+  private pendingIdrRequests = 0;
+  private encodedAccessUnitCount = 0;
+  private publisherRtpPacketCount = 0;
 
   constructor(config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps = {}) {
     this.config = config;
@@ -258,6 +290,7 @@ export class WebRtcPublisher {
     }
     this.lastKeyFrameRequestMs = now;
     logger.debug(`[WebRTC] stream ${this.config.streamId} received PLI; requesting keyframe`);
+    this.noteKeyFrameRequest();
     try {
       this.onKeyFrameRequest();
     } catch (error) {
@@ -282,6 +315,7 @@ export class WebRtcPublisher {
       packetsSent: stats?.packetsWritten ?? 0,
       audioPacketsSent: audioStats?.packetsWritten ?? 0,
       audioSamplesSent: audioStats?.samplesWritten ?? 0,
+      readiness: this.getReadiness(),
     };
   }
 
@@ -340,7 +374,9 @@ export class WebRtcPublisher {
             );
           }
         },
+        onAccessUnit: event => this.recordAccessUnit(event),
       });
+      this.mediaTelemetryInitialized = true;
       if (this.audioEnabled) {
         const audioTrack = new MediaStreamTrack({ kind: "audio", streamId: this.config.streamId });
         const audioTransceiver = pc.addTransceiver(audioTrack, { direction: "sendonly" });
@@ -527,6 +563,56 @@ export class WebRtcPublisher {
     if (this.frameWatchdogHandle) {
       this.timer.clearInterval(this.frameWatchdogHandle);
       this.frameWatchdogHandle = null;
+    }
+  }
+
+  private noteKeyFrameRequest(): void {
+    this.mediaTelemetryInitialized = true;
+    this.idrRequestCount++;
+    this.pendingIdrRequests++;
+  }
+
+  private getReadiness(): WebRtcStreamReadiness {
+    if (!this.mediaTelemetryInitialized) {
+      return {
+        lastEncodedFrameTimestampUs: null,
+        lastIdrTimestampUs: null,
+        idrRequestCount: null,
+        idrCompletionCount: null,
+        encodedAccessUnitCount: null,
+        publisherRtpPacketCount: null,
+        captureSourceState: "not_initialized",
+        lastSourceError: null,
+      };
+    }
+    return {
+      lastEncodedFrameTimestampUs: this.lastEncodedFrameTimestampUs,
+      lastIdrTimestampUs: this.lastIdrTimestampUs,
+      idrRequestCount: this.idrRequestCount,
+      idrCompletionCount: this.idrCompletionCount,
+      encodedAccessUnitCount: this.encodedAccessUnitCount,
+      publisherRtpPacketCount: this.publisherRtpPacketCount,
+      captureSourceState: "not_initialized",
+      lastSourceError: null,
+    };
+  }
+
+  private recordAccessUnit(event: {
+    timestampMs: number;
+    isIdr: boolean;
+    rtpPacketCount: number;
+  }): void {
+    this.mediaTelemetryInitialized = true;
+    this.lastEncodedFrameTimestampUs = event.timestampMs * 1000;
+    this.encodedAccessUnitCount++;
+    this.publisherRtpPacketCount += event.rtpPacketCount;
+    if (!event.isIdr) {
+      return;
+    }
+    this.lastIdrTimestampUs = event.timestampMs * 1000;
+    if (this.pendingIdrRequests > 0) {
+      this.pendingIdrRequests--;
+      this.idrCompletionCount++;
     }
   }
 

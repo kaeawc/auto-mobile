@@ -969,27 +969,6 @@ describe("IosH264Source", () => {
     expect(found).toBe(sourceBuild);
   });
 
-  test("resolves helper paths from packaged dist roots when bundled module dirs are stale", () => {
-    const packageRoot = path.resolve("pkg");
-    const packagedBuild = path.join(
-      packageRoot,
-      "dist",
-      "ios",
-      "screen-capture",
-      ".build",
-      "release",
-      "screen-capture-helper"
-    );
-    const found = resolveIosScreenCaptureHelperPath(undefined, {
-      moduleDir: path.join(path.resolve("build-host", "repo"), "src", "features", "webrtc"),
-      entryFile: path.join(packageRoot, "dist", "src", "index.js"),
-      env: {},
-      exists: candidate => candidate === packagedBuild,
-    });
-
-    expect(found).toBe(packagedBuild);
-  });
-
   test("prefers the helper path environment override", () => {
     const found = resolveIosScreenCaptureHelperPath(undefined, {
       moduleDir: "/repo/src/features/webrtc",
@@ -1008,6 +987,20 @@ describe("IosH264Source", () => {
     });
 
     expect(found).toBe("/legacy/helper");
+  });
+
+  test("returns null when no local helper exists (defers to the download provider)", () => {
+    // A published npm install has no ios/screen-capture/.build output and no
+    // override; the sync resolver returns null so ensureIosScreenCaptureHelper
+    // can fall through to the verified GitHub-release download (issue #4392).
+    const packageRoot = path.resolve("pkg-install");
+    const found = resolveIosScreenCaptureHelperPath(undefined, {
+      moduleDir: path.join(packageRoot, "dist", "src", "features", "webrtc"),
+      env: {},
+      exists: () => false,
+    });
+
+    expect(found).toBeNull();
   });
 
   test("prefers the ffmpeg environment override over the legacy alias", async () => {

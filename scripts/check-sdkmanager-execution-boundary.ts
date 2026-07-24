@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import ts from "typescript";
 
@@ -76,10 +77,15 @@ export function directlyExecutesSdkManager(source: string): boolean {
   const functionsByName = new Map<string, ts.FunctionLikeDeclaration[]>();
   const returnsByName = new Map<string, ts.Expression[]>();
   const callSites: { name: string; args: readonly ts.Expression[] }[] = [];
-  // Parameter names that receive an sdkmanager-ish argument at some call site, and function
-  // names whose return value carries sdkmanager. Both are filled by a fixpoint after collection.
+  // Three monotonic taint sets, all filled by the fixpoint after collection: parameter names
+  // that receive an sdkmanager-ish argument at some call site, function names whose return value
+  // carries sdkmanager, and variable names whose (transitive) initializer carries sdkmanager.
+  // `taintedNames` memoizes what a `seen`-guarded recursive walk of `initializers` would compute,
+  // but as an O(1) membership test — without it, a chain of repeated-reference bindings
+  // (`a1 = a0 + a0; a2 = a1 + a1; ...`) makes the walk re-descend exponentially.
   const sdkManagerParams = new Set<string>();
   const returnsSdkManager = new Set<string>();
+  const taintedNames = new Set<string>();
 
   const bindValue = (name: string, value: ts.Expression): void => {
     initializers.set(name, [...(initializers.get(name) ?? []), value]);
@@ -181,10 +187,11 @@ export function directlyExecutesSdkManager(source: string): boolean {
     }
     return undefined;
   };
-  // Consults the two interprocedural taint sets, which the fixpoint below grows monotonically.
-  // Every extra branch is an O(1) set membership test or a guarded walk of already-collected
-  // bindings — never a re-descent into a function body — so this stays bounded on large files.
-  const mentionsSdkManager = (node: ts.Node, seen = new Set<string>()): boolean => {
+  // Consults the three taint sets, which the fixpoint below grows monotonically. Every branch is
+  // an O(1) set membership test; the only recursion is a single walk of the node's own AST
+  // subtree (a tree, so it terminates without a visited set). Initializer chains are resolved by
+  // `taintedNames`, not by re-descending into bindings, so this is linear in the node size.
+  const mentionsSdkManager = (node: ts.Node): boolean => {
     if (ts.isExpression(node) && staticText(node)?.toLowerCase().includes("sdkmanager")) {
       return true;
     }
@@ -193,32 +200,33 @@ export function directlyExecutesSdkManager(source: string): boolean {
     if (ts.isIdentifier(node) && node.text.toLowerCase().includes("sdkmanager")) {return true;}
     // A parameter carrying an sdkmanager-ish argument from some caller (issue #4341).
     if (ts.isIdentifier(node) && sdkManagerParams.has(node.text)) {return true;}
+    // A variable whose initializer (transitively) carries sdkmanager — the memoized replacement
+    // for a recursive walk of `initializers`.
+    if (ts.isIdentifier(node) && taintedNames.has(node.text)) {return true;}
     // A call to a function whose return value carries sdkmanager (issue #4341).
     if (ts.isCallExpression(node)) {
       const name = calleeName(node.expression);
       if (name && returnsSdkManager.has(name)) {return true;}
     }
-    if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      const boundValues = initializers.get(node.text) ?? [];
-      if (boundValues.length > 0) {
-        const nextSeen = new Set(seen);
-        nextSeen.add(node.text);
-        if (boundValues.some(value => mentionsSdkManager(value, nextSeen))) {return true;}
-      }
-    }
     let found = false;
     ts.forEachChild(node, child => {
-      if (!found && mentionsSdkManager(child, seen)) {found = true;}
+      if (!found && mentionsSdkManager(child)) {found = true;}
     });
     return found;
   };
 
-  // Fixpoint over the two taint sets. Both only grow and are bounded by the finite sets of
-  // parameter and function names in the file, so this terminates; each round is a linear pass
-  // over the call sites and function returns.
+  // Fixpoint over the three taint sets. All only grow and are bounded by the finite sets of
+  // parameter, function, and variable names in the file, so this terminates; each round is a
+  // linear pass over the bindings, call sites, and function returns.
   let taintChanged = true;
   while (taintChanged) {
     taintChanged = false;
+    for (const [name, boundValues] of initializers) {
+      if (!taintedNames.has(name) && boundValues.some(value => mentionsSdkManager(value))) {
+        taintedNames.add(name);
+        taintChanged = true;
+      }
+    }
     for (const { name, args } of callSites) {
       const targets = functionsByName.get(name);
       if (!targets) {continue;}
@@ -276,16 +284,18 @@ export function sourceFiles(directory: string): string[] {
 
 /**
  * Scan `<root>/src` for files that execute sdkmanager outside the owning client. Returns one
- * message per offender; an empty array means the boundary holds.
+ * message per offender; an empty array means the boundary holds. Files are read in parallel so
+ * the whole-tree scan stays fast enough for a bun test running under coverage instrumentation.
  */
-export function findOffenders(root: string): string[] {
-  return sourceFiles(join(root, SOURCE_ROOT)).flatMap(file => {
-    const repoPath = relative(root, file);
-    if (repoPath === OWNER || EXCEPTIONS.has(repoPath)) {return [];}
-    return directlyExecutesSdkManager(readFileSync(file, "utf8"))
+export async function findOffenders(root: string): Promise<string[]> {
+  const sources = await Promise.all(sourceFiles(join(root, SOURCE_ROOT)).map(async file => ({
+    repoPath: relative(root, file),
+    source: await readFile(file, "utf8"),
+  })));
+  return sources.flatMap(({ repoPath, source }) =>
+    repoPath !== OWNER && !EXCEPTIONS.has(repoPath) && directlyExecutesSdkManager(source)
       ? [`${repoPath} directly executes sdkmanager; route it through ${OWNER} instead.`]
-      : [];
-  });
+      : []);
 }
 
 if (import.meta.main) {
@@ -296,7 +306,7 @@ if (import.meta.main) {
     console.error(`error: sdkmanager-execution-boundary scanned only ${files.length} files under ${SOURCE_ROOT}; expected the full source tree.`);
     process.exit(1);
   }
-  const offenders = findOffenders(root);
+  const offenders = await findOffenders(root);
   if (offenders.length > 0) {
     console.error(`error: sdkmanager execution must use ${OWNER}:`);
     for (const offender of offenders) {console.error(offender);}

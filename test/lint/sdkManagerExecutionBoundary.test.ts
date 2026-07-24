@@ -11,12 +11,28 @@ import {
 const ROOT = join(import.meta.dir, "..", "..");
 
 describe("sdkmanager execution boundary (issue #4052)", () => {
-  test("only SdkManagerClient directly executes sdkmanager", () => {
+  // Whole-tree scan: reads ~700 files, so give it far more than Bun's 5s default — under
+  // `--coverage` on a slow CI runner the default timeout trips even though the work is small.
+  test("only SdkManagerClient directly executes sdkmanager", async () => {
     const files = sourceFiles(join(ROOT, "src"));
     // A silently-empty scan yields zero offenders and passes green while checking nothing.
     expect(files.length).toBeGreaterThan(100);
-    const offenders = findOffenders(ROOT);
+    const offenders = await findOffenders(ROOT);
     expect(offenders, offenders.join("\n")).toEqual([]);
+  }, 30_000);
+
+  test("stays bounded on repeated-reference binding chains (no exponential blow-up)", () => {
+    // A chain where each binding references the previous one twice is the pathological input for
+    // a recursive initializer walk: resolving `a40` re-descends 2^40 times. The chain terminates
+    // in a launcher so the walk is actually forced, and `a0` is sdkmanager so the true verdict
+    // still exercises the deep path. The memoized taint fixpoint makes it linear; without it this
+    // hangs (Lens A measured a clean 2^N doubling: n=22 already took ~6s).
+    const lines = ['const a0 = "sdkmanager";'];
+    for (let i = 1; i <= 40; i++) {lines.push(`const a${i} = a${i - 1} + a${i - 1};`);}
+    lines.push("execFile(a40, []);");
+    const start = Bun.nanoseconds();
+    expect(directlyExecutesSdkManager(lines.join("\n"))).toBe(true);
+    expect((Bun.nanoseconds() - start) / 1e6).toBeLessThan(100);
   });
 
   test("detects resolved paths passed to supported launch APIs", () => {

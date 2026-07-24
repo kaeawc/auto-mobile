@@ -368,6 +368,47 @@ describe("WebRtcPublisher keyframe requests", () => {
     pc.pliSubscribers[0]();
     expect(requests).toBe(2);
   });
+
+  test("reports IDR completion and RTP publication readiness after a relayed PLI", async () => {
+    const pc = new FakePeerConnection();
+    const timer = new FakeTimer();
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        timer,
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+        onKeyFrameRequest: () => {},
+      }
+    );
+    await publisher.start();
+    pc.pliSubscribers[0]();
+
+    const start = Buffer.from([0, 0, 0, 1]);
+    publisher.writeH264Chunk(
+      Buffer.concat([
+        start, Buffer.from([0x67, 0x42, 0xe0, 0x2a]),
+        start, Buffer.from([0x68, 0xce, 0x3c, 0x80]),
+        start, Buffer.from([0x65, 0x80, 0x00]),
+        start, Buffer.from([0x41, 0x80, 0x01]),
+        start, Buffer.from([0x41, 0x80, 0x02]),
+      ])
+    );
+
+    expect(publisher.getDescriptor().readiness).toMatchObject({
+      lastEncodedFrameTimestampUs: 0,
+      lastIdrTimestampUs: 0,
+      idrRequestCount: 1,
+      idrCompletionCount: 1,
+      encodedAccessUnitCount: 1,
+    });
+    expect(publisher.getDescriptor().readiness.publisherRtpPacketCount).toBeGreaterThan(0);
+    await publisher.stop();
+  });
 });
 
 describe("WebRtcPublisher frame-stall watchdog", () => {

@@ -27,6 +27,22 @@ data class WebRtcIceServer(
 )
 
 /**
+ * Readiness observations from the encoder/publisher path. Null counters and
+ * timestamps mean that the corresponding producer has not initialized yet.
+ */
+@Serializable
+data class WebRtcStreamReadiness(
+  val lastEncodedFrameTimestampUs: Long? = null,
+  val lastIdrTimestampUs: Long? = null,
+  val idrRequestCount: Long? = null,
+  val idrCompletionCount: Long? = null,
+  val encodedAccessUnitCount: Long? = null,
+  val publisherRtpPacketCount: Long? = null,
+  val captureSourceState: String = "not_initialized",
+  val lastSourceError: String? = null,
+)
+
+/**
  * State of one published stream.
  *
  * Note the counters are *send*-side: this describes the daemon publishing the device's screen to a
@@ -45,6 +61,7 @@ data class WebRtcStreamDescriptor(
   val packetsSent: Long = 0,
   val audioPacketsSent: Long = 0,
   val audioSamplesSent: Long = 0,
+  val readiness: WebRtcStreamReadiness = WebRtcStreamReadiness(),
 )
 
 /**

@@ -7,7 +7,7 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { H264CaptureSource } from "./H264CaptureSource";
+import type { H264CaptureSource, H264CaptureSourceTelemetry } from "./H264CaptureSource";
 import {
   VIDEO_SERVER_CODEC_ID_H264,
   VIDEO_SERVER_CODEC_ID_PCM16,
@@ -32,6 +32,9 @@ const STREAMING_STARTED_MARKER = "Streaming started";
  * `VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME` in the Kotlin video-server.
  */
 export const VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME = 0x01;
+/** Retry a replaced local ADB socket without tearing down the device encoder. */
+export const DEFAULT_LOCAL_SOCKET_RECONNECT_WINDOW_MS = 5_000;
+export const DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS = 100;
 
 /** Minimal socket surface the source needs, for injectable testing. */
 export interface StreamSocket {
@@ -44,13 +47,37 @@ export interface StreamSocket {
 }
 
 /** Connects to a forwarded local TCP port and resolves once connected. */
-export type SocketConnector = (port: number) => Promise<StreamSocket>;
+export type SocketConnector = (port: number, signal?: AbortSignal) => Promise<StreamSocket>;
 
-const defaultConnector: SocketConnector = port =>
+const defaultConnector: SocketConnector = (port, signal) =>
   new Promise<StreamSocket>((resolve, reject) => {
     const socket = netConnect(port, "127.0.0.1");
-    socket.once("connect", () => resolve(socket));
-    socket.once("error", reject);
+    let settled = false;
+    const finish = (fn: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.off("connect", onConnect);
+      socket.off("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+      fn();
+    };
+    const onConnect = (): void => finish(() => resolve(socket));
+    const onError = (error: Error): void => finish(() => reject(error));
+    const onAbort = (): void =>
+      finish(() => {
+        socket.destroy();
+        reject(new Error("video-server socket connection aborted"));
+      });
+
+    socket.once("connect", onConnect);
+    socket.once("error", onError);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 
 export interface PersistentEncoderH264SourceOptions {
@@ -72,6 +99,10 @@ export interface PersistentEncoderH264SourceOptions {
   timer?: Timer;
   /** How long to wait for the server to signal readiness (ms). */
   readyTimeoutMs?: number;
+  /** Bounded time to reconnect a dropped local socket before failing the source. */
+  localSocketReconnectWindowMs?: number;
+  /** Spacing between local socket reconnect attempts. */
+  localSocketReconnectRetryMs?: number;
 }
 
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
@@ -94,6 +125,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly connector: SocketConnector;
   private readonly timer: Timer;
   private readonly readyTimeoutMs: number;
+  private readonly localSocketReconnectWindowMs: number;
+  private readonly localSocketReconnectRetryMs: number;
 
   private server: AdbProcess | null = null;
   private socket: StreamSocket | null = null;
@@ -102,6 +135,14 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private teardownPromise: Promise<void> | null = null;
   private resolveStartupAudioHeader: ((header: VideoServerStreamHeader) => void) | undefined;
   private resolveStartupAudioPacket: ((packet: VideoServerPacket) => void) | undefined;
+  private socketReconnectPromise: Promise<void> | null = null;
+  private telemetryInitialized = false;
+  private lastEncodedFrameTimestampUs: number | null = null;
+  private lastIdrTimestampUs: number | null = null;
+  private idrRequestCount = 0;
+  private idrCompletionCount = 0;
+  private pendingIdrRequests = 0;
+  private encodedAccessUnitCount = 0;
 
   constructor(options: PersistentEncoderH264SourceOptions) {
     this.options = options;
@@ -109,10 +150,36 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.connector = options.connector ?? defaultConnector;
     this.timer = options.timer ?? defaultTimer;
     this.readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
+    this.localSocketReconnectWindowMs =
+      options.localSocketReconnectWindowMs ?? DEFAULT_LOCAL_SOCKET_RECONNECT_WINDOW_MS;
+    this.localSocketReconnectRetryMs =
+      options.localSocketReconnectRetryMs ?? DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS;
+    if (this.localSocketReconnectWindowMs <= 0 || this.localSocketReconnectRetryMs <= 0) {
+      throw new ActionableError("Local socket reconnect timings must be positive milliseconds.");
+    }
   }
 
   get isRunning(): boolean {
     return this.running;
+  }
+
+  getTelemetry(): H264CaptureSourceTelemetry {
+    if (!this.telemetryInitialized) {
+      return {
+        lastEncodedFrameTimestampUs: null,
+        lastIdrTimestampUs: null,
+        idrRequestCount: null,
+        idrCompletionCount: null,
+        encodedAccessUnitCount: null,
+      };
+    }
+    return {
+      lastEncodedFrameTimestampUs: this.lastEncodedFrameTimestampUs,
+      lastIdrTimestampUs: this.lastIdrTimestampUs,
+      idrRequestCount: this.idrRequestCount,
+      idrCompletionCount: this.idrCompletionCount,
+      encodedAccessUnitCount: this.encodedAccessUnitCount,
+    };
   }
 
   async start(): Promise<void> {
@@ -152,9 +219,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (!this.running || !socket) {
       return;
     }
+    this.telemetryInitialized = true;
+    this.idrRequestCount++;
+    this.pendingIdrRequests++;
     try {
       socket.write(Buffer.from([VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME]));
     } catch (error) {
+      this.pendingIdrRequests--;
       // Best-effort: a dropped socket surfaces via its own error/close handler.
       logger.debug(`[PersistentEncoderH264Source] keyframe request write failed: ${error}`);
     }
@@ -235,7 +306,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         rejectStartupSocketFailure?.(error);
         return;
       }
-      this.failIfRunning(error);
+      this.reconnectSocket(socket, error);
     }, header => this.resolveStartupAudioHeader?.(header));
 
     // For audio-enabled streams, REMOTE_SUBMIX initialization happens after the
@@ -410,6 +481,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     const parser = new VideoServerStreamParser({
       onHeader: header => {
         onStreamHeader?.(header);
+        // Every local client attach, including a replacement socket, triggers a
+        // fresh encoder request. The video-server has already replayed cached
+        // SPS/PPS + IDR; this makes the next frame current without a GOP wait.
+        this.requestKeyFrame();
         logger.info(
           `[PersistentEncoderH264Source] stream ${header.width}x${header.height} codec=0x${header.codecId.toString(16)}`
         );
@@ -417,6 +492,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       onPacket: packet => {
         if (this.socket === socket) {
           if (packet.codecId === VIDEO_SERVER_CODEC_ID_H264) {
+            this.observeVideoPacket(packet);
             this.options.onData(packet.data);
           } else if (packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16) {
             this.options.onAudioData?.(packet.data);
@@ -428,6 +504,120 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     socket.on("data", chunk => parser.push(chunk));
     socket.on("error", onSocketFailure);
     socket.on("close", () => onSocketFailure(new Error("video-server socket closed")));
+  }
+
+  private observeVideoPacket(packet: VideoServerPacket): void {
+    if (packet.config) {
+      return;
+    }
+    this.telemetryInitialized = true;
+    if (packet.replayed) {
+      // The cached IDR makes the replacement client decodable, but it was emitted
+      // before this request. Preserve its timestamp only when no live observation
+      // exists; it cannot complete a pending encoder IDR request or increment the
+      // newly encoded access-unit counter.
+      this.lastEncodedFrameTimestampUs ??= packet.ptsUs;
+      if (packet.keyFrame) {
+        this.lastIdrTimestampUs ??= packet.ptsUs;
+      }
+      return;
+    }
+    this.lastEncodedFrameTimestampUs = packet.ptsUs;
+    this.encodedAccessUnitCount++;
+    if (!packet.keyFrame) {
+      return;
+    }
+    this.lastIdrTimestampUs = packet.ptsUs;
+    if (this.pendingIdrRequests > 0) {
+      this.pendingIdrRequests--;
+      this.idrCompletionCount++;
+    }
+  }
+
+  private reconnectSocket(failedSocket: StreamSocket, error: Error): void {
+    if (
+      !this.running ||
+      this.socket !== failedSocket ||
+      this.socketReconnectPromise !== null
+    ) {
+      return;
+    }
+    this.socket = null;
+    failedSocket.destroy();
+    this.socketReconnectPromise = this.tryReconnectSocket(error).finally(() => {
+      this.socketReconnectPromise = null;
+    });
+  }
+
+  private async tryReconnectSocket(initialError: Error): Promise<void> {
+    const port = this.forwardedPort;
+    if (port === null) {
+      this.failIfRunning(initialError);
+      return;
+    }
+
+    const deadline = this.timer.now() + this.localSocketReconnectWindowMs;
+    let lastError = initialError;
+    while (this.running && this.server !== null) {
+      try {
+        const socket = await this.connectBeforeDeadline(port, deadline);
+        if (!this.running || this.server === null) {
+          socket.destroy();
+          return;
+        }
+        this.socket = socket;
+        this.wireSocket(socket, error => this.reconnectSocket(socket, error));
+        logger.info("[PersistentEncoderH264Source] reconnected to retained video-server socket");
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(this.localSocketReconnectRetryMs, remainingMs));
+    }
+
+    this.failIfRunning(
+      new Error(
+        `video-server socket did not reconnect within ${this.localSocketReconnectWindowMs}ms: ${lastError.message}`
+      )
+    );
+  }
+
+  private async connectBeforeDeadline(port: number, deadline: number): Promise<StreamSocket> {
+    const remainingMs = deadline - this.timer.now();
+    if (remainingMs <= 0) {
+      throw new Error("video-server socket reconnect deadline elapsed");
+    }
+
+    const controller = new AbortController();
+    let timedOut = false;
+    const connection = this.connector(port, controller.signal);
+    const timeout = this.timer.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, remainingMs);
+    const timeoutFailure = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(new Error("video-server socket reconnect attempt timed out")),
+        { once: true }
+      );
+    });
+
+    try {
+      return await Promise.race([connection, timeoutFailure]);
+    } finally {
+      this.timer.clearTimeout(timeout);
+      if (timedOut) {
+        // A connector that ignored cancellation may still resolve. Do not leave
+        // that late local socket open after the source has failed its deadline.
+        void connection.then(socket => socket.destroy(), () => {});
+      }
+    }
   }
 
   /** Surface a post-start fatal failure exactly once and stop feeding data. */

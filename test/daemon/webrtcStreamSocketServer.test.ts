@@ -47,6 +47,18 @@ function descriptor(streamId: string, state: WebRtcStreamDescriptor["state"] = "
     iceServers: [],
     framesSent: 0,
     packetsSent: 0,
+    audioPacketsSent: 0,
+    audioSamplesSent: 0,
+    readiness: {
+      lastEncodedFrameTimestampUs: null,
+      lastIdrTimestampUs: null,
+      idrRequestCount: null,
+      idrCompletionCount: null,
+      encodedAccessUnitCount: null,
+      publisherRtpPacketCount: null,
+      captureSourceState: "not_initialized",
+      lastSourceError: null,
+    },
   };
 }
 

@@ -218,10 +218,6 @@ object VideoServer {
     capture = ScreenCapture(width, height, densityDpi)
     capture!!.start(surface)
 
-    // Create stream writer
-    streamWriter = VideoStreamWriter(SOCKET_NAME, width, height, audioEnabled)
-    streamWriter!!.start()
-
     // Backstop for idle-screen frame starvation (#4383): on a static screen the mirror
     // stops submitting buffers, so KEY_REPEAT_PREVIOUS_FRAME_AFTER alone does not reliably
     // sustain output and a keyframe request cannot yield a fresh IDR. The heartbeat tells us
@@ -230,15 +226,18 @@ object VideoServer {
       FrameHeartbeat(clock = FrameHeartbeat.Clock { android.os.SystemClock.uptimeMillis() })
     heartbeat.start()
 
-    // Read host→device commands (e.g. a relayed WHEP viewer PLI) and ask the
-    // encoder for a fresh IDR so late/recovering viewers decode without waiting
-    // for the 2s I-frame interval. Also arm the heartbeat so an idle screen that
-    // produces no frame for the request still gets a forced fresh submission.
+    // The writer keeps the encoder alive while its LocalSocket client
+    // reconnects, replays cached decoder state, and requests a new IDR at attach.
+    streamWriter = VideoStreamWriter(SOCKET_NAME, width, height, audioEnabled)
     streamWriter!!.startCommandReader { command ->
       if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {
         encoder?.requestKeyFrame()
         heartbeat.onKeyFrameRequested()
       }
+    }
+    streamWriter!!.start {
+      encoder?.requestKeyFrame()
+      heartbeat.onKeyFrameRequested()
     }
 
     if (audioEnabled) {
@@ -281,6 +280,11 @@ object VideoServer {
       // keyframe request produced nothing), nudge it into re-submitting a fresh frame.
       if (heartbeat.poll()) {
         capture?.forceFrame()
+      }
+
+      if (streamWriter!!.reconnectWindowExpired()) {
+        println("Client did not reconnect before the video reconnect window expired")
+        break
       }
     }
 

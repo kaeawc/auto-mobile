@@ -9,6 +9,8 @@ import {
   resolveWebRtcStreamingConfig,
   type H264CaptureSource,
   type H264CaptureSourceOptions,
+  type H264CaptureSourceTelemetry,
+  type WebRtcCaptureSourceState,
   type WebRtcPublisherConfig,
   type WebRtcPublisherDeps,
   type WebRtcStreamDescriptor,
@@ -40,6 +42,9 @@ interface WebRtcStreamRecord {
    * "capture running" — a video-only start returns before capture begins.
    */
   sourceStarted: boolean;
+  sourceState: WebRtcCaptureSourceState;
+  lastSourceError: string | null;
+  sourceTelemetry: H264CaptureSourceTelemetry | null;
   /** Reservation token for a start that has not returned to its caller yet. */
   startToken: symbol;
 }
@@ -126,17 +131,30 @@ async function withRecord(
 
 /** Descriptor for a record, including the manager-owned capture-source state. */
 function describeRecord(record: WebRtcStreamRecord): WebRtcStreamDescriptor {
-  return { ...record.publisher.getDescriptor(), sourceStarted: record.sourceStarted };
+  const descriptor = record.publisher.getDescriptor();
+  const sourceTelemetry = record.source?.getTelemetry?.() ?? record.sourceTelemetry;
+  return {
+    ...descriptor,
+    sourceStarted: record.sourceStarted,
+    readiness: {
+      ...descriptor.readiness,
+      ...sourceTelemetry,
+      captureSourceState: record.sourceState,
+      lastSourceError: record.lastSourceError,
+    },
+  };
 }
 
 /** Stop and clear the capture source for a stream (before each (re)establish). */
 async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   record.sourceStarted = false;
   if (record.source) {
+    record.sourceTelemetry = record.source.getTelemetry?.() ?? record.sourceTelemetry;
     await record.source.stop().catch(error => {
       logger.debug(`[WebRtcStream] source stop failed: ${error}`);
     });
     record.source = null;
+    record.sourceState = "stopped";
   }
 }
 
@@ -156,12 +174,16 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
   if (streams.get(record.streamId) !== record) {
     return false;
   }
+  record.sourceState = "starting";
   const source = dependencies.createSource(
     {
       device: record.device,
       onData: chunk => record.publisher.writeH264Chunk(chunk),
       onAudioData: chunk => record.publisher.writePcmAudioChunk(chunk),
       onError: error => {
+        record.sourceState = "failed";
+        record.lastSourceError = error.message;
+        record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
         record.publisher.notifySourceFailed(error);
       },
       bitrateBps: record.bitrateBps,
@@ -172,7 +194,14 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
     record.jarPath
   );
   record.source = source;
-  await source.start();
+  try {
+    await source.start();
+  } catch (error) {
+    record.sourceState = "failed";
+    record.lastSourceError = error instanceof Error ? error.message : String(error);
+    record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
+    throw error;
+  }
   // The stream may have been stopped while the source was starting. stop() only
   // reaches record.source, which was still null when it ran, so stop the source
   // we just spawned to avoid an orphaned screenrecord process.
@@ -182,6 +211,8 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
     return false;
   }
   record.sourceStarted = true;
+  record.sourceState = "running";
+  record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
   return true;
 }
 
@@ -232,6 +263,16 @@ function stoppedPendingDescriptor(pending: PendingWebRtcStart): WebRtcStreamDesc
     packetsSent: 0,
     audioPacketsSent: 0,
     audioSamplesSent: 0,
+    readiness: {
+      lastEncodedFrameTimestampUs: null,
+      lastIdrTimestampUs: null,
+      idrRequestCount: null,
+      idrCompletionCount: null,
+      encodedAccessUnitCount: null,
+      publisherRtpPacketCount: null,
+      captureSourceState: "stopped",
+      lastSourceError: null,
+    },
   };
 }
 
@@ -270,9 +311,7 @@ function cancelRecordStart(record: WebRtcStreamRecord): void {
 
 /** Stop live media components while retaining best-effort cleanup semantics. */
 async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
-  await record.source?.stop().catch(error => {
-    logger.debug(`[WebRtcStream] source stop failed: ${error}`);
-  });
+  await stopSource(record);
   await record.publisher.stop().catch(error => {
     logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
   });
@@ -411,6 +450,9 @@ export async function startWebRtcStream(
       audioEnabled: config.audioEnabled,
       startedAt: dependencies.now().toISOString(),
       sourceStarted: false,
+      sourceState: "not_initialized",
+      lastSourceError: null,
+      sourceTelemetry: null,
       startToken,
     };
     streams.set(streamId, record);
@@ -451,9 +493,8 @@ export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamD
   const record = resolveStreamRecord(streamId);
   streams.delete(record.streamId);
   cancelRecordStart(record);
-  const descriptor = describeRecord(record);
   await stopActiveRecord(record);
-  return { ...descriptor, state: "stopped" };
+  return { ...describeRecord(record), state: "stopped" };
 }
 
 /** List reconnect descriptors for all active streams. */

@@ -22,7 +22,17 @@ class WebRtcStreamSocketClientTest {
       "framesSent": 120,
       "packetsSent": 480,
       "audioPacketsSent": 0,
-      "audioSamplesSent": 0
+      "audioSamplesSent": 0,
+      "readiness": {
+        "lastEncodedFrameTimestampUs": 1000,
+        "lastIdrTimestampUs": 900,
+        "idrRequestCount": 2,
+        "idrCompletionCount": 1,
+        "encodedAccessUnitCount": 3,
+        "publisherRtpPacketCount": 6,
+        "captureSourceState": "running",
+        "lastSourceError": null
+      }
     }
     """
 
@@ -88,6 +98,8 @@ class WebRtcStreamSocketClientTest {
       assertEquals("https://coord.example.com/whip", stream.whipEndpoint)
       assertEquals(120L, stream.framesSent)
       assertEquals("stun:stun.example.com:3478", stream.iceServers.single().urls)
+      assertEquals(1000L, stream.readiness.lastEncodedFrameTimestampUs)
+      assertEquals("running", stream.readiness.captureSourceState)
     }
   }
 

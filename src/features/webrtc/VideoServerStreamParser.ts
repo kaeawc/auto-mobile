@@ -10,7 +10,8 @@
  *   big-endian, followed by `size` bytes of encoded data.
  *   - bit 63 of `pts_and_flags`: CONFIG (codec config / SPS+PPS)
  *   - bit 62: KEY_FRAME (IDR)
- *   - bits 0-61: presentation timestamp (microseconds)
+ *   - bit 61: REPLAYED (cached packet for a replacement client)
+ *   - bits 0-60: presentation timestamp (microseconds)
  *
  * Each packet payload is already Annex-B (MediaCodec AVC byte-buffer output), so
  * the concatenation of payloads is a valid Annex-B elementary stream — exactly
@@ -33,6 +34,8 @@ const MUX_TRACK_BYTES = 16;
 const MUX_PACKET_HEADER_BYTES = 16;
 const FLAG_CONFIG = 1n << 63n;
 const FLAG_KEY_FRAME = 1n << 62n;
+const FLAG_REPLAYED = 1n << 61n;
+const PTS_MASK = FLAG_REPLAYED - 1n;
 
 export interface VideoServerStreamHeader {
   codecId: number;
@@ -51,6 +54,8 @@ export interface VideoServerPacket {
   config: boolean;
   /** Key frame (IDR). */
   keyFrame: boolean;
+  /** Cached packet replayed for a replacement LocalSocket client. */
+  replayed: boolean;
   /** Presentation timestamp in microseconds. */
   ptsUs: number;
 }
@@ -142,7 +147,8 @@ export class VideoServerStreamParser {
         data,
         config: (flags & FLAG_CONFIG) !== 0n,
         keyFrame: (flags & FLAG_KEY_FRAME) !== 0n,
-        ptsUs: Number(flags & (FLAG_KEY_FRAME - 1n)),
+        replayed: (flags & FLAG_REPLAYED) !== 0n,
+        ptsUs: Number(flags & PTS_MASK),
       });
     }
   }
@@ -169,7 +175,8 @@ export class VideoServerStreamParser {
         data,
         config: (flags & FLAG_CONFIG) !== 0n,
         keyFrame: (flags & FLAG_KEY_FRAME) !== 0n,
-        ptsUs: Number(flags & (FLAG_KEY_FRAME - 1n)),
+        replayed: (flags & FLAG_REPLAYED) !== 0n,
+        ptsUs: Number(flags & PTS_MASK),
       });
     }
   }

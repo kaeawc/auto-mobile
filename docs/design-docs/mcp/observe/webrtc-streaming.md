@@ -195,10 +195,26 @@ Newline-delimited JSON request/response.
     "framesSent": 0,
     "packetsSent": 0,
     "audioPacketsSent": 0,
-    "audioSamplesSent": 0
+    "audioSamplesSent": 0,
+    "readiness": {
+      "lastEncodedFrameTimestampUs": null,
+      "lastIdrTimestampUs": null,
+      "idrRequestCount": null,
+      "idrCompletionCount": null,
+      "encodedAccessUnitCount": null,
+      "publisherRtpPacketCount": null,
+      "captureSourceState": "not_initialized",
+      "lastSourceError": null
+    }
   }
 }
 ```
+
+`readiness` separates capture-source, encoder, IDR, and RTP-publication
+progress. A `null` counter or timestamp has not been initialized by its
+producer; a numeric zero is a measured value. `captureSourceState` is
+`not_initialized`, `starting`, `running`, `failed`, or `stopped`, and
+`lastSourceError` identifies the latest capture failure when present.
 
 ## Configuration
 

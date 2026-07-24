@@ -24,6 +24,24 @@ class FakeSource implements H264CaptureSource {
   }
 }
 
+class PersistentFakeSource extends FakeSource {
+  keyFrameRequests = 0;
+
+  requestKeyFrame(): void {
+    this.keyFrameRequests++;
+  }
+
+  getTelemetry() {
+    return {
+      lastEncodedFrameTimestampUs: 123,
+      lastIdrTimestampUs: 123,
+      idrRequestCount: 1,
+      idrCompletionCount: 1,
+      encodedAccessUnitCount: 2,
+    };
+  }
+}
+
 function baseOptions(): AndroidH264SourceOptions {
   return { device: DEVICE, onData: () => {} };
 }
@@ -62,6 +80,27 @@ describe("createAndroidH264CaptureSource", () => {
     await source.stop();
     expect(persistent.stopped).toBe(1);
     expect(screenrecord.stopped).toBe(0);
+  });
+
+  test("forwards persistent keyframe control and telemetry through the fallback wrapper", async () => {
+    const persistent = new PersistentFakeSource();
+    const deps: AndroidH264CaptureSourceDeps = {
+      createPersistent: () => persistent,
+      createScreenrecord: () => new FakeSource(),
+    };
+    const source = createAndroidH264CaptureSource(baseOptions(), "/tmp/automobile-video.jar", deps);
+
+    await source.start();
+    source.requestKeyFrame?.();
+
+    expect(persistent.keyFrameRequests).toBe(1);
+    expect(source.getTelemetry?.()).toEqual({
+      lastEncodedFrameTimestampUs: 123,
+      lastIdrTimestampUs: 123,
+      idrRequestCount: 1,
+      idrCompletionCount: 1,
+      encodedAccessUnitCount: 2,
+    });
   });
 
   test("falls back to screenrecord when the persistent encoder fails to start", async () => {

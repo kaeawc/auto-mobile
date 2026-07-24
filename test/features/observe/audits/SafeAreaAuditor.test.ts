@@ -7,6 +7,7 @@ function observation(): ObserveResult {
     updatedAt: 1,
     screenSize: { width: 100, height: 200 },
     systemInsets: { top: 20, right: 0, bottom: 20, left: 0 },
+    activeWindow: { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 1 },
     insets: {
       available: true,
       source: "android-window-metrics",
@@ -36,6 +37,45 @@ describe("SafeAreaAuditor", () => {
     expect(warnings).toHaveLength(2);
     expect(warnings.map(warning => warning.element.viewId)).toEqual(["title", "continue"]);
     expect(warnings[1]).toMatchObject({ categories: ["text", "interaction"], sides: ["bottom"], insetTypes: ["systemBars"] });
+  });
+
+  test("excludes foreign resource IDs when nodes omit package metadata", () => {
+    const result = observation();
+    result.insets!.systemGestures = { top: 0, right: 0, bottom: 20, left: 0 };
+    result.viewHierarchy!.hierarchy.node = [
+      {
+        "text": "Compose",
+        "view-id": "composer",
+        "resource-id": "com.example:id/composer",
+        "bounds": { left: 10, top: 170, right: 90, bottom: 196 },
+      },
+      {
+        "text": "Back",
+        "view-id": "ime-nav-back",
+        "resource-id": "android:id/input_method_nav_back",
+        "clickable": "true",
+        "bounds": { left: 10, top: 170, right: 90, bottom: 196 },
+      },
+      {
+        "text": "q",
+        "view-id": "ime-key",
+        "resource-id": "com.google.android.inputmethod.latin:id/key_pos_q",
+        "clickable": "true",
+        "bounds": { left: 10, top: 170, right: 90, bottom: 196 },
+      },
+      {
+        "text": "Framework button",
+        "view-id": "framework-button",
+        "resource-id": "android:id/button1",
+        "clickable": "true",
+        "bounds": { left: 10, top: 8, right: 90, bottom: 28 },
+      },
+    ] as any;
+
+    const warnings = new SafeAreaAuditor().inspect(result);
+
+    expect(warnings).toHaveLength(2);
+    expect(warnings.map(warning => warning.element.viewId)).toEqual(["composer", "framework-button"]);
   });
 
   test("returns no warnings when measurements are unavailable", () => {

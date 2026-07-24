@@ -1,186 +1,38 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
-import ts from "typescript";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  directlyExecutesSdkManager,
+  findOffenders,
+  OWNER as CLIENT,
+  sourceFiles,
+} from "../../scripts/check-sdkmanager-execution-boundary";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const CLIENT = "src/utils/android-cmdline-tools/SdkManagerClient.ts";
-const LAUNCHER_NAMES = new Set([
-  "spawn",
-  "spawnSync",
-  "spawnCommand",
-  "exec",
-  "execSync",
-  "execFile",
-  "execFileSync",
-]);
-
-function directlyExecutesSdkManager(source: string): boolean {
-  const lowerSource = source.toLowerCase();
-  if (!lowerSource.includes("sdk") || !lowerSource.includes("manager")) {return false;}
-
-  const sourceFile = ts.createSourceFile(
-    "sdkmanager-boundary.ts",
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const launcherAliases = new Set(LAUNCHER_NAMES);
-  const initializers = new Map<string, ts.Expression[]>();
-  const declarations: ts.VariableDeclaration[] = [];
-  // Bindings are keyed by bare name, not by scope, and every value bound to a name is
-  // consulted — so a name bound anywhere in the file poisons every use of that name. That
-  // errs toward over-detection deliberately: a false CI failure is loud and fixable, a missed
-  // `spawn(sdkmanager)` is not.
-  const bindValue = (name: string, value: ts.Expression): void => {
-    initializers.set(name, [...(initializers.get(name) ?? []), value]);
-  };
-
-  const collect = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) &&
-      ["child_process", "node:child_process"].includes(node.moduleSpecifier.text)) {
-      const bindings = node.importClause?.namedBindings;
-      if (bindings && ts.isNamedImports(bindings)) {
-        for (const element of bindings.elements) {
-          const importedName = element.propertyName?.text ?? element.name.text;
-          if (LAUNCHER_NAMES.has(importedName)) {launcherAliases.add(element.name.text);}
-        }
-      }
-    }
-    if (ts.isVariableDeclaration(node)) {
-      declarations.push(node);
-      if (ts.isIdentifier(node.name) && node.initializer) {
-        bindValue(node.name.text, node.initializer);
-      }
-      if (ts.isObjectBindingPattern(node.name)) {
-        for (const element of node.name.elements) {
-          const propertyName = element.propertyName && ts.isIdentifier(element.propertyName)
-            ? element.propertyName.text
-            : ts.isIdentifier(element.name) ? element.name.text : undefined;
-          if (propertyName && LAUNCHER_NAMES.has(propertyName) && ts.isIdentifier(element.name)) {
-            launcherAliases.add(element.name.text);
-          }
-        }
-      }
-    }
-    // `let command: string; command = ...;` carries no declaration initializer, so the
-    // deferred assignment is the only place the value is visible.
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isIdentifier(node.left)) {
-      bindValue(node.left.text, node.right);
-    }
-    ts.forEachChild(node, collect);
-  };
-  collect(sourceFile);
-
-  // `promisify(execFile)` is the dominant launcher idiom in src/, so both the stored alias
-  // (`const run = promisify(exec); run(...)`) and the immediate call (`promisify(exec)(...)`)
-  // have to read as launcher references.
-  const isPromisifiedLauncher = (node: ts.Expression): boolean => {
-    if (!ts.isCallExpression(node) || node.arguments.length !== 1) {return false;}
-    const callee = node.expression;
-    const calleeName = ts.isIdentifier(callee) ? callee.text
-      : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
-    return calleeName === "promisify" && isLauncherReference(node.arguments[0]);
-  };
-  const isLauncherReference = (node: ts.Expression): boolean => {
-    if (ts.isIdentifier(node)) {return launcherAliases.has(node.text);}
-    if (ts.isCallExpression(node)) {return isPromisifiedLauncher(node);}
-    return ts.isPropertyAccessExpression(node) && LAUNCHER_NAMES.has(node.name.text);
-  };
-  let aliasesChanged = true;
-  while (aliasesChanged) {
-    aliasesChanged = false;
-    for (const declaration of declarations) {
-      if (!ts.isIdentifier(declaration.name) || !declaration.initializer ||
-        !isLauncherReference(declaration.initializer) || launcherAliases.has(declaration.name.text)) {
-        continue;
-      }
-      launcherAliases.add(declaration.name.text);
-      aliasesChanged = true;
-    }
-  }
-
-  const staticText = (node: ts.Expression): string | undefined => {
-    if (ts.isStringLiteralLike(node)) {return node.text;}
-    if (ts.isParenthesizedExpression(node)) {return staticText(node.expression);}
-    // Join the static chunks of a template with a separator no identifier can contain, so
-    // `sdkmanager` is only matched when it sits wholly inside one chunk.
-    if (ts.isTemplateExpression(node)) {
-      return [node.head.text, ...node.templateSpans.map(span => span.literal.text)].join("\u0000");
-    }
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-      const left = staticText(node.left);
-      const right = staticText(node.right);
-      return left === undefined || right === undefined ? undefined : left + right;
-    }
-    return undefined;
-  };
-  const mentionsSdkManager = (node: ts.Node, seen = new Set<string>()): boolean => {
-    if (ts.isExpression(node) && staticText(node)?.toLowerCase().includes("sdkmanager")) {
-      return true;
-    }
-    // `exec(`${sdkmanagerPath} --version`)` hides the tool name in the identifier, not in any
-    // static chunk of the template.
-    if (ts.isIdentifier(node) && node.text.toLowerCase().includes("sdkmanager")) {return true;}
-    if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      const boundValues = initializers.get(node.text) ?? [];
-      if (boundValues.length > 0) {
-        const nextSeen = new Set(seen);
-        nextSeen.add(node.text);
-        if (boundValues.some(value => mentionsSdkManager(value, nextSeen))) {return true;}
-      }
-    }
-    let found = false;
-    ts.forEachChild(node, child => {
-      if (!found && mentionsSdkManager(child, seen)) {found = true;}
-    });
-    return found;
-  };
-
-  let directExecution = false;
-  const inspect = (node: ts.Node): void => {
-    if (directExecution) {return;}
-    if (ts.isCallExpression(node) && isLauncherReference(node.expression) &&
-      node.arguments.some(argument => mentionsSdkManager(argument))) {
-      directExecution = true;
-      return;
-    }
-    ts.forEachChild(node, inspect);
-  };
-  inspect(sourceFile);
-  return directExecution;
-}
-
-function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {return sourceFiles(path);}
-    return entry.name.endsWith(".ts") ? [path] : [];
-  });
-}
 
 describe("sdkmanager execution boundary (issue #4052)", () => {
+  // Whole-tree scan: reads ~700 files, so give it far more than Bun's 5s default — under
+  // `--coverage` on a slow CI runner the default timeout trips even though the work is small.
   test("only SdkManagerClient directly executes sdkmanager", async () => {
-    const exceptions = new Map<string, string>([
-      // Keep production diagnostics out of this list unless they cannot use the client.
-    ]);
     const files = sourceFiles(join(ROOT, "src"));
     // A silently-empty scan yields zero offenders and passes green while checking nothing.
     expect(files.length).toBeGreaterThan(100);
-    const sources = await Promise.all(files.map(async file => ({
-      file,
-      source: await Bun.file(file).text(),
-    })));
-    const offenders = sources.flatMap(({ file, source }) => {
-      const repoPath = relative(ROOT, file);
-      if (repoPath === CLIENT || exceptions.has(repoPath)) {return [];}
-      return directlyExecutesSdkManager(source)
-        ? [`${repoPath} directly executes sdkmanager; route it through ${CLIENT} instead.`]
-        : [];
-    });
+    const offenders = await findOffenders(ROOT);
     expect(offenders, offenders.join("\n")).toEqual([]);
+  }, 30_000);
+
+  test("stays bounded on repeated-reference binding chains (no exponential blow-up)", () => {
+    // A chain where each binding references the previous one twice is the pathological input for
+    // a recursive initializer walk: resolving `a40` re-descends 2^40 times. The chain terminates
+    // in a launcher so the walk is actually forced, and `a0` is sdkmanager so the true verdict
+    // still exercises the deep path. The memoized taint fixpoint makes it linear; without it this
+    // hangs (Lens A measured a clean 2^N doubling: n=22 already took ~6s).
+    const lines = ['const a0 = "sdkmanager";'];
+    for (let i = 1; i <= 40; i++) {lines.push(`const a${i} = a${i - 1} + a${i - 1};`);}
+    lines.push("execFile(a40, []);");
+    const start = Bun.nanoseconds();
+    expect(directlyExecutesSdkManager(lines.join("\n"))).toBe(true);
+    expect((Bun.nanoseconds() - start) / 1e6).toBeLessThan(100);
   });
 
   test("detects resolved paths passed to supported launch APIs", () => {
@@ -235,6 +87,51 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
     expect(directlyExecutesSdkManager(
       "const readFileAsync = promisify(readFile); await readFileAsync(sdkmanagerPath);",
     )).toBe(false);
+  });
+
+  test("detects sdkmanager reached across functions via a parameter (issue #4341)", () => {
+    // The launcher call site names only the parameter `bin`; the tool name lives at the
+    // caller. A purely call-site-local reading (the pre-#4341 behaviour) misses this.
+    expect(directlyExecutesSdkManager(
+      'function run(bin) { execFile(bin, args); }\nrun("sdkmanager");',
+    )).toBe(true);
+    // A different tool passed the same way must not trip the guard.
+    expect(directlyExecutesSdkManager(
+      'function run(bin) { execFile(bin, args); }\nrun("avdmanager");',
+    )).toBe(false);
+    // Two hops: caller -> intermediate -> launcher.
+    expect(directlyExecutesSdkManager(
+      "function launch(cmd) { execFile(cmd, args); }\nfunction run(bin) { launch(bin); }\nrun(\"sdkmanager\");",
+    )).toBe(true);
+  });
+
+  test("detects production-shaped resolve-in-one-method / spawn-in-another (issue #4341)", () => {
+    // Mirrors SdkManagerClient's structure: one method resolves the binary path to a
+    // static "sdkmanager", another method spawns the resolved path. No sdkmanager text
+    // sits at the launcher call site, so only interprocedural reasoning catches it.
+    const prodShaped = [
+      "class Tool {",
+      "  private resolveExecutable(location) { return join(location.path, \"bin\", \"sdkmanager\"); }",
+      "  private execute(path, args) { return this.deps.spawn(path, args, {}); }",
+      "  async run(args) { const path = this.resolveExecutable(loc); return this.execute(path, args); }",
+      "}",
+    ].join("\n");
+    expect(directlyExecutesSdkManager(prodShaped)).toBe(true);
+    // Same structure resolving a different tool must stay clean.
+    const prodShapedOther = prodShaped.replace("sdkmanager", "avdmanager");
+    expect(directlyExecutesSdkManager(prodShapedOther)).toBe(false);
+  });
+
+  test("fires on the real SdkManagerClient, a true positive on production code (issue #4341)", () => {
+    const client = readFileSync(join(ROOT, CLIENT), "utf8");
+    expect(directlyExecutesSdkManager(client)).toBe(true);
+  });
+
+  test("detects Bun.$ tagged-template execution (issue #4341)", () => {
+    expect(directlyExecutesSdkManager("await Bun.$`sdkmanager --list`;")).toBe(true);
+    expect(directlyExecutesSdkManager("await $`sdkmanager --list`;")).toBe(true);
+    expect(directlyExecutesSdkManager("await Bun.$`${dir}/bin/sdkmanager --list`;")).toBe(true);
+    expect(directlyExecutesSdkManager("await Bun.$`avdmanager list`;")).toBe(false);
   });
 
   test("allows diagnostic text that does not execute sdkmanager", () => {

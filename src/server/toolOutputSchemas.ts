@@ -237,6 +237,8 @@ const layoutWarningSchema = z.object({
   categories: z.array(z.enum(["text", "interaction"])),
   insetTypes: z.array(z.enum(["systemBars", "displayCutout", "safeArea", "systemGestures", "mandatorySystemGestures"])),
   sides: z.array(z.enum(["top", "right", "bottom", "left"])),
+  overflowPx: edgeInsetsSchema.partial(),
+  insetPx: edgeInsetsSchema.partial(),
   overlapPercent: z.number().int(),
   confidence: z.enum(["high", "medium"]),
 });

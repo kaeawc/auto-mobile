@@ -16,6 +16,7 @@ class ScreenCapture(
   private val densityDpi: Int,
 ) {
   private var virtualDisplay: VirtualDisplay? = null
+  private var surface: Surface? = null
 
   /**
    * Create a VirtualDisplay that mirrors the main display.
@@ -34,12 +35,32 @@ class ScreenCapture(
         displayIdToMirror = 0, // Mirror the main display
       )
     virtualDisplay = display
+    this.surface = surface
     return display
+  }
+
+  /**
+   * Force the mirror to re-submit a frame to the encoder surface. On a static screen no new buffers
+   * are queued, so the encoder stalls after its initial burst and a keyframe request cannot produce
+   * a fresh IDR (issue #4383). Re-applying the output surface makes DisplayManager re-composite the
+   * mirror, pushing a fresh frame the encoder can emit. Safe to call from the encode loop thread;
+   * the codec's own IDR interval still bounds GOP.
+   */
+  fun forceFrame() {
+    val display = virtualDisplay ?: return
+    val surface = this.surface ?: return
+    try {
+      display.setSurface(surface)
+    } catch (e: Exception) {
+      // Best-effort nudge: a released display surfaces its own failure via the encode loop.
+      System.err.println("forceFrame failed: ${e.message}")
+    }
   }
 
   /** Release the VirtualDisplay. */
   fun stop() {
     virtualDisplay?.release()
     virtualDisplay = null
+    surface = null
   }
 }

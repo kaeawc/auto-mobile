@@ -221,12 +221,22 @@ object VideoServer {
     streamWriter = VideoStreamWriter(SOCKET_NAME, width, height, audioEnabled)
     streamWriter!!.start()
 
+    // Backstop for idle-screen frame starvation (#4383): on a static screen the mirror
+    // stops submitting buffers, so KEY_REPEAT_PREVIOUS_FRAME_AFTER alone does not reliably
+    // sustain output and a keyframe request cannot yield a fresh IDR. The heartbeat tells us
+    // when to nudge the VirtualDisplay into re-submitting a frame.
+    val heartbeat =
+      FrameHeartbeat(clock = FrameHeartbeat.Clock { android.os.SystemClock.uptimeMillis() })
+    heartbeat.start()
+
     // Read host→device commands (e.g. a relayed WHEP viewer PLI) and ask the
     // encoder for a fresh IDR so late/recovering viewers decode without waiting
-    // for the 10s I-frame interval.
+    // for the 10s I-frame interval. Also arm the heartbeat so an idle screen that
+    // produces no frame for the request still gets a forced fresh submission.
     streamWriter!!.startCommandReader { command ->
       if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {
         encoder?.requestKeyFrame()
+        heartbeat.onKeyFrameRequested()
       }
     }
 
@@ -257,12 +267,19 @@ object VideoServer {
           }
         }
         encoder!!.releaseOutputBuffer(index)
+        heartbeat.onFrameEmitted()
 
         // Check for end of stream
         if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
           println("End of stream")
           break
         }
+      }
+
+      // Backstop the encoder's own idle repeats: if the mirror has gone quiet (or a
+      // keyframe request produced nothing), nudge it into re-submitting a fresh frame.
+      if (heartbeat.poll()) {
+        capture?.forceFrame()
       }
     }
 

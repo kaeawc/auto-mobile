@@ -334,9 +334,9 @@ compromised:
 | Situation | Behavior |
 | --- | --- |
 | Checksum known + **matches** | use the jar |
-| Checksum known + **mismatch** | **fatal** `ActionableError` from stream start, even in degrade mode — a corrupted/tampered download is never silently accepted |
+| Checksum known + **mismatch** | stream start returns `success: false` with a typed `capture_start_failed` screenshot fallback; the corrupted/tampered jar is never accepted |
 | Checksum **absent** (a pin predating jar delivery / unknown) | **degrade** to `screenrecord` |
-| `AUTOMOBILE_REQUIRE_VIDEO_SERVER=1` | any degrade case becomes a **hard error** — for CI that must not silently fall back |
+| `AUTOMOBILE_REQUIRE_VIDEO_SERVER=1` | any degrade case returns the same typed screenshot fallback instead of starting a stream — for CI that must not silently fall back |
 | `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD=1` | **local-only** (override / Gradle build); the network is never touched. A dedicated flag — it does **not** overload `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`, whose CtrlProxy APK is mandatory |
 
 See [Environment variables](../../../using/environment-variables.md) for the full

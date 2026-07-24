@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import WebSocket from "ws";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
+import { WhipClient } from "../../src/features/webrtc/WhipClient";
 
 /**
  * Real SFU + decoder coverage for #4290. This is deliberately opt-in: it
@@ -333,7 +334,7 @@ test.skipIf(process.platform === "win32")("captures a child spawn error for the 
 });
 
 describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
-  test("publishes real H.264 through WHIP and Chrome decodes the MediaMTX WHEP reader", async () => {
+  test("trickles candidates across a reconnect and Chrome decodes both WHEP sessions", async () => {
     const mediamtxBinary = process.env.AUTOMOBILE_MEDIAMTX_BINARY;
     if (!mediamtxBinary) {
       throw new Error("AUTOMOBILE_MEDIAMTX_BINARY is required; use bun run test:integration:webrtc-mediamtx");
@@ -344,11 +345,26 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
     let ffmpeg: ChildProcessWithoutNullStreams | undefined;
     let chrome: StartedProcess | undefined;
     let cdp: CdpClient | undefined;
-    const publisher = new WebRtcPublisher({
-      streamId: STREAM_NAME,
-      whipEndpoint: `http://127.0.0.1:${WEBRTC_PORT}/${STREAM_NAME}/whip`,
-      maxReconnectAttempts: 1,
-    });
+    const patchedResources: string[] = [];
+    const publisher = new WebRtcPublisher(
+      {
+        streamId: STREAM_NAME,
+        whipEndpoint: `http://127.0.0.1:${WEBRTC_PORT}/${STREAM_NAME}/whip`,
+        maxReconnectAttempts: 1,
+        trickleIce: true,
+      },
+      {
+        createWhipClient: options => {
+          const client = new WhipClient(options);
+          const patchCandidate = client.patchCandidate.bind(client);
+          client.patchCandidate = async (resourceUrl, etag, fragment, signal) => {
+            await patchCandidate(resourceUrl, etag, fragment, signal);
+            patchedResources.push(resourceUrl);
+          };
+          return client;
+        },
+      }
+    );
 
     try {
       await waitForHttpServer(
@@ -360,6 +376,14 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       );
 
       await publisher.start();
+      const initialResourceUrl = publisher.getDescriptor().resourceUrl;
+      if (!initialResourceUrl) {
+        throw new Error("WHIP ingest did not return a resource URL for candidate trickling");
+      }
+      await waitFor(
+        () => patchedResources.includes(initialResourceUrl),
+        "MediaMTX did not receive a trickled candidate for the initial WHIP resource"
+      );
       const ffmpegProcess = startProcess("ffmpeg", [
         "-hide_banner", "-loglevel", "error", "-re",
         "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10",
@@ -396,6 +420,36 @@ describeIntegration("MediaMTX WebRTC publisher integration (#4290)", () => {
       expect(decoded.width).toBe(320);
       expect(decoded.height).toBe(240);
       expect(decoded.decodedFrames).toBeGreaterThan(0);
+
+      // A reconnect must create a new WHIP resource, send candidates to that
+      // resource after it exists, and keep MediaMTX's WHEP fan-out decodable.
+      publisher.notifySourceFailed(new Error("integration reconnect"));
+      let reconnectedResourceUrl = "";
+      await waitFor(() => {
+        const resourceUrl = publisher.getDescriptor().resourceUrl;
+        if (!resourceUrl || resourceUrl === initialResourceUrl || !patchedResources.includes(resourceUrl)) {
+          return false;
+        }
+        reconnectedResourceUrl = resourceUrl;
+        return publisher.getState() === "connected";
+      }, "publisher did not reconnect with a trickled candidate on its replacement WHIP resource");
+      expect(reconnectedResourceUrl).not.toBe(initialResourceUrl);
+
+      cdp.close();
+      cdp = undefined;
+      await stopProcess(chrome.process);
+      chrome = undefined;
+      const reconnectDebugPort = await reserveLoopbackPort();
+      chrome = startProcess(resolveChromeBinary(), [
+        "--headless=new", "--no-first-run", "--no-default-browser-check",
+        "--autoplay-policy=no-user-gesture-required", `--remote-debugging-port=${reconnectDebugPort}`,
+        `--user-data-dir=${join(tempDir, "chrome-reconnect-profile")}`, "about:blank",
+      ], tempDir);
+      cdp = await openReader(chrome, reconnectDebugPort);
+      const recovered = await readDecodedVideo(cdp);
+      expect(recovered.width).toBe(320);
+      expect(recovered.height).toBe(240);
+      expect(recovered.decodedFrames).toBeGreaterThan(0);
       expect(ffmpegErrors).toBe("");
     } finally {
       cdp?.close();

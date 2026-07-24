@@ -89,6 +89,15 @@ describe("H264AnnexBParser", () => {
     expect(afterFlush).toHaveLength(1);
     expect(afterFlush[0].equals(second)).toBe(true);
   });
+
+  test("drops an unterminated oversized NAL instead of retaining it indefinitely", () => {
+    const parser = new H264AnnexBParser(8);
+
+    expect(() => parser.push(Buffer.concat([START_4, Buffer.alloc(5, 0x67)])))
+      .toThrow(/buffer exceeded 8 bytes/);
+    // The rejected partial NAL cannot contaminate the next capture source.
+    expect(parser.push(Buffer.concat([START_4, makeNal(NAL_TYPE_IDR, 2)])).length).toBe(0);
+  });
 });
 
 describe("H264AccessUnitAssembler", () => {

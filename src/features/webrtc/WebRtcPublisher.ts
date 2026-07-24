@@ -93,6 +93,12 @@ export interface WebRtcPublisherDeps {
    * without waiting for the periodic IDR interval. Throttled by the publisher.
    */
   onKeyFrameRequest?: () => void;
+  /**
+   * Called when packetization rejects source media after H.264 capability
+   * validation. The manager must expose the failure and recreate capture for
+   * the reconnect instead of reporting a healthy publisher with no usable RTP.
+   */
+  onSourceFailure?: (error: Error) => void;
   onStateChange?: (state: ReconnectState) => void;
   /** Significant publish milestones, owned by the stream coordinator for telemetry. */
   onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
@@ -205,6 +211,7 @@ export class WebRtcPublisher {
   private readonly onBeforeEstablish?: () => Promise<void> | void;
   private readonly onConnected?: () => Promise<void> | void;
   private readonly onKeyFrameRequest?: () => void;
+  private readonly onSourceFailure?: (error: Error) => void;
   private readonly onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
   private readonly controller: ReconnectController;
 
@@ -244,6 +251,7 @@ export class WebRtcPublisher {
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
     this.onKeyFrameRequest = deps.onKeyFrameRequest;
+    this.onSourceFailure = deps.onSourceFailure;
     this.onLifecycleEvent = deps.onLifecycleEvent;
     this.createPeerConnection =
       deps.createPeerConnection ??
@@ -291,16 +299,25 @@ export class WebRtcPublisher {
     try {
       const framesBefore = this.writer?.stats.framesWritten ?? 0;
       this.writer?.writeChunk(chunk);
-      if (!this.firstRtpSent && (this.writer?.stats.framesWritten ?? 0) > framesBefore) {
-        this.firstRtpSent = true;
-        this.onLifecycleEvent?.("first_rtp_sent");
-      }
+      this.recordFirstRtpIfConnected(framesBefore);
     } catch (error) {
+      const sourceFailure = error instanceof Error ? error : new Error(String(error));
       logger.warn(
-        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${error instanceof Error ? error.message : String(error)}`
+        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${sourceFailure.message}`
       );
-      this.notifySourceFailed();
+      this.notifySourceFailed(sourceFailure);
     }
+  }
+
+  private recordFirstRtpIfConnected(framesBefore: number): void {
+    if (this.firstRtpSent || this.pc?.connectionState !== "connected") {
+      return;
+    }
+    if ((this.writer?.stats.framesWritten ?? 0) <= framesBefore) {
+      return;
+    }
+    this.firstRtpSent = true;
+    this.onLifecycleEvent?.("first_rtp_sent");
   }
 
   /**
@@ -331,6 +348,7 @@ export class WebRtcPublisher {
     logger.warn(
       `[WebRTC] stream ${this.config.streamId} capture source failed${detail}; reconnecting`
     );
+    this.onSourceFailure?.(error ?? new Error("Capture source stopped producing media."));
     this.controller.notifyConnectionLost();
   }
 
@@ -385,6 +403,7 @@ export class WebRtcPublisher {
     await this.teardownActiveSession();
   }
 
+  // eslint-disable-next-line complexity -- WHIP setup requires explicit cleanup at each failure boundary.
   private async establish(): Promise<void> {
     if (this.closed) {
       throw new Error("Publisher closed.");
@@ -446,15 +465,18 @@ export class WebRtcPublisher {
         });
       }
 
+      // Subscribe before createOffer()/setLocalDescription(): werift can emit a
+      // host candidate while installing the local description. The subscription
+      // buffers it until the SDP supplies the media/ICE context below.
+      const activateTrickle = this.trickleIce ? this.subscribeTrickle(pc) : undefined;
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       this.onLifecycleEvent?.("sdp_offer_created");
 
-      // Trickle ICE: start forwarding candidates (buffered until the resource URL
-      // is known) and publish the offer immediately instead of blocking on ICE
-      // gathering. Non-trickle: gather (bounded) before publishing.
-      if (this.trickleIce) {
-        this.startTrickle(pc);
+      // Trickle ICE publishes without waiting on gathering. Candidates emitted
+      // before local SDP activation are retained by subscribeTrickle.
+      if (activateTrickle) {
+        activateTrickle();
       } else {
         await this.waitForIceGathering(pc);
       }
@@ -684,20 +706,20 @@ export class WebRtcPublisher {
    * buffered by the forwarder until the WHIP resource URL is known (set right
    * after publish), then PATCHed as `application/trickle-ice-sdpfrag`.
    */
-  private startTrickle(pc: RTCPeerConnection): void {
-    const contexts = parseTrickleIceMediaContexts(pc.localDescription?.sdp ?? "");
-    const forwarder = new TrickleIceForwarder((resourceUrl, fragment) => {
-      const etag = this.activeWhipEtag;
-      if (!etag) {
-        return;
-      }
-      void this.whip.patchCandidate(resourceUrl, etag, fragment).catch(error => {
-        logger.debug(`[WebRTC] trickle candidate PATCH failed: ${error}`);
-      });
-    }, contexts);
-    this.trickle = forwarder;
-    this.candidateSub = pc.onIceCandidate.subscribe(candidate => {
-      if (this.pc !== pc) {
+  private subscribeTrickle(pc: RTCPeerConnection): () => void {
+    const pendingCandidates: Array<{
+      candidate: string;
+      sdpMid?: string;
+      sdpMLineIndex?: number;
+    } | null | undefined> = [];
+    let forwarder: TrickleIceForwarder | null = null;
+    const addCandidate = (candidate: {
+      candidate: string;
+      sdpMid?: string;
+      sdpMLineIndex?: number;
+    } | null | undefined): void => {
+      if (!forwarder) {
+        pendingCandidates.push(candidate);
         return;
       }
       if (candidate) {
@@ -709,7 +731,33 @@ export class WebRtcPublisher {
       } else {
         forwarder.completeGathering();
       }
+    };
+    this.candidateSub = pc.onIceCandidate.subscribe(candidate => {
+      if (this.pc === pc) {
+        addCandidate(candidate);
+      }
     });
+
+    return () => {
+      if (this.pc !== pc || forwarder) {
+        return;
+      }
+      const contexts = parseTrickleIceMediaContexts(pc.localDescription?.sdp ?? "");
+      forwarder = new TrickleIceForwarder((resourceUrl, fragment) => {
+        const etag = this.activeWhipEtag;
+        if (!etag) {
+          return;
+        }
+        void this.whip.patchCandidate(resourceUrl, etag, fragment).catch(error => {
+          logger.debug(`[WebRTC] trickle candidate PATCH failed: ${error}`);
+        });
+      }, contexts);
+      this.trickle = forwarder;
+      for (const candidate of pendingCandidates) {
+        addCandidate(candidate);
+      }
+      pendingCandidates.length = 0;
+    };
   }
 
   private async waitForIceGathering(pc: RTCPeerConnection): Promise<void> {

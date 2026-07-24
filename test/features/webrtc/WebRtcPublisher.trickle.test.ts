@@ -15,6 +15,11 @@ class FakeTricklePc {
   iceGatheringState = "gathering";
   private candidateCb?: (candidate: unknown) => void;
   private connectionStateCb?: (state: string) => void;
+  candidateDuringSetLocalDescription?: {
+    candidate: string;
+    sdpMid?: string;
+    sdpMLineIndex?: number;
+  };
   connectionStateChange = {
     subscribe: (callback: (state: string) => void) => {
       this.connectionStateCb = callback;
@@ -36,7 +41,11 @@ class FakeTricklePc {
   async createOffer() {
     return { type: "offer", sdp: "v=0" };
   }
-  async setLocalDescription() {}
+  async setLocalDescription() {
+    if (this.candidateDuringSetLocalDescription) {
+      this.emitCandidate(this.candidateDuringSetLocalDescription);
+    }
+  }
   async setRemoteDescription() {}
   async close() {
     this.closed = true;
@@ -70,6 +79,22 @@ function makePublisher(pc: FakeTricklePc, trickleIce: boolean) {
 }
 
 describe("WebRtcPublisher trickle ICE", () => {
+  test("buffers a candidate emitted during local-description setup until WHIP accepts the resource", async () => {
+    const pc = new FakeTricklePc();
+    pc.candidateDuringSetLocalDescription = {
+      candidate: "candidate:early 1 udp 2113 1.2.3.4 4000 typ host",
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+    };
+    const { publisher, patched } = makePublisher(pc, true);
+
+    await publisher.start();
+
+    expect(patched).toHaveLength(1);
+    expect(patched[0].fragment).toContain("candidate:early");
+    await publisher.stop();
+  });
+
   test("publishes without waiting for gathering and PATCHes candidates to the resource", async () => {
     const pc = new FakeTricklePc();
     const { publisher, patched } = makePublisher(pc, true);

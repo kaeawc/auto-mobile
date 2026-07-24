@@ -38,6 +38,7 @@ class FakePublisher {
   onBeforeEstablish?: () => Promise<void> | void;
   onConnected?: () => Promise<void> | void;
   onKeyFrameRequest?: () => void;
+  onSourceFailure?: (error: Error) => void;
   onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
   parameterSetPrimes: Array<{ sps: Buffer | null; pps: Buffer | null }> = [];
   constructor(
@@ -46,12 +47,14 @@ class FakePublisher {
       onBeforeEstablish?: () => Promise<void> | void;
       onConnected?: () => Promise<void> | void;
       onKeyFrameRequest?: () => void;
+      onSourceFailure?: (error: Error) => void;
       onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
     }
   ) {
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
     this.onKeyFrameRequest = deps.onKeyFrameRequest;
+    this.onSourceFailure = deps.onSourceFailure;
     this.onLifecycleEvent = deps.onLifecycleEvent;
   }
   async start(): Promise<void> {
@@ -410,6 +413,11 @@ describe("webrtcStreamManager", () => {
     expect(publishers[0].sourceFailedCount).toBe(1);
     expect(publishers[0].sourceFailureErrors[0].message).toBe("helper exited after first frame");
     expect(listWebRtcStreams()).toHaveLength(1);
+    await flushPublisherStart();
+    const descriptor = getWebRtcStreamDescriptor("webrtc_id-1");
+    expect(descriptor?.lifecycleState).toBe("degraded");
+    expect(descriptor?.failure?.code).toBe("capture_runtime_failed");
+    expect(descriptor?.fallback).toEqual({ mode: "screenshots", reason: "capture_runtime_failed" });
   });
 
   test("uses an explicit streamId when provided", async () => {
@@ -798,6 +806,55 @@ describe("webrtcStreamManager", () => {
     expect(getWebRtcStreamDescriptor(started.streamId)?.lifecycleState).toBe("publishing");
   });
 
+  test("reports a packetization failure as a typed fallback and recreates capture on reconnect", async () => {
+    const { publishers, sources } = installFakes();
+    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await flushPublisherStart();
+
+    publishers[0].onSourceFailure?.(new Error("H.264 SPS profile 6400 is incompatible"));
+    const degraded = getWebRtcStreamDescriptor(started.streamId);
+    expect(degraded?.lifecycleState).toBe("degraded");
+    expect(degraded?.failure?.code).toBe("capture_runtime_failed");
+    expect(degraded?.fallback).toEqual({ mode: "screenshots", reason: "capture_runtime_failed" });
+
+    await publishers[0].onBeforeEstablish?.();
+    expect(sources).toHaveLength(2);
+    expect(sources[0].stopped).toBe(true);
+  });
+
+  test("discards partial media from a replaced capture source", async () => {
+    const publishers: FakePublisher[] = [];
+    const sourceOptions: Array<Parameters<WebRtcStreamManagerDependencies["createSource"]>[0]> = [];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: options => {
+        sourceOptions.push(options);
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+    });
+
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await flushPublisherStart();
+    // A source can die mid-SPS. Its bytes must not become the replacement
+    // source's cached codec configuration after reconnection.
+    sourceOptions[0].onData(Buffer.from([0, 0, 0, 1, 0x67, 0x42]));
+    publishers[0].onSourceFailure?.(new Error("encoder wedged"));
+    await publishers[0].onBeforeEstablish?.();
+    sourceOptions[1].onData(Buffer.from([
+      0, 0, 0, 1, 0x65, 0x80,
+      0, 0, 0, 1, 0x41, 0x80,
+    ]));
+    await publishers[0].onConnected?.();
+
+    expect(publishers[0].parameterSetPrimes.at(-1)).toEqual({ sps: null, pps: null });
+  });
+
   test("replays warm-source codec configuration when the publisher attaches", async () => {
     const publishers: FakePublisher[] = [];
     let sourceOptions!: Parameters<NonNullable<WebRtcStreamManagerDependencies["createSource"]>>[0];
@@ -861,6 +918,64 @@ describe("webrtcStreamManager", () => {
     expect(result.fallback).toBeNull();
     expect(getWebRtcStreamDescriptor(started.streamId)?.lifecycleState).toBe("capture_ready");
     expect(getWebRtcStreamDescriptor(started.streamId)?.failure).toBeNull();
+  });
+
+  test("renews a waiting lease before its capture TTL expires", async () => {
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publisher.start = async () => {
+          await publisher.onBeforeEstablish?.();
+        };
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: async () => null,
+      timer,
+    });
+    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const waiting = waitForWebRtcStreamReadiness(
+      started.streamId,
+      "publishing",
+      WEBRTC_STREAM_LEASE_TTL_MS * 2,
+      started.lease?.id
+    );
+
+    for (let interval = 0; interval < 4; interval++) {
+      timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS / 2);
+      await flushPublisherStart();
+    }
+
+    const timedOut = await waiting;
+    expect(timedOut.failure?.code).toBe("publishing_timeout");
+    expect(listWebRtcStreams()).toHaveLength(1);
+  });
+
+  test("returns a typed stopped result when a waiting stream is stopped", async () => {
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publisher.start = async () => {
+          await publisher.onBeforeEstablish?.();
+        };
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      resolveVideoJar: async () => null,
+      timer,
+    });
+    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const waiting = waitForWebRtcStreamReadiness(started.streamId, "publishing", 1_000, started.lease?.id);
+    await Promise.resolve();
+    await stopWebRtcStream(started.streamId);
+
+    const stopped = await waiting;
+    expect(stopped.state).toBe("stopped");
+    expect(stopped.failure?.code).toBe("stopped");
   });
 
   test("expires the final lease and stops only that manager-owned capture", async () => {

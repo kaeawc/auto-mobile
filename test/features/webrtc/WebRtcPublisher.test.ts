@@ -334,6 +334,66 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
 
     expect(recoveries).toBe(1);
   });
+
+  test("notifies the manager when packetization rejects source H.264", async () => {
+    const pc = new FakePeerConnection();
+    let failure: Error | undefined;
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", maxReconnectAttempts: 1 },
+      {
+        onSourceFailure: error => {
+          failure = error;
+        },
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+    await publisher.start();
+
+    publisher.writeH264Chunk(Buffer.from([0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 0, 1]));
+
+    expect(failure?.message).toContain("incompatible with negotiated constrained baseline");
+    await publisher.stop();
+  });
+
+  test("records first RTP only after the peer connection is connected", async () => {
+    const pc = new FakePeerConnection();
+    const events: string[] = [];
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        onLifecycleEvent: event => events.push(event),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+    await publisher.start();
+    const startCode = Buffer.from([0, 0, 0, 1]);
+    const pFrame = Buffer.from([0x41, 0x80]);
+
+    publisher.writeH264Chunk(Buffer.concat([
+      startCode, Buffer.from([0x67, 0x42, 0xe0, 0x2a]),
+      startCode, Buffer.from([0x68, 0xce, 0x3c, 0x80]),
+      startCode, Buffer.from([0x65, 0x80, 0x00]),
+      startCode, pFrame,
+      startCode, pFrame,
+    ]));
+    expect(events).not.toContain("first_rtp_sent");
+
+    pc.connectionState = "connected";
+    publisher.writeH264Chunk(Buffer.concat([startCode, pFrame]));
+    expect(events.filter(event => event === "first_rtp_sent")).toHaveLength(1);
+
+    await publisher.stop();
+  });
 });
 
 describe("WebRtcPublisher keyframe requests", () => {

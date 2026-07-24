@@ -1,11 +1,11 @@
-# Keyguard Handling
+# Keyguard Handling & `wakeAndUnlock`
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `inputText` recovers a secure keyguard on Android by
-> delivering the credential as key events when the accessibility path fails.
-> Lock state is surfaced on `observe` and annotated on interactions
-> (issues [#4235](https://github.com/kaeawc/auto-mobile/issues/4235),
+> **Current state:** The `wakeAndUnlock` MCP tool wakes a device and gets past its
+> keyguard cross-platform. Lock state is surfaced on `observe` and annotated on
+> interactions (issues
+> [#4235](https://github.com/kaeawc/auto-mobile/issues/4235),
 > [#4280](https://github.com/kaeawc/auto-mobile/issues/4280),
 > [#4360](https://github.com/kaeawc/auto-mobile/issues/4360)).
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
@@ -23,93 +23,95 @@ the window is **not** governed by the settable `screen_off_timeout` /
 **resource baked into the build**. No amount of `settings put` widens it.
 
 Measured on `am-api35-ga-arm64` (API 35) with `screen_off_timeout=1800000`
-(30 min) and `sleep_timeout=-1`, both confirmed effective in `dumpsys power`
-(`mScreenOffTimeoutSetting=1800000`, `mSleepTimeoutSetting=-1`, no device-admin
-cap):
+(30 min) and `sleep_timeout=-1`, both confirmed effective in `dumpsys power`:
 
 | Elapsed | Unlocked (launcher) | Locked (keyguard) |
 |---|---|---|
 | 6s  | `Awake` / `ON`  | `Awake` / `ON`   |
 | 9s  | `Awake` / `ON`  | `Dozing` / `OFF` |
 | 12s | `Awake` / `ON`  | `Asleep` / `OFF` |
-| 30s | `Awake` / `ON`  | `Asleep` / `OFF` |
 
 The practical consequence: **credential entry must be a single, fast, un-observed
-key-event burst.** A per-digit `tapOn` (or any observe/settle loop between
-digits) cannot fit the budget — a single `tapOn` against a keyguard key was
-measured at ~13s wall-clock, by which point the screen had already switched off.
+key-event burst.** A per-digit `tapOn` (or any observe/settle loop between digits)
+cannot fit the budget — a single `tapOn` against a keyguard key was measured at
+~13s wall-clock, by which point the screen had already switched off (see
+[#4366](https://github.com/kaeawc/auto-mobile/issues/4366)).
 
-## `inputText` on a keyguard (#4360)
+## The `wakeAndUnlock` tool
 
-A secure PIN/pattern/password bouncer exposes **no editable accessibility node**,
-so the default `a11y` mode of `inputText` (a single `ACTION_SET_TEXT`) can never
-type into it — it fails with `No focused editable node found`. Reporting that
-error as the call's outcome is a false negative: an agent that (correctly)
-distrusts a bare success flag and reads the error concludes the unlock failed,
-then aborts or retries an action that had not actually run.
-
-`inputText` therefore falls back automatically. The fallback fires **only** when
-the accessibility leg has already failed **and** a pre-check
-(`AdbClient.getDeviceLock`) confirms the device is locked with a **secure**
-credential (`secure === true`) **and** every character of the text maps to a key
-event. A non-secure *swipe* lock is deliberately excluded — it has no credential,
-so typing digits into it would land stray key events in the app the swipe reveals;
-swipe locks are the job of `wm dismiss-keyguard`. The sequence (verified on
-API 35):
-
-```bash
-adb shell input keyevent KEYCODE_WAKEUP   # wake the display
-adb shell input keyevent KEYCODE_MENU     # raise the secure PIN bouncer
-adb shell input keyevent KEYCODE_<digit>  # ...one per credential character
-adb shell input keyevent KEYCODE_ENTER    # submit
+```
+wakeAndUnlock({ pin?: string, platform? })
 ```
 
-The outcome is **grounded in a re-read of the lock state**, never in the fact
-that the key events were sent:
+`pin` is optional in the schema but **logically required to unlock a secure
+Android device** — if omitted there, a PIN remembered earlier this session is
+used, otherwise the call returns an actionable error asking for one. It is
+ignored on iOS.
 
-- **Unlocked afterward** → `success: true`, `method: "eventAll"`, `deviceUnlocked:
-  true`, and the accessibility error is demoted to a non-fatal `warnings` entry.
-  (`deviceUnlocked` also suppresses the pre-action "still locked" warning that
-  `BaseVisualChange` would otherwise stamp from its stale snapshot.)
-- **Still locked — or the re-read is inconclusive** → `success: false` with the
-  error attributed to the keyguard leg (wrong credential or entry failure), never
-  to accessibility. An unreadable re-read is the absence of a confirmation, not a
-  confirmation of unlock, so it is treated as still-locked.
-- **Not securely locked at the pre-check, or text not key-event-mappable** → the
-  original accessibility failure is returned unchanged; behavior is identical to
-  before.
+### Android behavior
 
-Because the credential is submitted, a wrong value counts as a **failed unlock
-attempt** against the device's retry throttle. The fallback fires automatically
-whenever the default a11y path fails on a secure lock — **including a screen that
-has timed out to the keyguard mid-session**, where the caller did not intend an
-unlock at all. A caller that may run against a lockable device should branch on
-`observe`'s `deviceLock` before calling `inputText`.
+1. Read wakefulness (`dumpsys power`) and lock state (`dumpsys window policy`) —
+   no `observe`, so it is fast and works on a screen that is about to power off.
+2. If asleep, `KEYCODE_WAKEUP`.
+3. **Not locked** → done (this is the "wake a sleeping device" case).
+4. **Locked** → `wm dismiss-keyguard`, then branch on `secure`:
+   - **Swipe lock** (`secure=false`) → `wm dismiss-keyguard` fully dismisses it.
+   - **Secure lock** (`secure=true`) → the bouncer is now raised; type the PIN as
+     key events and submit with `KEYCODE_ENTER`. The accessibility path cannot
+     type into a secure bouncer (it exposes no editable a11y node — the original
+     [#4360](https://github.com/kaeawc/auto-mobile/issues/4360) symptom), so key
+     events are the only route.
+5. Ground the outcome in a **bounded poll** of the lock state (≤~2.5s, every
+   ~250ms) — never in the fact that keys were sent. There is a measured **~1.3s
+   lag** between `KEYCODE_ENTER` and the keyguard clearing in
+   `dumpsys window policy`; a single immediate re-read reports a false
+   "still locked".
+
+Recipe verified on API 35. Because a secure unlock **submits** the PIN, a wrong
+value counts as a failed unlock attempt against the device's retry throttle.
+
+### iOS behavior
+
+iOS simulators **cannot set a device passcode** — there is no `simctl` lock/
+passcode command and no "Face ID & Passcode" in Settings; pressing lock then
+swiping up dismisses the lock screen with no credential prompt (verified on
+iPhone 16 Pro, iOS 18.6). So on iOS the tool wakes the device and swipes the
+non-secure lock screen away via the existing gesture primitives, and **ignores
+any `pin`**. There is no iOS lock-state read equivalent to Android's dumpsys.
+
+## Remembering how to unlock (`device_sessions`)
+
+To avoid re-entering a PIN every session, `wakeAndUnlock` records how to unlock a
+device on its active session row (`device_sessions.lock_type` /
+`lock_credential`, added by the `2026_07_24_000_device_session_lock` migration).
+A freshly-supplied PIN that successfully unlocks a secure device is remembered;
+a recorded PIN is reused (and not re-persisted), and a PIN that failed to unlock
+is never stored. The credential is stored plaintext in the local, single-user
+`~/.auto-mobile` DB.
+
+The **boot path** (`AndroidEmulatorClient.wakeAndUnlock`) delegates to the same
+feature: a freshly-booted emulator with a swipe lock is dismissed automatically,
+and a secure device is unlocked with the remembered PIN if one exists. A secure
+device with no remembered PIN is left locked (non-fatal) — the device is still
+ready, and the user unlocks it once with the tool to have it remembered.
 
 ## What does NOT work (do not retry these approaches)
 
-Verified during the #4360 session on the same secure PIN keyguard:
+Verified during the [#4360](https://github.com/kaeawc/auto-mobile/issues/4360)
+sessions on a secure PIN keyguard:
 
-- **`wm dismiss-keyguard`** — dismisses only a *swipe* lock; it does not get past
-  a secure lock. This is the existing call at `AndroidEmulatorClient.ts`
-  (`wakeAndUnlock`), and it is why a freshly booted emulator with a PIN is not
-  automatically usable.
-- **Power-cycling the screen** (`keyevent 26` twice) does **not** raise the
-  bouncer.
+- **`wm dismiss-keyguard` alone** — dismisses a *swipe* lock, but on a *secure*
+  lock it only **raises the bouncer**; it does not unlock. That is exactly why
+  the tool follows it with PIN key events.
+- **Accessibility `setText`** — the secure bouncer is not an editable a11y node,
+  so `inputText` fails there with `No focused editable node found`. Unlocking is
+  the job of `wakeAndUnlock`, not `inputText`.
 - **Per-digit `tapOn`** on `com.android.systemui:id/key1`…`key9` — cannot fit the
   ~7s budget (a single tap measured ~13s); subsequent taps return
   `0 view hierarchy changes` because the screen switched off mid-settle, which
   misleadingly reads as a missed target.
-
-## What works to raise the bouncer
-
-Any of these raise the secure PIN bouncer (confirmed via `uiautomator`:
-`pinEntry` and `key1`–`key9` become present, and AutoMobile's own `observe` sees
-them immediately afterward):
-
-- `keyevent 82` (MENU) — used by the `inputText` fallback.
-- `keyevent 8` (a digit) or `keyevent 66` (ENTER).
-- `swipeOn --direction up --autoTarget false --speed slow`.
+- **Power-cycling the screen** (`keyevent 26` twice) does **not** raise the
+  bouncer.
 
 ## Related
 

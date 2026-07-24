@@ -10,28 +10,13 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { resolveAutoInputMode } from "./resolveAutoInputMode";
 import { serverConfig } from "../../utils/ServerConfig";
+import {
+  ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
+  buildAsciiKeyEventPlan,
+  type KeyEventPlan
+} from "./asciiKeyEvents";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll";
-
-/**
- * InputText result. `warnings` carries non-fatal notes about a degraded path
- * that still satisfied the request — e.g. the accessibility leg failed on a
- * keyguard but the credential was delivered via key events (#4360). It is
- * additive: absent on the normal path. `deviceUnlocked` marks that the action
- * cleared the keyguard, so `BaseVisualChange` does not stamp a contradictory
- * "still locked" warning from the pre-action snapshot.
- */
-export type InputTextResult = SendTextResult & {
-  method?: InputTextMode;
-  warnings?: string[];
-  deviceUnlocked?: boolean;
-};
-
-interface KeyEventPlan {
-  commands: string[];
-}
-
-const ANDROID_KEYCOMBINATION_MIN_API_LEVEL = 31;
 
 export class InputText extends BaseVisualChange {
   private androidInputKeyCombinationSupported: boolean | undefined;
@@ -46,7 +31,7 @@ export class InputText extends BaseVisualChange {
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode?: InputTextMode
-  ): Promise<InputTextResult> {
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
 
@@ -129,7 +114,7 @@ export class InputText extends BaseVisualChange {
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode: InputTextMode = "a11y"
-  ): Promise<InputTextResult> {
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
     if (mode === "eventLast") {
       return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard);
     }
@@ -159,119 +144,14 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    // The a11y leg failed. On a locked keyguard the PIN bouncer is not an
-    // editable a11y node, so setText can never succeed there — but the
-    // credential can still be delivered as key events. Attempt that only when
-    // the pre-check confirms a keyguard, and only report success if the device
-    // actually unlocked (grounded in a re-read, never trusting the send).
-    const keyguardResult = await this.tryKeyguardKeyEventUnlock(text, a11yResult.error);
-    if (keyguardResult) {
-      return keyguardResult;
-    }
-
-    // Return failure - no fallback methods
+    // Return failure - no fallback methods. Getting past a keyguard is the job
+    // of the dedicated `wakeAndUnlock` tool, not inputText (issue #4360).
     logger.warn(`[InputText] Accessibility service setText failed: ${a11yResult.error}`);
     return {
       success: false,
       text,
       error: `Accessibility service setText failed: ${a11yResult.error}`,
       method: "a11y"
-    };
-  }
-
-  /**
-   * Deliver text as a keyguard credential when the accessibility setText leg
-   * has already failed against a securely-locked device (#4360).
-   *
-   * A secure PIN/pattern/password bouncer exposes no editable accessibility
-   * node, so `a11y` mode cannot type into it. The digits can still be delivered
-   * as key events: KEYCODE_WAKEUP wakes the display, KEYCODE_MENU raises the
-   * bouncer, each character is sent as a key event, and KEYCODE_ENTER submits.
-   * (Recipe verified on API 35; see docs/design-docs/plat/android/keyguard.md.)
-   *
-   * Gated on `secure === true`, not merely `locked`: a swipe lock has no
-   * credential, so typing digits into it would land stray key events in the
-   * app the swipe reveals — swipe locks are the job of `wm dismiss-keyguard`.
-   *
-   * This is deliberately a single, un-observed key-event burst: the keyguard
-   * powers its display off after ~7s (`config_lockScreenDisplayTimeout`, a baked
-   * framework resource — not a settable `Settings` key), so a per-digit
-   * observe/settle loop cannot fit the budget.
-   *
-   * Returns `null` when this is not a secure-keyguard situation (device not
-   * securely locked, or text not fully mappable to key events) so the caller
-   * keeps the original a11y failure. Otherwise returns success (with the a11y
-   * error demoted to `warnings` and `deviceUnlocked` set) when the re-read
-   * confirms the device unlocked, or a keyguard-attributed failure when the
-   * re-read is still-locked *or* inconclusive — never surfacing the a11y leg's
-   * error as the call's outcome, and never treating an unreadable re-read as a
-   * confirmed unlock.
-   *
-   * Side effect: this submits `text` as a credential, so a non-credential value
-   * counts as a failed unlock attempt against the device's retry throttle. It
-   * fires automatically whenever the default a11y path fails on a secure lock —
-   * including a screen that timed out to the keyguard mid-session — so a caller
-   * that may run against a lockable device should branch on `observe`'s
-   * `deviceLock` first.
-   *
-   * @param text - The credential text to deliver
-   * @param a11yError - The accessibility leg's error, for the warning/attribution
-   */
-  private async tryKeyguardKeyEventUnlock(
-    text: string,
-    a11yError: string | undefined
-  ): Promise<InputTextResult | null> {
-    const lockBefore = await this.adb.getDeviceLock();
-    // Require a secure lock: `locked` alone is also true for a swipe lock, where
-    // there is no credential and the digits would land as stray input.
-    if (!lockBefore?.locked || lockBefore.secure !== true) {
-      return null;
-    }
-
-    // Every character must map to a key event; the bouncer cannot accept an
-    // atomic a11y setText, so an unmappable character means we cannot type it.
-    const chars = Array.from(text);
-    const charPlans: KeyEventPlan[] = [];
-    for (const char of chars) {
-      const plan = await this.getAsciiKeyEventPlan(char);
-      if (!plan) {
-        logger.info(`[InputText] keyguard fallback skipped: ${JSON.stringify(char)} is not key-event-mappable`);
-        return null;
-      }
-      charPlans.push(plan);
-    }
-
-    logger.warn("[InputText] a11y setText failed on a secure keyguard; submitting the provided text as an unlock credential via key events (a wrong value consumes a failed-unlock attempt)");
-    await this.adb.executeCommand("shell input keyevent KEYCODE_WAKEUP");
-    await this.adb.executeCommand("shell input keyevent KEYCODE_MENU");
-    for (const plan of charPlans) {
-      await this.executeKeyEventPlan(plan);
-    }
-    await this.adb.executeCommand("shell input keyevent KEYCODE_ENTER");
-
-    // Ground the outcome in a re-read; an unreadable re-read (`null`) is the
-    // absence of a confirmation, not a confirmation of unlock, so treat it as
-    // still-locked rather than fabricating success.
-    const lockAfter = await this.adb.getDeviceLock();
-    if (!lockAfter || lockAfter.locked) {
-      logger.warn("[InputText] keyguard still locked (or lock state unknown) after key-event unlock attempt");
-      return {
-        success: false,
-        text,
-        error: `Device remained locked after keyguard key-event unlock attempt; the accessibility path is not usable on a secure bouncer (${a11yError})`,
-        method: "eventAll"
-      };
-    }
-
-    logger.info("[InputText] keyguard cleared via key-event credential entry");
-    return {
-      success: true,
-      text,
-      method: "eventAll",
-      deviceUnlocked: true,
-      warnings: [
-        `Accessibility setText failed on the keyguard (${a11yError}); the device was unlocked via key events instead.`
-      ]
     };
   }
 
@@ -438,84 +318,7 @@ export class InputText extends BaseVisualChange {
   }
 
   private async getAsciiKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
-    if (/^[a-z]$/.test(char)) {
-      return {
-        commands: [`shell input keyevent KEYCODE_${char.toUpperCase()}`]
-      };
-    }
-
-    if (/^[A-Z]$/.test(char)) {
-      return this.createShiftedKeyEventPlan(`KEYCODE_${char}`);
-    }
-
-    if (/^[0-9]$/.test(char)) {
-      return {
-        commands: [`shell input keyevent KEYCODE_${char}`]
-      };
-    }
-
-    const directKeyCodes: Record<string, string> = {
-      " ": "KEYCODE_SPACE",
-      "-": "KEYCODE_MINUS",
-      "=": "KEYCODE_EQUALS",
-      "[": "KEYCODE_LEFT_BRACKET",
-      "]": "KEYCODE_RIGHT_BRACKET",
-      "\\": "KEYCODE_BACKSLASH",
-      ";": "KEYCODE_SEMICOLON",
-      "'": "KEYCODE_APOSTROPHE",
-      ",": "KEYCODE_COMMA",
-      ".": "KEYCODE_PERIOD",
-      "/": "KEYCODE_SLASH",
-      "`": "KEYCODE_GRAVE",
-      "@": "KEYCODE_AT"
-    };
-
-    const shiftedKeyCodes: Record<string, string> = {
-      "!": "KEYCODE_1",
-      "#": "KEYCODE_3",
-      "$": "KEYCODE_4",
-      "%": "KEYCODE_5",
-      "^": "KEYCODE_6",
-      "&": "KEYCODE_7",
-      "*": "KEYCODE_8",
-      "(": "KEYCODE_9",
-      ")": "KEYCODE_0",
-      "_": "KEYCODE_MINUS",
-      "+": "KEYCODE_EQUALS",
-      "{": "KEYCODE_LEFT_BRACKET",
-      "}": "KEYCODE_RIGHT_BRACKET",
-      "|": "KEYCODE_BACKSLASH",
-      ":": "KEYCODE_SEMICOLON",
-      "\"": "KEYCODE_APOSTROPHE",
-      "<": "KEYCODE_COMMA",
-      ">": "KEYCODE_PERIOD",
-      "?": "KEYCODE_SLASH",
-      "~": "KEYCODE_GRAVE"
-    };
-
-    const direct = directKeyCodes[char];
-    if (direct) {
-      return {
-        commands: [`shell input keyevent ${direct}`]
-      };
-    }
-
-    const shifted = shiftedKeyCodes[char];
-    if (shifted) {
-      return this.createShiftedKeyEventPlan(shifted);
-    }
-
-    return null;
-  }
-
-  private async createShiftedKeyEventPlan(baseKeyCode: string): Promise<KeyEventPlan | null> {
-    if (await this.supportsAndroidInputKeyCombination()) {
-      return {
-        commands: [`shell input keycombination KEYCODE_SHIFT_LEFT ${baseKeyCode}`]
-      };
-    }
-
-    return null;
+    return buildAsciiKeyEventPlan(char, await this.supportsAndroidInputKeyCombination());
   }
 
   private async supportsAndroidInputKeyCombination(): Promise<boolean> {

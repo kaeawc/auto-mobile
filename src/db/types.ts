@@ -467,6 +467,10 @@ export interface DeviceSessionsTable {
   session_timeout_ms: number;
   heartbeat_timeout_ms: number;
   has_received_heartbeat: number;
+  // How to unlock this device, remembered across the session (issue #4360).
+  // `lock_credential` is stored plaintext in the local single-user DB.
+  lock_type: string | null;
+  lock_credential: string | null;
   created_at: Generated<string>;
   updated_at: Generated<string>;
 }

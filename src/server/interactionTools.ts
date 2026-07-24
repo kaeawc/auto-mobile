@@ -3,6 +3,9 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { TapAnyElement } from "../features/action/TapAnyElement";
 import { InputText } from "../features/action/InputText";
+import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
+import { DeviceSessionLockStore } from "../features/action/DeviceSessionLockStore";
+import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
 import { ClearText } from "../features/action/ClearText";
 import { SelectAllText } from "../features/action/SelectAllText";
 import { PressButton } from "../features/action/PressButton";
@@ -44,6 +47,7 @@ import type {
   SystemTrayNotificationArgs,
   SystemTrayArgs,
   InputTextArgs,
+  WakeAndUnlockArgs,
   OpenLinkArgs,
   TapOnArgs,
   TapAnyArgs,
@@ -89,6 +93,7 @@ export type {
   SystemTrayNotificationArgs,
   SystemTrayArgs,
   InputTextArgs,
+  WakeAndUnlockArgs,
   OpenLinkArgs,
   TapOnArgs,
   TapAnyArgs,
@@ -326,6 +331,12 @@ export const inputTextSchema = addDeviceTargetingToSchema(z.object({
     .describe("IME action after input"),
   dismissKeyboard: z.boolean().optional()
     .describe("Android: dismiss keyboard after input"),
+  platform: platformSchema
+}));
+
+export const wakeAndUnlockSchema = addDeviceTargetingToSchema(z.object({
+  pin: z.string().optional()
+    .describe("Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS."),
   platform: platformSchema
 }));
 
@@ -830,6 +841,20 @@ export function registerInteractionTools() {
     });
   };
 
+  // Wake and unlock handler
+  const wakeAndUnlockHandler = async (device: BootedDevice, args: WakeAndUnlockArgs) => {
+    const iosUnlocker = device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined;
+    const wakeAndUnlock = new WakeAndUnlock(device, undefined, {
+      credentialStore: new DeviceSessionLockStore(),
+      iosUnlocker
+    });
+    const result = await wakeAndUnlock.execute(args.pin);
+    const message = result.success
+      ? (result.wasLocked ? "Device unlocked" : "Device awake")
+      : `Failed to unlock device: ${result.error ?? "unknown error"}`;
+    return createJSONToolResponse({ message, ...result });
+  };
+
   // Open link handler
   const openLinkHandler = async (device: BootedDevice, args: OpenLinkArgs) => {
     const openUrl = new OpenURL(device);
@@ -970,6 +995,8 @@ export function registerInteractionTools() {
   ToolRegistry.registerDeviceAware("systemTray", "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)", systemTraySchema, systemTrayHandler, { supportsProgress: true });
 
   ToolRegistry.registerDeviceAware("inputText", "Input text. The optional mode field is Android-only and ignored on iOS.", inputTextSchema, inputTextHandler);
+
+  ToolRegistry.registerDeviceAware("wakeAndUnlock", "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).", wakeAndUnlockSchema, wakeAndUnlockHandler);
 
   ToolRegistry.registerDeviceAware("openLink", "Open URL in browser", openLinkSchema, openLinkHandler);
 

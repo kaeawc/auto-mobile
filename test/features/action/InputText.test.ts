@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { InputTextMode } from "../../../src/features/action/InputText";
-import type { BootedDevice, DeviceLockState } from "../../../src/models";
+import type { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 
 interface TestInputText {
@@ -13,22 +12,8 @@ interface TestInputText {
     imeAction?: undefined,
     dismissKeyboard?: boolean,
     mode?: InputTextMode
-  ) => Promise<{ success: boolean; error?: string; method?: string; warnings?: string[] }>;
+  ) => Promise<{ success: boolean; error?: string; method?: string }>;
 }
-
-const LOCKED_SECURE: DeviceLockState = { locked: true, keyguardShowing: true, secure: true };
-const LOCKED_SWIPE: DeviceLockState = { locked: true, keyguardShowing: true, secure: false };
-const UNLOCKED: DeviceLockState = { locked: false, keyguardShowing: false, secure: true };
-
-const KEYGUARD_PIN_COMMANDS = [
-  "shell input keyevent KEYCODE_WAKEUP",
-  "shell input keyevent KEYCODE_MENU",
-  "shell input keyevent KEYCODE_1",
-  "shell input keyevent KEYCODE_2",
-  "shell input keyevent KEYCODE_3",
-  "shell input keyevent KEYCODE_4",
-  "shell input keyevent KEYCODE_ENTER",
-];
 
 type RequestSetText = (
   text: string,
@@ -314,147 +299,5 @@ describe("InputText", () => {
     expect(result.method).toBe("a11y");
     expect(setTextCalls).toEqual(["你好😊"]);
     expect(inputCommands(factory)).toEqual([]);
-  });
-
-  // Regression for https://github.com/kaeawc/auto-mobile/issues/4360.
-  // A secure PIN bouncer is not an editable a11y node, so a11y setText can
-  // never work there; today the call dead-ends on the a11y error even though
-  // the credential can still be delivered as key events. When (and only when)
-  // the pre-check shows a locked keyguard, InputText raises the bouncer and
-  // types the PIN via key events, then grounds the outcome in a re-read of the
-  // lock state — never trusting the send.
-  describe("keyguard key-event fallback (#4360)", () => {
-    test("a11y failure on a locked keyguard: types PIN via key events and reports success", async () => {
-      const adb = new FakeAdbExecutor();
-      adb.setAndroidApiLevel(35);
-      adb.setDeviceLockSequence([LOCKED_SECURE, UNLOCKED]);
-      const inputText = new InputText(androidDevice, adb);
-
-      stubAndroidSetText(async () => ({
-        success: false,
-        error: "No focused editable node found",
-        totalTimeMs: 1,
-      }));
-
-      const result = await testInputText(inputText).executeAndroidTextInput("1234");
-
-      expect(result.success).toBe(true);
-      expect(result.error).toBeUndefined();
-      expect(result.method).toBe("eventAll");
-      expect(result.deviceUnlocked).toBe(true);
-      expect(result.warnings?.[0]).toContain("No focused editable node found");
-      expect(adb.getExecutedCommands()).toEqual(KEYGUARD_PIN_COMMANDS);
-    });
-
-    test("swipe (non-secure) lock: fallback does not fire, a11y failure returned, no key events", async () => {
-      const adb = new FakeAdbExecutor();
-      adb.setDeviceLock(LOCKED_SWIPE);
-      const inputText = new InputText(androidDevice, adb);
-
-      stubAndroidSetText(async () => ({
-        success: false,
-        error: "No focused editable node found",
-        totalTimeMs: 1,
-      }));
-
-      const result = await testInputText(inputText).executeAndroidTextInput("1234");
-
-      expect(result.success).toBe(false);
-      expect(result.method).toBe("a11y");
-      expect(result.error).toContain("No focused editable node found");
-      expect(adb.getExecutedCommands()).toEqual([]);
-    });
-
-    test("inconclusive re-read after entry: reported as failure, never a fabricated success", async () => {
-      const adb = new FakeAdbExecutor();
-      adb.setAndroidApiLevel(35);
-      adb.setDeviceLockSequence([LOCKED_SECURE, null]);
-      const inputText = new InputText(androidDevice, adb);
-
-      stubAndroidSetText(async () => ({
-        success: false,
-        error: "No focused editable node found",
-        totalTimeMs: 1,
-      }));
-
-      const result = await testInputText(inputText).executeAndroidTextInput("1234");
-
-      expect(result.success).toBe(false);
-      expect(result.deviceUnlocked).toBeUndefined();
-      expect(result.error).toContain("remained locked");
-      expect(adb.getExecutedCommands()).toEqual(KEYGUARD_PIN_COMMANDS);
-    });
-
-    test("device not locked: a11y failure is returned unchanged, no key events sent", async () => {
-      const adb = new FakeAdbExecutor();
-      adb.setDeviceLock(UNLOCKED);
-      const inputText = new InputText(androidDevice, adb);
-
-      stubAndroidSetText(async () => ({
-        success: false,
-        error: "No focused editable node found",
-        totalTimeMs: 1,
-      }));
-
-      const result = await testInputText(inputText).executeAndroidTextInput("1234");
-
-      expect(result.success).toBe(false);
-      expect(result.method).toBe("a11y");
-      expect(result.error).toContain("No focused editable node found");
-      expect(result.warnings).toBeUndefined();
-      expect(adb.getExecutedCommands()).toEqual([]);
-    });
-
-    test("keyguard still up after the attempt: failure is attributed to the keyguard leg", async () => {
-      const adb = new FakeAdbExecutor();
-      adb.setAndroidApiLevel(35);
-      adb.setDeviceLockSequence([LOCKED_SECURE, LOCKED_SECURE]);
-      const inputText = new InputText(androidDevice, adb);
-
-      stubAndroidSetText(async () => ({
-        success: false,
-        error: "No focused editable node found",
-        totalTimeMs: 1,
-      }));
-
-      const result = await testInputText(inputText).executeAndroidTextInput("1234");
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("remained locked");
-      expect(adb.getExecutedCommands()).toEqual(KEYGUARD_PIN_COMMANDS);
-    });
-
-    test("locked keyguard but text is not key-event-mappable: original a11y failure preserved", async () => {
-      const adb = new FakeAdbExecutor();
-      adb.setDeviceLock(LOCKED_SECURE);
-      const inputText = new InputText(androidDevice, adb);
-
-      stubAndroidSetText(async () => ({
-        success: false,
-        error: "No focused editable node found",
-        totalTimeMs: 1,
-      }));
-
-      const result = await testInputText(inputText).executeAndroidTextInput("你好");
-
-      expect(result.success).toBe(false);
-      expect(result.method).toBe("a11y");
-      expect(result.error).toContain("No focused editable node found");
-      expect(adb.getExecutedCommands()).toEqual([]);
-    });
-
-    test("a11y success is unaffected: no lock read, no key events", async () => {
-      const adb = new FakeAdbExecutor();
-      adb.setDeviceLock(LOCKED_SECURE);
-      const inputText = new InputText(androidDevice, adb);
-
-      stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
-
-      const result = await testInputText(inputText).executeAndroidTextInput("1234");
-
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("a11y");
-      expect(adb.getExecutedCommands()).toEqual([]);
-    });
   });
 });

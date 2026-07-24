@@ -63,6 +63,11 @@ export class DeviceSessionRepository {
         session_timeout_ms: record.sessionTimeoutMs,
         heartbeat_timeout_ms: record.heartbeatTimeoutMs,
         has_received_heartbeat: record.hasReceivedHeartbeat ? 1 : 0,
+        // Lock info is learned later (via wakeAndUnlock); a fresh row starts
+        // empty and is deliberately NOT reset in doUpdateSet below so a
+        // re-upsert of an existing session preserves a remembered credential.
+        lock_type: null,
+        lock_credential: null,
         updated_at: now,
       };
 
@@ -208,5 +213,50 @@ export class DeviceSessionRepository {
       .selectAll()
       .where("session_uuid", "=", sessionUuid)
       .executeTakeFirst();
+  }
+
+  /**
+   * The credential last remembered for a device's active session, or null when
+   * none is recorded. Backs `wakeAndUnlock`'s learn-then-reuse of a PIN
+   * (issue #4360). Returns the most-recently-used active session's credential.
+   */
+  async getDeviceLockCredential(deviceId: string): Promise<string | null> {
+    const db = await this.getDb();
+    const row = await db
+      .selectFrom("device_sessions")
+      .select(["lock_credential"])
+      .where("device_id", "=", deviceId)
+      .where("status", "=", "active")
+      .orderBy("last_used_at_ms", "desc")
+      .limit(1)
+      .executeTakeFirst();
+    return row?.lock_credential ?? null;
+  }
+
+  /**
+   * Remember how to unlock a device on its active session(s). Best-effort: a
+   * device with no active session row is a no-op. The credential is stored
+   * plaintext in the local single-user DB (issue #4360).
+   */
+  async rememberDeviceLock(
+    deviceId: string,
+    lockType: string,
+    credential: string | null
+  ): Promise<void> {
+    try {
+      const db = await this.getDb();
+      await db
+        .updateTable("device_sessions")
+        .set({
+          lock_type: lockType,
+          lock_credential: credential,
+          updated_at: new Date().toISOString(),
+        })
+        .where("device_id", "=", deviceId)
+        .where("status", "=", "active")
+        .execute();
+    } catch (error) {
+      logger.warn(`[DeviceSessionRepository] Failed to remember lock for device ${deviceId}: ${error}`);
+    }
   }
 }

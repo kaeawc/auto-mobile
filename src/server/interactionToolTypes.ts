@@ -43,6 +43,11 @@ export interface InputTextArgs {
   platform: Platform;
 }
 
+export interface WakeAndUnlockArgs {
+  pin?: string;
+  platform: Platform;
+}
+
 export interface OpenLinkArgs {
   url: string;
   platform: Platform;

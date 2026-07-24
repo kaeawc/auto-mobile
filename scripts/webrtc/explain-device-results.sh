@@ -25,38 +25,40 @@ emit() {
 }
 
 render_legend() {
-  cat <<EOF
-## How to read the ${platform} WebRTC device-capture results
-
+  # Heading carries the only interpolation; the body is a quoted heredoc so its
+  # backticks and any future `$(...)` stay literal text rather than running as
+  # command substitution in a script whose whole job is printing static prose.
+  printf '## How to read the %s WebRTC device-capture results\n\n' "${platform}"
+  cat <<'EOF'
 This lane proves the full pipeline works:
-\`capture -> WHIP -> MediaMTX -> WHEP -> browser decode\`. The artifacts uploaded
+`capture -> WHIP -> MediaMTX -> WHEP -> browser decode`. The artifacts uploaded
 below (result.txt, stage-latency.json, chrome.log, mediamtx.log) record it.
 
 ### What decides pass/fail
 The test passes when a real frame is decoded in the browser and keeps advancing,
 then the stream tears down cleanly. Concretely, in result.txt / stage-latency.json:
-- \`outcome=passed\` — the capture pipeline reached the browser.
-- \`missingStages\` is empty — all six stages below were observed, in order.
-- \`captureToBrowser=<n>ms\` is present — first browser-decoded frame was timed.
-- \`decodedSize\` width/height > 0 and frames advanced across the sample window.
+- `outcome=passed` — the capture pipeline reached the browser.
+- `missingStages` is empty — all six stages below were observed, in order.
+- `captureToBrowser=<n>ms` is present — first browser-decoded frame was timed.
+- `decodedSize` width/height > 0 and frames advanced across the sample window.
 
 ### The six stages (elapsed from startRequest; +delta from the previous stage)
-- \`startRequest\`      the daemon was asked to start the stream (origin, 0ms).
-- \`whipConnected\`     the device's WHIP publish PeerConnection came up.
-- \`sourceStarted\`     the device began producing encoded frames.
-- \`firstEncodedFrame\` MediaMTX saw the first H264 frame on the path.
-- \`whepConnected\`     the browser's WHEP subscribe PeerConnection came up.
-- \`firstDecodedFrame\` the browser decoded the first frame (== captureToBrowser).
+- `startRequest`      the daemon was asked to start the stream (origin, 0ms).
+- `whipConnected`     the device's WHIP publish PeerConnection came up.
+- `sourceStarted`     the device began producing encoded frames.
+- `firstEncodedFrame` MediaMTX saw the first H264 frame on the path.
+- `whepConnected`     the browser's WHEP subscribe PeerConnection came up.
+- `firstDecodedFrame` the browser decoded the first frame (== captureToBrowser).
 
 ### Lifecycle phases (reported separately from outcome, per #4354)
-\`[phase] ... ok|failed|timedOut\` lines (e.g. pipelineTeardown, fixtureRestore)
-time bounded cleanup. A phase can fail or time out WITHOUT recolouring \`outcome\`:
+`[phase] ... ok|failed|timedOut` lines (e.g. pipelineTeardown, fixtureRestore)
+time bounded cleanup. A phase can fail or time out WITHOUT recolouring `outcome`:
 outcome describes the capture pipeline, a phase describes teardown/restore. Read
-both — an \`ok\` pipeline with a \`timedOut\` teardown is a real (separate) signal.
+both — an `ok` pipeline with a `timedOut` teardown is a real (separate) signal.
 
 ### Throughput metrics (measured at the browser, #4349)
-- \`egress=<n>kbps\`   mean inbound-RTP bitrate the reader actually received.
-- \`decodedFps=<n>\`   frames/s the runner sustained, vs the configured \`fps=\`.
+- `egress=<n>kbps`   mean inbound-RTP bitrate the reader actually received.
+- `decodedFps=<n>`   frames/s the runner sustained, vs the configured `fps=`.
 These characterize the pipeline; they are diagnostic, not the pass gate. Source
 vs decoded resolution differ by design (device portrait framing + the
 resolution-aware bitrate cap, #4371) — that is not an error.
@@ -78,9 +80,9 @@ chrome.log runs Chrome fully offline on a private/localhost network, so:
   MediaMTX's "closed: terminated" / "peer connection closed".
 
 ### When a run really failed
-Look for \`outcome=failed\`, a non-empty \`missingStages=...\` (which stage was
-never reached localizes the break), a \`[phase] ... failed|timedOut\` line, or an
-absent \`captureToBrowser\`. The benign lines above do NOT indicate any of these.
+Look for `outcome=failed`, a non-empty `missingStages=...` (which stage was
+never reached localizes the break), a `[phase] ... failed|timedOut` line, or an
+absent `captureToBrowser`. The benign lines above do NOT indicate any of these.
 EOF
 }
 

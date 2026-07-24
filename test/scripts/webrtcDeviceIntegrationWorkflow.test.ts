@@ -128,6 +128,8 @@ describe("#4308 device WebRTC integration workflow", () => {
       expect(explain?.if).toBe("always()");
       expect(explain?.run).toContain("scripts/webrtc/explain-device-results.sh");
       expect(explain?.run).toContain(platform);
+      // A diagnostic-only step must not redden a green capture lane if it throws.
+      expect(explain?.["continue-on-error"]).toBe(true);
 
       // The legend documents the artifacts, so it must run after the capture
       // step that writes them and before they are uploaded away.

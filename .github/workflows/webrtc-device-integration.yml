@@ -97,6 +97,9 @@ jobs:
       # is there for failed runs too, when it is most needed.
       - name: "Explain WebRTC device results"
         if: always()
+        # Diagnostic-only: a failure here must never redden a green capture lane,
+        # same as the upload step below.
+        continue-on-error: true
         run: bash scripts/webrtc/explain-device-results.sh android
       # Always keep the stage-latency record (#4343): p50/p95 baselines need the
       # passing runs too. continue-on-error keeps a missing or failed upload from
@@ -146,6 +149,9 @@ jobs:
       # is there for failed runs too, when it is most needed.
       - name: "Explain WebRTC device results"
         if: always()
+        # Diagnostic-only: a failure here must never redden a green capture lane,
+        # same as the upload step below.
+        continue-on-error: true
         run: bash scripts/webrtc/explain-device-results.sh ios
       # Always keep the stage-latency record (#4343): p50/p95 baselines need the
       # passing runs too. continue-on-error keeps a missing or failed upload from

@@ -212,24 +212,40 @@ function findAnchor(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord | null
  * resource-id (and its package qualifier) is on the allow-list, and Android
  * system chrome carries ids like `com.android.systemui:id/...`.
  */
-function resourceIdPackage(node: NodeRecord): string {
-  const rid = stringAttr(node, "resource-id");
+function resourceIdPackage(rid: string): string {
   const colon = rid.indexOf(":");
   return colon > 0 ? rid.slice(0, colon) : "";
 }
 
 /**
- * Drop subtrees rooted at an identifiable NON-foreground package — status bar,
- * nav bar, and IME all carry package-qualified resource-ids
- * (`com.android.systemui:id/...`, the keyboard package, …). A node with no
- * package-qualified id (a generic container, or an app/Compose/iOS leaf whose
- * identity is text/content-desc) is neutral and kept, so real app content is
- * never dropped merely for lacking a qualified id. On iOS, where nodes carry no
- * `pkg:id/...` resource-ids at all, nothing is foreign, so this is a safe no-op.
+ * A resource-id package prefix names FOREIGN system chrome only when it is a
+ * REAL dotted Android package other than the foreground app. The dot test is
+ * load-bearing and prevents two catastrophic false positives:
+ *
+ *  - The `android:` framework namespace (`android:id/content` — the setContentView
+ *    host present in EVERY app window — plus AlertDialog `android:id/button1`,
+ *    ActionBar, and list framework ids) belongs to APP content, not chrome.
+ *    Prefix `android` has no dot, so it is neutral and kept; without this guard
+ *    FOCUS would empty the app subtree in the common dialog / content-view case.
+ *  - iOS accessibility identifiers (`row:0`, `section:2:cell:1`) split on their
+ *    colon to an undotted prefix, so iOS is a natural no-op — a dotted-package
+ *    prefix is an Android shape iOS does not produce.
+ *
+ * Real chrome (`com.android.systemui:id/...`, the dotted IME package) and other
+ * apps' windows keep their dotted prefixes and are correctly dropped.
+ */
+function isForeignPackage(pkg: string, fgPackage: string): boolean {
+  return pkg.includes(".") && pkg !== fgPackage;
+}
+
+/**
+ * Drop subtrees rooted at an identifiable foreign-package node — status bar, nav
+ * bar, IME. A node with no dotted-package resource-id (a generic container, an
+ * `android:`-framework host, or an app/Compose/iOS leaf) is neutral and kept, so
+ * real app content is never dropped merely for its id namespace.
  */
 function pruneForeignChrome(node: NodeRecord, fgPackage: string): NodeRecord | null {
-  const pkg = resourceIdPackage(node);
-  if (pkg !== "" && pkg !== fgPackage) {
+  if (isForeignPackage(resourceIdPackage(stringAttr(node, "resource-id")), fgPackage)) {
     return null;
   }
   const keptChildren = childrenOf(node)
@@ -242,12 +258,10 @@ function foregroundPackage(obs: ObserveResult): string {
   return obs.viewHierarchy?.packageName || obs.activeWindow?.appId || "";
 }
 
-/** Whether an `Element`-shaped record belongs to an identifiable non-fg package. */
+/** Whether an `Element`-shaped record belongs to a foreign (chrome) package. */
 function isForeignElement(item: { "resource-id"?: unknown }, fgPackage: string): boolean {
   const rid = typeof item["resource-id"] === "string" ? item["resource-id"] : "";
-  const colon = rid.indexOf(":");
-  const pkg = colon > 0 ? rid.slice(0, colon) : "";
-  return pkg !== "" && pkg !== fgPackage;
+  return isForeignPackage(resourceIdPackage(rid), fgPackage);
 }
 
 /**

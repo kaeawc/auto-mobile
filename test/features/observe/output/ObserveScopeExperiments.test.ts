@@ -247,6 +247,56 @@ describe("scopeToFocus", () => {
     expect(result.elements?.clickable).toHaveLength(1); // app header element kept
   });
 
+  test("foreground-app scoping KEEPS android: framework ids (app content, not chrome)", () => {
+    const obs = androidFixture();
+    // android:id/content is the setContentView host in every app window; an
+    // AlertDialog's buttons are android:id/button1 etc. All belong to app content.
+    roots(obs)[0].node!.push({
+      "resource-id": "android:id/content",
+      "bounds": { left: 0, top: 300, right: 1080, bottom: 500 },
+      "node": [
+        { "resource-id": `${APP}:id/ok`, "text": "OK", "bounds": { left: 0, top: 300, right: 200, bottom: 500 } },
+        { "resource-id": "android:id/button1", "text": "Cancel", "bounds": { left: 200, top: 300, right: 400, bottom: 500 } },
+      ],
+    });
+    const ids = resourceIds(scopeToFocus(obs).result);
+    expect(ids).toContain("android:id/content"); // framework host kept
+    expect(ids).toContain("android:id/button1"); // dialog button kept
+    expect(ids).toContain(`${APP}:id/ok`); // app child under a framework host kept
+    expect(ids.some(id => id.startsWith(SYSUI))).toBe(false); // real chrome still dropped
+  });
+
+  test("foreground-app scoping drops a dotted foreign IME package subtree", () => {
+    const obs = androidFixture();
+    roots(obs)[0].node!.push({
+      "resource-id": "com.google.android.inputmethod.latin:id/keyboard",
+      "bounds": { left: 0, top: 1800, right: 1080, bottom: 2300 },
+    });
+    const ids = resourceIds(scopeToFocus(obs).result);
+    expect(ids.some(id => id.startsWith("com.google.android.inputmethod"))).toBe(false);
+  });
+
+  test("foreground-app scoping is a no-op on iOS-style colon identifiers (undotted prefix)", () => {
+    const iosRoot: Node = {
+      class: "XCUIElementTypeApplication",
+      node: [
+        { "resource-id": "row:0", "text": "First", "bounds": { left: 0, top: 0, right: 400, bottom: 100 } },
+        { "resource-id": "section:2:cell:1", "text": "Second", "bounds": { left: 0, top: 100, right: 400, bottom: 200 } },
+      ],
+    };
+    const obs = {
+      updatedAt: 0,
+      screenSize: { width: 400, height: 800 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { packageName: "com.example.iosapp", hierarchy: { node: iosRoot as unknown as ViewHierarchyNode } },
+    } as ObserveResult;
+    const before = countNodes(roots(obs));
+    const { result, focus } = scopeToFocus(obs);
+    expect(focus.matched).toBe(false); // undotted prefixes are never foreign
+    expect(countNodes(roots(result))).toBe(before);
+    expect(resourceIds(result)).toContain("row:0");
+  });
+
   test("anchor scoping by resource-id keeps only the matched subtree", () => {
     const obs = androidFixture();
     const { result, focus } = scopeToFocus(obs, { resourceId: LIST });
@@ -418,10 +468,14 @@ describe("applyObserveScopeExperiments", () => {
     const obs = androidFixture();
     const result = applyObserveScopeExperiments(obs, { focus: true, overview: true, region: true });
     const applied = result.observeScope?.applied ?? [];
-    // focus + overview definitely change the tree; region may already be covered
-    // by focus, so assert order-preserving subset of the enabled set.
-    expect(applied).toEqual(applied.filter(k => ["focus", "region", "overview"].includes(k)));
-    expect(result.observeScope?.applied).toContain("overview");
+    // `applied` must be a subsequence of the canonical stage order (focus, region,
+    // overview) — i.e. each entry's stage index strictly increases. This catches a
+    // real regression (a stage recorded out of order) the type system cannot.
+    const order = ["focus", "region", "overview"];
+    const indices = applied.map(k => order.indexOf(k));
+    expect(indices).toEqual([...indices].sort((a, b) => a - b));
+    expect(new Set(applied).size).toBe(applied.length); // no duplicate stages
+    expect(applied).toContain("overview");
     expect(result.elements).toBeUndefined(); // overview drops elements
   });
 

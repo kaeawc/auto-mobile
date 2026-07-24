@@ -46,6 +46,37 @@ Part of the MCP output-context reduction effort. Each flag can be set either as 
 | **`--actions-diff-observe`** | `AUTOMOBILE_ACTIONS_DIFF_OBSERVE` | Non-observe tools (`tapOn`, `swipeOn`, …) emit a **diff** of their post-action observation against the last one shown to the agent, instead of the full embedded observation. The baseline is the "last observation output to the agent" — the sanitized `ObserveResult` cached per session (`SessionCacheData.lastRenderedObservation`). `observe` **always** emits the full sanitized observation and resets the baseline; each non-observe action emits its diff then updates the baseline to its own observation, so the next diff is against current state. Nodes carry no stable id, so diffing uses a synthetic key: `resource-id` + `bounds` + `text` + sibling index. The diff is `{ isDiff: true, added, removed, changed, fields }` — `added`/`removed`/`changed` are keyed nodes (a node whose key fields change reads as remove+add; a same-key node whose other attributes change, e.g. `checked`, reads as `changed`), and `fields` are changed top-level fields — scalars (`rotation`, `wakefulness`, `awaitDuration`, …; `updatedAt` is excluded as pure churn) and the Element **mirror** fields (`focusedElement`, `accessibilityFocusedElement`, `awaitedElement`), each as `{from, to}`. The mirror fields are emitted `node`-subtree-stripped (the subtree is redundant with the node diff) and compared bounds-tolerantly; a focus gain reads as `{from: undefined, to: element}`, a loss as `{from: element, to: undefined}`. **Falls back to the full observation** (no diff) when the active window/package changed (cross-screen diff is meaningless), the baseline is missing (first action), or there is no `sessionUuid` (legacy single-agent path). **Content-hash node identity (#3053):** the positional key cascades on scroll / mid-list insert — a shift changes every following node's `bounds` and sibling index, so whole rows would surface as remove+add. After positional matching, a leftover *removed* and *added* node are re-paired into one `changed` delta when they share a stable content key (`resource-id`/`view-id`/`content-desc`/`text` — no bounds, no sibling index) that is **unique among the leftovers on both sides**; uniqueness guarantees exactly one candidate each side, so distinct content never false-merges, and a keyless node (no stable identity) never re-pairs. This collapses a scroll into "N nodes moved" instead of "N removed + N added". Duplicate/interchangeable cells stay remove+add (ambiguous key). Applied output-only in `finalizeToolResponse` after `sanitizeObserveResult`, so it composes with `--observe-result-compact` (the diff operates on the already-compacted observation; the synthetic key normalizes both object- and tuple-shaped bounds). **Internal tool-to-tool calls are never diffed:** `PlanExecutor` marks its step calls internal (`__internalNoDiff`), so a plan step's finalized envelope always carries the full observation — a current or future internal `.observation.viewHierarchy` reader is never handed a diff. Combining it with `--actions-no-observe` is moot — that flag removes the observation, so there is nothing to diff. |
 | **`--actions-no-observe`** | `AUTOMOBILE_ACTIONS_NO_OBSERVE` | Strip the embedded `observation` from non-observe tool results entirely (deleted from **both** `structuredContent` and the serialized `content[0].text`). Output-only — `BaseVisualChange` still computes the observation internally for its own success detection, so visual-change behavior is unchanged; the `observe` tool's own observation is never stripped. Applied at `finalizeToolResponse`. **Precedence:** when both `--actions-no-observe` and `--actions-diff-observe` are set, no-observe wins — the observation is removed, so there is nothing to diff. |
 | **`--tool-results-compact-json`** | `AUTOMOBILE_TOOL_RESULTS_COMPACT_JSON` | Serialize tool results as compact (non-pretty-printed) JSON — drops the 2-space indentation in `stringifyToolResponse`. Same data (parses back identically, no effect on `tapOn`/text matching); ~35% fewer characters on element-heavy payloads. Composes with the other flags. |
+| **`--observe-focus-scope`** | `AUTOMOBILE_OBSERVE_FOCUS_SCOPE` | Enable the FOCUS dimension of the `observe` `scope` input (see below). Scope the returned hierarchy to a subtree — a semantic anchor, or the foreground app with identifiable system chrome dropped. Honored only when the call also supplies `scope.focus`. |
+| **`--observe-overview`** | `AUTOMOBILE_OBSERVE_OVERVIEW` | Enable the OVERVIEW dimension of the `observe` `scope` input. Collapse the hierarchy to a structural/addressable container skeleton, dropping anonymous leaves and annotating `omittedDescendants`. Honored only when the call supplies `scope.overview: true`. |
+| **`--observe-region`** | `AUTOMOBILE_OBSERVE_REGION` | Enable the REGION dimension of the `observe` `scope` input. Crop the hierarchy to a normalized `(0..1)` box, or the inset content rectangle. Honored only when the call supplies `scope.region`. |
+
+### Observe scope input (issue #4344)
+
+Applies the multimodal "crop tool" concept to the **view hierarchy** (the artifact
+agents consume) rather than screenshots: three progressive-disclosure transforms
+that return a *scoped* view of the tree. This is the "spatial axis" complementing
+`--actions-diff-observe`'s "temporal axis". Implemented output-only in
+`finalizeToolResponse` (`src/features/observe/output/ObserveScopeExperiments.ts`),
+so it never mutates the in-memory result, and applied to the **agent-facing**
+`observe` payload only — internal tool-to-tool calls and the diff baseline keep
+the full sanitized tree.
+
+Unlike the other flags, the parameters ride in the tool call, not the flag: the
+agent picks where to zoom on **each** screen via an optional `scope` field on
+`observe`, and the flag above is only a per-dimension dark-launch gate.
+`buildObserveScopeConfig` applies a dimension only when the call requested it
+**and** its flag is on.
+
+| `scope` field | Shape | Behavior |
+|---|---|---|
+| `scope.focus` | `true` \| `{ resourceId?, text? }` | An anchor scopes to the first matching node's subtree; `true` scopes to the foreground app, dropping identifiable foreign-package chrome. FOCUS classifies chrome by the resource-id **dotted-package** prefix (`com.android.systemui:id/...`), which survives `cleanNodeProperties`; the undotted `android:` framework namespace (`android:id/content`, dialog/ActionBar ids) and iOS colon identifiers (`row:0`) are neutral and kept, so app content is never dropped. |
+| `scope.region` | `true` \| `{ x1, y1, x2, y2 }` | Crop to a normalized `(0..1)` box (`x1<x2`, `y1<y2`, enforced at runtime), or the inset content rectangle when `true`. Nodes with no readable bounds are kept. |
+| `scope.overview` | `true` | Collapse to a structural/addressable skeleton (kept: children, `scrollable`, `clickable`, `resource-id`, `content-desc`). |
+
+Every scoped payload carries an `observeScope` field (`applied` transforms,
+`nodesBefore`/`nodesAfter`, `regionPx`, `focus` resolution) so the reduction is
+measurable on the wire. The `scope` input and `observeScope` output are advertised
+in the `observe` tool schema.
 
 ### Tool Output Artifact Mode
 

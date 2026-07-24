@@ -28,7 +28,13 @@ export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTU
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
-const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 15_000;
+/**
+ * Deadline for the capture helper's first frame (and, when audio is on, its first
+ * audio sample). Held at 15s: measured iOS source startup on hosted CI runners
+ * reaches 13s on its slow tail, and MediaMTX's relay deadline is pinned above this
+ * value plus encoder startup. See test/scripts/mediamtxConfig.test.ts (#4345).
+ */
+export const IOS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 /** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
 const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
@@ -163,7 +169,7 @@ export class IosH264Source implements H264CaptureSource {
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     this.helperPathExists = options.helperPathExists;
     this.timer = options.timer ?? defaultTimer;
-    this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? DEFAULT_FIRST_FRAME_TIMEOUT_MS;
+    this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? IOS_FIRST_FRAME_TIMEOUT_MS;
     this.simulatorWindowResolver =
       options.simulatorWindowResolver ??
       ((helperPath, device, audioEnabled) =>

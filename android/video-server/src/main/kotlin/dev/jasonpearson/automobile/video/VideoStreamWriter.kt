@@ -20,6 +20,12 @@ class VideoStreamWriter(
   private val audioEnabled: Boolean = false,
   private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
+  private data class CachedPacket(
+    val trackId: Int,
+    val ptsAndFlags: Long,
+    val data: ByteArray,
+  )
+
   private var serverSocket: LocalServerSocket? = null
   private var clientSocket: LocalSocket? = null
   private var outputStream: OutputStream? = null
@@ -125,7 +131,7 @@ class VideoStreamWriter(
     Thread(
         {
           try {
-            while (!stopped) {
+            while (!stopped && isCurrentClient(client)) {
               val command = input.read()
               if (command < 0) break
               commandHandler?.invoke(command)
@@ -221,6 +227,9 @@ class VideoStreamWriter(
       return true
     }
   }
+
+  private fun isCurrentClient(client: LocalSocket): Boolean =
+    synchronized(lock) { clientSocket === client }
 
   private fun closeClientLocked() {
     try {

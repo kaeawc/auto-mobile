@@ -3,7 +3,8 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
   PersistentEncoderH264Source,
-  VIDEO_SERVER_SOCKET_NAME,
+  VIDEO_SERVER_LEASE_DIRECTORY,
+  VIDEO_SERVER_SOCKET_PREFIX,
   type SocketConnector,
   type StreamSocket,
 } from "../../../src/features/webrtc/PersistentEncoderH264Source";
@@ -21,6 +22,9 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const DEVICE: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "t" } as BootedDevice;
 const FORWARD_PORT = "45999";
+const SESSION_TOKEN = "session-0001";
+const SESSION_SOCKET = `${VIDEO_SERVER_SOCKET_PREFIX}_session0001`;
+const VIDEO_SERVER_MAIN_CLASS = "dev.jasonpearson.automobile.video.VideoServer";
 // Flush the nextTick + microtask queues so the source's async launch steps and
 // the PassThrough `data` emissions settle (no fake timer involved here).
 const tick = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
@@ -33,8 +37,17 @@ class FakeProcess extends EventEmitter implements SpawnedProcess {
     this.killed.push(signal ?? "SIGTERM");
     return true;
   }
-  ready(): void {
-    this.stdout.write(Buffer.from("Waiting for client connection on localabstract:x\n"));
+  ready(token: string = SESSION_TOKEN, socketName: string = SESSION_SOCKET, pid: number = 1234): void {
+    this.stdout.write(Buffer.from(`VIDEO_SESSION_READY token=${token} pid=${pid} socket=${socketName}\n`));
+    this.stdout.write(Buffer.from(`Waiting for client connection on localabstract:${socketName}\n`));
+  }
+  readyAndStreamingStarted(): void {
+    this.stdout.write(
+      Buffer.from(
+        `VIDEO_SESSION_READY token=${SESSION_TOKEN} pid=1234 socket=${SESSION_SOCKET}\n` +
+        "Streaming started\n"
+      )
+    );
   }
   streamingStarted(): void {
     this.stdout.write(Buffer.from("Streaming started\n"));
@@ -107,6 +120,12 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   const errors: Error[] = [];
   const timer = new FakeTimer();
   const audioEnabled = overrides.audioEnabled === true;
+  let forwardedSocket: string | null = null;
+  const leaseOutput = (overrides.leaseOutput as string | undefined) ?? "";
+  const deviceUptimeMs = (overrides.deviceUptimeMs as number | undefined) ?? 100_000;
+  const processCommandLine =
+    (overrides.processCommandLine as string | undefined) ??
+    `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`;
 
   const adbFactory: AdbClientFactory = {
     create() {
@@ -115,7 +134,28 @@ function makeSource(overrides: Record<string, unknown> = {}) {
         executeCommand: async (command: string) => {
           commands.push(command);
           if (command.startsWith("forward tcp:0")) {
+            forwardedSocket = command.split("localabstract:")[1] ?? null;
             return { stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 };
+          }
+          if (command === "forward --list") {
+            const stdout =
+              (overrides.forwardListOutput as string | undefined) ??
+              (forwardedSocket
+                ? `${DEVICE.deviceId} tcp:${FORWARD_PORT} localabstract:${forwardedSocket}\n`
+                : "");
+            return { stdout, stderr: "", exitCode: 0 };
+          }
+          if (command === `shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`) {
+            return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+          }
+          if (command.startsWith(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/`)) {
+            return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+          }
+          if (command === "shell cat /proc/uptime") {
+            return { stdout: `${deviceUptimeMs / 1000} 0.00\n`, stderr: "", exitCode: 0 };
+          }
+          if (command.startsWith("shell cat /proc/")) {
+            return { stdout: processCommandLine, stderr: "", exitCode: 0 };
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         },
@@ -145,6 +185,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     adbFactory,
     connector,
     timer,
+    sessionTokenFactory: () => SESSION_TOKEN,
     ...overrides,
   });
 
@@ -159,6 +200,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     errors,
     timer,
     audioEnabled,
+    sessionSocket: () => forwardedSocket,
   };
 }
 
@@ -186,7 +228,7 @@ describe("PersistentEncoderH264Source", () => {
     await startReady(ctx);
 
     expect(ctx.commands.some(c => c.startsWith("push") && c.includes("/data/local/tmp/automobile-video.jar"))).toBe(true);
-    expect(ctx.commands).toContain(`forward tcp:0 localabstract:${VIDEO_SERVER_SOCKET_NAME}`);
+    expect(ctx.commands).toContain(`forward tcp:0 localabstract:${SESSION_SOCKET}`);
 
     const args = ctx.spawnArgs[0].join(" ");
     expect(args).not.toContain("-s emulator-5554");
@@ -194,6 +236,8 @@ describe("PersistentEncoderH264Source", () => {
     expect(args).toContain("--quality low");
     expect(args).toContain("--bit-rate 1500000");
     expect(args).toContain("--size 480x1040");
+    expect(args).toContain(`--session-token ${SESSION_TOKEN}`);
+    expect(args).toContain(`--socket-name ${SESSION_SOCKET}`);
 
     // A stream header + one packet: only the packet payload reaches onData.
     ctx.sockets[0].feed(streamHeader(480, 1040));
@@ -306,6 +350,22 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
   });
 
+  test("audio startup observes a streaming marker emitted with session readiness", async () => {
+    const ctx = makeSource({ audioEnabled: true });
+    const startPromise = ctx.source.start();
+    await tick(); // push + spawn
+    ctx.processes[0].readyAndStreamingStarted();
+    await tick(); // readiness resolves, forward + connect
+    ctx.sockets[0].feed(muxHeader());
+    ctx.sockets[0].feed(muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([0x7f])));
+
+    await startPromise;
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.audioChunks).toEqual([Buffer.from([0x7f])]);
+
+    await ctx.source.stop();
+  });
+
   test("audio startup rejects when the server exits before the post-audio-ready marker", async () => {
     const ctx = makeSource({ audioEnabled: true });
     const startPromise = ctx.source.start();
@@ -400,11 +460,12 @@ describe("PersistentEncoderH264Source", () => {
     const startPromise = ctx.source.start();
     await tick(); // spawn
     ctx.timer.advanceTime(5000); // readiness timeout fires
-    await expect(startPromise).rejects.toThrow(/did not become ready/);
+    await expect(startPromise).rejects.toThrow(/did not become session-ready.*AUTOMOBILE_VIDEO_SERVER_JAR/);
     // A startup failure must NOT be reported via onError (that path is for
     // post-start failures / reconnect); it surfaces as the rejection.
     expect(ctx.errors).toEqual([]);
     expect(ctx.processes[0].killed).toContain("SIGINT");
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
   });
 
   test("rejects start when the server exits before ready", async () => {
@@ -414,6 +475,17 @@ describe("PersistentEncoderH264Source", () => {
     ctx.processes[0].exit(1, null);
     await expect(startPromise).rejects.toThrow(/exited before ready/);
     expect(ctx.errors).toEqual([]);
+  });
+
+  test("rejects a readiness line whose token does not match this session", async () => {
+    const ctx = makeSource();
+    const startPromise = ctx.source.start();
+    await tick();
+    ctx.processes[0].ready("different-session", `${VIDEO_SERVER_SOCKET_PREFIX}_differentsession`);
+
+    await expect(startPromise).rejects.toThrow(/readiness token mismatch/);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.processes[0].killed).toContain("SIGINT");
   });
 
   test("reconnects a post-start socket close without failing the retained encoder source", async () => {
@@ -550,5 +622,180 @@ describe("PersistentEncoderH264Source", () => {
     ctx.processes[0].exit(137, "SIGKILL");
     expect(ctx.errors).toHaveLength(1);
     expect(ctx.errors[0].message).toContain("video-server exited");
+  });
+
+  test("reconciles an expired owned lease with a matching forward", async () => {
+    const staleLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 60_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLease,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:61234");
+    expect(ctx.commands).toContain("shell kill -2 987");
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does not remove a mismatched stale-session forward", async () => {
+    const staleLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 60_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLease,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:someone_elses_socket\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("forward --remove tcp:61234");
+    expect(ctx.commands).toContain("shell kill -2 987");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("refuses stale cleanup when the PID command line does not contain the lease token", async () => {
+    const staleLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 60_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLease,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000another-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:61234");
+    expect(ctx.commands).not.toContain("shell kill -2 987");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("refuses stale cleanup when the lease token is not the --session-token value", async () => {
+    const staleLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 60_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLease,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000other-session\u0000--quality\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:61234");
+    expect(ctx.commands).not.toContain("shell kill -2 987");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("uses device uptime instead of a lease wall-clock timestamp for expiry", async () => {
+    const freshLeaseWithOldWallClock = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_fresh",
+      sessionToken: "fresh-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -1_000_000,
+      heartbeatAtMs: -1_000_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: freshLeaseWithOldWallClock,
+      deviceUptimeMs: 100_000,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("forward --remove tcp:61234");
+    expect(ctx.commands).not.toContain("shell kill -2 987");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("uses separate socket leases for separate device sources", async () => {
+    const first = makeSource({ sessionTokenFactory: () => "first-session" });
+    const second = makeSource({
+      sessionTokenFactory: () => "second-session",
+      device: { ...DEVICE, deviceId: "emulator-5556" },
+    });
+
+    const firstStart = first.source.start();
+    const secondStart = second.source.start();
+    await tick();
+    first.processes[0].ready("first-session", `${VIDEO_SERVER_SOCKET_PREFIX}_firstsession`);
+    second.processes[0].ready("second-session", `${VIDEO_SERVER_SOCKET_PREFIX}_secondsession`);
+    await Promise.all([firstStart, secondStart]);
+
+    expect(first.sessionSocket()).toBe(`${VIDEO_SERVER_SOCKET_PREFIX}_firstsession`);
+    expect(second.sessionSocket()).toBe(`${VIDEO_SERVER_SOCKET_PREFIX}_secondsession`);
+
+    await first.source.stop();
+    await second.source.stop();
   });
 });

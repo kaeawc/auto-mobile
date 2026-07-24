@@ -118,6 +118,25 @@ const MODERN_TASK_HEADER = /^\s*\*\s*Task\{\S+\s+#(\d+)\b(.*)$/;
 /** "* Hist  #0: ActivityRecord{...}" -- one printed activity. */
 const HIST_LINE = /\bHist\s+#\d+:/;
 
+/**
+ * `rootOfTask=<bool>` out of an ActivityRecord block (issue #4340). Printed by
+ * `ActivityRecord.dump` from API 30 on as its own field line a few lines below
+ * the record's `Hist #N:` row:
+ *
+ *     * Hist  #1: ActivityRecord{c87b532 u0 com.google...nexuslauncher/.NexusLauncherActivity t7}
+ *         ...
+ *         rootOfTask=true task=Task{97acb18 #7 type=home I=...}
+ *
+ * This is the authoritative task-root answer; the `Hist #N` index is not. Real
+ * captures disagree with the index in both directions: the launcher is the root
+ * of its task yet prints as `Hist #1` on API 35/36, and API 34 prints a
+ * `Hist #0` row whose block says `rootOfTask=false`. Anchored to the start of
+ * the line so the inline `task=Task{...}` tail of the same line -- or any other
+ * mention -- cannot match. Absent on API <= 29, where the index heuristic
+ * remains the only source.
+ */
+const ROOT_OF_TASK_LINE = /^\s*rootOfTask=(true|false)\b/;
+
 /** Fields carried by a modern task header line. */
 interface TaskHeaderFields {
   id: number;
@@ -188,6 +207,11 @@ export class GetBackStack implements BackStack {
 
     let currentTaskId = -1;
     let currentTaskAffinity: string | undefined;
+    // The last parsed activity, while the scan is still inside its
+    // ActivityRecord block -- the target for that block's `rootOfTask=` line.
+    // Cleared at the next Hist row or task header, so a value can never bleed
+    // into the following record (issue #4340).
+    let openActivity: ActivityInfo | undefined;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -200,6 +224,7 @@ export class GetBackStack implements BackStack {
         // to the standalone "affinity=" line handled just below. Reset either
         // way so one task's affinity cannot leak onto the next task.
         currentTaskAffinity = header.affinity;
+        openActivity = undefined;
         logger.debug(`[BACK_STACK] Found task ID: ${currentTaskId}`);
       }
 
@@ -231,11 +256,22 @@ export class GetBackStack implements BackStack {
           name: activityName,
           taskId: taskIdFromActivity,
           taskAffinity: currentTaskAffinity,
+          // Index-derived fallback, authoritative only on API <= 29; overridden
+          // below by the block's own rootOfTask= line when one is printed.
           isTaskRoot: histIndex === 0
         };
 
         activities.push(activity);
+        openActivity = activity;
         logger.debug(`[BACK_STACK] Found activity: ${activityName} (task: ${taskIdFromActivity})`);
+        continue;
+      }
+
+      // The current record's own rootOfTask= field (see ROOT_OF_TASK_LINE).
+      const rootOfTask = line.match(ROOT_OF_TASK_LINE);
+      if (rootOfTask && openActivity) {
+        openActivity.isTaskRoot = rootOfTask[1] === "true";
+        openActivity = undefined;
       }
     }
 
@@ -441,8 +477,9 @@ export class GetBackStack implements BackStack {
 
       // Calculate depth: number of activities in current task minus 1 (the current activity).
       // This is the number of entries that can still be popped from the current task.
-      // isTaskRoot is set during parsing from the activity's own "Hist #N" index -- the
-      // root is the #0 entry, which dumpsys prints LAST because it lists top-to-bottom.
+      // isTaskRoot is set during parsing from the record's own rootOfTask= field (API 30+),
+      // falling back to the "Hist #N" index -- #0 is the root -- where the field is not
+      // printed (API <= 29). See ROOT_OF_TASK_LINE and issue #4340.
       const currentTaskId = currentActivity?.taskId || -1;
       const activitiesInCurrentTask = activities.filter(a => a.taskId === currentTaskId);
       const depth = Math.max(0, activitiesInCurrentTask.length - 1);

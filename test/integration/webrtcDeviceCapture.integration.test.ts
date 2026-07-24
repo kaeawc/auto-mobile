@@ -251,6 +251,30 @@ async function waitForDecodedFrames(cdp: CdpClient, minimum: number, message: st
   }
 }
 
+/**
+ * Wait until the decoded frame's content actually differs from `previousSample`, returning that
+ * frame. Frame *count* is no longer a proxy for a visible change: the encoder's idle-frame backstop
+ * (#4383) advances the counter with forced repeats of an unchanged screen, so a count-based wait can
+ * return on a still frame. Content-difference is what proves a visible transition rendered.
+ */
+async function waitForChangedSample(
+  cdp: CdpClient,
+  previousSample: number,
+  message: string
+): Promise<{ frames: number; width: number; height: number; sample: number }> {
+  let latest = await videoSample(cdp);
+  try {
+    await waitFor(async () => {
+      latest = await videoSample(cdp);
+      return latest.frames > 0 && latest.sample !== previousSample;
+    }, message);
+  } catch {
+    const diagnostics = await readerDiagnostics(cdp).catch(() => undefined);
+    throw new Error(`${message}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`);
+  }
+  return latest;
+}
+
 function androidDeviceId(): string {
   return process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
 }
@@ -515,13 +539,13 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       expect(staticScreenFrame.frames).toBeGreaterThan(0);
       decodedSize = { width: staticScreenFrame.width, height: staticScreenFrame.height };
       // A visible transition must still deliver changing video (regression guard for the
-      // active-screen path that the idle-frame backstop must not disturb).
+      // active-screen path that the idle-frame backstop must not disturb). Wait on decoded
+      // CONTENT changing, not the frame count — the idle backstop advances the count on a static
+      // screen, so a count-based wait would return on a forced repeat before the transition renders.
       await changeFixture();
-      await waitForDecodedFrames(cdp, staticScreenFrame.frames, "browser did not decode a new frame after a visible change");
-      const first = await videoSample(cdp);
+      const first = await waitForChangedSample(cdp, staticScreenFrame.sample, "browser did not decode changed video after a visible change");
       await launchFixture();
-      await waitForDecodedFrames(cdp, first.frames, "browser did not receive video after returning to the fixture");
-      const second = await videoSample(cdp);
+      const second = await waitForChangedSample(cdp, first.sample, "browser did not receive changed video after returning to the fixture");
       expect(first.width).toBeGreaterThan(0);
       expect(first.height).toBeGreaterThan(0);
       expect(second.frames).toBeGreaterThan(first.frames);

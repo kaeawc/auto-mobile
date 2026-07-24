@@ -11,7 +11,7 @@ import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import type { AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader } from "./AvdConfigReader";
 import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
-import { DeviceSessionLockStore } from "../../features/action/DeviceSessionLockStore";
+import { DeviceLockStore } from "../../features/action/DeviceLockStore";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 
 /**
@@ -1549,7 +1549,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     try {
       const wakeAndUnlock = new WakeAndUnlock(device, this.adbFactory, {
         timer: this.timer,
-        credentialStore: new DeviceSessionLockStore()
+        credentialStore: new DeviceLockStore()
       });
       const result = await wakeAndUnlock.execute();
       if (!result.unlocked && result.secure) {

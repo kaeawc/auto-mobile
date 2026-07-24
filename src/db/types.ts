@@ -467,11 +467,23 @@ export interface DeviceSessionsTable {
   session_timeout_ms: number;
   heartbeat_timeout_ms: number;
   has_received_heartbeat: number;
-  // How to unlock this device, remembered across the session (issue #4360).
-  // `lock_credential` is stored plaintext in the local single-user DB.
-  lock_type: string | null;
-  lock_credential: string | null;
   created_at: Generated<string>;
+  updated_at: Generated<string>;
+}
+
+/**
+ * How to unlock a device, keyed by device — NOT by session (issue #4360).
+ *
+ * Deliberately separate from `device_sessions`: a session row only exists when
+ * device-pool autolock is enabled, and never during boot (which precedes any
+ * session), so session-scoped storage could not deliver remember-then-reuse in
+ * the default config or at boot. `lock_credential` is stored plaintext in the
+ * local single-user DB.
+ */
+export interface DeviceLocksTable {
+  device_id: string;
+  lock_type: string;
+  lock_credential: string | null;
   updated_at: Generated<string>;
 }
 
@@ -687,6 +699,7 @@ export interface Database {
   storage_events: StorageEventsTable;
   layout_events: LayoutEventsTable;
   device_sessions: DeviceSessionsTable;
+  device_locks: DeviceLocksTable;
 }
 
 // Convenience types for each table
@@ -696,6 +709,9 @@ export type NewInstalledApp = Insertable<InstalledAppsTable>;
 export type DeviceSession = Selectable<DeviceSessionsTable>;
 export type NewDeviceSession = Insertable<DeviceSessionsTable>;
 export type DeviceSessionUpdate = Updateable<DeviceSessionsTable>;
+
+export type DeviceLock = Selectable<DeviceLocksTable>;
+export type NewDeviceLock = Insertable<DeviceLocksTable>;
 
 export type PerformanceThresholds = Selectable<PerformanceThresholdsTable>;
 export type NewPerformanceThresholds = Insertable<PerformanceThresholdsTable>;

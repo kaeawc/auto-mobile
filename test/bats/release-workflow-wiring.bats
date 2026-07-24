@@ -145,9 +145,12 @@
 # wiring link that regresses silently is the exact defect this whole area exists
 # to prevent. `yq` reads the real trigger and step fields instead.
 #
-# Pushing the tag does not start Release on its own: the `create` event never
-# fired for the tags CI pushed at 0.0.42 and 0.0.44, so ~26 versions were
-# published by hand while CI reported green.
+# Pushing the tag does start Release on its own -- release.yml's `create:`
+# trigger fired for 0.0.43, 0.0.44 and 0.0.45, all pushed by CI. The premise
+# recorded here originally (that `create` never fires for CI-pushed tags) was a
+# misread: what failed at 0.0.44 was a v-prefixed tag losing the validation gate,
+# not a missing run. So prepare-release confirms a run exists for the tag and
+# only dispatches when none does; the assertions below pin that fallback.
 
 # Skipping locally is a convenience; skipping in CI would silently retire every
 # assertion below, which is the same fail-green these guards exist to catch.
@@ -183,6 +186,26 @@ wiring_requires_yq() {
   [[ "$code" == *"gh workflow run release.yml"* ]]
   [[ "$code" == *'--ref "$TAG"'* ]]
   [[ "$code" != *"--ref main"* ]]
+
+  # Whichever route starts Release, the check has to be scoped to this tag.
+  # Comparing against the newest run of any branch matches the release.yml run
+  # that every branch creation queues, which reports a release that is not there.
+  [[ "$code" == *'--branch "$TAG"'* ]]
+}
+
+# The dispatch API rejects a token without actions: write, and the job-level
+# block replaces the workflow-level grant wholesale -- so dropping either half
+# turns the fallback into the 403 that failed Prepare Release #204.
+@test "prepare-release can dispatch and still push (#4157)" {
+  wiring_requires_yq
+  local perms
+  perms="$(yq -r '.jobs.prepare.permissions' ".github/workflows/prepare-release.yml")"
+  [ "$perms" != "null" ]
+
+  run yq -r '.jobs.prepare.permissions.actions' ".github/workflows/prepare-release.yml"
+  [ "$output" = "write" ]
+  run yq -r '.jobs.prepare.permissions.contents' ".github/workflows/prepare-release.yml"
+  [ "$output" = "write" ]
 }
 
 # action-gh-release throws "GitHub Releases requires a tag" when github.ref is not
@@ -226,6 +249,29 @@ wiring_requires_yq() {
     ".github/workflows/release.yml" | grep -v '^[[:space:]]*#')"
   [[ "$runs" == *'state=$(scripts/release/already-published.sh'* ]]
   [[ "$runs" != *'if [ "$(scripts/release/already-published.sh'* ]]
+}
+
+# The artifact checksum gate is the only thing standing between a stale APK/IPA
+# and a published release, and it failed open twice over in release 0.0.45:
+# `bash -e` without pipefail takes the pipeline's status from `tee`, discarding
+# the script's exit 1, and `grep | cut` takes its status from `cut`, so a missing
+# `checksum=` line produced an empty output rather than an abort.
+@test "release.yml artifact checksum gate cannot fail open (#4157)" {
+  wiring_requires_yq
+  local step
+  for step in verify_checksum verify_ipa_checksum verify_video_jar_checksum; do
+    local script
+    script="$(yq -r ".jobs.\"verify-and-release\".steps[] | select(.id == \"$step\") | .run" \
+      ".github/workflows/release.yml" | grep -v '^[[:space:]]*#')"
+    [ -n "$script" ]
+    [ "$script" != "null" ]
+
+    # pipefail propagates the verify script's mismatch exit through `tee`.
+    [[ "$script" == *"pipefail"* ]]
+    # The emptiness check catches the grep-into-cut case, which pipefail alone
+    # does not: cut succeeds on empty input, so the pipeline status stays 0.
+    [[ "$script" == *'[ -n "$CHECKSUM" ]'* ]]
+  done
 }
 
 # A dispatch that merely names the tag is not enough: the Actions UI ref picker

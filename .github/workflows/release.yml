@@ -164,29 +164,47 @@ jobs:
           name: video-server-jar
           path: /tmp
 
+      # These three steps run the release's only artifact-provenance gate, and
+      # both halves of the original form failed open. `bash -e` without pipefail
+      # takes its status from `tee`, so verify-artifact-sha256.sh's exit 1 on a
+      # mismatch was discarded; and `grep | cut` takes its status from `cut`, so
+      # finding no `checksum=` line set an empty output instead of aborting. A
+      # mismatched APK therefore sailed through green and only stopped later, at
+      # generate-release-constants.sh's "requires both" guard, reported as a
+      # missing variable rather than the mismatch it was. Keep pipefail and the
+      # non-empty assertion together: either one alone still lets a case through.
       - name: "Verify APK SHA256 matches source"
         id: verify_checksum
+        shell: bash
         run: |
+          set -euo pipefail
           bash scripts/ci/verify-artifact-sha256.sh \
             /tmp/control-proxy-debug.apk android | tee /tmp/apk-verify.log
           CHECKSUM=$(grep '^checksum=' /tmp/apk-verify.log | cut -d= -f2)
-          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+          [ -n "$CHECKSUM" ] || { echo "No checksum= line in APK verify log" >&2; exit 1; }
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
 
       - name: "Verify CtrlProxy iOS IPA SHA256 matches source"
         id: verify_ipa_checksum
+        shell: bash
         run: |
+          set -euo pipefail
           bash scripts/ci/verify-artifact-sha256.sh \
             /tmp/control-proxy.ipa ios | tee /tmp/ipa-verify.log
           CHECKSUM=$(grep '^checksum=' /tmp/ipa-verify.log | cut -d= -f2)
-          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+          [ -n "$CHECKSUM" ] || { echo "No checksum= line in IPA verify log" >&2; exit 1; }
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
 
       - name: "Verify video-server jar SHA256 matches source"
         id: verify_video_jar_checksum
+        shell: bash
         run: |
+          set -euo pipefail
           bash scripts/ci/verify-artifact-sha256.sh \
             /tmp/automobile-video.jar videojar | tee /tmp/videojar-verify.log
           CHECKSUM=$(grep '^checksum=' /tmp/videojar-verify.log | cut -d= -f2)
-          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+          [ -n "$CHECKSUM" ] || { echo "No checksum= line in jar verify log" >&2; exit 1; }
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
 
       - name: Generate release constants
         env:

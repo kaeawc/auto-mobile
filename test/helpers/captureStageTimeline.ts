@@ -191,6 +191,43 @@ export function decodedFpsBetween(first: EgressSample, second: EgressSample): nu
   return (frames / windowMs) * 1_000;
 }
 
+/**
+ * Two counters read from a WHEP viewer's inbound-RTP video stat, used to decide
+ * whether a relayed PLI recovered the stream to a fresh, self-decodable IDR
+ * (#4376). Cumulative, like {@link EgressSample}, so recovery is judged from two
+ * readings bracketing the request rather than from a single instant.
+ */
+export interface KeyframeRecoverySample {
+  /** Cumulative count of keyframes (SPS/PPS + IDR) the reader has decoded. */
+  keyFramesDecoded: number;
+  /** Cumulative count of all frames the reader has decoded. */
+  framesDecoded: number;
+}
+
+/**
+ * Whether a WHEP viewer recovered to a fresh, self-decodable IDR after a relayed
+ * PLI (#4376), comparing a baseline reading to a later one.
+ *
+ * Recovery is a *new* keyframe (`keyFramesDecoded` advanced — the reader decoded
+ * a fresh SPS/PPS + IDR, AC1) that rode out on a *delivered* frame
+ * (`framesDecoded` advanced). Requiring both is the delivery-shortfall tolerance
+ * (AC2): `IosH264Source.requestKeyFrame` restarts the encoder, but under a
+ * static Simulator screen its IDR only reaches the viewer on the next delivered
+ * frame — so the recovery point is defined on that delivered frame, never on a
+ * fixed wall clock. A reader whose counters reset (reconnect) reads as
+ * no-recovery rather than a spurious pass, since neither counter strictly
+ * advances.
+ */
+export function keyframeRecovered(
+  baseline: KeyframeRecoverySample,
+  latest: KeyframeRecoverySample
+): boolean {
+  return (
+    latest.keyFramesDecoded > baseline.keyFramesDecoded &&
+    latest.framesDecoded > baseline.framesDecoded
+  );
+}
+
 /** Monotonic millisecond reader used when none is injected. */
 export function monotonicNowMs(): number {
   return performance.now();

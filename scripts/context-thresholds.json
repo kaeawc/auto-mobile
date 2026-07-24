@@ -1,18 +1,18 @@
 {
   "version": "1.0.0",
   "metadata": {
-    "generatedAt": "2026-07-11",
-    "description": "MCP context usage thresholds with manual headroom for resource/template growth",
+    "generatedAt": "2026-07-24",
+    "description": "MCP context usage thresholds with manual headroom for resource/template growth. tools baseline/threshold raised in #3490: openLink gained an integrated waitFor (the whole predicate surface, previously observe-only) plus new absent/settled fields; shared waitFor descriptions were trimmed to minimize the net increase.",
     "baseline": {
-      "tools": 14910,
+      "tools": 15104,
       "resources": 440,
       "resourceTemplates": 1885,
-      "total": 17235
+      "total": 17429
     },
     "buffer": "custom"
   },
   "thresholds": {
-    "tools": 15000,
+    "tools": 15200,
     "resources": 1000,
     "resourceTemplates": 2000,
     "total": 20000

@@ -3091,7 +3091,7 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Wait for a predicate before returning the observation. Provide at least one of: elementId, text, textAny, className, contentDescription, activeWindow, or absent. textAny is mutually exclusive with the element predicates.",
+          "description": "Wait for a predicate before returning. Provide at least one of: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
           "properties": {
             "elementId": {
               "type": "string",
@@ -3144,11 +3144,11 @@
                 },
                 "packageName": {
                   "type": "string",
-                  "description": "Alias for appId (Android package name)"
+                  "description": "appId alias (Android package)"
                 },
                 "bundleId": {
                   "type": "string",
-                  "description": "Alias for appId (iOS bundle ID)"
+                  "description": "appId alias (iOS bundle)"
                 },
                 "activityName": {
                   "type": "string",
@@ -3181,23 +3181,19 @@
             "absent": {
               "type": "object",
               "additionalProperties": false,
-              "description": "Wait until an element matching these fields is absent",
+              "description": "Wait until an element matching these fields is absent (text uses contains match)",
               "properties": {
                 "elementId": {
-                  "type": "string",
-                  "description": "Resource ID / accessibility identifier that must be absent"
+                  "type": "string"
                 },
                 "text": {
-                  "type": "string",
-                  "description": "Element text that must be absent (contains match)"
+                  "type": "string"
                 },
                 "className": {
-                  "type": "string",
-                  "description": "Element class name that must be absent"
+                  "type": "string"
                 },
                 "contentDescription": {
-                  "type": "string",
-                  "description": "Content description / accessibility label that must be absent"
+                  "type": "string"
                 }
               },
               "anyOf": [
@@ -3322,14 +3318,14 @@
           ]
         },
         "settled": {
-          "description": "After waitFor matches, wait for a quiet (no hierarchy change) period before returning",
+          "description": "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
           "type": "object",
           "properties": {
             "quietPeriodMs": {
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
-              "description": "Wait for this many ms with no hierarchy changes after the waitFor predicate matches"
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
             }
           },
           "required": [
@@ -5395,7 +5391,7 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Wait for a predicate before returning the observation. Provide at least one of: elementId, text, textAny, className, contentDescription, activeWindow, or absent. textAny is mutually exclusive with the element predicates.",
+          "description": "Wait for a predicate before returning. Provide at least one of: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
           "properties": {
             "elementId": {
               "type": "string",
@@ -5448,11 +5444,11 @@
                 },
                 "packageName": {
                   "type": "string",
-                  "description": "Alias for appId (Android package name)"
+                  "description": "appId alias (Android package)"
                 },
                 "bundleId": {
                   "type": "string",
-                  "description": "Alias for appId (iOS bundle ID)"
+                  "description": "appId alias (iOS bundle)"
                 },
                 "activityName": {
                   "type": "string",
@@ -5485,23 +5481,19 @@
             "absent": {
               "type": "object",
               "additionalProperties": false,
-              "description": "Wait until an element matching these fields is absent",
+              "description": "Wait until an element matching these fields is absent (text uses contains match)",
               "properties": {
                 "elementId": {
-                  "type": "string",
-                  "description": "Resource ID / accessibility identifier that must be absent"
+                  "type": "string"
                 },
                 "text": {
-                  "type": "string",
-                  "description": "Element text that must be absent (contains match)"
+                  "type": "string"
                 },
                 "className": {
-                  "type": "string",
-                  "description": "Element class name that must be absent"
+                  "type": "string"
                 },
                 "contentDescription": {
-                  "type": "string",
-                  "description": "Content description / accessibility label that must be absent"
+                  "type": "string"
                 }
               },
               "anyOf": [
@@ -5626,14 +5618,14 @@
           ]
         },
         "settled": {
-          "description": "After waitFor matches, wait for a quiet (no hierarchy change) period before returning",
+          "description": "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
           "type": "object",
           "properties": {
             "quietPeriodMs": {
               "type": "integer",
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
-              "description": "Wait for this many ms with no hierarchy changes after the waitFor predicate matches"
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
             }
           },
           "required": [

@@ -359,7 +359,7 @@ export const openLinkSchema = withAppIdAliases(withJsonSchemaOverride(addDeviceT
   url: z.string().describe("URL to open"),
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("After opening, wait for this predicate before returning the observation"),
-  settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet (no hierarchy change) period before returning")
+  settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)")
 })).superRefine(refineWaitForArgs), overrideWaitForJsonSchema));
 
 /** Outcome of a post-open waitFor poll, as produced by {@link waitForObservation}. */

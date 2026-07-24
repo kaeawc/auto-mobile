@@ -84,7 +84,7 @@ const waitForCommonShape = {
 // Stability / "settled" gate (issue #3490 §3). After the waitFor predicate first
 // matches, keep observing until the view hierarchy is unchanged for this long.
 export const settledSchema = z.object({
-  quietPeriodMs: z.number().int().positive().describe("Wait for this many ms with no hierarchy changes after the waitFor predicate matches")
+  quietPeriodMs: z.number().int().positive().describe("Quiet-period ms (no hierarchy change) required after waitFor matches")
 }).strict();
 
 const waitForTextAnySchema = z.object({
@@ -153,12 +153,12 @@ const ELEMENT_PREDICATE_REQUIRED = [
 const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  description: "Wait until an element matching these fields is absent",
+  description: "Wait until an element matching these fields is absent (text uses contains match)",
   properties: {
-    elementId: { type: "string", description: "Resource ID / accessibility identifier that must be absent" },
-    text: { type: "string", description: "Element text that must be absent (contains match)" },
-    className: { type: "string", description: "Element class name that must be absent" },
-    contentDescription: { type: "string", description: "Content description / accessibility label that must be absent" },
+    elementId: { type: "string" },
+    text: { type: "string" },
+    className: { type: "string" },
+    contentDescription: { type: "string" },
   },
   anyOf: [
     { required: ["elementId"] },
@@ -171,9 +171,9 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   description:
-    "Wait for a predicate before returning the observation. Provide at least one of: " +
-    "elementId, text, textAny, className, contentDescription, activeWindow, or absent. " +
-    "textAny is mutually exclusive with the element predicates.",
+    "Wait for a predicate before returning. Provide at least one of: elementId, text, " +
+    "textAny, className, contentDescription, activeWindow, absent. textAny excludes the " +
+    "element predicates.",
   properties: {
     elementId: { type: "string", description: "Element resource ID / accessibility identifier" },
     text: { type: "string", description: "Element text" },
@@ -203,8 +203,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
       description: "Foreground app/window predicates (provide an app id or activityName)",
       properties: {
         appId: { type: "string", description: "Foreground app bundle ID / package name" },
-        packageName: { type: "string", description: "Alias for appId (Android package name)" },
-        bundleId: { type: "string", description: "Alias for appId (iOS bundle ID)" },
+        packageName: { type: "string", description: "appId alias (Android package)" },
+        bundleId: { type: "string", description: "appId alias (iOS bundle)" },
         activityName: {
           type: "string",
           description: "Foreground Android activity name (Android-only)",
@@ -318,7 +318,7 @@ export const overrideWaitForJsonSchema: JsonSchemaOverride = jsonSchema => {
 const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
-  settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet (no hierarchy change) period before returning"),
+  settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
   raw: z.boolean().optional().describe("Include raw view hierarchy"),
   skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling")
 })).superRefine(refineWaitForArgs), overrideWaitForJsonSchema);

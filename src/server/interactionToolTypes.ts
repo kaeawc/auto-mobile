@@ -3,6 +3,7 @@
  * Extracted from interactionTools.ts for maintainability.
  */
 import type { Platform, ElementSelectionStrategy, ImeAction } from "../models";
+import type { ObserveWaitForOptions, SettledOptions } from "./observeTools";
 
 // ============================================================================
 // Tool Argument Types
@@ -51,6 +52,8 @@ export interface WakeAndUnlockArgs {
 export interface OpenLinkArgs {
   url: string;
   platform: Platform;
+  waitFor?: ObserveWaitForOptions;
+  settled?: SettledOptions;
 }
 
 export interface TapOnArgs {

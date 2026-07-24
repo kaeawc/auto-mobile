@@ -24,9 +24,21 @@ import {
   ActionableError,
   BootedDevice,
   ClipboardResult,
+  Element,
+  ObserveResult,
+  OpenURLResult,
   SwipeOnToolPayload,
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
+import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import {
+  overrideWaitForJsonSchema,
+  refineWaitForArgs,
+  settledSchema,
+  waitForObservation,
+  waitForSchema,
+} from "./observeTools";
+import { defaultTimer } from "../utils/SystemTimer";
 import { createJSONToolResponse, createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
@@ -340,10 +352,50 @@ export const wakeAndUnlockSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema
 }));
 
-export const openLinkSchema = addDeviceTargetingToSchema(z.object({
+// openLink gains an optional integrated waitFor (issue #3490 §5): after opening
+// the URL, poll for the predicate — reusing observe's waitFor/settled schema and
+// semantics — so the open→settle→observe→verify workaround collapses into one call.
+export const openLinkSchema = withAppIdAliases(withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   url: z.string().describe("URL to open"),
-  platform: platformSchema
-}));
+  platform: platformSchema,
+  waitFor: waitForSchema.optional().describe("After opening, wait for this predicate before returning the observation"),
+  settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet (no hierarchy change) period before returning")
+})).superRefine(refineWaitForArgs), overrideWaitForJsonSchema));
+
+/** Outcome of a post-open waitFor poll, as produced by {@link waitForObservation}. */
+export interface OpenLinkWaitOutcome {
+  observation: ObserveResult;
+  awaitedElement?: Element;
+  awaitDuration: number;
+  awaitTimeout: boolean;
+}
+
+/**
+ * Build the openLink response payload. Without a wait it is the plain open
+ * result; with a wait (issue #3490 §5) the awaited observation replaces the
+ * open-time snapshot and the await metadata is surfaced to the caller.
+ */
+export const buildOpenLinkPayload = (
+  url: string,
+  openResult: OpenURLResult,
+  waitOutcome: OpenLinkWaitOutcome | null
+) => {
+  if (!waitOutcome) {
+    return {
+      message: `Opened link ${url}`,
+      ...openResult,
+      observation: openResult.observation,
+    };
+  }
+  return {
+    message: `Opened link ${url}`,
+    ...openResult,
+    observation: waitOutcome.observation,
+    awaitedElement: waitOutcome.awaitedElement,
+    awaitDuration: waitOutcome.awaitDuration,
+    awaitTimeout: waitOutcome.awaitTimeout,
+  };
+};
 
 export const imeActionSchema = addDeviceTargetingToSchema(z.object({
   action: z.enum(["done", "next", "search", "send", "go", "previous"]).describe("IME action"),
@@ -856,15 +908,25 @@ export function registerInteractionTools() {
   };
 
   // Open link handler
-  const openLinkHandler = async (device: BootedDevice, args: OpenLinkArgs) => {
+  const openLinkHandler = async (device: BootedDevice, args: OpenLinkArgs, _progress?: ProgressCallback, signal?: AbortSignal) => {
     const openUrl = new OpenURL(device);
     const result = await openUrl.execute(args.url);
 
-    return createJSONToolResponse({
-      message: `Opened link ${args.url}`,
-      observation: result.observation,
-      ...result
-    });
+    // Integrated waitFor (issue #3490 §5): once the URL is opened, poll for the
+    // predicate exactly as `observe` does, surfacing the awaited observation and
+    // await metadata so callers no longer need a separate observe round-trip.
+    const waitOutcome = args.waitFor
+      ? await waitForObservation(
+        new RealObserveScreen(device),
+        { ...args.waitFor, settled: args.settled },
+        signal,
+        false,
+        defaultTimer,
+        device.platform
+      )
+      : null;
+
+    return createJSONToolResponse(buildOpenLinkPayload(args.url, result, waitOutcome));
   };
 
   // Shake handler

@@ -354,6 +354,31 @@ describe("published observe waitFor input schema", () => {
         },
       },
     },
+    {
+      label: "absent alone",
+      input: {
+        platform: "ios",
+        waitFor: { absent: { className: "UIActivityIndicatorView" } },
+      },
+    },
+    {
+      label: "absent combined with a positive predicate",
+      input: {
+        platform: "ios",
+        waitFor: {
+          absent: { className: "UIActivityIndicatorView" },
+          elementId: "message_list",
+        },
+      },
+    },
+    {
+      label: "settled with a waitFor predicate",
+      input: {
+        platform: "android",
+        waitFor: { elementId: "home_tab_bar", timeout: 15000 },
+        settled: { quietPeriodMs: 500 },
+      },
+    },
   ])("accepts runtime-valid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(true);
 
@@ -436,6 +461,20 @@ describe("published observe waitFor input schema", () => {
             activityName: "com.example.ios.IgnoredActivity",
           },
         },
+      },
+    },
+    {
+      label: "settled without waitFor",
+      input: {
+        platform: "android",
+        settled: { quietPeriodMs: 500 },
+      },
+    },
+    {
+      label: "empty absent object",
+      input: {
+        platform: "android",
+        waitFor: { absent: {} },
       },
     },
   ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
@@ -1039,5 +1078,246 @@ describe("waitForObservation activeWindow", () => {
     expect(outcome.awaitTimeout).toBe(true);
     expect(outcome.awaitedElement).toBeUndefined();
     expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+});
+
+// --- Issue #3490: settled (stability) gate ------------------------------------
+
+describe("observeSchema settled", () => {
+  test("accepts settled with a waitFor predicate", () => {
+    const parsed = observeSchema.parse({
+      platform: "android",
+      waitFor: { elementId: "home_tab_bar", timeout: 15000 },
+      settled: { quietPeriodMs: 500 },
+    });
+    expect(parsed.settled).toEqual({ quietPeriodMs: 500 });
+  });
+
+  test("rejects settled without a waitFor predicate", () => {
+    expect(
+      observeSchema.safeParse({
+        platform: "android",
+        settled: { quietPeriodMs: 500 },
+      }).success
+    ).toBe(false);
+  });
+
+  test("rejects non-positive quietPeriodMs", () => {
+    expect(
+      observeSchema.safeParse({
+        platform: "android",
+        waitFor: { elementId: "home_tab_bar" },
+        settled: { quietPeriodMs: 0 },
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("waitForObservation settled", () => {
+  const makeObservation = (markerId: string): ObserveResult => ({
+    updatedAt: 0,
+    screenSize: { width: 200, height: 200 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    activeWindow: { appId: "com.example.app", activityName: "", layoutSeqSum: 0 },
+    viewHierarchy: makeHierarchy([
+      { $: { "resource-id": "home_tab_bar", "bounds": bounds(10, 10, 100, 60) } },
+      { $: { "resource-id": markerId, "bounds": bounds(10, 80, 100, 120) } },
+    ]),
+  });
+
+  test("waits for a quiet hierarchy period after the predicate first matches", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    let call = 0;
+    // Predicate (home_tab_bar) matches from the first observation, but the tree
+    // keeps changing for the first three observations before it stabilizes.
+    observeScreen.setObserveResult(() => {
+      call++;
+      return makeObservation(call <= 3 ? `marker_${call}` : "marker_stable");
+    });
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        elementId: "home_tab_bar",
+        settled: { quietPeriodMs: 300 },
+        timeout: 5000,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    // Must have kept polling past the first match to confirm the quiet period.
+    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(4);
+    expect(outcome.awaitedElement?.["resource-id"]).toBe("home_tab_bar");
+  });
+
+  test("times out when the hierarchy never settles", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    let call = 0;
+    // Predicate always matches, but every observation is a different tree, so it
+    // never reaches a quiet period.
+    observeScreen.setObserveResult(() => {
+      call++;
+      return makeObservation(`marker_${call}`);
+    });
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        elementId: "home_tab_bar",
+        settled: { quietPeriodMs: 300 },
+        timeout: 500,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+  });
+});
+
+// --- Issue #3490: absence / negation predicate --------------------------------
+
+describe("observeSchema waitFor.absent", () => {
+  test("accepts absent combined with a positive predicate", () => {
+    const parsed = observeSchema.parse({
+      platform: "ios",
+      waitFor: {
+        absent: { className: "UIActivityIndicatorView" },
+        elementId: "message_list",
+        timeout: 15000,
+      },
+    });
+    expect(parsed.waitFor).toMatchObject({
+      absent: { className: "UIActivityIndicatorView" },
+      elementId: "message_list",
+    });
+  });
+
+  test("accepts absent alone", () => {
+    const parsed = observeSchema.parse({
+      platform: "ios",
+      waitFor: { absent: { className: "UIActivityIndicatorView" } },
+    });
+    expect(parsed.waitFor).toMatchObject({
+      absent: { className: "UIActivityIndicatorView" },
+    });
+  });
+
+  test("accepts absent combined with textAny", () => {
+    const parsed = observeSchema.parse({
+      platform: "android",
+      waitFor: {
+        textAny: ["Home", "Feed"],
+        absent: { elementId: "com.app:id/spinner" },
+      },
+    });
+    expect(parsed.waitFor).toMatchObject({
+      textAny: ["Home", "Feed"],
+      absent: { elementId: "com.app:id/spinner" },
+    });
+  });
+
+  test("rejects an empty absent object", () => {
+    expect(
+      observeSchema.safeParse({
+        platform: "android",
+        waitFor: { absent: {} },
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("waitForObservation absent", () => {
+  const makeObservation = (nodes: unknown[]): ObserveResult => ({
+    updatedAt: 0,
+    screenSize: { width: 200, height: 200 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    activeWindow: { appId: "com.example.app", activityName: "", layoutSeqSum: 0 },
+    viewHierarchy: makeHierarchy(nodes),
+  });
+
+  const spinner = { $: { "class": "UIActivityIndicatorView", "bounds": bounds(10, 10, 50, 50) } };
+  const list = { $: { "resource-id": "message_list", "bounds": bounds(10, 60, 190, 190) } };
+
+  test("resolves once the absent element disappears and the positive predicate is present", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observations = [
+      makeObservation([spinner, list]),
+      makeObservation([list]),
+    ];
+    observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        absent: { className: "UIActivityIndicatorView" },
+        elementId: "message_list",
+        timeout: 500,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(outcome.awaitedElement?.["resource-id"]).toBe("message_list");
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
+  });
+
+  test("keeps waiting while the absent element is still present", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => makeObservation([spinner, list]));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        absent: { className: "UIActivityIndicatorView" },
+        elementId: "message_list",
+        timeout: 250,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(observeScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("absent-only predicate resolves when the element is gone", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observations = [
+      makeObservation([spinner]),
+      makeObservation([]),
+    ];
+    observeScreen.setObserveResult(() => observations.shift() ?? observations[0]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        absent: { className: "UIActivityIndicatorView" },
+        timeout: 500,
+      } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
   });
 });

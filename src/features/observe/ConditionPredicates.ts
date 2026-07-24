@@ -1,5 +1,6 @@
 import type { Element, ObserveResult, ViewHierarchyResult } from "../../models";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import { isClickableElementProperties } from "../../utils/elementProperties";
 import type { ConditionEvaluation, ConditionPredicate } from "./interfaces/WaitForCondition";
 
 /**
@@ -102,12 +103,14 @@ function findAllMatches(
 }
 
 /**
- * The Android/iOS `clickable` node attribute is typed `boolean | string` — the
- * accessibility bridges emit it either way — so accept the boolean `true` and the
- * stringified `"true"` identically.
+ * Whether an element is clickable, using the SAME signal `TapOnElement` taps on
+ * (`isClickableElementProperties`): the truthy `clickable` flag OR a `"click"`
+ * accessibility action. Matching the tap definition matters — iOS nodes are
+ * frequently tappable via a `click` action with `clickable` unset, so a narrower
+ * flag-only check would make "wait for clickable, then tap" disagree with `tapOn`.
  */
 function isElementClickable(element: Element): boolean {
-  return element.clickable === true || element.clickable === "true";
+  return isClickableElementProperties(element);
 }
 
 /**

@@ -67,6 +67,7 @@ const waitForCommonShape = {
 };
 
 const waitForTextAnySchema = z.object({
+  for: z.never().optional(),
   textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
   elementId: z.never().optional(),
   text: z.never().optional(),
@@ -78,6 +79,7 @@ const waitForTextAnySchema = z.object({
 }).strict();
 
 const waitForElementBaseSchema = z.object({
+  for: z.never().optional(),
   elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
   text: z.string().optional().describe("Element text"),
   textAny: z.never().optional(),
@@ -126,7 +128,12 @@ const waitForConditionDslSchema = z.object({
   pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
   stableReads: z.number().optional().describe("Consecutive stable reads for countStable/stable (default 2)"),
   timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
-  container: waitForContainerField,
+  // `container` is declared `never` (not accepted) on the DSL form: the #4389
+  // predicate builders match whole-screen (NO_CONTAINER), so accepting it would
+  // silently ignore it. Threading container scope into the predicates is a
+  // follow-up. `never` keeps the inferred union structurally compatible with the
+  // legacy arms (which do read `container`) while rejecting it on DSL requests.
+  container: z.never().optional(),
   textAny: z.never().optional(),
   className: z.never().optional(),
   contentDescription: z.never().optional(),

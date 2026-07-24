@@ -231,6 +231,28 @@ describe("waitFor back-compat", () => {
       observeSchema.parse({ platform: "android", waitFor: { for: "appear" } })
     ).toThrow();
   });
+
+  test("mixing `for` with a legacy-only field (activeWindow) is rejected, not silently dropped", () => {
+    // Regression guard: the DSL arm declares activeWindow as `never`, and the legacy
+    // arms declare `for` as `never`, so a `for`+activeWindow request matches no arm.
+    // Without the legacy-arm `for: never`, the passthrough element arm re-admitted
+    // `for` and silently discarded activeWindow.
+    expect(() =>
+      observeSchema.parse({
+        platform: "android",
+        waitFor: { for: "appear", elementId: "x", activeWindow: { appId: "com.z" } },
+      })
+    ).toThrow();
+  });
+
+  test("mixing `for` with a legacy-only element field (className) is rejected", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "android",
+        waitFor: { for: "appear", elementId: "x", className: "android.widget.Button" },
+      })
+    ).toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -309,9 +331,12 @@ describe("runWaitForConditionTool", () => {
 // Registration (AC1 / AC2) — the tools are reachable from the registry
 // ---------------------------------------------------------------------------
 describe("tool registration", () => {
-  test("registers settleObserve and waitForCondition as device-aware tools", () => {
+  test("registers settleObserve and waitForCondition as served (not debug-only) device-aware tools", () => {
     registerObserveTools();
-    const names = ToolRegistry.getAllTools({ includeUnavailable: true }).map(tool => tool.name);
+    // The default getAllTools() is the served, availability-filtered set — asserting
+    // against it (not includeUnavailable) proves the tools are actually reachable,
+    // not merely present but gated off as debugOnly.
+    const names = ToolRegistry.getAllTools().map(tool => tool.name);
     expect(names).toContain("settleObserve");
     expect(names).toContain("waitForCondition");
   });

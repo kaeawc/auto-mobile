@@ -64,6 +64,12 @@ describe("clickable predicate", () => {
     expect(evaluation.matched).toBe(true);
   });
 
+  test("matches an element tappable via a 'click' accessibility action (clickable unset) — the iOS/tapOn signal", () => {
+    const predicate = clickable(finder, { elementId: "submit" });
+    const evaluation = predicate(obs([node({ "resource-id": "submit", "text": "Go", "actions": ["click"] })]));
+    expect(evaluation.matched).toBe(true);
+  });
+
   test("does NOT match a present-but-not-clickable element, surfacing it as a candidate", () => {
     const predicate = clickable(finder, { elementId: "submit" });
     const evaluation = predicate(obs([node({ "resource-id": "submit", "text": "Go", "clickable": false })]));

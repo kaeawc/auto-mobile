@@ -205,34 +205,36 @@ function findAnchor(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord | null
   return null;
 }
 
-/** True when the node or any descendant belongs to the foreground package. */
-function subtreeHasPackage(node: NodeRecord, pkg: string): boolean {
-  const nodePkg = stringAttr(node, "package");
-  if (nodePkg === pkg) {
-    return true;
-  }
-  return childrenOf(node).some(child => subtreeHasPackage(child, pkg));
+/**
+ * The package prefix of a resource-id — `com.pkg:id/name` -> `com.pkg`, `""` when
+ * absent or unqualified. This is the app-vs-chrome signal that SURVIVES capture:
+ * per-node `package` is dropped by `ViewHierarchy.cleanNodeProperties`, but the
+ * resource-id (and its package qualifier) is on the allow-list, and Android
+ * system chrome carries ids like `com.android.systemui:id/...`.
+ */
+function resourceIdPackage(node: NodeRecord): string {
+  const rid = stringAttr(node, "resource-id");
+  const colon = rid.indexOf(":");
+  return colon > 0 ? rid.slice(0, colon) : "";
 }
 
 /**
- * Prune a subtree to nodes belonging to (or on the path to) the foreground
- * package. A node is retained when its own package matches, is unset (a generic
- * container), or any descendant is retained — so chrome from other packages
- * (`com.android.systemui`, IME) drops while app containers stay.
+ * Drop subtrees rooted at an identifiable NON-foreground package — status bar,
+ * nav bar, and IME all carry package-qualified resource-ids
+ * (`com.android.systemui:id/...`, the keyboard package, …). A node with no
+ * package-qualified id (a generic container, or an app/Compose/iOS leaf whose
+ * identity is text/content-desc) is neutral and kept, so real app content is
+ * never dropped merely for lacking a qualified id. On iOS, where nodes carry no
+ * `pkg:id/...` resource-ids at all, nothing is foreign, so this is a safe no-op.
  */
-function pruneToPackage(node: NodeRecord, pkg: string): NodeRecord | null {
+function pruneForeignChrome(node: NodeRecord, fgPackage: string): NodeRecord | null {
+  const pkg = resourceIdPackage(node);
+  if (pkg !== "" && pkg !== fgPackage) {
+    return null;
+  }
   const keptChildren = childrenOf(node)
-    .map(child => pruneToPackage(child, pkg))
+    .map(child => pruneForeignChrome(child, fgPackage))
     .filter((child): child is NodeRecord => child !== null);
-  const nodePkg = stringAttr(node, "package");
-  const selfMatches = nodePkg === pkg || nodePkg === "";
-  if (keptChildren.length === 0 && !selfMatches) {
-    return null;
-  }
-  if (keptChildren.length === 0 && nodePkg === "") {
-    // A generic container with no matching descendants is empty chrome — drop it.
-    return null;
-  }
   return withChildren(node, keptChildren);
 }
 
@@ -240,10 +242,34 @@ function foregroundPackage(obs: ObserveResult): string {
   return obs.viewHierarchy?.packageName || obs.activeWindow?.appId || "";
 }
 
+/** Whether an `Element`-shaped record belongs to an identifiable non-fg package. */
+function isForeignElement(item: { "resource-id"?: unknown }, fgPackage: string): boolean {
+  const rid = typeof item["resource-id"] === "string" ? item["resource-id"] : "";
+  const colon = rid.indexOf(":");
+  const pkg = colon > 0 ? rid.slice(0, colon) : "";
+  return pkg !== "" && pkg !== fgPackage;
+}
+
+/**
+ * Drop categorized elements whose resource-id names a non-foreground package.
+ * Only the three id-bearing categories are filtered — `media` (MediaView) carries
+ * no resource-id, so it has no package identity to be foreign by and is left as-is.
+ */
+function filterElementsByForeignPackage(obs: ObserveResult, fgPackage: string): void {
+  const elements = obs.elements;
+  if (!elements) {
+    return;
+  }
+  const keep = (item: { "resource-id"?: unknown }): boolean => !isForeignElement(item, fgPackage);
+  elements.clickable = (elements.clickable ?? []).filter(keep);
+  elements.scrollable = (elements.scrollable ?? []).filter(keep);
+  elements.text = (elements.text ?? []).filter(keep);
+}
+
 /**
  * FOCUS transform. With an anchor, keep only the matched node's subtree. Without
- * one, keep only the foreground app's nodes. Returns the (possibly unchanged)
- * result plus how it resolved, for `observeScope`.
+ * one (`scope.focus: true`), drop identifiable non-foreground chrome. Returns the
+ * (possibly unchanged) result plus how it resolved, for `observeScope`.
  */
 export function scopeToFocus(
   input: ObserveResult,
@@ -264,17 +290,17 @@ export function scopeToFocus(
   if (pkg === "") {
     return { result: obs, focus: { by: "foreground-app", matched: false } };
   }
-  const hasPackageAnywhere = roots.some(root => subtreeHasPackage(root, pkg));
-  if (!hasPackageAnywhere) {
-    // No node advertises the foreground package (e.g. iOS single-app roots) —
-    // scoping would blank the tree, so leave it untouched.
-    return { result: obs, focus: { by: "foreground-app", matched: false, packageName: pkg } };
-  }
+  const before = countNodes(roots);
   const kept = roots
-    .map(root => pruneToPackage(root, pkg))
+    .map(root => pruneForeignChrome(root, pkg))
     .filter((root): root is NodeRecord => root !== null);
   setRootNodes(obs, kept);
-  return { result: obs, focus: { by: "foreground-app", matched: true, packageName: pkg } };
+  filterElementsByForeignPackage(obs, pkg);
+  // `matched` reports whether any foreign chrome was actually pruned. When the
+  // tree is already just the app (or iOS carries no qualified ids) nothing drops
+  // and it stays false — an honest "no reduction" signal.
+  const matched = countNodes(kept) !== before;
+  return { result: obs, focus: { by: "foreground-app", matched, packageName: pkg } };
 }
 
 /* ------------------------------------------------------------------------ *
@@ -324,7 +350,9 @@ function pruneToRect(node: NodeRecord, rect: ElementBounds): NodeRecord | null {
   }
   const bounds = readBounds(attr(node, "bounds"));
   if (bounds === null) {
-    return null;
+    // No readable bounds: never geometrically excluded — a container/leaf we
+    // cannot place is kept rather than silently dropped.
+    return withChildren(node, []);
   }
   return intersects(bounds, rect) ? withChildren(node, []) : null;
 }
@@ -338,10 +366,12 @@ function filterElementsByRect(obs: ObserveResult, rect: ElementBounds): void {
     const bounds = readBounds(item.bounds);
     return bounds === null || intersects(bounds, rect);
   };
-  elements.clickable = elements.clickable.filter(keep);
-  elements.scrollable = elements.scrollable.filter(keep);
-  elements.text = elements.text.filter(keep);
-  elements.media = elements.media.filter(keep);
+  // Guard each category: the ObserveResult type makes them non-optional arrays,
+  // but this runs at the wire chokepoint where a malformed payload must not throw.
+  elements.clickable = (elements.clickable ?? []).filter(keep);
+  elements.scrollable = (elements.scrollable ?? []).filter(keep);
+  elements.text = (elements.text ?? []).filter(keep);
+  elements.media = (elements.media ?? []).filter(keep);
 }
 
 /**
@@ -370,11 +400,21 @@ export function scopeToRegion(
  * OVERVIEW
  * ------------------------------------------------------------------------ */
 
-/** A node is structural when it has children, scrolls, or is addressable. */
+/**
+ * A node is structural — kept in the skeleton — when it has kept children,
+ * scrolls, or is addressable. "Addressable" is any of the identity/interaction
+ * attributes an agent targets: `resource-id`, `content-desc`, or `clickable`.
+ * Consulting `clickable`/`content-desc` (both in `OVERVIEW_KEPT_ATTRS`) is what
+ * keeps id-less-but-tappable controls — common on Compose and iOS, where the
+ * accessibility label, not a resource-id, is the identity — instead of collapsing
+ * them into an `omittedDescendants` count.
+ */
 function isStructural(node: NodeRecord, hasKeptChildren: boolean): boolean {
   return hasKeptChildren
     || isTruthyFlag(attr(node, "scrollable"))
-    || stringAttr(node, "resource-id") !== "";
+    || isTruthyFlag(attr(node, "clickable"))
+    || stringAttr(node, "resource-id") !== ""
+    || stringAttr(node, "content-desc") !== "";
 }
 
 /** Keep only the structural-attribute allowlist on an overview node. */
@@ -421,6 +461,13 @@ function toOverviewNode(node: NodeRecord): { node: NodeRecord | null; dropped: n
 /**
  * OVERVIEW transform. Drops `elements` (leaf-level detail the skeleton replaces)
  * and collapses the hierarchy to structural/addressable nodes.
+ *
+ * `omittedDescendants` annotates each SURVIVING node with the count of nodes
+ * dropped beneath it. A root subtree that collapses entirely (all-anonymous) has
+ * no surviving node to annotate; that omission is still surfaced globally by
+ * `observeScope.nodesBefore` vs `nodesAfter`, so nothing vanishes unaccounted for.
+ * A consumer must NOT sum `omittedDescendants` across nodes — an ancestor's count
+ * already subsumes its descendants'.
  */
 export function toOverview(input: ObserveResult): ObserveResult {
   const obs = clone(input);
@@ -445,15 +492,30 @@ interface ScopeRun {
   focus?: ObserveScopeMetadata["focus"];
 }
 
-/** True when a stage changed the node count (i.e. it materially scoped). */
-function nodeCountChanged(before: ObserveResult, after: ObserveResult): boolean {
-  return countNodes(rootNodes(before)) !== countNodes(rootNodes(after));
+/** Total categorized elements across all four buckets. */
+function elementsCount(obs: ObserveResult): number {
+  const e = obs.elements;
+  if (!e) {
+    return 0;
+  }
+  return (e.clickable?.length ?? 0) + (e.scrollable?.length ?? 0) + (e.text?.length ?? 0) + (e.media?.length ?? 0);
+}
+
+/**
+ * True when a stage materially scoped the payload — a change in either the node
+ * count OR the categorized element count. FOCUS and REGION both prune `elements`,
+ * so a crop that removed only off-scope elements (no hierarchy nodes) still counts
+ * as applied; without the element check `applied[]` would under-report it.
+ */
+function scopeChanged(before: ObserveResult, after: ObserveResult): boolean {
+  return countNodes(rootNodes(before)) !== countNodes(rootNodes(after))
+    || elementsCount(before) !== elementsCount(after);
 }
 
 function runFocusStage(run: ScopeRun, cfg: ObserveScopeConfig): void {
   const { result, focus } = scopeToFocus(run.current, cfg.focusAnchor);
   run.focus = focus;
-  if (nodeCountChanged(run.current, result)) {
+  if (scopeChanged(run.current, result)) {
     run.applied.push("focus");
   }
   run.current = result;
@@ -464,7 +526,7 @@ function runRegionStage(run: ScopeRun, cfg: ObserveScopeConfig): void {
   if (rectPx) {
     run.regionPx = rectPx;
   }
-  if (nodeCountChanged(run.current, result)) {
+  if (scopeChanged(run.current, result)) {
     run.applied.push("region");
   }
   run.current = result;

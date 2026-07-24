@@ -1677,9 +1677,11 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
           node: {
             "class": "Root",
             "bounds": { left: 0, top: 0, right: 1000, bottom: 2000 },
+            // Package-qualified resource-ids are the app-vs-chrome signal that
+            // survives cleanNodeProperties (per-node `package` does not).
             "node": [
-              { "resource-id": "statusBar", "package": "com.android.systemui", "bounds": { left: 0, top: 0, right: 1000, bottom: 100 } },
-              { "resource-id": "content", "package": "com.example.app", "text": "Hi", "bounds": { left: 0, top: 100, right: 1000, bottom: 1900 } },
+              { "resource-id": "com.android.systemui:id/status_bar", "bounds": { left: 0, top: 0, right: 1000, bottom: 100 } },
+              { "resource-id": "com.example.app:id/content", "text": "Hi", "bounds": { left: 0, top: 100, right: 1000, bottom: 1900 } },
             ],
           } as any,
         },
@@ -1755,6 +1757,6 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
       for (const c of (n.node ?? [])) { walk(c); }
     };
     walk(baseline.viewHierarchy!.hierarchy.node);
-    expect(ids).toContain("statusBar");
+    expect(ids).toContain("com.android.systemui:id/status_bar");
   });
 });

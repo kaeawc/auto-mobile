@@ -21,16 +21,29 @@ interface Node {
   "resource-id"?: string;
   text?: string;
   class?: string;
-  package?: string;
+  "content-desc"?: string;
   scrollable?: boolean | string;
   clickable?: boolean | string;
   bounds?: { left: number; top: number; right: number; bottom: number } | number[];
   node?: Node[];
 }
 
+const SYSUI = "com.android.systemui";
+const APP = "com.example.app";
+// Package-qualified resource-ids — the app-vs-chrome signal that SURVIVES
+// `cleanNodeProperties` (per-node `package` does not). System chrome carries
+// `com.android.systemui:id/...`; app nodes carry `com.example.app:id/...`; app
+// leaves (list items) carry NO id, as on real Compose/list surfaces.
+const STATUS_BAR = `${SYSUI}:id/status_bar`;
+const NAV_BAR = `${SYSUI}:id/navigation_bar`;
+const HEADER = `${APP}:id/header`;
+const LIST = `${APP}:id/list`;
+
 /**
  * An Android-shaped tree: a container root with system chrome (status/nav bars,
- * `com.android.systemui`) flanking the foreground app's own subtree.
+ * `com.android.systemui`) flanking the foreground app's own subtree. App leaf
+ * rows deliberately carry NO resource-id, so FOCUS must keep them (it only drops
+ * identifiable FOREIGN packages, never id-less content).
  */
 function androidFixture(): ObserveResult {
   const root: Node = {
@@ -38,41 +51,35 @@ function androidFixture(): ObserveResult {
     bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
     node: [
       {
-        "resource-id": "statusBar",
-        "package": "com.android.systemui",
+        "resource-id": STATUS_BAR,
         "bounds": { left: 0, top: 0, right: 1080, bottom: 80 },
       },
       {
         class: "LinearLayout",
-        package: "com.example.app",
         bounds: { left: 0, top: 80, right: 1080, bottom: 2300 },
         node: [
           {
-            "resource-id": "header",
-            "package": "com.example.app",
+            "resource-id": HEADER,
             "text": "Title",
             "bounds": { left: 0, top: 80, right: 1080, bottom: 200 },
           },
           {
-            "resource-id": "list",
-            "package": "com.example.app",
+            "resource-id": LIST,
             "scrollable": true,
             "bounds": { left: 0, top: 200, right: 1080, bottom: 2200 },
             "node": [
-              { text: "Item 1", package: "com.example.app", bounds: { left: 0, top: 200, right: 1080, bottom: 400 } },
-              { text: "Item 2", package: "com.example.app", bounds: { left: 0, top: 400, right: 1080, bottom: 600 } },
+              { text: "Item 1", bounds: { left: 0, top: 200, right: 1080, bottom: 400 } },
+              { text: "Item 2", bounds: { left: 0, top: 400, right: 1080, bottom: 600 } },
             ],
           },
           {
             class: "View",
-            package: "com.example.app",
             bounds: { left: 0, top: 2200, right: 1080, bottom: 2300 },
           },
         ],
       },
       {
-        "resource-id": "navBar",
-        "package": "com.android.systemui",
+        "resource-id": NAV_BAR,
         "bounds": { left: 0, top: 2300, right: 1080, bottom: 2400 },
       },
     ],
@@ -82,17 +89,17 @@ function androidFixture(): ObserveResult {
     updatedAt: 0,
     screenSize: { width: 1080, height: 2400 },
     systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
-    activeWindow: { appId: "com.example.app" } as ObserveResult["activeWindow"],
+    activeWindow: { appId: APP } as ObserveResult["activeWindow"],
     viewHierarchy: {
-      packageName: "com.example.app",
+      packageName: APP,
       hierarchy: { node: root as unknown as ViewHierarchyNode },
     },
     elements: {
-      clickable: [{ bounds: { left: 0, top: 80, right: 1080, bottom: 200 } } as never],
-      scrollable: [{ bounds: { left: 0, top: 200, right: 1080, bottom: 2200 } } as never],
+      clickable: [{ "resource-id": HEADER, "bounds": { left: 0, top: 80, right: 1080, bottom: 200 } } as never],
+      scrollable: [{ "resource-id": LIST, "bounds": { left: 0, top: 200, right: 1080, bottom: 2200 } } as never],
       text: [
-        { bounds: { left: 0, top: 0, right: 1080, bottom: 80 } } as never, // status bar clock
-        { bounds: { left: 0, top: 400, right: 1080, bottom: 600 } } as never, // Item 2
+        { "resource-id": `${SYSUI}:id/clock`, "bounds": { left: 0, top: 0, right: 1080, bottom: 80 } } as never, // chrome
+        { "bounds": { left: 0, top: 400, right: 1080, bottom: 600 } } as never, // Item 2 (app, no id)
       ],
       media: [],
     },
@@ -209,24 +216,52 @@ describe("buildObserveScopeConfig", () => {
 });
 
 describe("scopeToFocus", () => {
-  test("foreground-app scoping drops system chrome", () => {
+  test("foreground-app scoping drops identifiable foreign chrome (by resource-id package)", () => {
     const obs = androidFixture();
     const { result, focus } = scopeToFocus(obs);
-    expect(focus).toEqual({ by: "foreground-app", matched: true, packageName: "com.example.app" });
+    expect(focus).toEqual({ by: "foreground-app", matched: true, packageName: APP });
     const ids = resourceIds(result);
-    expect(ids).not.toContain("statusBar");
-    expect(ids).not.toContain("navBar");
-    expect(ids).toContain("header");
-    expect(ids).toContain("list");
+    expect(ids.some(id => id.startsWith(SYSUI))).toBe(false); // status/nav bars gone
+    expect(ids).toContain(HEADER);
+    expect(ids).toContain(LIST);
   });
 
-  test("anchor scoping keeps only the matched subtree", () => {
+  test("foreground-app scoping keeps id-less app leaves (never drops content for lacking an id)", () => {
     const obs = androidFixture();
-    const { result, focus } = scopeToFocus(obs, { resourceId: "list" });
+    const { result } = scopeToFocus(obs);
+    // The two id-less list rows and the anonymous View survive.
+    const texts: string[] = [];
+    const walk = (nodes: Node[]): void => {
+      for (const n of nodes) { if (n.text) { texts.push(n.text); } walk(toNodeArray(n.node)); }
+    };
+    walk(roots(result));
+    expect(texts).toContain("Item 1");
+    expect(texts).toContain("Item 2");
+  });
+
+  test("foreground-app scoping filters elements with a foreign package resource-id", () => {
+    const obs = androidFixture();
+    const { result } = scopeToFocus(obs);
+    // The com.android.systemui:id/clock text element drops; the id-less Item 2 stays.
+    expect(result.elements?.text).toHaveLength(1);
+    expect(result.elements?.clickable).toHaveLength(1); // app header element kept
+  });
+
+  test("anchor scoping by resource-id keeps only the matched subtree", () => {
+    const obs = androidFixture();
+    const { result, focus } = scopeToFocus(obs, { resourceId: LIST });
     expect(focus).toEqual({ by: "anchor", matched: true });
     expect(roots(result)).toHaveLength(1);
-    expect(roots(result)[0]["resource-id"]).toBe("list");
+    expect(roots(result)[0]["resource-id"]).toBe(LIST);
     expect(countNodes(roots(result))).toBe(3); // list + 2 items
+  });
+
+  test("anchor scoping by substring text keeps the matching node's subtree", () => {
+    const obs = androidFixture();
+    const { result, focus } = scopeToFocus(obs, { text: "Title" });
+    expect(focus).toEqual({ by: "anchor", matched: true });
+    expect(roots(result)).toHaveLength(1);
+    expect(roots(result)[0]["resource-id"]).toBe(HEADER);
   });
 
   test("unmatched anchor leaves the tree untouched", () => {
@@ -237,9 +272,13 @@ describe("scopeToFocus", () => {
     expect(countNodes(roots(result))).toBe(before);
   });
 
-  test("iOS-style tree with no matching package is a no-op", () => {
+  test("iOS-style tree (no package-qualified ids) is a no-op", () => {
     const obs = androidFixture();
-    obs.viewHierarchy!.packageName = "com.apple.springboard"; // no node advertises it
+    // Strip the qualified ids so no node looks foreign — the real iOS shape.
+    const strip = (nodes: Node[]): void => {
+      for (const n of nodes) { delete n["resource-id"]; strip(toNodeArray(n.node)); }
+    };
+    strip(roots(obs));
     const before = countNodes(roots(obs));
     const { result, focus } = scopeToFocus(obs);
     expect(focus.matched).toBe(false);
@@ -261,9 +300,9 @@ describe("scopeToRegion", () => {
     // insets top:80 bottom:100 -> content rect [0,80,1080,2300].
     expect(rectPx).toEqual({ left: 0, top: 80, right: 1080, bottom: 2300 });
     const ids = resourceIds(result);
-    expect(ids).not.toContain("statusBar"); // 0..80, touches top edge only
-    expect(ids).not.toContain("navBar"); // 2300..2400, touches bottom edge only
-    expect(ids).toContain("header");
+    expect(ids).not.toContain(STATUS_BAR); // 0..80, touches top edge only
+    expect(ids).not.toContain(NAV_BAR); // 2300..2400, touches bottom edge only
+    expect(ids).toContain(HEADER);
   });
 
   test("normalized box crops to the top half", () => {
@@ -271,9 +310,9 @@ describe("scopeToRegion", () => {
     const { result, rectPx } = scopeToRegion(obs, { x1: 0, y1: 0, x2: 1, y2: 0.5 });
     expect(rectPx).toEqual({ left: 0, top: 0, right: 1080, bottom: 1200 });
     const ids = resourceIds(result);
-    expect(ids).toContain("statusBar");
-    expect(ids).toContain("header");
-    expect(ids).not.toContain("navBar"); // 2300..2400 is below y=1200
+    expect(ids).toContain(STATUS_BAR);
+    expect(ids).toContain(HEADER);
+    expect(ids).not.toContain(NAV_BAR); // 2300..2400 is below y=1200
   });
 
   test("filters the categorized elements by the same rect", () => {
@@ -284,12 +323,20 @@ describe("scopeToRegion", () => {
     expect(result.elements?.clickable).toHaveLength(1);
   });
 
+  test("keeps a leaf with no readable bounds (never geometrically excluded)", () => {
+    const obs = androidFixture();
+    // A bounds-less node the crop cannot place must survive, per the contract.
+    roots(obs)[0].node!.push({ "resource-id": `${APP}:id/boundless` });
+    const { result } = scopeToRegion(obs, { x1: 0, y1: 0, x2: 0.1, y2: 0.1 });
+    expect(resourceIds(result)).toContain(`${APP}:id/boundless`);
+  });
+
   test("reads compacted-tuple bounds", () => {
     const obs = androidFixture();
     const statusBar = roots(obs)[0].node![0];
     statusBar.bounds = [0, 0, 1080, 80]; // compact form
     const { result } = scopeToRegion(obs, { x1: 0, y1: 0, x2: 1, y2: 0.5 });
-    expect(resourceIds(result)).toContain("statusBar");
+    expect(resourceIds(result)).toContain(STATUS_BAR);
   });
 
   test("is pure — input is not mutated", () => {
@@ -306,20 +353,37 @@ describe("toOverview", () => {
     const result = toOverview(obs);
     const ids = resourceIds(result);
     // list is addressable + scrollable -> kept; its two anonymous item leaves drop.
-    expect(ids).toContain("list");
-    expect(ids).toContain("header");
-    const list = findById(result, "list")!;
+    expect(ids).toContain(LIST);
+    expect(ids).toContain(HEADER);
+    const list = findById(result, LIST)!;
     expect(list.node).toBeUndefined(); // both leaf items collapsed
     expect((list as unknown as { omittedDescendants?: number }).omittedDescendants).toBe(2);
     // the anonymous `View` leaf under the app root has no id/children -> dropped.
     expect(result.elements).toBeUndefined();
   });
 
+  test("keeps id-less but addressable leaves (clickable / content-desc)", () => {
+    const obs = androidFixture();
+    // A tappable, id-less control (Compose/iOS shape) with an a11y label.
+    roots(obs)[0].node![1].node!.push({
+      "clickable": true,
+      "content-desc": "Add item",
+      "bounds": { left: 0, top: 2100, right: 200, bottom: 2200 },
+    });
+    const result = toOverview(obs);
+    const labels: string[] = [];
+    const walk = (nodes: Node[]): void => {
+      for (const n of nodes) { if (n["content-desc"]) { labels.push(n["content-desc"]); } walk(toNodeArray(n.node)); }
+    };
+    walk(roots(result));
+    expect(labels).toContain("Add item"); // NOT collapsed into omittedDescendants
+  });
+
   test("strips non-structural attributes from retained nodes", () => {
     const obs = androidFixture();
     const result = toOverview(obs);
-    const header = findById(result, "header")!;
-    expect(header["resource-id"]).toBe("header");
+    const header = findById(result, HEADER)!;
+    expect(header["resource-id"]).toBe(HEADER);
     expect(header.text).toBeUndefined(); // leaf detail dropped
     expect(header.bounds).toBeDefined(); // structural attr kept
   });

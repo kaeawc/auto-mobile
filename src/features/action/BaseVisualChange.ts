@@ -232,6 +232,13 @@ export class BaseVisualChange {
     if (!result || this.device.platform !== "android") {
       return;
     }
+    // An action that just cleared the keyguard (e.g. inputText's key-event
+    // unlock, #4360) reports it via `deviceUnlocked`. The pre-action snapshot
+    // below would otherwise stamp a contradictory "still locked; ask the user
+    // to unlock" warning onto the very success that cleared the lock.
+    if (result.deviceUnlocked === true) {
+      return;
+    }
     const lock = previousObserveResult?.deviceLock;
     if (!lock?.locked) {
       return;

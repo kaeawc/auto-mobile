@@ -17,9 +17,15 @@ export type InputTextMode = "a11y" | "eventLast" | "eventAll";
  * InputText result. `warnings` carries non-fatal notes about a degraded path
  * that still satisfied the request — e.g. the accessibility leg failed on a
  * keyguard but the credential was delivered via key events (#4360). It is
- * additive: absent on the normal path.
+ * additive: absent on the normal path. `deviceUnlocked` marks that the action
+ * cleared the keyguard, so `BaseVisualChange` does not stamp a contradictory
+ * "still locked" warning from the pre-action snapshot.
  */
-export type InputTextResult = SendTextResult & { method?: InputTextMode; warnings?: string[] };
+export type InputTextResult = SendTextResult & {
+  method?: InputTextMode;
+  warnings?: string[];
+  deviceUnlocked?: boolean;
+};
 
 interface KeyEventPlan {
   commands: string[];
@@ -40,7 +46,7 @@ export class InputText extends BaseVisualChange {
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode?: InputTextMode
-  ): Promise<SendTextResult & { method?: InputTextMode }> {
+  ): Promise<InputTextResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
 
@@ -123,7 +129,7 @@ export class InputText extends BaseVisualChange {
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode: InputTextMode = "a11y"
-  ): Promise<SendTextResult & { method?: InputTextMode }> {
+  ): Promise<InputTextResult> {
     if (mode === "eventLast") {
       return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard);
     }
@@ -175,24 +181,38 @@ export class InputText extends BaseVisualChange {
 
   /**
    * Deliver text as a keyguard credential when the accessibility setText leg
-   * has already failed against a locked device (#4360).
+   * has already failed against a securely-locked device (#4360).
    *
    * A secure PIN/pattern/password bouncer exposes no editable accessibility
    * node, so `a11y` mode cannot type into it. The digits can still be delivered
    * as key events: KEYCODE_WAKEUP wakes the display, KEYCODE_MENU raises the
    * bouncer, each character is sent as a key event, and KEYCODE_ENTER submits.
+   * (Recipe verified on API 35; see docs/design-docs/plat/android/keyguard.md.)
+   *
+   * Gated on `secure === true`, not merely `locked`: a swipe lock has no
+   * credential, so typing digits into it would land stray key events in the
+   * app the swipe reveals — swipe locks are the job of `wm dismiss-keyguard`.
    *
    * This is deliberately a single, un-observed key-event burst: the keyguard
    * powers its display off after ~7s (`config_lockScreenDisplayTimeout`, a baked
-   * framework resource — not a settable `Settings` key; see
-   * docs/design-docs/plat/android/keyguard.md), so a per-digit observe/settle
-   * loop cannot fit the budget.
+   * framework resource — not a settable `Settings` key), so a per-digit
+   * observe/settle loop cannot fit the budget.
    *
-   * Returns `null` when this is not a keyguard situation (device not locked, or
-   * text not fully mappable to key events) so the caller keeps the original a11y
-   * failure. Otherwise returns success (with the a11y error demoted to
-   * `warnings`) when the device unlocked, or a keyguard-attributed failure when
-   * it did not — never surfacing the a11y leg's error as the call's outcome.
+   * Returns `null` when this is not a secure-keyguard situation (device not
+   * securely locked, or text not fully mappable to key events) so the caller
+   * keeps the original a11y failure. Otherwise returns success (with the a11y
+   * error demoted to `warnings` and `deviceUnlocked` set) when the re-read
+   * confirms the device unlocked, or a keyguard-attributed failure when the
+   * re-read is still-locked *or* inconclusive — never surfacing the a11y leg's
+   * error as the call's outcome, and never treating an unreadable re-read as a
+   * confirmed unlock.
+   *
+   * Side effect: this submits `text` as a credential, so a non-credential value
+   * counts as a failed unlock attempt against the device's retry throttle. It
+   * fires automatically whenever the default a11y path fails on a secure lock —
+   * including a screen that timed out to the keyguard mid-session — so a caller
+   * that may run against a lockable device should branch on `observe`'s
+   * `deviceLock` first.
    *
    * @param text - The credential text to deliver
    * @param a11yError - The accessibility leg's error, for the warning/attribution
@@ -202,7 +222,9 @@ export class InputText extends BaseVisualChange {
     a11yError: string | undefined
   ): Promise<InputTextResult | null> {
     const lockBefore = await this.adb.getDeviceLock();
-    if (!lockBefore?.locked) {
+    // Require a secure lock: `locked` alone is also true for a swipe lock, where
+    // there is no credential and the digits would land as stray input.
+    if (!lockBefore?.locked || lockBefore.secure !== true) {
       return null;
     }
 
@@ -219,7 +241,7 @@ export class InputText extends BaseVisualChange {
       charPlans.push(plan);
     }
 
-    logger.info("[InputText] a11y setText failed on a locked keyguard; delivering credential via key events");
+    logger.warn("[InputText] a11y setText failed on a secure keyguard; submitting the provided text as an unlock credential via key events (a wrong value consumes a failed-unlock attempt)");
     await this.adb.executeCommand("shell input keyevent KEYCODE_WAKEUP");
     await this.adb.executeCommand("shell input keyevent KEYCODE_MENU");
     for (const plan of charPlans) {
@@ -227,9 +249,12 @@ export class InputText extends BaseVisualChange {
     }
     await this.adb.executeCommand("shell input keyevent KEYCODE_ENTER");
 
+    // Ground the outcome in a re-read; an unreadable re-read (`null`) is the
+    // absence of a confirmation, not a confirmation of unlock, so treat it as
+    // still-locked rather than fabricating success.
     const lockAfter = await this.adb.getDeviceLock();
-    if (lockAfter?.locked) {
-      logger.warn("[InputText] keyguard still locked after key-event unlock attempt");
+    if (!lockAfter || lockAfter.locked) {
+      logger.warn("[InputText] keyguard still locked (or lock state unknown) after key-event unlock attempt");
       return {
         success: false,
         text,
@@ -243,6 +268,7 @@ export class InputText extends BaseVisualChange {
       success: true,
       text,
       method: "eventAll",
+      deviceUnlocked: true,
       warnings: [
         `Accessibility setText failed on the keyguard (${a11yError}); the device was unlocked via key events instead.`
       ]

@@ -17,6 +17,7 @@ interface TestInputText {
 }
 
 const LOCKED_SECURE: DeviceLockState = { locked: true, keyguardShowing: true, secure: true };
+const LOCKED_SWIPE: DeviceLockState = { locked: true, keyguardShowing: true, secure: false };
 const UNLOCKED: DeviceLockState = { locked: false, keyguardShowing: false, secure: true };
 
 const KEYGUARD_PIN_COMMANDS = [
@@ -340,7 +341,47 @@ describe("InputText", () => {
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
       expect(result.method).toBe("eventAll");
+      expect(result.deviceUnlocked).toBe(true);
       expect(result.warnings?.[0]).toContain("No focused editable node found");
+      expect(adb.getExecutedCommands()).toEqual(KEYGUARD_PIN_COMMANDS);
+    });
+
+    test("swipe (non-secure) lock: fallback does not fire, a11y failure returned, no key events", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setDeviceLock(LOCKED_SWIPE);
+      const inputText = new InputText(androidDevice, adb);
+
+      stubAndroidSetText(async () => ({
+        success: false,
+        error: "No focused editable node found",
+        totalTimeMs: 1,
+      }));
+
+      const result = await testInputText(inputText).executeAndroidTextInput("1234");
+
+      expect(result.success).toBe(false);
+      expect(result.method).toBe("a11y");
+      expect(result.error).toContain("No focused editable node found");
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test("inconclusive re-read after entry: reported as failure, never a fabricated success", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(35);
+      adb.setDeviceLockSequence([LOCKED_SECURE, null]);
+      const inputText = new InputText(androidDevice, adb);
+
+      stubAndroidSetText(async () => ({
+        success: false,
+        error: "No focused editable node found",
+        totalTimeMs: 1,
+      }));
+
+      const result = await testInputText(inputText).executeAndroidTextInput("1234");
+
+      expect(result.success).toBe(false);
+      expect(result.deviceUnlocked).toBeUndefined();
+      expect(result.error).toContain("remained locked");
       expect(adb.getExecutedCommands()).toEqual(KEYGUARD_PIN_COMMANDS);
     });
 

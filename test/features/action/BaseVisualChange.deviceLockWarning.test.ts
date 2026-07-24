@@ -96,6 +96,22 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     expect(result.deviceLockWarning).toBeUndefined();
   });
 
+  test("action that unlocked the keyguard suppresses the stale pre-action warning (#4360)", async () => {
+    // Pre-action snapshot is locked, but the block cleared the keyguard and says
+    // so via deviceUnlocked. The result must not carry a contradictory
+    // "still locked; ask the user to unlock" warning.
+    fakeObserveScreen.setObserveResult(observeWith({ locked: true, keyguardShowing: true, secure: true }));
+    const result = await createVisualChange("android").observedInteraction(
+      async () => ({ success: true, deviceUnlocked: true, warnings: ["unlocked via key events"] }),
+      { changeExpected: false }
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.deviceUnlocked).toBe(true);
+    expect(result.deviceLock).toBeUndefined();
+    expect(result.deviceLockWarning).toBeUndefined();
+  });
+
   test("iOS is never annotated even if a lock state is present", async () => {
     fakeObserveScreen.setObserveResult(() => observeWith({ locked: true, keyguardShowing: true, secure: true }));
     const result = await createVisualChange("ios").observedInteraction(

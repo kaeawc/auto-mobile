@@ -50,8 +50,12 @@ then aborts or retries an action that had not actually run.
 
 `inputText` therefore falls back automatically. The fallback fires **only** when
 the accessibility leg has already failed **and** a pre-check
-(`AdbClient.getDeviceLock`) confirms the device is locked **and** every character
-of the text maps to a key event. The sequence:
+(`AdbClient.getDeviceLock`) confirms the device is locked with a **secure**
+credential (`secure === true`) **and** every character of the text maps to a key
+event. A non-secure *swipe* lock is deliberately excluded — it has no credential,
+so typing digits into it would land stray key events in the app the swipe reveals;
+swipe locks are the job of `wm dismiss-keyguard`. The sequence (verified on
+API 35):
 
 ```bash
 adb shell input keyevent KEYCODE_WAKEUP   # wake the display
@@ -63,16 +67,24 @@ adb shell input keyevent KEYCODE_ENTER    # submit
 The outcome is **grounded in a re-read of the lock state**, never in the fact
 that the key events were sent:
 
-- **Unlocked afterward** → `success: true`, `method: "eventAll"`, and the
-  accessibility error is demoted to a non-fatal `warnings` entry.
-- **Still locked afterward** → `success: false` with the error attributed to the
-  keyguard leg (wrong credential or entry failure), never to accessibility.
-- **Not locked at the pre-check, or text not key-event-mappable** → the original
-  accessibility failure is returned unchanged; behavior is identical to before.
+- **Unlocked afterward** → `success: true`, `method: "eventAll"`, `deviceUnlocked:
+  true`, and the accessibility error is demoted to a non-fatal `warnings` entry.
+  (`deviceUnlocked` also suppresses the pre-action "still locked" warning that
+  `BaseVisualChange` would otherwise stamp from its stale snapshot.)
+- **Still locked — or the re-read is inconclusive** → `success: false` with the
+  error attributed to the keyguard leg (wrong credential or entry failure), never
+  to accessibility. An unreadable re-read is the absence of a confirmation, not a
+  confirmation of unlock, so it is treated as still-locked.
+- **Not securely locked at the pre-check, or text not key-event-mappable** → the
+  original accessibility failure is returned unchanged; behavior is identical to
+  before.
 
-Because the credential is submitted, a wrong value counts as a failed unlock
-attempt against the device's retry throttle. This path is reached only when a
-caller has explicitly asked to input text at a device already known to be locked.
+Because the credential is submitted, a wrong value counts as a **failed unlock
+attempt** against the device's retry throttle. The fallback fires automatically
+whenever the default a11y path fails on a secure lock — **including a screen that
+has timed out to the keyguard mid-session**, where the caller did not intend an
+unlock at all. A caller that may run against a lockable device should branch on
+`observe`'s `deviceLock` before calling `inputText`.
 
 ## What does NOT work (do not retry these approaches)
 

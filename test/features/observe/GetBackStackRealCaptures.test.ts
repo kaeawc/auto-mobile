@@ -253,6 +253,33 @@ describe("GetBackStack against real captures (#4329)", () => {
         });
       }
 
+      if (readCapture(file).includes("rootOfTask=")) {
+        test("tasks[].rootActivity agrees with the activity marked isTaskRoot (#4359)", async () => {
+          // Cross-consistency: whichever activity `activities[]` reports as the
+          // task root (driven by the block's own rootOfTask= field since #4357)
+          // must be the same component `tasks[].rootActivity` names for that
+          // task. Before #4359, parseTasks resolved rootActivity from the first
+          // `Hist #0` row, which can name an activity the dump says is NOT the
+          // root (api34 task #9). Scoped to tasks that actually carry a marked
+          // root activity -- container tasks with no Hist rows leave rootActivity
+          // undefined, which this invariant cannot speak to.
+          const result = await parse(readCapture(file));
+          const rootByTask = new Map<number, string>();
+          for (const activity of result.activities) {
+            if (activity.isTaskRoot) {
+              rootByTask.set(activity.taskId, activity.name);
+            }
+          }
+          for (const task of result.tasks) {
+            const markedRoot = rootByTask.get(task.id);
+            if (markedRoot === undefined || task.rootActivity === undefined) {
+              continue;
+            }
+            expect(qualify(task.rootActivity)).toBe(markedRoot);
+          }
+        });
+      }
+
       test("parses tasks via the header format this level actually emits", async () => {
         // Ties each level to the parser path it exercises: a modern-format level
         // whose `* Task{...}` parsing regressed, or a legacy-format level whose
@@ -318,6 +345,76 @@ describe("GetBackStack against real captures (#4329)", () => {
       expect(wifi).toBeDefined();
       expect(wifi!.isTaskRoot).toBe(false);
     });
+  });
+
+  // AC1: parseTasks must resolve rootActivity from the Hist row the dump marks
+  // rootOfTask=true, not the first `Hist #0` row (issue #4359). Task #9 prints
+  // two `Hist #0` rows in different TaskFragments; the first (Wifi) says
+  // rootOfTask=false, the second (DeepLinkHomepage) says true.
+  describe("api34 task #9 rootActivity prefers rootOfTask=true (#4359)", () => {
+    test("rootActivity names DeepLinkHomepageActivity, not the first Hist #0 Wifi row", async () => {
+      const result = await parse(readCapture("api34-home-settings-secondapp.log"));
+      const task9 = result.tasks.find(t => t.id === 9);
+      expect(task9).toBeDefined();
+      expect(task9!.rootActivity).toBe("com.android.settings/.homepage.DeepLinkHomepageActivity");
+      // packageName is unaffected -- both Hist #0 rows are com.android.settings.
+      expect(task9!.packageName).toBe("com.android.settings");
+    });
+  });
+
+  // AC2: API <= 29 fixtures print no rootOfTask= field, so the first-`Hist #0`
+  // fallback stays the only source; their rootActivity values must not move
+  // (issue #4359). Pinned to the exact values the committed captures carry.
+  describe("API <= 29 rootActivity is unchanged (#4359)", () => {
+    const BASELINE: Record<string, Array<[number, string]>> = {
+      "api24-home-settings-secondapp.log": [
+        [5, "com.android.contacts/.activities.PeopleActivity"],
+        [4, "com.android.settings/.Settings"],
+        [3, "com.android.launcher3/.Launcher"]
+      ],
+      "api25-home-settings-secondapp.log": [
+        [8, "com.android.contacts/.activities.PeopleActivity"],
+        [7, "com.android.settings/.Settings$WifiSettingsActivity"],
+        [6, "com.android.settings/.Settings"],
+        [5, "com.android.launcher3/.Launcher"]
+      ],
+      "api26-home-settings-secondapp.log": [
+        [8, "com.android.contacts/.activities.PeopleActivity"],
+        [7, "com.android.settings/.Settings$WifiSettingsActivity"],
+        [6, "com.android.settings/.Settings"],
+        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"]
+      ],
+      "api27-home-settings-secondapp.log": [
+        [8, "com.android.contacts/.activities.PeopleActivity"],
+        [7, "com.android.settings/.Settings$WifiSettingsActivity"],
+        [6, "com.android.settings/.Settings"],
+        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"]
+      ],
+      "api28-home-settings-secondapp.log": [
+        [8, "com.android.contacts/.activities.PeopleActivity"],
+        [7, "com.android.settings/.Settings$WifiSettingsActivity"],
+        [6, "com.android.settings/.Settings"],
+        [5, "com.android.launcher3/.Launcher"]
+      ],
+      "api29-home-settings-secondapp.log": [
+        [7, "com.android.contacts/.activities.PeopleActivity"],
+        [6, "com.android.settings/.homepage.SettingsHomepageActivity"],
+        [5, "com.google.android.apps.nexuslauncher/.NexusLauncherActivity"]
+      ]
+    };
+
+    for (const [file, expected] of Object.entries(BASELINE)) {
+      test(`${file} keeps its rootActivity values`, async () => {
+        const raw = readCapture(file);
+        // Guard the premise: these levels genuinely print no rootOfTask= field.
+        expect(raw).not.toContain("rootOfTask=");
+        const result = await parse(raw);
+        for (const [id, rootActivity] of expected) {
+          const task = result.tasks.find(t => t.id === id);
+          expect(task?.rootActivity).toBe(rootActivity);
+        }
+      });
+    }
   });
 
   describe("api34 modern capture, exact values", () => {

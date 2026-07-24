@@ -1642,4 +1642,106 @@ describe("finalizeToolResponse", () => {
       expect((finalized.structuredContent as any).observation.isDiff).toBe(true);
     });
   });
+
+  describe("skeleton projection (issue #4388)", () => {
+    let originalSkeleton: boolean;
+
+    beforeEach(() => {
+      originalSkeleton = serverConfig.isObserveResultProjectSkeletonEnabled();
+      serverConfig.setObserveResultProjectSkeletonEnabled(false);
+    });
+
+    afterEach(() => {
+      serverConfig.setObserveResultProjectSkeletonEnabled(originalSkeleton);
+    });
+
+    /** An observe result whose elements carry bounds so the skeleton is non-empty. */
+    function observeWithActionableElements(): ObserveResult {
+      const obs = makeObserveResult();
+      obs.elements = {
+        clickable: [
+          {
+            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
+            "resource-id": "com.example:id/btn",
+            "text": "Submit",
+            "clickable": "true",
+          } as any,
+        ],
+        scrollable: [],
+        text: [],
+        media: [],
+      };
+      return obs;
+    }
+
+    test("flag off + no project arg: default behavior unchanged (full tree, no skeleton)", () => {
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(observeWithActionableElements()),
+        { name: "observe" }
+      );
+      const sc = finalized.structuredContent as ObserveResult;
+      expect(sc.skeleton).toBeUndefined();
+      expect(sc.viewHierarchy?.hierarchy).toBeDefined();
+      expect(sc.elements).toBeDefined();
+    });
+
+    test("flag on: observe returns a skeleton and omits viewHierarchy + elements", () => {
+      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(observeWithActionableElements()),
+        { name: "observe" }
+      );
+      const sc = finalized.structuredContent as ObserveResult;
+      expect(Array.isArray(sc.skeleton)).toBe(true);
+      expect(sc.skeleton!.length).toBeGreaterThan(0);
+      expect(sc.viewHierarchy).toBeUndefined();
+      expect(sc.elements).toBeUndefined();
+      // text mirror agrees with structuredContent.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.skeleton.length).toBe(sc.skeleton!.length);
+    });
+
+    test("per-call project:'skeleton' arg projects even with the flag off", () => {
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(observeWithActionableElements()),
+        { name: "observe", args: { project: "skeleton" } }
+      );
+      const sc = finalized.structuredContent as ObserveResult;
+      expect(sc.skeleton).toBeDefined();
+      expect(sc.viewHierarchy).toBeUndefined();
+    });
+
+    test("explicit project:'full' overrides the flag (full tree returned)", () => {
+      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(observeWithActionableElements()),
+        { name: "observe", args: { project: "full" } }
+      );
+      const sc = finalized.structuredContent as ObserveResult;
+      expect(sc.skeleton).toBeUndefined();
+      expect(sc.viewHierarchy?.hierarchy).toBeDefined();
+    });
+
+    test("raw:true forces the full tree even when the flag is on", () => {
+      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse(observeWithActionableElements()),
+        { name: "observe", args: { raw: true } }
+      );
+      const sc = finalized.structuredContent as ObserveResult;
+      expect(sc.skeleton).toBeUndefined();
+      expect(sc.viewHierarchy?.hierarchy).toBeDefined();
+    });
+
+    test("embedded action observations are never skeletonized (scoped to observe)", () => {
+      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: observeWithActionableElements() }),
+        { name: "tapOn", sessionUuid: "s1" }
+      );
+      const obsSc = (finalized.structuredContent as any).observation as ObserveResult;
+      expect(obsSc.skeleton).toBeUndefined();
+      expect(obsSc.viewHierarchy?.hierarchy).toBeDefined();
+    });
+  });
 });

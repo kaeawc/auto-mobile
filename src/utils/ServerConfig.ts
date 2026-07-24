@@ -39,6 +39,7 @@ class ServerConfig {
   private _planExecutionActive: boolean = false;
   private _observeResultDropElements: boolean = false;
   private _observeResultCompact: boolean = false;
+  private _observeResultProjectSkeleton: boolean = false;
   private _toolResultsNoStructuredContent: boolean = false;
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
@@ -261,6 +262,14 @@ class ServerConfig {
 
   isObserveResultCompactEnabled(): boolean {
     return this._observeResultCompact;
+  }
+
+  setObserveResultProjectSkeletonEnabled(enabled: boolean): void {
+    this._observeResultProjectSkeleton = enabled;
+  }
+
+  isObserveResultProjectSkeletonEnabled(): boolean {
+    return this._observeResultProjectSkeleton;
   }
 
   /** `--safe-area-warnings` and `--edge-to-edge-warnings` are exact aliases. */

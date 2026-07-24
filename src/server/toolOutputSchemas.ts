@@ -411,12 +411,29 @@ export const deviceLockSchema = z.object({
   secure: z.boolean().optional(),
 });
 
+/**
+ * One row of the Interactable Skeleton Projection (issue #4388). Present only
+ * when the observe output is projected to `"skeleton"` (per-call `project` arg
+ * or the `observe-result-project-skeleton` flag); it then replaces
+ * `viewHierarchy` / `elements`. Bounds are always the compact
+ * `[left, top, right, bottom]` tuple, so this uses the tuple schema directly
+ * rather than the flag-dependent `elementBoundsSchema` union.
+ */
+export const skeletonElementSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().optional(),
+  bounds: compactBoundsTupleSchema,
+  affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
+  checked: z.boolean().optional()
+}).passthrough();
+
 export const observeResultSchema = z.object({
   screenSize: screenSizeSchema.optional(),
   systemInsets: systemInsetsSchema.optional(),
   insets: observationInsetsSchema.optional(),
   layoutWarnings: z.array(layoutWarningSchema).optional(),
   viewHierarchy: viewHierarchyResultSchema.optional(),
+  skeleton: z.array(skeletonElementSchema).optional(),
   activeWindow: activeWindowSchema.optional(),
   screenIdentity: screenIdentitySchema.optional(),
   elements: observeElementsSchema.optional(),

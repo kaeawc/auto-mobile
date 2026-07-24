@@ -14,6 +14,7 @@ export type FeatureFlagKey =
   | "navigation-screenshots"
   | "observe-result-drop-elements"
   | "observe-result-compact"
+  | "observe-result-project-skeleton"
   | "tool-results-no-structured-content"
   | "actions-diff-observe"
   | "actions-no-observe"
@@ -153,6 +154,13 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "observe-result-compact",
     label: "Observe result: compact",
     description: "Emit observe results in a compact form to reduce output size.",
+    defaultValue: false,
+  },
+  {
+    key: "observe-result-project-skeleton",
+    label: "Observe result: project skeleton",
+    description:
+      "Project observe results to a flat, actionable-only skeleton (id/label/bounds/affordances) in place of the full view hierarchy, to reduce output size.",
     defaultValue: false,
   },
   {

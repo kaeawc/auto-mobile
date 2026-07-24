@@ -3275,6 +3275,14 @@
           "description": "Include raw view hierarchy",
           "type": "boolean"
         },
+        "project": {
+          "description": "Output projection. 'full' (default) returns the whole view hierarchy; 'skeleton' returns a flat, actionable-only list (id/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": [
+            "full",
+            "skeleton"
+          ]
+        },
         "skipBackStack": {
           "description": "Skip back stack during waitFor polling",
           "type": "boolean"
@@ -4230,6 +4238,59 @@
             }
           },
           "additionalProperties": {}
+        },
+        "skeleton": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "bounds": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "description": "Compact bounds tuple [left, top, right, bottom]; emitted in place of the {left, top, right, bottom} object only when the --observe-result-compact flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
+              },
+              "affordances": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "tap",
+                    "long-press",
+                    "input",
+                    "scroll",
+                    "toggle"
+                  ]
+                }
+              },
+              "checked": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "bounds",
+              "affordances"
+            ],
+            "additionalProperties": {}
+          }
         },
         "activeWindow": {
           "type": "object",

@@ -14,6 +14,7 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 const CASES: Array<{ key: FeatureFlagKey; read: () => boolean }> = [
   { key: "observe-result-drop-elements", read: () => serverConfig.isObserveResultDropElementsEnabled() },
   { key: "observe-result-compact", read: () => serverConfig.isObserveResultCompactEnabled() },
+  { key: "observe-result-project-skeleton", read: () => serverConfig.isObserveResultProjectSkeletonEnabled() },
   { key: "tool-results-no-structured-content", read: () => serverConfig.isToolResultsNoStructuredContentEnabled() },
   { key: "actions-diff-observe", read: () => serverConfig.isActionsDiffObserveEnabled() },
   { key: "actions-no-observe", read: () => serverConfig.isActionsNoObserveEnabled() },

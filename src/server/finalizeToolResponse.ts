@@ -88,6 +88,24 @@ function classifyObservationAction(
 }
 
 /**
+ * Resolve the observe output projection (issue #4388). An explicit per-call
+ * `project` arg always wins; otherwise `raw: true` forces `"full"` (the raw tree
+ * is the documented disambiguation escape hatch), and absent both the
+ * `observe-result-project-skeleton` flag decides. Default is `"full"`, so
+ * behavior is unchanged until the flag flips or a caller opts in.
+ */
+function resolveObserveProjection(args?: Record<string, unknown>): "full" | "skeleton" {
+  const explicit = args?.project;
+  if (explicit === "full" || explicit === "skeleton") {
+    return explicit;
+  }
+  if (args?.raw === true) {
+    return "full";
+  }
+  return serverConfig.isObserveResultProjectSkeletonEnabled() ? "skeleton" : "full";
+}
+
+/**
  * Context needed to finalize a tool response at the serialization chokepoint.
  * `name` selects where the `ObserveResult` lives (top-level for `observe`, else
  * `.observation`); `sessionUuid` keys the diff baseline. `baselineStore` enables
@@ -227,7 +245,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
-    const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, cfg);
+    // Skeleton projection (#4388) applies only to the headline `observe` payload,
+    // never to embedded action observations (those stay `"full"` so the diff path
+    // has a tree to diff).
+    const observeCfg: SanitizeObserveConfig = { ...cfg, project: resolveObserveProjection(ctx.args) };
+    const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, observeCfg);
     if (canDiff) {
       pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
     }

@@ -112,10 +112,20 @@ case .captureSimulator(let windowID, let fps, let audio):
         }
     }
 
+    // Emit stage markers synchronously to stderr before each blocking call. When
+    // `startCapture()` hangs, `runBlocking` parks the main thread, so the 10s
+    // permission hint (scheduled on the main queue) never fires — the last marker
+    // observed is then the only signal of which stage stalled (issue #4350).
+    logError(CaptureStartupMarker.line(.resolvingWindow(windowID: windowID)))
     let window: SCWindow
     switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
     case .success(.some(let resolved)):
         window = resolved
+        logError(CaptureStartupMarker.line(.resolvedWindow(
+            windowID: windowID,
+            width: Int(resolved.frame.width),
+            height: Int(resolved.frame.height)
+        )))
     case .success(.none):
         logError("error: no window with CGWindowID \(windowID)")
         exit(1)
@@ -130,12 +140,14 @@ case .captureSimulator(let windowID, let fps, let audio):
         logError("error: ScreenCaptureKit stream stopped: \(error)")
     }
 
+    logError(CaptureStartupMarker.line(.startingCapture(windowID: windowID, fps: fps)))
     if case .failure(let error) = runBlocking({
         try await simSession.start(window: window, fps: fps, audio: audio)
     }) {
         logError("error: failed to start simulator capture: \(error)")
         exit(1)
     }
+    logError(CaptureStartupMarker.line(.captureStarted(windowID: windowID)))
 
     // ScreenCaptureKit silently emits no frames when the host process lacks
     // Screen Recording permission — there's no error to surface. Emit a hint

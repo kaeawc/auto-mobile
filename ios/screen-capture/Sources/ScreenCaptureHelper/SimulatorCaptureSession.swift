@@ -18,6 +18,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     private var hasReceivedFrame = false
     private var fps: Int = CommandLineOptions.defaultSimulatorFPS
     private var audioEnabled = false
+    private var windowID: UInt32 = 0
 
     init(writer: FrameWriter, onFatalError: @escaping (Error) -> Void) {
         self.writer = writer
@@ -27,6 +28,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     func start(window: SCWindow, fps: Int, audio: Bool) async throws {
         self.fps = fps
         audioEnabled = audio
+        windowID = window.windowID
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SimulatorCaptureSession.makeConfiguration(window: window, fps: fps, audio: audio)
         configuredPixelWidth = config.width
@@ -85,6 +87,16 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         }
 
         if writer.write(sampleBuffer: sampleBuffer) {
+            if !hasReceivedFrame {
+                // Emitted from the frame queue, not the (possibly parked) main
+                // thread, so it survives to confirm the source actually started
+                // delivering frames — the "captureStarted but no firstFrame"
+                // distinction issue #4350 needs.
+                let marker = CaptureStartupMarker.line(
+                    .firstFrame(windowID: windowID, width: actualWidth, height: actualHeight)
+                )
+                FileHandle.standardError.write(Data("\(marker)\n".utf8))
+            }
             hasReceivedFrame = true
         }
     }

@@ -80,7 +80,9 @@ object VideoServer {
 
     try {
       sessionLease =
-        session.token?.let { VideoSessionLease(session, android.os.Process.myPid()) }?.also { it.start() }
+        session.token
+          ?.let { VideoSessionLease(session, android.os.Process.myPid()) }
+          ?.also { it.start() }
       run(
         outputWidth,
         outputHeight,

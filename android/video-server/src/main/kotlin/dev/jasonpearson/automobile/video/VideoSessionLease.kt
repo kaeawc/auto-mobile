@@ -7,9 +7,9 @@ import org.json.JSONObject
 /**
  * Device-side record of one host-owned video-server process.
  *
- * The host uses these records only after their heartbeat expires. The token is
- * included in both this file and the process command line so a reused PID can
- * never make stale cleanup terminate an unrelated process.
+ * The host uses these records only after their heartbeat expires. The token is included in both
+ * this file and the process command line so a reused PID can never make stale cleanup terminate an
+ * unrelated process.
  */
 data class VideoSessionOptions(
   val socketName: String,
@@ -165,8 +165,8 @@ class VideoSessionLease(
     private const val HEARTBEAT_INTERVAL_MS = 5_000L
 
     /**
-     * Describes a lease that owns [socketName], if one exists for another token.
-     * This is diagnostic-only: collision handling never kills a process.
+     * Describes a lease that owns [socketName], if one exists for another token. This is
+     * diagnostic-only: collision handling never kills a process.
      */
     fun collisionDiagnostic(socketName: String, requestedToken: String?): String? {
       val record =
@@ -183,17 +183,14 @@ class VideoSessionLease(
           ?.firstOrNull {
             it.optString("socketName") == socketName &&
               it.optString("sessionToken") != requestedToken
-          }
-          ?: return null
+          } ?: return null
 
       val heartbeatAtMs = record.optLong("heartbeatAtMs", 0)
       val ageMs = (System.currentTimeMillis() - heartbeatAtMs).coerceAtLeast(0)
-      return (
-        "VIDEO_SESSION_COLLISION socket=$socketName " +
-          "existingOwnerPid=${record.optLong("ownerPid", -1)} " +
-          "existingToken=${record.optString("sessionToken")} " +
-          "requestedToken=$requestedToken tokenMismatch=true ageMs=$ageMs"
-        )
+      return ("VIDEO_SESSION_COLLISION socket=$socketName " +
+        "existingOwnerPid=${record.optLong("ownerPid", -1)} " +
+        "existingToken=${record.optString("sessionToken")} " +
+        "requestedToken=$requestedToken tokenMismatch=true ageMs=$ageMs")
     }
   }
 }

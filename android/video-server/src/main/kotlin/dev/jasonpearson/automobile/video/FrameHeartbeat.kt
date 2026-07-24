@@ -24,6 +24,12 @@ class FrameHeartbeat(
   private val idleForceIntervalMs: Long = DEFAULT_IDLE_FORCE_INTERVAL_MS,
   /** After a keyframe request, force a submission if no frame lands within this window. */
   private val keyFrameGraceMs: Long = DEFAULT_KEY_FRAME_GRACE_MS,
+  /**
+   * Cap consecutive grace-window nudges for one unsatisfied request. If this many fire without a
+   * frame the request is abandoned and the slower idle cadence takes over, so a genuinely wedged or
+   * undecodable surface cannot spin a fast `setSurface` storm to system_server forever.
+   */
+  private val maxKeyFrameNudges: Int = DEFAULT_MAX_KEY_FRAME_NUDGES,
 ) {
   /** Injectable monotonic clock; production uses `SystemClock.uptimeMillis()`. */
   fun interface Clock {
@@ -36,11 +42,15 @@ class FrameHeartbeat(
   /** When an unsatisfied keyframe request began, or null when none is outstanding. */
   private var keyFramePendingSinceMs: Long? = null
 
+  /** Grace nudges already fired for the outstanding request; bounded by [maxKeyFrameNudges]. */
+  private var keyFrameNudges = 0
+
   /** Baseline the timers at capture start so the first idle nudge is a full interval out. */
   @Synchronized
   fun start() {
     lastActivityMs = clock.nowMs()
     keyFramePendingSinceMs = null
+    keyFrameNudges = 0
   }
 
   /** Record that the encoder emitted a frame: resets idle timing and clears any request. */
@@ -48,6 +58,7 @@ class FrameHeartbeat(
   fun onFrameEmitted() {
     lastActivityMs = clock.nowMs()
     keyFramePendingSinceMs = null
+    keyFrameNudges = 0
   }
 
   /** Record a keyframe request (a relayed WHEP viewer PLI). Coalesces repeats. */
@@ -55,13 +66,14 @@ class FrameHeartbeat(
   fun onKeyFrameRequested() {
     if (keyFramePendingSinceMs == null) {
       keyFramePendingSinceMs = clock.nowMs()
+      keyFrameNudges = 0
     }
   }
 
   /**
    * @return true if the caller should force a fresh surface submission now. Firing advances the
    *   internal timers so a wedged surface is nudged at most once per interval (idle) or once per
-   *   grace window (pending keyframe) until a frame lands.
+   *   grace window (pending keyframe, up to [maxKeyFrameNudges]) until a frame lands.
    */
   @Synchronized
   fun poll(): Boolean {
@@ -73,10 +85,17 @@ class FrameHeartbeat(
       return false
     }
     lastActivityMs = now
-    if (pending != null) {
-      // Keep the request outstanding but re-throttle: if the nudge produces nothing,
-      // fire again after another grace window rather than every poll.
-      keyFramePendingSinceMs = now
+    if (dueForKeyFrame) {
+      keyFrameNudges++
+      if (keyFrameNudges >= maxKeyFrameNudges) {
+        // Grace budget spent with no frame: abandon the fast retry and let the idle cadence
+        // carry it, so an undecodable surface cannot spin setSurface at the grace rate forever.
+        keyFramePendingSinceMs = null
+        keyFrameNudges = 0
+      } else {
+        // Keep the request outstanding but re-throttle to the next grace window.
+        keyFramePendingSinceMs = now
+      }
     }
     return true
   }
@@ -84,5 +103,6 @@ class FrameHeartbeat(
   companion object {
     const val DEFAULT_IDLE_FORCE_INTERVAL_MS = 1_000L
     const val DEFAULT_KEY_FRAME_GRACE_MS = 150L
+    const val DEFAULT_MAX_KEY_FRAME_NUDGES = 4
   }
 }

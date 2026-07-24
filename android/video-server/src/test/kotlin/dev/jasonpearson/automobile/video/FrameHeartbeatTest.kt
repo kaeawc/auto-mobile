@@ -20,7 +20,11 @@ class FrameHeartbeatTest {
     clock: FrameHeartbeat.Clock,
     idleForceIntervalMs: Long = 1_000,
     keyFrameGraceMs: Long = 150,
-  ) = FrameHeartbeat(clock, idleForceIntervalMs, keyFrameGraceMs).also { it.start() }
+    maxKeyFrameNudges: Int = 4,
+  ) =
+    FrameHeartbeat(clock, idleForceIntervalMs, keyFrameGraceMs, maxKeyFrameNudges).also {
+      it.start()
+    }
 
   @Test
   fun idleScreenForcesFrameOncePerInterval() {
@@ -109,6 +113,33 @@ class FrameHeartbeatTest {
     clock.nowMs = 250
     assertFalse(heartbeat.poll())
     clock.nowMs = 300
+    assertTrue(heartbeat.poll())
+  }
+
+  @Test
+  fun keyFrameNudgesAreCappedThenFallBackToIdleCadence() {
+    val clock = FakeClock()
+    val heartbeat =
+      heartbeat(clock, idleForceIntervalMs = 1_000, keyFrameGraceMs = 150, maxKeyFrameNudges = 2)
+
+    clock.nowMs = 0
+    heartbeat.onKeyFrameRequested()
+
+    // Two grace-window nudges fire for the unsatisfied request...
+    clock.nowMs = 150
+    assertTrue(heartbeat.poll())
+    clock.nowMs = 300
+    assertTrue(heartbeat.poll())
+
+    // ...then the grace budget is spent: no more fast nudges — a wedged surface cannot spin
+    // setSurface at the 150ms grace rate forever. The last nudge (t=300) seeds the idle timer.
+    clock.nowMs = 450
+    assertFalse(heartbeat.poll())
+    clock.nowMs = 1_000
+    assertFalse(heartbeat.poll())
+
+    // The slower idle cadence still carries it: 1s after the final nudge, force once.
+    clock.nowMs = 1_300
     assertTrue(heartbeat.poll())
   }
 }

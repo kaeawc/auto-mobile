@@ -32,7 +32,8 @@ object VideoServer {
   @Volatile private var running = true
 
   @Volatile private var encoder: VideoEncoder? = null
-  private var capture: ScreenCapture? = null
+  // Volatile: the encode loop reads it for forceFrame() while the shutdown hook nulls it (#4383).
+  @Volatile private var capture: ScreenCapture? = null
   private var audioCapture: AudioCapture? = null
   private var streamWriter: VideoStreamWriter? = null
 
@@ -231,7 +232,7 @@ object VideoServer {
 
     // Read host→device commands (e.g. a relayed WHEP viewer PLI) and ask the
     // encoder for a fresh IDR so late/recovering viewers decode without waiting
-    // for the 10s I-frame interval. Also arm the heartbeat so an idle screen that
+    // for the 2s I-frame interval. Also arm the heartbeat so an idle screen that
     // produces no frame for the request still gets a forced fresh submission.
     streamWriter!!.startCommandReader { command ->
       if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {

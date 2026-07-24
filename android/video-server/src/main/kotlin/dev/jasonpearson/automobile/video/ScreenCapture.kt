@@ -42,14 +42,20 @@ class ScreenCapture(
   /**
    * Force the mirror to re-submit a frame to the encoder surface. On a static screen no new buffers
    * are queued, so the encoder stalls after its initial burst and a keyframe request cannot produce
-   * a fresh IDR (issue #4383). Re-applying the output surface makes DisplayManager re-composite the
-   * mirror, pushing a fresh frame the encoder can emit. Safe to call from the encode loop thread;
-   * the codec's own IDR interval still bounds GOP.
+   * a fresh IDR (issue #4383).
+   *
+   * The nudge detaches then re-attaches the output surface: `DisplayManagerService`'s
+   * `VirtualDisplayDevice.setSurfaceLocked` short-circuits on a reference-equality check (`mSurface
+   * != surface`), so re-applying the SAME surface is a no-op. Clearing to null and then re-setting
+   * passes that guard both times, forcing a traversal that re-composites the mirror onto the
+   * surface and pushes a fresh frame the encoder can emit. Safe to call from the encode loop
+   * thread; the codec's own IDR interval still bounds GOP.
    */
   fun forceFrame() {
     val display = virtualDisplay ?: return
     val surface = this.surface ?: return
     try {
+      display.setSurface(null)
       display.setSurface(surface)
     } catch (e: Exception) {
       // Best-effort nudge: a released display surfaces its own failure via the encode loop.

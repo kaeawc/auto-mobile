@@ -503,14 +503,22 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       }, "capture source did not deliver H.264 frames to the WHIP publisher");
       await subscribeReader(cdp);
       timeline.mark("whepConnected");
-      // The device can be idle by the time the WHEP reader connects. Trigger a
-      // visible transition after subscription so the reader receives a fresh
-      // encoded access unit rather than waiting on an earlier keyframe.
-      await changeFixture();
-      await waitForDecodedFrames(cdp, 0, "browser did not decode device video");
+      // #4383: the screen has been static since capture started (fixture launched, no further
+      // input), so this exercises a late viewer joining an idle stream. The encoder's
+      // FrameHeartbeat must force a fresh surface submission — the periodic idle nudge plus a
+      // keyframe nudge on the viewer's PLI — so the reader decodes with NO visible screen change.
+      // On the pre-fix jar the reader sat black here indefinitely; this is the device coverage
+      // #4383 asked for, and it fails on the old encoder while passing on the fixed one.
+      await waitForDecodedFrames(cdp, 0, "browser did not decode device video on a static screen (late-viewer starvation, #4383)");
       timeline.mark("firstDecodedFrame");
+      const staticScreenFrame = await videoSample(cdp);
+      expect(staticScreenFrame.frames).toBeGreaterThan(0);
+      decodedSize = { width: staticScreenFrame.width, height: staticScreenFrame.height };
+      // A visible transition must still deliver changing video (regression guard for the
+      // active-screen path that the idle-frame backstop must not disturb).
+      await changeFixture();
+      await waitForDecodedFrames(cdp, staticScreenFrame.frames, "browser did not decode a new frame after a visible change");
       const first = await videoSample(cdp);
-      decodedSize = { width: first.width, height: first.height };
       await launchFixture();
       await waitForDecodedFrames(cdp, first.frames, "browser did not receive video after returning to the fixture");
       const second = await videoSample(cdp);

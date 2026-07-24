@@ -42,6 +42,36 @@ const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
 const H264_MACROBLOCK_SIZE = 16;
 /** Smallest dimension ffmpeg can encode as 4:2:0 chroma-subsampled video. */
 const MIN_ENCODER_DIMENSION = 2;
+/**
+ * Bits budgeted per encoded pixel per frame for the default WebRTC bitrate.
+ *
+ * Chosen from the two measured hosted-lane operating points (#4349): after
+ * #4346 stopped upscaling toward 1920x1080, a Retina developer host encodes the
+ * Simulator window at its native ~910x1940 backing store, so an uncapped
+ * VideoToolbox default scales egress with resolution x rate with no ceiling. A
+ * 0.1 bpp budget bounds that worst case (910x1940 @ 15 fps -> ~2.6 Mbps) while
+ * a headless CI runner's much smaller frame (286x658 @ 15 fps -> ~0.28 Mbps)
+ * stays far below it — so the same budget caps the large case without inflating
+ * the small one. 0.1 bpp is a conventional target for baseline-profile screen
+ * content, whose largely-static frames leave headroom for scroll/animation
+ * transients within the 2s GOP. Override per-worker with
+ * `AUTOMOBILE_WEBRTC_BITRATE_KBPS` when a specific ceiling is required.
+ */
+export const IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL = 0.1;
+
+/**
+ * Resolution-aware default encoder bitrate (bps) for an iOS WebRTC stream that
+ * did not configure one, derived from the *encoded* size (after any downscale)
+ * and the declared frame rate. Scales the target with the encoder's real
+ * workload rather than pinning a fixed ceiling, and always returns a positive
+ * finite integer — a non-finite input (which real capture never produces) falls
+ * back to the 1 bps floor rather than passing `NaN` to ffmpeg. See
+ * {@link IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL}.
+ */
+export function defaultIosBitrateBps(size: EncoderSize, fps: number): number {
+  const budget = Math.round(size.width * size.height * fps * IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL);
+  return Number.isFinite(budget) ? Math.max(1, budget) : 1;
+}
 
 export interface IosFrameCaptureHelper {
   start(): void;
@@ -511,9 +541,18 @@ export class IosH264Source implements H264CaptureSource {
       "-forced-idr",
       "1"
     );
-    if (this.options.bitrateBps && this.options.bitrateBps > 0) {
-      args.push("-b:v", String(Math.round(this.options.bitrateBps)));
-    }
+    // Always emit an explicit target bitrate. Left unset, VideoToolbox picks a
+    // default that scales with resolution x rate with no ceiling — and since
+    // #4346 stopped upscaling toward 1920x1080, a Retina host now encodes the
+    // native backing store, so egress can climb several-fold (#4349). Honor an
+    // operator override; otherwise budget from the *encoded* size (post any
+    // downscale) and the declared rate.
+    const encodedSize = scale ?? size;
+    const bitrateBps =
+      this.options.bitrateBps && this.options.bitrateBps > 0
+        ? this.options.bitrateBps
+        : defaultIosBitrateBps(encodedSize, this.fps);
+    args.push("-b:v", String(Math.round(bitrateBps)));
     args.push("-f", "h264", "pipe:1");
     return args;
   }

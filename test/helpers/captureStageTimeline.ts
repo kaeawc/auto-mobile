@@ -104,6 +104,19 @@ export interface CaptureStageContext {
   configuredFps: number | null;
   /** Dimensions of the first frame the browser decoded. */
   decodedSize: CaptureDimensions | null;
+  /**
+   * Mean egress bitrate in kbps, measured at the browser over a sampling window
+   * (#4349), or null when it could not be sampled. This is the number the
+   * "default `-b:v` vs. rely on the VideoToolbox default" decision turns on, so
+   * a whole-test duration cannot stand in for it.
+   */
+  egressKbps: number | null;
+  /**
+   * Decoded frame rate in fps, measured at the browser over the same window
+   * (#4349), or null when it could not be sampled. The configured fps is what
+   * the pipeline requested; this is what a hosted runner actually sustained.
+   */
+  decodedFps: number | null;
   run: CaptureRunIdentity;
   /**
    * Poll interval each stage was observed with. Every measurement carries up to
@@ -131,9 +144,52 @@ export interface CaptureStageRecord extends CaptureStageContext {
 
 /**
  * Current {@link CaptureStageRecord.schemaVersion}. Bumped to 2 when `phases`
- * was added (#4354).
+ * was added (#4354), and to 3 when `egressKbps` / `decodedFps` were added (#4349).
  */
-export const CAPTURE_STAGE_RECORD_SCHEMA_VERSION = 2;
+export const CAPTURE_STAGE_RECORD_SCHEMA_VERSION = 3;
+
+/**
+ * A cumulative inbound-RTP counter read from the browser at one instant. Egress
+ * bitrate and decoded fps are rates, so they are computed from two of these
+ * bracketing a window rather than from a single reading.
+ */
+export interface EgressSample {
+  /** Cumulative bytes the reader has received on the video track. */
+  bytesReceived: number;
+  /** Cumulative frames the reader has decoded. */
+  framesDecoded: number;
+  /** Reader-side timestamp (ms) the counters were read at. */
+  timestampMs: number;
+}
+
+/**
+ * Mean egress bitrate (kbps) between two cumulative inbound-RTP samples, or null
+ * when the window is non-positive (a single sample, or reader clock skew). Bits
+ * per millisecond are numerically identical to kilobits per second, so no unit
+ * scaling is needed. A counter that reset between samples clamps to zero rather
+ * than reporting a negative rate.
+ */
+export function egressKbpsBetween(first: EgressSample, second: EgressSample): number | null {
+  const windowMs = second.timestampMs - first.timestampMs;
+  if (windowMs <= 0) {
+    return null;
+  }
+  const bits = Math.max(0, second.bytesReceived - first.bytesReceived) * 8;
+  return bits / windowMs;
+}
+
+/**
+ * Mean decoded frame rate (fps) between two cumulative samples, or null when the
+ * window is non-positive. Clamps a reset counter to zero, as {@link egressKbpsBetween} does.
+ */
+export function decodedFpsBetween(first: EgressSample, second: EgressSample): number | null {
+  const windowMs = second.timestampMs - first.timestampMs;
+  if (windowMs <= 0) {
+    return null;
+  }
+  const frames = Math.max(0, second.framesDecoded - first.framesDecoded);
+  return (frames / windowMs) * 1_000;
+}
 
 /** Monotonic millisecond reader used when none is injected. */
 export function monotonicNowMs(): number {
@@ -229,6 +285,7 @@ export function formatCaptureStageRecord(record: CaptureStageRecord): string {
   const lines = [
     `platform=${record.platform} stream=${record.streamId} outcome=${record.outcome}`,
     `source=${formatDimensions(record.sourceSize)} fps=${record.configuredFps ?? "none"} decoded=${formatDimensions(record.decodedSize)}`,
+    `egress=${record.egressKbps === null ? "none" : `${Math.round(record.egressKbps)}kbps`} decodedFps=${record.decodedFps === null ? "none" : Math.round(record.decodedFps * 10) / 10}`,
     `run=${record.run.runId ?? "local"}/${record.run.runAttempt ?? "1"} sha=${record.run.commitSha ?? "unknown"} runner=${record.run.runnerImage ?? record.run.runnerOs ?? "unknown"}`,
     ...record.stages.map(
       measurement =>

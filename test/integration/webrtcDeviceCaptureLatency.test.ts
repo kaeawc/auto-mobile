@@ -167,6 +167,38 @@ describe("#4343 device capture latency instrumentation", () => {
     expect(source.indexOf("writeFile", afterAllIndex)).toBeGreaterThan(afterAllIndex);
   });
 
+  test("records the iOS WebRTC streaming fps, not the MCP-observation default (#4349)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+
+    // The generic SIMULATOR_FPS_DEFAULT is 5, tuned for one-shot observation; the
+    // WebRTC path runs WEBRTC_IOS_SIMULATOR_FPS_DEFAULT (15). Sourcing the record
+    // from the wrong constant made every prior iOS sample wrong by 3x.
+    expect(source).toContain("WEBRTC_IOS_SIMULATOR_FPS_DEFAULT");
+    // Word-boundary match, so the bare MCP-observation constant is caught in any
+    // position — import, ternary, a local, a call argument — while the
+    // `WEBRTC_IOS_`-prefixed constant never matches (the boundary before
+    // SIMULATOR fails when preceded by `_`). A substring scan for
+    // `SIMULATOR_FPS_DEFAULT}` both missed the indirect forms and would have
+    // false-failed once anyone wrapped the correct constant in a template.
+    expect(source).not.toMatch(/\bSIMULATOR_FPS_DEFAULT\b/);
+  });
+
+  test("samples egress bitrate and decoded fps into the record (#4349)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+
+    // Two cumulative inbound-RTP readings bracket the measured window; both feed
+    // the record so the operating point behind the AC2 decision is observable.
+    const first = indexOfRequired(source, "const before = await egressSample(cdp)");
+    const second = indexOfRequired(source, "const after = await egressSample(cdp)");
+    expect(first).toBeLessThan(second);
+    expect(source).toContain("egressKbps = egressKbpsBetween(before, after)");
+    expect(source).toContain("decodedFps = decodedFpsBetween(before, after)");
+    // Carried on the record written from afterAll.
+    const afterAllIndex = indexOfRequired(source, "afterAll(");
+    expect(source.indexOf("egressKbps,", afterAllIndex)).toBeGreaterThan(afterAllIndex);
+    expect(source.indexOf("decodedFps,", afterAllIndex)).toBeGreaterThan(afterAllIndex);
+  });
+
   test("mirrors the Android capture fps from the video-server default quality preset", () => {
     const integration = read(INTEGRATION_TEST_PATH);
     const encoder = read("src/features/webrtc/PersistentEncoderH264Source.ts");

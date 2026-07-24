@@ -4,9 +4,12 @@ import {
   CAPTURE_STAGE_RECORD_SCHEMA_VERSION,
   CaptureStageTimeline,
   captureRunIdentity,
+  decodedFpsBetween,
+  egressKbpsBetween,
   formatCaptureStageRecord,
   monotonicNowMs,
   type CaptureStageContext,
+  type EgressSample,
 } from "./captureStageTimeline";
 
 /** Deterministic monotonic clock: advance() is the only way time moves. */
@@ -27,6 +30,8 @@ const context: CaptureStageContext = {
   sourceSize: { width: 1080, height: 2400 },
   configuredFps: 60,
   decodedSize: { width: 720, height: 1600 },
+  egressKbps: 2_648,
+  decodedFps: 14.7,
   run: {
     runId: "30053647851",
     runAttempt: "2",
@@ -161,6 +166,26 @@ describe("#4343 capture stage timeline", () => {
     expect(record.decodedSize).toEqual({ width: 720, height: 1600 });
   });
 
+  test("carries the measured egress bitrate and decoded fps (#4349)", () => {
+    const timeline = new CaptureStageTimeline(fakeClock().nowMs);
+    timeline.mark("startRequest");
+
+    const record = timeline.toRecord(context);
+
+    expect(record.egressKbps).toBe(2_648);
+    expect(record.decodedFps).toBe(14.7);
+  });
+
+  test("carries a null egress bitrate and decoded fps when they could not be sampled", () => {
+    const timeline = new CaptureStageTimeline(fakeClock().nowMs);
+    timeline.mark("startRequest");
+
+    const record = timeline.toRecord({ ...context, egressKbps: null, decodedFps: null });
+
+    expect(record.egressKbps).toBeNull();
+    expect(record.decodedFps).toBeNull();
+  });
+
   test("carries the run identity and sampling error bar so samples can be aggregated", () => {
     const timeline = new CaptureStageTimeline(fakeClock().nowMs);
     timeline.mark("startRequest");
@@ -235,12 +260,31 @@ describe("#4343 capture stage timeline", () => {
     timeline.mark("startRequest");
 
     const formatted = formatCaptureStageRecord(
-      timeline.toRecord({ ...context, sourceSize: null, configuredFps: null, decodedSize: null })
+      timeline.toRecord({
+        ...context,
+        sourceSize: null,
+        configuredFps: null,
+        decodedSize: null,
+        egressKbps: null,
+        decodedFps: null,
+      })
     );
 
     expect(formatted).toContain("source=none");
     expect(formatted).toContain("fps=none");
     expect(formatted).toContain("decoded=none");
+    expect(formatted).toContain("egress=none");
+    expect(formatted).toContain("decodedFps=none");
+  });
+
+  test("formats the measured egress bitrate and decoded fps (#4349)", () => {
+    const timeline = new CaptureStageTimeline(fakeClock().nowMs);
+    timeline.mark("startRequest");
+
+    const formatted = formatCaptureStageRecord(timeline.toRecord(context));
+
+    expect(formatted).toContain("egress=2648kbps");
+    expect(formatted).toContain("decodedFps=14.7");
   });
 
   test("defaults to a monotonic clock that never runs backwards", () => {
@@ -364,7 +408,7 @@ describe("#4354 teardown phase instrumentation", () => {
   });
 
   test("bumps the record schema version so a parser can span the phases addition", () => {
-    expect(CAPTURE_STAGE_RECORD_SCHEMA_VERSION).toBe(2);
+    expect(CAPTURE_STAGE_RECORD_SCHEMA_VERSION).toBe(3);
   });
 
   test("formats every phase with its status and elapsed time", async () => {
@@ -400,5 +444,33 @@ describe("#4354 teardown phase instrumentation", () => {
 
     expect(record.phases).toEqual([]);
     expect(formatCaptureStageRecord(record)).not.toContain("phase");
+  });
+});
+
+describe("#4349 egress bitrate and decoded fps between two inbound-rtp samples", () => {
+  const sample = (bytesReceived: number, framesDecoded: number, timestampMs: number): EgressSample => ({
+    bytesReceived,
+    framesDecoded,
+    timestampMs,
+  });
+
+  test("computes egress kbps: bits per millisecond equal kilobits per second", () => {
+    // 1,000,000 bytes over 2s == 8,000,000 bits / 2000 ms == 4000 kbps.
+    expect(egressKbpsBetween(sample(0, 0, 1_000), sample(1_000_000, 0, 3_000))).toBe(4_000);
+  });
+
+  test("computes decoded fps from the cumulative frame counter", () => {
+    // 30 frames over 2s == 15 fps.
+    expect(decodedFpsBetween(sample(0, 0, 1_000), sample(0, 30, 3_000))).toBe(15);
+  });
+
+  test("returns null for a non-positive window rather than dividing by zero", () => {
+    expect(egressKbpsBetween(sample(0, 0, 2_000), sample(1_000, 0, 2_000))).toBeNull();
+    expect(decodedFpsBetween(sample(0, 0, 2_000), sample(0, 5, 1_500))).toBeNull();
+  });
+
+  test("clamps a counter that reset between samples to zero rather than reporting negative", () => {
+    expect(egressKbpsBetween(sample(5_000, 0, 1_000), sample(1_000, 0, 3_000))).toBe(0);
+    expect(decodedFpsBetween(sample(0, 90, 1_000), sample(0, 10, 3_000))).toBe(0);
   });
 });

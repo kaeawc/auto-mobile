@@ -8,15 +8,18 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
-import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
 import {
   CaptureStageTimeline,
   captureRunIdentity,
+  decodedFpsBetween,
+  egressKbpsBetween,
   formatCaptureStageRecord,
   type CaptureDimensions,
   type CaptureStage,
   type CaptureStageContext,
+  type EgressSample,
 } from "../helpers/captureStageTimeline";
 
 const execFileAsync = promisify(execFile);
@@ -211,6 +214,34 @@ async function readerDiagnostics(cdp: CdpClient): Promise<ReaderDiagnostics> {
   return response.result?.result?.value as ReaderDiagnostics;
 }
 
+/**
+ * One cumulative inbound-RTP reading for the egress-bitrate / decoded-fps
+ * measurement (#4349). Uses the WebRTC stat's own `timestamp` for the window so
+ * the rate does not depend on the test host's wall clock. Returns null when no
+ * inbound-video stat is available yet — a missing sample must never fail the
+ * lane, so the caller treats null as "not measured".
+ */
+async function egressSample(cdp: CdpClient): Promise<EgressSample | null> {
+  const expression = `(async () => {
+    const connections = Array.from(window.__automobilePeerConnections ?? []);
+    const reports = (await Promise.all(connections.map(connection => connection.getStats())))
+      .flatMap(report => Array.from(report.values()));
+    const inbound = reports.find(stat => stat.type === "inbound-rtp" && stat.kind === "video");
+    if (!inbound) { return null; }
+    return {
+      bytesReceived: inbound.bytesReceived ?? 0,
+      framesDecoded: inbound.framesDecoded ?? 0,
+      timestampMs: inbound.timestamp ?? 0,
+    };
+  })()`;
+  const response = await cdp.command("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  return (response.result?.result?.value as EgressSample | null) ?? null;
+}
+
 async function waitForDecodedFrames(cdp: CdpClient, minimum: number, message: string): Promise<void> {
   try {
     await waitFor(async () => (await videoSample(cdp)).frames > minimum, message);
@@ -242,9 +273,13 @@ async function captureProfile(): Promise<CaptureProfile> {
   // never configures; only the persistent encoder publishes a chosen fps.
   const usesVideoServer =
     Boolean(process.env.AUTOMOBILE_VIDEO_SERVER_JAR) || process.env.AUTOMOBILE_REQUIRE_VIDEO_SERVER === "1";
+  // iOS WebRTC captures at the streaming default, which is deliberately separate
+  // from the generic MCP-observation `SIMULATOR_FPS_DEFAULT` (5): the lane never
+  // overrides AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS, so the record must reflect the
+  // rate the pipeline actually configures, not the observation constant (#4349).
   const configuredFps = platform === "android"
     ? (usesVideoServer ? ANDROID_VIDEO_SERVER_MEDIUM_FPS : null)
-    : SIMULATOR_FPS_DEFAULT;
+    : WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
   try {
     if (platform === "android") {
       const { stdout } = await execFileAsync("adb", ["-s", androidDeviceId(), "shell", "wm", "size"]);
@@ -338,7 +373,13 @@ const SAMPLING_INTERVALS_MS: Partial<Record<CaptureStage, number>> = {
 const timeline = new CaptureStageTimeline();
 let profile: CaptureProfile = { sourceSize: null, configuredFps: null };
 let decodedSize: CaptureDimensions | null = null;
+let egressKbps: number | null = null;
+let decodedFps: number | null = null;
 let outcome: "passed" | "failed" = "failed";
+// Window over which egress bitrate and decoded fps are averaged, and the
+// interval between the fixture toggles that keep the screen changing across it.
+const EGRESS_WINDOW_MS = 2_000;
+const EGRESS_TOGGLE_INTERVAL_MS = 400;
 
 describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => {
   afterAll(async () => {
@@ -349,6 +390,8 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       sourceSize: profile.sourceSize,
       configuredFps: profile.configuredFps,
       decodedSize,
+      egressKbps,
+      decodedFps,
       run: captureRunIdentity(),
       samplingIntervalsMs: SAMPLING_INTERVALS_MS,
     } satisfies CaptureStageContext);
@@ -475,6 +518,32 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       expect(first.height).toBeGreaterThan(0);
       expect(second.frames).toBeGreaterThan(first.frames);
       expect(second.sample).not.toBe(first.sample);
+      // Measure the operating point the AC2 decision turns on (#4349): average
+      // egress bitrate and decoded fps over a window while the stream is live.
+      // Drive continuous visible change across the window rather than sampling a
+      // static screen — H.264 inter-prediction compresses an idle fixture to
+      // near-zero, which would under-report the active-screen egress this is
+      // meant to capture (SimulatorCaptureSession also drops non-`.complete`
+      // frames, so a still screen delivers far fewer than the configured fps).
+      // Diagnostic only — a stats hiccup leaves both null and must never fail the
+      // lane, so this asserts nothing about the values.
+      try {
+        const before = await egressSample(cdp);
+        const windowDeadline = Date.now() + EGRESS_WINDOW_MS;
+        while (Date.now() < windowDeadline) {
+          await changeFixture();
+          await Bun.sleep(EGRESS_TOGGLE_INTERVAL_MS);
+          await launchFixture();
+          await Bun.sleep(EGRESS_TOGGLE_INTERVAL_MS);
+        }
+        const after = await egressSample(cdp);
+        if (before && after) {
+          egressKbps = egressKbpsBetween(before, after);
+          decodedFps = decodedFpsBetween(before, after);
+        }
+      } catch (error) {
+        console.warn(`[#4349] could not sample egress bitrate / decoded fps: ${error}`);
+      }
       const stopped = await sendWebRtcStreamRequest(
         { action: "stop", id: `${streamId}-stop`, streamId },
         { socketPath: webRtcSocketPath }

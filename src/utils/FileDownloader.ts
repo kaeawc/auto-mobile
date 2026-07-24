@@ -85,7 +85,9 @@ export class DefaultFileDownloader implements FileDownloader {
 
     await new Promise<void>((resolve, reject) => {
       const transport = url.startsWith("https:") ? https : http;
-      const abort = (): void => request.destroy(new Error(`Download aborted: ${url}`));
+      const abort = (): void => {
+        request.destroy(new Error(`Download aborted: ${url}`));
+      };
       const request = transport.get(
         url,
         { headers: { "User-Agent": "auto-mobile" } },

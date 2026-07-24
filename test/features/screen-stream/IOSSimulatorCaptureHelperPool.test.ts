@@ -100,6 +100,21 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     expect(helpers).toEqual([]);
   });
 
+  test("clears only the attachment generation that completed", async () => {
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => new FakeSimulatorHelper(),
+    });
+    const lease = pool.acquire(simulatorOptions());
+
+    await lease.start();
+    await lease.stop();
+    await lease.start();
+
+    expect(lease.isStarted).toBe(true);
+    await lease.stop();
+    await pool.shutdown();
+  });
+
   test("replaces the helper when the simulator window is recreated with a new ID", async () => {
     const helpers: FakeSimulatorHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({

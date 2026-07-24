@@ -40,6 +40,8 @@ export interface ScreenCaptureHelperProviderDeps {
   expectedChecksum?: string;
   releaseUrl?: string;
   downloadTimeoutMs?: number;
+  /** Test seam: Windows does not expose POSIX executable mode bits. */
+  platform?: NodeJS.Platform;
 }
 
 /**
@@ -58,6 +60,7 @@ export class ScreenCaptureHelperProvider {
   private readonly expectedChecksumOverride?: string;
   private readonly releaseUrlOverride?: string;
   private readonly downloadTimeoutMs: number;
+  private readonly platform: NodeJS.Platform;
   private inFlight: Promise<string | null> | null = null;
 
   constructor(deps: ScreenCaptureHelperProviderDeps = {}) {
@@ -70,6 +73,7 @@ export class ScreenCaptureHelperProvider {
     this.expectedChecksumOverride = deps.expectedChecksum;
     this.releaseUrlOverride = deps.releaseUrl;
     this.downloadTimeoutMs = deps.downloadTimeoutMs ?? SCREEN_CAPTURE_HELPER_DOWNLOAD_TIMEOUT_MS;
+    this.platform = deps.platform ?? process.platform;
   }
 
   static getInstance(): ScreenCaptureHelperProvider {
@@ -134,7 +138,11 @@ export class ScreenCaptureHelperProvider {
 
     try {
       const stats = await fs.stat(this.helperPath);
-      if (!stats.isFile() || stats.size !== metadata.size || (stats.mode & 0o111) === 0) {
+      if (
+        !stats.isFile() ||
+        stats.size !== metadata.size ||
+        (this.platform !== "win32" && (stats.mode & 0o111) === 0)
+      ) {
         return null;
       }
     } catch (error) {
@@ -223,7 +231,8 @@ function extractHelper(archivePath: string): Buffer {
     );
   }
   const entries = archive.getEntries().filter(candidate =>
-    !candidate.isDirectory && candidate.entryName === SCREEN_CAPTURE_HELPER_CACHE_FILENAME
+    !candidate.isDirectory &&
+    path.posix.basename(candidate.entryName) === SCREEN_CAPTURE_HELPER_CACHE_FILENAME
   );
   if (entries.length !== 1) {
     throw new ActionableError(

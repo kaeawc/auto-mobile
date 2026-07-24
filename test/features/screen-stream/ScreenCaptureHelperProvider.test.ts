@@ -28,7 +28,10 @@ describe("ScreenCaptureHelperProvider", () => {
   let checksumCalculator: FakeChecksumCalculator;
   let timer: FakeTimer;
 
-  function makeProvider(expectedChecksum = EXPECTED_SHA): ScreenCaptureHelperProvider {
+  function makeProvider(
+    expectedChecksum = EXPECTED_SHA,
+    platform?: NodeJS.Platform
+  ): ScreenCaptureHelperProvider {
     return new ScreenCaptureHelperProvider({
       cacheDir,
       downloader,
@@ -37,6 +40,7 @@ describe("ScreenCaptureHelperProvider", () => {
       expectedChecksum,
       releaseUrl: `https://releases.example/0.0.46/${SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME}`,
       env: { AUTOMOBILE_VERSION: "0.0.46" },
+      platform,
     });
   }
 
@@ -81,6 +85,28 @@ describe("ScreenCaptureHelperProvider", () => {
 
     expect(second).toBe(first);
     expect(downloader.downloadedUrls).toHaveLength(1);
+  });
+
+  test("reuses a verified cached helper on Windows without POSIX execute bits", async () => {
+    const provider = makeProvider(EXPECTED_SHA, "win32");
+    const first = await provider.ensure();
+    await fs.chmod(first!, 0o600);
+    const second = await makeProvider(EXPECTED_SHA, "win32").ensure();
+
+    expect(second).toBe(first);
+    expect(downloader.downloadedUrls).toHaveLength(1);
+  });
+
+  test("extracts the helper from the release archive's parent directory", async () => {
+    const archive = new AdmZip();
+    archive.addFile(
+      `${SCREEN_CAPTURE_HELPER_CACHE_FILENAME}/${SCREEN_CAPTURE_HELPER_CACHE_FILENAME}`,
+      Buffer.from("signed-universal-helper")
+    );
+    downloader.payload = archive.toBuffer();
+
+    const helperPath = await makeProvider().ensure();
+    expect(await fs.readFile(helperPath!, "utf8")).toBe("signed-universal-helper");
   });
 
   test("rejects a checksum mismatch without leaving an executable behind", async () => {

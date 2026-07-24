@@ -236,6 +236,7 @@ export class IOSSimulatorCaptureHelperPool {
 class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimulatorCaptureHelperLease {
   private started = false;
   private attachment: Promise<void> | null = null;
+  private attachmentGeneration = 0;
   entryKey: string | null = null;
 
   constructor(
@@ -251,6 +252,7 @@ class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimul
     }
     this.started = true;
     const attachment = this.pool.attach(this);
+    const attachmentGeneration = ++this.attachmentGeneration;
     this.attachment = attachment;
     try {
       await attachment;
@@ -258,7 +260,7 @@ class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimul
       this.started = false;
       throw error;
     } finally {
-      if (this.attachment === attachment) {
+      if (this.attachmentGeneration === attachmentGeneration) {
         this.attachment = null;
       }
     }

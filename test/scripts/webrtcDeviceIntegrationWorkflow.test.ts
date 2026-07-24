@@ -13,7 +13,21 @@ interface WorkflowDocument {
   jobs?: Record<string, {
     needs?: string | string[];
     if?: string;
-    steps?: Array<{ id?: string; name?: string; uses?: string; with?: { filters?: string; "gradle-tasks"?: string; script?: string } }>;
+    steps?: Array<{
+      id?: string;
+      name?: string;
+      uses?: string;
+      if?: string;
+      "continue-on-error"?: boolean;
+      with?: {
+        filters?: string;
+        "gradle-tasks"?: string;
+        script?: string;
+        name?: string;
+        path?: string;
+        "if-no-files-found"?: string;
+      };
+    }>;
   }>;
 }
 
@@ -50,6 +64,9 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(filter?.with?.filters).toContain("examples/mediamtx/**");
     expect(filter?.with?.filters).toContain("scripts/webrtc/**");
     expect(filter?.with?.filters).toContain("test/integration/webrtcDeviceCapture.integration.test.ts");
+    // The stage-latency helper runs inside the device lane, so a change to it
+    // has to re-run that lane (#4343).
+    expect(filter?.with?.filters).toContain("test/helpers/captureStageTimeline.ts");
     expect(filter?.with?.filters).toContain(WORKFLOW_PATH);
   });
 
@@ -76,6 +93,25 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(buildIndex).toBeGreaterThanOrEqual(0);
     expect(androidSteps[buildIndex]?.with?.["gradle-tasks"]).toContain(":control-proxy:assembleDebug");
     expect(emulatorIndex).toBeGreaterThan(buildIndex);
+  });
+
+  test("keeps the stage-latency artifacts from passing runs without making the upload required (#4343)", () => {
+    const document = workflow();
+
+    for (const jobId of ["android-device-webrtc", "ios-device-webrtc"]) {
+      const upload = document.jobs?.[jobId]?.steps?.find(
+        step => step.uses?.startsWith("actions/upload-artifact") === true
+      );
+
+      expect(upload?.if).toBe("always()");
+      expect(upload?.["continue-on-error"]).toBe(true);
+      expect(upload?.with?.path).toBe("scratch/webrtc-device-integration/");
+      expect(upload?.with?.["if-no-files-found"]).toBe("ignore");
+      // Artifacts are immutable and run-scoped, so a re-run of the lane would
+      // collide on a fixed name — and continue-on-error would swallow the 409,
+      // silently costing a sample.
+      expect(upload?.with?.name).toContain("github.run_attempt");
+    }
   });
 
   test("uses the checkout's video-server jar for Android capture", () => {

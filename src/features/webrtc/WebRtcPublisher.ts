@@ -107,6 +107,14 @@ export interface WebRtcStreamDescriptor {
   packetsSent: number;
   audioPacketsSent: number;
   audioSamplesSent: number;
+  /**
+   * True once the capture source for the current session has started. A
+   * video-only stream connects and *then* starts capture, so `state` alone
+   * cannot tell "WHIP publish accepted" from "capture running". Set by the
+   * stream manager, which owns source startup; absent on descriptors the
+   * publisher builds on its own.
+   */
+  sourceStarted?: boolean;
 }
 
 /**

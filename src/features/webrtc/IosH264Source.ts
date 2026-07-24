@@ -570,17 +570,18 @@ export class IosH264Source implements H264CaptureSource {
       "4.2",
       "-bf",
       "0",
-      // Cap the keyframe interval at ~2s of *declared* rate. ffmpeg cannot be
-      // signalled to emit an IDR mid-stream over a pipe, so this source has no
-      // requestKeyFrame() and a bounded GOP is the only thing that lets a late
-      // or recovering WHEP viewer decode promptly. The h264 muxer prepends
+      // Cap the keyframe interval at ~2s of *declared* rate. This periodic GOP
+      // is the *fallback* recovery path; on-demand recovery goes through
+      // requestKeyFrame() (an encoder restart), because ffmpeg cannot be
+      // signalled to emit an IDR mid-stream over a pipe. The h264 muxer prepends
       // SPS/PPS to each keyframe, so every IDR is self-decodable.
       //
       // -g counts encoded frames, not seconds, and the helper delivers fewer
       // than `fps` whenever the screen is static (SimulatorCaptureSession drops
       // every non-.complete ScreenCaptureKit status) or the host is saturated.
       // The wall-clock interval is therefore `-g / delivered_fps`, which only
-      // equals 2s when delivery keeps up with the request.
+      // equals 2s when delivery keeps up with the request — which is exactly why
+      // the on-demand restart path exists to bound recovery under a shortfall.
       "-g",
       String(Math.max(1, Math.round(this.fps * IOS_KEYFRAME_INTERVAL_SECONDS))),
       "-forced-idr",

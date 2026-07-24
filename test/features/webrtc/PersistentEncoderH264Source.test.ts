@@ -506,6 +506,44 @@ describe("PersistentEncoderH264Source", () => {
     expect(lateSocket.destroyed).toBe(true);
   });
 
+  test("stopping aborts a hung reconnect and closes a late socket without waiting for its deadline", async () => {
+    const firstSocket = new FakeSocket();
+    const lateSocket = new FakeSocket();
+    let resolveHangingConnect: ((socket: StreamSocket) => void) | undefined;
+    let reconnectSignal: AbortSignal | undefined;
+    let connectAttempts = 0;
+    const ctx = makeSource({
+      connector: async (_port, signal) => {
+        connectAttempts++;
+        if (connectAttempts === 1) {
+          return firstSocket;
+        }
+        reconnectSignal = signal;
+        return new Promise<StreamSocket>(resolve => {
+          resolveHangingConnect = resolve;
+        });
+      },
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+    ctx.processes[0].ready();
+    await tick();
+    await startPromise;
+
+    firstSocket.emit("close");
+    await tick();
+    expect(reconnectSignal?.aborted).toBe(false);
+
+    await ctx.source.stop();
+    expect(reconnectSignal?.aborted).toBe(true);
+    expect(ctx.errors).toEqual([]);
+
+    resolveHangingConnect?.(lateSocket);
+    await tick();
+    expect(lateSocket.destroyed).toBe(true);
+  });
+
   test("surfaces a post-start server exit via onError", async () => {
     const ctx = makeSource();
     await startReady(ctx);

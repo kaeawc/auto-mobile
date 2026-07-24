@@ -377,11 +377,56 @@ async function main() {
       process.exit(0);
     }
 
+    // Single source of truth for the startup options handed to the daemon,
+    // shared by BOTH transports (issue #4344 propagation audit). Threading the
+    // full set into the `--cli` path too — not just
+    // `{safeAreaWarnings, embeddedSdk, networkMockable}` — closes a gap where
+    // output-reduction / observe-scope / a11y-audit / predictive flags requested
+    // on the CLI transport never reached (or restarted) the daemon, while the
+    // stdio proxy path relayed them. One object also means the two transports can
+    // never drift apart again.
+    const daemonStartupOptions: DaemonOptions = {
+      debug,
+      debugPerf,
+      planExecutionLockScope,
+      mcpRecording,
+      videoQualityPreset: videoRecordingDefaults.qualityPreset,
+      videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
+      videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,
+      videoFps: videoRecordingDefaults.fps,
+      videoFormat: videoRecordingDefaults.format,
+      videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
+      toolOutputsDir,
+      networkMockable,
+      embeddedSdk,
+      dismissKeyboardAfterInput,
+      ...eventAllMarkerDaemonOptions,
+      noUiPerfMode: !uiPerfMode,
+      memPerfAudit: memPerfAuditMode,
+      accessibilityAudit: a11yAuditMode,
+      accessibilityLevel: a11yLevel,
+      accessibilityFailureMode: a11yFailureMode,
+      accessibilityMinSeverity: a11yMinSeverity,
+      accessibilityUseBaseline: a11yUseBaseline,
+      predictiveUi,
+      rawElementSearch,
+      skipCtrlProxyDownload,
+      noNavigationScreenshots: !navigationScreenshots,
+      noWaitForPollingOverhead,
+      noA11yIncludeNotImportantViews,
+      noA11yReportViewIds,
+      noA11yRetrieveInteractiveWindows,
+      noOcclusion,
+      safeAreaWarnings,
+      // OutputReductionFlags field names match these DaemonOptions fields 1:1.
+      ...outputReduction,
+    };
+
     if (cliMode) {
       // Run in CLI mode
       logger.info("Running in CLI mode");
       // logger.enableStdoutLogging();
-      await runCliCommand(cliArgs, { safeAreaWarnings, embeddedSdk, networkMockable });
+      await runCliCommand(cliArgs, daemonStartupOptions);
       // CRITICAL: Exit explicitly after CLI command completes to prevent process from hanging
       // The event loop may have pending operations (ADB connections, file descriptors) that
       // prevent Node.js from exiting naturally. Force exit with code 0 to ensure clean termination.
@@ -392,44 +437,6 @@ async function main() {
       // The daemon manages device state and tool execution
       // In no-proxy mode (--no-proxy flag), the MCP server executes tools directly
       const useProxyMode = !noProxy;
-
-      // Construct daemon options from CLI args to pass when auto-starting daemon
-      const proxyDaemonOptions: DaemonOptions = {
-        debug,
-        debugPerf,
-        planExecutionLockScope,
-        mcpRecording,
-        videoQualityPreset: videoRecordingDefaults.qualityPreset,
-        videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
-        videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,
-        videoFps: videoRecordingDefaults.fps,
-        videoFormat: videoRecordingDefaults.format,
-        videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
-        toolOutputsDir,
-        networkMockable,
-        embeddedSdk,
-        dismissKeyboardAfterInput,
-        ...eventAllMarkerDaemonOptions,
-        noUiPerfMode: !uiPerfMode,
-        memPerfAudit: memPerfAuditMode,
-        accessibilityAudit: a11yAuditMode,
-        accessibilityLevel: a11yLevel,
-        accessibilityFailureMode: a11yFailureMode,
-        accessibilityMinSeverity: a11yMinSeverity,
-        accessibilityUseBaseline: a11yUseBaseline,
-        predictiveUi,
-        rawElementSearch,
-        skipCtrlProxyDownload,
-        noNavigationScreenshots: !navigationScreenshots,
-        noWaitForPollingOverhead,
-        noA11yIncludeNotImportantViews,
-        noA11yReportViewIds,
-        noA11yRetrieveInteractiveWindows,
-        noOcclusion,
-        safeAreaWarnings,
-        // OutputReductionFlags field names match these DaemonOptions fields 1:1.
-        ...outputReduction,
-      };
 
       if (useProxyMode) {
         logger.info("Starting MCP server in proxy mode (connecting to daemon)");
@@ -463,7 +470,7 @@ async function main() {
       try {
         if (useProxyMode) {
           const result = createProxyMcpServer({
-            proxyConfig: { autoStartDaemon: !noDaemon, daemonOptions: proxyDaemonOptions }
+            proxyConfig: { autoStartDaemon: !noDaemon, daemonOptions: daemonStartupOptions }
           });
           server = result.server;
           stdioProxy = result.proxy;

@@ -72,6 +72,15 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "tool-results-compact-json":
         serverConfig.setToolResultsCompactJsonEnabled(enabled);
         break;
+      case "observe-focus-scope":
+        serverConfig.setObserveFocusScopeEnabled(enabled);
+        break;
+      case "observe-overview":
+        serverConfig.setObserveOverviewEnabled(enabled);
+        break;
+      case "observe-region":
+        serverConfig.setObserveRegionEnabled(enabled);
+        break;
     }
   }
 }

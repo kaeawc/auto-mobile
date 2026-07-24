@@ -43,6 +43,9 @@ class ServerConfig {
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
   private _toolResultsCompactJson: boolean = false;
+  private _observeFocusScope: boolean = false;
+  private _observeOverview: boolean = false;
+  private _observeRegion: boolean = false;
   private _safeAreaWarningsEnabled: boolean = false;
   private _toolOutputsDir: string | undefined;
 
@@ -302,6 +305,30 @@ class ServerConfig {
 
   isToolResultsCompactJsonEnabled(): boolean {
     return this._toolResultsCompactJson;
+  }
+
+  setObserveFocusScopeEnabled(enabled: boolean): void {
+    this._observeFocusScope = enabled;
+  }
+
+  isObserveFocusScopeEnabled(): boolean {
+    return this._observeFocusScope;
+  }
+
+  setObserveOverviewEnabled(enabled: boolean): void {
+    this._observeOverview = enabled;
+  }
+
+  isObserveOverviewEnabled(): boolean {
+    return this._observeOverview;
+  }
+
+  setObserveRegionEnabled(enabled: boolean): void {
+    this._observeRegion = enabled;
+  }
+
+  isObserveRegionEnabled(): boolean {
+    return this._observeRegion;
   }
 
 }

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { createWriteStream, existsSync } from "node:fs";
+import { createWriteStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -125,21 +125,76 @@ function chromeBinary(): string {
   return binary;
 }
 
+const CHROME_DEBUG_PORT = 9222;
+const CHROME_LAUNCH_ARGS = [
+  "--headless=new",
+  "--autoplay-policy=no-user-gesture-required",
+  `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
+  "--no-first-run",
+  "about:blank",
+];
+
+/** The Chrome process exit status + a tail of its log, for diagnosing a
+ * headless-startup flake (the log was empty and unsurfaced before #4409). */
+function chromeDiagnostics(chrome: ChildProcessWithoutNullStreams, logFile: string): string {
+  let tail = "(empty)";
+  try {
+    const contents = readFileSync(logFile, "utf8").trim();
+    if (contents) { tail = contents.slice(-1500); }
+  } catch { /* the log may not exist if the spawn itself failed */ }
+  return `chrome exitCode=${chrome.exitCode} signal=${chrome.signalCode} log=${tail}`;
+}
+
 /**
- * Bring the browser up and install the peer-connection hook, without
- * subscribing yet. Kept separate from {@link subscribeReader} so Chrome's cold
- * start — seconds on a hosted runner — stays outside the measured window and
- * does not land in the WHEP-connect stage (#4343).
+ * Launch headless Chrome and connect the CDP reader, relaunching once if Chrome
+ * fails to expose DevTools — headless Chrome startup is a known flake on the
+ * hosted macOS runner image (#4409). Each attempt uses a fresh profile so a
+ * stale user-data lock cannot wedge the relaunch. Returns the live process so
+ * the caller can tear it down.
  */
-async function launchReader(): Promise<CdpClient> {
-  let target: ChromeTarget | undefined;
-  await waitFor(async () => {
+async function launchChromeReader(logFile: string): Promise<{ chrome: ChildProcessWithoutNullStreams; cdp: CdpClient }> {
+  const maxAttempts = 2;
+  let lastError: Error | undefined;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const userDataDir = await mkdtemp(join(tmpdir(), "automobile-chrome-"));
+    const chrome = start(chromeBinary(), [...CHROME_LAUNCH_ARGS, `--user-data-dir=${userDataDir}`], logFile);
     try {
-      const targets = await (await fetch("http://127.0.0.1:9222/json/list")).json() as ChromeTarget[];
-      target = targets.find(candidate => candidate.type === "page" && candidate.webSocketDebuggerUrl);
-      return target !== undefined;
-    } catch { return false; }
-  }, "browser DevTools did not start");
+      const cdp = await connectReader(chrome, logFile);
+      return { chrome, cdp };
+    } catch (error) {
+      lastError = error as Error;
+      await stop(chrome);
+      // Free the debugging port before relaunching on the same port.
+      if (attempt < maxAttempts) { await Bun.sleep(1_000); }
+    }
+  }
+  throw lastError ?? new Error("browser DevTools did not start");
+}
+
+/**
+ * Wait for Chrome's DevTools endpoint and install the peer-connection hook,
+ * without subscribing yet. Kept separate from {@link subscribeReader} so
+ * Chrome's cold start — seconds on a hosted runner — stays outside the measured
+ * window and does not land in the WHEP-connect stage (#4343). Fails fast if the
+ * Chrome process exits during startup, and attaches the process exit status +
+ * log tail to the error so a headless flake is diagnosable (#4409).
+ */
+async function connectReader(chrome: ChildProcessWithoutNullStreams, logFile: string): Promise<CdpClient> {
+  let target: ChromeTarget | undefined;
+  try {
+    await waitFor(async () => {
+      if (chrome.exitCode !== null || chrome.signalCode !== null) {
+        throw new Error("chrome exited before exposing DevTools");
+      }
+      try {
+        const targets = await (await fetch(`http://127.0.0.1:${CHROME_DEBUG_PORT}/json/list`)).json() as ChromeTarget[];
+        target = targets.find(candidate => candidate.type === "page" && candidate.webSocketDebuggerUrl);
+        return target !== undefined;
+      } catch { return false; }
+    }, "browser DevTools did not start");
+  } catch (error) {
+    throw new Error(`${(error as Error).message}; ${chromeDiagnostics(chrome, logFile)}`);
+  }
   const cdp = await CdpClient.connect(target!.webSocketDebuggerUrl!);
   await cdp.command("Page.enable");
   await cdp.command("Runtime.enable");
@@ -158,21 +213,28 @@ async function launchReader(): Promise<CdpClient> {
   return cdp;
 }
 
-/** Subscribe the already-running browser to the WHEP stream. */
+/** Subscribe the already-running browser to the WHEP stream. On a connect
+ * timeout, attach the RTCPeerConnection diagnostics (ICE state, candidates) so
+ * a WHEP-connect flake is diagnosable rather than a bare message (#4409). */
 async function subscribeReader(cdp: CdpClient): Promise<void> {
   await cdp.command("Page.navigate", { url: `http://127.0.0.1:${webRtcPort}/${streamId}` });
-  await waitFor(async () => {
-    try {
-      const response = await cdp.command("Runtime.evaluate", {
-        expression: `Array.from(window.__automobilePeerConnections ?? [])
-          .some(connection => connection.connectionState === "connected")`,
-        returnByValue: true,
-      });
-      return response.result?.result?.value === true;
-    } catch {
-      return false;
-    }
-  }, "browser WHEP reader did not connect");
+  try {
+    await waitFor(async () => {
+      try {
+        const response = await cdp.command("Runtime.evaluate", {
+          expression: `Array.from(window.__automobilePeerConnections ?? [])
+            .some(connection => connection.connectionState === "connected")`,
+          returnByValue: true,
+        });
+        return response.result?.result?.value === true;
+      } catch {
+        return false;
+      }
+    }, "browser WHEP reader did not connect");
+  } catch (error) {
+    const diagnostics = await readerDiagnostics(cdp).catch(() => undefined);
+    throw new Error(`${(error as Error).message}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`);
+  }
 }
 
 async function videoSample(cdp: CdpClient): Promise<{ frames: number; width: number; height: number; sample: number }> {
@@ -513,8 +575,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       profile = await captureProfile();
       // Chrome is launched before the measured window opens so its cold start —
       // seconds on a hosted runner — is not charged to the WHEP-connect stage.
-      chrome = start(chromeBinary(), ["--headless=new", "--autoplay-policy=no-user-gesture-required", "--remote-debugging-port=9222", "--no-first-run", "about:blank"], join(artifactDir, "chrome.log"));
-      cdp = await launchReader();
+      ({ chrome, cdp } = await launchChromeReader(join(artifactDir, "chrome.log")));
       timeline.mark("startRequest");
       // A video-only start returns as soon as the WHIP publish is accepted; the
       // capture source starts afterwards, so both transitions have to be

@@ -267,6 +267,14 @@ export class GetBackStack implements BackStack {
         continue;
       }
 
+      if (HIST_LINE.test(line)) {
+        // A Hist row in a shape parseHistRow does not recognize still starts a
+        // new record, so the previous record's block is over; without this, the
+        // unrecognized record's rootOfTask= would land on the previous activity.
+        openActivity = undefined;
+        continue;
+      }
+
       // The current record's own rootOfTask= field (see ROOT_OF_TASK_LINE).
       const rootOfTask = line.match(ROOT_OF_TASK_LINE);
       if (rootOfTask && openActivity) {
@@ -297,8 +305,10 @@ export class GetBackStack implements BackStack {
     // for the same task ("Task id #N" then "* TaskRecord{... #N ...}"), so the
     // second must resume the first's count rather than restart it.
     const histCounts: Map<number, number> = new Map();
-    // The component of each task's "Hist #0" row. `Hist #0` is the task root
-    // (see #4197), and its "pkg/.Cls" is the same shape legacy `realActivity=`
+    // The component of each task's "Hist #0" row. `Hist #0` is normally the
+    // task root (see #4197; the authoritative rootOfTask= field can disagree
+    // on API 30+, see #4340 -- close enough for the package-name fallback this
+    // feeds), and its "pkg/.Cls" is the same shape legacy `realActivity=`
     // prints. This is the ONLY package source on the modern path (issue #4263):
     // a modern header's `A=` is `Task.affinity`, which is uid-prefixed on
     // Android 11+, is an app-declarable string that need not name a package,

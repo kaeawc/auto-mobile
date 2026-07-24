@@ -24,6 +24,10 @@ import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCalculator";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
+import {
+  type AndroidPrerequisiteDetector,
+  DefaultAndroidPrerequisiteDetector
+} from "./android-cmdline-tools/AndroidPrerequisiteDetector";
 
 /**
  * Android-specific accessibility-service lifecycle, extending the
@@ -120,6 +124,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private readonly checksumCalculator: ChecksumCalculator;
   private static readonly defaultFileDownloader: FileDownloader = new DefaultFileDownloader();
   private static readonly defaultChecksumCalculator: ChecksumCalculator = new DefaultChecksumCalculator();
+
+  // Gate that decides whether the startup APK prefetch should run at all (#4404).
+  private static androidPrerequisiteDetector: AndroidPrerequisiteDetector = new DefaultAndroidPrerequisiteDetector();
+  // Test seam for the static prefetch's downloader; null uses defaultFileDownloader.
+  private static prefetchFileDownloaderOverride: FileDownloader | null = null;
 
   private constructor(
     device: BootedDevice,
@@ -232,6 +241,18 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Internal prefetch implementation
    */
   private static async doPrefetch(): Promise<string | null> {
+    // Skip cleanly in environments that cannot consume the APK. Without ADB (and
+    // the SDK tooling behind it) no Android device work is possible, so there is
+    // no reason to download and verify the APK during startup (#4404). Returning
+    // null (not throwing) keeps the daemon healthy and non-Android workflows intact.
+    if (!(await AndroidCtrlProxyManager.androidPrerequisiteDetector.hasAndroidPrerequisites())) {
+      logger.info(
+        "[CTRL_PROXY] Prefetch skipped: Android prerequisites (adb/SDK) not detected; " +
+        "the APK is only needed for Android device work"
+      );
+      return null;
+    }
+
     // Fail closed before touching the network: don't background-download and cache
     // an unverifiable APK for an unknown explicit pin (#2746). Skipping (not
     // throwing) keeps daemon startup alive; the install path still fails closed.
@@ -250,7 +271,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Download the APK (URL honors AUTOMOBILE_VERSION + AUTOMOBILE_ASSET_BASE_URL)
       const apkUrl = resolveApkUrl();
       logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: apkUrl, destination: apkPath });
-      await AndroidCtrlProxyManager.defaultFileDownloader.download(apkUrl, apkPath);
+      const downloader = AndroidCtrlProxyManager.prefetchFileDownloaderOverride ?? AndroidCtrlProxyManager.defaultFileDownloader;
+      await downloader.download(apkUrl, apkPath);
 
       // Verify the file exists and has reasonable size
       const stats = await fs.stat(apkPath);
@@ -450,6 +472,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   public static setAccessibilityDetectorForTesting(detector: AccessibilityDetector | null): void {
     AndroidCtrlProxyManager.accessibilityDetectorOverride = detector;
+  }
+
+  /** Override the Android-prerequisite gate for the prefetch (#4404). Null restores the default detector. */
+  public static setAndroidPrerequisiteDetectorForTesting(detector: AndroidPrerequisiteDetector | null): void {
+    AndroidCtrlProxyManager.androidPrerequisiteDetector = detector ?? new DefaultAndroidPrerequisiteDetector();
+  }
+
+  /** Override the downloader used by the static prefetch (#4404). Null restores the default. */
+  public static setPrefetchFileDownloaderForTesting(downloader: FileDownloader | null): void {
+    AndroidCtrlProxyManager.prefetchFileDownloaderOverride = downloader;
   }
 
   private getAccessibilityDetector(): AccessibilityDetector {

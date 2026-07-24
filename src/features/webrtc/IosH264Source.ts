@@ -175,6 +175,7 @@ export class IosH264Source implements H264CaptureSource {
   private readonly firstFrameTimeoutMs: number;
 
   private helper: IosFrameCaptureHelper | null = null;
+  private captureKind: CaptureTarget["kind"] | null = null;
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
   private encoderBackpressured = false;
@@ -229,6 +230,7 @@ export class IosH264Source implements H264CaptureSource {
       });
       await validateFfmpegAvailability(this.ffmpegClient, this.ffmpegPath, this.options.commandRunner);
       const target = await this.resolveCaptureTarget(helperPath);
+      this.captureKind = target.kind;
       if (!this.isActive()) {
         return;
       }
@@ -587,18 +589,30 @@ export class IosH264Source implements H264CaptureSource {
       "-forced-idr",
       "1"
     );
-    // Always emit an explicit target bitrate. Left unset, VideoToolbox picks a
-    // default that scales with resolution x rate with no ceiling — and since
-    // #4346 stopped upscaling toward 1920x1080, a Retina host now encodes the
-    // native backing store, so egress can climb several-fold (#4349). Honor an
-    // operator override; otherwise budget from the *encoded* size (post any
-    // downscale) and the declared rate.
+    // Resolve the target encoder bitrate. An operator override
+    // (`AUTOMOBILE_WEBRTC_BITRATE_KBPS`) always wins, on either capture kind.
+    // Otherwise the resolution-derived default is applied *only* to a Simulator
+    // target: #4349 justified the 0.1 bpp budget entirely from Simulator
+    // screen-content measurements, so a physical device — whose higher-entropy
+    // content 0.1 bpp may under-serve — falls back to VideoToolbox's own default
+    // rather than inheriting a Simulator-scoped cap (#4375).
+    //
+    // Note on what this bounds: `-b:v` is an *average* (ABR) target for
+    // h264_videotoolbox, not a peak ceiling — egress peaks above it by design.
+    // The default therefore bounds *average* egress, which is the intended goal.
+    // Bounding *peak* would require `-maxrate`/`-bufsize` (VideoToolbox
+    // DataRateLimits), whose h264_videotoolbox support is ffmpeg-version-
+    // dependent and unverified on our builds; that is deferred to a follow-up
+    // rather than added speculatively (#4375).
     const encodedSize = scale ?? size;
+    const explicitBitrateBps =
+      this.options.bitrateBps && this.options.bitrateBps > 0 ? this.options.bitrateBps : undefined;
     const bitrateBps =
-      this.options.bitrateBps && this.options.bitrateBps > 0
-        ? this.options.bitrateBps
-        : defaultIosBitrateBps(encodedSize, this.fps);
-    args.push("-b:v", String(Math.round(bitrateBps)));
+      explicitBitrateBps ??
+      (this.captureKind === "simulator" ? defaultIosBitrateBps(encodedSize, this.fps) : undefined);
+    if (bitrateBps !== undefined) {
+      args.push("-b:v", String(Math.round(bitrateBps)));
+    }
     args.push("-f", "h264", "pipe:1");
     return args;
   }

@@ -58,6 +58,7 @@ test method is called.
 | `timeoutSeconds` | `TimeInterval` | `300` (env: `AUTOMOBILE_TEST_TIMEOUT_SECONDS`) | Maximum wall-clock seconds the executor waits for the daemon. |
 | `retryDelaySeconds` | `TimeInterval` | `1` (env: `AUTOMOBILE_TEST_RETRY_DELAY_SECONDS`) | Seconds to wait between retry attempts. |
 | `startStep` | `Int` | `0` | Resume execution from this step index (0-based). Useful when debugging a specific step. |
+| `aiAssistance` | `Bool` | `true` (env: `AUTOMOBILE_AI_ASSISTANCE`) | Per-test switch for AI-assisted failure recovery. When true (and the `ai-recovery` flag is on and a model API key is configured), a failed step triggers one recovery attempt before the test fails. See [AI-assisted recovery](#ai-assisted-recovery). |
 | `planParameters` | `[String: String]` | `[:]` | Key–value substitutions applied to `${KEY}` references in the plan at execution time. |
 | `planBundle` | `Bundle?` | `Bundle(for: type(of: self))` | Bundle used to resolve the `planPath`. Defaults to the test bundle. |
 
@@ -120,6 +121,38 @@ In the plan:
 - tool: launchApp
   appId: ${appId}
   label: Launch ${env} build
+```
+
+### AI-assisted recovery
+
+When a plan step fails, the executor can hand the failure to an AI agent (built on
+[Tachikoma](https://github.com/steipete/Tachikoma)) that drives AutoMobile tools — `observe`,
+`tapOn`, `inputText`, `swipeOn`, etc. — to get the app back into the expected state, then resumes the
+plan from the **next** step. This mirrors the Android JUnit runner's recovery loop.
+
+Recovery runs only when **all** of the following hold, and it is attempted **at most once per test**:
+
+1. `aiAssistance` is `true` (the default; set `AUTOMOBILE_AI_ASSISTANCE=false` to force fail-fast).
+2. The `ai-recovery` feature flag is enabled on the daemon (default on; carries a `maxToolCalls`
+   budget, default 5).
+3. A model API key is present in the environment. Recovery is a no-op without one — the test fails
+   exactly as it would have before.
+4. The run is **not** in CI (`CI` / `GITHUB_ACTIONS` unset). CI runs fail deterministically.
+
+Model selection is env-driven:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `AUTOMOBILE_AI_PROVIDER` | `anthropic` | `anthropic`, `openai`, or `google`. |
+| `AUTOMOBILE_AI_MODEL` | provider default (Anthropic: `claude-sonnet-4-20250514`) | Override the model. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | — | Read by Tachikoma for the selected provider. |
+
+"Recovered" means a post-recovery `observe` succeeded; the resumed step is the real test of whether
+recovery worked. If recovery fails or the resumed run still fails, the test fails with the original
+error. To debug a single test without recovery, override `aiAssistance`:
+
+```swift
+override var aiAssistance: Bool { false }
 ```
 
 ## Lifecycle hooks

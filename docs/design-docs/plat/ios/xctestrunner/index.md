@@ -3,10 +3,12 @@
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd>
 
 > **Current state:** `XCTestRunner` is a fully implemented Swift package (`ios/XCTestRunner/`) with
-> `AutoMobileTestCase`, `AutoMobilePlanExecutor`, `AutoMobileTestObserver`, `TestTimingCache`, and
-> `AutoMobileSession`. Plans execute against a booted iOS Simulator via the AutoMobile daemon over a
-> Unix domain socket. Published as a local SPM package; remote GitHub release in progress. See the
-> [Status Glossary](../../../status-glossary.md) for chip definitions.
+> `AutoMobileTestCase`, `AutoMobilePlanExecutor`, `AutoMobileTestObserver`, `TestTimingCache`,
+> `AutoMobileSession`, and AI-assisted failure recovery (`TachikomaPlanRecoveryHandler`). Plans
+> execute against a booted iOS Simulator via the AutoMobile daemon over a Unix domain socket.
+> Published as a local SPM package; remote GitHub release in progress. Requires Swift 6.0+ and
+> iOS 17 / macOS 14 (raised from iOS 15 / macOS 13 when the Tachikoma dependency was added for
+> recovery). See the [Status Glossary](../../../status-glossary.md) for chip definitions.
 
 The AutoMobile XCTestRunner lets you write host-side XCTest classes that drive a real iOS Simulator
 over the AutoMobile daemon. Tests execute as ordinary unit tests inside a dedicated test target, so
@@ -47,14 +49,15 @@ runner binary is involved.
 | **Build required** | Pre-built `.xctestrun` reused | Full UI test host recompile |
 | **Device needed at** | Test execution only | Build time (linking) + execution |
 | **Parallel devices** | Daemon-managed pool | One device per test bundle |
-| **AI recovery** | Optional self-healing | Not available |
+| **AI recovery** | Optional self-healing ([details](#ai-assisted-recovery)) | Not available |
 | **Test authoring** | YAML plans or AI prompt | Swift/Objective-C code |
 | **App under test** | Any installed app | App compiled into UI test host |
 
 ## Requirements
 
-- macOS 13.0+ (Ventura or newer)
-- Xcode 15.0+ and Command Line Tools
+- macOS 14.0+ (Sonoma or newer)
+- Xcode 16.0+ and Command Line Tools (Swift 6.0+ toolchain)
+- iOS 17.0+ deployment target for the test host
 - A booted iOS Simulator
 - AutoMobile daemon running (`auto-mobile --daemon start`)
 - CtrlProxy iOS installed in the simulator (see [CtrlProxy iOS](../ctrl-proxy-ios.md))
@@ -165,6 +168,49 @@ xcodebuild test-without-building \
 
 See [Project Setup → Running tests locally](project-setup.md#running-tests-locally) for the full
 step-by-step walkthrough.
+
+## AI-assisted recovery
+
+When a plan step fails, the executor can hand the failure to an AI agent that drives AutoMobile tools
+to get the app back into the state the plan expects, then resumes from the **next** step — the iOS
+counterpart to the Android JUnit runner's recovery loop. It is built on
+[Tachikoma](https://github.com/steipete/Tachikoma) (a Swift AI SDK) rather than a bespoke client.
+
+```mermaid
+sequenceDiagram
+    participant E as AutoMobilePlanExecutor
+    participant H as TachikomaPlanRecoveryHandler
+    participant M as LLM (Anthropic/OpenAI/Google)
+    participant D as AutoMobile Daemon
+
+    E->>D: executePlan(startStep = 0)
+    D-->>E: failedStep(index = N, error, failureObservation)
+    E->>H: attemptRecovery(FailedStepContext)
+    loop up to maxToolCalls
+        H->>M: prompt + tool results
+        M-->>H: tool call (observe / tapOn / …)
+        H->>D: callTool(...)
+        D-->>H: result
+    end
+    H->>D: observe (verify device state)
+    H-->>E: RecoveryOutcome(success)
+    E->>D: executePlan(startStep = N + 1, pinned to device)
+```
+
+Key properties (parity with Android):
+
+- **Gated**: runs only when `aiAssistance` is on, the `ai-recovery` feature flag is enabled, a model
+  API key is present, and the run is not in CI.
+- **At most once per test**: a second failure after a resume fails the test with the original error.
+- **Backward compatible**: with no API key (CI, most unit tests) the handler is never constructed and
+  the executor behaves exactly as before — a failed step throws.
+- **Reuses the wire**: consumes the `failedStep.failureObservation` digest the daemon already sends,
+  and reads the gate from the `automobile:config/feature-flags/ai-recovery` resource.
+
+Configuration and model-selection env vars are documented in
+[Writing Tests → AI-assisted recovery](writing-tests.md#ai-assisted-recovery). The implementation
+lives in `AutoMobileRecovery.swift` (types + config) and `TachikomaPlanRecoveryHandler.swift` (the
+agent loop); the executor wiring is in `AutoMobilePlanExecutor.handleFailure`.
 
 ## Pages in this section
 

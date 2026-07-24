@@ -11,7 +11,9 @@ import {
   IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
   IOS_WEBRTC_FFMPEG_ENV,
   IOS_WEBRTC_FFMPEG_ENV_ALIAS,
+  IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
   IosH264Source,
+  defaultIosBitrateBps,
   resolveIosEncoderScale,
   resolveIosScreenCaptureHelperPath,
   type IosFrameCaptureHelper,
@@ -410,6 +412,44 @@ describe("IosH264Source", () => {
     expect(encoderSpawns[0].args).toContain("1200000");
     expect(encoderSpawns[0].args).toContain("-vf");
     expect(encoderSpawns[0].args).toContain("scale=720:1280");
+  });
+
+  test("emits a resolution-aware default bitrate when none is configured (#4349)", async () => {
+    const { source, helper, encoderSpawns } = createHarness(IOS_SIMULATOR);
+
+    // Native encode (even, inside budget) at the default 15 fps.
+    await startWithFrame(source, helper, frame(750, 1334, 0x11));
+
+    const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
+    expect(rateIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[rateIndex + 1]).toBe(
+      String(defaultIosBitrateBps({ width: 750, height: 1334 }, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT))
+    );
+  });
+
+  test("derives the default bitrate from the downscaled size, not the native capture (#4349)", async () => {
+    const { source, helper, encoderSpawns } = createHarness(IOS_SIMULATOR);
+
+    await startWithFrame(source, helper, frame(3840, 2160, 0x11));
+
+    const scaled = resolveIosEncoderScale({ width: 3840, height: 2160 })!;
+    const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
+    expect(rateIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[rateIndex + 1]).toBe(
+      String(defaultIosBitrateBps(scaled, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT))
+    );
+  });
+
+  test("an explicit bitrate still overrides the resolution-derived default (#4349)", async () => {
+    const { source, helper, encoderSpawns } = createHarnessWithOverrides({ bitrateBps: 1_200_000 });
+
+    await startWithFrame(source, helper, frame(750, 1334, 0x11));
+
+    const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
+    expect(encoderSpawns[0].args[rateIndex + 1]).toBe("1200000");
+    expect(encoderSpawns[0].args[rateIndex + 1]).not.toBe(
+      String(defaultIosBitrateBps({ width: 750, height: 1334 }, WEBRTC_IOS_SIMULATOR_FPS_DEFAULT))
+    );
   });
 
   test("packs padded BGRA frame rows before writing rawvideo to ffmpeg", async () => {
@@ -992,5 +1032,40 @@ describe("resolveIosEncoderScale", () => {
     );
     expect(scale.width).toBeGreaterThan(0);
     expect(scale.height).toBeGreaterThan(0);
+  });
+});
+
+describe("defaultIosBitrateBps (#4349)", () => {
+  test("budgets a fixed number of bits per encoded pixel per frame", () => {
+    // width * height * fps * bpp, so the target scales with the encoder's real
+    // workload rather than a fixed ceiling.
+    expect(defaultIosBitrateBps({ width: 1_000, height: 1_000 }, 10)).toBe(
+      Math.round(1_000 * 1_000 * 10 * IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL)
+    );
+  });
+
+  test("bounds the Retina developer host without inflating the hosted CI runner", () => {
+    // The two measured operating points behind the AC2 decision. Retina dev host
+    // (910x1940 @ 15) is bounded to ~2.6 Mbps; the headless CI runner
+    // (286x658 @ 15) is a fraction of that, so the same budget never inflates it.
+    const retina = defaultIosBitrateBps({ width: 910, height: 1_940 }, 15);
+    const hostedCi = defaultIosBitrateBps({ width: 286, height: 658 }, 15);
+
+    expect(retina).toBe(2_648_100);
+    expect(hostedCi).toBe(282_282);
+    expect(retina).toBeGreaterThan(hostedCi);
+  });
+
+  test("never returns a non-positive bitrate for a degenerate frame", () => {
+    expect(defaultIosBitrateBps({ width: 2, height: 2 }, 1)).toBeGreaterThanOrEqual(1);
+  });
+
+  test("falls back to the floor rather than passing NaN to ffmpeg", () => {
+    // Real capture never produces a non-finite dimension, but the guarantee is
+    // cheap: Math.max(1, NaN) is NaN, so the floor must be applied after a finite
+    // check, not by the max alone.
+    const bitrate = defaultIosBitrateBps({ width: Number.NaN, height: 1_080 }, 15);
+    expect(Number.isFinite(bitrate)).toBe(true);
+    expect(bitrate).toBeGreaterThanOrEqual(1);
   });
 });

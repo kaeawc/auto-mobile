@@ -289,7 +289,9 @@ export function sourceFiles(directory: string): string[] {
  */
 export async function findOffenders(root: string): Promise<string[]> {
   const sources = await Promise.all(sourceFiles(join(root, SOURCE_ROOT)).map(async file => ({
-    repoPath: relative(root, file),
+    // `relative` yields OS separators (backslashes on Windows), but OWNER/EXCEPTIONS are keyed
+    // with forward slashes — normalize so the owner exclusion matches and messages are portable.
+    repoPath: relative(root, file).replace(/\\/g, "/"),
     source: await readFile(file, "utf8"),
   })));
   return sources.flatMap(({ repoPath, source }) =>

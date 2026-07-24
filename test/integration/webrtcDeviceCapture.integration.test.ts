@@ -34,6 +34,16 @@ const deviceIntegrationTimeoutMs = 360_000;
 // test/integration/webrtcDeviceCaptureLatency.test.ts so the two cannot drift.
 const ANDROID_VIDEO_SERVER_MEDIUM_FPS = 60;
 
+// The cosmetic fixture-restore hook contends with a just-stopped capture; a
+// simctl/adb call that wedges must be killed rather than block the hook. Bounds
+// the restore subprocess itself, so the hook deadline below is never reached by
+// a hung child (#4354).
+const FIXTURE_RESTORE_TIMEOUT_MS = 15_000;
+// bun caps a hook with no explicit deadline at 5000ms, which is what turned a
+// slow appearance restore into a failed run whose pipeline recorded `passed`.
+// Give the hook its own generous timeout, comfortably past the restore budget.
+const TEARDOWN_HOOK_TIMEOUT_MS = 30_000;
+
 interface ChromeTarget { type: string; webSocketDebuggerUrl?: string }
 interface CdpResponse { id?: number; result?: { result?: { value?: unknown } }; error?: { message?: string } }
 interface ReaderDiagnostics {
@@ -285,12 +295,30 @@ async function changeFixture(): Promise<void> {
 }
 
 afterEach(async () => {
-  if (platform === "android") {
-    const id = androidDeviceId();
-    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"]).catch(() => undefined);
-  }
-  if (platform === "ios") {await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"]).catch(() => undefined);}
-});
+  // Measured as its own phase and swallowed: a cosmetic restore must be
+  // attributable from the artifact (#4354) but must never fail an otherwise
+  // passing run. The explicit hook timeout keeps bun's 5s default from firing;
+  // the subprocess timeout kills a wedged simctl/adb before the budget is hit.
+  await timeline
+    .runPhase(
+      "fixtureRestore",
+      async () => {
+        if (platform === "android") {
+          const id = androidDeviceId();
+          await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"], {
+            timeout: FIXTURE_RESTORE_TIMEOUT_MS,
+          });
+        }
+        if (platform === "ios") {
+          await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
+            timeout: FIXTURE_RESTORE_TIMEOUT_MS,
+          });
+        }
+      },
+      FIXTURE_RESTORE_TIMEOUT_MS
+    )
+    .catch(() => undefined);
+}, TEARDOWN_HOOK_TIMEOUT_MS);
 
 // Poll cadences the stages are observed with. Each measurement carries up to
 // its interval as positive bias, so the record reports them rather than leaving
@@ -460,18 +488,24 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       outcome = "passed";
     } finally {
       observingStart = false;
-      // Nothing in the observer rejects today; swallow anyway so a future edit
-      // cannot skip the teardown below and replace the real test failure.
-      await startObserver.catch(() => undefined);
-      cdp?.close();
-      await stop(chrome);
-      if (started) {await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], { env: daemonEnvironment }).catch(() => undefined);}
-      await stop(mediamtx);
-      await rm(webRtcSocketDir, { recursive: true, force: true });
-      // The daemon dir lives under the artifact dir and holds its logs and DB.
-      // Now that artifacts upload on success too, keep it only for a failure to
-      // triage; a green run should ship the latency record, not a sqlite file.
-      if (outcome === "passed") {await rm(daemonDir, { recursive: true, force: true });}
+      // Measured as its own phase (#4354) so a teardown that stalls stopping the
+      // daemon, MediaMTX or Chrome is attributable from the artifact rather than
+      // only from job logs. runPhase re-throws, preserving the prior semantics
+      // where a failed cleanup surfaces as a test failure.
+      await timeline.runPhase("pipelineTeardown", async () => {
+        // Nothing in the observer rejects today; swallow anyway so a future edit
+        // cannot skip the teardown below and replace the real test failure.
+        await startObserver.catch(() => undefined);
+        cdp?.close();
+        await stop(chrome);
+        if (started) {await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], { env: daemonEnvironment }).catch(() => undefined);}
+        await stop(mediamtx);
+        await rm(webRtcSocketDir, { recursive: true, force: true });
+        // The daemon dir lives under the artifact dir and holds its logs and DB.
+        // Now that artifacts upload on success too, keep it only for a failure to
+        // triage; a green run should ship the latency record, not a sqlite file.
+        if (outcome === "passed") {await rm(daemonDir, { recursive: true, force: true });}
+      });
     }
   }, deviceIntegrationTimeoutMs);
 });

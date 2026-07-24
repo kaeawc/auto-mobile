@@ -30,6 +30,24 @@ export interface CaptureDimensions {
   height: number;
 }
 
+/**
+ * Outcome of a bounded lifecycle phase (daemon startup, browser launch,
+ * pipeline teardown, fixture restore). `timedOut` when the phase threw at or
+ * past a supplied budget — the failure mode #4354 was invisible to: a cosmetic
+ * teardown blowing bun's implicit hook deadline while the pipeline `outcome`
+ * still reads `passed`.
+ */
+export type CapturePhaseStatus = "ok" | "failed" | "timedOut";
+
+export interface CapturePhaseMeasurement {
+  phase: string;
+  /** The phase's own wall time, end minus start — not elapsed from the origin. */
+  elapsedMs: number;
+  status: CapturePhaseStatus;
+  /** Failure message, present only when the phase did not end `ok`. */
+  detail?: string;
+}
+
 export interface CaptureStageMeasurement {
   stage: CaptureStage;
   /** Milliseconds between the first mark and this stage. */
@@ -98,14 +116,24 @@ export interface CaptureStageRecord extends CaptureStageContext {
   /** Bumped when the record's shape changes, so a parser can span generations. */
   schemaVersion: number;
   stages: CaptureStageMeasurement[];
+  /**
+   * Bounded lifecycle phases, in run order. Distinct from `stages` and from
+   * `outcome`: `outcome` reports the capture pipeline, while a phase failure
+   * (e.g. a wedged teardown) is recorded here without recolouring the pipeline
+   * result (#4354).
+   */
+  phases: CapturePhaseMeasurement[];
   /** Stages never reached — populated when a run fails part-way through. */
   missingStages: CaptureStage[];
   /** Start request to first browser-decoded frame, or null when never decoded. */
   captureToBrowserMs: number | null;
 }
 
-/** Current {@link CaptureStageRecord.schemaVersion}. */
-export const CAPTURE_STAGE_RECORD_SCHEMA_VERSION = 1;
+/**
+ * Current {@link CaptureStageRecord.schemaVersion}. Bumped to 2 when `phases`
+ * was added (#4354).
+ */
+export const CAPTURE_STAGE_RECORD_SCHEMA_VERSION = 2;
 
 /** Monotonic millisecond reader used when none is injected. */
 export function monotonicNowMs(): number {
@@ -114,9 +142,39 @@ export function monotonicNowMs(): number {
 
 export class CaptureStageTimeline {
   private readonly marks = new Map<CaptureStage, number>();
+  private readonly phases: CapturePhaseMeasurement[] = [];
   private originMs: number | null = null;
 
   constructor(private readonly nowMs: () => number = monotonicNowMs) {}
+
+  /**
+   * Time a bounded lifecycle phase and record its own elapsed duration and
+   * status, then hand control back unchanged — the result is returned and a
+   * rejection re-thrown, so instrumentation never alters what the phase would
+   * otherwise do. `budgetMs`, when supplied, is the deadline the caller bounds
+   * the phase with: a rejection at or past it is classified `timedOut` so a
+   * teardown that blew its deadline is distinguishable from one that failed
+   * fast (#4354).
+   */
+  async runPhase<T>(phase: string, fn: () => Promise<T>, budgetMs?: number): Promise<T> {
+    const start = this.nowMs();
+    try {
+      const result = await fn();
+      this.phases.push({ phase, elapsedMs: this.nowMs() - start, status: "ok" });
+      return result;
+    } catch (error) {
+      const elapsedMs = this.nowMs() - start;
+      const status: CapturePhaseStatus =
+        budgetMs !== undefined && elapsedMs >= budgetMs ? "timedOut" : "failed";
+      this.phases.push({
+        phase,
+        elapsedMs,
+        status,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
 
   /**
    * Record the moment a stage was observed. The first mark sets the origin, and
@@ -154,6 +212,7 @@ export class CaptureStageTimeline {
       ...context,
       schemaVersion: CAPTURE_STAGE_RECORD_SCHEMA_VERSION,
       stages,
+      phases: [...this.phases],
       missingStages: CAPTURE_STAGES.filter(stage => !this.marks.has(stage)),
       captureToBrowserMs: this.marks.get("firstDecodedFrame") ?? null,
     };
@@ -178,6 +237,15 @@ export function formatCaptureStageRecord(record: CaptureStageRecord): string {
   ];
   if (record.captureToBrowserMs !== null) {
     lines.push(`captureToBrowser=${Math.round(record.captureToBrowserMs)}ms`);
+  }
+  if (record.phases.length > 0) {
+    const phaseWidth = Math.max(...record.phases.map(phase => phase.phase.length));
+    for (const phase of record.phases) {
+      const detail = phase.detail ? `: ${phase.detail}` : "";
+      lines.push(
+        `  [phase] ${phase.phase.padEnd(phaseWidth)} ${Math.round(phase.elapsedMs)}ms ${phase.status}${detail}`
+      );
+    }
   }
   if (record.missingStages.length > 0) {
     lines.push(`missing=${record.missingStages.join(",")}`);

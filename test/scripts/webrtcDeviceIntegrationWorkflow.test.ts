@@ -17,6 +17,7 @@ interface WorkflowDocument {
       id?: string;
       name?: string;
       uses?: string;
+      run?: string;
       if?: string;
       "continue-on-error"?: boolean;
       with?: {
@@ -111,6 +112,29 @@ describe("#4308 device WebRTC integration workflow", () => {
       // collide on a fixed name — and continue-on-error would swallow the 409,
       // silently costing a sample.
       expect(upload?.with?.name).toContain("github.run_attempt");
+    }
+  });
+
+  test("prints the result-reading legend in both lanes, even on failure (#4308)", () => {
+    const document = workflow();
+
+    for (const [jobId, platform] of [
+      ["android-device-webrtc", "android"],
+      ["ios-device-webrtc", "ios"],
+    ] as const) {
+      const steps = document.jobs?.[jobId]?.steps ?? [];
+      const explain = steps.find(step => step.name === "Explain WebRTC device results");
+
+      expect(explain?.if).toBe("always()");
+      expect(explain?.run).toContain("scripts/webrtc/explain-device-results.sh");
+      expect(explain?.run).toContain(platform);
+
+      // The legend documents the artifacts, so it must run after the capture
+      // step that writes them and before they are uploaded away.
+      const explainIndex = steps.findIndex(step => step.name === "Explain WebRTC device results");
+      const uploadIndex = steps.findIndex(step => step.uses?.startsWith("actions/upload-artifact") === true);
+      expect(explainIndex).toBeGreaterThanOrEqual(0);
+      expect(uploadIndex).toBeGreaterThan(explainIndex);
     }
   });
 

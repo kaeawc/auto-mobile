@@ -134,6 +134,45 @@ describe("sdkmanager execution boundary (issue #4052)", () => {
     expect(directlyExecutesSdkManager("await Bun.$`avdmanager list`;")).toBe(false);
   });
 
+  test("detects sdkmanager stored in a class field and spawned via this.field (issue #4368)", () => {
+    // `private bin = "sdkmanager"` is a PropertyDeclaration; feeding its initializer into the
+    // value flow lets `this.bin` resolve to the tool name at the launcher call site.
+    expect(directlyExecutesSdkManager(
+      'class Tool { private bin = "sdkmanager"; run(args) { spawn(this.bin, args); } }',
+    )).toBe(true);
+    // A different tool stored the same way must not trip the guard.
+    expect(directlyExecutesSdkManager(
+      'class Tool { private bin = "avdmanager"; run(args) { spawn(this.bin, args); } }',
+    )).toBe(false);
+  });
+
+  test("detects sdkmanager reached through an iteration-callback parameter (issue #4368)", () => {
+    // The arrow's `bin` parameter is bound by `.forEach` to the array element, which is the tool
+    // name; there is no named-function call site, so only receiver-driven taint catches it.
+    expect(directlyExecutesSdkManager(
+      '["sdkmanager"].forEach(bin => spawn(bin));',
+    )).toBe(true);
+    expect(directlyExecutesSdkManager(
+      '["sdkmanager"].map(bin => execFile(bin, args));',
+    )).toBe(true);
+    // A different tool iterated the same way must stay clean.
+    expect(directlyExecutesSdkManager(
+      '["avdmanager"].forEach(bin => spawn(bin));',
+    )).toBe(false);
+  });
+
+  test("detects sdkmanager reached through a member-assigned function (issue #4368)", () => {
+    // `obj.run = (bin) => execFile(bin, args)` binds the arrow to a member expression, not a
+    // variable or object-literal property, so its parameter was previously untracked.
+    expect(directlyExecutesSdkManager(
+      'obj.run = (bin) => execFile(bin, args);\nobj.run("sdkmanager");',
+    )).toBe(true);
+    // A different tool passed the same way must not trip the guard.
+    expect(directlyExecutesSdkManager(
+      'obj.run = (bin) => execFile(bin, args);\nobj.run("avdmanager");',
+    )).toBe(false);
+  });
+
   test("allows diagnostic text that does not execute sdkmanager", () => {
     expect(directlyExecutesSdkManager('logger.info("Install with sdkmanager --list");')).toBe(false);
   });

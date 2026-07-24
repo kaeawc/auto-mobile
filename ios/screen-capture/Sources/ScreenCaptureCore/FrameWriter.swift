@@ -141,7 +141,10 @@ public final class FrameWriter {
     /// Queues bounded, ordered audio records on the same serial writer. Unlike
     /// video, PCM records cannot be replaced without creating audible gaps.
     public func writeAudio(pcm16le: Data) {
-        guard pcm16le.count <= configuration.maximumPendingAudioBytes else { return }
+        guard !pcm16le.isEmpty,
+              pcm16le.count <= configuration.maximumPendingAudioBytes else {
+            return
+        }
         let record = PendingRecord(
             header: FrameProtocol.encodeAudioHeader(payloadLength: pcm16le.count),
             payload: pcm16le,
@@ -235,8 +238,8 @@ public final class FrameWriter {
         return nil
     }
 
-    private func takeFrameLocked() -> PendingRecord {
-        let frame = pendingFrame!
+    private func takeFrameLocked() -> PendingRecord? {
+        guard let frame = pendingFrame else { return nil }
         pendingFrame = nil
         lastWrittenRecordKind = .frame
         return frame

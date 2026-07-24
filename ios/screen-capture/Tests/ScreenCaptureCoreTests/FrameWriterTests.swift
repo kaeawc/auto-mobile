@@ -167,4 +167,28 @@ final class FrameWriterTests: XCTestCase {
         )
         XCTAssertEqual(writer.metrics().bytesQueued, 0)
     }
+
+    func testSlowSinkDiscardsEmptyAudioRecords() {
+        let sink = BlockingPayloadSink()
+        let writer = FrameWriter(
+            sink: sink,
+            configuration: .init(maximumPendingFrameBytes: 4)
+        )
+        let first: [UInt8] = [0x11, 0x11, 0x11, 0x11]
+
+        first.withUnsafeBufferPointer { ptr in
+            XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
+        }
+        XCTAssertTrue(sink.waitForFirstPayload())
+
+        for _ in 0..<10 {
+            writer.writeAudio(pcm16le: Data())
+        }
+
+        sink.allowOutput()
+        writer.flush()
+
+        XCTAssertEqual(sink.payloads(), [Data(first)])
+        XCTAssertEqual(writer.metrics().bytesQueued, 0)
+    }
 }

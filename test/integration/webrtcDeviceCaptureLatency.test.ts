@@ -103,6 +103,70 @@ describe("#4343 device capture latency instrumentation", () => {
     ).toEqual([]);
   });
 
+  test("gives the fixture-restore afterEach hook an explicit timeout past bun's 5s default (#4354)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+
+    // Bun caps a hook with no explicit deadline at 5000ms, so a cosmetic
+    // simctl/adb restore that contends with a just-stopped capture fails an
+    // otherwise-passing run. The hook must carry its own generous timeout.
+    const hookMatch = /afterEach\([\s\S]*?\},\s*([A-Z_]+)\s*\)/.exec(source);
+    expect(hookMatch).not.toBeNull();
+    const timeoutConstant = hookMatch![1];
+
+    const constantValue = new RegExp(`const ${timeoutConstant} = (\\d[\\d_]*)`).exec(source)?.[1];
+    expect(constantValue).toBeDefined();
+    expect(Number(constantValue!.replace(/_/g, ""))).toBeGreaterThan(5_000);
+  });
+
+  test("bounds each fixture-restore subprocess so a wedged simctl/adb is killed, not waited on (#4354)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+    const afterEachIndex = indexOfRequired(source, "afterEach(");
+    // The hook closes on its explicit timeout argument; slice to there rather
+    // than to a bare `});`, which an options object `{ timeout: N });` would
+    // trip on and truncate the region mid-hook.
+    const hookEnd = source.indexOf("}, TEARDOWN_HOOK_TIMEOUT_MS)", afterEachIndex);
+    expect(hookEnd).toBeGreaterThan(afterEachIndex);
+    const hookBody = source.slice(afterEachIndex, hookEnd);
+
+    // Every execFileAsync inside the restore hook must pass a timeout; an
+    // unbounded child can outlast even the generous hook deadline.
+    const restoreCalls = hookBody.match(/execFileAsync\(/g) ?? [];
+    expect(restoreCalls.length).toBeGreaterThan(0);
+    const boundedCalls = hookBody.match(/execFileAsync\([\s\S]*?timeout:/g) ?? [];
+    expect(boundedCalls.length).toBe(restoreCalls.length);
+  });
+
+  test("measures the fixture-restore hook as a phase so a teardown failure is attributable from the artifact (#4354)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+    const afterEachIndex = indexOfRequired(source, "afterEach(");
+
+    // The hook records its own elapsed time and status into the stage record,
+    // so a red teardown is visible without reading job logs. Whitespace-tolerant:
+    // the call is written as a multi-line `timeline\n.runPhase(` chain.
+    const phaseInHook = /runPhase\(\s*"fixtureRestore"/.exec(source.slice(afterEachIndex));
+    expect(phaseInHook).not.toBeNull();
+  });
+
+  test("wraps the pipeline teardown finally in its own measured phase (#4354)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+
+    expect(source).toContain('runPhase("pipelineTeardown"');
+  });
+
+  test("collects phases on the shared timeline and keeps afterAll the sole record writer (#4354)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+    const afterAllIndex = source.indexOf("afterAll(");
+
+    // Both phases record onto the module-scope `timeline` — the same instance
+    // afterAll serializes — so they survive a test-body timeout the way the
+    // stage marks do, rather than being lost on a local per-test object.
+    const sharedTimelinePhases = source.match(/timeline\s*\.\s*runPhase\(/g) ?? [];
+    expect(sharedTimelinePhases.length).toBeGreaterThanOrEqual(2);
+    // afterAll is still the only place the record is written to disk.
+    expect(source.indexOf("stage-latency.json")).toBeGreaterThan(afterAllIndex);
+    expect(source.indexOf("writeFile", afterAllIndex)).toBeGreaterThan(afterAllIndex);
+  });
+
   test("mirrors the Android capture fps from the video-server default quality preset", () => {
     const integration = read(INTEGRATION_TEST_PATH);
     const encoder = read("src/features/webrtc/PersistentEncoderH264Source.ts");

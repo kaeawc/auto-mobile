@@ -251,3 +251,154 @@ describe("#4343 capture stage timeline", () => {
     expect(Number.isFinite(first)).toBe(true);
   });
 });
+
+describe("#4354 teardown phase instrumentation", () => {
+  test("records a successful phase with its own elapsed time and returns the result", async () => {
+    const clock = fakeClock();
+    const timeline = new CaptureStageTimeline(clock.nowMs);
+
+    const value = await timeline.runPhase("daemonStartup", async () => {
+      clock.advance(1_200);
+      return 42;
+    });
+
+    expect(value).toBe(42);
+    expect(timeline.toRecord(context).phases).toEqual([
+      { phase: "daemonStartup", elapsedMs: 1_200, status: "ok" },
+    ]);
+  });
+
+  test("classifies a phase that throws under its budget as failed and re-throws", async () => {
+    const clock = fakeClock();
+    const timeline = new CaptureStageTimeline(clock.nowMs);
+
+    await expect(
+      timeline.runPhase(
+        "fixtureRestore",
+        async () => {
+          clock.advance(800);
+          throw new Error("simctl refused");
+        },
+        5_000
+      )
+    ).rejects.toThrow("simctl refused");
+
+    expect(timeline.toRecord(context).phases).toEqual([
+      { phase: "fixtureRestore", elapsedMs: 800, status: "failed", detail: "simctl refused" },
+    ]);
+  });
+
+  test("classifies a phase that reaches its budget as timedOut", async () => {
+    const clock = fakeClock();
+    const timeline = new CaptureStageTimeline(clock.nowMs);
+
+    await expect(
+      timeline.runPhase(
+        "fixtureRestore",
+        async () => {
+          clock.advance(5_000);
+          throw new Error("simctl killed after timeout");
+        },
+        5_000
+      )
+    ).rejects.toThrow("simctl killed after timeout");
+
+    const phase = timeline.toRecord(context).phases[0];
+    expect(phase.status).toBe("timedOut");
+    expect(phase.elapsedMs).toBe(5_000);
+  });
+
+  test("re-throwing leaves control flow to the caller — instrumentation never swallows", async () => {
+    const clock = fakeClock();
+    const timeline = new CaptureStageTimeline(clock.nowMs);
+    let caught: unknown;
+
+    try {
+      await timeline.runPhase("browserLaunch", async () => {
+        throw new Error("chrome did not start");
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect((caught as Error).message).toBe("chrome did not start");
+  });
+
+  test("records each phase, in the order they ran", async () => {
+    const clock = fakeClock();
+    const timeline = new CaptureStageTimeline(clock.nowMs);
+
+    await timeline.runPhase("daemonStartup", async () => clock.advance(300));
+    await timeline.runPhase("browserLaunch", async () => clock.advance(700));
+    await timeline.runPhase("pipelineTeardown", async () => clock.advance(150));
+
+    expect(timeline.toRecord(context).phases.map(phase => `${phase.phase}:${phase.elapsedMs}`)).toEqual([
+      "daemonStartup:300",
+      "browserLaunch:700",
+      "pipelineTeardown:150",
+    ]);
+  });
+
+  test("a passed pipeline outcome co-exists with a timed-out teardown phase in the record", async () => {
+    const clock = fakeClock();
+    const timeline = new CaptureStageTimeline(clock.nowMs);
+    timeline.mark("startRequest");
+    await timeline
+      .runPhase(
+        "fixtureRestore",
+        async () => {
+          clock.advance(5_000);
+          throw new Error("simctl wedged");
+        },
+        5_000
+      )
+      .catch(() => undefined);
+
+    const record = timeline.toRecord(context);
+
+    // The capture pipeline succeeded; the artifact keeps saying so. The red
+    // teardown is reported in its own field, resolving the #4354 confusion of a
+    // `passed` artifact against a `failed` job.
+    expect(record.outcome).toBe("passed");
+    expect(record.phases[0].status).toBe("timedOut");
+  });
+
+  test("bumps the record schema version so a parser can span the phases addition", () => {
+    expect(CAPTURE_STAGE_RECORD_SCHEMA_VERSION).toBe(2);
+  });
+
+  test("formats every phase with its status and elapsed time", async () => {
+    const clock = fakeClock();
+    const timeline = new CaptureStageTimeline(clock.nowMs);
+    timeline.mark("startRequest");
+    await timeline.runPhase("daemonStartup", async () => clock.advance(1_100));
+    await timeline
+      .runPhase(
+        "fixtureRestore",
+        async () => {
+          clock.advance(5_000);
+          throw new Error("simctl wedged");
+        },
+        5_000
+      )
+      .catch(() => undefined);
+
+    const formatted = formatCaptureStageRecord(timeline.toRecord(context));
+
+    expect(formatted).toContain("daemonStartup");
+    expect(formatted).toContain("1100ms");
+    expect(formatted).toContain("fixtureRestore");
+    expect(formatted).toContain("timedOut");
+    expect(formatted).toContain("simctl wedged");
+  });
+
+  test("omits the phases section entirely when no phase was run", () => {
+    const timeline = new CaptureStageTimeline(fakeClock().nowMs);
+    timeline.mark("startRequest");
+
+    const record = timeline.toRecord(context);
+
+    expect(record.phases).toEqual([]);
+    expect(formatCaptureStageRecord(record)).not.toContain("phase");
+  });
+});

@@ -31,15 +31,18 @@ class FakePublisher {
   sourceFailureErrors: Error[] = [];
   onBeforeEstablish?: () => Promise<void> | void;
   onConnected?: () => Promise<void> | void;
+  onKeyFrameRequest?: () => void;
   constructor(
     public readonly config: { streamId: string; whipEndpoint: string },
     deps: {
       onBeforeEstablish?: () => Promise<void> | void;
       onConnected?: () => Promise<void> | void;
+      onKeyFrameRequest?: () => void;
     }
   ) {
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
+    this.onKeyFrameRequest = deps.onKeyFrameRequest;
   }
   async start(): Promise<void> {
     // Simulate establish: stop any prior source, connect, then start capture.
@@ -88,11 +91,15 @@ class AsyncConnectedPublisher extends FakePublisher {
 class FakeSource {
   started = false;
   stopped = false;
+  keyFrameRequests = 0;
   async start(): Promise<void> {
     this.started = true;
   }
   async stop(): Promise<void> {
     this.stopped = true;
+  }
+  requestKeyFrame(): void {
+    this.keyFrameRequests++;
   }
 }
 
@@ -138,6 +145,16 @@ describe("webrtcStreamManager", () => {
     // onBeforeEstablish started the capture source.
     expect(sources[0].started).toBe(true);
     expect(listWebRtcStreams()).toHaveLength(1);
+  });
+
+  test("relays a downstream keyframe request (WHEP viewer PLI) to the capture source", async () => {
+    const { publishers, sources } = installFakes();
+    await startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } });
+
+    expect(sources[0].keyFrameRequests).toBe(0);
+    // Simulate the publisher relaying a viewer PLI up to the manager.
+    publishers[0].onKeyFrameRequest?.();
+    expect(sources[0].keyFrameRequests).toBe(1);
   });
 
   test("rejects a second stream for the same device", async () => {

@@ -38,6 +38,14 @@ export const IOS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 /** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
 const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
+/**
+ * Minimum spacing between keyframe-driven encoder restarts. ffmpeg cannot be
+ * signalled for an IDR mid-stream over a pipe, so `requestKeyFrame()` restarts
+ * the encoder (whose first encoded frame is an SPS/PPS + IDR). That is
+ * disruptive, so a burst of relayed viewer PLIs collapses to at most one restart
+ * per this interval. Mirrors `ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS`.
+ */
+export const IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS = 3000;
 /** H.264 macroblock edge, in pixels. */
 const H264_MACROBLOCK_SIZE = 16;
 /** Smallest dimension ffmpeg can encode as 4:2:0 chroma-subsampled video. */
@@ -176,6 +184,7 @@ export class IosH264Source implements H264CaptureSource {
   private rejectFirstAudioWait: ((error: Error) => void) | null = null;
   private lastHelperStderr: string | null = null;
   private lastEncoderStderr: string | null = null;
+  private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -248,6 +257,42 @@ export class IosH264Source implements H264CaptureSource {
     this.cancelFirstFrameWait?.();
     this.cancelFirstAudioWait?.();
     await this.beginTeardown();
+  }
+
+  /**
+   * Serve a downstream keyframe request (a WHEP viewer's PLI relayed through the
+   * publisher). ffmpeg cannot be signalled to emit an IDR mid-stream over a
+   * pipe, so restart the encoder: a fresh h264_videotoolbox encoder begins its
+   * output with SPS/PPS + an IDR on the next delivered frame, which is exactly
+   * what a late or recovering viewer needs to decode. This is the on-demand
+   * recovery path the periodic GOP could not provide under a delivery shortfall,
+   * where `-g` (counted in encoded frames) stretches the wall-clock IDR interval
+   * past its ~2s target.
+   *
+   * Restarting on demand — rather than shortening `-g` for every stream — keeps
+   * the steady-state bitrate cost at zero: no extra keyframes are emitted unless
+   * a viewer actually asks. A burst of PLIs is throttled to one restart per
+   * {@link IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}. Safe to call before the encoder
+   * exists (the first frame is already an IDR) or after the source has stopped.
+   */
+  requestKeyFrame(): void {
+    const oldEncoder = this.encoder;
+    const size = this.encoderSize;
+    if (this.phase !== "running" || !oldEncoder || !size) {
+      return;
+    }
+    const now = this.timer.now();
+    if (now - this.lastForcedKeyFrameMs < IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS) {
+      return;
+    }
+    this.lastForcedKeyFrameMs = now;
+    logger.info("[IosH264Source] keyframe requested; restarting encoder to emit a fresh IDR");
+    // Spawn the replacement first so the outgoing encoder's exit/error handlers
+    // — all guarded by `this.encoder === encoder` — no-op instead of tearing the
+    // source down as a fatal crash. Then end its stdin and terminate it.
+    this.startEncoder(size);
+    oldEncoder.stdin.end();
+    oldEncoder.kill("SIGTERM");
   }
 
   private async resolveCaptureTarget(helperPath: string): Promise<CaptureTarget> {
@@ -525,17 +570,18 @@ export class IosH264Source implements H264CaptureSource {
       "4.2",
       "-bf",
       "0",
-      // Cap the keyframe interval at ~2s of *declared* rate. ffmpeg cannot be
-      // signalled to emit an IDR mid-stream over a pipe, so this source has no
-      // requestKeyFrame() and a bounded GOP is the only thing that lets a late
-      // or recovering WHEP viewer decode promptly. The h264 muxer prepends
+      // Cap the keyframe interval at ~2s of *declared* rate. This periodic GOP
+      // is the *fallback* recovery path; on-demand recovery goes through
+      // requestKeyFrame() (an encoder restart), because ffmpeg cannot be
+      // signalled to emit an IDR mid-stream over a pipe. The h264 muxer prepends
       // SPS/PPS to each keyframe, so every IDR is self-decodable.
       //
       // -g counts encoded frames, not seconds, and the helper delivers fewer
       // than `fps` whenever the screen is static (SimulatorCaptureSession drops
       // every non-.complete ScreenCaptureKit status) or the host is saturated.
       // The wall-clock interval is therefore `-g / delivered_fps`, which only
-      // equals 2s when delivery keeps up with the request.
+      // equals 2s when delivery keeps up with the request — which is exactly why
+      // the on-demand restart path exists to bound recovery under a shortfall.
       "-g",
       String(Math.max(1, Math.round(this.fps * IOS_KEYFRAME_INTERVAL_SECONDS))),
       "-forced-idr",

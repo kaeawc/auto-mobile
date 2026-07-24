@@ -26,6 +26,8 @@ export type CaptureSourceFactory = (options: {
   onError: (error: Error) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  /** Capture rate for iOS Simulator sources; see the call site for why it is pinned. */
+  fps?: number;
 }) => Promise<H264CaptureSource>;
 
 export interface VideoStreamSocketServerDependencies {

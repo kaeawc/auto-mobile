@@ -61,7 +61,7 @@ export class SafeAreaAuditor {
     warnings: LayoutWarning[]
   ): void {
     const inspectedNode = withHierarchyAttributes(node);
-    if (!isForeignNode(inspectedNode, foregroundPackage)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, warnings);}
+    if (!isForeignNode(inspectedNode, foregroundPackage)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, warnings);}
     for (const child of asNodes(node.node)) {
       this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, warnings);
     }
@@ -73,20 +73,40 @@ export class SafeAreaAuditor {
     content: ContentInsets | null,
     systemGestures: ObservationEdgeInsets | undefined,
     mandatorySystemGestures: ObservationEdgeInsets | undefined,
+    foregroundPackage: string | undefined,
     warnings: LayoutWarning[]
   ): void {
     const bounds = readBounds(node);
     const categories = categoriesFor(node);
     if (!bounds || categories.length === 0 || !isOnScreen(bounds, screen) || isScreenSized(bounds, screen) || node.enabled === "false") {return;}
-    this.inspectContent(node, bounds, categories, screen, content, warnings);
+    this.inspectContent(node, bounds, categories, screen, content, foregroundPackage, warnings);
     this.inspectGestureRegion(node, bounds, categories, screen, systemGestures, mandatorySystemGestures, warnings);
   }
 
-  private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, warnings: LayoutWarning[]): void {
+  private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, foregroundPackage: string | undefined, warnings: LayoutWarning[]): void {
     if (!content) {return;}
     const sides = intersectingSides(bounds, screen, content.edges)
       .filter(side => content.typesForSides([side]).length > 0);
-    if (sides.length > 0) {warnings.push(this.warning(node, bounds, categories, content.typesForSides(sides), sides, "important-content-under-inset", "warning", screen, content.edges));}
+    if (sides.length === 0) {return;}
+    warnings.push(this.warning(
+      node,
+      bounds,
+      categories,
+      content.typesForSides(sides),
+      sides,
+      "important-content-under-inset",
+      this.contentSeverity(node, bounds, screen, content.edges, foregroundPackage),
+      screen,
+      content.edges
+    ));
+  }
+
+  private contentSeverity(node: Node, bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets, foregroundPackage: string | undefined): LayoutWarning["severity"] {
+    const overlap = overlapPercent(bounds, screen, insets);
+    if (isLargeContainer(node, bounds, screen) && !hasOverlappingContentDescendant(node, screen, insets, foregroundPackage)) {
+      return "info";
+    }
+    return overlap >= 50 ? "warning" : "info";
   }
 
   private inspectGestureRegion(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, systemGestures: ObservationEdgeInsets | undefined, mandatorySystemGestures: ObservationEdgeInsets | undefined, warnings: LayoutWarning[]): void {
@@ -197,6 +217,27 @@ function isScreenSized(bounds: ObservationEdgeInsets, screen: { width: number; h
 
 function isOnScreen(bounds: ObservationEdgeInsets, screen: { width: number; height: number }): boolean {
   return bounds.right > 0 && bounds.bottom > 0 && bounds.left < screen.width && bounds.top < screen.height;
+}
+
+function isLargeContainer(node: Node, bounds: ObservationEdgeInsets, screen: { width: number; height: number }): boolean {
+  return asNodes(node.node).length > 0
+    && bounds.right - bounds.left >= screen.width * 0.9
+    && (bounds.right - bounds.left) * (bounds.bottom - bounds.top) >= screen.width * screen.height * 0.2;
+}
+
+function hasOverlappingContentDescendant(node: Node, screen: { width: number; height: number }, insets: ObservationEdgeInsets, foregroundPackage: string | undefined): boolean {
+  return descendants(node).some(descendant => {
+    if (isForeignNode(descendant, foregroundPackage) || categoriesFor(descendant).length === 0) {return false;}
+    const bounds = readBounds(descendant);
+    return bounds !== null && intersectingSides(bounds, screen, insets).length > 0;
+  });
+}
+
+function descendants(node: Node): Node[] {
+  return asNodes(node.node).flatMap(child => {
+    const inspectedChild = withHierarchyAttributes(child);
+    return [inspectedChild, ...descendants(child)];
+  });
 }
 
 function intersectingSides(bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets): Side[] {

@@ -26,9 +26,10 @@ export class SafeAreaAuditor {
     }
 
     const contentInsets = this.contentInsets(insets);
+    const foregroundPackage = result.activeWindow?.appId ?? result.viewHierarchy.packageName;
     const warnings: LayoutWarning[] = [];
     for (const root of asNodes(result.viewHierarchy.hierarchy.node)) {
-      this.inspectNode(root, screen, contentInsets, insets.systemGestures, insets.mandatorySystemGestures, warnings);
+      this.inspectNode(root, screen, contentInsets, insets.systemGestures, insets.mandatorySystemGestures, foregroundPackage, warnings);
     }
     return dedupeWarnings(warnings);
   }
@@ -56,12 +57,13 @@ export class SafeAreaAuditor {
     content: ContentInsets | null,
     systemGestures: ObservationEdgeInsets | undefined,
     mandatorySystemGestures: ObservationEdgeInsets | undefined,
+    foregroundPackage: string | undefined,
     warnings: LayoutWarning[]
   ): void {
     const inspectedNode = withHierarchyAttributes(node);
-    if (!isSystemNode(inspectedNode)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, warnings);}
+    if (!isForeignNode(inspectedNode, foregroundPackage)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, warnings);}
     for (const child of asNodes(node.node)) {
-      this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, warnings);
+      this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, warnings);
     }
   }
 
@@ -167,7 +169,11 @@ function hasSdkInteraction(value: unknown): boolean {
     || stringValue(value["sdk.accessibilityCustomActions"]) !== undefined;
 }
 
-function isSystemNode(node: Node): boolean {
+function isForeignNode(node: Node, foregroundPackage: string | undefined): boolean {
+  const nodePackage = stringValue(node.packageName);
+  if (foregroundPackage && nodePackage && nodePackage !== foregroundPackage) {
+    return true;
+  }
   const id = `${stringValue(node["resource-id"]) ?? ""} ${stringValue(node.packageName) ?? ""}`;
   return id.includes("com.android.systemui") || id.includes("com.apple.springboard");
 }

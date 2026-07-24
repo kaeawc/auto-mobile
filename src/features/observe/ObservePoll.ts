@@ -10,7 +10,12 @@ import { throwIfAborted } from "../../utils/toolUtils";
  * once.
  */
 export interface ObservePollOptions {
-  /** Hard budget in ms. Mandatory: the loop can never outlast it. */
+  /**
+   * Hard budget in ms. Mandatory: the loop stops scheduling polls once elapsed
+   * time reaches it. It can overshoot by up to one `pollMs` plus one observe, so
+   * `waitMs` may exceed `timeoutMs` slightly — the budget bounds the loop, it is
+   * not an exact deadline.
+   */
   timeoutMs: number;
   /** Poll interval in ms between observations. */
   pollMs: number;
@@ -61,11 +66,14 @@ function isScreenOff(observation: ObserveResult): boolean {
 /**
  * Poll `observeScreen` until `onObservation` returns true or the budget expires.
  *
- * The correctness point: each poll requests `minTimestamp = previous.updatedAt`
- * (the first seeds from loop start), so every read is genuinely newer than the
- * last. Passing a fixed `minTimestamp` would let two polls read the *same cached
- * tree* and false-settle. On a screen-off (Android) capture the loop fast-fails
- * rather than burning the budget against a dark screen.
+ * Freshness: each poll advances `minTimestamp` to the previous observation's
+ * `updatedAt` (the first seeds from loop start) and passes `skipWaitForFresh:
+ * false`, so every read prefers a capture at least as new as the last. The
+ * device freshness gate is inclusive (`updatedAt >= minTimestamp`), so this is
+ * "at least as new", not "strictly newer" — it steers each poll toward the
+ * latest available capture without forcing a full fresh-wait on a static screen
+ * (which a `+1` strict bound would). On a screen-off (Android) capture the loop
+ * fast-fails rather than burning the budget against a dark screen.
  */
 export async function pollObserveUntil(
   observeScreen: ObserveScreen,

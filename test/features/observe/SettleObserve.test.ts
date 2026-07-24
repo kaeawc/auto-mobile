@@ -97,6 +97,52 @@ describe("RealSettleObserve", () => {
     expect(result.polls).toBe(2);
   });
 
+  test("settles when only volatile occlusion attributes churn (would never settle otherwise on Android)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // Two captures of the SAME idle Android screen. Occlusion attributes churn
+    // nondeterministically between captures (documented in StableNodeIdentity)
+    // and are diffed by diffObserveResult, so without the settle comparator
+    // ignoring them this idle screen would report a `changed` entry every poll
+    // and never settle.
+    fake.setObserveSequence([
+      obs({ "resource-id": "x", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "hi", "occlusionState": "occluded" }, { updatedAt: 10 }),
+      obs({ "resource-id": "x", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "hi", "occlusionState": "visible" }, { updatedAt: 20 }),
+    ]);
+
+    const settle = new RealSettleObserve(fake, timer);
+    const result = await settle.execute({ timeoutMs: 2500, pollMs: 150 });
+
+    expect(result.settled).toBe(true);
+    expect(result.polls).toBe(2);
+  });
+
+  test("does NOT settle when a real attribute changes alongside occlusion churn", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // `checked` flips (a real UI change) while occlusion also churns — the
+    // volatile-attr allowance must not mask the genuine change.
+    fake.setObserveResult(index =>
+      obs(
+        {
+          "resource-id": "cb",
+          "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+          "text": "Opt",
+          "checked": index % 2 === 0 ? "true" : "false",
+          "occlusionState": index % 2 === 0 ? "visible" : "occluded",
+        },
+        { updatedAt: (index + 1) * 10 }
+      )
+    );
+
+    const settle = new RealSettleObserve(fake, timer);
+    const result = await settle.execute({ timeoutMs: 500, pollMs: 150 });
+
+    expect(result.settled).toBe(false);
+  });
+
   test("each poll uses a monotonic minTimestamp equal to the prior snapshot (cannot false-settle)", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

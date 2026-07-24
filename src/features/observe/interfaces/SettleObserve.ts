@@ -36,6 +36,17 @@ export interface SettleResult {
  * Poll the screen until the view hierarchy is structurally stable (two
  * consecutive structurally-equal snapshots) or a budget expires, returning only
  * the final snapshot.
+ *
+ * Known limitations (all resolve to a graceful `settled: false` on timeout, never
+ * a hang):
+ * - A screen with a continuously-changing node (a status-bar clock ticking, a
+ *   blinking caret) will not reach structural stability while it changes; the
+ *   timeout governs. `settled: false` on such a screen is not a failure.
+ * - A screen whose `screenIdentity` confidence is `low` never passes the
+ *   `isSameObservationScreen` gate, so it can never register as settled. This is
+ *   the shared diff's conservative cross-screen guard, not a settle-specific one.
+ * - A screen-off (Android) capture fast-fails to `settled: false, polls: 1`;
+ *   inspect `observation.wakefulness === "Asleep"` to tell it from a real timeout.
  */
 export interface SettleObserve {
   execute(options?: SettleOptions): Promise<SettleResult>;

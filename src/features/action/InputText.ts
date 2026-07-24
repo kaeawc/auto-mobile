@@ -10,14 +10,13 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { resolveAutoInputMode } from "./resolveAutoInputMode";
 import { serverConfig } from "../../utils/ServerConfig";
+import {
+  ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
+  buildAsciiKeyEventPlan,
+  type KeyEventPlan
+} from "./asciiKeyEvents";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll";
-
-interface KeyEventPlan {
-  commands: string[];
-}
-
-const ANDROID_KEYCOMBINATION_MIN_API_LEVEL = 31;
 
 export class InputText extends BaseVisualChange {
   private androidInputKeyCombinationSupported: boolean | undefined;
@@ -145,7 +144,8 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    // Return failure - no fallback methods
+    // Return failure - no fallback methods. Getting past a keyguard is the job
+    // of the dedicated `wakeAndUnlock` tool, not inputText (issue #4360).
     logger.warn(`[InputText] Accessibility service setText failed: ${a11yResult.error}`);
     return {
       success: false,
@@ -318,84 +318,7 @@ export class InputText extends BaseVisualChange {
   }
 
   private async getAsciiKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
-    if (/^[a-z]$/.test(char)) {
-      return {
-        commands: [`shell input keyevent KEYCODE_${char.toUpperCase()}`]
-      };
-    }
-
-    if (/^[A-Z]$/.test(char)) {
-      return this.createShiftedKeyEventPlan(`KEYCODE_${char}`);
-    }
-
-    if (/^[0-9]$/.test(char)) {
-      return {
-        commands: [`shell input keyevent KEYCODE_${char}`]
-      };
-    }
-
-    const directKeyCodes: Record<string, string> = {
-      " ": "KEYCODE_SPACE",
-      "-": "KEYCODE_MINUS",
-      "=": "KEYCODE_EQUALS",
-      "[": "KEYCODE_LEFT_BRACKET",
-      "]": "KEYCODE_RIGHT_BRACKET",
-      "\\": "KEYCODE_BACKSLASH",
-      ";": "KEYCODE_SEMICOLON",
-      "'": "KEYCODE_APOSTROPHE",
-      ",": "KEYCODE_COMMA",
-      ".": "KEYCODE_PERIOD",
-      "/": "KEYCODE_SLASH",
-      "`": "KEYCODE_GRAVE",
-      "@": "KEYCODE_AT"
-    };
-
-    const shiftedKeyCodes: Record<string, string> = {
-      "!": "KEYCODE_1",
-      "#": "KEYCODE_3",
-      "$": "KEYCODE_4",
-      "%": "KEYCODE_5",
-      "^": "KEYCODE_6",
-      "&": "KEYCODE_7",
-      "*": "KEYCODE_8",
-      "(": "KEYCODE_9",
-      ")": "KEYCODE_0",
-      "_": "KEYCODE_MINUS",
-      "+": "KEYCODE_EQUALS",
-      "{": "KEYCODE_LEFT_BRACKET",
-      "}": "KEYCODE_RIGHT_BRACKET",
-      "|": "KEYCODE_BACKSLASH",
-      ":": "KEYCODE_SEMICOLON",
-      "\"": "KEYCODE_APOSTROPHE",
-      "<": "KEYCODE_COMMA",
-      ">": "KEYCODE_PERIOD",
-      "?": "KEYCODE_SLASH",
-      "~": "KEYCODE_GRAVE"
-    };
-
-    const direct = directKeyCodes[char];
-    if (direct) {
-      return {
-        commands: [`shell input keyevent ${direct}`]
-      };
-    }
-
-    const shifted = shiftedKeyCodes[char];
-    if (shifted) {
-      return this.createShiftedKeyEventPlan(shifted);
-    }
-
-    return null;
-  }
-
-  private async createShiftedKeyEventPlan(baseKeyCode: string): Promise<KeyEventPlan | null> {
-    if (await this.supportsAndroidInputKeyCombination()) {
-      return {
-        commands: [`shell input keycombination KEYCODE_SHIFT_LEFT ${baseKeyCode}`]
-      };
-    }
-
-    return null;
+    return buildAsciiKeyEventPlan(char, await this.supportsAndroidInputKeyCombination());
   }
 
   private async supportsAndroidInputKeyCombination(): Promise<boolean> {

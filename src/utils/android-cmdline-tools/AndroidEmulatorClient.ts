@@ -10,6 +10,8 @@ import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import type { AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader } from "./AvdConfigReader";
+import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
+import { DeviceSessionLockStore } from "../../features/action/DeviceSessionLockStore";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 
 /**
@@ -1535,35 +1537,33 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   /**
    * Wake up the emulator and dismiss the lock screen after boot.
    * This ensures the device is immediately usable for automation.
+   *
+   * Delegates to the shared {@link WakeAndUnlock} feature so boot uses the same
+   * path as the `wakeAndUnlock` tool: a swipe lock is dismissed, and a secure
+   * lock is unlocked with the PIN remembered for the device this session (if
+   * any). A secure device with no remembered PIN is left locked — non-fatal, the
+   * device is still ready and the user can unlock it with the tool (#4360).
    * @param device - The booted device to wake and unlock
    */
   private async wakeAndUnlock(device: BootedDevice): Promise<void> {
-    const executor = this.adbFactory.create(device);
-
     try {
-      // Check wakefulness state
-      const wakefulness = await executor.getWakefulness();
-      logger.info(`[WakeAndUnlock] Device wakefulness state: ${wakefulness}`);
-
-      if (wakefulness !== "Awake") {
-        // Send KEYCODE_WAKEUP to wake the device
-        logger.info("[WakeAndUnlock] Device not awake, sending KEYCODE_WAKEUP");
-        await executor.executeCommand("shell input keyevent KEYCODE_WAKEUP");
-
-        // Small delay to allow the screen to turn on
-        await this.sleep(500);
+      const wakeAndUnlock = new WakeAndUnlock(device, this.adbFactory, {
+        timer: this.timer,
+        credentialStore: new DeviceSessionLockStore()
+      });
+      const result = await wakeAndUnlock.execute();
+      if (!result.unlocked && result.secure) {
+        logger.info(
+          `[WakeAndUnlock] Device ${device.deviceId} is secure-locked and no PIN is remembered; ` +
+          "leaving it locked. Unlock it once with the wakeAndUnlock tool (passing a pin) to remember it."
+        );
+      } else {
+        logger.info(`[WakeAndUnlock] Device ${device.deviceId} wake/unlock: ${JSON.stringify(result)}`);
       }
-
-      // Dismiss the lock screen / keyguard
-      logger.info("[WakeAndUnlock] Dismissing keyguard");
-      await executor.executeCommand("shell wm dismiss-keyguard");
-
-      // Verify the device is now awake
-      const finalWakefulness = await executor.getWakefulness();
-      logger.info(`[WakeAndUnlock] Final wakefulness state: ${finalWakefulness}`);
     } catch (error) {
-      // Log but don't fail - the device is still ready, just might need manual interaction
-      logger.warn(`[WakeAndUnlock] Failed to wake/unlock device: ${error}`);
+      // Log but don't fail - the device is still ready, just might need manual interaction.
+      // A secure lock with no remembered PIN throws ActionableError here; that is expected.
+      logger.warn(`[WakeAndUnlock] Failed to wake/unlock device ${device.deviceId}: ${error}`);
     }
   }
 

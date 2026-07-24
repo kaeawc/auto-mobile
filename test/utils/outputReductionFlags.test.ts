@@ -15,6 +15,9 @@ describe("parseOutputReductionFlags", () => {
       actionsDiffObserve: false,
       actionsNoObserve: false,
       toolResultsCompactJson: false,
+      observeFocusScope: false,
+      observeOverview: false,
+      observeRegion: false,
     });
   });
 

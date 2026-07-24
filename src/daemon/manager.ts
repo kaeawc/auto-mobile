@@ -706,6 +706,18 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.noOcclusion) {
       args.push("--no-occlusion");
     }
+    // Accessibility-service view-filter flags (issue #4344 propagation audit):
+    // these were in the daemon-options object but serialized nowhere, so a
+    // manager-spawned daemon never received them on either transport.
+    if (options.noA11yIncludeNotImportantViews) {
+      args.push("--no-include-not-important-views");
+    }
+    if (options.noA11yReportViewIds) {
+      args.push("--no-report-view-ids");
+    }
+    if (options.noA11yRetrieveInteractiveWindows) {
+      args.push("--no-retrieve-interactive-windows");
+    }
     if (options.safeAreaWarnings) {
       args.push("--safe-area-warnings");
     }
@@ -1163,6 +1175,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.noWaitForPollingOverhead = true;
     } else if (args[i] === "--no-occlusion") {
       options.noOcclusion = true;
+    } else if (args[i] === "--no-include-not-important-views") {
+      options.noA11yIncludeNotImportantViews = true;
+    } else if (args[i] === "--no-report-view-ids") {
+      options.noA11yReportViewIds = true;
+    } else if (args[i] === "--no-retrieve-interactive-windows") {
+      options.noA11yRetrieveInteractiveWindows = true;
     } else if (args[i] === "--safe-area-warnings" || args[i] === "--edge-to-edge-warnings") {
       options.safeAreaWarnings = true;
     } else if (args[i] === "--mem-perf-audit") {
@@ -1202,6 +1220,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.actionsNoObserve = true;
     } else if (args[i] === "--tool-results-compact-json") {
       options.toolResultsCompactJson = true;
+    } else if (args[i] === "--observe-focus-scope") {
+      options.observeFocusScope = true;
+    } else if (args[i] === "--observe-overview") {
+      options.observeOverview = true;
+    } else if (args[i] === "--observe-region") {
+      options.observeRegion = true;
     }
   }
   return options;

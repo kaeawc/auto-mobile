@@ -219,7 +219,7 @@ export interface ProxiedResourceTemplate {
  * `field` names map 1:1 to `DaemonOptions`) so a new flag is covered
  * automatically.
  */
-const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
+export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "embeddedSdk",
   "networkMockable",
   "safeAreaWarnings",

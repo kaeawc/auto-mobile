@@ -5,6 +5,11 @@ import {
   isSameObservationScreen,
   type SanitizeObserveConfig,
 } from "../features/observe/output/ObserveResultOutput";
+import {
+  applyObserveScopeExperiments,
+  buildObserveScopeConfig,
+} from "../features/observe/output/ObserveScopeExperiments";
+import type { ObserveScopeInput } from "../models/ObserveScope";
 import { isInPlacePressButton, isNavigationPressButton } from "../features/action/pressButtonPolicy";
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
@@ -227,6 +232,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     compact: serverConfig.isObserveResultCompactEnabled(),
   };
 
+  // Progressive-disclosure scoping experiments (issue #4344). Agent-facing only:
+  // internal tool-to-tool consumers read the full `.observation.viewHierarchy`, so
+  // scoping (like the diff/strip transforms) is suppressed for `ctx.internal`.
+  const scopeFlags = {
+    focus: serverConfig.isObserveFocusScopeEnabled(),
+    overview: serverConfig.isObserveOverviewEnabled(),
+    region: serverConfig.isObserveRegionEnabled(),
+  };
+  const scopeActive = !ctx.internal && (scopeFlags.focus || scopeFlags.overview || scopeFlags.region);
+
   // Internal tool-to-tool calls (#3053) always get the full sanitized observation:
   // the diff/strip transforms are for the agent-facing wire only, so an internal
   // consumer reading `.observation.viewHierarchy` off a finalized step envelope is
@@ -245,19 +260,30 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
-    // Skeleton projection (#4388) applies only to the headline `observe` payload,
-    // never to embedded action observations (those stay `"full"` so the diff path
-    // has a tree to diff).
-    const observeCfg: SanitizeObserveConfig = { ...cfg, project: resolveObserveProjection(ctx.args) };
-    const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, observeCfg);
+    const observeResult = payload as unknown as ObserveResult;
+    const sanitized = sanitizeObserveResult(observeResult, cfg);
     if (canDiff) {
-      // A skeleton-projected observe stores a hierarchy-less baseline, so the next
-      // action's diff sees `!hasRenderableHierarchy(baseline)` and falls back to a
-      // full emit (reason `unrenderable_hierarchy`) for that one step before
-      // self-healing — graceful, and the observe tool itself is never diffed.
+      // Diff against the full sanitized tree, never the scoped/projected copy — the
+      // next action must see real state, not what this observe payload was cropped
+      // to (scope experiments #4344) or projected to (skeleton #4388).
       pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
     }
-    sanitizedPayload = sanitized as unknown as Record<string, unknown>;
+    // Served (agent-facing) copy: skeleton projection (#4388) and scope experiments
+    // (#4344) are alternative croppings of the observe payload; both apply only to
+    // the headline `observe` payload, never to embedded action observations. Skeleton
+    // is the more aggressive projection (it replaces viewHierarchy/elements), so when
+    // requested it wins. It re-projects from the original payload so it still sees
+    // `elements` even under --observe-result-drop-elements.
+    let served: ObserveResult = sanitized;
+    if (resolveObserveProjection(ctx.args) === "skeleton") {
+      served = sanitizeObserveResult(observeResult, { ...cfg, project: "skeleton" });
+    } else if (scopeActive) {
+      served = applyObserveScopeExperiments(
+        sanitized,
+        buildObserveScopeConfig(scopeFlags, ctx.args?.scope as ObserveScopeInput | undefined)
+      );
+    }
+    sanitizedPayload = served as unknown as Record<string, unknown>;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
     if (noObserveEnabled) {

@@ -3287,6 +3287,79 @@
           "description": "Skip back stack during waitFor polling",
           "type": "boolean"
         },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "focus": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "resourceId": {
+                      "description": "Anchor by exact resource-id",
+                      "type": "string"
+                    },
+                    "text": {
+                      "description": "Anchor by substring text match",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor. Needs --observe-focus-scope."
+            },
+            "region": {
+              "description": "Crop to a normalized 0..1 box; true = inset content rect. Needs --observe-region.",
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "x1": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y1": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "x2": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y2": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "x1",
+                    "y1",
+                    "x2",
+                    "y2"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "overview": {
+              "description": "Collapse to a container skeleton. Needs --observe-overview.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)"
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -5329,6 +5402,92 @@
             "keyguardShowing"
           ],
           "additionalProperties": false
+        },
+        "observeScope": {
+          "type": "object",
+          "properties": {
+            "applied": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "focus",
+                  "region",
+                  "overview"
+                ]
+              }
+            },
+            "nodesBefore": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "nodesAfter": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "regionPx": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "number"
+                },
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "centerX": {
+                  "type": "number"
+                },
+                "centerY": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false,
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+            },
+            "focus": {
+              "type": "object",
+              "properties": {
+                "by": {
+                  "type": "string",
+                  "enum": [
+                    "anchor",
+                    "foreground-app"
+                  ]
+                },
+                "matched": {
+                  "type": "boolean"
+                },
+                "packageName": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "by",
+                "matched"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "applied",
+            "nodesBefore",
+            "nodesAfter"
+          ],
+          "additionalProperties": {}
         },
         "artifact": {
           "type": "object",

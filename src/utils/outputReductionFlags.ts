@@ -15,6 +15,14 @@ export interface OutputReductionFlags {
   actionsDiffObserve: boolean;
   actionsNoObserve: boolean;
   toolResultsCompactJson: boolean;
+  /**
+   * Progressive-disclosure scoping experiments for the `observe` payload
+   * (issue #4344). Independent transforms — see
+   * `features/observe/output/ObserveScopeExperiments.ts`.
+   */
+  observeFocusScope: boolean;
+  observeOverview: boolean;
+  observeRegion: boolean;
 }
 
 export type OutputReductionFlagField = keyof OutputReductionFlags;
@@ -82,6 +90,27 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
     featureFlagKey: "tool-results-compact-json",
     label: "--tool-results-compact-json",
   },
+  {
+    field: "observeFocusScope",
+    cli: "--observe-focus-scope",
+    env: "AUTOMOBILE_OBSERVE_FOCUS_SCOPE",
+    featureFlagKey: "observe-focus-scope",
+    label: "--observe-focus-scope",
+  },
+  {
+    field: "observeOverview",
+    cli: "--observe-overview",
+    env: "AUTOMOBILE_OBSERVE_OVERVIEW",
+    featureFlagKey: "observe-overview",
+    label: "--observe-overview",
+  },
+  {
+    field: "observeRegion",
+    cli: "--observe-region",
+    env: "AUTOMOBILE_OBSERVE_REGION",
+    featureFlagKey: "observe-region",
+    label: "--observe-region",
+  },
 ];
 
 /**
@@ -106,6 +135,9 @@ export function parseOutputReductionFlags(
     actionsDiffObserve: false,
     actionsNoObserve: false,
     toolResultsCompactJson: false,
+    observeFocusScope: false,
+    observeOverview: false,
+    observeRegion: false,
   };
   for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
     flags[spec.field] = resolve(spec);

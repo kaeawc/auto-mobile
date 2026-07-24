@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { computePercentile } from "../../src/utils/percentile";
 
 /**
  * Stage-level latency for the device capture path (#4343).
@@ -343,6 +344,114 @@ export function formatCaptureStageRecord(record: CaptureStageRecord): string {
   }
   if (record.missingStages.length > 0) {
     lines.push(`missing=${record.missingStages.join(",")}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * p50/p95 of one metric over the samples that carried it. `count` is the number
+ * of non-null samples that fed the percentiles — never the number of records —
+ * so a metric that only a few runs sampled reports an honest, small `count`
+ * rather than a percentile diluted by zeros (#4387).
+ */
+export interface PercentileSummary {
+  count: number;
+  p50: number;
+  p95: number;
+}
+
+/**
+ * The p50/p95 baseline over a set of {@link CaptureStageRecord} samples (#4387).
+ * This does not *set* a baseline number or tighten any budget — the issue is
+ * explicit that those need several accumulated CI runs and stay tracked — it
+ * only turns "then p50/p95 reported" into a repeatable computation over the
+ * records the device lane already emits.
+ */
+export interface CaptureBaselineSummary {
+  /** Platform filter applied, or null when every record was included. */
+  platform: string | null;
+  /** Records considered after the platform filter. */
+  sampleCount: number;
+  /** Egress-bitrate percentiles (kbps), or null when no sample carried egress. */
+  egressKbps: PercentileSummary | null;
+  /** Decoded-fps percentiles, or null when no sample carried decoded fps. */
+  decodedFps: PercentileSummary | null;
+  /** Per-stage elapsed-from-origin percentiles (ms); a stage no record reached is omitted. */
+  stages: Partial<Record<CaptureStage, PercentileSummary>>;
+}
+
+/**
+ * p50/p95 over the finite values only. `null`/non-finite samples are dropped
+ * (never coerced to zero), and an all-empty set yields null so a caller can tell
+ * "no samples" from "a real zero".
+ */
+function summarizePercentiles(values: Array<number | null>): PercentileSummary | null {
+  const finite = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  if (finite.length === 0) {
+    return null;
+  }
+  const sorted = [...finite].sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    p50: computePercentile(sorted, 50),
+    p95: computePercentile(sorted, 95),
+  };
+}
+
+/**
+ * Aggregate a set of capture-stage records into a p50/p95 baseline (#4387).
+ * Aggregates `elapsedMs` per stage — never `deltaMs`, which is anti-correlated
+ * across an out-of-order pair and meaningless in aggregate (see
+ * {@link CaptureStageMeasurement.deltaMs}).
+ */
+export function aggregateCaptureStageRecords(
+  records: CaptureStageRecord[],
+  options: { platform?: string } = {}
+): CaptureBaselineSummary {
+  const platform = options.platform ?? null;
+  const considered = platform === null ? records : records.filter(record => record.platform === platform);
+
+  const stages: Partial<Record<CaptureStage, PercentileSummary>> = {};
+  for (const stage of CAPTURE_STAGES) {
+    const elapsed = considered
+      .map(record => record.stages.find(measurement => measurement.stage === stage)?.elapsedMs ?? null)
+      .filter((value): value is number => value !== null);
+    const summary = summarizePercentiles(elapsed);
+    if (summary !== null) {
+      stages[stage] = summary;
+    }
+  }
+
+  return {
+    platform,
+    sampleCount: considered.length,
+    egressKbps: summarizePercentiles(considered.map(record => record.egressKbps)),
+    decodedFps: summarizePercentiles(considered.map(record => record.decodedFps)),
+    stages,
+  };
+}
+
+function formatPercentile(label: string, summary: PercentileSummary | null): string {
+  if (summary === null) {
+    return `  ${label}: no samples`;
+  }
+  const p50 = Math.round(summary.p50 * 10) / 10;
+  const p95 = Math.round(summary.p95 * 10) / 10;
+  return `  ${label}: p50=${p50} p95=${p95} (n=${summary.count})`;
+}
+
+/** Human-readable rendering of a {@link CaptureBaselineSummary} for a job log. */
+export function formatCaptureBaselineSummary(summary: CaptureBaselineSummary): string {
+  const lines = [
+    `platform=${summary.platform ?? "all"} samples=${summary.sampleCount}`,
+    formatPercentile("egressKbps", summary.egressKbps),
+    formatPercentile("decodedFps", summary.decodedFps),
+  ];
+  for (const stage of CAPTURE_STAGES) {
+    const stageSummary = summary.stages[stage];
+    if (stageSummary !== undefined) {
+      lines.push(formatPercentile(`${stage} (ms)`, stageSummary));
+    }
   }
   return lines.join("\n");
 }

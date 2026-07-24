@@ -18,7 +18,10 @@ export type FeatureFlagKey =
   | "tool-results-no-structured-content"
   | "actions-diff-observe"
   | "actions-no-observe"
-  | "tool-results-compact-json";
+  | "tool-results-compact-json"
+  | "observe-focus-scope"
+  | "observe-overview"
+  | "observe-region";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -185,6 +188,24 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "tool-results-compact-json",
     label: "Tool results: compact JSON",
     description: "Serialize tool results as compact (non-pretty-printed) JSON — same data, ~35% fewer characters.",
+    defaultValue: false,
+  },
+  {
+    key: "observe-focus-scope",
+    label: "Observe scope: focus",
+    description: "Honor observe `scope.focus` — scope the hierarchy to a subtree (an anchor, else the foreground app), dropping system chrome (issue #4344).",
+    defaultValue: false,
+  },
+  {
+    key: "observe-overview",
+    label: "Observe scope: overview",
+    description: "Honor observe `scope.overview` — collapse the hierarchy to a structural container skeleton, annotating omitted-descendant counts (issue #4344).",
+    defaultValue: false,
+  },
+  {
+    key: "observe-region",
+    label: "Observe scope: region",
+    description: "Honor observe `scope.region` — crop the hierarchy to a per-call normalized (0..1) box, or the inset content rectangle when `true` (issue #4344).",
     defaultValue: false,
   },
 ];

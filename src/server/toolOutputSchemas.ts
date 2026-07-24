@@ -430,6 +430,24 @@ export const skeletonElementSchema = z.object({
   checked: z.boolean().optional()
 }).passthrough();
 
+/**
+ * Progressive-disclosure scoping metadata (issue #4344), present only when an
+ * `--observe-focus-scope` / `--observe-overview` / `--observe-region` experiment
+ * scoped the payload. `regionPx` routes through {@link elementBoundsSchema} so its
+ * bounds advertise the `--observe-result-compact` tuple like every other bounds.
+ */
+export const observeScopeMetadataSchema = z.object({
+  applied: z.array(z.enum(["focus", "region", "overview"])),
+  nodesBefore: z.number().int().nonnegative(),
+  nodesAfter: z.number().int().nonnegative(),
+  regionPx: elementBoundsSchema.optional(),
+  focus: z.object({
+    by: z.enum(["anchor", "foreground-app"]),
+    matched: z.boolean(),
+    packageName: z.string().optional()
+  }).passthrough().optional()
+}).passthrough();
+
 export const observeResultSchema = z.object({
   screenSize: screenSizeSchema.optional(),
   systemInsets: systemInsetsSchema.optional(),
@@ -447,7 +465,8 @@ export const observeResultSchema = z.object({
   freshness: freshnessSchema.optional(),
   predictions: predictionsSchema.optional(),
   accessibilityState: accessibilityStateSchema.optional(),
-  deviceLock: deviceLockSchema.optional()
+  deviceLock: deviceLockSchema.optional(),
+  observeScope: observeScopeMetadataSchema.optional()
 }).passthrough();
 
 export const observeToolResultSchema = z.union([

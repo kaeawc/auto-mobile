@@ -38,7 +38,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "test": {
-      "description": "Run Bun test suite",
+      "description": "Run Bun test suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, ctrlProxyWireParity, webrtcDeviceCaptureLatency); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
@@ -46,7 +46,14 @@
         "scripts/**",
         "package.json",
         "bunfig.toml",
-        ".github/workflows/**"
+        ".github/workflows/**",
+        "turbo.json",
+        "android/auto-mobile-sdk/src/main/kotlin/**",
+        "android/control-proxy/src/main/kotlin/**",
+        "android/protocol/src/main/kotlin/**",
+        "android/video-server/src/main/kotlin/**",
+        "ios/auto-mobile-sdk/Sources/**",
+        "ios/control-proxy/Sources/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -75,14 +82,21 @@
       "outputLogs": "new-only"
     },
     "test:coverage": {
-      "description": "Run tests with coverage reporting to coverage/",
+      "description": "Run tests with coverage reporting to coverage/. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach; without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
         "schemas/**",
         "scripts/**",
         "package.json",
-        "bunfig.toml"
+        "bunfig.toml",
+        "turbo.json",
+        "android/auto-mobile-sdk/src/main/kotlin/**",
+        "android/control-proxy/src/main/kotlin/**",
+        "android/protocol/src/main/kotlin/**",
+        "android/video-server/src/main/kotlin/**",
+        "ios/auto-mobile-sdk/Sources/**",
+        "ios/control-proxy/Sources/**"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

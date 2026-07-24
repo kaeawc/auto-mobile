@@ -32,6 +32,14 @@
 #   CTRL_PROXY_IOS_PORT   Override CtrlProxy iOS port (default: 8765)
 #   HOT_RELOAD_MANAGE_IOS_RUNNER  Set to "true" to make the watcher own the
 #                        CtrlProxy iOS runner (same as --manage-ios-runner).
+#
+# Daemons restarted by this script are pinned to the locally-built CtrlProxy APK
+# (AUTOMOBILE_CTRL_PROXY_APK_PATH + AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED)
+# so they cannot reinstall a released APK over it. Note this only covers daemons
+# THIS script starts: another checkout's daemon sharing the socket will still
+# replace the APK. If a runner-gated change seems missing, check what is actually
+# installed:
+#   adb shell dumpsys package dev.jasonpearson.automobile.ctrlproxy | grep versionName
 
 set -euo pipefail
 
@@ -246,6 +254,17 @@ reload_mcp_daemon() {
 
   if [[ -f "${VIDEO_SERVER_JAR_PATH}" ]]; then
     daemon_env+=("AUTOMOBILE_VIDEO_SERVER_JAR=${VIDEO_SERVER_JAR_PATH}")
+  fi
+
+  # Pin the daemon to the APK this watcher just built. update_checksum() rewrites
+  # src/constants/release.ts so the local sha256 is the expected one, but that
+  # only takes effect once TypeScript is rebuilt — and the daemon is restarted
+  # before that happens on the initial run. Without these the daemon compares
+  # against the stale compiled-in checksum, treats the fresh APK as unknown, and
+  # reinstalls the released one, silently downgrading the build being iterated on.
+  if [[ -f "${APK_PATH}" ]]; then
+    daemon_env+=("AUTOMOBILE_CTRL_PROXY_APK_PATH=${APK_PATH}")
+    daemon_env+=("AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED=true")
   fi
 
   log_info "Restarting MCP daemon..."

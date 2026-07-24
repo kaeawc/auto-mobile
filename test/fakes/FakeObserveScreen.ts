@@ -1,5 +1,5 @@
 import { ObserveResult } from "../../src/models";
-import type { ObserveScreen } from "../../src/features/observe/interfaces/ObserveScreen";
+import type { ObserveScreen, ObserveScreenExecuteOptions } from "../../src/features/observe/interfaces/ObserveScreen";
 import type { RawViewHierarchyResult } from "../../src/models/RawViewHierarchyResult";
 
 /**
@@ -9,27 +9,46 @@ import type { RawViewHierarchyResult } from "../../src/models/RawViewHierarchyRe
 export class FakeObserveScreen implements ObserveScreen {
   private executedOperations: string[] = [];
   private configuredObserveResult: ObserveResult | null = null;
-  private observeResultFactory: (() => ObserveResult) | null = null;
+  private observeResultFactory: ((index: number) => ObserveResult) | null = null;
+  private observeSequence: ObserveResult[] | null = null;
   private executeCallCount: number = 0;
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
   private autoVaryHierarchy: boolean = false;
+  private readonly executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
-   * Can either be a static result or a factory function that creates new results on each call
+   * Can either be a static result or a factory function that creates new results on each
+   * call. The factory receives the zero-based call index for ever-changing sequences.
    */
   setObserveResult(result: ObserveResult): void;
-  setObserveResult(resultFactory: () => ObserveResult): void;
-  setObserveResult(resultOrFactory: ObserveResult | (() => ObserveResult)): void {
+  setObserveResult(resultFactory: (index: number) => ObserveResult): void;
+  setObserveResult(resultOrFactory: ObserveResult | ((index: number) => ObserveResult)): void {
     if (typeof resultOrFactory === "function") {
-      this.observeResultFactory = resultOrFactory as () => ObserveResult;
+      this.observeResultFactory = resultOrFactory as (index: number) => ObserveResult;
       this.configuredObserveResult = null;
+      this.observeSequence = null;
     } else {
       this.configuredObserveResult = resultOrFactory;
       this.observeResultFactory = null;
+      this.observeSequence = null;
     }
+  }
+
+  /**
+   * Script a fixed sequence of observations. Each `execute()` returns the next
+   * entry; once exhausted the last entry repeats. Lets a settle/wait poll loop be
+   * driven through a deterministic transition→stable (or ever-changing) sequence.
+   */
+  setObserveSequence(results: ObserveResult[]): void {
+    if (results.length === 0) {
+      throw new Error("FakeObserveScreen: empty sequence");
+    }
+    this.observeSequence = results;
+    this.observeResultFactory = null;
+    this.configuredObserveResult = null;
   }
 
   /**
@@ -46,10 +65,13 @@ export class FakeObserveScreen implements ObserveScreen {
    */
   private getNextObserveResult(): ObserveResult {
     this.callCounter++;
+    const index = this.callCounter - 1;
 
     let result: ObserveResult;
-    if (this.observeResultFactory) {
-      result = this.observeResultFactory();
+    if (this.observeSequence) {
+      result = this.observeSequence[Math.min(index, this.observeSequence.length - 1)];
+    } else if (this.observeResultFactory) {
+      result = this.observeResultFactory(index);
     } else if (!this.configuredObserveResult) {
       throw new Error("No observe result configured");
     } else {
@@ -119,6 +141,7 @@ export class FakeObserveScreen implements ObserveScreen {
     this.executeCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
+    this.executeOptionsHistory.length = 0;
   }
 
   /**
@@ -137,9 +160,10 @@ export class FakeObserveScreen implements ObserveScreen {
 
   // Implementation of ObserveScreen interface
 
-  async execute(_options?: any): Promise<ObserveResult> {
+  async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     this.executedOperations.push("execute");
     this.executeCallCount++;
+    this.executeOptionsHistory.push({ ...(options ?? {}) });
 
     const error = this.failures.get("execute");
     if (error) {
@@ -147,6 +171,16 @@ export class FakeObserveScreen implements ObserveScreen {
     }
 
     return this.getNextObserveResult();
+  }
+
+  /** Options passed to each `execute()` call, in order. */
+  getExecuteOptions(): ObserveScreenExecuteOptions[] {
+    return [...this.executeOptionsHistory];
+  }
+
+  /** The `minTimestamp` passed to each `execute()` call, in order. */
+  getExecuteMinTimestamps(): Array<number | undefined> {
+    return this.executeOptionsHistory.map(options => options.minTimestamp);
   }
 
   async getMostRecentCachedObserveResult(): Promise<ObserveResult> {

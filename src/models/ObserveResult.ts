@@ -16,6 +16,7 @@ import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
 import type { MediaView } from "../features/observe/IdentifyMediaViews";
 import type { ObserveError } from "../features/observe/ObserveError";
 import type { LayoutWarning, ObservationInsets } from "./ObservationInsets";
+import type { ObserveScopeMetadata } from "./ObserveScope";
 
 export interface PredictionTarget {
   text?: string;
@@ -263,6 +264,15 @@ export interface ObserveResult {
    * the pre-offscreen-filter hierarchy (iOS)
    */
   rawViewHierarchy?: RawViewHierarchyResult;
+
+  /**
+   * Progressive-disclosure scoping metadata (issue #4344), present only when an
+   * `--observe-focus-scope` / `--observe-overview` / `--observe-region`
+   * experiment scoped this observe payload. Records which transforms ran and the
+   * node-count reduction so the experiment is measurable on the wire. See
+   * `features/observe/output/ObserveScopeExperiments.ts`.
+   */
+  observeScope?: ObserveScopeMetadata;
 }
 
 /**

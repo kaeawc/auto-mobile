@@ -59,8 +59,12 @@ describe("ScreenCaptureHelperProvider (#4392)", function() {
     const stats = await fs.stat(helperPath!);
     expect(stats.isFile()).toBe(true);
     // The cached executable must carry the owner-execute bit — it is spawned
-    // directly, and curl/npm do not preserve an executable bit.
-    expect(stats.mode & 0o100).toBe(0o100);
+    // directly, and curl/npm do not preserve an executable bit. Windows has no
+    // Unix mode bits (chmod is a no-op there) and never runs the macOS helper,
+    // so this assertion only applies off Windows.
+    if (process.platform !== "win32") {
+      expect(stats.mode & 0o100).toBe(0o100);
+    }
 
     const meta = JSON.parse(
       await fs.readFile(path.join(cacheDir, SCREEN_CAPTURE_HELPER_METADATA_FILENAME), "utf8")

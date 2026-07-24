@@ -21,6 +21,7 @@ import {
 } from "./h264Level";
 import { parseTrickleIceMediaContexts, TrickleIceForwarder } from "./trickleIce";
 import { WhipClient, type WhipClientOptions } from "./WhipClient";
+import type { H264CaptureSourceMetrics } from "./H264CaptureSource";
 
 /**
  * How long to wait for ICE gathering before publishing the offer.
@@ -139,6 +140,8 @@ export interface WebRtcStreamDescriptor {
    * publisher builds on its own.
    */
   sourceStarted?: boolean;
+  /** Latest capture-pipeline metrics, when supplied by the active source. */
+  frameMetrics?: H264CaptureSourceMetrics;
 }
 
 /**

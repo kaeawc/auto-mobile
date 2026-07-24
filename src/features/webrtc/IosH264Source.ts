@@ -7,10 +7,13 @@ import type {
   CaptureTarget,
   DecodedAudio,
   DecodedFrame,
+  FrameQueueMetrics,
   IosScreenCaptureHelperOptions,
   MalformedFrameError,
+  NativeFrameMetrics,
 } from "../screen-stream";
 import { AUTOMOBILE_VERSION_ENV } from "../../constants/release";
+import { LatestFrameQueue } from "../screen-stream/LatestFrameQueue";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { logger } from "../../utils/logger";
@@ -22,7 +25,12 @@ import {
   type FfmpegProcess,
 } from "../../utils/media/FfmpegClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
+import type {
+  H264CaptureSource,
+  H264CaptureSourceMetrics,
+  H264CaptureSourceOptions,
+  H264EncoderFrameMetrics,
+} from "./H264CaptureSource";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 
@@ -60,6 +68,8 @@ export const IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS = 3000;
 const H264_MACROBLOCK_SIZE = 16;
 /** Smallest dimension ffmpeg can encode as 4:2:0 chroma-subsampled video. */
 const MIN_ENCODER_DIMENSION = 2;
+/** One iPhone/iPad-sized BGRA frame awaiting encoder drain. */
+const IOS_ENCODER_PENDING_FRAME_MAX_BYTES = 32 * 1024 * 1024;
 /**
  * Bits budgeted per encoded pixel per frame for the default WebRTC bitrate.
  *
@@ -95,6 +105,8 @@ export interface IosFrameCaptureHelper {
   start(): void;
   stop(): Promise<unknown>;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
+  on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
+  on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
   on(event: "audio", listener: (audio: DecodedAudio) => void): this;
   on(event: "malformed", listener: (error: MalformedFrameError) => void): this;
   on(event: "stderr", listener: (line: string) => void): this;
@@ -172,6 +184,8 @@ export interface EncoderSize {
   height: number;
 }
 
+export interface IosH264FrameMetrics extends H264CaptureSourceMetrics {}
+
 type IosH264SourcePhase = "idle" | "starting" | "running" | "stopping";
 
 export class IosH264Source implements H264CaptureSource {
@@ -186,6 +200,7 @@ export class IosH264Source implements H264CaptureSource {
   private readonly helperProvider?: ScreenCaptureHelperEnsurer;
   private readonly timer: Timer;
   private readonly firstFrameTimeoutMs: number;
+  private readonly pendingFrames: LatestFrameQueue;
 
   private helper: IosFrameCaptureHelper | null = null;
   private captureKind: CaptureTarget["kind"] | null = null;
@@ -199,6 +214,10 @@ export class IosH264Source implements H264CaptureSource {
   private lastHelperStderr: string | null = null;
   private lastEncoderStderr: string | null = null;
   private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
+  private lastOutputWriteDurationMs: number | null = null;
+  private outputWriteHighWaterDurationMs = 0;
+  private helperFrameMetrics: FrameQueueMetrics | null = null;
+  private nativeFrameMetrics: NativeFrameMetrics | null = null;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -224,10 +243,23 @@ export class IosH264Source implements H264CaptureSource {
     this.helperProvider = options.helperProvider;
     this.timer = options.timer ?? defaultTimer;
     this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? IOS_FIRST_FRAME_TIMEOUT_MS;
+    this.pendingFrames = new LatestFrameQueue({
+      maxFrameBytes: IOS_ENCODER_PENDING_FRAME_MAX_BYTES,
+      now: () => this.timer.now(),
+    });
     this.simulatorWindowResolver =
       options.simulatorWindowResolver ??
       ((helperPath, device, audioEnabled) =>
         defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner, audioEnabled));
+  }
+
+  /** Snapshot of each bounded handoff from capture through VideoToolbox. */
+  getFrameMetrics(): IosH264FrameMetrics {
+    return {
+      native: this.nativeFrameMetrics,
+      helper: this.helperFrameMetrics,
+      encoder: this.getEncoderFrameMetrics(),
+    };
   }
 
   async start(): Promise<void> {
@@ -237,6 +269,8 @@ export class IosH264Source implements H264CaptureSource {
     await this.teardownPromise;
     this.phase = "starting";
     this.lastHelperStderr = null;
+    this.helperFrameMetrics = null;
+    this.nativeFrameMetrics = null;
 
     try {
       const helperPath = await ensureIosScreenCaptureHelper({
@@ -308,6 +342,8 @@ export class IosH264Source implements H264CaptureSource {
     // Spawn the replacement first so the outgoing encoder's exit/error handlers
     // — all guarded by `this.encoder === encoder` — no-op instead of tearing the
     // source down as a fatal crash. Then end its stdin and terminate it.
+    this.pendingFrames.clear(true);
+    this.reportFrameMetrics();
     this.startEncoder(size);
     oldEncoder.stdin.end();
     oldEncoder.kill("SIGTERM");
@@ -439,6 +475,18 @@ export class IosH264Source implements H264CaptureSource {
 
   private wireHelperFrames(helper: IosFrameCaptureHelper): void {
     helper.on("frame", frame => this.handleFrame(frame));
+    helper.on("frameMetrics", metrics => {
+      if (this.helper === helper && this.isActive()) {
+        this.helperFrameMetrics = metrics;
+        this.reportFrameMetrics();
+      }
+    });
+    helper.on("captureMetrics", metrics => {
+      if (this.helper === helper && this.isActive()) {
+        this.nativeFrameMetrics = metrics;
+        this.reportFrameMetrics();
+      }
+    });
     helper.on("audio", audio => {
       if (this.isActive() && this.options.audioEnabled) {
         this.options.onAudioData?.(audio.pcm16le);
@@ -471,6 +519,8 @@ export class IosH264Source implements H264CaptureSource {
     if (!this.encoder) {
       this.startEncoder(size);
     } else if (this.encoderBackpressured) {
+      this.pendingFrames.enqueue(frame);
+      this.reportFrameMetrics();
       return;
     } else if (
       this.encoderSize &&
@@ -484,10 +534,23 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
 
-    const accepted = this.encoder?.stdin.write(tightlyPackBgraFrame(frame));
+    this.writeFrameToEncoder(frame);
+  }
+
+  private writeFrameToEncoder(frame: DecodedFrame): void {
+    const encoder = this.encoder;
+    if (!encoder) {return;}
+    const startedAt = this.timer.now();
+    const accepted = encoder.stdin.write(tightlyPackBgraFrame(frame));
+    this.lastOutputWriteDurationMs = Math.max(0, this.timer.now() - startedAt);
+    this.outputWriteHighWaterDurationMs = Math.max(
+      this.outputWriteHighWaterDurationMs,
+      this.lastOutputWriteDurationMs
+    );
     if (accepted === false) {
       this.encoderBackpressured = true;
     }
+    this.reportFrameMetrics();
   }
 
   private startEncoder(size: EncoderSize): void {
@@ -522,6 +585,7 @@ export class IosH264Source implements H264CaptureSource {
     encoder.stdin.on("drain", () => {
       if (this.encoder === encoder) {
         this.encoderBackpressured = false;
+        this.writePendingFrameToEncoder();
       }
     });
     encoder.stdin.on("error", error => {
@@ -543,6 +607,38 @@ export class IosH264Source implements H264CaptureSource {
         );
       }
     });
+  }
+
+  private writePendingFrameToEncoder(): void {
+    if (!this.isActive() || this.encoderBackpressured) {return;}
+    const frame = this.pendingFrames.take();
+    this.reportFrameMetrics();
+    if (frame === null) {return;}
+    const size = { width: frame.header.width, height: frame.header.height };
+    if (
+      this.encoderSize &&
+      (this.encoderSize.width !== size.width || this.encoderSize.height !== size.height)
+    ) {
+      this.failIfRunning(
+        new Error(
+          `iOS capture frame changed size from ${this.encoderSize.width}x${this.encoderSize.height} to ${size.width}x${size.height}`
+        )
+      );
+      return;
+    }
+    this.writeFrameToEncoder(frame);
+  }
+
+  private getEncoderFrameMetrics(): H264EncoderFrameMetrics {
+    return {
+      ...this.pendingFrames.metrics(),
+      outputWriteDurationMs: this.lastOutputWriteDurationMs,
+      outputWriteHighWaterDurationMs: this.outputWriteHighWaterDurationMs,
+    };
+  }
+
+  private reportFrameMetrics(): void {
+    this.options.onFrameMetrics?.(this.getFrameMetrics());
   }
 
   private withEncoderDiagnostics(error: Error): Error {
@@ -671,6 +767,7 @@ export class IosH264Source implements H264CaptureSource {
     this.encoder = null;
     this.encoderSize = null;
     this.encoderBackpressured = false;
+    this.pendingFrames.clear();
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 

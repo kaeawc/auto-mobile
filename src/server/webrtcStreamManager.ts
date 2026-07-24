@@ -8,6 +8,7 @@ import {
   WebRtcPublisher,
   resolveWebRtcStreamingConfig,
   type H264CaptureSource,
+  type H264CaptureSourceMetrics,
   type H264CaptureSourceOptions,
   type H264CaptureSourceTelemetry,
   type WebRtcCaptureSourceState,
@@ -45,6 +46,7 @@ interface WebRtcStreamRecord {
   sourceState: WebRtcCaptureSourceState;
   lastSourceError: string | null;
   sourceTelemetry: H264CaptureSourceTelemetry | null;
+  frameMetrics?: H264CaptureSourceMetrics;
   /** Reservation token for a start that has not returned to its caller yet. */
   startToken: symbol;
 }
@@ -142,12 +144,14 @@ function describeRecord(record: WebRtcStreamRecord): WebRtcStreamDescriptor {
       captureSourceState: record.sourceState,
       lastSourceError: record.lastSourceError,
     },
+    frameMetrics: record.frameMetrics,
   };
 }
 
 /** Stop and clear the capture source for a stream (before each (re)establish). */
 async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   record.sourceStarted = false;
+  record.frameMetrics = undefined;
   if (record.source) {
     record.sourceTelemetry = record.source.getTelemetry?.() ?? record.sourceTelemetry;
     await record.source.stop().catch(error => {
@@ -175,6 +179,7 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
     return false;
   }
   record.sourceState = "starting";
+  const sourceRef: { current: H264CaptureSource | null } = { current: null };
   const source = dependencies.createSource(
     {
       device: record.device,
@@ -190,9 +195,15 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
       size: record.size,
       fps: record.fps,
       audioEnabled: record.audioEnabled,
+      onFrameMetrics: metrics => {
+        if (record.source === sourceRef.current) {
+          record.frameMetrics = metrics;
+        }
+      },
     },
     record.jarPath
   );
+  sourceRef.current = source;
   record.source = source;
   try {
     await source.start();

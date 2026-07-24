@@ -63,11 +63,11 @@ describe("#4343 device capture latency instrumentation", () => {
 
     // Chrome cold start is seconds on a hosted runner; inside the window it
     // would land in the WHEP-connect stage and dominate it.
-    // Match the call sites, not the declarations of `chromeBinary`/`launchReader`
-    // — those sit at the top of the file and would satisfy any ordering check.
+    // Match the call site, not the declaration of `launchChromeReader` — the
+    // declaration (which itself contains `start(chromeBinary()`) sits at the
+    // top of the file and would satisfy any ordering check vacuously.
     const startRequestIndex = indexOfRequired(source, 'timeline.mark("startRequest")');
-    expect(indexOfRequired(source, "chrome = start(chromeBinary()")).toBeLessThan(startRequestIndex);
-    expect(indexOfRequired(source, "cdp = await launchReader()")).toBeLessThan(startRequestIndex);
+    expect(indexOfRequired(source, "({ chrome, cdp } = await launchChromeReader(")).toBeLessThan(startRequestIndex);
   });
 
   test("writes the latency record from afterAll so a timed-out run still reports", () => {

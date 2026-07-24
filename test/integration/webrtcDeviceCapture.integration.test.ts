@@ -322,16 +322,24 @@ async function waitForDecodedFrames(cdp: CdpClient, minimum: number, message: st
  * (#4383) advances the counter with forced repeats of an unchanged screen, so a count-based wait can
  * return on a still frame. Content-difference is what proves a visible transition rendered.
  */
+/**
+ * Wait until the decoded video shows different content than `previous` AND the
+ * decode counter has advanced past `previous.frames`. Frame progress is part of
+ * the bounded wait rather than a one-shot assertion afterwards: Chromium's
+ * `getVideoPlaybackQuality().totalVideoFrames` is not updated in lockstep with
+ * the compositor frame the canvas samples, so a single snapshot taken the
+ * moment the pixels change can still carry the previous counter value (#4409).
+ */
 async function waitForChangedSample(
   cdp: CdpClient,
-  previousSample: number,
+  previous: { sample: number; frames: number },
   message: string
 ): Promise<{ frames: number; width: number; height: number; sample: number }> {
   let latest = await videoSample(cdp);
   try {
     await waitFor(async () => {
       latest = await videoSample(cdp);
-      return latest.frames > 0 && latest.sample !== previousSample;
+      return latest.frames > previous.frames && latest.sample !== previous.sample;
     }, message);
   } catch {
     const diagnostics = await readerDiagnostics(cdp).catch(() => undefined);
@@ -635,12 +643,14 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       // CONTENT changing, not the frame count — the idle backstop advances the count on a static
       // screen, so a count-based wait would return on a forced repeat before the transition renders.
       await changeFixture();
-      const first = await waitForChangedSample(cdp, staticScreenFrame.sample, "browser did not decode changed video after a visible change");
+      const first = await waitForChangedSample(cdp, staticScreenFrame, "browser did not decode changed video after a visible change");
       await launchFixture();
-      const second = await waitForChangedSample(cdp, first.sample, "browser did not receive changed video after returning to the fixture");
+      // Changed content + frame progress are both enforced inside the bounded
+      // waits (see waitForChangedSample) — asserting the counter on a one-shot
+      // snapshot here raced the compositor and flaked (#4409).
+      const second = await waitForChangedSample(cdp, first, "browser did not receive changed video after returning to the fixture");
       expect(first.width).toBeGreaterThan(0);
       expect(first.height).toBeGreaterThan(0);
-      expect(second.frames).toBeGreaterThan(first.frames);
       expect(second.sample).not.toBe(first.sample);
       // Measure the operating point the AC2 decision turns on (#4349): average
       // egress bitrate and decoded fps over a window while the stream is live.

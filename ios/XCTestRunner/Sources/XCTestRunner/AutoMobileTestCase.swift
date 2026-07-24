@@ -99,6 +99,14 @@ open class AutoMobileTestCase: XCTestCase {
         return 0
     }
 
+    /// Per-test kill switch for AI-assisted failure recovery. When true (the default) and the
+    /// `ai-recovery` flag is enabled and a model API key is configured, a failed step triggers one
+    /// recovery attempt before the test fails. Set `AUTOMOBILE_AI_ASSISTANCE=false` (or override) to
+    /// force the pre-recovery behavior of failing immediately.
+    open var aiAssistance: Bool {
+        return environment.boolValue(["AUTOMOBILE_AI_ASSISTANCE"]) ?? true
+    }
+
     open var planParameters: [String: String] {
         return [:]
     }
@@ -200,7 +208,8 @@ open class AutoMobileTestCase: XCTestCase {
             startStep: startStep,
             parameters: planParameters,
             cleanup: cleanupOptions,
-            planBundle: planBundle
+            planBundle: planBundle,
+            aiAssistance: aiAssistance
         )
     }
 

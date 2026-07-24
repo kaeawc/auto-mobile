@@ -284,7 +284,15 @@ describe("observeResultSchema: every bounds site is the advertised union (#3025)
   });
 
   test("compact OFF: every bounds union collapses to its object arm (no tuple)", () => {
-    const out = advertiseBoundsForCompact(observeJson(), false);
+    const out = advertiseBoundsForCompact(observeJson(), false) as Record<string, unknown>;
+    // The `skeleton` projection field (#4388) carries a deliberately always-tuple
+    // bounds — it is emitted only under project:"skeleton" and its bounds never
+    // depend on --observe-result-compact — so it is not a collapsible bounds
+    // *union*. Exclude it structurally before asserting the union-collapse invariant.
+    const properties = out.properties as Record<string, unknown> | undefined;
+    if (properties) {
+      delete properties.skeleton;
+    }
     const json = JSON.stringify(out);
     expect(json).not.toContain("prefixItems");
     // Prose still documents the tuple exists under the flag.
@@ -353,19 +361,37 @@ describe("observe tool registration advertises the schema (#3025)", () => {
       const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
       return JSON.stringify((observe as Record<string, unknown>).outputSchema);
     };
+    // Count JSON-Schema tuple sites (`prefixItems`). The `skeleton` bounds tuple
+    // (#4388) is deliberately always a tuple — it is emitted only under
+    // project:"skeleton" and its bounds never depend on --observe-result-compact —
+    // so it contributes a fixed tuple site regardless of the flag. The invariant
+    // is therefore relative: flipping compact ON must advertise strictly MORE
+    // tuple sites (every bounds *union* collapses to its object arm when off).
+    const countTupleSites = (json: string): number => json.split("prefixItems").length - 1;
     try {
       withFreshRegistry(() => {
         serverConfig.setObserveResultCompactEnabled(false);
-        expect(observeSchemaJson()).not.toContain("prefixItems");
+        const offSites = countTupleSites(observeSchemaJson());
 
         serverConfig.setObserveResultCompactEnabled(true);
         // Compact on: the object|tuple union (a JSON-Schema tuple → prefixItems)
-        // is advertised, so a client decodes the emitted [l,t,r,b] tuple.
-        expect(observeSchemaJson()).toContain("prefixItems");
+        // is advertised for every bounds field, so a client decodes the emitted
+        // [l,t,r,b] tuple.
+        const onSites = countTupleSites(observeSchemaJson());
+        expect(onSites).toBeGreaterThan(offSites);
       });
     } finally {
       serverConfig.setObserveResultCompactEnabled(original);
     }
+  });
+
+  test("advertises the skeleton projection field with an always-tuple bounds (#4388)", () => {
+    withFreshRegistry(() => {
+      const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
+      const json = JSON.stringify((observe as Record<string, unknown>).outputSchema);
+      expect(json).toContain("\"skeleton\"");
+      expect(json).toContain("\"affordances\"");
+    });
   });
 });
 

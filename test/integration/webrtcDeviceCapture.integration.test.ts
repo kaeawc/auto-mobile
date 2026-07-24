@@ -255,6 +255,30 @@ async function waitForDecodedFrames(cdp: CdpClient, minimum: number, message: st
 }
 
 /**
+ * Wait until the decoded frame's content actually differs from `previousSample`, returning that
+ * frame. Frame *count* is no longer a proxy for a visible change: the encoder's idle-frame backstop
+ * (#4383) advances the counter with forced repeats of an unchanged screen, so a count-based wait can
+ * return on a still frame. Content-difference is what proves a visible transition rendered.
+ */
+async function waitForChangedSample(
+  cdp: CdpClient,
+  previousSample: number,
+  message: string
+): Promise<{ frames: number; width: number; height: number; sample: number }> {
+  let latest = await videoSample(cdp);
+  try {
+    await waitFor(async () => {
+      latest = await videoSample(cdp);
+      return latest.frames > 0 && latest.sample !== previousSample;
+    }, message);
+  } catch {
+    const diagnostics = await readerDiagnostics(cdp).catch(() => undefined);
+    throw new Error(`${message}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`);
+  }
+  return latest;
+}
+
+/**
  * Cumulative keyframe/frame decode counters for the recovery viewer — the most
  * recent WHEP subscription, so the last peer connection the hook recorded
  * (#4376). Returns null when no inbound-video stat is available yet (the fresh
@@ -534,17 +558,25 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       }, "capture source did not deliver H.264 frames to the WHIP publisher");
       await subscribeReader(cdp);
       timeline.mark("whepConnected");
-      // The device can be idle by the time the WHEP reader connects. Trigger a
-      // visible transition after subscription so the reader receives a fresh
-      // encoded access unit rather than waiting on an earlier keyframe.
-      await changeFixture();
-      await waitForDecodedFrames(cdp, 0, "browser did not decode device video");
+      // #4383: the screen has been static since capture started (fixture launched, no further
+      // input), so this exercises a late viewer joining an idle stream. The encoder's
+      // FrameHeartbeat must force a fresh surface submission — the periodic idle nudge plus a
+      // keyframe nudge on the viewer's PLI — so the reader decodes with NO visible screen change.
+      // On the pre-fix jar the reader sat black here indefinitely; this is the device coverage
+      // #4383 asked for, and it fails on the old encoder while passing on the fixed one.
+      await waitForDecodedFrames(cdp, 0, "browser did not decode device video on a static screen (late-viewer starvation, #4383)");
       timeline.mark("firstDecodedFrame");
-      const first = await videoSample(cdp);
-      decodedSize = { width: first.width, height: first.height };
+      const staticScreenFrame = await videoSample(cdp);
+      expect(staticScreenFrame.frames).toBeGreaterThan(0);
+      decodedSize = { width: staticScreenFrame.width, height: staticScreenFrame.height };
+      // A visible transition must still deliver changing video (regression guard for the
+      // active-screen path that the idle-frame backstop must not disturb). Wait on decoded
+      // CONTENT changing, not the frame count — the idle backstop advances the count on a static
+      // screen, so a count-based wait would return on a forced repeat before the transition renders.
+      await changeFixture();
+      const first = await waitForChangedSample(cdp, staticScreenFrame.sample, "browser did not decode changed video after a visible change");
       await launchFixture();
-      await waitForDecodedFrames(cdp, first.frames, "browser did not receive video after returning to the fixture");
-      const second = await videoSample(cdp);
+      const second = await waitForChangedSample(cdp, first.sample, "browser did not receive changed video after returning to the fixture");
       expect(first.width).toBeGreaterThan(0);
       expect(first.height).toBeGreaterThan(0);
       expect(second.frames).toBeGreaterThan(first.frames);

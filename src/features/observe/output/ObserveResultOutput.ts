@@ -1,5 +1,6 @@
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
+import { toSkeleton } from "./SkeletonProjection";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -75,6 +76,17 @@ export interface SanitizeObserveConfig {
    * and other shapes are never mis-compacted.
    */
   compact?: boolean;
+  /**
+   * Output projection (issue #4388). Default `"full"` returns the whole view
+   * hierarchy, today's behavior. `"skeleton"` replaces `viewHierarchy` +
+   * `elements` with the flat, actionable-only `skeleton` (a projection of the
+   * already-computed `elements`); its bounds are always the compact tuple form
+   * regardless of `compact`. The wiring layer (`finalizeToolResponse`) supplies
+   * it from the per-call `project` arg or the `observe-result-project-skeleton`
+   * flag, and only for the headline `observe` payload — embedded action
+   * observations stay `"full"` so `--actions-diff-observe` can still diff a tree.
+   */
+  project?: "full" | "skeleton";
 }
 
 /** Positional order of a compacted bounds tuple: `[left, top, right, bottom]`. */
@@ -105,6 +117,13 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
     }
   }
 
+  // Skeleton projection (issue #4388): runs before `compact`/`dropElements` so it
+  // reads object-shaped element bounds. It emits its own compact tuple bounds and
+  // removes the tree + elements, so the later steps become no-ops on those fields.
+  if (cfg.project === "skeleton") {
+    projectSkeleton(out);
+  }
+
   if (cfg.compact) {
     compactObserveBounds(out);
   }
@@ -114,6 +133,18 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
   }
 
   return out;
+}
+
+/**
+ * Replace the full tree with the actionable-only skeleton (issue #4388): set
+ * `out.skeleton` from the already-computed `elements`, then drop `viewHierarchy`
+ * and `elements`. A hierarchy-less observation (capture failure) yields an empty
+ * skeleton — still a valid, if empty, projection. Operates on the cloned copy.
+ */
+function projectSkeleton(out: ObserveResult): void {
+  out.skeleton = out.elements ? toSkeleton(out.elements) : [];
+  delete out.viewHierarchy;
+  delete out.elements;
 }
 
 /**

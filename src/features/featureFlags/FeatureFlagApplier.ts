@@ -60,6 +60,9 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "observe-result-compact":
         serverConfig.setObserveResultCompactEnabled(enabled);
         break;
+      case "observe-result-project-skeleton":
+        serverConfig.setObserveResultProjectSkeletonEnabled(enabled);
+        break;
       case "tool-results-no-structured-content":
         serverConfig.setToolResultsNoStructuredContentEnabled(enabled);
         break;

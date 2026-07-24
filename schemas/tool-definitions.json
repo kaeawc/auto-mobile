@@ -3091,7 +3091,7 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Wait for a predicate before returning the observation. Either set `for` (DSL: appear|disappear|clickable|textEquals|countStable|stable) with elementId/text, or provide a legacy predicate: elementId, text, textAny, className, contentDescription, or activeWindow. textAny is mutually exclusive with the element predicates.",
+          "description": "Wait for a predicate before returning. Either `for` (DSL: appear|disappear|clickable|textEquals|countStable|stable) with elementId/text, or a legacy predicate: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
           "properties": {
             "for": {
               "type": "string",
@@ -3103,7 +3103,7 @@
                 "countStable",
                 "stable"
               ],
-              "description": "Condition: appear/disappear/clickable/textEquals/countStable (selector) or stable (whole screen)"
+              "description": "DSL condition (selector-based, or stable=whole screen)"
             },
             "pollMs": {
               "type": "number",
@@ -3111,7 +3111,7 @@
             },
             "stableReads": {
               "type": "number",
-              "description": "Consecutive stable reads for countStable/stable (default 2)"
+              "description": "Stable reads for countStable/stable (default 2)"
             },
             "elementId": {
               "type": "string",
@@ -3164,11 +3164,11 @@
                 },
                 "packageName": {
                   "type": "string",
-                  "description": "Alias for appId (Android package name)"
+                  "description": "appId alias (Android package)"
                 },
                 "bundleId": {
                   "type": "string",
-                  "description": "Alias for appId (iOS bundle ID)"
+                  "description": "appId alias (iOS bundle)"
                 },
                 "activityName": {
                   "type": "string",
@@ -3194,6 +3194,47 @@
                 {
                   "required": [
                     "activityName"
+                  ]
+                }
+              ]
+            },
+            "absent": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Wait until an element matching these fields is absent (text uses contains match)",
+              "properties": {
+                "elementId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "className": {
+                  "type": "string"
+                },
+                "contentDescription": {
+                  "type": "string"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                },
+                {
+                  "required": [
+                    "className"
+                  ]
+                },
+                {
+                  "required": [
+                    "contentDescription"
                   ]
                 }
               ]
@@ -3300,14 +3341,43 @@
                   "required": [
                     "activeWindow"
                   ]
+                },
+                {
+                  "required": [
+                    "absent"
+                  ]
                 }
               ]
             }
           ]
         },
+        "settled": {
+          "description": "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
+          "type": "object",
+          "properties": {
+            "quietPeriodMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
+            }
+          },
+          "required": [
+            "quietPeriodMs"
+          ],
+          "additionalProperties": false
+        },
         "raw": {
           "description": "Include raw view hierarchy",
           "type": "boolean"
+        },
+        "project": {
+          "description": "Output projection. 'full' (default) returns the whole view hierarchy; 'skeleton' returns a flat, actionable-only list (id/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": [
+            "full",
+            "skeleton"
+          ]
         },
         "skipBackStack": {
           "description": "Skip back stack during waitFor polling",
@@ -3444,7 +3514,12 @@
           }
         }
       },
-      "then": false
+      "then": false,
+      "dependentRequired": {
+        "settled": [
+          "waitFor"
+        ]
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4337,6 +4412,59 @@
             }
           },
           "additionalProperties": {}
+        },
+        "skeleton": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "bounds": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, independent of the --observe-result-compact flag."
+              },
+              "affordances": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "tap",
+                    "long-press",
+                    "input",
+                    "scroll",
+                    "toggle"
+                  ]
+                }
+              },
+              "checked": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "bounds",
+              "affordances"
+            ],
+            "additionalProperties": {}
+          }
         },
         "activeWindow": {
           "type": "object",
@@ -5514,6 +5642,285 @@
             "ios"
           ]
         },
+        "waitFor": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Wait for a predicate before returning. Either `for` (DSL: appear|disappear|clickable|textEquals|countStable|stable) with elementId/text, or a legacy predicate: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
+          "properties": {
+            "for": {
+              "type": "string",
+              "enum": [
+                "appear",
+                "disappear",
+                "clickable",
+                "textEquals",
+                "countStable",
+                "stable"
+              ],
+              "description": "DSL condition (selector-based, or stable=whole screen)"
+            },
+            "pollMs": {
+              "type": "number",
+              "description": "Poll interval ms (default 150)"
+            },
+            "stableReads": {
+              "type": "number",
+              "description": "Stable reads for countStable/stable (default 2)"
+            },
+            "elementId": {
+              "type": "string",
+              "description": "Element resource ID / accessibility identifier"
+            },
+            "text": {
+              "type": "string",
+              "description": "Element text; for `for:textEquals` the exact expected value"
+            },
+            "textAny": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered text variants; first visible match wins"
+            },
+            "className": {
+              "type": "string",
+              "description": "Element class name"
+            },
+            "contentDescription": {
+              "type": "string",
+              "description": "Element content description / accessibility label"
+            },
+            "matchType": {
+              "type": "string",
+              "enum": [
+                "all",
+                "any"
+              ],
+              "description": "Whether element predicates must all match one node, or any one may match"
+            },
+            "textMatch": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "contains",
+                "regex"
+              ],
+              "description": "How to match waitFor.text; does not affect contentDescription"
+            },
+            "activeWindow": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Foreground app/window predicates (provide an app id or activityName)",
+              "properties": {
+                "appId": {
+                  "type": "string",
+                  "description": "Foreground app bundle ID / package name"
+                },
+                "packageName": {
+                  "type": "string",
+                  "description": "appId alias (Android package)"
+                },
+                "bundleId": {
+                  "type": "string",
+                  "description": "appId alias (iOS bundle)"
+                },
+                "activityName": {
+                  "type": "string",
+                  "description": "Foreground Android activity name (Android-only)"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "appId"
+                  ]
+                },
+                {
+                  "required": [
+                    "packageName"
+                  ]
+                },
+                {
+                  "required": [
+                    "bundleId"
+                  ]
+                },
+                {
+                  "required": [
+                    "activityName"
+                  ]
+                }
+              ]
+            },
+            "absent": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Wait until an element matching these fields is absent (text uses contains match)",
+              "properties": {
+                "elementId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "className": {
+                  "type": "string"
+                },
+                "contentDescription": {
+                  "type": "string"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                },
+                {
+                  "required": [
+                    "className"
+                  ]
+                },
+                {
+                  "required": [
+                    "contentDescription"
+                  ]
+                }
+              ]
+            },
+            "container": {
+              "type": "object",
+              "description": "Scope the match to a container element (by elementId or text)",
+              "properties": {
+                "elementId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Wait timeout ms (default 5000)"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "for"
+              ]
+            },
+            {
+              "required": [
+                "textAny"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "elementId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "className"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contentDescription"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "matchType"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "textMatch"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "textAny"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "for"
+                    ]
+                  }
+                ]
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                },
+                {
+                  "required": [
+                    "className"
+                  ]
+                },
+                {
+                  "required": [
+                    "contentDescription"
+                  ]
+                },
+                {
+                  "required": [
+                    "activeWindow"
+                  ]
+                },
+                {
+                  "required": [
+                    "absent"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "settled": {
+          "description": "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
+          "type": "object",
+          "properties": {
+            "quietPeriodMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
+            }
+          },
+          "required": [
+            "quietPeriodMs"
+          ],
+          "additionalProperties": false
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -5530,7 +5937,55 @@
         "url",
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": [
+          "platform",
+          "waitFor"
+        ],
+        "properties": {
+          "platform": {
+            "const": "ios"
+          },
+          "waitFor": {
+            "required": [
+              "activeWindow"
+            ],
+            "properties": {
+              "activeWindow": {
+                "required": [
+                  "activityName"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "appId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "bundleId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "packageName"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": false,
+      "dependentRequired": {
+        "settled": [
+          "waitFor"
+        ]
+      }
     }
   },
   {
@@ -6513,7 +6968,7 @@
   },
   {
     "name": "settleObserve",
-    "description": "Observe once the screen stops changing (structural settle); returns only the final snapshot.",
+    "description": "Observe once the screen stops changing; returns only the final snapshot.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -6526,7 +6981,7 @@
           ]
         },
         "timeoutMs": {
-          "description": "Hard budget ms (default 2500)",
+          "description": "Budget ms (default 2500)",
           "type": "number"
         },
         "pollMs": {
@@ -6534,7 +6989,7 @@
           "type": "number"
         },
         "stableReads": {
-          "description": "Consecutive structurally-equal snapshots to settle (default 2)",
+          "description": "Equal snapshots to settle (default 2)",
           "type": "number"
         },
         "sessionUuid": {
@@ -9651,7 +10106,7 @@
   },
   {
     "name": "waitForCondition",
-    "description": "Wait until a predicate holds: appear|disappear|clickable|textEquals|countStable.",
+    "description": "Wait until a predicate holds (appear/disappear/clickable/textEquals/countStable).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9672,7 +10127,7 @@
             "textEquals",
             "countStable"
           ],
-          "description": "Condition: appear|disappear|clickable|textEquals|countStable"
+          "description": "appear|disappear|clickable|textEquals|countStable"
         },
         "elementId": {
           "description": "Element resource ID / accessibility identifier",
@@ -9683,7 +10138,7 @@
           "type": "string"
         },
         "timeoutMs": {
-          "description": "Hard budget ms (default 5000)",
+          "description": "Budget ms (default 5000)",
           "type": "number"
         },
         "pollMs": {
@@ -9691,7 +10146,7 @@
           "type": "number"
         },
         "stableReads": {
-          "description": "Consecutive stable reads for countStable (default 2)",
+          "description": "Stable reads for countStable (default 2)",
           "type": "number"
         },
         "sessionUuid": {

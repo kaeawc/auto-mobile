@@ -9,7 +9,7 @@ import { IOS_FIRST_FRAME_TIMEOUT_MS } from "../../src/features/webrtc/IosH264Sou
  * `whipConnected` to `firstEncodedFrame` — the exact interval MediaMTX's
  * `webrtcTrackGatherTimeout` governs.
  *
- * iOS samples, n=6 (ms): 3357, 4164, 6158, 6436, 10571, 15065
+ * iOS samples, n=6 (ms): 3356, 4164, 6158, 6436, 10570, 15065
  *   runs 30061346419, 30061350168, 30058014124/2, 30061342714, 30061358682, 30061354391
  * Android samples, n=3 (ms): 5141, 5164, 5924
  *

@@ -34,7 +34,7 @@ webrtcAddress: :8889
 # 30s is a measured value, not a guess. Elapsed WHIP-connected -> first H.264
 # frame on the hosted device lanes (issue #4345, instrumentation from #4343):
 #
-#   iOS     n=6: 3357, 4164, 6158, 6436, 10571, 15065 ms  -> p50 6297, p95 15065
+#   iOS     n=6: 3356, 4164, 6158, 6436, 10570, 15065 ms  -> p50 6297, p95 15065
 #   Android n=3: 5141, 5164, 5924 ms
 #
 # iOS is bimodal — a 3-6s cluster and a 10-15s tail — so the p95 is ~15s and this

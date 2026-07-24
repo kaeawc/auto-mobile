@@ -352,6 +352,12 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (!Number.isInteger(port) || port <= 0) {
       throw new ActionableError(`adb forward returned an invalid port: "${forward.stdout.trim()}"`);
     }
+    if (!this.running) {
+      // This forward completed after stop() snapshotted its resources. It is
+      // still ours because this call just created it, so remove it directly.
+      await this.removeForward(port);
+      return null;
+    }
     this.forwardedPort = port;
     return port;
   }
@@ -947,7 +953,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         continue;
       }
       const ageMs = deviceElapsedRealtimeMs - heartbeatElapsedRealtimeMs;
-      if (ageMs < STALE_LEASE_MS) {
+      // elapsedRealtime resets when Android reboots. A negative age therefore
+      // proves this persisted lease belongs to a previous boot.
+      if (ageMs >= 0 && ageMs < STALE_LEASE_MS) {
         continue;
       }
       logger.info(
@@ -972,7 +980,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       lease.socketName === session.socketName &&
       lease.ownerPid === session.ownerPid &&
       lease.deviceSerial === session.deviceSerial &&
-      lease.pid === expectedProcessId
+      // A cancellation can arrive after the server persisted its lease but
+      // before VIDEO_SESSION_READY handed its PID back to the host. The
+      // lease identity plus terminateProcessIfMatching's argv check still
+      // make that owned cleanup safe.
+      (expectedProcessId === null || lease.pid === expectedProcessId)
     ) {
       await this.removeForwardIfMatching(adb, lease.forwardPort, lease.socketName);
       await this.terminateProcessIfMatching(adb, lease);

@@ -123,6 +123,9 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   let forwardedSocket: string | null = null;
   const leaseOutput = (overrides.leaseOutput as string | undefined) ?? "";
   const deviceUptimeMs = (overrides.deviceUptimeMs as number | undefined) ?? 100_000;
+  const forwardResult = overrides.forwardResult as
+    | Promise<{ stdout: string; stderr: string; exitCode: number }>
+    | undefined;
   const processCommandLine =
     (overrides.processCommandLine as string | undefined) ??
     `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`;
@@ -135,6 +138,9 @@ function makeSource(overrides: Record<string, unknown> = {}) {
           commands.push(command);
           if (command.startsWith("forward tcp:0")) {
             forwardedSocket = command.split("localabstract:")[1] ?? null;
+            if (forwardResult) {
+              return forwardResult;
+            }
             return { stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 };
           }
           if (command === "forward --list") {
@@ -455,6 +461,27 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.commands.some(c => c.includes("pkill"))).toBe(false);
   });
 
+  test("removes a forward created after stop races startup", async () => {
+    let resolveForward!: (result: { stdout: string; stderr: string; exitCode: number }) => void;
+    const forwardResult = new Promise<{ stdout: string; stderr: string; exitCode: number }>(
+      resolve => {
+        resolveForward = resolve;
+      }
+    );
+    const ctx = makeSource({ forwardResult });
+
+    const startPromise = ctx.source.start();
+    await tick();
+    await tick();
+    expect(ctx.commands).toContain(`forward tcp:0 localabstract:${SESSION_SOCKET}`);
+
+    const stopPromise = ctx.source.stop();
+    resolveForward({ stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 });
+    await Promise.all([startPromise, stopPromise]);
+
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+  });
+
   test("rejects start (for fallback) when the server never becomes ready", async () => {
     const ctx = makeSource({ readyTimeoutMs: 5000 });
     const startPromise = ctx.source.start();
@@ -466,6 +493,35 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.errors).toEqual([]);
     expect(ctx.processes[0].killed).toContain("SIGINT");
     expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+  });
+
+  test("cleans up a matching lease when stop wins before PID handoff", async () => {
+    const lease = JSON.stringify({
+      version: 1,
+      socketName: SESSION_SOCKET,
+      sessionToken: SESSION_TOKEN,
+      pid: 1234,
+      ownerPid: process.pid,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: Number(FORWARD_PORT),
+      startedAtMs: 1_000,
+      heartbeatAtMs: 95_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: lease,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000${SESSION_TOKEN}`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick(); // startup reached the server, but it has not emitted readiness.
+    await ctx.source.stop();
+    ctx.processes[0].exit();
+    await expect(startPromise).rejects.toThrow(/exited before ready/);
+
+    expect(ctx.commands).toContain("shell kill -2 1234");
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_TOKEN}.json`);
   });
 
   test("rejects start when the server exits before ready", async () => {
@@ -772,6 +828,39 @@ describe("PersistentEncoderH264Source", () => {
 
     expect(ctx.commands).not.toContain("forward --remove tcp:61234");
     expect(ctx.commands).not.toContain("shell kill -2 987");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("reconciles a stale lease from before the device rebooted", async () => {
+    const staleLeaseBeforeReboot = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 120_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLeaseBeforeReboot,
+      deviceUptimeMs: 5_000,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:61234");
+    expect(ctx.commands).toContain("shell kill -2 987");
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
 
     ctx.processes[0].ready();
     await startPromise;

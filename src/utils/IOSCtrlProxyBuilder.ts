@@ -34,6 +34,10 @@ import {
   SKIP_CTRL_PROXY_DOWNLOAD_ENV,
   isTruthyEnvValue,
 } from "./ctrlProxyDownloadControl";
+import {
+  type IosPrerequisiteDetector,
+  DefaultIosPrerequisiteDetector
+} from "./ios-cmdline-tools/IosPrerequisiteDetector";
 
 /**
  * Result of CtrlProxy download/install
@@ -60,6 +64,16 @@ interface CtrlProxyIosBuildConfig {
 interface CtrlProxyIosBuilderDependencies {
   downloader?: CtrlProxyIosBundleDownloader;
 }
+
+/**
+ * The narrow builder surface {@link IOSCtrlProxyBuilder.doPrefetch} drives.
+ * Exposed so the prefetch gate can be tested without a real build/download
+ * (issue #4407); grow it only when the prefetch needs another method.
+ */
+export type PrefetchBuilder = Pick<
+  IOSCtrlProxyBuilder,
+  "needsRebuild" | "getBuildProductsPath" | "getXctestrunPath" | "build"
+>;
 
 type IOSCtrlProxyPlatform = "simulator" | "device";
 
@@ -98,6 +112,12 @@ export class IOSCtrlProxyBuilder {
   private static expectedRunnerChecksumOverride: string | null = null;
   private static expectedRunnerChecksumTargetOverride: RunnerSha256Target | null = null;
   private static timer: Timer = defaultTimer;
+
+  // Gate that decides whether the startup runner-bundle prefetch should run at
+  // all (issue #4407). Skips cleanly on hosts without a usable Xcode toolchain.
+  private static iosPrerequisiteDetector: IosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
+  // Test seam for the builder the static prefetch drives; null uses getInstance().
+  private static prefetchBuilderOverride: PrefetchBuilder | null = null;
 
   // Singleton instances per configuration
   private static instances: Map<string, IOSCtrlProxyBuilder> = new Map();
@@ -163,6 +183,8 @@ export class IOSCtrlProxyBuilder {
     IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
     IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = null;
     IOSCtrlProxyBuilder.timer = defaultTimer;
+    IOSCtrlProxyBuilder.iosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
+    IOSCtrlProxyBuilder.prefetchBuilderOverride = null;
   }
 
   /**
@@ -177,6 +199,16 @@ export class IOSCtrlProxyBuilder {
    */
   public static setExpectedChecksumForTesting(checksum: string | null): void {
     IOSCtrlProxyBuilder.expectedChecksumOverride = checksum;
+  }
+
+  /** Override the iOS-prerequisite gate for the prefetch (issue #4407). Null restores the default detector. */
+  public static setIosPrerequisiteDetectorForTesting(detector: IosPrerequisiteDetector | null): void {
+    IOSCtrlProxyBuilder.iosPrerequisiteDetector = detector ?? new DefaultIosPrerequisiteDetector();
+  }
+
+  /** Override the builder driven by the static prefetch (issue #4407). Null restores getInstance(). */
+  public static setPrefetchBuilderForTesting(builder: PrefetchBuilder | null): void {
+    IOSCtrlProxyBuilder.prefetchBuilderOverride = builder;
   }
 
   public static setExpectedRunnerChecksumForTesting(
@@ -550,7 +582,20 @@ export class IOSCtrlProxyBuilder {
    * Internal prefetch implementation
    */
   private static async doPrefetch(): Promise<CtrlProxyIosBuildResult | null> {
-    const builder = IOSCtrlProxyBuilder.getInstance();
+    // Skip cleanly on hosts that cannot consume the runner. Without the Xcode
+    // toolchain (xcrun/xcodebuild) the bundle can never be installed or run, so
+    // there is no reason to download and extract it at startup (issue #4407).
+    // Returning null (not throwing) keeps the daemon healthy and non-iOS
+    // workflows intact; the on-demand build path still runs when a device connects.
+    if (!(await IOSCtrlProxyBuilder.iosPrerequisiteDetector.hasIosPrerequisites())) {
+      logger.info(
+        "[IOSCtrlProxyBuilder] Prefetch skipped: iOS prerequisites (xcrun/xcodebuild) not detected; " +
+        "the runner bundle is only needed for iOS device work"
+      );
+      return null;
+    }
+
+    const builder: PrefetchBuilder = IOSCtrlProxyBuilder.prefetchBuilderOverride ?? IOSCtrlProxyBuilder.getInstance();
     const needsDownload = await builder.needsRebuild();
     if (!needsDownload) {
       const buildPath = await builder.getBuildProductsPath();

@@ -19,13 +19,31 @@ export {
   IOSScreenCaptureHelper,
   IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES,
   NATIVE_FRAME_METRICS_PREFIX,
+  IOS_HELPER_STOP_GRACE_MS,
   SIMULATOR_FPS_DEFAULT,
   SIMULATOR_FPS_MAX,
   SIMULATOR_FPS_MIN,
   type CaptureTarget,
   type HelperSpawner,
+  type HelperProcessGroupKiller,
   type IosScreenCaptureHelperOptions,
   type IosScreenCaptureHelperEvents,
   type FrameDeliveryScheduler,
   type NativeFrameMetrics,
+  type IosScreenCaptureReadiness,
+  type IosScreenCaptureReadinessPhase,
 } from "./IOSScreenCaptureHelper";
+export {
+  IOSSimulatorCaptureHelperPool,
+  IOS_SIMULATOR_HELPER_IDLE_TTL_MS,
+  iosSimulatorCaptureHelperPool,
+  type IosSimulatorCaptureHelperLease,
+  type SimulatorCaptureHelperPoolOptions,
+} from "./IOSSimulatorCaptureHelperPool";
+export {
+  ScreenCaptureHelperProvider,
+  SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,
+  SCREEN_CAPTURE_HELPER_CACHE_FILENAME,
+  SCREEN_CAPTURE_HELPER_METADATA_FILENAME,
+  type ScreenCaptureHelperMetadata,
+} from "./ScreenCaptureHelperProvider";

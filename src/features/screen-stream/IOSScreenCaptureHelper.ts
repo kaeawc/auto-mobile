@@ -1,9 +1,11 @@
 import {
   spawn as nodeSpawn,
   type ChildProcessWithoutNullStreams,
+  type SpawnOptions,
 } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { logger } from "../../utils/logger";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   type DecodedFrame,
   type DecodedAudio,
@@ -24,8 +26,11 @@ export const NATIVE_FRAME_METRICS_PREFIX = "automobile-frame-metrics:";
 
 export type HelperSpawner = (
   command: string,
-  args: string[]
+  args: string[],
+  options: SpawnOptions
 ) => ChildProcessWithoutNullStreams;
+
+export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
 
 /**
  * What the helper should capture. Either a USB-connected iOS device (via
@@ -50,6 +55,26 @@ export interface IosScreenCaptureHelperOptions {
   now?: () => number;
   /** Scheduling seam for tests and embedders with a controlled event loop. */
   frameDeliveryScheduler?: FrameDeliveryScheduler;
+  /** Timer seam for shutdown escalation tests. */
+  timer?: Timer;
+  /** Time to allow graceful helper shutdown before escalating to SIGKILL. */
+  stopGraceMs?: number;
+  /** Override process-group cleanup for tests. */
+  processGroupKiller?: HelperProcessGroupKiller;
+}
+
+export type IosScreenCaptureReadinessPhase =
+  | "helper-executable-found"
+  | "helper-process-spawned"
+  | "permission-ready"
+  | "target-resolved"
+  | "capture-started"
+  | "first-frame";
+
+export interface IosScreenCaptureReadiness {
+  phase: IosScreenCaptureReadinessPhase;
+  atMs: number;
+  detail?: string;
 }
 
 export interface IosScreenCaptureHelperEvents {
@@ -59,6 +84,7 @@ export interface IosScreenCaptureHelperEvents {
   audio: (audio: DecodedAudio) => void;
   malformed: (error: MalformedFrameError) => void;
   stderr: (line: string) => void;
+  readiness: (status: IosScreenCaptureReadiness) => void;
   exit: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   error: (error: Error) => void;
 }
@@ -95,6 +121,9 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   private readonly binaryPath: string;
   private readonly target: CaptureTarget;
   private readonly spawner: HelperSpawner;
+  private readonly timer: Timer;
+  private readonly stopGraceMs: number;
+  private readonly processGroupKiller: HelperProcessGroupKiller;
   private readonly decoder = new FrameDecoder();
   private readonly frameQueue: LatestFrameQueue;
   private readonly frameDeliveryScheduler: FrameDeliveryScheduler;
@@ -107,7 +136,10 @@ export class IOSScreenCaptureHelper extends EventEmitter {
     super();
     this.binaryPath = options.binaryPath;
     this.target = options.target;
-    this.spawner = options.spawner ?? (nodeSpawn as HelperSpawner);
+    this.spawner = options.spawner ?? defaultHelperSpawner;
+    this.timer = options.timer ?? defaultTimer;
+    this.stopGraceMs = options.stopGraceMs ?? IOS_HELPER_STOP_GRACE_MS;
+    this.processGroupKiller = options.processGroupKiller ?? defaultProcessGroupKiller;
     this.frameQueue = new LatestFrameQueue({
       maxFrameBytes: IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES,
       now: options.now ?? Date.now,
@@ -145,8 +177,13 @@ export class IOSScreenCaptureHelper extends EventEmitter {
     }
 
     const args = buildArgs(this.target);
-    const proc = this.spawner(this.binaryPath, args);
+    this.emitReadiness("helper-executable-found", this.binaryPath);
+    const proc = this.spawner(this.binaryPath, args, {
+      detached: process.platform === "darwin",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     this.process = proc;
+    this.emitReadiness("helper-process-spawned", `pid=${proc.pid ?? "?"}`);
 
     proc.stdout.on("data", chunk => {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -193,16 +230,34 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   async stop(): Promise<{ code: number | null; signal: NodeJS.Signals | null } | null> {
     const proc = this.process;
     if (proc === null) {return null;}
-    if (proc.exitCode === null && !proc.killed) {
-      proc.kill("SIGTERM");
+
+    if (proc.exitCode !== null || proc.killed) {
+      const result = await (this.exitPromise ?? Promise.resolve(null));
+      this.cleanupProcess(proc);
+      return result;
     }
-    const result = await (this.exitPromise ?? Promise.resolve(null));
-    proc.stdout.removeAllListeners();
-    proc.stderr.removeAllListeners();
-    proc.removeAllListeners();
-    this.frameQueue.clear();
-    this.process = null;
-    return result;
+    proc.kill("SIGTERM");
+    const result = await this.waitForExitWithinGrace();
+    if (result !== null) {
+      this.cleanupProcess(proc);
+      return result;
+    }
+
+    logger.warn(
+      `[IOSScreenCaptureHelper] helper pid=${proc.pid ?? "?"} did not exit after SIGTERM; escalating to SIGKILL`
+    );
+    proc.kill("SIGKILL");
+    if (process.platform === "darwin" && proc.pid !== undefined) {
+      try {
+        this.processGroupKiller(proc.pid, "SIGKILL");
+      } catch (error) {
+        logger.debug(
+          `[IOSScreenCaptureHelper] process-group cleanup failed for pid=${proc.pid}: ${error}`
+        );
+      }
+    }
+    this.cleanupProcess(proc);
+    return { code: proc.exitCode, signal: proc.signalCode ?? "SIGKILL" };
   }
 
   private appendStderr(text: string): void {
@@ -250,6 +305,53 @@ export class IOSScreenCaptureHelper extends EventEmitter {
       return;
     }
     this.emit("stderr", line);
+    this.emitReadinessFromMarker(line);
+  }
+
+  private async waitForExitWithinGrace(): Promise<{
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  } | null> {
+    const exitPromise = this.exitPromise ?? Promise.resolve(null);
+    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<null>(resolve => {
+      timeout = this.timer.setTimeout(() => resolve(null), this.stopGraceMs);
+    });
+    try {
+      return await Promise.race([exitPromise, timedOut]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private cleanupProcess(proc: ChildProcessWithoutNullStreams): void {
+    proc.stdout.removeAllListeners();
+    proc.stderr.removeAllListeners();
+    proc.removeAllListeners();
+    this.frameQueue.clear();
+    this.frameDeliveryScheduled = false;
+    if (this.process === proc) {
+      this.process = null;
+    }
+  }
+
+  private emitReadinessFromMarker(line: string): void {
+    const marker = line.trim();
+    if (marker.startsWith("capture-phase: permission-ready")) {
+      this.emitReadiness("permission-ready");
+    } else if (marker.startsWith("capture-phase: resolved-window")) {
+      this.emitReadiness("target-resolved", marker);
+    } else if (marker.startsWith("capture-phase: capture-started")) {
+      this.emitReadiness("capture-started", marker);
+    } else if (marker.startsWith("capture-phase: first-frame")) {
+      this.emitReadiness("first-frame", marker);
+    }
+  }
+
+  private emitReadiness(phase: IosScreenCaptureReadinessPhase, detail?: string): void {
+    this.emit("readiness", { phase, atMs: this.timer.now(), detail });
   }
 
   private static readonly STDERR_BUFFER_MAX = 64 * 1024;
@@ -301,6 +403,15 @@ const immediateFrameDeliveryScheduler: FrameDeliveryScheduler = {
   schedule(callback): void {
     setImmediate(callback);
   },
+};
+
+export const IOS_HELPER_STOP_GRACE_MS = 2_000;
+
+const defaultHelperSpawner: HelperSpawner = (command, args, options) =>
+  nodeSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+
+const defaultProcessGroupKiller: HelperProcessGroupKiller = (pid, signal) => {
+  process.kill(-pid, signal);
 };
 
 function buildArgs(target: CaptureTarget): string[] {

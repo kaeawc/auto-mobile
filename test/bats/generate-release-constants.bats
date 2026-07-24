@@ -7,6 +7,7 @@ APK_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 IPA_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RUNNER_SHA="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 VIDEO_JAR_SHA="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+HELPER_SHA="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 setup() {
   TEST_ROOT="$(mktemp -d)"
@@ -26,6 +27,7 @@ teardown() {
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -37,6 +39,7 @@ teardown() {
   grep -q "ipaSha256: \"${IPA_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q 'runnerSha256Target: "xctest"' "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "screenCaptureHelperSha256: \"${HELPER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
 @test "writes runnerSha256 in release mode" {
@@ -45,6 +48,7 @@ teardown() {
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -133,6 +137,7 @@ read_field_for_version() {
     RELEASE_VERSION="99.99.99" \
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
 
@@ -143,6 +148,7 @@ read_field_for_version() {
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
 
@@ -184,6 +190,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -217,6 +224,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -267,6 +275,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -321,6 +330,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -330,4 +340,49 @@ PY
   [ "$version_count" -eq 100 ]
   [ "$open_count" -eq "$close_count" ]
   grep -q '^  version: "nightly",$' "${TEST_ROOT}/src/constants/release.ts"
+}
+
+# --- screen-capture-helper release asset ---
+
+@test "writes screenCaptureHelperSha256 into the new registry entry in release mode" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  helper_sha="$(read_field_for_version 99.99.99 screenCaptureHelperSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$helper_sha" = "$HELPER_SHA" ]
+}
+
+@test "writes NIGHTLY_CHECKSUM_ENTRY screenCaptureHelperSha256 in checksum-only mode" {
+  run env \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  helper_sha="$(read_field_for_version nightly screenCaptureHelperSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$helper_sha" = "$HELPER_SHA" ]
+}
+
+@test "rejects a release without a screen-capture-helper checksum" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SCREEN_CAPTURE_HELPER_SHA256"* ]]
+}
+
+@test "rejects a malformed SCREEN_CAPTURE_HELPER_SHA256" {
+  run env \
+    SCREEN_CAPTURE_HELPER_SHA256="not-a-sha" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SCREEN_CAPTURE_HELPER_SHA256 must be a valid SHA256"* ]]
 }

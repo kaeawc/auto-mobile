@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 import ScreenCaptureCore
@@ -137,6 +138,14 @@ case .listSimulators:
     }
 
 case .captureSimulator(let windowID, let fps, let audio):
+    guard CGPreflightScreenCaptureAccess() else {
+        logError(
+            "error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE in System Settings > Privacy & Security > Screen Recording."
+        )
+        exit(1)
+    }
+    logError(CaptureStartupMarker.line(.permissionReady))
+
     if audio {
         switch runBlocking({ try await SimulatorWindowDiscovery.discover() }) {
         case .success(let windows):

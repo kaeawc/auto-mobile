@@ -52,13 +52,9 @@ export interface ReleaseChecksumEntry {
    */
   videoJarSha256?: string;
   /**
-   * SHA-256 of the prebuilt universal (arm64+x86_64) iOS screen-capture helper
-   * (issue #4392). Optional and absent from every existing entry: the helper is
-   * not yet attached to a release, so callers treat an absent/empty value as
-   * "unknown → the helper cannot be integrity-verified, degrade to the
-   * env override / local Swift build" (mirrors `videoJarSha256`). Populated by
-   * scripts/generate-release-constants.sh once the release job builds, signs,
-   * and attaches the binary.
+   * SHA-256 of the signed, universal macOS ScreenCaptureKit helper archive.
+   * Optional so releases predating the helper's GitHub-release delivery retain
+   * their prior, explicit development-only fallback behavior.
    */
   screenCaptureHelperSha256?: string;
 }
@@ -487,6 +483,9 @@ export function resolveIpaChecksum(env: EnvLike = process.env): string {
  */
 export const VIDEO_SERVER_JAR_FILENAME = "automobile-video.jar";
 
+/** Fixed GitHub Release asset for the signed universal macOS capture helper. */
+export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-macos-universal.zip";
+
 /**
  * video-server jar download URL honoring `AUTOMOBILE_VERSION` +
  * `AUTOMOBILE_ASSET_BASE_URL`, mirroring `resolveApkUrl`/`resolveIpaUrl`.
@@ -511,31 +510,20 @@ export function resolveVideoJarChecksum(
   return entryForPinnedVersion(env, registry)?.videoJarSha256 ?? "";
 }
 
-/**
- * Fixed asset filename of the prebuilt iOS screen-capture helper. The same name
- * is used as the CI artifact, the GitHub-release asset, and the client-side
- * cached executable (issue #4392).
- */
-export const SCREEN_CAPTURE_HELPER_FILENAME = "screen-capture-helper";
-
-/**
- * screen-capture-helper download URL honoring `AUTOMOBILE_VERSION` +
- * `AUTOMOBILE_ASSET_BASE_URL`, mirroring `resolveVideoJarUrl`.
- */
+/** Download URL for the signed macOS ScreenCaptureKit helper archive. */
 export function resolveScreenCaptureHelperUrl(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
 ): string {
-  return buildReleaseAssetUrl(SCREEN_CAPTURE_HELPER_FILENAME, resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+  return buildReleaseAssetUrl(
+    SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry
+  );
 }
 
-/**
- * Expected screen-capture-helper SHA-256 for the pinned version. Returns an
- * empty string when unknown — either the pin is absent from the registry, or the
- * matched entry predates helper delivery (no `screenCaptureHelperSha256`).
- * Callers treat an empty checksum as "unknown → degrade to the env override /
- * local Swift build" (mirrors `resolveVideoJarChecksum`, issue #4392).
- */
+/** Expected archive SHA-256 for the selected screen-capture-helper release. */
 export function resolveScreenCaptureHelperChecksum(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY

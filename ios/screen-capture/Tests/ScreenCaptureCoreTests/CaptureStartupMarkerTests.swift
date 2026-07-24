@@ -4,6 +4,10 @@ import XCTest
 final class CaptureStartupMarkerTests: XCTestCase {
     func testFormatsEachPhaseWithStablePrefix() {
         XCTAssertEqual(
+            CaptureStartupMarker.line(.permissionReady),
+            "capture-phase: permission-ready"
+        )
+        XCTAssertEqual(
             CaptureStartupMarker.line(.resolvingWindow(windowID: 32)),
             "capture-phase: resolving-window id=32"
         )
@@ -35,6 +39,7 @@ final class CaptureStartupMarkerTests: XCTestCase {
     /// misreport the capture (issue #4350).
     func testMarkersAreNotMisclassifiedBySupervisor() {
         let lines = [
+            CaptureStartupMarker.line(.permissionReady),
             CaptureStartupMarker.line(.resolvingWindow(windowID: 1)),
             CaptureStartupMarker.line(.resolvedWindow(windowID: 1, width: 2, height: 3)),
             CaptureStartupMarker.line(.startingCapture(windowID: 1, fps: 5)),

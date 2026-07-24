@@ -1,0 +1,173 @@
+import { EventEmitter } from "node:events";
+import { describe, expect, test } from "bun:test";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import type {
+  IosScreenCaptureHelperEvents,
+  IosScreenCaptureHelperOptions,
+} from "../../../src/features/screen-stream/IOSScreenCaptureHelper";
+import {
+  IOS_SIMULATOR_HELPER_IDLE_TTL_MS,
+  IOSSimulatorCaptureHelperPool,
+} from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
+
+class FakeSimulatorHelper extends EventEmitter {
+  starts = 0;
+  stops = 0;
+  isRunning = false;
+
+  start(): void {
+    this.starts++;
+    this.isRunning = true;
+  }
+
+  async stop(): Promise<null> {
+    this.stops++;
+    this.isRunning = false;
+    return null;
+  }
+
+  override on<E extends keyof IosScreenCaptureHelperEvents>(
+    event: E,
+    listener: IosScreenCaptureHelperEvents[E]
+  ): this {
+    return super.on(event, listener as (...args: any[]) => void);
+  }
+}
+
+function simulatorOptions(windowID = 42): IosScreenCaptureHelperOptions {
+  return {
+    binaryPath: "/fake/screen-capture-helper",
+    target: { kind: "simulator", windowID, fps: 15 },
+  };
+}
+
+describe("IOSSimulatorCaptureHelperPool", () => {
+  test("reuses a warm helper and replays its latest frame to the next lease", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const first = pool.acquire(simulatorOptions());
+    const firstFrames: number[] = [];
+    first.on("frame", frame => firstFrames.push(frame.header.width));
+
+    await first.start();
+    helpers[0].emit("frame", {
+      header: { width: 1, height: 1, bytesPerRow: 4, timestampMs: 1 },
+      pixels: Buffer.alloc(4),
+    });
+    await first.stop();
+
+    const second = pool.acquire(simulatorOptions());
+    const secondFrames: number[] = [];
+    second.on("frame", frame => secondFrames.push(frame.header.width));
+    await second.start();
+    helpers[0].emit("frame", {
+      header: { width: 2, height: 1, bytesPerRow: 8, timestampMs: 2 },
+      pixels: Buffer.alloc(8),
+    });
+
+    expect(helpers).toHaveLength(1);
+    expect(helpers[0].starts).toBe(1);
+    expect(firstFrames).toEqual([1]);
+    expect(secondFrames).toEqual([1, 2]);
+  });
+
+  test("does not create a helper when a lease stops before its queued attachment", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      timer,
+      idleTtlMs: 1,
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const lease = pool.acquire(simulatorOptions());
+
+    const starting = lease.start();
+    await lease.stop();
+    await starting;
+    timer.advanceTime(1);
+    await Promise.resolve();
+
+    expect(helpers).toEqual([]);
+  });
+
+  test("replaces the helper when the simulator window is recreated with a new ID", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const first = pool.acquire(simulatorOptions(42));
+    await first.start();
+    await first.stop();
+
+    const replacement = pool.acquire(simulatorOptions(99));
+    await replacement.start();
+
+    expect(helpers).toHaveLength(2);
+    expect(helpers[0].stops).toBe(1);
+    expect(helpers[1].starts).toBe(1);
+  });
+
+  test("keeps active streams for different simulator windows isolated", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const first = pool.acquire(simulatorOptions(42));
+    const second = pool.acquire(simulatorOptions(99));
+
+    await first.start();
+    await second.start();
+
+    expect(helpers).toHaveLength(2);
+    expect(helpers[0].stops).toBe(0);
+    expect(helpers[1].starts).toBe(1);
+    await pool.shutdown();
+    expect(helpers[0].stops).toBe(1);
+    expect(helpers[1].stops).toBe(1);
+  });
+
+  test("stops an idle helper at the configured TTL and on shutdown", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      timer,
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const lease = pool.acquire(simulatorOptions());
+    await lease.start();
+    await lease.stop();
+
+    timer.advanceTime(IOS_SIMULATOR_HELPER_IDLE_TTL_MS - 1);
+    expect(helpers[0].stops).toBe(0);
+    timer.advanceTime(1);
+    await Promise.resolve();
+    expect(helpers[0].stops).toBe(1);
+
+    const second = pool.acquire(simulatorOptions());
+    await second.start();
+    await pool.shutdown();
+    expect(helpers[1].stops).toBe(1);
+  });
+});

@@ -10,15 +10,18 @@ import { logger } from "./logger";
 const execFileAsync = promisify(execFile);
 
 export interface FileDownloader {
-  download(url: string, destination: string): Promise<void>;
+  download(url: string, destination: string, signal?: AbortSignal): Promise<void>;
 }
 
 export class DefaultFileDownloader implements FileDownloader {
-  public async download(url: string, destination: string): Promise<void> {
+  public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      throw new Error(`Download aborted before starting: ${url}`);
+    }
     await fs.mkdir(path.dirname(destination), { recursive: true });
 
     try {
-      await this.downloadWithCurl(url, destination);
+      await this.downloadWithCurl(url, destination, signal);
       return;
     } catch (error) {
       if (!this.isCommandUnavailable(error, "curl")) {
@@ -30,7 +33,7 @@ export class DefaultFileDownloader implements FileDownloader {
     }
 
     try {
-      await this.downloadWithWget(url, destination);
+      await this.downloadWithWget(url, destination, signal);
       return;
     } catch (error) {
       if (!this.isCommandUnavailable(error, "wget")) {
@@ -41,10 +44,10 @@ export class DefaultFileDownloader implements FileDownloader {
       });
     }
 
-    await this.downloadWithNodeHttp(url, destination, 0);
+    await this.downloadWithNodeHttp(url, destination, 0, signal);
   }
 
-  private async downloadWithCurl(url: string, destination: string): Promise<void> {
+  private async downloadWithCurl(url: string, destination: string, signal?: AbortSignal): Promise<void> {
     await execFileAsync("curl", [
       "--fail",
       "--location",
@@ -57,26 +60,32 @@ export class DefaultFileDownloader implements FileDownloader {
       "-o",
       destination,
       url
-    ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+    ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024, signal });
   }
 
-  private async downloadWithWget(url: string, destination: string): Promise<void> {
+  private async downloadWithWget(url: string, destination: string, signal?: AbortSignal): Promise<void> {
     await execFileAsync("wget", [
       "--tries=3",
       "--timeout=30",
       "-O",
       destination,
       url
-    ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+    ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024, signal });
   }
 
-  private async downloadWithNodeHttp(url: string, destination: string, redirectCount: number): Promise<void> {
+  private async downloadWithNodeHttp(
+    url: string,
+    destination: string,
+    redirectCount: number,
+    signal?: AbortSignal
+  ): Promise<void> {
     if (redirectCount > 5) {
       throw new Error(`Too many redirects while downloading ${url}`);
     }
 
     await new Promise<void>((resolve, reject) => {
       const transport = url.startsWith("https:") ? https : http;
+      const abort = (): void => request.destroy(new Error(`Download aborted: ${url}`));
       const request = transport.get(
         url,
         { headers: { "User-Agent": "auto-mobile" } },
@@ -85,7 +94,7 @@ export class DefaultFileDownloader implements FileDownloader {
           if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
             response.resume();
             const redirectedUrl = new URL(response.headers.location, url).toString();
-            void this.downloadWithNodeHttp(redirectedUrl, destination, redirectCount + 1)
+            void this.downloadWithNodeHttp(redirectedUrl, destination, redirectCount + 1, signal)
               .then(resolve)
               .catch(reject);
             return;
@@ -111,6 +120,11 @@ export class DefaultFileDownloader implements FileDownloader {
         request.destroy(new Error(`Download request timed out for ${url}`));
       });
       request.on("error", reject);
+      request.once("close", () => signal?.removeEventListener("abort", abort));
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) {
+        abort();
+      }
     });
   }
 

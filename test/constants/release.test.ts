@@ -25,8 +25,11 @@ import {
   resolvePinnedVersion,
   resolveRunnerChecksum,
   resolveRunnerChecksumTarget,
+  resolveScreenCaptureHelperChecksum,
+  resolveScreenCaptureHelperUrl,
   resolveVideoJarChecksum,
   resolveVideoJarUrl,
+  SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,
   VIDEO_SERVER_JAR_FILENAME,
   type ReleaseChecksumEntry,
 } from "../../src/constants/release";
@@ -386,6 +389,40 @@ describe("resolveVideoJarChecksum (video-server jar delivery, #3830)", function(
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const jar = entry.videoJarSha256 ?? "";
       expect(jar === "" || /^[a-f0-9]{64}$/.test(jar)).toBe(true);
+    }
+  });
+});
+
+describe("screen-capture-helper release delivery", function() {
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "0.0.46",
+      apkSha256: "apk46",
+      ipaSha256: "ipa46",
+      runnerSha256: "runner46",
+      screenCaptureHelperSha256: "helper46",
+    },
+    { version: "0.0.45", apkSha256: "apk45", ipaSha256: "ipa45", runnerSha256: "runner45" },
+  ];
+
+  test("builds a version-pinned release URL", function() {
+    expect(resolveScreenCaptureHelperUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.46/${SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME}`
+    );
+    expect(resolveScreenCaptureHelperUrl({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.45/${SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME}`
+    );
+  });
+
+  test("resolves the matching helper checksum and leaves pre-delivery releases unverifiable", function() {
+    expect(resolveScreenCaptureHelperChecksum({}, registry)).toBe("helper46");
+    expect(resolveScreenCaptureHelperChecksum({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe("");
+  });
+
+  test("registry helper checksums are empty or SHA-256 values", function() {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const checksum = entry.screenCaptureHelperSha256 ?? "";
+      expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
     }
   });
 });

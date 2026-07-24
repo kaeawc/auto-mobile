@@ -10,6 +10,7 @@
 SCRIPT_SRC="scripts/ci/verify-release-integrity.sh"
 VERSION="0.0.40"
 RUNNER_SHA="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+HELPER_SHA="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 setup() {
   TEST_ROOT="$(mktemp -d)"
@@ -24,9 +25,12 @@ teardown() {
   rm -rf "$TEST_ROOT"
 }
 
-# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha>
+# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha> [helper_sha]
 write_fixtures() {
-  local ver="$1" gradle="$2" registry="$3" runner="$4"
+  local ver="$1" gradle="$2" registry="$3" runner="$4" helper="$HELPER_SHA"
+  if [ "$#" -ge 5 ]; then
+    helper="$5"
+  fi
 
   cat > "${TEST_ROOT}/package.json" <<EOF
 { "name": "@kaeawc/auto-mobile", "version": "${ver}" }
@@ -57,6 +61,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     ipaSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     runnerSha256: "${runner}",
     runnerSha256Target: "${runner_target:-xctest}",
+    screenCaptureHelperSha256: "${helper}",
   },
 ];
 export const IOS_CTRL_PROXY_APP_HASH: string = "";
@@ -210,6 +215,20 @@ PY
   run_gate "$VERSION"
   [ "$status" -ne 0 ]
   [[ "$output" == *"registry[0].runnerSha256"* ]]
+}
+
+@test "fails when screen-capture-helper sha256 is empty" {
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" ""
+  run_gate "$VERSION"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"registry[0].screenCaptureHelperSha256"* ]]
+}
+
+@test "fails when screen-capture-helper sha256 is malformed" {
+  write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" "not-a-valid-sha"
+  run_gate "$VERSION"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"registry[0].screenCaptureHelperSha256"* ]]
 }
 
 @test "fails when runner sha256 target is not the CtrlProxy xctest executable" {

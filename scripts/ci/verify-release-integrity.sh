@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Verify release integrity before publishing.
 #
-# Two independent gaps this gate closes (see issue #2745):
+# Three independent gaps this gate closes (see issue #2745):
 #   1. Version equality — the npm version, every release manifest, the checksum
 #      registry, and the git tag must all name the SAME version. Nothing else
 #      enforces this; bump-versions.sh merely writes them together.
 #   2. iOS CtrlProxy executable checksum — registry[0].runnerSha256 must be a real
 #      sha256, not the "" default. Empty silently disables runner integrity
 #      verification for the simulator path.
+#   3. macOS ScreenCaptureKit helper checksum —
+#      registry[0].screenCaptureHelperSha256 must name the signed GitHub Release
+#      archive. Empty would make release-only helper delivery unverifiable.
 #
 # package.json is the canonical version source; every other value is checked
 # against the <version> argument (the git tag), which prepare-release keeps
@@ -104,6 +107,7 @@ check "src/constants/release.ts registry[0].version" "$registry_version"
 # truth with nightly.yml + verify-artifact-sha256.sh).
 runner_sha="$(bun "$RELEASE_READER" runnerSha256 "$RELEASE_TS")"
 runner_sha_target="$(bun "$RELEASE_READER" runnerSha256Target "$RELEASE_TS")"
+screen_capture_helper_sha="$(bun "$RELEASE_READER" screenCaptureHelperSha256 "$RELEASE_TS")"
 
 if [ "$runner_sha_target" != "xctest" ]; then
   errors+=("registry[0].runnerSha256Target must be 'xctest', got '${runner_sha_target:-missing}'")
@@ -143,6 +147,12 @@ else
   errors+=("registry[0].runnerSha256 must be a 64-char hex sha256, got '${runner_sha}' (empty disables runner integrity verification)")
 fi
 
+if [[ "$screen_capture_helper_sha" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "  OK  registry[0].screenCaptureHelperSha256 populated"
+else
+  errors+=("registry[0].screenCaptureHelperSha256 must be a 64-char hex sha256, got '${screen_capture_helper_sha}'")
+fi
+
 if [ "${#errors[@]}" -gt 0 ]; then
   echo ""
   echo "ERROR: release integrity check failed for version '${EXPECTED}':"
@@ -151,7 +161,7 @@ if [ "${#errors[@]}" -gt 0 ]; then
   done
   echo ""
   echo "All manifests + the checksum registry + the git tag must name the same"
-  echo "version, and the iOS CtrlProxy executable checksum must be populated, before releasing."
+  echo "version, and the iOS CtrlProxy plus screen-capture-helper checksums must be populated, before releasing."
   exit 1
 fi
 

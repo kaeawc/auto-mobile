@@ -15,6 +15,7 @@ import Foundation
 /// - `startingCapture` seen, `captureStarted` absent → stalled in `startCapture()`
 /// - `captureStarted` seen, `firstFrame` absent      → started but delivered no frames
 public enum CaptureStartupPhase: Equatable {
+    case permissionReady
     case resolvingWindow(windowID: UInt32)
     case resolvedWindow(windowID: UInt32, width: Int, height: Int)
     case startingCapture(windowID: UInt32, fps: Int)
@@ -32,6 +33,8 @@ public enum CaptureStartupMarker {
 
     public static func line(_ phase: CaptureStartupPhase) -> String {
         switch phase {
+        case .permissionReady:
+            return "\(prefix) permission-ready"
         case let .resolvingWindow(windowID):
             return "\(prefix) resolving-window id=\(windowID)"
         case let .resolvedWindow(windowID, width, height):

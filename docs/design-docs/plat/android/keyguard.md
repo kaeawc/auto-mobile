@@ -79,15 +79,19 @@ iPhone 16 Pro, iOS 18.6). So on iOS the tool wakes the device and swipes the
 non-secure lock screen away via the existing gesture primitives, and **ignores
 any `pin`**. There is no iOS lock-state read equivalent to Android's dumpsys.
 
-## Remembering how to unlock (`device_sessions`)
+## Remembering how to unlock (`device_locks`)
 
 To avoid re-entering a PIN every session, `wakeAndUnlock` records how to unlock a
-device on its active session row (`device_sessions.lock_type` /
-`lock_credential`, added by the `2026_07_24_000_device_session_lock` migration).
-A freshly-supplied PIN that successfully unlocks a secure device is remembered;
-a recorded PIN is reused (and not re-persisted), and a PIN that failed to unlock
-is never stored. The credential is stored plaintext in the local, single-user
-`~/.auto-mobile` DB.
+device in a dedicated **`device_locks`** table keyed by `device_id`
+(`device_id`, `lock_type`, `lock_credential`, added by the
+`2026_07_24_000_device_locks` migration). It is deliberately **not** stored on
+`device_sessions`: a session row only exists when device-pool autolock is
+enabled, and never during boot, so session-scoped storage could not deliver
+remember-then-reuse in the default config or at boot. A freshly-supplied PIN that
+successfully unlocks a secure device is remembered; a recorded PIN is reused (and
+not re-persisted); a PIN that failed to unlock is forgotten (so a changed PIN
+does not get re-submitted into a lockout). The credential is stored plaintext in
+the local, single-user `~/.auto-mobile` DB.
 
 The **boot path** (`AndroidEmulatorClient.wakeAndUnlock`) delegates to the same
 feature: a freshly-booted emulator with a swipe lock is dismissed automatically,

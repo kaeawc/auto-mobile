@@ -4,7 +4,7 @@ import { TapOnElement } from "../features/action/TapOnElement";
 import { TapAnyElement } from "../features/action/TapAnyElement";
 import { InputText } from "../features/action/InputText";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
-import { DeviceSessionLockStore } from "../features/action/DeviceSessionLockStore";
+import { DeviceLockStore } from "../features/action/DeviceLockStore";
 import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
 import { ClearText } from "../features/action/ClearText";
 import { SelectAllText } from "../features/action/SelectAllText";
@@ -845,7 +845,7 @@ export function registerInteractionTools() {
   const wakeAndUnlockHandler = async (device: BootedDevice, args: WakeAndUnlockArgs) => {
     const iosUnlocker = device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined;
     const wakeAndUnlock = new WakeAndUnlock(device, undefined, {
-      credentialStore: new DeviceSessionLockStore(),
+      credentialStore: new DeviceLockStore(),
       iosUnlocker
     });
     const result = await wakeAndUnlock.execute(args.pin);

@@ -10,7 +10,7 @@ import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchy
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
-import { addDeviceTargetingToSchema, platformSchema, withAppIdAliases, withJsonSchemaOverride } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, JsonSchemaOverride, platformSchema, withAppIdAliases, withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeToolResultSchema } from "./toolOutputSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
@@ -22,6 +22,7 @@ import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";
+import { NodeCryptoService } from "../utils/crypto";
 
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are
@@ -55,11 +56,36 @@ const activeWindowWaitForSchema = activeWindowWaitForBaseSchema.and(z.union([
   z.object({ activityName: z.string() }).passthrough(),
 ]));
 
+// Absence / negation predicate (issue #3490 §4). Same element-matching fields as
+// a positive predicate; the wait resolves only when NO element matches these.
+const absentPredicateBaseSchema = z.object({
+  elementId: z.string().optional().describe("Resource ID / accessibility identifier that must be absent"),
+  text: z.string().optional().describe("Element text that must be absent (contains match)"),
+  className: z.string().optional().describe("Element class name that must be absent"),
+  contentDescription: z.string().optional().describe("Content description / accessibility label that must be absent"),
+}).strict();
+
+const absentPredicatePresenceSchema = z.union([
+  z.object({ elementId: z.string() }).passthrough(),
+  z.object({ text: z.string() }).passthrough(),
+  z.object({ className: z.string() }).passthrough(),
+  z.object({ contentDescription: z.string() }).passthrough(),
+]);
+
+const absentPredicateSchema = absentPredicateBaseSchema.and(absentPredicatePresenceSchema);
+
 const waitForCommonShape = {
   activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
+  absent: absentPredicateSchema.optional().describe("Wait until an element matching these fields is absent"),
   timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
   container: waitForContainerField
 };
+
+// Stability / "settled" gate (issue #3490 §3). After the waitFor predicate first
+// matches, keep observing until the view hierarchy is unchanged for this long.
+export const settledSchema = z.object({
+  quietPeriodMs: z.number().int().positive().describe("Quiet-period ms (no hierarchy change) required after waitFor matches")
+}).strict();
 
 const waitForTextAnySchema = z.object({
   textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins"),
@@ -101,11 +127,12 @@ const waitForPredicatePresenceSchema = z.union([
   z.object({ className: z.string() }).passthrough(),
   z.object({ contentDescription: z.string() }).passthrough(),
   z.object({ activeWindow: activeWindowWaitForSchema }).passthrough(),
+  z.object({ absent: absentPredicateSchema }).passthrough(),
 ]);
 
 const waitForElementSchema = waitForElementBaseSchema.and(waitForPredicatePresenceSchema);
 
-const waitForSchema = z.union([
+export const waitForSchema = z.union([
   waitForTextAnySchema,
   waitForElementSchema,
 ]);
@@ -123,13 +150,30 @@ const ELEMENT_PREDICATE_REQUIRED = [
   { required: ["className"] },
   { required: ["contentDescription"] },
 ];
+const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  description: "Wait until an element matching these fields is absent (text uses contains match)",
+  properties: {
+    elementId: { type: "string" },
+    text: { type: "string" },
+    className: { type: "string" },
+    contentDescription: { type: "string" },
+  },
+  anyOf: [
+    { required: ["elementId"] },
+    { required: ["text"] },
+    { required: ["className"] },
+    { required: ["contentDescription"] },
+  ],
+};
 const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   description:
-    "Wait for a predicate before returning the observation. Provide at least one of: " +
-    "elementId, text, textAny, className, contentDescription, or activeWindow. " +
-    "textAny is mutually exclusive with the element predicates.",
+    "Wait for a predicate before returning. Provide at least one of: elementId, text, " +
+    "textAny, className, contentDescription, activeWindow, absent. textAny excludes the " +
+    "element predicates.",
   properties: {
     elementId: { type: "string", description: "Element resource ID / accessibility identifier" },
     text: { type: "string", description: "Element text" },
@@ -159,8 +203,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
       description: "Foreground app/window predicates (provide an app id or activityName)",
       properties: {
         appId: { type: "string", description: "Foreground app bundle ID / package name" },
-        packageName: { type: "string", description: "Alias for appId (Android package name)" },
-        bundleId: { type: "string", description: "Alias for appId (iOS bundle ID)" },
+        packageName: { type: "string", description: "appId alias (Android package)" },
+        bundleId: { type: "string", description: "appId alias (iOS bundle)" },
         activityName: {
           type: "string",
           description: "Foreground Android activity name (Android-only)",
@@ -173,6 +217,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
         { required: ["activityName"] },
       ],
     },
+    absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
     container: {
       type: "object",
       description: "Scope the match to a container element (by elementId or text)",
@@ -182,6 +227,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   },
   // Enforce the same shape the runtime does: at least one predicate, and textAny
   // mutually exclusive with the element predicates / matchType / textMatch.
+  // `absent` composes with everything (including textAny), so it is not part of
+  // the textAny exclusion set.
   anyOf: [
     {
       required: ["textAny"],
@@ -191,7 +238,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     },
     {
       not: { required: ["textAny"] },
-      anyOf: [...ELEMENT_PREDICATE_REQUIRED, { required: ["activeWindow"] }],
+      anyOf: [...ELEMENT_PREDICATE_REQUIRED, { required: ["activeWindow"] }, { required: ["absent"] }],
     },
   ],
 };
@@ -225,19 +272,13 @@ const observeScopeSchema = z.object({
   overview: z.boolean().optional().describe("Collapse to a container skeleton. Needs --observe-overview.")
 }).describe("Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)");
 
-const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
-  platform: platformSchema,
-  waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
-  raw: z.boolean().optional().describe("Include raw view hierarchy"),
-  project: z.enum(["full", "skeleton"]).optional().describe(
-    "Output projection. 'full' (default) returns the whole view hierarchy; " +
-    "'skeleton' returns a flat, actionable-only list (id/label/bounds/affordances) " +
-    "in place of viewHierarchy/elements. Each skeleton id/label is directly usable " +
-    "as a tapOn selector; re-request with raw/project:'full' to disambiguate."
-  ),
-  skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
-  scope: observeScopeSchema.optional()
-})).superRefine((value, ctx) => {
+// Cross-field validation shared by `observe` and `openLink` (both carry
+// platform + waitFor + settled): iOS rejects Android-only activityName, and
+// `settled` requires a `waitFor` predicate to settle after.
+export const refineWaitForArgs = (
+  value: { platform?: "android" | "ios"; waitFor?: ObserveWaitForOptions; settled?: unknown },
+  ctx: z.RefinementCtx
+): void => {
   const activeWindow = value.waitFor?.activeWindow;
   if (
     value.platform === "ios" &&
@@ -250,7 +291,19 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
       message: "activityName is Android-only; use appId/bundleId on iOS"
     });
   }
-}), jsonSchema => {
+  if (value.settled !== undefined && value.waitFor === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["settled"],
+      message: "settled requires waitFor"
+    });
+  }
+};
+
+// Shared advertised-JSON-schema override for `observe` and `openLink`: enforce
+// the iOS activityName rule, require waitFor whenever settled is present, and
+// swap the verbose generated `waitFor` schema for the compact advertised form.
+export const overrideWaitForJsonSchema: JsonSchemaOverride = jsonSchema => {
   jsonSchema.if = {
     required: ["platform", "waitFor"],
     properties: {
@@ -274,6 +327,12 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
   };
   jsonSchema.then = false;
 
+  // settled has no meaning without a waitFor predicate to settle after.
+  jsonSchema.dependentRequired = {
+    ...(jsonSchema.dependentRequired as Record<string, string[]> | undefined),
+    settled: ["waitFor"]
+  };
+
   // Replace the verbose generated `waitFor` schema with the compact advertised
   // form. Runtime validation still uses the full zod `waitForSchema`; this only
   // shrinks what `tools/list` carries (~2064 -> ~473 tokens). The `if`/`then`
@@ -283,7 +342,22 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
   if (props && props.waitFor) {
     props.waitFor = COMPACT_WAITFOR_ADVERTISED_SCHEMA;
   }
-});
+};
+
+const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
+  platform: platformSchema,
+  waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
+  settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
+  raw: z.boolean().optional().describe("Include raw view hierarchy"),
+  project: z.enum(["full", "skeleton"]).optional().describe(
+    "Output projection. 'full' (default) returns the whole view hierarchy; " +
+    "'skeleton' returns a flat, actionable-only list (id/label/bounds/affordances) " +
+    "in place of viewHierarchy/elements. Each skeleton id/label is directly usable " +
+    "as a tapOn selector; re-request with raw/project:'full' to disambiguate."
+  ),
+  skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
+  scope: observeScopeSchema.optional()
+})).superRefine(refineWaitForArgs), overrideWaitForJsonSchema);
 
 export const observeSchema = withAppIdAliases(observeBaseSchema);
 
@@ -305,7 +379,10 @@ export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({
 
 const WAIT_FOR_POLL_INTERVAL_MS = 100;
 
-type ObserveWaitForOptions = z.infer<typeof waitForSchema>;
+export type ObserveWaitForOptions = z.infer<typeof waitForSchema>;
+export type SettledOptions = z.infer<typeof settledSchema>;
+/** waitFor options carrying the (top-level) settled gate, as threaded to {@link waitForObservation}. */
+export type WaitForWithSettled = ObserveWaitForOptions & { settled?: SettledOptions };
 type ObserveArgs = z.infer<typeof observeSchema>;
 
 const waitForContainerForFinder = (
@@ -563,6 +640,26 @@ const matchesActiveWindow = (
   return true;
 };
 
+// Absence / negation predicate (issue #3490 §4). Reuses the same element
+// matcher: the `absent` fields describe an element that must NOT be present, so
+// the predicate is satisfied exactly when no element matches them. Returns true
+// (vacuously satisfied) when no `absent` predicate is configured.
+const matchesAbsent = (
+  finder: ElementFinder,
+  waitFor: ObserveWaitForOptions,
+  viewHierarchy: ViewHierarchyResult,
+  platform?: BootedDevice["platform"]
+): boolean => {
+  if (!waitFor.absent) {
+    return true;
+  }
+  const absentAsWaitFor = {
+    ...waitFor.absent,
+    container: waitFor.container,
+  } as ObserveWaitForOptions;
+  return findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform) === null;
+};
+
 const evaluateWaitForObservation = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
@@ -574,16 +671,40 @@ const evaluateWaitForObservation = (
   const awaitedElement = needsElementMatch && observation.viewHierarchy
     ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform)
     : null;
+  // Without a hierarchy we cannot confirm the absent element is gone, so treat
+  // an unconfirmed absence as unsatisfied (keep waiting).
+  const absentSatisfied = waitFor.absent === undefined
+    ? true
+    : observation.viewHierarchy
+      ? matchesAbsent(finder, waitFor, observation.viewHierarchy, platform)
+      : false;
 
   return {
-    matched: activeWindowMatched && (!needsElementMatch || awaitedElement !== null),
+    matched: activeWindowMatched && absentSatisfied && (!needsElementMatch || awaitedElement !== null),
     awaitedElement: awaitedElement ?? undefined
   };
 };
 
+// Compact stable hash of the hierarchy node tree, used only to detect quiet
+// (settled) periods. Screen size / window metadata are excluded so cosmetic,
+// non-hierarchy churn does not defeat the gate. A missing hierarchy hashes to a
+// stable sentinel, so it counts as "quiet". Returns null when the tree cannot be
+// hashed, which the settle gate treats as unstable (never settle on it).
+const hashHierarchyForSettle = (viewHierarchy?: ViewHierarchyResult): string | null => {
+  try {
+    return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy?.hierarchy ?? null));
+  } catch (error) {
+    // Non-serializable hierarchy is unexpected; a constant sentinel would compare
+    // equal across consecutive failures and be mistaken for a quiet tree, so
+    // return null and let settleReady restart the quiet window instead.
+    logger.debug(`[observe] Failed to hash hierarchy for settle gate: ${error}`);
+    return null;
+  }
+};
+
 export const waitForObservation = async (
   observeScreen: ObserveScreen,
-  waitFor: ObserveWaitForOptions,
+  waitFor: WaitForWithSettled,
   signal?: AbortSignal,
   skipBackStack: boolean = false,
   timer: Timer = defaultTimer,
@@ -596,6 +717,7 @@ export const waitForObservation = async (
 }> => {
   const startTime = timer.now();
   const timeoutMs = waitFor.timeout ?? 5000;
+  const settled = waitFor.settled;
   const finder = new DefaultElementFinder();
   const queryOptions = {
     text: waitFor.text ?? waitFor.textAny?.[0] ?? waitFor.contentDescription,
@@ -609,8 +731,7 @@ export const waitForObservation = async (
   // exact screen state when waitFor resolved.
   const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
 
-  throwIfAborted(signal);
-  let observation = await observeScreen.execute({
+  const observeOnce = () => observeScreen.execute({
     queryOptions,
     perf: createGlobalPerformanceTracker(),
     skipWaitForFresh: false,
@@ -619,15 +740,41 @@ export const waitForObservation = async (
     skipBackStack: skipPollingOverhead || skipBackStack,
     skipScreenshot: skipPollingOverhead,
   });
+
+  // Settle gate (issue #3490 §3): once the predicate matches, hold until the
+  // hierarchy hash is unchanged for settled.quietPeriodMs. `matchedHash === null`
+  // means "no stable candidate yet"; a changed hash restarts the quiet window.
+  let matchedHash: string | null = null;
+  let quietStart = startTime;
+  const settleReady = (observation: ObserveResult): boolean => {
+    if (!settled) {
+      return true;
+    }
+    const hash = hashHierarchyForSettle(observation.viewHierarchy);
+    // An unhashable tree (null) is never quiet: fall through to restart the
+    // window so the gate cannot resolve early on an unverifiable snapshot.
+    if (hash === null || matchedHash === null || hash !== matchedHash) {
+      matchedHash = hash;
+      quietStart = timer.now();
+      return false;
+    }
+    return timer.now() - quietStart >= settled.quietPeriodMs;
+  };
+
+  throwIfAborted(signal);
+  let observation = await observeOnce();
   let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
-  if (waitEvaluation.matched) {
+  if (waitEvaluation.matched && settleReady(observation)) {
     return {
       observation,
       awaitedElement: waitEvaluation.awaitedElement,
       awaitDuration: timer.now() - startTime,
       awaitTimeout: false
     };
+  }
+  if (!waitEvaluation.matched) {
+    matchedHash = null;
   }
 
   if (timer.now() - startTime >= timeoutMs) {
@@ -642,24 +789,20 @@ export const waitForObservation = async (
     await timer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
     throwIfAborted(signal);
 
-    observation = await observeScreen.execute({
-      queryOptions,
-      perf: createGlobalPerformanceTracker(),
-      skipWaitForFresh: false,
-      minTimestamp: startTime,
-      signal,
-      skipBackStack: skipPollingOverhead || skipBackStack,
-      skipScreenshot: skipPollingOverhead,
-    });
+    observation = await observeOnce();
     waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
     if (waitEvaluation.matched) {
-      return {
-        observation,
-        awaitedElement: waitEvaluation.awaitedElement,
-        awaitDuration: timer.now() - startTime,
-        awaitTimeout: false
-      };
+      if (settleReady(observation)) {
+        return {
+          observation,
+          awaitedElement: waitEvaluation.awaitedElement,
+          awaitDuration: timer.now() - startTime,
+          awaitTimeout: false
+        };
+      }
+    } else {
+      matchedHash = null;
     }
   }
 
@@ -681,7 +824,7 @@ export function registerObserveTools() {
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome = waitFor
-        ? await waitForObservation(observeScreen, waitFor, signal, args.skipBackStack ?? false, defaultTimer, device.platform)
+        ? await waitForObservation(observeScreen, { ...waitFor, settled: args.settled }, signal, args.skipBackStack ?? false, defaultTimer, device.platform)
         : null;
       const result = waitOutcome
         ? waitOutcome.observation

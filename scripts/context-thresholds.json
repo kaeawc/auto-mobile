@@ -1,18 +1,18 @@
 {
   "version": "1.0.0",
   "metadata": {
-    "generatedAt": "2026-07-11",
-    "description": "MCP context usage thresholds with manual headroom for resource/template growth",
+    "generatedAt": "2026-07-24",
+    "description": "MCP context usage thresholds with manual headroom for resource/template growth. tools baseline/threshold reconciled to current main: #4390 (observe.scope, ~433 tokens) and #4396 (observe.project, ~108 tokens) both merged over the non-required benchmark without raising the threshold, and #3490 adds openLink's integrated waitFor (the whole predicate surface, previously observe-only) plus absent/settled (~194 tokens after trimming shared waitFor descriptions).",
     "baseline": {
-      "tools": 14910,
+      "tools": 15645,
       "resources": 440,
       "resourceTemplates": 1885,
-      "total": 17235
+      "total": 17970
     },
     "buffer": "custom"
   },
   "thresholds": {
-    "tools": 15000,
+    "tools": 15740,
     "resources": 1000,
     "resourceTemplates": 2000,
     "total": 20000

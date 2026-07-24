@@ -3091,7 +3091,7 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Wait for a predicate before returning the observation. Provide at least one of: elementId, text, textAny, className, contentDescription, or activeWindow. textAny is mutually exclusive with the element predicates.",
+          "description": "Wait for a predicate before returning. Provide at least one of: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
           "properties": {
             "elementId": {
               "type": "string",
@@ -3144,11 +3144,11 @@
                 },
                 "packageName": {
                   "type": "string",
-                  "description": "Alias for appId (Android package name)"
+                  "description": "appId alias (Android package)"
                 },
                 "bundleId": {
                   "type": "string",
-                  "description": "Alias for appId (iOS bundle ID)"
+                  "description": "appId alias (iOS bundle)"
                 },
                 "activityName": {
                   "type": "string",
@@ -3174,6 +3174,47 @@
                 {
                   "required": [
                     "activityName"
+                  ]
+                }
+              ]
+            },
+            "absent": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Wait until an element matching these fields is absent (text uses contains match)",
+              "properties": {
+                "elementId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "className": {
+                  "type": "string"
+                },
+                "contentDescription": {
+                  "type": "string"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                },
+                {
+                  "required": [
+                    "className"
+                  ]
+                },
+                {
+                  "required": [
+                    "contentDescription"
                   ]
                 }
               ]
@@ -3266,10 +3307,31 @@
                   "required": [
                     "activeWindow"
                   ]
+                },
+                {
+                  "required": [
+                    "absent"
+                  ]
                 }
               ]
             }
           ]
+        },
+        "settled": {
+          "description": "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
+          "type": "object",
+          "properties": {
+            "quietPeriodMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
+            }
+          },
+          "required": [
+            "quietPeriodMs"
+          ],
+          "additionalProperties": false
         },
         "raw": {
           "description": "Include raw view hierarchy",
@@ -3418,7 +3480,12 @@
           }
         }
       },
-      "then": false
+      "then": false,
+      "dependentRequired": {
+        "settled": [
+          "waitFor"
+        ]
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5541,6 +5608,251 @@
             "ios"
           ]
         },
+        "waitFor": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Wait for a predicate before returning. Provide at least one of: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "description": "Element resource ID / accessibility identifier"
+            },
+            "text": {
+              "type": "string",
+              "description": "Element text"
+            },
+            "textAny": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered text variants; first visible match wins"
+            },
+            "className": {
+              "type": "string",
+              "description": "Element class name"
+            },
+            "contentDescription": {
+              "type": "string",
+              "description": "Element content description / accessibility label"
+            },
+            "matchType": {
+              "type": "string",
+              "enum": [
+                "all",
+                "any"
+              ],
+              "description": "Whether element predicates must all match one node, or any one may match"
+            },
+            "textMatch": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "contains",
+                "regex"
+              ],
+              "description": "How to match waitFor.text; does not affect contentDescription"
+            },
+            "activeWindow": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Foreground app/window predicates (provide an app id or activityName)",
+              "properties": {
+                "appId": {
+                  "type": "string",
+                  "description": "Foreground app bundle ID / package name"
+                },
+                "packageName": {
+                  "type": "string",
+                  "description": "appId alias (Android package)"
+                },
+                "bundleId": {
+                  "type": "string",
+                  "description": "appId alias (iOS bundle)"
+                },
+                "activityName": {
+                  "type": "string",
+                  "description": "Foreground Android activity name (Android-only)"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "appId"
+                  ]
+                },
+                {
+                  "required": [
+                    "packageName"
+                  ]
+                },
+                {
+                  "required": [
+                    "bundleId"
+                  ]
+                },
+                {
+                  "required": [
+                    "activityName"
+                  ]
+                }
+              ]
+            },
+            "absent": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Wait until an element matching these fields is absent (text uses contains match)",
+              "properties": {
+                "elementId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "className": {
+                  "type": "string"
+                },
+                "contentDescription": {
+                  "type": "string"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                },
+                {
+                  "required": [
+                    "className"
+                  ]
+                },
+                {
+                  "required": [
+                    "contentDescription"
+                  ]
+                }
+              ]
+            },
+            "container": {
+              "type": "object",
+              "description": "Scope the match to a container element (by elementId or text)",
+              "properties": {
+                "elementId": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Wait timeout ms (default 5000)"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "textAny"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "elementId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "className"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "contentDescription"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "matchType"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "textMatch"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "not": {
+                "required": [
+                  "textAny"
+                ]
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                },
+                {
+                  "required": [
+                    "className"
+                  ]
+                },
+                {
+                  "required": [
+                    "contentDescription"
+                  ]
+                },
+                {
+                  "required": [
+                    "activeWindow"
+                  ]
+                },
+                {
+                  "required": [
+                    "absent"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "settled": {
+          "description": "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
+          "type": "object",
+          "properties": {
+            "quietPeriodMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Quiet-period ms (no hierarchy change) required after waitFor matches"
+            }
+          },
+          "required": [
+            "quietPeriodMs"
+          ],
+          "additionalProperties": false
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -5557,7 +5869,55 @@
         "url",
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": [
+          "platform",
+          "waitFor"
+        ],
+        "properties": {
+          "platform": {
+            "const": "ios"
+          },
+          "waitFor": {
+            "required": [
+              "activeWindow"
+            ],
+            "properties": {
+              "activeWindow": {
+                "required": [
+                  "activityName"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "appId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "bundleId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "packageName"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": false,
+      "dependentRequired": {
+        "settled": [
+          "waitFor"
+        ]
+      }
     }
   },
   {

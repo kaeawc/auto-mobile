@@ -21,6 +21,23 @@ const LAUNCHER_NAMES = new Set([
   "execFileSync",
 ]);
 
+// Array-iteration methods that bind a callback's parameters to the receiver's elements. When the
+// receiver carries an sdkmanager literal, those parameters are tainted just like a named
+// function's parameters at a call site (issue #4368) — there is no explicit call site to key on.
+const ITERATION_METHODS = new Set([
+  "forEach",
+  "map",
+  "flatMap",
+  "filter",
+  "find",
+  "findIndex",
+  "findLast",
+  "some",
+  "every",
+  "reduce",
+  "reduceRight",
+]);
+
 function functionLikeName(node: ts.Node): string | undefined {
   if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
     node.name && ts.isIdentifier(node.name)) {
@@ -30,6 +47,11 @@ function functionLikeName(node: ts.Node): string | undefined {
     const parent = node.parent;
     if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {return parent.name.text;}
     if (parent && ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {return parent.name.text;}
+    // `obj.run = (bin) => ...` binds the arrow to a member expression, not a variable or
+    // object-literal property; key it by the property name so its call sites are found (#4368).
+    if (parent && ts.isBinaryExpression(parent) &&
+      parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(parent.left)) {return parent.left.name.text;}
   }
   return undefined;
 }
@@ -77,6 +99,10 @@ export function directlyExecutesSdkManager(source: string): boolean {
   const functionsByName = new Map<string, ts.FunctionLikeDeclaration[]>();
   const returnsByName = new Map<string, ts.Expression[]>();
   const callSites: { name: string; args: readonly ts.Expression[] }[] = [];
+  // Iteration-method callbacks paired with the receiver whose elements bind their parameters, e.g.
+  // `["sdkmanager"].forEach(bin => spawn(bin))`. If the receiver mentions sdkmanager the fixpoint
+  // taints the callback's parameters (issue #4368).
+  const iterationCallbacks: { receiver: ts.Expression; callback: ts.FunctionLikeDeclaration }[] = [];
   // Three monotonic taint sets, all filled by the fixpoint after collection: parameter names
   // that receive an sdkmanager-ish argument at some call site, function names whose return value
   // carries sdkmanager, and variable names whose (transitive) initializer carries sdkmanager.
@@ -128,6 +154,23 @@ export function directlyExecutesSdkManager(source: string): boolean {
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       ts.isIdentifier(node.left)) {
       bindValue(node.left.text, node.right);
+    }
+    // `private bin = "sdkmanager"` is a PropertyDeclaration; bind its initializer by the field
+    // name so a `this.bin` reference at a launcher call site resolves through the value flow,
+    // mirroring the local-variable handling above (issue #4368).
+    if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      bindValue(node.name.text, node.initializer);
+    }
+    // `receiver.map(bin => ...)` binds `bin` to the receiver's elements; record the pairing so the
+    // fixpoint can taint the callback parameters when the receiver mentions sdkmanager (#4368).
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+      ITERATION_METHODS.has(node.expression.name.text)) {
+      const receiver = node.expression.expression;
+      for (const argument of node.arguments) {
+        if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) {
+          iterationCallbacks.push({ receiver, callback: argument });
+        }
+      }
     }
     if (ts.isFunctionLike(node)) {
       const name = functionLikeName(node);
@@ -245,6 +288,15 @@ export function directlyExecutesSdkManager(source: string): boolean {
       if (!returnsSdkManager.has(name) && returns.some(expression => mentionsSdkManager(expression))) {
         returnsSdkManager.add(name);
         taintChanged = true;
+      }
+    }
+    for (const { receiver, callback } of iterationCallbacks) {
+      if (!mentionsSdkManager(receiver)) {continue;}
+      for (const parameter of callback.parameters) {
+        if (ts.isIdentifier(parameter.name) && !sdkManagerParams.has(parameter.name.text)) {
+          sdkManagerParams.add(parameter.name.text);
+          taintChanged = true;
+        }
       }
     }
   }

@@ -51,5 +51,12 @@ describe("MCP Server Memory Leak Tests", () => {
     } finally {
       await harness.cleanup();
     }
-  });
+    // The 200-iteration loop runs in ~300ms locally but was observed at 5015ms on
+    // a loaded windows-latest runner (issue #4342), 0.3% over bun's 5000ms default
+    // per-test timeout — a hard red on an unrelated PR. State the deadline as
+    // intent with real headroom instead of relying on the loop happening to fit
+    // under a default it never declared. This keeps `iterations` (and therefore
+    // what the test measures) identical across platforms.
+    // https://github.com/kaeawc/auto-mobile/actions/runs/30043326977/job/89328362082
+  }, 30_000);
 });

@@ -324,12 +324,104 @@ function noBareExpectRule() {
 	};
 }
 
+// A stress test runs an inherently unbounded loop (issue #4342: a 200-iteration
+// observe/interaction loop came in at 5015ms, 0.3% over bun's *default* 5000ms
+// per-test timeout, and failed as a hard red on an unrelated PR). The fix is not
+// to shrink the loop — that changes what the test measures across platforms — but
+// to state the deadline as intent with real headroom rather than let the loop
+// happen to fit under a default it never declared.
+//
+// This rule requires every stress test that RUNS a body in test/stress to pass a
+// numeric-literal timeout of at least MIN_STRESS_TIMEOUT_MS. A missing timeout, or
+// a literal too small to clear the observed worst case, both fail.
+//
+// It covers every running form: bare `test(...)`/`it(...)` and the chained variants
+// that still execute a body — `test.only`, `it.each(table)(...)`, `test.concurrent`,
+// combos like `test.concurrent.each`, etc. `test.skip` and `test.todo` never run a
+// body and are excluded; `describe`/`expect` and any call whose second argument is
+// not a function are excluded because they carry no per-test deadline. The name,
+// body, and timeout sit at argument positions 0/1/2 across all these forms, so one
+// extraction serves them all — only the callee shape (unwound below) differs.
+//
+// Report-only (no `fix`), matching no-bare-expect: the ratchet convention requires
+// ratchet rules be non-auto-fixable (see CLAUDE.md), and there is no single correct
+// timeout to auto-insert. Scoped to test/stress in the config below so the rest of
+// the suite's fast unit tests are unaffected.
+const MIN_STRESS_TIMEOUT_MS = 10_000;
+
+function stressExplicitTimeoutRule() {
+	return {
+		meta: {
+			type: "problem",
+			messages: {
+				missingTimeout: `A stress test declares no explicit timeout, so it silently inherits bun's 5000ms default (issue #4342). Pass a numeric-literal timeout of at least ${MIN_STRESS_TIMEOUT_MS}ms as the third argument, e.g. \`test(name, fn, 30_000)\`.`,
+				timeoutTooSmall: `A stress test's ${MIN_STRESS_TIMEOUT_MS}ms floor is not enough headroom (issue #4342: the loop was observed at 5015ms). Raise the third-argument timeout to at least ${MIN_STRESS_TIMEOUT_MS}ms.`,
+			},
+		},
+		create(context) {
+			const isFunction = node =>
+				node?.type === "ArrowFunctionExpression" || node?.type === "FunctionExpression";
+			// Unwind an arbitrarily-chained test callee to its root identifier and the
+			// set of member names in the chain: `test.concurrent.each(t)` → { root:
+			// "test", props: {"concurrent","each"} }. The curried `.each(table)(...)`
+			// step is a CallExpression in the chain, so recurse through `.callee`.
+			const unwind = node => {
+				if (node.type === "Identifier") {
+					return { root: node.name, props: new Set() };
+				}
+				if (node.type === "MemberExpression" && node.property.type === "Identifier") {
+					const inner = unwind(node.object);
+					if (inner) {
+						inner.props.add(node.property.name);
+					}
+					return inner;
+				}
+				if (node.type === "CallExpression") {
+					return unwind(node.callee);
+				}
+				return null;
+			};
+			return {
+				CallExpression(node) {
+					const callee = unwind(node.callee);
+					if (!callee || (callee.root !== "test" && callee.root !== "it")) {
+						return;
+					}
+					// `.skip`/`.todo` never execute a body, so they carry no deadline.
+					if (callee.props.has("skip") || callee.props.has("todo")) {
+						return;
+					}
+					const [, body, timeout] = node.arguments;
+					// Only name+body test declarations carry a per-test deadline.
+					if (!isFunction(body)) {
+						return;
+					}
+					if (timeout === undefined) {
+						context.report({ node, messageId: "missingTimeout" });
+						return;
+					}
+					// A non-literal (identifier, expression) can't be checked statically
+					// and hides the deadline from the call site — treat as unstated.
+					if (timeout.type !== "Literal" || typeof timeout.value !== "number") {
+						context.report({ node, messageId: "missingTimeout" });
+						return;
+					}
+					if (timeout.value < MIN_STRESS_TIMEOUT_MS) {
+						context.report({ node, messageId: "timeoutTooSmall" });
+					}
+				},
+			};
+		},
+	};
+}
+
 const catchConventionPlugin = {
 	rules: {
 		"catch-convention": catchConventionRule(),
 		"no-unknown-cast": noUnknownCastRule(),
 		"no-accumulator-foreach": noAccumulatorForEachRule(),
 		"no-bare-expect": noBareExpectRule(),
+		"stress-explicit-timeout": stressExplicitTimeoutRule(),
 	},
 };
 
@@ -661,6 +753,18 @@ export default [
 			// A bare `expect(...)` statement asserts nothing (issue #4198). Only
 			// test files use `expect`, so scope the gate here.
 			"auto-mobile/no-bare-expect": 2,
+		},
+	},
+	{
+		// Stress tests run inherently-unbounded loops; a missing or too-tight
+		// per-test timeout is a coin flip on a loaded CI runner (issue #4342). This
+		// gate is scoped here so the rest of the fast unit suite is unaffected.
+		files: ["test/stress/**/*.ts"],
+		plugins,
+		languageOptions,
+		rules: {
+			...baseRules,
+			"auto-mobile/stress-explicit-timeout": 2,
 		},
 	},
 	{

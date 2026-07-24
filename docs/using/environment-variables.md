@@ -114,6 +114,7 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`. | `stun:stun.l.google.com:19302` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale as `WIDTHxHEIGHT` (e.g. `720x1280`). | native |
+| `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` | iOS Simulator WebRTC capture rate. Integer in `[5, 60]`; values outside the range are rejected at stream start. Separate from the generic screen-capture rate used for MCP observation. | `15` |
 | `AUTOMOBILE_VIDEO_SERVER_JAR` | Explicit path to a built `automobile-video.jar` (persistent on-device encoder). Highest resolution precedence: when set it is used directly, ahead of the cached/downloaded release jar and the Gradle build output. | (resolution precedence, see below) |
 | `AUTOMOBILE_REQUIRE_VIDEO_SERVER` | When `1`/`true`, a degrade-to-`screenrecord` case (no verifiable jar available) becomes a hard `ActionableError` instead. For CI that must run the persistent encoder. A checksum **mismatch** is always fatal regardless of this flag. | unset |
 | `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD` | When `1`/`true`, never fetch the jar from the network: resolve from the local override or Gradle build output only. Dedicated flag — **not** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` (the CtrlProxy APK is mandatory; the jar is optional and degrades). | unset |

@@ -8,6 +8,8 @@ import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
 import { CODEC_ID_H264 } from "../../src/daemon/videoStreamFraming";
+import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IOSScreenCaptureHelper";
+import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
 
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
@@ -37,6 +39,7 @@ interface Harness {
   server: VideoStreamSocketServer;
   socketPath: string;
   sources: FakeCaptureSource[];
+  captureOptions: Array<{ fps?: number }>;
   emit: (chunk: Buffer) => void;
   cleanup: () => Promise<void>;
 }
@@ -50,6 +53,7 @@ async function startHarness(
   const socketPath = path.join(dir, "video-stream.sock");
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
+  const captureOptions: Array<{ fps?: number }> = [];
 
   const server = new VideoStreamSocketServer(
     {
@@ -61,6 +65,7 @@ async function startHarness(
       },
       createCaptureSource: async opts => {
         onData = opts.onData;
+        captureOptions.push(opts);
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
         sources.push(source);
@@ -76,6 +81,7 @@ async function startHarness(
     server,
     socketPath,
     sources,
+    captureOptions,
     emit: chunk => onData?.(chunk),
     cleanup: async () => {
       await server.close();
@@ -154,6 +160,17 @@ describe("VideoStreamSocketServer", () => {
     expect(ack.type).toBe("video_stream_response");
     expect(ack.deviceId).toBe(DEVICE.deviceId);
     expect(ack.framing).toBe("h264");
+  });
+
+  test("pins the observation capture rate rather than inheriting the WebRTC default", async () => {
+    const h = await startHarness();
+
+    await subscribe(h.socketPath);
+
+    // This relay borrows the WebRTC capture sources. Leaving fps unset would
+    // silently adopt whatever the interactive WHEP default happens to be.
+    expect(h.captureOptions[0].fps).toBe(SIMULATOR_FPS_DEFAULT);
+    expect(SIMULATOR_FPS_DEFAULT).not.toBe(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT);
   });
 
   test("sends the stream header immediately after the ack", async () => {

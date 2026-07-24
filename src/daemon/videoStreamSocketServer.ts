@@ -5,6 +5,7 @@ import { ActionableError } from "../models";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
 import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
+import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IOSScreenCaptureHelper";
 import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
@@ -25,6 +26,8 @@ export type CaptureSourceFactory = (options: {
   onError: (error: Error) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  /** Capture rate for iOS Simulator sources; see the call site for why it is pinned. */
+  fps?: number;
 }) => Promise<H264CaptureSource>;
 
 export interface VideoStreamSocketServerDependencies {
@@ -207,6 +210,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         },
         bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
         size: request.size,
+        // Pin the observation rate explicitly. This relay borrows the WebRTC
+        // capture sources, so without this it would silently inherit whatever
+        // the *WebRTC* iOS Simulator default happens to be — a knob that is
+        // tuned for an interactive WHEP feed and is not configurable here.
+        fps: SIMULATOR_FPS_DEFAULT,
       });
       // The final subscriber may disconnect while source construction is in
       // flight. Do not attach an unreachable capture process to a removed entry.

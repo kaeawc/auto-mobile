@@ -10,6 +10,15 @@ export interface H264CaptureSourceOptions {
   onError?: (error: Error) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  /**
+   * Capture frame rate, carrying `WebRtcStreamingConfig.iosSimulatorFps`.
+   *
+   * Only the iOS Simulator source uses it to *request* a capture rate. Android
+   * ignores it entirely, and physical iOS captures at its own AVFoundation rate
+   * — but on both iOS paths it still sets ffmpeg's declared rawvideo input rate
+   * and therefore the GOP length, so it is not inert there.
+   */
+  fps?: number;
   audioEnabled?: boolean;
 }
 

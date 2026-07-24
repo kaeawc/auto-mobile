@@ -30,6 +30,8 @@ interface WebRtcStreamRecord {
   jarPath: string | null;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  /** iOS Simulator capture rate; ignored by Android and physical-iOS sources. */
+  fps: number;
   audioEnabled: boolean;
   startedAt: string;
   /**
@@ -164,6 +166,7 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
       },
       bitrateBps: record.bitrateBps,
       size: record.size,
+      fps: record.fps,
       audioEnabled: record.audioEnabled,
     },
     record.jarPath
@@ -404,6 +407,7 @@ export async function startWebRtcStream(
       jarPath,
       bitrateBps,
       size: config.size,
+      fps: config.iosSimulatorFps,
       audioEnabled: config.audioEnabled,
       startedAt: dependencies.now().toISOString(),
       sourceStarted: false,

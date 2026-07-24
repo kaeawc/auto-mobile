@@ -26,6 +26,8 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
   iceServers?: WebRtcIceServerInput[];
   bitrateKbps?: number;
   size?: { width: number; height: number };
+  /** iOS Simulator capture rate; integer in the range documented by the seam. */
+  iosSimulatorFps?: number;
   /** Enable optional audio capture/publishing. */
   audio?: boolean;
 }

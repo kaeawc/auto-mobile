@@ -7,6 +7,7 @@ import {
 } from "../db/networkEventRepository";
 import { NetworkState } from "./NetworkState";
 import { BODY_TRUNCATION_LIMIT } from "../utils/truncateBodyText";
+import { computePercentile } from "../utils/percentile";
 
 const NETWORK_RESOURCE_URIS = {
   REQUEST: "automobile:network/request/{requestId}",
@@ -118,15 +119,6 @@ export interface TimeSeriesBucket {
   avgDurationMs: number;
   p50: number;
   p95: number;
-}
-
-function computePercentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) {return 0;}
-  const index = (p / 100) * (sorted.length - 1);
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) {return sorted[lower];}
-  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
 const MAX_BUCKETS = 1000;

@@ -40,9 +40,7 @@ class DatabaseInspectorProvider : ContentProvider() {
 
     // Check if inspection is enabled
     if (!DatabaseInspector.isEnabled()) {
-      result.putBoolean("success", false)
-      result.putString("errorType", "DISABLED")
-      result.putString("error", "Database inspection is disabled")
+      result.putError("DISABLED", "Database inspection is disabled")
       return result
     }
 
@@ -60,20 +58,38 @@ class DatabaseInspectorProvider : ContentProvider() {
       result.putBoolean("success", true)
       result.putString("result", response.toString())
     } catch (e: DatabaseError) {
-      result.putBoolean("success", false)
-      result.putString("errorType", e::class.simpleName ?: "UNKNOWN")
-      result.putString("error", e.message ?: "Unknown error")
+      result.putError(e::class.simpleName ?: "UNKNOWN", e.message ?: "Unknown error")
     } catch (e: IllegalArgumentException) {
-      result.putBoolean("success", false)
-      result.putString("errorType", "INVALID_ARGUMENT")
-      result.putString("error", e.message ?: "Invalid argument")
+      result.putError("INVALID_ARGUMENT", e.message ?: "Invalid argument")
     } catch (e: Exception) {
-      result.putBoolean("success", false)
-      result.putString("errorType", e::class.simpleName ?: "UNKNOWN")
-      result.putString("error", e.message ?: "Unknown error")
+      result.putError(e::class.simpleName ?: "UNKNOWN", e.message ?: "Unknown error")
     }
 
     return result
+  }
+
+  /**
+   * Write a failure reply as a single JSON envelope under `result`, mirroring the success path.
+   *
+   * `adb shell content call` prints the returned Bundle with `Bundle.toString()`
+   * (`Bundle[{key=value, ...}]`) and does not escape values, so raw `errorType` / `error` entries
+   * whose text contains a `, <key>=` sequence or a `}]` are indistinguishable from real entry
+   * boundaries once printed. Because SQLite echoes caller-controlled SQL back in its messages, that
+   * ambiguity is reachable. Nesting the values inside a JSON string escapes them, so the TS
+   * consumer can read them back intact with a balanced-brace parser. See
+   * `src/features/database/DatabaseInspector.ts` (`extractError`).
+   */
+  private fun Bundle.putError(errorType: String, error: String) {
+    putBoolean("success", false)
+    putString(
+      "result",
+      JSONObject()
+        .apply {
+          put("errorType", errorType)
+          put("error", error)
+        }
+        .toString(),
+    )
   }
 
   private fun handleListDatabases(driver: DatabaseDriver): JSONObject {

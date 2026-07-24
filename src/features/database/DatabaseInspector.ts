@@ -1,5 +1,6 @@
 import { ActionableError, BootedDevice } from "../../models";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 
 /**
@@ -180,8 +181,7 @@ export class DatabaseInspector {
     const success = this.extractBundleValue(output, "success") === "true";
 
     if (!success) {
-      const errorType = this.extractBundleValue(output, "errorType") || "UNKNOWN";
-      const error = this.extractBundleValue(output, "error") || "Unknown error";
+      const { errorType, error } = this.extractError(output);
       throw new ActionableError(`Database error (${errorType}): ${error}`);
     }
 
@@ -199,6 +199,48 @@ export class DatabaseInspector {
   }
 
   /**
+   * Resolve the `errorType` / `error` of a failure reply.
+   *
+   * Newer SDK builds put the failure payload in a single JSON envelope under `result=`, exactly
+   * as the success path does (see DatabaseInspectorProvider.kt). Because the values live inside a
+   * JSON string they are escaped, so they can no longer collide with Bundle.toString()'s
+   * delimiters (", ", "=", "}]") — the balanced-brace `extractJsonFromBundle` reads them back
+   * intact even when a caller-controlled fragment such as `near "x, error=y": syntax` is echoed.
+   *
+   * Older SDK builds emit the flat form (`errorType=...`, `error=...` as raw Bundle entries).
+   * Version skew is the normal state between releases, so when there is no parseable envelope we
+   * fall back to reading the flat entries with {@link extractBundleValue}, preserving the prior
+   * behavior (and its documented ambiguity, which only the envelope form can eliminate).
+   */
+  private extractError(output: string): { errorType: string; error: string } {
+    const json = this.extractJsonFromBundle(output);
+    if (json) {
+      try {
+        const parsed = JSON.parse(json) as { errorType?: unknown; error?: unknown };
+        // Only accept it as the envelope if it actually carries a field. Otherwise this is an old
+        // flat reply whose error text merely contains a parseable `result={...}` span: `indexOf`
+        // latched onto that substring, JSON.parse succeeded, but the real flat values are elsewhere
+        // — fall through so the flat reader below still finds them.
+        if (typeof parsed.errorType === "string" || typeof parsed.error === "string") {
+          return {
+            errorType: typeof parsed.errorType === "string" ? parsed.errorType : "UNKNOWN",
+            error: typeof parsed.error === "string" ? parsed.error : "Unknown error"
+          };
+        }
+      } catch (error) {
+        // Not a structured envelope (e.g. an old flat reply whose error text merely contains
+        // a "result=" substring) — expected under version skew, so fall through to the flat form.
+        logger.debug(`database error envelope was not valid JSON, using flat form: ${error}`);
+      }
+    }
+
+    return {
+      errorType: this.extractBundleValue(output, "errorType") || "UNKNOWN",
+      error: this.extractBundleValue(output, "error") || "Unknown error"
+    };
+  }
+
+  /**
    * Extract a single Bundle entry value from `content call` output.
    *
    * `adb shell content call` prints the returned Bundle with Bundle.toString(), i.e.
@@ -210,8 +252,10 @@ export class DatabaseInspector {
    *
    * Bundle.toString() does not escape its values, so a value that itself contains a literal
    * `, <knownKey>=` sequence is indistinguishable from a real entry boundary and would still be
-   * cut short. That ambiguity is in the wire format, not in this parser, and no SQLite message
-   * produces it in practice.
+   * cut short. That ambiguity is in the wire format, not in this parser. Newer SDK builds remove
+   * it at the producer by nesting the failure payload in a JSON envelope (see {@link extractError}
+   * and DatabaseInspectorProvider.kt); this flat reader remains only as the version-skew fallback
+   * for older SDK builds that still emit raw `errorType=` / `error=` entries.
    */
   private extractBundleValue(output: string, key: string): string | null {
     // A key always starts the bundle ("Bundle[{key=") or follows an entry separator.

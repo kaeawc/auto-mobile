@@ -265,18 +265,32 @@ export function resolveChecksum(
   return platform === "android" ? entry.apkSha256 : entry.ipaSha256;
 }
 
+/**
+ * The registry entry for the pinned version (`AUTOMOBILE_VERSION`), or the
+ * latest validated build when unpinned. Returns `undefined` when the registry
+ * is empty or the pin is unknown. Shared entry-selection for the per-field
+ * `resolve*Checksum` resolvers below, which differ only in which field they read
+ * and their default. (`resolveChecksum` above takes an explicit version +
+ * platform and normalizes case, so it stays separate.)
+ */
+function entryForPinnedVersion(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): ReleaseChecksumEntry | undefined {
+  if (registry.length === 0) {
+    return undefined;
+  }
+  const pinned = resolvePinnedVersion(env);
+  return pinned === LATEST_RELEASE_VERSION
+    ? registry[0]
+    : registry.find(e => e.version === pinned);
+}
+
 export function resolveRunnerChecksum(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
 ): string {
-  if (registry.length === 0) {
-    return "";
-  }
-  const pinned = resolvePinnedVersion(env);
-  const entry = pinned === LATEST_RELEASE_VERSION
-    ? registry[0]
-    : registry.find(e => e.version === pinned);
-  return entry?.runnerSha256 ?? "";
+  return entryForPinnedVersion(env, registry)?.runnerSha256 ?? "";
 }
 
 /**
@@ -288,14 +302,7 @@ export function resolveRunnerChecksumTarget(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
 ): RunnerSha256Target {
-  if (registry.length === 0) {
-    return "runner";
-  }
-  const pinned = resolvePinnedVersion(env);
-  const entry = pinned === LATEST_RELEASE_VERSION
-    ? registry[0]
-    : registry.find(e => e.version === pinned);
-  return entry?.runnerSha256Target ?? "runner";
+  return entryForPinnedVersion(env, registry)?.runnerSha256Target ?? "runner";
 }
 
 /**
@@ -493,14 +500,7 @@ export function resolveVideoJarChecksum(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
 ): string {
-  if (registry.length === 0) {
-    return "";
-  }
-  const pinned = resolvePinnedVersion(env);
-  const entry = pinned === LATEST_RELEASE_VERSION
-    ? registry[0]
-    : registry.find(e => e.version === pinned);
-  return entry?.videoJarSha256 ?? "";
+  return entryForPinnedVersion(env, registry)?.videoJarSha256 ?? "";
 }
 
 /**
@@ -532,14 +532,7 @@ export function resolveScreenCaptureHelperChecksum(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
 ): string {
-  if (registry.length === 0) {
-    return "";
-  }
-  const pinned = resolvePinnedVersion(env);
-  const entry = pinned === LATEST_RELEASE_VERSION
-    ? registry[0]
-    : registry.find(e => e.version === pinned);
-  return entry?.screenCaptureHelperSha256 ?? "";
+  return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
 }
 
 /**

@@ -139,8 +139,8 @@ as they do to the CtrlProxy APK/IPA. See
 ### `screen-capture-helper` resolution (iOS)
 
 The iOS WebRTC capture helper is resolved at stream start, in this order:
-`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override → a local Swift `swift build`
-output under `ios/screen-capture/.build` (checkout/package) → a valid cached
+`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override → a repo-checkout Swift `swift build`
+output under `ios/screen-capture/.build` → a valid cached
 download at `~/.auto-mobile/screen-capture-helper/` → a fresh, sha256-verified
 download of the prebuilt universal (`arm64`+`x86_64`) helper from the GitHub
 release. A normal macOS install therefore needs **no** Swift toolchain — the

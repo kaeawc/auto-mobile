@@ -780,16 +780,15 @@ function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {
 export interface IosScreenCaptureHelperPathResolverOptions {
   env?: NodeJS.ProcessEnv;
   moduleDir?: string;
-  entryFile?: string;
   exists?: (candidate: string) => boolean;
 }
 
 /**
  * Synchronous, local-only resolution of the helper: an explicit path, the
- * `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override, then a checkout/package-local
- * Swift `.build` output. Returns `null` when none exist — the full precedence
- * (which also downloads a verified prebuilt helper from GitHub releases) lives
- * in {@link ensureIosScreenCaptureHelper}. Mirrors `resolveVideoServerJarPath`.
+ * `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override, then a repo-checkout Swift
+ * `.build` output. Returns `null` when none exist — the full precedence (which
+ * also downloads a verified prebuilt helper from GitHub releases) lives in
+ * {@link ensureIosScreenCaptureHelper}.
  */
 export function resolveIosScreenCaptureHelperPath(
   explicitPath?: string,
@@ -797,20 +796,18 @@ export function resolveIosScreenCaptureHelperPath(
 ): string | null {
   const env = options.env ?? process.env;
   const moduleDir = options.moduleDir ?? __dirname;
-  const entryFile = options.entryFile ?? process.argv[1];
   const exists = options.exists ?? existsSync;
-  const candidateRoots = uniquePaths([
-    ...ancestorDirs(moduleDir),
-    ...(entryFile ? ancestorDirs(path.dirname(entryFile)) : []),
-  ]);
+  // Only a repo checkout has ios/screen-capture/.build — the Swift source is NOT
+  // shipped in the npm payload (issue #4392), so a published install has no local
+  // build path and falls through to the download provider. Walking moduleDir's
+  // ancestors reaches the repo root from either src/ or dist/src/.
+  const candidateRoots = ancestorDirs(moduleDir);
   const candidates = [
     explicitPath,
     readEnvWithLegacy(env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS),
     ...candidateRoots.flatMap(root => [
       path.join(root, "ios/screen-capture/.build/debug/screen-capture-helper"),
       path.join(root, "ios/screen-capture/.build/release/screen-capture-helper"),
-      path.join(root, "dist/ios/screen-capture/.build/debug/screen-capture-helper"),
-      path.join(root, "dist/ios/screen-capture/.build/release/screen-capture-helper"),
     ]),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
@@ -839,7 +836,7 @@ export interface EnsureIosScreenCaptureHelperOptions extends IosScreenCaptureHel
  * layered on top of the download provider — mirrors `resolveVideoServerJar`:
  *
  *   1. Explicit path / `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override.
- *   2. Checkout/package-local Swift `.build` output (developer convenience).
+ *   2. Repo-checkout Swift `.build` output (developer convenience).
  *   3. Verified prebuilt helper from GitHub releases (cached), unless
  *      `AUTOMOBILE_SKIP_IOS_SCREEN_CAPTURE_HELPER_DOWNLOAD` is set.
  *   4. else throw an actionable error.
@@ -892,10 +889,6 @@ function ancestorDirs(startDir: string): string[] {
     }
     current = parent;
   }
-}
-
-function uniquePaths(paths: string[]): string[] {
-  return [...new Set(paths)];
 }
 
 async function validateFfmpegAvailability(

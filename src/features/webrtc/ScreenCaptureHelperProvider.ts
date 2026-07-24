@@ -26,9 +26,6 @@ const SECURE_DIR_MODE = 0o700;
 /** Subdirectory under the auto-mobile base dir that holds the cached helper. */
 const CACHE_SUBDIR = "screen-capture-helper";
 
-/** Fixed on-disk name of the cached helper executable. */
-export const SCREEN_CAPTURE_HELPER_CACHE_FILENAME = SCREEN_CAPTURE_HELPER_FILENAME;
-
 /** Metadata sidecar describing the currently-cached helper. */
 export const SCREEN_CAPTURE_HELPER_METADATA_FILENAME = "screen-capture-helper.json";
 
@@ -109,7 +106,7 @@ export class ScreenCaptureHelperProvider {
   }
 
   private get cachedHelperPath(): string {
-    return path.join(this.cacheDir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME);
+    return path.join(this.cacheDir, SCREEN_CAPTURE_HELPER_FILENAME);
   }
 
   private get metadataPath(): string {
@@ -220,7 +217,7 @@ export class ScreenCaptureHelperProvider {
   private async download(expected: string): Promise<string> {
     const url = resolveScreenCaptureHelperUrl(this.env);
     const dir = await this.ensureSecureCacheDir();
-    const helperPath = path.join(dir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME);
+    const helperPath = path.join(dir, SCREEN_CAPTURE_HELPER_FILENAME);
     const tempPath = `${helperPath}.download`;
 
     logger.info("[SCREEN_CAPTURE_HELPER] Downloading prebuilt helper", { url, destination: tempPath });

@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { SCREEN_CAPTURE_HELPER_FILENAME } from "../../../src/constants/release";
 import {
-  SCREEN_CAPTURE_HELPER_CACHE_FILENAME,
   SCREEN_CAPTURE_HELPER_METADATA_FILENAME,
   ScreenCaptureHelperProvider,
   type ScreenCaptureHelperMetadata,
@@ -52,9 +52,9 @@ describe("ScreenCaptureHelperProvider (#4392)", function() {
   test("downloads, verifies, caches, and marks the helper executable", async function() {
     const helperPath = await makeProvider().ensure();
 
-    expect(helperPath).toBe(path.join(cacheDir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME));
+    expect(helperPath).toBe(path.join(cacheDir, SCREEN_CAPTURE_HELPER_FILENAME));
     expect(downloader.downloadedUrls).toHaveLength(1);
-    expect(downloader.downloadedUrls[0]).toContain(SCREEN_CAPTURE_HELPER_CACHE_FILENAME);
+    expect(downloader.downloadedUrls[0]).toContain(SCREEN_CAPTURE_HELPER_FILENAME);
 
     const stats = await fs.stat(helperPath!);
     expect(stats.isFile()).toBe(true);
@@ -80,7 +80,7 @@ describe("ScreenCaptureHelperProvider (#4392)", function() {
     expect(downloader.downloadedUrls).toHaveLength(1);
 
     const helperPath = await makeProvider().ensure();
-    expect(helperPath).toBe(path.join(cacheDir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME));
+    expect(helperPath).toBe(path.join(cacheDir, SCREEN_CAPTURE_HELPER_FILENAME));
     expect(downloader.downloadedUrls).toHaveLength(1);
   });
 
@@ -111,7 +111,7 @@ describe("ScreenCaptureHelperProvider (#4392)", function() {
     checksum.checksum = "c".repeat(64); // differs from the forced expected sha
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
     await expect(
-      fs.access(path.join(cacheDir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME))
+      fs.access(path.join(cacheDir, SCREEN_CAPTURE_HELPER_FILENAME))
     ).rejects.toThrow();
   });
 

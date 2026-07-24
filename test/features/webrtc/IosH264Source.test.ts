@@ -969,27 +969,6 @@ describe("IosH264Source", () => {
     expect(found).toBe(sourceBuild);
   });
 
-  test("resolves helper paths from packaged dist roots when bundled module dirs are stale", () => {
-    const packageRoot = path.resolve("pkg");
-    const packagedBuild = path.join(
-      packageRoot,
-      "dist",
-      "ios",
-      "screen-capture",
-      ".build",
-      "release",
-      "screen-capture-helper"
-    );
-    const found = resolveIosScreenCaptureHelperPath(undefined, {
-      moduleDir: path.join(path.resolve("build-host", "repo"), "src", "features", "webrtc"),
-      entryFile: path.join(packageRoot, "dist", "src", "index.js"),
-      env: {},
-      exists: candidate => candidate === packagedBuild,
-    });
-
-    expect(found).toBe(packagedBuild);
-  });
-
   test("prefers the helper path environment override", () => {
     const found = resolveIosScreenCaptureHelperPath(undefined, {
       moduleDir: "/repo/src/features/webrtc",
@@ -1017,7 +996,6 @@ describe("IosH264Source", () => {
     const packageRoot = path.resolve("pkg-install");
     const found = resolveIosScreenCaptureHelperPath(undefined, {
       moduleDir: path.join(packageRoot, "dist", "src", "features", "webrtc"),
-      entryFile: path.join(packageRoot, "dist", "src", "index.js"),
       env: {},
       exists: () => false,
     });

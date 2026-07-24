@@ -5,6 +5,11 @@ import { RESOURCE_URIS } from "./observationResources";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
+import { RealSettleObserve } from "../features/observe/SettleObserve";
+import { RealWaitForCondition } from "../features/observe/WaitForCondition";
+import type { SettleResult } from "../features/observe/interfaces/SettleObserve";
+import type { ConditionPredicate, WaitForConditionResult } from "../features/observe/interfaces/WaitForCondition";
+import { appear, disappear, clickable, textEquals, countStable, ConditionSelector } from "../features/observe/ConditionPredicates";
 import { createJSONToolResponse, createStructuredToolResponse, throwIfAborted, StructuredToolResponse } from "../utils/toolUtils";
 import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchyResult } from "../models";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
@@ -105,7 +110,49 @@ const waitForPredicatePresenceSchema = z.union([
 
 const waitForElementSchema = waitForElementBaseSchema.and(waitForPredicatePresenceSchema);
 
+// Declarative predicate DSL (issue #4398): `for` selects a condition backed by a
+// #4389 primitive. Everything but `stable` is a WaitForCondition predicate; the
+// handler routes `stable` (whole-screen structural settle) to SettleObserve. The
+// legacy-only fields are declared `never` here so the inferred union stays
+// structurally compatible with the element/textAny arms (same pattern those arms
+// use to exclude each other), keeping the legacy handler's field access valid.
+const WAIT_FOR_CONDITION_KINDS = ["appear", "disappear", "clickable", "textEquals", "countStable"] as const;
+const WAIT_FOR_DSL_KINDS = [...WAIT_FOR_CONDITION_KINDS, "stable"] as const;
+
+const waitForConditionDslSchema = z.object({
+  for: z.enum(WAIT_FOR_DSL_KINDS).describe("Declarative condition to wait for"),
+  elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
+  text: z.string().optional().describe("Element text; for `textEquals` this is the exact expected value"),
+  pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
+  stableReads: z.number().optional().describe("Consecutive stable reads for countStable/stable (default 2)"),
+  timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
+  container: waitForContainerField,
+  textAny: z.never().optional(),
+  className: z.never().optional(),
+  contentDescription: z.never().optional(),
+  matchType: z.never().optional(),
+  textMatch: z.never().optional(),
+  activeWindow: z.never().optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.for === "stable") {
+    return;
+  }
+  if (value.elementId === undefined && value.text === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `waitFor "for: ${value.for}" requires elementId or text`
+    });
+  }
+  if (value.for === "textEquals" && value.text === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "waitFor \"for: textEquals\" requires text (the exact expected value)"
+    });
+  }
+});
+
 const waitForSchema = z.union([
+  waitForConditionDslSchema,
   waitForTextAnySchema,
   waitForElementSchema,
 ]);
@@ -127,12 +174,20 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   description:
-    "Wait for a predicate before returning the observation. Provide at least one of: " +
-    "elementId, text, textAny, className, contentDescription, or activeWindow. " +
-    "textAny is mutually exclusive with the element predicates.",
+    "Wait for a predicate before returning the observation. Either set `for` (DSL: " +
+    "appear|disappear|clickable|textEquals|countStable|stable) with elementId/text, or " +
+    "provide a legacy predicate: elementId, text, textAny, className, contentDescription, " +
+    "or activeWindow. textAny is mutually exclusive with the element predicates.",
   properties: {
+    for: {
+      type: "string",
+      enum: ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"],
+      description: "Condition: appear/disappear/clickable/textEquals/countStable (selector) or stable (whole screen)",
+    },
+    pollMs: { type: "number", description: "Poll interval ms (default 150)" },
+    stableReads: { type: "number", description: "Consecutive stable reads for countStable/stable (default 2)" },
     elementId: { type: "string", description: "Element resource ID / accessibility identifier" },
-    text: { type: "string", description: "Element text" },
+    text: { type: "string", description: "Element text; for `for:textEquals` the exact expected value" },
     textAny: {
       type: "array",
       items: { type: "string" },
@@ -180,9 +235,10 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     },
     timeout: { type: "number", description: "Wait timeout ms (default 5000)" },
   },
-  // Enforce the same shape the runtime does: at least one predicate, and textAny
-  // mutually exclusive with the element predicates / matchType / textMatch.
+  // Enforce the same shape the runtime does: either the `for` DSL, or at least one
+  // legacy predicate with textAny mutually exclusive from the element predicates.
   anyOf: [
+    { required: ["for"] },
     {
       required: ["textAny"],
       not: {
@@ -190,7 +246,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
       },
     },
     {
-      not: { required: ["textAny"] },
+      not: { anyOf: [{ required: ["textAny"] }, { required: ["for"] }] },
       anyOf: [...ELEMENT_PREDICATE_REQUIRED, { required: ["activeWindow"] }],
     },
   ],
@@ -281,6 +337,39 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
 
 export const observeSchema = withAppIdAliases(observeBaseSchema);
 
+// Standalone settle/wait tools (issue #4398) expose the #4389 primitives directly.
+// They use the primitive option names (timeoutMs/pollMs/stableReads) so the tool
+// surface reads the same as the class it drives.
+export const settleObserveSchema = addDeviceTargetingToSchema(z.object({
+  platform: platformSchema,
+  timeoutMs: z.number().optional().describe("Hard budget ms (default 2500)"),
+  pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
+  stableReads: z.number().optional().describe("Consecutive structurally-equal snapshots to settle (default 2)")
+}));
+
+export const waitForConditionSchema = addDeviceTargetingToSchema(z.object({
+  platform: platformSchema,
+  for: z.enum(WAIT_FOR_CONDITION_KINDS).describe("Condition: appear|disappear|clickable|textEquals|countStable"),
+  elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
+  text: z.string().optional().describe("Element text; for `textEquals` the exact expected value"),
+  timeoutMs: z.number().optional().describe("Hard budget ms (default 5000)"),
+  pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
+  stableReads: z.number().optional().describe("Consecutive stable reads for countStable (default 2)")
+}).superRefine((value, ctx) => {
+  if (value.elementId === undefined && value.text === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `waitForCondition "for: ${value.for}" requires elementId or text`
+    });
+  }
+  if (value.for === "textEquals" && value.text === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "waitForCondition \"for: textEquals\" requires text (the exact expected value)"
+    });
+  }
+}));
+
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   filter: z.object({
@@ -301,6 +390,142 @@ const WAIT_FOR_POLL_INTERVAL_MS = 100;
 
 type ObserveWaitForOptions = z.infer<typeof waitForSchema>;
 type ObserveArgs = z.infer<typeof observeSchema>;
+type WaitForConditionDsl = z.infer<typeof waitForConditionDslSchema>;
+type WaitForConditionKind = (typeof WAIT_FOR_CONDITION_KINDS)[number];
+
+/** True when the waitFor options are the #4398 declarative `for` DSL form. */
+const isConditionDsl = (waitFor: ObserveWaitForOptions): waitFor is WaitForConditionDsl =>
+  (waitFor as { for?: unknown }).for !== undefined;
+
+/**
+ * Build the #4389 {@link ConditionPredicate} for a DSL `for` kind (issue #4398).
+ * `stable` is intentionally not handled here — the handler routes it to
+ * `RealSettleObserve` (whole-screen settle) rather than a predicate. Throws an
+ * `ActionableError` for `textEquals` without a `text` value, mirroring the zod
+ * refinement so the standalone tool path fails with the same actionable message.
+ */
+export const buildConditionPredicate = (
+  finder: ElementFinder,
+  kind: WaitForConditionKind,
+  selector: ConditionSelector,
+  options?: { stableReads?: number }
+): ConditionPredicate => {
+  switch (kind) {
+    case "appear":
+      return appear(finder, selector);
+    case "disappear":
+      return disappear(finder, selector);
+    case "clickable":
+      return clickable(finder, selector);
+    case "textEquals":
+      if (selector.text === undefined) {
+        throw new ActionableError("waitFor \"for: textEquals\" requires text (the exact expected value)");
+      }
+      return textEquals(finder, { elementId: selector.elementId }, selector.text);
+    case "countStable":
+      return countStable(finder, selector, options);
+    default: {
+      const exhaustive: never = kind;
+      throw new ActionableError(`Unknown waitFor condition: ${String(exhaustive)}`);
+    }
+  }
+};
+
+/**
+ * Run the declarative `for` DSL (issue #4398) and adapt its result to the shared
+ * `waitForObservation` return shape. `stable` runs the settle loop
+ * (`RealSettleObserve`); every other kind runs `RealWaitForCondition` with the
+ * predicate for that kind. `awaitedElement` carries the matched element (never set
+ * for settle / countStable, which have no single element); `awaitTimeout` reflects
+ * "did not settle" / "timed out". `container` is not yet threaded into the
+ * primitives' finder path — a follow-up.
+ */
+const runWaitForConditionDsl = async (
+  observeScreen: ObserveScreen,
+  waitFor: WaitForConditionDsl,
+  signal: AbortSignal | undefined,
+  timer: Timer
+): Promise<{ observation: ObserveResult; awaitedElement?: Element; awaitDuration: number; awaitTimeout: boolean }> => {
+  const pollMs = waitFor.pollMs;
+  if (waitFor.for === "stable") {
+    const settle = await new RealSettleObserve(observeScreen, timer).execute({
+      timeoutMs: waitFor.timeout,
+      pollMs,
+      stableReads: waitFor.stableReads,
+      signal,
+    });
+    return {
+      observation: settle.observation,
+      awaitedElement: undefined,
+      awaitDuration: settle.waitMs,
+      awaitTimeout: !settle.settled,
+    };
+  }
+
+  const finder = new DefaultElementFinder();
+  const predicate = buildConditionPredicate(
+    finder,
+    waitFor.for,
+    { elementId: waitFor.elementId, text: waitFor.text },
+    { stableReads: waitFor.stableReads }
+  );
+  const result = await new RealWaitForCondition(observeScreen, timer).execute(predicate, {
+    timeoutMs: waitFor.timeout,
+    pollMs,
+    signal,
+  });
+  return {
+    observation: result.observation,
+    awaitedElement: result.matchedElement,
+    awaitDuration: result.waitMs,
+    awaitTimeout: result.timedOut,
+  };
+};
+
+type SettleObserveArgs = z.infer<typeof settleObserveSchema>;
+type WaitForConditionArgs = z.infer<typeof waitForConditionSchema>;
+
+/**
+ * Core of the `settleObserve` tool (issue #4398): drive `RealSettleObserve` over
+ * the injected screen. Separated from the registered handler so it is testable
+ * with a fake screen + FakeTimer (no device, no ADB).
+ */
+export const runSettleObserveTool = async (
+  observeScreen: ObserveScreen,
+  args: SettleObserveArgs,
+  timer: Timer = defaultTimer,
+  signal?: AbortSignal
+): Promise<SettleResult> =>
+  new RealSettleObserve(observeScreen, timer).execute({
+    timeoutMs: args.timeoutMs,
+    pollMs: args.pollMs,
+    stableReads: args.stableReads,
+    signal,
+  });
+
+/**
+ * Core of the `waitForCondition` tool (issue #4398): build the predicate from the
+ * declarative selector and drive `RealWaitForCondition` over the injected screen.
+ */
+export const runWaitForConditionTool = async (
+  observeScreen: ObserveScreen,
+  args: WaitForConditionArgs,
+  timer: Timer = defaultTimer,
+  signal?: AbortSignal
+): Promise<WaitForConditionResult> => {
+  const finder = new DefaultElementFinder();
+  const predicate = buildConditionPredicate(
+    finder,
+    args.for,
+    { elementId: args.elementId, text: args.text },
+    { stableReads: args.stableReads }
+  );
+  return new RealWaitForCondition(observeScreen, timer).execute(predicate, {
+    timeoutMs: args.timeoutMs,
+    pollMs: args.pollMs,
+    signal,
+  });
+};
 
 const waitForContainerForFinder = (
   waitFor: ObserveWaitForOptions
@@ -588,6 +813,12 @@ export const waitForObservation = async (
   awaitDuration: number;
   awaitTimeout: boolean;
 }> => {
+  // Declarative `for` DSL (issue #4398) routes to the #4389 primitives; the
+  // legacy element/textAny/activeWindow path below is unchanged (back-compat).
+  if (isConditionDsl(waitFor)) {
+    return runWaitForConditionDsl(observeScreen, waitFor, signal, timer);
+  }
+
   const startTime = timer.now();
   const timeoutMs = waitFor.timeout ?? 5000;
   const finder = new DefaultElementFinder();
@@ -740,6 +971,50 @@ export function registerObserveTools() {
     }
   };
 
+  // settleObserve: poll until the screen is structurally stable, return only the
+  // final snapshot (issue #4398, primitive #4389). Mirrors the `shake` 5-step
+  // pattern — construct RealObserveScreen, delegate to the primitive core.
+  const settleObserveHandler = async (device: BootedDevice, args: SettleObserveArgs, _progress?: unknown, signal?: AbortSignal) => {
+    try {
+      const observeScreen = new RealObserveScreen(device);
+      const result = await runSettleObserveTool(observeScreen, args, defaultTimer, signal);
+      return createJSONToolResponse({
+        message: result.settled
+          ? `Screen settled after ${result.polls} polls (${result.waitMs}ms)`
+          : `Screen did not settle within budget (${result.polls} polls, ${result.waitMs}ms)`,
+        settled: result.settled,
+        polls: result.polls,
+        waitMs: result.waitMs,
+        observation: result.observation,
+      });
+    } catch (error) {
+      throw new ActionableError(`Failed to settle observe: ${error}`);
+    }
+  };
+
+  // waitForCondition: poll until a declarative predicate holds, returning the
+  // matched element or (on timeout) the last-seen near-matches (issue #4398).
+  const waitForConditionHandler = async (device: BootedDevice, args: WaitForConditionArgs, _progress?: unknown, signal?: AbortSignal) => {
+    try {
+      const observeScreen = new RealObserveScreen(device);
+      const result = await runWaitForConditionTool(observeScreen, args, defaultTimer, signal);
+      return createJSONToolResponse({
+        message: result.matched
+          ? `Condition "${args.for}" met after ${result.polls} polls (${result.waitMs}ms)`
+          : `Condition "${args.for}" not met within ${result.waitMs}ms; ${result.candidates.length} near-match(es)`,
+        matched: result.matched,
+        matchedElement: result.matchedElement,
+        candidates: result.candidates,
+        timedOut: result.timedOut,
+        polls: result.polls,
+        waitMs: result.waitMs,
+        observation: result.observation,
+      });
+    } catch (error) {
+      throw new ActionableError(`Failed to wait for condition: ${error}`);
+    }
+  };
+
   const identifyInteractionsHandler = async (
     device: BootedDevice,
     args: IdentifyInteractionsOptions
@@ -777,6 +1052,22 @@ export function registerObserveTools() {
     observeSchema,
     observeHandler,
     { outputSchema: observeToolResultSchema }
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "settleObserve",
+    "Observe once the screen stops changing (structural settle); returns only the final snapshot.",
+    settleObserveSchema,
+    settleObserveHandler,
+    { supportsProgress: true }
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "waitForCondition",
+    "Wait until a predicate holds: appear|disappear|clickable|textEquals|countStable.",
+    waitForConditionSchema,
+    waitForConditionHandler,
+    { supportsProgress: true }
   );
 
   ToolRegistry.registerDeviceAware("identifyInteractions", "Suggest likely interactions", identifyInteractionsSchema, identifyInteractionsHandler, { debugOnly: true });

@@ -3091,15 +3091,35 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Wait for a predicate before returning the observation. Provide at least one of: elementId, text, textAny, className, contentDescription, or activeWindow. textAny is mutually exclusive with the element predicates.",
+          "description": "Wait for a predicate before returning the observation. Either set `for` (DSL: appear|disappear|clickable|textEquals|countStable|stable) with elementId/text, or provide a legacy predicate: elementId, text, textAny, className, contentDescription, or activeWindow. textAny is mutually exclusive with the element predicates.",
           "properties": {
+            "for": {
+              "type": "string",
+              "enum": [
+                "appear",
+                "disappear",
+                "clickable",
+                "textEquals",
+                "countStable",
+                "stable"
+              ],
+              "description": "Condition: appear/disappear/clickable/textEquals/countStable (selector) or stable (whole screen)"
+            },
+            "pollMs": {
+              "type": "number",
+              "description": "Poll interval ms (default 150)"
+            },
+            "stableReads": {
+              "type": "number",
+              "description": "Consecutive stable reads for countStable/stable (default 2)"
+            },
             "elementId": {
               "type": "string",
               "description": "Element resource ID / accessibility identifier"
             },
             "text": {
               "type": "string",
-              "description": "Element text"
+              "description": "Element text; for `for:textEquals` the exact expected value"
             },
             "textAny": {
               "type": "array",
@@ -3198,6 +3218,11 @@
           "anyOf": [
             {
               "required": [
+                "for"
+              ]
+            },
+            {
+              "required": [
                 "textAny"
               ],
               "not": {
@@ -3237,8 +3262,17 @@
             },
             {
               "not": {
-                "required": [
-                  "textAny"
+                "anyOf": [
+                  {
+                    "required": [
+                      "textAny"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "for"
+                    ]
+                  }
                 ]
               },
               "anyOf": [
@@ -6478,6 +6512,50 @@
     }
   },
   {
+    "name": "settleObserve",
+    "description": "Observe once the screen stops changing (structural settle); returns only the final snapshot.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "timeoutMs": {
+          "description": "Hard budget ms (default 2500)",
+          "type": "number"
+        },
+        "pollMs": {
+          "description": "Poll interval ms (default 150)",
+          "type": "number"
+        },
+        "stableReads": {
+          "description": "Consecutive structurally-equal snapshots to settle (default 2)",
+          "type": "number"
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "setUIState",
     "description": "Set multiple form fields by desired state.",
     "inputSchema": {
@@ -9567,6 +9645,70 @@
       "required": [
         "action",
         "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "waitForCondition",
+    "description": "Wait until a predicate holds: appear|disappear|clickable|textEquals|countStable.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "for": {
+          "type": "string",
+          "enum": [
+            "appear",
+            "disappear",
+            "clickable",
+            "textEquals",
+            "countStable"
+          ],
+          "description": "Condition: appear|disappear|clickable|textEquals|countStable"
+        },
+        "elementId": {
+          "description": "Element resource ID / accessibility identifier",
+          "type": "string"
+        },
+        "text": {
+          "description": "Element text; for `textEquals` the exact expected value",
+          "type": "string"
+        },
+        "timeoutMs": {
+          "description": "Hard budget ms (default 5000)",
+          "type": "number"
+        },
+        "pollMs": {
+          "description": "Poll interval ms (default 150)",
+          "type": "number"
+        },
+        "stableReads": {
+          "description": "Consecutive stable reads for countStable (default 2)",
+          "type": "number"
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "platform",
+        "for"
       ],
       "additionalProperties": false
     }

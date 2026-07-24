@@ -51,6 +51,16 @@ export interface ReleaseChecksumEntry {
    * scripts/generate-release-constants.sh (#3833) for releases that ship it.
    */
   videoJarSha256?: string;
+  /**
+   * SHA-256 of the prebuilt universal (arm64+x86_64) iOS screen-capture helper
+   * (issue #4392). Optional and absent from every existing entry: the helper is
+   * not yet attached to a release, so callers treat an absent/empty value as
+   * "unknown → the helper cannot be integrity-verified, degrade to the
+   * env override / local Swift build" (mirrors `videoJarSha256`). Populated by
+   * scripts/generate-release-constants.sh once the release job builds, signs,
+   * and attaches the binary.
+   */
+  screenCaptureHelperSha256?: string;
 }
 
 /**
@@ -491,6 +501,45 @@ export function resolveVideoJarChecksum(
     ? registry[0]
     : registry.find(e => e.version === pinned);
   return entry?.videoJarSha256 ?? "";
+}
+
+/**
+ * Fixed asset filename of the prebuilt iOS screen-capture helper. The same name
+ * is used as the CI artifact, the GitHub-release asset, and the client-side
+ * cached executable (issue #4392).
+ */
+export const SCREEN_CAPTURE_HELPER_FILENAME = "screen-capture-helper";
+
+/**
+ * screen-capture-helper download URL honoring `AUTOMOBILE_VERSION` +
+ * `AUTOMOBILE_ASSET_BASE_URL`, mirroring `resolveVideoJarUrl`.
+ */
+export function resolveScreenCaptureHelperUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  return buildReleaseAssetUrl(SCREEN_CAPTURE_HELPER_FILENAME, resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+}
+
+/**
+ * Expected screen-capture-helper SHA-256 for the pinned version. Returns an
+ * empty string when unknown — either the pin is absent from the registry, or the
+ * matched entry predates helper delivery (no `screenCaptureHelperSha256`).
+ * Callers treat an empty checksum as "unknown → degrade to the env override /
+ * local Swift build" (mirrors `resolveVideoJarChecksum`, issue #4392).
+ */
+export function resolveScreenCaptureHelperChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  if (registry.length === 0) {
+    return "";
+  }
+  const pinned = resolvePinnedVersion(env);
+  const entry = pinned === LATEST_RELEASE_VERSION
+    ? registry[0]
+    : registry.find(e => e.version === pinned);
+  return entry?.screenCaptureHelperSha256 ?? "";
 }
 
 /**

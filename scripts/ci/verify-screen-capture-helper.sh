@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Verify a prebuilt iOS screen-capture-helper binary before it is staged into
-# the npm payload (issue #4392). Checks that the binary:
+# Verify a prebuilt iOS screen-capture-helper binary before it is attached to a
+# GitHub release (issue #4392), and again on the client after download. Checks
+# that the binary:
 #   - exists and is marked executable (npm preserves mode bits, so a
 #     non-executable staged binary would install unusable),
 #   - is a universal Mach-O containing every required architecture,

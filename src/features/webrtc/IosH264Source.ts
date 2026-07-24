@@ -10,8 +10,11 @@ import type {
   IosScreenCaptureHelperOptions,
   MalformedFrameError,
 } from "../screen-stream";
+import { AUTOMOBILE_VERSION_ENV } from "../../constants/release";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { logger } from "../../utils/logger";
+import { ScreenCaptureHelperProvider } from "./ScreenCaptureHelperProvider";
 import {
   DefaultFfmpegClient,
   resolveFfmpegBinary,
@@ -26,13 +29,12 @@ import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
 export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER";
 /**
- * Location of the prebuilt universal helper inside the published npm payload,
- * relative to a package/checkout root (issue #4392). A release job builds,
- * signs, and stages the `arm64`+`x86_64` binary here so a normal macOS install
- * resolves it without a local `swift build`.
+ * When set (`1`/`true`), never touch the network for the screen-capture helper:
+ * resolve from the explicit override or a local Swift build only (issue #4392).
+ * Dedicated flag, mirroring `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD`.
  */
-export const IOS_SCREEN_CAPTURE_HELPER_PACKAGED_RELATIVE =
-  "dist/vendor/screen-capture-helper/darwin-universal/screen-capture-helper";
+export const IOS_SCREEN_CAPTURE_HELPER_SKIP_DOWNLOAD_ENV =
+  "AUTOMOBILE_SKIP_IOS_SCREEN_CAPTURE_HELPER_DOWNLOAD";
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
@@ -152,6 +154,8 @@ export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   commandRunner?: CommandRunner;
   ffmpegClient?: FfmpegClient;
   helperPathExists?: (candidate: string) => boolean;
+  /** Injectable helper download provider; defaults to the shared singleton. */
+  helperProvider?: ScreenCaptureHelperEnsurer;
   timer?: Timer;
   firstFrameTimeoutMs?: number;
 }
@@ -179,6 +183,7 @@ export class IosH264Source implements H264CaptureSource {
   private readonly simulatorWindowResolver: IosSimulatorWindowResolver;
   private readonly commandRunner: CommandRunner;
   private readonly helperPathExists?: (candidate: string) => boolean;
+  private readonly helperProvider?: ScreenCaptureHelperEnsurer;
   private readonly timer: Timer;
   private readonly firstFrameTimeoutMs: number;
 
@@ -216,6 +221,7 @@ export class IosH264Source implements H264CaptureSource {
     });
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     this.helperPathExists = options.helperPathExists;
+    this.helperProvider = options.helperProvider;
     this.timer = options.timer ?? defaultTimer;
     this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? IOS_FIRST_FRAME_TIMEOUT_MS;
     this.simulatorWindowResolver =
@@ -233,8 +239,10 @@ export class IosH264Source implements H264CaptureSource {
     this.lastHelperStderr = null;
 
     try {
-      const helperPath = resolveIosScreenCaptureHelperPath(this.helperPath, {
+      const helperPath = await ensureIosScreenCaptureHelper({
+        explicitPath: this.helperPath,
         exists: this.helperPathExists,
+        provider: this.helperProvider,
       });
       await validateFfmpegAvailability(this.ffmpegClient, this.ffmpegPath, this.options.commandRunner);
       const target = await this.resolveCaptureTarget(helperPath);
@@ -776,10 +784,17 @@ export interface IosScreenCaptureHelperPathResolverOptions {
   exists?: (candidate: string) => boolean;
 }
 
+/**
+ * Synchronous, local-only resolution of the helper: an explicit path, the
+ * `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override, then a checkout/package-local
+ * Swift `.build` output. Returns `null` when none exist — the full precedence
+ * (which also downloads a verified prebuilt helper from GitHub releases) lives
+ * in {@link ensureIosScreenCaptureHelper}. Mirrors `resolveVideoServerJarPath`.
+ */
 export function resolveIosScreenCaptureHelperPath(
   explicitPath?: string,
   options: IosScreenCaptureHelperPathResolverOptions = {}
-): string {
+): string | null {
   const env = options.env ?? process.env;
   const moduleDir = options.moduleDir ?? __dirname;
   const entryFile = options.entryFile ?? process.argv[1];
@@ -791,12 +806,6 @@ export function resolveIosScreenCaptureHelperPath(
   const candidates = [
     explicitPath,
     readEnvWithLegacy(env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS),
-    // Prebuilt universal helper shipped in the npm payload (issue #4392). A
-    // normal package install has no Swift `.build` output, so this is the only
-    // path that resolves out of the box; it is preferred over any `.build`
-    // output but still yields to an explicit path or the env override.
-    ...candidateRoots.map(root =>
-      path.join(root, IOS_SCREEN_CAPTURE_HELPER_PACKAGED_RELATIVE)),
     ...candidateRoots.flatMap(root => [
       path.join(root, "ios/screen-capture/.build/debug/screen-capture-helper"),
       path.join(root, "ios/screen-capture/.build/release/screen-capture-helper"),
@@ -811,8 +820,56 @@ export function resolveIosScreenCaptureHelperPath(
     }
   }
 
+  return null;
+}
+
+/** Just the ensure() surface {@link ensureIosScreenCaptureHelper} needs from the provider. */
+export interface ScreenCaptureHelperEnsurer {
+  ensure(): Promise<string | null>;
+}
+
+export interface EnsureIosScreenCaptureHelperOptions extends IosScreenCaptureHelperPathResolverOptions {
+  explicitPath?: string;
+  /** Injectable for tests; defaults to the shared provider singleton. */
+  provider?: ScreenCaptureHelperEnsurer;
+}
+
+/**
+ * Full resolution precedence for the iOS screen-capture helper (issue #4392),
+ * layered on top of the download provider — mirrors `resolveVideoServerJar`:
+ *
+ *   1. Explicit path / `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override.
+ *   2. Checkout/package-local Swift `.build` output (developer convenience).
+ *   3. Verified prebuilt helper from GitHub releases (cached), unless
+ *      `AUTOMOBILE_SKIP_IOS_SCREEN_CAPTURE_HELPER_DOWNLOAD` is set.
+ *   4. else throw an actionable error.
+ *
+ * A checksum mismatch on a downloaded helper throws (from the provider) and is
+ * intentionally never caught — corruption/tampering must stay fatal.
+ */
+export async function ensureIosScreenCaptureHelper(
+  options: EnsureIosScreenCaptureHelperOptions = {}
+): Promise<string> {
+  const env = options.env ?? process.env;
+
+  const local = resolveIosScreenCaptureHelperPath(options.explicitPath, options);
+  if (local) {
+    return local;
+  }
+
+  const skip = isTruthyEnvValue(env[IOS_SCREEN_CAPTURE_HELPER_SKIP_DOWNLOAD_ENV]);
+  if (!skip) {
+    const provider = options.provider ?? ScreenCaptureHelperProvider.getInstance();
+    const downloaded = await provider.ensure();
+    if (downloaded) {
+      return downloaded;
+    }
+  }
+
   throw new ActionableError(
-    `iOS WebRTC streaming requires a screen-capture-helper. A supported macOS npm install ships one at ${IOS_SCREEN_CAPTURE_HELPER_PACKAGED_RELATIVE}; if it is missing, set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to an absolute path or run swift build in ios/screen-capture.`
+    `iOS WebRTC streaming requires a screen-capture-helper. A supported macOS install downloads a ` +
+    `prebuilt one from the release matching ${AUTOMOBILE_VERSION_ENV}; if it is unavailable, set ` +
+    `${IOS_SCREEN_CAPTURE_HELPER_ENV} to an absolute path or run swift build in ios/screen-capture.`
   );
 }
 

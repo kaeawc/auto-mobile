@@ -291,8 +291,10 @@ internal object AutoMobilePlanExecutor {
 
   /**
    * Execute a plan starting at [startStep]. If the plan fails and recovery has not yet been
-   * attempted, the Koog agent is invoked to work around the failure. On successful recovery the
-   * plan resumes from the step after the failed one. Recovery is allowed at most once per test.
+   * attempted, the Koog agent is invoked to clear whatever interrupted the failed step. On
+   * successful recovery the plan resumes by re-running the failed step (so its action is retried
+   * now that the obstruction is gone) and then continuing. Recovery is allowed at most once per
+   * test.
    */
   /**
    * @param deviceIdOverride When non-null, pins execution to this device. Used after recovery to
@@ -467,10 +469,18 @@ internal object AutoMobilePlanExecutor {
       )
     }
 
-    // Recovery succeeded — resume the plan from the step after the failed one,
-    // pinned to the same device the agent just recovered
-    val resumeStep = failedStepContext.failedStepIndex + 1
-    println("AI recovery succeeded, resuming plan from step ${resumeStep + 1}")
+    // Recovery only cleared whatever was blocking the failed step (a modal,
+    // notification, permission dialog, etc.). The step's own action has NOT run yet, so
+    // resume by RE-RUNNING the failed step itself — the daemon retries its action
+    // deterministically and then continues with the rest of the plan. Resuming at
+    // failedStepIndex + 1 would skip the step and leave the app on the wrong screen.
+    //
+    // This re-run is also the authoritative check that recovery worked: if the
+    // obstruction is truly gone the step now passes; otherwise it fails again and the
+    // once-per-test guard (recoveryAlreadyAttempted) stops us from looping. coerceAtLeast
+    // guards the -1 "unknown step" case by re-running the whole plan from the start.
+    val resumeStep = failedStepContext.failedStepIndex.coerceAtLeast(0)
+    println("AI recovery succeeded, re-running failed step ${resumeStep + 1} and resuming")
 
     val resumeResult =
       executePlanFromStep(

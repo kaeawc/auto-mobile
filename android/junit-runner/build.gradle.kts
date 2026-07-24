@@ -111,6 +111,12 @@ tasks.configureEach {
 }
 
 tasks.withType<Test> {
+  // Run on the JUnit Platform so JUnit 5 (jupiter) suites like AutoMobileAgentTest are
+  // discovered. Without this the default runner only sees JUnit 4 tests and jupiter
+  // classes are silently skipped. The junit-vintage-engine dependency keeps the existing
+  // JUnit 4 suites (e.g. RecoveryLoopTest) running on the same platform.
+  useJUnitPlatform()
+
   // Enable parallel test execution across multiple devices
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
   dependsOn(":control-proxy:assembleDebug")

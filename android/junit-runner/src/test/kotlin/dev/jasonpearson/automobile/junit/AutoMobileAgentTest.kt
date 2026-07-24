@@ -223,6 +223,69 @@ class AutoMobileAgentTest {
   }
 
   @Test
+  fun `attemptAiRecovery prompt tells agent to clear the interruption, not perform the failed step`() {
+    // Arrange
+    val context =
+      FailedStepContext(
+        failedStepIndex = 2,
+        failedTool = "tapOn",
+        error = "Element not found",
+        succeededSteps = emptyList(),
+        planContent = "name: test\nsteps: []",
+        deviceId = "emulator-5554",
+      )
+    val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
+    val promptSlot = slot<String>()
+
+    every { mockTimeProvider.currentTimeMillis() } returns 1000L andThen 2000L
+    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
+    every { mockMcpClient.isConnected() } returns false
+    every { mockMcpClient.connect("http://localhost:3000") } just runs
+    every { mockMcpClient.disconnect() } just runs
+    every { mockConfigProvider.getModelConfig() } returns modelConfig
+    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5) } returns
+      mockAIAgent
+    every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
+    coEvery { mockAIAgent.run(capture(promptSlot)) } returns "Dismissed the dialog"
+
+    // Act
+    autoMobileAgent.attemptAiRecovery(context)
+
+    // Assert - the prompt must steer the agent toward clearing the blocker and away from
+    // performing the failed step itself (the runner re-runs that step deterministically).
+    val prompt = promptSlot.captured
+    assertTrue(
+      prompt.contains("RE-RUN", ignoreCase = true),
+      "Prompt should say the runner re-runs the failed step",
+    )
+    assertTrue(
+      prompt.contains("Do NOT perform the failed step", ignoreCase = true),
+      "Prompt should tell the agent not to perform the failed step's action",
+    )
+    assertTrue(
+      prompt.contains("dismiss", ignoreCase = true),
+      "Prompt should mention dismissing blockers like dialogs/notifications",
+    )
+  }
+
+  @Test
+  fun `recoveryIterationCap allows the full tool-call budget plus one concluding turn`() {
+    // N tool calls need N+1 Koog iterations (the last iteration is the finishing
+    // assistant turn), so the hard cap is maxToolCalls + 1.
+    assertEquals(6, recoveryIterationCap(5))
+    assertEquals(11, recoveryIterationCap(10))
+  }
+
+  @Test
+  fun `recoveryIterationCap floors a non-positive budget so the agent can still observe`() {
+    // A misconfigured 0 / negative budget must not produce a zero or negative cap that
+    // aborts before the agent observes — it floors to 1 tool call (+1 => 2 iterations).
+    assertEquals(2, recoveryIterationCap(0))
+    assertEquals(2, recoveryIterationCap(-3))
+    assertEquals(2, recoveryIterationCap(1))
+  }
+
+  @Test
   fun `attemptAiRecovery returns failure when agent throws exception`() {
     // Arrange
     val context =

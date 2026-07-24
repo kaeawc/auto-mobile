@@ -94,9 +94,12 @@ open class AutoMobileAgent(
   /**
    * Attempts AI-assisted recovery for a failed test step using AutoMobile MCP tools.
    *
-   * The agent receives structured context about the failure and uses MCP tools to get the device
-   * back on track. After the agent finishes, we call observe ourselves (outside the tool budget) to
-   * capture the device state for verification.
+   * The agent receives structured context about the failure and uses MCP tools to clear whatever
+   * interrupted the failed step (a modal, notification, permission dialog, etc.). After the agent
+   * finishes, we call observe ourselves (outside the tool budget) as a device-liveness gate: a
+   * non-null result means the device is still responsive and worth resuming on. The authoritative
+   * check that recovery actually worked is the caller re-running the failed step (see
+   * [AutoMobilePlanExecutor]) — if the obstruction is gone that step now passes.
    */
   open fun attemptAiRecovery(context: FailedStepContext): RecoveryOutcome {
     val startTime = timeProvider.currentTimeMillis()
@@ -123,7 +126,8 @@ open class AutoMobileAgent(
 
       val recoveryPrompt =
         """
-        A test plan step failed. Here is the context:
+        A test plan step was interrupted and failed. Your job is to CLEAR whatever is
+        blocking the app — you do NOT need to perform the failed step yourself.
 
         FAILED STEP: Step ${context.failedStepIndex + 1} using tool "${context.failedTool}"
         ERROR: ${context.error}
@@ -134,19 +138,24 @@ open class AutoMobileAgent(
         PLAN YAML:
         ${context.planContent}
 
-        You have a maximum of $maxToolCalls tool calls to recover the device state so the
-        test can resume from step ${context.failedStepIndex + 2}.
+        After you finish, the test runner will AUTOMATICALLY RE-RUN the failed step
+        (step ${context.failedStepIndex + 1}) and then continue with the rest of the plan.
+        So do NOT tap the failed step's own target or otherwise perform its action — just
+        remove whatever is blocking it and leave the app on the screen that step expects.
+
+        You have a maximum of $maxToolCalls tool calls.
 
         Instructions:
         1. Call observe to see the current device state.
-        2. Take corrective actions (tap, type, swipe, wait, etc.) to address the failure.
-        3. Focus on getting the device ready for the NEXT step in the plan.
+        2. Identify anything blocking the failed step and dismiss it, for example:
+           - a system notification or the expanded notification shade
+           - a permission dialog (accept or deny as the plan implies)
+           - a modal, popup, bottom sheet, or interstitial
+           - an ANR ("isn't responding") or crash ("has stopped") dialog
+           Dismiss it with its close / OK / allow / deny affordance, or press Back.
+        3. Return the app to the screen the failed step expects, then stop.
 
-        Common issues to watch for:
-        - Elements not found (try alternative selectors or wait longer)
-        - Pop-ups or dialogs blocking interaction
-        - Wrong screen (navigate to the correct screen)
-        - Timing issues (add appropriate waits)
+        Do NOT perform the failed step's action — the runner retries it for you.
       """
           .trimIndent()
 
@@ -160,7 +169,9 @@ open class AutoMobileAgent(
 
           println("AI recovery agent finished, verifying device state...")
 
-          // Call observe ourselves to capture post-recovery state
+          // Device-liveness gate: confirm the device is still responsive before the caller
+          // spends a daemon round-trip re-running the failed step. This is NOT proof the
+          // interruption is gone — the failed-step re-run in the executor is that check.
           val observeResult =
             try {
               mcpClient.callTool("observe", mapOf("withViewHierarchy" to true))
@@ -970,14 +981,18 @@ open class AutoMobileAgent(
         """
         You are an expert mobile test automation recovery agent using the AutoMobile framework.
 
-        Your goal is to analyze test failures and take corrective actions using available tools.
-        You have access to AutoMobile tools for observing and interacting with mobile devices.
-        The available tools are discovered dynamically from the MCP server.
+        Your goal is to clear whatever interruption blocked a failing test step — typically a
+        modal, popup, system notification, permission dialog, or crash/ANR dialog — and return
+        the app to the screen that step expects. You have access to AutoMobile tools for
+        observing and interacting with mobile devices, discovered dynamically from the MCP server.
+
+        The test runner re-runs the failed step itself after you finish, so do NOT perform that
+        step's action — just remove the obstruction.
 
         IMPORTANT CONSTRAINTS:
         - You have a maximum of $maxToolCalls tool calls per recovery attempt
         - Always start by observing the current device state
-        - Focus on practical, immediate fixes rather than complex workarounds
+        - Focus on dismissing blockers, not on completing the test's own actions
         - If you can't fix the issue within the tool call limit, explain what you discovered
 
         Core tools typically available:
@@ -997,11 +1012,17 @@ open class AutoMobileAgent(
       """
           .trimIndent()
 
+      // Hard-enforce the tool-call budget: cap Koog's agent loop via maxIterations so a
+      // looping or runaway model cannot exceed the budget the prompt advertises. Without
+      // this the "$maxToolCalls tool calls" line is advisory only. See [recoveryIterationCap]
+      // for why the ceiling is maxToolCalls + 1. When the cap is hit Koog throws, which the
+      // caller's try/catch turns into a failed RecoveryOutcome (we do not resume).
       return AIAgent(
         promptExecutor = executor,
         llmModel = model,
         toolRegistry = toolRegistry,
         systemPrompt = systemPrompt,
+        maxIterations = recoveryIterationCap(maxToolCalls),
       )
     }
 
@@ -1030,3 +1051,15 @@ open class AutoMobileAgent(
     override fun currentTimeMillis(): Long = System.currentTimeMillis()
   }
 }
+
+/**
+ * Hard iteration ceiling for a recovery agent run, derived from the configured tool-call budget.
+ *
+ * Koog's `AIAgentConfig.maxAgentIterations` counts every agent step, so making N tool calls takes
+ * N + 1 iterations — the extra one is the concluding assistant turn that produces no tool call and
+ * ends the loop. We add that +1 of headroom so an agent that spends its full budget still finishes
+ * cleanly, while an agent that attempts an (N + 1)th tool call trips the cap (Koog throws, and the
+ * caller treats that as a failed recovery). [coerceAtLeast] keeps a misconfigured non-positive
+ * budget from yielding a zero or negative cap, which would abort before the agent can even observe.
+ */
+internal fun recoveryIterationCap(maxToolCalls: Int): Int = maxToolCalls.coerceAtLeast(1) + 1

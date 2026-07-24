@@ -110,8 +110,8 @@ class RecoveryLoopTest {
   }
 
   @Test
-  fun `resume-from-step passes correct startStep to daemon`() {
-    // First call fails at step 2
+  fun `resume re-runs the failed step so its action is retried, not skipped`() {
+    // First call fails at step 2 (index)
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 2, failedTool = "tapOn"))
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
@@ -119,10 +119,12 @@ class RecoveryLoopTest {
 
     executePlan(aiAssistance = true)
 
-    // The second daemon call should have startStep = 3 (failedStepIndex + 1)
+    // The resume call must re-run the FAILED step itself (startStep == failedStepIndex),
+    // not skip ahead to failedStepIndex + 1 — the agent only cleared the interruption, so
+    // the step's own action still needs to run.
     assertEquals("Should have made 2 daemon calls", 2, fakeDaemonClient.callArgs.size)
     val resumeArgs = fakeDaemonClient.callArgs[1]
-    assertEquals(3, resumeArgs["startStep"]?.let { (it as JsonPrimitive).content.toInt() })
+    assertEquals(2, resumeArgs["startStep"]?.let { (it as JsonPrimitive).content.toInt() })
   }
 
   @Test

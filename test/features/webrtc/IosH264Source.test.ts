@@ -12,6 +12,7 @@ import {
   IOS_WEBRTC_FFMPEG_ENV,
   IOS_WEBRTC_FFMPEG_ENV_ALIAS,
   IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
+  IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   IosH264Source,
   defaultIosBitrateBps,
   resolveIosEncoderScale,
@@ -180,6 +181,37 @@ function createHarnessWithOverrides(options: Partial<ConstructorParameters<typeo
     ...options,
   });
   return { source, helper, encoderSpawns };
+}
+
+// A harness that hands out a *fresh* encoder per spawn, so an encoder restart
+// (requestKeyFrame) can be observed as a second spawn rather than reusing the
+// single encoder the other harnesses share.
+function createRestartHarness(
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+) {
+  const helper = new FakeFrameCaptureHelper();
+  const encoders: FakeChildProcess[] = [];
+  const encoderSpawns: Array<{ command: string; args: string[] }> = [];
+  const chunks: Buffer[] = [];
+  const errors: Error[] = [];
+  const source = new IosH264Source({
+    device: IOS_DEVICE,
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
+    onData: chunk => chunks.push(chunk),
+    onError: error => errors.push(error),
+    createHelper: () => helper,
+    spawner: (command, args) => {
+      encoderSpawns.push({ command, args });
+      const encoder = new FakeChildProcess();
+      encoders.push(encoder);
+      return encoder as unknown as ChildProcessWithoutNullStreams;
+    },
+    simulatorWindowResolver: async () => 42,
+    commandRunner: successfulCommandRunner,
+    ...overrides,
+  });
+  return { source, helper, encoders, encoderSpawns, chunks, errors };
 }
 
 async function successfulCommandRunner(_command: string, args: string[]) {
@@ -808,6 +840,75 @@ describe("IosH264Source", () => {
     await flush();
 
     expect(errors).toEqual([]);
+  });
+
+  test("requestKeyFrame restarts the ffmpeg encoder to emit a fresh IDR, keeping output flowing", async () => {
+    const { source, helper, encoders, encoderSpawns, chunks, errors } = createRestartHarness();
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    expect(encoderSpawns).toHaveLength(1);
+
+    // ffmpeg cannot be signalled for an IDR mid-stream over a pipe; a request
+    // restarts the encoder, whose first encoded frame is an SPS/PPS + IDR.
+    source.requestKeyFrame();
+
+    // A second encoder is spawned with identical argv, and the old one is ended
+    // and killed rather than treated as a fatal crash.
+    expect(encoderSpawns).toHaveLength(2);
+    expect(encoderSpawns[1].args).toEqual(encoderSpawns[0].args);
+    expect(encoders[0].killed).toBe(true);
+
+    // The next delivered frame flows into the new encoder, and its output (the
+    // fresh IDR) is forwarded to the same onData sink.
+    helper.emitFrame(frame(2, 2, 0x22));
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x22));
+    encoders[1].stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
+    await flush();
+
+    expect(chunks).toContainEqual(Buffer.from([0, 0, 0, 1, 0x65]));
+    // The deliberate restart must not surface as a source failure.
+    expect(errors).toEqual([]);
+  });
+
+  test("requestKeyFrame throttles a burst of PLIs to at most one restart per interval", async () => {
+    const timer = new FakeTimer();
+    const { source, helper, encoderSpawns } = createRestartHarness({ timer });
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    expect(encoderSpawns).toHaveLength(1);
+
+    // A burst of relayed viewer PLIs collapses to a single restart.
+    source.requestKeyFrame();
+    source.requestKeyFrame();
+    source.requestKeyFrame();
+    expect(encoderSpawns).toHaveLength(2);
+
+    // Within the throttle window, another request is coalesced away.
+    timer.advanceTime(IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS - 1);
+    source.requestKeyFrame();
+    expect(encoderSpawns).toHaveLength(2);
+
+    // After the interval elapses, a request restarts again.
+    timer.advanceTime(1);
+    source.requestKeyFrame();
+    expect(encoderSpawns).toHaveLength(3);
+  });
+
+  test("requestKeyFrame is a no-op before the first frame and after stop", async () => {
+    const { source, helper, encoderSpawns } = createRestartHarness();
+
+    // No encoder yet: the first frame is already an IDR, so there is nothing to
+    // restart. Must not throw or spawn.
+    source.requestKeyFrame();
+    expect(encoderSpawns).toHaveLength(0);
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    expect(encoderSpawns).toHaveLength(1);
+
+    await source.stop();
+    // After teardown there is no live encoder to restart.
+    source.requestKeyFrame();
+    expect(encoderSpawns).toHaveLength(1);
   });
 
   test("rejects startup when ffmpeg lacks h264_videotoolbox", async () => {

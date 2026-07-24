@@ -183,6 +183,39 @@ describe("SafeAreaAuditor", () => {
     ]);
   });
 
+  test("collapses an equal-bounds container into its flagged leaf", () => {
+    const result = observation();
+    result.viewHierarchy!.hierarchy.node = [{
+      clickable: "true",
+      bounds: { left: 1, top: 180, right: 99, bottom: 199 },
+      node: [{
+        text: "Label",
+        bounds: { left: 1, top: 180, right: 99, bottom: 199 },
+      }],
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toEqual([
+      expect.objectContaining({ element: expect.objectContaining({ text: "Label" }), sides: ["bottom"] }),
+    ]);
+  });
+
+  test("keeps an ancestor warning when its leaf does not cover every unsafe side", () => {
+    const result = observation();
+    result.viewHierarchy!.hierarchy.node = [{
+      clickable: "true",
+      bounds: { left: 1, top: 10, right: 99, bottom: 195 },
+      node: [{
+        text: "Label",
+        bounds: { left: 1, top: 180, right: 99, bottom: 195 },
+      }],
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+      { element: { bounds: { left: 1, top: 10, right: 99, bottom: 195 } }, sides: ["top", "bottom"] },
+      { element: { text: "Label" }, sides: ["bottom"] },
+    ]);
+  });
+
   test("returns no warnings when measurements are unavailable", () => {
     const result = observation();
     result.insets = { available: false, source: "unavailable", units: "unknown" };

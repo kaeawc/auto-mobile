@@ -398,8 +398,8 @@ function dedupeWarnings(candidates: WarningCandidate[]): LayoutWarning[] {
     for (const ancestor of ancestors) {
       if (
         ancestor.warning.type === descendant.warning.type
-        && sharesSide(ancestor.warning.sides, descendant.warning.sides)
-        && strictlyContains(ancestor.warning.element.bounds, descendant.warning.element.bounds)
+        && coversSides(ancestor.warning.sides, descendant.warning.sides)
+        && contains(ancestor.warning.element.bounds, descendant.warning.element.bounds)
       ) {
         containerWarnings.add(ancestor);
       }
@@ -415,17 +415,13 @@ function dedupeWarnings(candidates: WarningCandidate[]): LayoutWarning[] {
   }).map(candidate => candidate.warning);
 }
 
-function sharesSide(first: Side[], second: Side[]): boolean {
-  return first.some(side => second.includes(side));
+function coversSides(required: Side[], candidate: Side[]): boolean {
+  return required.every(side => candidate.includes(side));
 }
 
-function strictlyContains(container: ObservationEdgeInsets, contained: ObservationEdgeInsets): boolean {
+function contains(container: ObservationEdgeInsets, contained: ObservationEdgeInsets): boolean {
   return container.left <= contained.left
     && container.top <= contained.top
     && container.right >= contained.right
-    && container.bottom >= contained.bottom
-    && (container.left < contained.left
-      || container.top < contained.top
-      || container.right > contained.right
-      || container.bottom > contained.bottom);
+    && container.bottom >= contained.bottom;
 }

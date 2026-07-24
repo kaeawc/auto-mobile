@@ -65,9 +65,11 @@ error rather than silently publishing video-only.
 `IosH264Source` wraps that helper, pipes frames into `ffmpeg` with
 `h264_videotoolbox`, and forwards raw H.264 Annex-B stdout chunks into the
 existing `WebRtcPublisher`. The helper binary is resolved from
-`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` or repo/package-local Swift build outputs;
-the helper Swift package source is copied into `dist/ios/screen-capture` for
-published installs. ffmpeg is resolved from `AUTOMOBILE_IOS_WEBRTC_FFMPEG` or
+`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`, then the prebuilt universal helper
+staged in the npm payload at
+`dist/vendor/screen-capture-helper/darwin-universal/` (issue #4392), then
+repo/package-local Swift build outputs. The helper Swift package source is also
+copied into `dist/ios/screen-capture` so a checkout/package can still build it. ffmpeg is resolved from `AUTOMOBILE_IOS_WEBRTC_FFMPEG` or
 `PATH`, and startup fails fast if ffmpeg or `h264_videotoolbox` is unavailable
 or if simulator capture reports missing Screen Recording permission before the
 first frame.

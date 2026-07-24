@@ -25,6 +25,14 @@ import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 
 export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
 export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER";
+/**
+ * Location of the prebuilt universal helper inside the published npm payload,
+ * relative to a package/checkout root (issue #4392). A release job builds,
+ * signs, and stages the `arm64`+`x86_64` binary here so a normal macOS install
+ * resolves it without a local `swift build`.
+ */
+export const IOS_SCREEN_CAPTURE_HELPER_PACKAGED_RELATIVE =
+  "dist/vendor/screen-capture-helper/darwin-universal/screen-capture-helper";
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
@@ -783,6 +791,12 @@ export function resolveIosScreenCaptureHelperPath(
   const candidates = [
     explicitPath,
     readEnvWithLegacy(env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS),
+    // Prebuilt universal helper shipped in the npm payload (issue #4392). A
+    // normal package install has no Swift `.build` output, so this is the only
+    // path that resolves out of the box; it is preferred over any `.build`
+    // output but still yields to an explicit path or the env override.
+    ...candidateRoots.map(root =>
+      path.join(root, IOS_SCREEN_CAPTURE_HELPER_PACKAGED_RELATIVE)),
     ...candidateRoots.flatMap(root => [
       path.join(root, "ios/screen-capture/.build/debug/screen-capture-helper"),
       path.join(root, "ios/screen-capture/.build/release/screen-capture-helper"),
@@ -798,7 +812,7 @@ export function resolveIosScreenCaptureHelperPath(
   }
 
   throw new ActionableError(
-    `iOS WebRTC streaming requires a built screen-capture-helper. Set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to its absolute path or run swift build in ios/screen-capture.`
+    `iOS WebRTC streaming requires a screen-capture-helper. A supported macOS npm install ships one at ${IOS_SCREEN_CAPTURE_HELPER_PACKAGED_RELATIVE}; if it is missing, set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to an absolute path or run swift build in ios/screen-capture.`
   );
 }
 

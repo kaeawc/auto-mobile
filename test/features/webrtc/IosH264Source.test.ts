@@ -1010,6 +1010,81 @@ describe("IosH264Source", () => {
     expect(found).toBe("/legacy/helper");
   });
 
+  test("resolves the prebuilt vendor helper on a normal package install", () => {
+    // A published npm install has no ios/screen-capture/.build output; the
+    // universal helper ships prebuilt under dist/vendor (issue #4392, AC1).
+    const packageRoot = path.resolve("pkg-install");
+    const vendorHelper = path.join(
+      packageRoot,
+      "dist",
+      "vendor",
+      "screen-capture-helper",
+      "darwin-universal",
+      "screen-capture-helper"
+    );
+    const found = resolveIosScreenCaptureHelperPath(undefined, {
+      moduleDir: path.join(packageRoot, "dist", "src", "features", "webrtc"),
+      entryFile: path.join(packageRoot, "dist", "src", "index.js"),
+      env: {},
+      exists: candidate => candidate === vendorHelper,
+    });
+
+    expect(found).toBe(vendorHelper);
+  });
+
+  test("prefers the prebuilt vendor helper over a legacy dist .build output", () => {
+    // Ordering guard: the packaged helper is preferred over any Swift build
+    // output that happens to also be present (issue #4392, "prefer packaged").
+    const packageRoot = path.resolve("pkg-install-ordering");
+    const vendorHelper = path.join(
+      packageRoot,
+      "dist",
+      "vendor",
+      "screen-capture-helper",
+      "darwin-universal",
+      "screen-capture-helper"
+    );
+    const distBuild = path.join(
+      packageRoot,
+      "dist",
+      "ios",
+      "screen-capture",
+      ".build",
+      "release",
+      "screen-capture-helper"
+    );
+    const found = resolveIosScreenCaptureHelperPath(undefined, {
+      moduleDir: path.join(packageRoot, "dist", "src", "features", "webrtc"),
+      entryFile: path.join(packageRoot, "dist", "src", "index.js"),
+      env: {},
+      exists: candidate => candidate === vendorHelper || candidate === distBuild,
+    });
+
+    expect(found).toBe(vendorHelper);
+  });
+
+  test("prefers the env override over the prebuilt vendor helper", () => {
+    // The env override remains the development escape hatch even when the
+    // package ships a prebuilt helper (issue #4392, AC3).
+    const packageRoot = path.resolve("pkg-install-env");
+    const vendorHelper = path.join(
+      packageRoot,
+      "dist",
+      "vendor",
+      "screen-capture-helper",
+      "darwin-universal",
+      "screen-capture-helper"
+    );
+    const found = resolveIosScreenCaptureHelperPath(undefined, {
+      moduleDir: path.join(packageRoot, "dist", "src", "features", "webrtc"),
+      entryFile: path.join(packageRoot, "dist", "src", "index.js"),
+      env: { [IOS_SCREEN_CAPTURE_HELPER_ENV]: "/custom/helper" },
+      exists: candidate => candidate === "/custom/helper" || candidate === vendorHelper,
+    });
+
+    expect(found).toBe("/custom/helper");
+  });
+
   test("prefers the ffmpeg environment override over the legacy alias", async () => {
     const originalPreferred = process.env[IOS_WEBRTC_FFMPEG_ENV];
     const originalLegacy = process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS];

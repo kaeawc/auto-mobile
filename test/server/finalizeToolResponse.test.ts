@@ -1643,3 +1643,120 @@ describe("finalizeToolResponse", () => {
     });
   });
 });
+
+/**
+ * Observe scope experiments (issue #4344). The per-call `scope` request arrives on
+ * the observe tool args; a server flag gates each dimension. Scoping is applied to
+ * the agent-facing payload only — it must leave the diff baseline (the full
+ * sanitized tree) intact and never touch internal tool-to-tool calls.
+ */
+describe("finalizeToolResponse observe scope experiments (#4344)", () => {
+  beforeEach(() => {
+    serverConfig.setObserveFocusScopeEnabled(false);
+    serverConfig.setObserveOverviewEnabled(false);
+    serverConfig.setObserveRegionEnabled(false);
+    serverConfig.setActionsDiffObserveEnabled(false);
+  });
+
+  afterEach(() => {
+    serverConfig.setObserveFocusScopeEnabled(false);
+    serverConfig.setObserveOverviewEnabled(false);
+    serverConfig.setObserveRegionEnabled(false);
+    serverConfig.setActionsDiffObserveEnabled(false);
+  });
+
+  function chromeObserve(): ObserveResult {
+    return {
+      updatedAt: 1,
+      screenSize: { width: 1000, height: 2000 },
+      systemInsets: { top: 100, bottom: 100, left: 0, right: 0 },
+      activeWindow: { appId: "com.example.app" } as ObserveResult["activeWindow"],
+      viewHierarchy: {
+        packageName: "com.example.app",
+        hierarchy: {
+          node: {
+            "class": "Root",
+            "bounds": { left: 0, top: 0, right: 1000, bottom: 2000 },
+            // Package-qualified resource-ids are the app-vs-chrome signal that
+            // survives cleanNodeProperties (per-node `package` does not).
+            "node": [
+              { "resource-id": "com.android.systemui:id/status_bar", "bounds": { left: 0, top: 0, right: 1000, bottom: 100 } },
+              { "resource-id": "com.example.app:id/content", "text": "Hi", "bounds": { left: 0, top: 100, right: 1000, bottom: 1900 } },
+            ],
+          } as any,
+        },
+      },
+    } as ObserveResult;
+  }
+
+  test("no scope flags: observe payload is untouched even when the call requests scope", () => {
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      args: { scope: { focus: true } },
+    });
+    expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
+  });
+
+  test("flag on but no scope in the call: payload is untouched", () => {
+    serverConfig.setObserveFocusScopeEnabled(true);
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), { name: "observe", args: {} });
+    expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
+  });
+
+  test("scope.focus in the call (flag on) scopes the payload and records observeScope", () => {
+    serverConfig.setObserveFocusScopeEnabled(true);
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      args: { scope: { focus: true } },
+    });
+    const out = finalized.structuredContent as ObserveResult;
+    expect(out.observeScope?.applied).toContain("focus");
+    expect(out.observeScope!.nodesAfter).toBeLessThan(out.observeScope!.nodesBefore);
+    // text mirror agrees with structuredContent.
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
+  test("scope.region box in the call (flag on) crops to the normalized rectangle", () => {
+    serverConfig.setObserveRegionEnabled(true);
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      args: { scope: { region: { x1: 0, y1: 0, x2: 1, y2: 0.5 } } }, // top half only
+    });
+    const out = finalized.structuredContent as ObserveResult;
+    expect(out.observeScope?.regionPx).toEqual({ left: 0, top: 0, right: 1000, bottom: 1000 });
+  });
+
+  test("internal observe calls are never scoped", () => {
+    serverConfig.setObserveFocusScopeEnabled(true);
+    const finalized = finalizeToolResponse(
+      createStructuredToolResponse(chromeObserve()),
+      { name: "observe", internal: true, args: { scope: { focus: true } } }
+    );
+    expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
+  });
+
+  test("diff baseline is the full sanitized tree, not the scoped copy", () => {
+    serverConfig.setObserveFocusScopeEnabled(true);
+    serverConfig.setActionsDiffObserveEnabled(true);
+    const map = new Map<string, ObserveResult>();
+    const store = { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } };
+
+    finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      sessionUuid: "s1",
+      baselineStore: store,
+      args: { scope: { focus: true } },
+    });
+
+    // Baseline retains the system-chrome node the served payload dropped.
+    const baseline = map.get("s1")!;
+    expect(baseline.observeScope).toBeUndefined();
+    const ids: string[] = [];
+    const walk = (n: any): void => {
+      if (n["resource-id"]) { ids.push(n["resource-id"]); }
+      for (const c of (n.node ?? [])) { walk(c); }
+    };
+    walk(baseline.viewHierarchy!.hierarchy.node);
+    expect(ids).toContain("com.android.systemui:id/status_bar");
+  });
+});

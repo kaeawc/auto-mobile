@@ -243,6 +243,35 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   ],
 };
 
+// Progressive-disclosure scoping of the returned hierarchy (issue #4344). The
+// agent picks where to zoom on THIS screen, so region/anchor are per-call inputs
+// (not env). Each dimension is honored only when its server experiment flag is
+// enabled: --observe-focus-scope, --observe-region, --observe-overview.
+const observeScopeFocusSchema = z.union([
+  z.boolean(),
+  z.object({
+    resourceId: z.string().optional().describe("Anchor by exact resource-id"),
+    text: z.string().optional().describe("Anchor by substring text match")
+  })
+]).describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor. Needs --observe-focus-scope.");
+
+const observeScopeRegionBoxSchema = z.object({
+  x1: z.number().min(0).max(1),
+  y1: z.number().min(0).max(1),
+  x2: z.number().min(0).max(1),
+  y2: z.number().min(0).max(1)
+}).refine(b => b.x1 < b.x2 && b.y1 < b.y2, {
+  message: "region requires x1 < x2 and y1 < y2"
+});
+
+const observeScopeSchema = z.object({
+  focus: observeScopeFocusSchema.optional(),
+  region: z.union([z.boolean(), observeScopeRegionBoxSchema])
+    .optional()
+    .describe("Crop to a normalized 0..1 box; true = inset content rect. Needs --observe-region."),
+  overview: z.boolean().optional().describe("Collapse to a container skeleton. Needs --observe-overview.")
+}).describe("Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)");
+
 // Cross-field validation shared by `observe` and `openLink` (both carry
 // platform + waitFor + settled): iOS rejects Android-only activityName, and
 // `settled` requires a `waitFor` predicate to settle after.
@@ -320,7 +349,8 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
   settled: settledSchema.optional().describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
   raw: z.boolean().optional().describe("Include raw view hierarchy"),
-  skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling")
+  skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
+  scope: observeScopeSchema.optional()
 })).superRefine(refineWaitForArgs), overrideWaitForJsonSchema);
 
 export const observeSchema = withAppIdAliases(observeBaseSchema);

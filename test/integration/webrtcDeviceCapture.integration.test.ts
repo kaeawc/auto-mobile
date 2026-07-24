@@ -10,16 +10,19 @@ import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
+import { IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS } from "../../src/features/webrtc/IosH264Source";
 import {
   CaptureStageTimeline,
   captureRunIdentity,
   decodedFpsBetween,
   egressKbpsBetween,
   formatCaptureStageRecord,
+  keyframeRecovered,
   type CaptureDimensions,
   type CaptureStage,
   type CaptureStageContext,
   type EgressSample,
+  type KeyframeRecoverySample,
 } from "../helpers/captureStageTimeline";
 
 const execFileAsync = promisify(execFile);
@@ -249,6 +252,34 @@ async function waitForDecodedFrames(cdp: CdpClient, minimum: number, message: st
     const diagnostics = await readerDiagnostics(cdp).catch(() => undefined);
     throw new Error(`${message}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`);
   }
+}
+
+/**
+ * Cumulative keyframe/frame decode counters for the recovery viewer — the most
+ * recent WHEP subscription, so the last peer connection the hook recorded
+ * (#4376). Returns null when no inbound-video stat is available yet (the fresh
+ * subscription has not decoded anything), which the caller treats as "not yet
+ * recovered" rather than a failure.
+ */
+async function recoverySample(cdp: CdpClient): Promise<KeyframeRecoverySample | null> {
+  const expression = `(async () => {
+    const connections = Array.from(window.__automobilePeerConnections ?? []);
+    const latest = connections[connections.length - 1];
+    if (!latest) { return null; }
+    const reports = Array.from((await latest.getStats()).values());
+    const inbound = reports.find(stat => stat.type === "inbound-rtp" && stat.kind === "video");
+    if (!inbound) { return null; }
+    return {
+      keyFramesDecoded: inbound.keyFramesDecoded ?? 0,
+      framesDecoded: inbound.framesDecoded ?? 0,
+    };
+  })()`;
+  const response = await cdp.command("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  return (response.result?.result?.value as KeyframeRecoverySample | null) ?? null;
 }
 
 function androidDeviceId(): string {
@@ -543,6 +574,45 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         }
       } catch (error) {
         console.warn(`[#4349] could not sample egress bitrate / decoded fps: ${error}`);
+      }
+      // #4376: prove the on-demand keyframe path end-to-end. iOS only — the path
+      // under a delivery shortfall is IosH264Source.requestKeyFrame (encoder
+      // restart, PR #4374); AndroidH264Source has its own keyframe path, out of
+      // scope here. Fresh viewer subscribing relays a PLI upstream through
+      // MediaMTX to the WHIP publisher, which calls source.requestKeyFrame().
+      if (platform === "ios") {
+        await timeline.runPhase("keyframeRecovery", async () => {
+          // A brand-new WHEP subscription is the relayed PLI: it renegotiates
+          // with MediaMTX, which requests a keyframe upstream. The recovery
+          // viewer starts cold, so its baseline is zero on both counters.
+          await subscribeReader(cdp!);
+          const baseline: KeyframeRecoverySample = { keyFramesDecoded: 0, framesDecoded: 0 };
+          // Under a static Simulator screen the restarted encoder's IDR only
+          // rides out on the next delivered frame (SimulatorCaptureSession drops
+          // non-`.complete` frames), so keep driving a visible change and poll
+          // for the fresh keyframe on that delivered frame — never a fixed
+          // wall-clock sleep. The throttle floors one restart per
+          // IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS; allow delivery slack on top so a
+          // shortfall does not flake the lane.
+          let recovered: KeyframeRecoverySample | null = null;
+          let toggle = false;
+          await waitFor(
+            async () => {
+              toggle = !toggle;
+              await (toggle ? changeFixture() : launchFixture());
+              const latest = await recoverySample(cdp!);
+              if (latest && keyframeRecovered(baseline, latest)) {
+                recovered = latest;
+                return true;
+              }
+              return false;
+            },
+            `iOS WHEP viewer did not recover to a fresh IDR within ~${IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}ms of the relayed PLI`,
+            IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS + 30_000
+          );
+          expect(recovered).not.toBeNull();
+          expect(keyframeRecovered(baseline, recovered!)).toBe(true);
+        });
       }
       const stopped = await sendWebRtcStreamRequest(
         { action: "stop", id: `${streamId}-stop`, streamId },

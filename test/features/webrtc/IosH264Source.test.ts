@@ -484,6 +484,30 @@ describe("IosH264Source", () => {
     );
   });
 
+  test("does not apply the resolution-derived default bitrate to a physical device (#4375)", async () => {
+    // #4349 justified the 0.1 bpp default entirely from Simulator screen-content
+    // measurements, so a physical iPhone must not inherit it — with no operator
+    // override it falls back to VideoToolbox's own default (no -b:v emitted).
+    const { source, helper, encoderSpawns } = createHarness(IOS_DEVICE);
+
+    await startWithFrame(source, helper, frame(750, 1334, 0x11));
+
+    expect(encoderSpawns[0].args).not.toContain("-b:v");
+  });
+
+  test("still honors an explicit bitrate override for a physical device (#4375)", async () => {
+    // Only the resolution-derived *default* is Simulator-scoped; an operator
+    // ceiling (AUTOMOBILE_WEBRTC_BITRATE_KBPS -> bitrateBps) still applies to a
+    // physical device.
+    const { source, helper, encoderSpawns } = createHarnessWithOverrides({ bitrateBps: 900_000 });
+
+    await startWithFrame(source, helper, frame(750, 1334, 0x11));
+
+    const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
+    expect(rateIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[rateIndex + 1]).toBe("900000");
+  });
+
   test("packs padded BGRA frame rows before writing rawvideo to ffmpeg", async () => {
     const { source, helper, encoder } = createHarness();
     const padded = frame(2, 2, 0);

@@ -242,6 +242,12 @@ export interface DaemonOptions {
   actionsNoObserve?: boolean;
   /** Output reduction: serialize tool results as compact (non-pretty) JSON (issue #2756) */
   toolResultsCompactJson?: boolean;
+  /** Observe scope experiment: focus the hierarchy to a subtree / foreground app (issue #4344) */
+  observeFocusScope?: boolean;
+  /** Observe scope experiment: collapse the hierarchy to a container skeleton (issue #4344) */
+  observeOverview?: boolean;
+  /** Observe scope experiment: crop the hierarchy to a normalized region (issue #4344) */
+  observeRegion?: boolean;
 }
 
 /**

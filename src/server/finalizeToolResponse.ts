@@ -5,6 +5,11 @@ import {
   isSameObservationScreen,
   type SanitizeObserveConfig,
 } from "../features/observe/output/ObserveResultOutput";
+import {
+  applyObserveScopeExperiments,
+  buildObserveScopeConfig,
+} from "../features/observe/output/ObserveScopeExperiments";
+import type { ObserveScopeInput } from "../models/ObserveScope";
 import { isInPlacePressButton, isNavigationPressButton } from "../features/action/pressButtonPolicy";
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
@@ -209,6 +214,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     compact: serverConfig.isObserveResultCompactEnabled(),
   };
 
+  // Progressive-disclosure scoping experiments (issue #4344). Agent-facing only:
+  // internal tool-to-tool consumers read the full `.observation.viewHierarchy`, so
+  // scoping (like the diff/strip transforms) is suppressed for `ctx.internal`.
+  const scopeFlags = {
+    focus: serverConfig.isObserveFocusScopeEnabled(),
+    overview: serverConfig.isObserveOverviewEnabled(),
+    region: serverConfig.isObserveRegionEnabled(),
+  };
+  const scopeActive = !ctx.internal && (scopeFlags.focus || scopeFlags.overview || scopeFlags.region);
+
   // Internal tool-to-tool calls (#3053) always get the full sanitized observation:
   // the diff/strip transforms are for the agent-facing wire only, so an internal
   // consumer reading `.observation.viewHierarchy` off a finalized step envelope is
@@ -229,9 +244,17 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
     const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, cfg);
     if (canDiff) {
+      // Diff against the full sanitized tree, never the scoped copy — the next
+      // action must see real state, not what this observe payload was cropped to.
       pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
     }
-    sanitizedPayload = sanitized as unknown as Record<string, unknown>;
+    const served = scopeActive
+      ? applyObserveScopeExperiments(
+        sanitized,
+        buildObserveScopeConfig(scopeFlags, ctx.args?.scope as ObserveScopeInput | undefined)
+      )
+      : sanitized;
+    sanitizedPayload = served as unknown as Record<string, unknown>;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
     if (noObserveEnabled) {

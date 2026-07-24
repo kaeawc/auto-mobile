@@ -7,9 +7,11 @@ import {
   decodedFpsBetween,
   egressKbpsBetween,
   formatCaptureStageRecord,
+  keyframeRecovered,
   monotonicNowMs,
   type CaptureStageContext,
   type EgressSample,
+  type KeyframeRecoverySample,
 } from "./captureStageTimeline";
 
 /** Deterministic monotonic clock: advance() is the only way time moves. */
@@ -472,5 +474,48 @@ describe("#4349 egress bitrate and decoded fps between two inbound-rtp samples",
   test("clamps a counter that reset between samples to zero rather than reporting negative", () => {
     expect(egressKbpsBetween(sample(5_000, 0, 1_000), sample(1_000, 0, 3_000))).toBe(0);
     expect(decodedFpsBetween(sample(0, 90, 1_000), sample(0, 10, 3_000))).toBe(0);
+  });
+});
+
+describe("#4376 WHEP keyframe recovery after a relayed PLI", () => {
+  const sample = (keyFramesDecoded: number, framesDecoded: number): KeyframeRecoverySample => ({
+    keyFramesDecoded,
+    framesDecoded,
+  });
+
+  test("recovers when a fresh IDR is decoded on a newly delivered frame", () => {
+    // AC1: a WHEP viewer that relayed a PLI receives a decodable SPS/PPS + IDR —
+    // observed as keyFramesDecoded advancing — carried by a delivered frame.
+    expect(keyframeRecovered(sample(1, 30), sample(2, 31))).toBe(true);
+  });
+
+  test("recovers a fresh viewer that starts from no decoded frames at all", () => {
+    // A recovery viewer subscribes cold: its baseline is zero on both counters,
+    // and connecting relays the PLI that forces the fresh IDR.
+    expect(keyframeRecovered(sample(0, 0), sample(1, 1))).toBe(true);
+  });
+
+  test("does not recover until a delivered frame carries the IDR (delivery shortfall)", () => {
+    // AC2: under a static Simulator screen the restarted encoder's IDR only
+    // rides out on the next delivered frame. A keyframe counter that advances
+    // without framesDecoded advancing cannot happen on the wire, but the check
+    // is defined on the delivered frame — not a fixed wall clock — so a stalled
+    // delivery is reported as "not yet recovered", never as recovered.
+    expect(keyframeRecovered(sample(1, 30), sample(2, 30))).toBe(false);
+  });
+
+  test("does not treat ordinary inter-frame decode progress as a recovery", () => {
+    // Frames keep flowing without a new keyframe: no fresh IDR was delivered.
+    expect(keyframeRecovered(sample(1, 30), sample(1, 45))).toBe(false);
+  });
+
+  test("does not recover when nothing changed between the two samples", () => {
+    expect(keyframeRecovered(sample(1, 30), sample(1, 30))).toBe(false);
+    expect(keyframeRecovered(sample(0, 0), sample(0, 0))).toBe(false);
+  });
+
+  test("clamps a reset keyframe counter to no-recovery rather than a spurious pass", () => {
+    // A reconnect that reset the reader's counters must not read as a recovery.
+    expect(keyframeRecovered(sample(5, 90), sample(1, 91))).toBe(false);
   });
 });

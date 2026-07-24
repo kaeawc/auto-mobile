@@ -217,10 +217,16 @@ export class DatabaseInspector {
     if (json) {
       try {
         const parsed = JSON.parse(json) as { errorType?: unknown; error?: unknown };
-        return {
-          errorType: typeof parsed.errorType === "string" ? parsed.errorType : "UNKNOWN",
-          error: typeof parsed.error === "string" ? parsed.error : "Unknown error"
-        };
+        // Only accept it as the envelope if it actually carries a field. Otherwise this is an old
+        // flat reply whose error text merely contains a parseable `result={...}` span: `indexOf`
+        // latched onto that substring, JSON.parse succeeded, but the real flat values are elsewhere
+        // — fall through so the flat reader below still finds them.
+        if (typeof parsed.errorType === "string" || typeof parsed.error === "string") {
+          return {
+            errorType: typeof parsed.errorType === "string" ? parsed.errorType : "UNKNOWN",
+            error: typeof parsed.error === "string" ? parsed.error : "Unknown error"
+          };
+        }
       } catch (error) {
         // Not a structured envelope (e.g. an old flat reply whose error text merely contains
         // a "result=" substring) — expected under version skew, so fall through to the flat form.

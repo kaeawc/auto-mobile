@@ -279,6 +279,17 @@ describe("DatabaseInspector", () => {
 
       expect(message).toBe("Database error (UNKNOWN): Unknown error");
     });
+
+    test("keeps flat values when an old reply's error text embeds a parseable result={}", async () => {
+      // Version skew: an old flat-form SDK whose SQLite message happens to echo a `result={...}`
+      // span. The envelope reader latches onto that substring and parses it, but it carries no
+      // errorType/error field, so the real flat values must still win.
+      const message = await errorFor(
+        `Bundle[{success=false, errorType=SQLiteException, error=near result={"a":1} bad}]`
+      );
+
+      expect(message).toBe(`Database error (SQLiteException): near result={"a":1} bad`);
+    });
   });
 
   describe("structured error envelope (SDK wire format)", () => {

@@ -508,12 +508,15 @@ describe("iOS runner-binary checksum", function() {
     expect(IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM).toBe(RELEASE_CHECKSUM_REGISTRY[0].runnerSha256);
   });
 
-  test("registry[0] (0.0.44) is a coherent triple after the #3784 runner-sha repair", function() {
-    const v0044 = RELEASE_CHECKSUM_REGISTRY[0];
-    expect(v0044.version).toBe("0.0.44");
+  test("the 0.0.44 entry is a coherent triple after the #3784 runner-sha repair", function() {
+    // Addressed by version, not by index: the registry is prepended on every
+    // release, so pinning [0] made each version bump red main (#4353) — and bumps
+    // ship [skip ci], so nothing caught it until the next PR branched.
+    const v0044 = RELEASE_CHECKSUM_REGISTRY.find(entry => entry.version === "0.0.44");
+    expect(v0044).toBeDefined();
     // The runner inside the published 0.0.44 IPA, not the orphaned nightly sha.
-    expect(v0044.runnerSha256).toBe("b281f9fd516116164a76dc049a413d5123bfb7bf96c79c6ad654ba90c08ed982");
-    expect(v0044.runnerSha256).not.toBe(NIGHTLY_CHECKSUM_ENTRY.runnerSha256);
+    expect(v0044?.runnerSha256).toBe("b281f9fd516116164a76dc049a413d5123bfb7bf96c79c6ad654ba90c08ed982");
+    expect(v0044?.runnerSha256).not.toBe(NIGHTLY_CHECKSUM_ENTRY.runnerSha256);
   });
 });
 

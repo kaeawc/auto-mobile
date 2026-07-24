@@ -284,7 +284,10 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: timer,
-            logger: NullLogger()
+            logger: NullLogger(),
+            // Disable AI recovery so this test deterministically exercises the failure-throw path
+            // regardless of whether the environment has a model API key configured.
+            recoveryModelConfig: nil
         )
 
         XCTAssertThrowsError(try executor.execute(testMetadata: nil)) { error in
@@ -371,7 +374,10 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: timer,
-            logger: NullLogger()
+            logger: NullLogger(),
+            // Disable AI recovery so this test deterministically exercises the failure-throw path
+            // regardless of whether the environment has a model API key configured.
+            recoveryModelConfig: nil
         )
 
         XCTAssertThrowsError(try executor.execute(testMetadata: nil)) { error in

@@ -9,6 +9,13 @@ running your first test locally.
 The XCTestRunner is a Swift Package Manager library. It can be consumed as a local path dependency
 (for reproducibility before a GitHub release is available) or as a remote dependency once published.
 
+> **Toolchain requirements (updated):** XCTestRunner now targets **Swift tools 6.0**, **iOS 17**, and
+> **macOS 14**, and depends on [Tachikoma](https://github.com/steipete/Tachikoma) (pinned to an exact
+> tag) for [AI-assisted recovery](index.md#ai-assisted-recovery). Consuming projects must raise their
+> deployment target to iOS 17+ and allow SPM to resolve the Tachikoma dependency (and its transitive
+> deps: swift-log). If you vendor the package source for offline CI, vendor Tachikoma too, or resolve
+> it from the network. The manifest snippets below reflect these versions.
+
 ### Local path dependency (current approach)
 
 The recommended approach is to commit the XCTestRunner source alongside your project so CI can
@@ -30,26 +37,36 @@ cp -r ~/path/to/auto-mobile/ios/XCTestRunner/Sources \
 
 ```swift
 // libs/spm/XCTestRunner/Package.swift
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
     name: "XCTestRunner",
     platforms: [
-        .iOS(.v15),
-        .macOS(.v13),
+        .iOS(.v17),
+        .macOS(.v14),
     ],
     products: [
         .library(name: "XCTestRunner", targets: ["XCTestRunner"]),
     ],
+    dependencies: [
+        // Powers AI-assisted recovery. Pin to an exact tag for reproducible CI.
+        .package(url: "https://github.com/steipete/Tachikoma.git", exact: "1.0.0"),
+    ],
     targets: [
-        .target(name: "XCTestRunner", path: "Sources/XCTestRunner"),
+        .target(
+            name: "XCTestRunner",
+            dependencies: [.product(name: "Tachikoma", package: "Tachikoma")],
+            path: "Sources/XCTestRunner",
+            // The runner sources compile in the Swift 5 language mode; only the manifest is Swift 6.
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )
 ```
 
-**Step 3 — Commit both the manifest and the source files.** CI runners resolve them from disk with
-no network dependency.
+**Step 3 — Commit the manifest and source files.** For fully offline CI, also vendor the Tachikoma
+package (and swift-log) or allow the runner to resolve them from the network on first build.
 
 ### Remote dependency (once published)
 

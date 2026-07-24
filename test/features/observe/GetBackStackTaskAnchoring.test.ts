@@ -211,3 +211,75 @@ Display #0 (activities from top to bottom):
     expect(result.tasks[0].rootActivity).toBeUndefined();
   });
 });
+
+describe("Hist #0 root component defers to rootOfTask=true (#4359)", () => {
+  // Mirrors api34 task #9: two `Hist #0` rows in different TaskFragments. The
+  // first says rootOfTask=false, the second rootOfTask=true. The first-`Hist #0`
+  // heuristic named the activity the dump itself calls NOT the root.
+  const TWO_HIST0_ROWS = `
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+  * Task{9de9b7 #9 type=standard A=1000:com.android.settings U=0 mode=fullscreen sz=2}
+    * TaskFragment{aaa mode=fullscreen}
+      * Hist  #0: ActivityRecord{459683c u0 com.android.settings/.Settings$WifiSettingsActivity t9}
+          packageName=com.android.settings processName=com.android.settings
+          rootOfTask=false task=Task{9de9b7 #9 type=standard A=1000:com.android.settings}
+    * TaskFragment{bbb mode=fullscreen}
+      * Hist  #0: ActivityRecord{5059d6b u0 com.android.settings/.homepage.DeepLinkHomepageActivity t9}
+          packageName=com.android.settings processName=com.android.settings
+          rootOfTask=true task=Task{9de9b7 #9 type=standard A=1000:com.android.settings}
+`;
+
+  test("rootActivity is the rootOfTask=true row, not the first Hist #0", async () => {
+    const result = await parse(TWO_HIST0_ROWS);
+
+    expect(result.tasks[0].rootActivity).toBe(
+      "com.android.settings/.homepage.DeepLinkHomepageActivity"
+    );
+    expect(result.tasks[0].packageName).toBe("com.android.settings");
+  });
+
+  test("API <= 29: with no rootOfTask= printed, the first Hist #0 still wins", async () => {
+    // The authoritative field is absent pre-API-30, so the index heuristic
+    // remains the only source and its behavior must not change.
+    const result = await parse(`
+    Task id #14418
+    * TaskRecord{1d3813b #14418 A=com.example U=0 StackId=436 sz=2}
+      * Hist #0: ActivityRecord{aaa u0 com.example/.FirstActivity t14418}
+          frontOfTask=true task=TaskRecord{1d3813b #14418}
+      * Hist #0: ActivityRecord{bbb u0 com.example/.SecondActivity t14418}
+          frontOfTask=false task=TaskRecord{1d3813b #14418}
+`);
+
+    expect(result.tasks[0].rootActivity).toBe("com.example/.FirstActivity");
+  });
+
+  test("rootOfTask=true does NOT populate a task that prints no Hist #0", async () => {
+    // Narrowed to overriding an existing Hist #0-derived value: a task whose
+    // only rootOfTask=true row is a Hist #N (N>0) with no Hist #0 stays
+    // undefined, exactly as before #4359. rootActivity must not appear where it
+    // was absent.
+    const result = await parse(`
+  * Task{d19dee2 #61 type=standard A=10164:com.example U=0 mode=fullscreen sz=1}
+    * Hist  #1: ActivityRecord{2b2ce0f u0 com.example/.RootActivity t61}
+        packageName=com.example processName=com.example
+        rootOfTask=true task=Task{d19dee2 #61 type=standard A=10164:com.example}
+`);
+
+    expect(result.tasks[0].id).toBe(61);
+    expect(result.tasks[0].rootActivity).toBeUndefined();
+    expect(result.tasks[0].packageName).toBeUndefined();
+  });
+
+  test("rootOfTask=true does not override an I= header component", async () => {
+    // The header's own intent component still outranks the Hist-derived root,
+    // just as the first-Hist #0 path did.
+    const result = await parse(`
+  * Task{9c31af0 #1 type=home I=com.android.launcher3/.Launcher U=0 mode=fullscreen sz=1}
+    * Hist  #0: ActivityRecord{3177c30 u0 com.android.launcher3/.OtherEntry t1}
+        rootOfTask=true task=Task{9c31af0 #1 type=home I=com.android.launcher3/.Launcher}
+`);
+
+    expect(result.tasks[0].rootActivity).toBe("com.android.launcher3/.Launcher");
+    expect(result.tasks[0].packageName).toBe("com.android.launcher3");
+  });
+});

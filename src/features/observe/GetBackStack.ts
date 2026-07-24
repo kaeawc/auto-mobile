@@ -137,6 +137,17 @@ const HIST_LINE = /\bHist\s+#\d+:/;
  */
 const ROOT_OF_TASK_LINE = /^\s*rootOfTask=(true|false)\b/;
 
+/**
+ * The two candidate root components for a task, gathered from its `Hist` rows.
+ * `firstHist0` is the index-derived value (the only source on API <= 29);
+ * `authoritative` is the component whose ActivityRecord block prints
+ * rootOfTask=true and, when present, is preferred (issue #4359).
+ */
+interface HistRootEntry {
+  firstHist0?: string;
+  authoritative?: string;
+}
+
 /** Fields carried by a modern task header line. */
 interface TaskHeaderFields {
   id: number;
@@ -305,16 +316,48 @@ export class GetBackStack implements BackStack {
     // for the same task ("Task id #N" then "* TaskRecord{... #N ...}"), so the
     // second must resume the first's count rather than restart it.
     const histCounts: Map<number, number> = new Map();
-    // The component of each task's "Hist #0" row. `Hist #0` is normally the
-    // task root (see #4197; the authoritative rootOfTask= field can disagree
-    // on API 30+, see #4340 -- close enough for the package-name fallback this
-    // feeds), and its "pkg/.Cls" is the same shape legacy `realActivity=`
-    // prints. This is the ONLY package source on the modern path (issue #4263):
-    // a modern header's `A=` is `Task.affinity`, which is uid-prefixed on
-    // Android 11+, is an app-declarable string that need not name a package,
-    // and is empty for `android:taskAffinity=""`. It is applied at flush time,
-    // and only as a fallback, so `I=`/`aI=` and `realActivity=` still win.
-    const histRoots: Map<number, string> = new Map();
+    // The root component of each task, derived from its `Hist` rows. `Hist #0`
+    // is normally the task root (see #4197), and its "pkg/.Cls" is the same
+    // shape legacy `realActivity=` prints. This is the ONLY package source on
+    // the modern path (issue #4263): a modern header's `A=` is `Task.affinity`,
+    // which is uid-prefixed on Android 11+, is an app-declarable string that
+    // need not name a package, and is empty for `android:taskAffinity=""`. It
+    // is applied at flush time, and only as a fallback, so `I=`/`aI=` and
+    // `realActivity=` still win.
+    //
+    // `Hist #0` is not authoritative: on API 30+ a task can print two `Hist #0`
+    // rows in different TaskFragments and only one's block says rootOfTask=true
+    // (issue #4359, api34 task #9). `firstHist0` keeps the index-derived value
+    // (the sole source on API <= 29, where rootOfTask= is absent); `authoritative`
+    // captures the component whose block prints rootOfTask=true and, when set,
+    // is preferred. This override only ever *replaces* a firstHist0 value -- a
+    // task that prints no `Hist #0` row stays undefined even if a later `Hist #N`
+    // says rootOfTask=true, matching the pre-#4359 "no Hist #0 -> no root" rule.
+    const histRoots: Map<number, HistRootEntry> = new Map();
+    // The still-open ActivityRecord block: the `Hist` row whose `rootOfTask=`
+    // field, if printed, we are waiting on. Mirrors parseActivities' openActivity
+    // discipline (issue #4340) -- cleared at the next Hist row / task header /
+    // consumed rootOfTask= so a value never bleeds across records.
+    let openHist: { owner: number; component: string } | undefined;
+
+    const histRootEntry = (owner: number): HistRootEntry => {
+      let entry = histRoots.get(owner);
+      if (entry === undefined) {
+        entry = {};
+        histRoots.set(owner, entry);
+      }
+      return entry;
+    };
+    // First `Hist #0` wins; first rootOfTask=true wins. Encapsulated so the scan
+    // loop stays flat (the max-depth ratchet caps nesting at 3).
+    const recordFirstHist0 = (owner: number, component: string): void => {
+      const entry = histRootEntry(owner);
+      entry.firstHist0 ??= component;
+    };
+    const recordAuthoritative = (owner: number, component: string): void => {
+      const entry = histRootEntry(owner);
+      entry.authoritative ??= component;
+    };
 
     const flush = (): void => {
       if (currentTaskId === -1 || currentTask.id === undefined) {
@@ -341,6 +384,8 @@ export class GetBackStack implements BackStack {
         // "Running activities"; restarting there discarded everything already
         // parsed for that task (issue #4263).
         currentTask = tasks.get(currentTaskId) ?? { id: currentTaskId };
+        // A task header ends the previous record's block (see openHist).
+        openHist = undefined;
         if (header.affinity) {
           currentTask.affinity = header.affinity;
         }
@@ -361,12 +406,28 @@ export class GetBackStack implements BackStack {
         // printed under another header.
         const owner = hist.taskId ?? currentTaskId;
         histCounts.set(owner, (histCounts.get(owner) ?? 0) + 1);
-        if (hist.histIndex === 0 && !histRoots.has(owner)) {
-          histRoots.set(owner, hist.component);
+        if (hist.histIndex === 0) {
+          recordFirstHist0(owner, hist.component);
         }
+        // This row opens a new ActivityRecord block; its own rootOfTask= (if
+        // printed a few lines below) targets this row.
+        openHist = { owner, component: hist.component };
       } else if (HIST_LINE.test(line)) {
-        // A Hist row in a shape parseHistRow does not recognize still counts.
+        // A Hist row in a shape parseHistRow does not recognize still counts,
+        // and still ends the previous record's block.
         histCounts.set(currentTaskId, (histCounts.get(currentTaskId) ?? 0) + 1);
+        openHist = undefined;
+      }
+
+      // The open record's own rootOfTask= field (see ROOT_OF_TASK_LINE / #4340).
+      // First rootOfTask=true wins, so the api34 double-`Hist #0` task resolves
+      // to the row the dump actually marks as the root.
+      const rootOfTask = line.match(ROOT_OF_TASK_LINE);
+      if (rootOfTask && openHist) {
+        if (rootOfTask[1] === "true") {
+          recordAuthoritative(openHist.owner, openHist.component);
+        }
+        openHist = undefined;
       }
 
       // Match affinity
@@ -402,13 +463,16 @@ export class GetBackStack implements BackStack {
       if (task.numActivities === undefined) {
         task.numActivities = histCounts.get(task.id) ?? 0;
       }
-      const histRoot = histRoots.get(task.id);
-      // No Hist #0 row and no I=/aI=/realActivity= means nothing in this dump
-      // identifies the task's package. Leaving both undefined is the honest
-      // answer; the affinity is not a package name and is not guessed from.
-      if (histRoot === undefined) {
+      const entry = histRoots.get(task.id);
+      // No `Hist #0` row means nothing here resolves the task's root the way
+      // this fallback is scoped to. A rootOfTask=true row alone does NOT
+      // populate an otherwise-undefined root (issue #4359): the override only
+      // ever replaces the index-derived `firstHist0` value. Leaving both
+      // undefined is the honest answer; the affinity is not a package name.
+      if (entry === undefined || entry.firstHist0 === undefined) {
         continue;
       }
+      const histRoot = entry.authoritative ?? entry.firstHist0;
       if (task.rootActivity === undefined) {
         task.rootActivity = histRoot;
       }

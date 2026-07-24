@@ -234,6 +234,8 @@ export interface DaemonOptions {
   observeResultDropElements?: boolean;
   /** Output reduction: emit observe results in compact form (issue #2756) */
   observeResultCompact?: boolean;
+  /** Output reduction: project observe results to an actionable-only skeleton (issue #4388) */
+  observeResultProjectSkeleton?: boolean;
   /** Output reduction: omit structuredContent from tool results (issue #2756) */
   toolResultsNoStructuredContent?: boolean;
   /** Output reduction: return only the observation diff after an action (issue #2756) */

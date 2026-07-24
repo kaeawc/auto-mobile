@@ -672,6 +672,10 @@ public final class AutoMobilePlanExecutor {
         public let cleanup: CleanupOptions?
         public let planBundle: Bundle?
         public let defaultPlatform: PlanPlatform
+        /// Per-run kill switch for AI-assisted recovery. Mirrors Android's
+        /// `AutoMobilePlanExecutionOptions.aiAssistance`. When false, a failed step throws exactly as
+        /// before this feature, regardless of the `ai-recovery` flag.
+        public let aiAssistance: Bool
 
         public init(
             transport: Transport,
@@ -683,7 +687,8 @@ public final class AutoMobilePlanExecutor {
             parameters: [String: String] = [:],
             cleanup: CleanupOptions? = nil,
             planBundle: Bundle? = nil,
-            defaultPlatform: PlanPlatform = .ios
+            defaultPlatform: PlanPlatform = .ios,
+            aiAssistance: Bool = true
         ) {
             self.transport = transport
             self.planPath = planPath
@@ -695,6 +700,7 @@ public final class AutoMobilePlanExecutor {
             self.cleanup = cleanup
             self.planBundle = planBundle
             self.defaultPlatform = defaultPlatform
+            self.aiAssistance = aiAssistance
         }
     }
 
@@ -725,6 +731,9 @@ public final class AutoMobilePlanExecutor {
         public let tool: String
         public let error: String
         public let device: String?
+        // The daemon attaches a failure-observation digest to a failed step (src/models/
+        // FailureObservation.ts). Decoded here so AI recovery can include it in the agent prompt.
+        public let failureObservation: FailureObservationSummary?
     }
 
     public struct ExecutePlanResult: Decodable {
@@ -735,6 +744,14 @@ public final class AutoMobilePlanExecutor {
         public let error: String?
         public let platform: String?
         public let deviceMapping: [String: String]?
+        // Set by the executor after an AI-recovery attempt (not decoded from the wire). Mirrors the
+        // Android result's aiRecoveryAttempted/aiRecoverySuccessful flags.
+        public var aiRecoveryAttempted: Bool = false
+        public var aiRecoverySuccessful: Bool = false
+
+        private enum CodingKeys: String, CodingKey {
+            case success, executedSteps, totalSteps, failedStep, error, platform, deviceMapping
+        }
     }
 
     public enum ExecutorError: Error, CustomStringConvertible {
@@ -775,6 +792,10 @@ public final class AutoMobilePlanExecutor {
     private let timer: AutoMobileTimer
     private let logger: AutoMobileLogger
     private let sessionIdProvider: () -> String
+    private let recoveryConfigProvider: RecoveryConfigProviding
+    // Nil = no AI recovery (no injected handler and no model API key in the environment); the executor
+    // then behaves exactly as it did before this feature — a failed step throws.
+    private let recoveryHandler: PlanRecoveryHandler?
 
     public init(
         configuration: Configuration,
@@ -782,7 +803,10 @@ public final class AutoMobilePlanExecutor {
         mcpClient: AutoMobileMCPClient? = nil,
         timer: AutoMobileTimer = SystemTimer(),
         logger: AutoMobileLogger = StdoutLogger(),
-        sessionIdProvider: @escaping () -> String = { AutoMobileSession.currentSessionUuid() }
+        sessionIdProvider: @escaping () -> String = { AutoMobileSession.currentSessionUuid() },
+        recoveryHandler: PlanRecoveryHandler? = nil,
+        recoveryConfigProvider: RecoveryConfigProviding? = nil,
+        recoveryModelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve()
     ) {
         self.configuration = configuration
         self.planLoader = planLoader
@@ -804,6 +828,29 @@ public final class AutoMobilePlanExecutor {
                 }
             }
         }
+
+        // Recovery config provider reads the `ai-recovery` feature flag over the same MCP client the
+        // plan runs on. Consulted only when a handler exists (see handleFailure), so no extra daemon
+        // traffic in the common no-recovery path.
+        let resolvedClient = self.mcpClient
+        self.recoveryConfigProvider = recoveryConfigProvider
+            ?? DaemonRecoveryConfigProvider(clientProvider: { resolvedClient }, logger: logger)
+
+        // Auto-wire the Tachikoma handler only when recovery can actually run — a model API key must be
+        // present. Without a key (CI, most unit tests) the handler stays nil and behavior is unchanged.
+        if let recoveryHandler = recoveryHandler {
+            self.recoveryHandler = recoveryHandler
+        } else if let recoveryModelConfig = recoveryModelConfig {
+            self.recoveryHandler = TachikomaPlanRecoveryHandler(
+                mcpClient: resolvedClient,
+                configProvider: self.recoveryConfigProvider,
+                modelConfig: recoveryModelConfig,
+                timer: timer,
+                logger: logger
+            )
+        } else {
+            self.recoveryHandler = nil
+        }
     }
 
     public func execute(testMetadata: TestMetadata? = nil) throws -> ExecutePlanResult {
@@ -823,7 +870,13 @@ public final class AutoMobilePlanExecutor {
                 if attempt > 0 {
                     logger.info("Retry attempt \(attempt + 1) of \(configuration.retryCount + 1)")
                 }
-                return try executeOnce(testMetadata: testMetadata)
+                return try executeAttempt(
+                    startStep: configuration.startStep,
+                    recoveryAlreadyAttempted: false,
+                    deviceIdOverride: nil,
+                    sessionUuidOverride: nil,
+                    testMetadata: testMetadata
+                )
             } catch {
                 lastError = error
                 let shouldRetry = shouldRetry(error: error, attempt: attempt)
@@ -859,8 +912,19 @@ public final class AutoMobilePlanExecutor {
         mcpClient.resetSession()
     }
 
-    private func executeOnce(testMetadata: TestMetadata?) throws -> ExecutePlanResult {
-        PerfTimer.log("executeOnce START")
+    /// Execute the plan once from `startStep`. On a step failure, if AI recovery is enabled and has not
+    /// yet been attempted for this test, hand the failure to the recovery handler and — on success —
+    /// resume from the step after the failed one (see `handleFailure`). `sessionUuidOverride` lets a
+    /// resume reuse the failed attempt's session so it continues on the same device; the transient
+    /// retry loop passes nil and gets a fresh session each attempt, as before.
+    private func executeAttempt(
+        startStep: Int,
+        recoveryAlreadyAttempted: Bool,
+        deviceIdOverride: String?,
+        sessionUuidOverride: String?,
+        testMetadata: TestMetadata?
+    ) throws -> ExecutePlanResult {
+        PerfTimer.log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
         let planContent: String
         do {
             planContent = try PerfTimer.measure("loadPlan") {
@@ -887,7 +951,7 @@ public final class AutoMobilePlanExecutor {
         let platform = try resolvePlatform(from: planMetadata)
         PerfTimer.log("resolved platform=\(platform)")
 
-        let sessionUuid = sessionIdProvider()
+        let sessionUuid = sessionUuidOverride ?? sessionIdProvider()
         PerfTimer.log("sessionUuid=\(sessionUuid)")
 
         let arguments = PerfTimer.measure("buildExecutePlanArguments") {
@@ -895,6 +959,8 @@ public final class AutoMobilePlanExecutor {
                 planContent: substituted,
                 sessionUuid: sessionUuid,
                 platform: platform,
+                startStep: startStep,
+                deviceIdOverride: deviceIdOverride,
                 deviceLabels: planMetadata.deviceLabels,
                 testMetadata: testMetadata
             )
@@ -918,27 +984,127 @@ public final class AutoMobilePlanExecutor {
                 try decodeExecutePlanResult(from: response.text)
             }
             PerfTimer
-                .log("executeOnce END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)")
+                .log("executeAttempt END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)")
             if result.success {
                 return result
             }
-            throw ExecutorError.executionFailed(buildFailureMessage(from: result))
+            return try handleFailure(
+                result: result,
+                planContent: substituted,
+                platform: platform,
+                sessionUuid: sessionUuid,
+                deviceIdOverride: deviceIdOverride,
+                recoveryAlreadyAttempted: recoveryAlreadyAttempted,
+                testMetadata: testMetadata
+            )
         } catch let error as MCPClientError {
-            PerfTimer.log("executeOnce ERROR: MCPClientError - \(error.description)")
+            PerfTimer.log("executeAttempt ERROR: MCPClientError - \(error.description)")
             throw ExecutorError.mcpFailure(error.description)
         } catch let error as ExecutorError {
-            PerfTimer.log("executeOnce ERROR: ExecutorError - \(error)")
+            PerfTimer.log("executeAttempt ERROR: ExecutorError - \(error)")
             throw error
         } catch {
-            PerfTimer.log("executeOnce ERROR: \(error.localizedDescription)")
+            PerfTimer.log("executeAttempt ERROR: \(error.localizedDescription)")
             throw ExecutorError.executionFailed(error.localizedDescription)
         }
+    }
+
+    /// Handle a failed `executePlan` result: gate AI recovery, and on a successful recovery resume the
+    /// plan from the step after the failed one. Mirrors the Android runner's `handleFailure`. When
+    /// recovery is not eligible or does not succeed, throws the same `ExecutorError.executionFailed` the
+    /// executor threw before this feature existed.
+    private func handleFailure(
+        result: ExecutePlanResult,
+        planContent: String,
+        platform: PlanPlatform,
+        sessionUuid: String,
+        deviceIdOverride: String?,
+        recoveryAlreadyAttempted: Bool,
+        testMetadata: TestMetadata?
+    ) throws -> ExecutePlanResult {
+        let failureMessage = buildFailureMessage(from: result)
+
+        // Cheap local gates first; the feature-flag read (which may hit the daemon) is last and runs
+        // only when a handler is present, so the no-recovery path adds zero daemon traffic.
+        guard configuration.aiAssistance,
+              !recoveryAlreadyAttempted,
+              let handler = recoveryHandler,
+              let failedStep = result.failedStep,
+              failedStep.stepIndex >= 0,
+              !(testMetadata?.isCi ?? false),
+              recoveryConfigProvider.isRecoveryEnabled()
+        else {
+            throw ExecutorError.executionFailed(failureMessage)
+        }
+
+        logger.info("Attempting AI-assisted recovery for failed step \(failedStep.stepIndex + 1) (\(failedStep.tool))")
+        let context = buildFailedStepContext(
+            failedStep: failedStep,
+            planContent: planContent,
+            platform: platform,
+            sessionUuid: sessionUuid,
+            deviceIdOverride: deviceIdOverride
+        )
+
+        let outcome = handler.attemptRecovery(context)
+        if !outcome.success {
+            logger.warn("AI recovery failed")
+            throw ExecutorError.executionFailed("\(failureMessage)\n  AI recovery attempted but did not succeed.")
+        }
+
+        // Recovery succeeded — resume from the next step, pinned to the recovered device and the same
+        // session. `recoveryAlreadyAttempted: true` prevents a second recovery within this attempt.
+        let resumeStep = failedStep.stepIndex + 1
+        logger.info("AI recovery succeeded, resuming plan from step \(resumeStep + 1)")
+        var resumeResult = try executeAttempt(
+            startStep: resumeStep,
+            recoveryAlreadyAttempted: true,
+            deviceIdOverride: context.deviceId,
+            sessionUuidOverride: sessionUuid,
+            testMetadata: testMetadata
+        )
+        resumeResult.aiRecoveryAttempted = true
+        resumeResult.aiRecoverySuccessful = resumeResult.success
+        return resumeResult
+    }
+
+    private func buildFailedStepContext(
+        failedStep: FailedStep,
+        planContent: String,
+        platform: PlanPlatform,
+        sessionUuid: String,
+        deviceIdOverride: String?
+    ) -> FailedStepContext {
+        // Sequential execution stops at the first failure, so every step before failedStep.stepIndex
+        // completed. Reconstruct their tool names from the plan for the agent prompt (best effort).
+        let stepTools = PlanStepToolParser.toolNames(from: planContent)
+        var succeeded: [SucceededStepSummary] = []
+        var index = 0
+        while index < failedStep.stepIndex {
+            let tool = index < stepTools.count ? stepTools[index] : "step"
+            succeeded.append(SucceededStepSummary(stepIndex: index, tool: tool))
+            index += 1
+        }
+
+        return FailedStepContext(
+            failedStepIndex: failedStep.stepIndex,
+            failedTool: failedStep.tool,
+            error: failedStep.error,
+            succeededSteps: succeeded,
+            planContent: planContent,
+            platform: platform.rawValue,
+            sessionUuid: sessionUuid,
+            deviceId: failedStep.device ?? deviceIdOverride,
+            failureObservation: failedStep.failureObservation
+        )
     }
 
     private func buildExecutePlanArguments(
         planContent: String,
         sessionUuid: String,
         platform: PlanPlatform,
+        startStep: Int,
+        deviceIdOverride: String?,
         deviceLabels: [String],
         testMetadata: TestMetadata?
     )
@@ -948,9 +1114,14 @@ public final class AutoMobilePlanExecutor {
         var args: [String: Any] = [
             "planContent": "base64:\(base64Content)",
             "platform": platform.rawValue,
-            "startStep": configuration.startStep,
+            "startStep": startStep,
             "sessionUuid": sessionUuid,
         ]
+
+        // Pin a resumed plan to the device the recovery agent just fixed (single-device path).
+        if let deviceIdOverride = deviceIdOverride {
+            args["deviceId"] = deviceIdOverride
+        }
 
         if let cleanup = configuration.cleanup {
             args["cleanupAppId"] = cleanup.appId

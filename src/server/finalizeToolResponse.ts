@@ -93,6 +93,24 @@ function classifyObservationAction(
 }
 
 /**
+ * Resolve the observe output projection (issue #4388). An explicit per-call
+ * `project` arg always wins; otherwise `raw: true` forces `"full"` (the raw tree
+ * is the documented disambiguation escape hatch), and absent both the
+ * `observe-result-project-skeleton` flag decides. Default is `"full"`, so
+ * behavior is unchanged until the flag flips or a caller opts in.
+ */
+function resolveObserveProjection(args?: Record<string, unknown>): "full" | "skeleton" {
+  const explicit = args?.project;
+  if (explicit === "full" || explicit === "skeleton") {
+    return explicit;
+  }
+  if (args?.raw === true) {
+    return "full";
+  }
+  return serverConfig.isObserveResultProjectSkeletonEnabled() ? "skeleton" : "full";
+}
+
+/**
  * Context needed to finalize a tool response at the serialization chokepoint.
  * `name` selects where the `ObserveResult` lives (top-level for `observe`, else
  * `.observation`); `sessionUuid` keys the diff baseline. `baselineStore` enables
@@ -242,18 +260,29 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
-    const sanitized = sanitizeObserveResult(payload as unknown as ObserveResult, cfg);
+    const observeResult = payload as unknown as ObserveResult;
+    const sanitized = sanitizeObserveResult(observeResult, cfg);
     if (canDiff) {
-      // Diff against the full sanitized tree, never the scoped copy — the next
-      // action must see real state, not what this observe payload was cropped to.
+      // Diff against the full sanitized tree, never the scoped/projected copy — the
+      // next action must see real state, not what this observe payload was cropped
+      // to (scope experiments #4344) or projected to (skeleton #4388).
       pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
     }
-    const served = scopeActive
-      ? applyObserveScopeExperiments(
+    // Served (agent-facing) copy: skeleton projection (#4388) and scope experiments
+    // (#4344) are alternative croppings of the observe payload; both apply only to
+    // the headline `observe` payload, never to embedded action observations. Skeleton
+    // is the more aggressive projection (it replaces viewHierarchy/elements), so when
+    // requested it wins. It re-projects from the original payload so it still sees
+    // `elements` even under --observe-result-drop-elements.
+    let served: ObserveResult = sanitized;
+    if (resolveObserveProjection(ctx.args) === "skeleton") {
+      served = sanitizeObserveResult(observeResult, { ...cfg, project: "skeleton" });
+    } else if (scopeActive) {
+      served = applyObserveScopeExperiments(
         sanitized,
         buildObserveScopeConfig(scopeFlags, ctx.args?.scope as ObserveScopeInput | undefined)
-      )
-      : sanitized;
+      );
+    }
     sanitizedPayload = served as unknown as Record<string, unknown>;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {

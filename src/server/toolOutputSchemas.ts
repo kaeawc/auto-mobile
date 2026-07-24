@@ -412,6 +412,25 @@ export const deviceLockSchema = z.object({
 });
 
 /**
+ * One row of the Interactable Skeleton Projection (issue #4388). Present only
+ * when the observe output is projected to `"skeleton"` (per-call `project` arg
+ * or the `observe-result-project-skeleton` flag); it then replaces
+ * `viewHierarchy` / `elements`. Bounds are always the compact
+ * `[left, top, right, bottom]` tuple, so this uses the tuple schema directly
+ * rather than the flag-dependent `elementBoundsSchema` union.
+ */
+export const skeletonElementSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().optional(),
+  bounds: compactBoundsTupleSchema.describe(
+    "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
+      "for skeleton entries, independent of the --observe-result-compact flag."
+  ),
+  affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
+  checked: z.boolean().optional()
+}).passthrough();
+
+/**
  * Progressive-disclosure scoping metadata (issue #4344), present only when an
  * `--observe-focus-scope` / `--observe-overview` / `--observe-region` experiment
  * scoped the payload. `regionPx` routes through {@link elementBoundsSchema} so its
@@ -435,6 +454,7 @@ export const observeResultSchema = z.object({
   insets: observationInsetsSchema.optional(),
   layoutWarnings: z.array(layoutWarningSchema).optional(),
   viewHierarchy: viewHierarchyResultSchema.optional(),
+  skeleton: z.array(skeletonElementSchema).optional(),
   activeWindow: activeWindowSchema.optional(),
   screenIdentity: screenIdentitySchema.optional(),
   elements: observeElementsSchema.optional(),

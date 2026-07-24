@@ -845,6 +845,53 @@ describe("sanitizeObserveResult", () => {
     });
   });
 
+  describe("skeleton projection (cfg.project)", () => {
+    test("project 'skeleton' replaces viewHierarchy + elements with a skeleton", () => {
+      const { observe } = loadAndroidHomeObserve();
+      // Precondition: the baseline carries a real hierarchy and elements block.
+      expect(observe.viewHierarchy?.hierarchy).toBeDefined();
+      expect(observe.elements).toBeDefined();
+
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+
+      expect(out.skeleton).toBeDefined();
+      expect(Array.isArray(out.skeleton)).toBe(true);
+      expect(out.skeleton!.length).toBeGreaterThan(0);
+      expect(out.viewHierarchy).toBeUndefined();
+      expect(out.elements).toBeUndefined();
+    });
+
+    test("skeleton entries carry tuple bounds regardless of the compact flag", () => {
+      const { observe } = loadAndroidHomeObserve();
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+      for (const entry of out.skeleton!) {
+        expect(Array.isArray(entry.bounds)).toBe(true);
+        expect(entry.bounds).toHaveLength(4);
+      }
+    });
+
+    test("project 'full' (default) leaves the hierarchy in place — no skeleton", () => {
+      const { observe } = loadAndroidHomeObserve();
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "full" });
+      expect(out.skeleton).toBeUndefined();
+      expect(out.viewHierarchy?.hierarchy).toBeDefined();
+    });
+
+    test("absent project behaves as 'full' (default behavior unchanged)", () => {
+      const { observe } = loadAndroidHomeObserve();
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+      expect(out.skeleton).toBeUndefined();
+      expect(out.viewHierarchy?.hierarchy).toBeDefined();
+    });
+
+    test("is output-only: the input observe result is never mutated", () => {
+      const { observe } = loadAndroidHomeObserve();
+      const before = JSON.stringify(observe);
+      sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+      expect(JSON.stringify(observe)).toBe(before);
+    });
+  });
+
   describe("combined reduction", () => {
     test("all three steps together substantially shrink the baseline", () => {
       const { observe } = loadAndroidHomeObserve();

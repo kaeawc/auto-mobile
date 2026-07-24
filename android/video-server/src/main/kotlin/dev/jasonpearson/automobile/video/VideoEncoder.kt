@@ -110,7 +110,7 @@ class VideoEncoder(
   }
 
   /**
-   * Ask the encoder to emit an IDR as soon as possible, rather than waiting for the 10s I-frame
+   * Ask the encoder to emit an IDR as soon as possible, rather than waiting for the 2s I-frame
    * interval. Serves a downstream keyframe request (a WHEP viewer PLI relayed by the host) so a
    * late or recovering viewer decodes promptly. Safe to call from any thread and after the codec
    * has been released.

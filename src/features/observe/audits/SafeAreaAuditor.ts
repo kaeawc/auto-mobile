@@ -251,18 +251,40 @@ function intersectingSides(bounds: ObservationEdgeInsets, screen: { width: numbe
 
 function overlapPercent(bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets): number {
   const area = Math.max(1, (bounds.right - bounds.left) * (bounds.bottom - bounds.top));
-  const overlap = [
-    intersectArea(bounds, { left: 0, top: 0, right: screen.width, bottom: insets.top }),
-    intersectArea(bounds, { left: 0, top: screen.height - insets.bottom, right: screen.width, bottom: screen.height }),
-    intersectArea(bounds, { left: 0, top: 0, right: insets.left, bottom: screen.height }),
-    intersectArea(bounds, { left: screen.width - insets.right, top: 0, right: screen.width, bottom: screen.height }),
-  ].reduce((total, current) => total + current, 0);
+  const overlap = unionArea([
+    intersectBounds(bounds, { left: 0, top: 0, right: screen.width, bottom: insets.top }),
+    intersectBounds(bounds, { left: 0, top: screen.height - insets.bottom, right: screen.width, bottom: screen.height }),
+    intersectBounds(bounds, { left: 0, top: 0, right: insets.left, bottom: screen.height }),
+    intersectBounds(bounds, { left: screen.width - insets.right, top: 0, right: screen.width, bottom: screen.height }),
+  ].filter((region): region is ObservationEdgeInsets => region !== null));
   return Math.min(100, Math.round((overlap / area) * 100));
 }
 
-function intersectArea(a: ObservationEdgeInsets, b: ObservationEdgeInsets): number {
-  return Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
-    * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+function intersectBounds(a: ObservationEdgeInsets, b: ObservationEdgeInsets): ObservationEdgeInsets | null {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.right, b.right);
+  const bottom = Math.min(a.bottom, b.bottom);
+  return left < right && top < bottom ? { left, top, right, bottom } : null;
+}
+
+function unionArea(regions: ObservationEdgeInsets[]): number {
+  const xEdges = [...new Set(regions.flatMap(region => [region.left, region.right]))].sort((a, b) => a - b);
+  const yEdges = [...new Set(regions.flatMap(region => [region.top, region.bottom]))].sort((a, b) => a - b);
+  let area = 0;
+
+  for (let x = 0; x < xEdges.length - 1; x += 1) {
+    for (let y = 0; y < yEdges.length - 1; y += 1) {
+      const left = xEdges[x]!;
+      const top = yEdges[y]!;
+      const right = xEdges[x + 1]!;
+      const bottom = yEdges[y + 1]!;
+      if (regions.some(region => region.left <= left && region.top <= top && region.right >= right && region.bottom >= bottom)) {
+        area += (right - left) * (bottom - top);
+      }
+    }
+  }
+  return area;
 }
 
 function maxInsets(

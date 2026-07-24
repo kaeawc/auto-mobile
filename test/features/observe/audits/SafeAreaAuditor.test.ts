@@ -129,6 +129,27 @@ describe("SafeAreaAuditor", () => {
     }]);
   });
 
+  test("does not double count a corner shared by safe-area insets", () => {
+    const result = observation();
+    result.insets = {
+      available: true,
+      source: "ios-sdk-safe-area",
+      units: "points",
+      safeArea: { top: 10, right: 0, bottom: 0, left: 10 },
+    };
+    result.viewHierarchy!.hierarchy.node = [{
+      "text": "Corner leaf",
+      "view-id": "corner",
+      "bounds": { left: 0, top: 0, right: 40, bottom: 40 },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([{
+      element: { viewId: "corner" },
+      severity: "info",
+      overlapPercent: 44,
+    }]);
+  });
+
   test("returns no warnings when measurements are unavailable", () => {
     const result = observation();
     result.insets = { available: false, source: "unavailable", units: "unknown" };

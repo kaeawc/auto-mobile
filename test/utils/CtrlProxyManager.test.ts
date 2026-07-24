@@ -46,6 +46,13 @@ describe("CtrlProxyManager", function() {
     // Reset singleton instances
     AndroidCtrlProxyManager.resetInstances();
 
+    // These tests exercise download/checksum/retry behavior, not the prefetch
+    // prerequisite gate (#4404). Neutralize the gate so the default detector
+    // doesn't skip the prefetch on CI hosts without Android tooling (e.g. Windows).
+    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting({
+      hasAndroidPrerequisites: async () => true
+    });
+
     accessibilityServiceClient = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory);
     accessibilityServiceClient.clearAvailabilityCache();
   });
@@ -53,6 +60,7 @@ describe("CtrlProxyManager", function() {
   afterEach(async function() {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
+    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;

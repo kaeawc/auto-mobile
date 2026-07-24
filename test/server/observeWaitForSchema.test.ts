@@ -372,6 +372,16 @@ describe("published observe waitFor input schema", () => {
       },
     },
     {
+      label: "absent combined with textAny",
+      input: {
+        platform: "android",
+        waitFor: {
+          textAny: ["Home", "Feed"],
+          absent: { elementId: "com.app:id/spinner" },
+        },
+      },
+    },
+    {
       label: "settled with a waitFor predicate",
       input: {
         platform: "android",

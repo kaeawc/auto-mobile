@@ -652,15 +652,17 @@ const evaluateWaitForObservation = (
 // Compact stable hash of the hierarchy node tree, used only to detect quiet
 // (settled) periods. Screen size / window metadata are excluded so cosmetic,
 // non-hierarchy churn does not defeat the gate. A missing hierarchy hashes to a
-// stable sentinel, so it counts as "quiet".
-const hashHierarchyForSettle = (viewHierarchy?: ViewHierarchyResult): string => {
+// stable sentinel, so it counts as "quiet". Returns null when the tree cannot be
+// hashed, which the settle gate treats as unstable (never settle on it).
+const hashHierarchyForSettle = (viewHierarchy?: ViewHierarchyResult): string | null => {
   try {
     return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy?.hierarchy ?? null));
   } catch (error) {
-    // Non-serializable hierarchy is unexpected; treat it as an unstable tree so
-    // the settle gate keeps polling rather than resolving on a bad snapshot.
+    // Non-serializable hierarchy is unexpected; a constant sentinel would compare
+    // equal across consecutive failures and be mistaken for a quiet tree, so
+    // return null and let settleReady restart the quiet window instead.
     logger.debug(`[observe] Failed to hash hierarchy for settle gate: ${error}`);
-    return `unstable:${WAIT_FOR_POLL_INTERVAL_MS}`;
+    return null;
   }
 };
 
@@ -713,7 +715,9 @@ export const waitForObservation = async (
       return true;
     }
     const hash = hashHierarchyForSettle(observation.viewHierarchy);
-    if (matchedHash === null || hash !== matchedHash) {
+    // An unhashable tree (null) is never quiet: fall through to restart the
+    // window so the gate cannot resolve early on an unverifiable snapshot.
+    if (hash === null || matchedHash === null || hash !== matchedHash) {
       matchedHash = hash;
       quietStart = timer.now();
       return false;

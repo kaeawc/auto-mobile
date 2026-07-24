@@ -252,4 +252,67 @@ describe("GetBackStack real-output parsing (#4197)", () => {
       expect(result.activities[0].isTaskRoot).toBe(true);
     });
   });
+
+  // `rootOfTask=` is printed inside each ActivityRecord block from API 30 on and
+  // is the authoritative task-root answer; the Hist-index heuristic disagrees
+  // with it in both directions on real devices (issue #4340). These fixtures are
+  // contrived -- a real task has exactly one root -- to pin the parser mechanics
+  // in isolation: override in both directions, and no bleed across records.
+  describe("rootOfTask overrides the Hist-index heuristic (#4340)", () => {
+    test("an explicit rootOfTask= wins over the index in both directions", async () => {
+      const result = await parse(`
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{d19dee2 #61 type=standard A=10164:com.example U=0 visible=true mode=fullscreen sz=2}
+    * Hist  #1: ActivityRecord{2b2ce0f u0 com.example/.DetailActivity t61}
+        packageName=com.example processName=com.example
+        rootOfTask=true task=Task{d19dee2 #61 type=standard A=10164:com.example}
+    * Hist  #0: ActivityRecord{7ff01aa u0 com.example/.MainActivity t61}
+        packageName=com.example processName=com.example
+        rootOfTask=false task=Task{d19dee2 #61 type=standard A=10164:com.example}
+`);
+
+      expect(result.activities.map(a => a.isTaskRoot)).toEqual([true, false]);
+    });
+
+    test("a rootOfTask value never bleeds into the following record", async () => {
+      // The second record prints no rootOfTask= line, so it must fall back to
+      // its own Hist index (#0 -> true), not inherit the previous record's
+      // `false`.
+      const result = await parse(`
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{d19dee2 #61 type=standard A=10164:com.example U=0 visible=true mode=fullscreen sz=2}
+    * Hist  #1: ActivityRecord{2b2ce0f u0 com.example/.DetailActivity t61}
+        packageName=com.example processName=com.example
+        rootOfTask=false task=Task{d19dee2 #61 type=standard A=10164:com.example}
+    * Hist  #0: ActivityRecord{7ff01aa u0 com.example/.MainActivity t61}
+        packageName=com.example processName=com.example
+`);
+
+      expect(result.activities.map(a => a.isTaskRoot)).toEqual([false, true]);
+    });
+
+    test("an unrecognized Hist row closes the previous record's block", async () => {
+      // The second Hist row is missing its closing brace, so parseHistRow
+      // rejects it -- but it still starts a new record, so the rootOfTask=
+      // printed in ITS block must not land on the previous activity.
+      const result = await parse(`
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{d19dee2 #61 type=standard A=10164:com.example U=0 visible=true mode=fullscreen sz=2}
+    * Hist  #0: ActivityRecord{7ff01aa u0 com.example/.MainActivity t61}
+        packageName=com.example processName=com.example
+    * Hist  #1: ActivityRecord{2b2ce0f u0 com.example/.DetailActivity
+        packageName=com.example processName=com.example
+        rootOfTask=false task=Task{d19dee2 #61 type=standard A=10164:com.example}
+`);
+
+      // Only the well-formed row parses, and it keeps its own index-derived
+      // value rather than absorbing the rejected record's rootOfTask=false.
+      expect(result.activities).toHaveLength(1);
+      expect(result.activities[0].name).toBe("com.example.MainActivity");
+      expect(result.activities[0].isTaskRoot).toBe(true);
+    });
+  });
 });

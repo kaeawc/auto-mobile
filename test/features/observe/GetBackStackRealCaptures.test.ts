@@ -90,6 +90,44 @@ function hasLegacyHeader(raw: string): boolean {
   return raw.split("\n").some(l => /^\s*(?:Task id #\d+|\*?\s*TaskRecord\{\S+\s+#\d+)\b/.test(l));
 }
 
+/**
+ * One `Hist #N` row paired with the `rootOfTask=` value printed inside its own
+ * `ActivityRecord` block (issue #4340). Extracted from the raw capture by an
+ * independent scan so the parser's `isTaskRoot` can be asserted against the
+ * dump's own ground truth rather than against the Hist-index heuristic.
+ */
+interface HistGroundTruth {
+  histIndex: number;
+  /** Verbatim "pkg/.Cls" from the Hist row. */
+  component: string;
+  /** The block's own `rootOfTask=` value; absent on API <= 29 captures. */
+  rootOfTask?: boolean;
+}
+
+function histGroundTruth(raw: string): HistGroundTruth[] {
+  const rows: HistGroundTruth[] = [];
+  for (const line of raw.split("\n")) {
+    const hist = line.match(/\bHist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+([^\s}]+)/);
+    if (hist) {
+      rows.push({ histIndex: parseInt(hist[1], 10), component: hist[2] });
+      continue;
+    }
+    // Anchored to the start of the line: `rootOfTask=` is printed as its own
+    // field line inside the ActivityRecord block, always after its Hist row.
+    const root = line.match(/^\s*rootOfTask=(true|false)\b/);
+    if (root && rows.length > 0) {
+      rows[rows.length - 1].rootOfTask = root[1] === "true";
+    }
+  }
+  return rows;
+}
+
+/** "pkg/.Cls" -> fully-qualified class name, mirroring the parser's own rule. */
+function qualify(component: string): string {
+  const [pkg, cls] = component.split("/");
+  return cls.startsWith(".") ? pkg + cls : cls;
+}
+
 /** All `apiNN-*.log` captures, sorted by API level for stable test ordering. */
 const captureFiles = fs.existsSync(CAPTURE_DIR)
   ? fs
@@ -187,6 +225,34 @@ describe("GetBackStack against real captures (#4329)", () => {
         }
       });
 
+      if (apiLevel >= MODERN_FORMAT_MIN_API) {
+        test("isTaskRoot matches the dump's own rootOfTask field (#4340)", async () => {
+          const raw = readCapture(file);
+          const truth = histGroundTruth(raw);
+          // Every modern capture pairs each Hist row with exactly one
+          // rootOfTask= line; a hole here means the extraction regressed, not
+          // the parser.
+          expect(truth.length).toBeGreaterThan(0);
+          for (const row of truth) {
+            expect(row.rootOfTask).toBeDefined();
+          }
+          const result = await parse(raw);
+          expect(result.activities.map(a => ({ name: a.name, isTaskRoot: a.isTaskRoot }))).toEqual(
+            truth.map(r => ({ name: qualify(r.component), isTaskRoot: r.rootOfTask! }))
+          );
+        });
+      } else {
+        test("no rootOfTask printed; isTaskRoot stays index-derived (#4340)", async () => {
+          const raw = readCapture(file);
+          expect(raw).not.toContain("rootOfTask=");
+          const truth = histGroundTruth(raw);
+          const result = await parse(raw);
+          expect(result.activities.map(a => a.isTaskRoot)).toEqual(
+            truth.map(r => r.histIndex === 0)
+          );
+        });
+      }
+
       test("parses tasks via the header format this level actually emits", async () => {
         // Ties each level to the parser path it exercises: a modern-format level
         // whose `* Task{...}` parsing regressed, or a legacy-format level whose
@@ -227,6 +293,30 @@ describe("GetBackStack against real captures (#4329)", () => {
       const result = await parse(readCapture("api24-home-settings-secondapp.log"));
       // Pre-Android-11 affinity is the bare package; contrast api34 below.
       expect(result.tasks[1].affinity).toBe("com.android.settings");
+    });
+  });
+
+  // Both directions the Hist-index heuristic got wrong (issue #4340), pinned
+  // against the exact fixtures the issue reproduced them on.
+  describe("isTaskRoot vs rootOfTask, exact values (#4340)", () => {
+    for (const file of ["api35-home-settings-secondapp.log", "api36-home-settings-secondapp.log"]) {
+      test(`${file}: launcher prints as Hist #1 yet IS the task root`, async () => {
+        const result = await parse(readCapture(file));
+        const launcher = result.activities.find(
+          a => a.name === "com.google.android.apps.nexuslauncher.NexusLauncherActivity"
+        );
+        expect(launcher).toBeDefined();
+        expect(launcher!.isTaskRoot).toBe(true);
+      });
+    }
+
+    test("api34: WifiSettingsActivity prints as Hist #0 yet is NOT the task root", async () => {
+      const result = await parse(readCapture("api34-home-settings-secondapp.log"));
+      const wifi = result.activities.find(
+        a => a.name === "com.android.settings.Settings$WifiSettingsActivity"
+      );
+      expect(wifi).toBeDefined();
+      expect(wifi!.isTaskRoot).toBe(false);
     });
   });
 

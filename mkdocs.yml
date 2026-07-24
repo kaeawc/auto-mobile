@@ -172,6 +172,7 @@ nav:
               - 'accessibilityFocus': design-docs/plat/android/accessibility-focus.md
               - 'takeScreenshot fallback': design-docs/plat/android/take-screenshot.md
               - 'Biometrics stubbing': design-docs/plat/android/biometrics.md
+              - 'Keyguard handling': design-docs/plat/android/keyguard.md
               - 'Notification triggering': design-docs/plat/android/notifications.md
               - 'System tray lookFor': design-docs/plat/android/system-tray-lookfor.md
               - 'tapOn pre-tap stability': design-docs/plat/android/tapOn-pre-tap-stability-and-search-flakes.md

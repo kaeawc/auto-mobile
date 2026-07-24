@@ -25,6 +25,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private screenOn: boolean = true;
   private wakefulness: "Awake" | "Asleep" | "Dozing" | null = "Awake";
   private deviceLock: DeviceLockState | null = null;
+  private deviceLockSequence: (DeviceLockState | null)[] | null = null;
   private devices: BootedDevice[] = [];
   private users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
   private foregroundApp: { packageName: string; userId: number } | null = null;
@@ -282,12 +283,26 @@ export class FakeAdbExecutor implements AdbExecutor {
   }
 
   async getDeviceLock(): Promise<DeviceLockState | null> {
+    if (this.deviceLockSequence && this.deviceLockSequence.length > 0) {
+      return this.deviceLockSequence.length > 1
+        ? this.deviceLockSequence.shift()!
+        : this.deviceLockSequence[0];
+    }
     return this.deviceLock;
   }
 
   /** Configure the lock state returned by getDeviceLock (null = unknown). */
   setDeviceLock(state: DeviceLockState | null): void {
     this.deviceLock = state;
+  }
+
+  /**
+   * Configure an ordered sequence of lock states returned by successive
+   * getDeviceLock() calls; the final state repeats once exhausted. Mirrors
+   * {@link setCommandResponseSequence} for fail-then-succeed unlock flows.
+   */
+  setDeviceLockSequence(states: (DeviceLockState | null)[]): void {
+    this.deviceLockSequence = [...states];
   }
 
   async listUsers(): Promise<AndroidUser[]> {

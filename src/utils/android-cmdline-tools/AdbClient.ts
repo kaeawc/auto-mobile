@@ -851,6 +851,11 @@ export class AdbClient implements AdbExecutor {
    * The field names are the API 30+ `KeyguardServiceDelegate` dump; on a release
    * that does not emit them the read simply returns `null` — a missing signal,
    * never a wrong one.
+   *
+   * Keyguard interaction has a hard ~7s budget (`config_lockScreenDisplayTimeout`,
+   * a baked framework resource, not a settable key) and a documented key-event
+   * unlock recipe; see docs/design-docs/plat/android/keyguard.md before building
+   * anything that drives a locked device.
    */
   async getDeviceLock(signal?: AbortSignal): Promise<DeviceLockState | null> {
     let policy: string;

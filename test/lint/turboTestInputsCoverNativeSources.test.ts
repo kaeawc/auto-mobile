@@ -94,6 +94,13 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           walk(abs);
         } else if (entry.name.endsWith(".ts")) {
           const rel = abs.slice(ROOT.length + 1);
+          // Skip this guard itself: its REQUIRED_NATIVE_GLOBS and
+          // NOT_READ_EXEMPTIONS literals would otherwise make every entry
+          // trivially "referenced" by its own definition, so the stale-exemption
+          // and coverage checks below would be self-satisfying and never bite.
+          if (rel === GUARD_PATH) {
+            continue;
+          }
           const source = readFileSync(abs, "utf8");
           for (const match of source.matchAll(/(?<![A-Za-z0-9_.-])(android|ios)\/[A-Za-z0-9._/-]+/g)) {
             const path = match[0].replace(/\/+$/, "");

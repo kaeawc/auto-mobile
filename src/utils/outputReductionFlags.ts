@@ -10,6 +10,7 @@ import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinit
 export interface OutputReductionFlags {
   observeResultDropElements: boolean;
   observeResultCompact: boolean;
+  observeResultProjectSkeleton: boolean;
   toolResultsNoStructuredContent: boolean;
   actionsDiffObserve: boolean;
   actionsNoObserve: boolean;
@@ -53,6 +54,13 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
     env: "AUTOMOBILE_OBSERVE_RESULT_COMPACT",
     featureFlagKey: "observe-result-compact",
     label: "--observe-result-compact",
+  },
+  {
+    field: "observeResultProjectSkeleton",
+    cli: "--observe-result-project-skeleton",
+    env: "AUTOMOBILE_OBSERVE_RESULT_PROJECT_SKELETON",
+    featureFlagKey: "observe-result-project-skeleton",
+    label: "--observe-result-project-skeleton",
   },
   {
     field: "toolResultsNoStructuredContent",
@@ -122,6 +130,7 @@ export function parseOutputReductionFlags(
   const flags: OutputReductionFlags = {
     observeResultDropElements: false,
     observeResultCompact: false,
+    observeResultProjectSkeleton: false,
     toolResultsNoStructuredContent: false,
     actionsDiffObserve: false,
     actionsNoObserve: false,

@@ -10,6 +10,7 @@ describe("parseOutputReductionFlags", () => {
     expect(flags).toEqual({
       observeResultDropElements: false,
       observeResultCompact: false,
+      observeResultProjectSkeleton: false,
       toolResultsNoStructuredContent: false,
       actionsDiffObserve: false,
       actionsNoObserve: false,

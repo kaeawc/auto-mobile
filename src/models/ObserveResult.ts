@@ -57,6 +57,34 @@ export interface Predictions {
   interactableElements: InteractablePrediction[];
 }
 
+/**
+ * A single actionable affordance a skeleton entry exposes (issue #4388).
+ * Derived from view-hierarchy attributes: `clickable` → `tap`,
+ * `long-clickable` → `long-press`, `scrollable` → `scroll`, `checkable` →
+ * `toggle` (carries `checked`), and a focusable editable field → `input`.
+ */
+export type Affordance = "tap" | "long-press" | "input" | "scroll" | "toggle";
+
+/**
+ * One row of the Interactable Skeleton Projection (issue #4388): a flat,
+ * actionable-only summary of a screen. `id` / `label` map directly onto the
+ * `tapOn` selector union (`elementId` / `text`), so an agent reads the skeleton
+ * and issues `tapOn({ elementId })` with no new selector semantics. Bounds are
+ * always the compact `[left, top, right, bottom]` tuple.
+ */
+export interface SkeletonElement {
+  /** `resource-id ?? view-id` (the stable content-hash id from #3228). */
+  id?: string;
+  /** `text ?? content-desc`. */
+  label?: string;
+  /** Compact bounds tuple `[left, top, right, bottom]`. */
+  bounds: [number, number, number, number];
+  /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle. */
+  affordances: Affordance[];
+  /** Present only for a `toggle` affordance: the current checked state. */
+  checked?: boolean;
+}
+
 export type ScreenIdentitySource = "heuristic" | "sdk";
 export type ScreenIdentityConfidence = "high" | "medium" | "low";
 
@@ -104,6 +132,15 @@ export interface ObserveResult {
 
   /** View hierarchy data */
   viewHierarchy?: ViewHierarchyResult;
+
+  /**
+   * Interactable Skeleton Projection (issue #4388): a flat, actionable-only
+   * summary emitted in place of `viewHierarchy` / `elements` when the observe
+   * output is projected to `"skeleton"` (per-call `project` arg or the
+   * `observe-result-project-skeleton` flag). Absent in the default `"full"`
+   * projection.
+   */
+  skeleton?: SkeletonElement[];
 
   /** Active window information */
   activeWindow?: ActiveWindowInfo;

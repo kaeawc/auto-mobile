@@ -229,6 +229,12 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
   raw: z.boolean().optional().describe("Include raw view hierarchy"),
+  project: z.enum(["full", "skeleton"]).optional().describe(
+    "Output projection. 'full' (default) returns the whole view hierarchy; " +
+    "'skeleton' returns a flat, actionable-only list (id/label/bounds/affordances) " +
+    "in place of viewHierarchy/elements. Each skeleton id/label is directly usable " +
+    "as a tapOn selector; re-request with raw/project:'full' to disambiguate."
+  ),
   skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
   scope: observeScopeSchema.optional()
 })).superRefine((value, ctx) => {

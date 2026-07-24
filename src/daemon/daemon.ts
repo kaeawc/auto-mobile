@@ -261,6 +261,9 @@ export class Daemon {
     if (options.observeResultCompact) {
       serverConfig.setObserveResultCompactEnabled(true);
     }
+    if (options.observeResultProjectSkeleton) {
+      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+    }
     if (options.toolResultsNoStructuredContent) {
       serverConfig.setToolResultsNoStructuredContentEnabled(true);
     }

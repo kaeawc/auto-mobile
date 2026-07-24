@@ -170,12 +170,24 @@ function hasSdkInteraction(value: unknown): boolean {
 }
 
 function isForeignNode(node: Node, foregroundPackage: string | undefined): boolean {
+  const resourceId = stringValue(node["resource-id"]);
   const nodePackage = stringValue(node.packageName);
-  if (foregroundPackage && nodePackage && nodePackage !== foregroundPackage) {
+  const resourcePackage = resourceIdPackage(resourceId);
+  if (foregroundPackage && (
+    (nodePackage !== undefined && nodePackage !== foregroundPackage)
+    || (resourcePackage?.includes(".") && resourcePackage !== foregroundPackage)
+    || resourceId?.startsWith("android:id/input_method_")
+  )) {
     return true;
   }
-  const id = `${stringValue(node["resource-id"]) ?? ""} ${stringValue(node.packageName) ?? ""}`;
+  const id = `${resourceId ?? ""} ${nodePackage ?? ""}`;
   return id.includes("com.android.systemui") || id.includes("com.apple.springboard");
+}
+
+function resourceIdPackage(resourceId: string | undefined): string | undefined {
+  if (!resourceId) {return undefined;}
+  const separator = resourceId.indexOf(":");
+  return separator > 0 ? resourceId.slice(0, separator) : undefined;
 }
 
 function isScreenSized(bounds: ObservationEdgeInsets, screen: { width: number; height: number }): boolean {

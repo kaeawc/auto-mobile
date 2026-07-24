@@ -331,11 +331,17 @@ function noBareExpectRule() {
 // to state the deadline as intent with real headroom rather than let the loop
 // happen to fit under a default it never declared.
 //
-// This rule requires every `test(...)`/`it(...)` in test/stress to pass a numeric
-// literal timeout of at least MIN_STRESS_TIMEOUT_MS. A missing timeout, or a
-// literal too small to clear the observed worst case, both fail. `test.todo` /
-// `test.each` (callee is a MemberExpression, not the `test` Identifier) and calls
-// whose second argument is not a function body are inherently excluded.
+// This rule requires every stress test that RUNS a body in test/stress to pass a
+// numeric-literal timeout of at least MIN_STRESS_TIMEOUT_MS. A missing timeout, or
+// a literal too small to clear the observed worst case, both fail.
+//
+// It covers every running form: bare `test(...)`/`it(...)` and the chained variants
+// that still execute a body — `test.only`, `it.each(table)(...)`, `test.concurrent`,
+// combos like `test.concurrent.each`, etc. `test.skip` and `test.todo` never run a
+// body and are excluded; `describe`/`expect` and any call whose second argument is
+// not a function are excluded because they carry no per-test deadline. The name,
+// body, and timeout sit at argument positions 0/1/2 across all these forms, so one
+// extraction serves them all — only the callee shape (unwound below) differs.
 //
 // Report-only (no `fix`), matching no-bare-expect: the ratchet convention requires
 // ratchet rules be non-auto-fixable (see CLAUDE.md), and there is no single correct
@@ -355,8 +361,36 @@ function stressExplicitTimeoutRule() {
 		create(context) {
 			const isFunction = node =>
 				node?.type === "ArrowFunctionExpression" || node?.type === "FunctionExpression";
+			// Unwind an arbitrarily-chained test callee to its root identifier and the
+			// set of member names in the chain: `test.concurrent.each(t)` → { root:
+			// "test", props: {"concurrent","each"} }. The curried `.each(table)(...)`
+			// step is a CallExpression in the chain, so recurse through `.callee`.
+			const unwind = node => {
+				if (node.type === "Identifier") {
+					return { root: node.name, props: new Set() };
+				}
+				if (node.type === "MemberExpression" && node.property.type === "Identifier") {
+					const inner = unwind(node.object);
+					if (inner) {
+						inner.props.add(node.property.name);
+					}
+					return inner;
+				}
+				if (node.type === "CallExpression") {
+					return unwind(node.callee);
+				}
+				return null;
+			};
 			return {
-				"CallExpression[callee.name=/^(test|it)$/]"(node) {
+				CallExpression(node) {
+					const callee = unwind(node.callee);
+					if (!callee || (callee.root !== "test" && callee.root !== "it")) {
+						return;
+					}
+					// `.skip`/`.todo` never execute a body, so they carry no deadline.
+					if (callee.props.has("skip") || callee.props.has("todo")) {
+						return;
+					}
 					const [, body, timeout] = node.arguments;
 					// Only name+body test declarations carry a per-test deadline.
 					if (!isFunction(body)) {

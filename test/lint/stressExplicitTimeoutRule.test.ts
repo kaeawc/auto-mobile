@@ -89,11 +89,55 @@ test("high-frequency loop", async () => {
     expect(matches(messages, MISSING_TIMEOUT)).toBe(true);
   });
 
-  // `test.todo("name")` has no body to time out, and `test.each` takes a table
-  // rather than a name+body pair. Neither is the shape the rule is about.
+  // `test.todo("name")` has no body to time out. `.skip`/`.todo` never run a body,
+  // so they carry no per-test deadline and must not be flagged.
   test("does not flag declarations with no test body", async () => {
     const messages = await lintSnippet(`import { test } from "bun:test";
 test.todo("not written yet");
+`);
+    expect(matches(messages, MISSING_TIMEOUT)).toBe(false);
+    expect(matches(messages, TIMEOUT_TOO_SMALL)).toBe(false);
+  });
+
+  test("does not flag test.skip with no timeout", async () => {
+    const messages = await lintSnippet(`import { test } from "bun:test";
+test.skip("skipped", async () => {
+  await Promise.resolve();
+});
+`);
+    expect(matches(messages, MISSING_TIMEOUT)).toBe(false);
+    expect(matches(messages, TIMEOUT_TOO_SMALL)).toBe(false);
+  });
+
+  // Runnable chained forms execute a body and so inherit the same 5000ms default.
+  // `test.only` is the escape hatch a developer reaches for while debugging one
+  // stress case — exactly when the flake would bite — so it must be covered too.
+  test("flags test.only with no timeout", async () => {
+    const messages = await lintSnippet(`import { test } from "bun:test";
+test.only("only this one", async () => {
+  await Promise.resolve();
+});
+`);
+    expect(matches(messages, MISSING_TIMEOUT)).toBe(true);
+  });
+
+  // `it.each(table)(name, fn, timeout)` is the realistic shape for a parametrized
+  // stress load. The callee is a curried CallExpression, not a bare identifier, but
+  // the body/timeout still sit at arg positions 1/2, so the rule applies.
+  test("flags it.each with no timeout", async () => {
+    const messages = await lintSnippet(`import { it } from "bun:test";
+it.each([1, 2, 3])("load %i", async () => {
+  await Promise.resolve();
+});
+`);
+    expect(matches(messages, MISSING_TIMEOUT)).toBe(true);
+  });
+
+  test("accepts test.concurrent.each with real headroom", async () => {
+    const messages = await lintSnippet(`import { test } from "bun:test";
+test.concurrent.each([1, 2])("load %i", async () => {
+  await Promise.resolve();
+}, 30_000);
 `);
     expect(matches(messages, MISSING_TIMEOUT)).toBe(false);
     expect(matches(messages, TIMEOUT_TOO_SMALL)).toBe(false);

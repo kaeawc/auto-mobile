@@ -273,6 +273,15 @@ export class Daemon {
     if (options.toolResultsCompactJson) {
       serverConfig.setToolResultsCompactJsonEnabled(true);
     }
+    if (options.observeFocusScope) {
+      serverConfig.setObserveFocusScopeEnabled(true);
+    }
+    if (options.observeOverview) {
+      serverConfig.setObserveOverviewEnabled(true);
+    }
+    if (options.observeRegion) {
+      serverConfig.setObserveRegionEnabled(true);
+    }
     if (options.toolOutputsDir) {
       serverConfig.setToolOutputsDir(options.toolOutputsDir);
     }

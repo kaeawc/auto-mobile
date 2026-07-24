@@ -1200,6 +1200,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.actionsNoObserve = true;
     } else if (args[i] === "--tool-results-compact-json") {
       options.toolResultsCompactJson = true;
+    } else if (args[i] === "--observe-focus-scope") {
+      options.observeFocusScope = true;
+    } else if (args[i] === "--observe-overview") {
+      options.observeOverview = true;
+    } else if (args[i] === "--observe-region") {
+      options.observeRegion = true;
     }
   }
   return options;

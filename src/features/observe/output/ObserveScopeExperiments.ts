@@ -1,0 +1,568 @@
+import type { ObserveResult } from "../../../models/ObserveResult";
+import type { ElementBounds } from "../../../models/ElementBounds";
+import type {
+  FocusAnchor,
+  NormalizedRegion,
+  ObserveScopeInput,
+  ObserveScopeKind,
+  ObserveScopeMetadata,
+} from "../../../models/ObserveScope";
+
+export type {
+  FocusAnchor,
+  NormalizedRegion,
+  ObserveScopeInput,
+  ObserveScopeKind,
+  ObserveScopeMetadata,
+} from "../../../models/ObserveScope";
+
+/**
+ * Progressive-disclosure scoping experiments for `observe` output (issue #4344).
+ *
+ * Inspired by the Anthropic multimodal "crop tool" cookbook. That tool hands the
+ * model a large, detail-dense artifact (a high-resolution image) plus a way to
+ * *zoom into a region on demand* instead of front-loading every pixel. The lesson
+ * transfers to AutoMobile with one substitution: the dense artifact an agent
+ * actually consumes is the **view hierarchy**, not a screenshot. Today `observe`
+ * front-loads the whole (reduced) tree; these transforms let a caller opt into a
+ * scoped view of it.
+ *
+ * Three independent transforms — the "spatial axis" complementing the existing
+ * "temporal axis" (`--actions-diff-observe`). The agent picks where to zoom on
+ * each screen, so the parameters ride in the `observe` tool's `scope` input
+ * ({@link ObserveScopeInput}), NOT the environment. A server flag gates each
+ * dimension as a dark-launch switch; {@link buildObserveScopeConfig} intersects
+ * the two (call-requested AND flag-enabled):
+ *
+ *  1. FOCUS  (`scope.focus`, `--observe-focus-scope`)  — scope to a subtree: an
+ *     anchor object (`resource-id` / text) when given, else `true` for the
+ *     foreground app, dropping system chrome (status/nav bars, IME, other pkgs).
+ *  2. OVERVIEW (`scope.overview`, `--observe-overview`) — collapse to a container
+ *     skeleton: keep structural/addressable nodes, drop anonymous leaves, annotate
+ *     the count of omitted descendants so nothing is *silently* dropped.
+ *  3. REGION (`scope.region`, `--observe-region`) — crop to a normalized (0..1)
+ *     box (the crop cookbook's signature ergonomic); `true` uses the inset content
+ *     rectangle.
+ *
+ * GUIDING PRINCIPLE — OUTPUT-ONLY, like `sanitizeObserveResult`: every function
+ * here returns a deep copy and never mutates the caller's `ObserveResult`.
+ * `applyObserveScopeExperiments` composes them (focus -> region -> overview) and
+ * records what it did in `observeScope` so the reduction is measurable on the
+ * wire. Applied to the `observe` tool payload only; the diff pipeline owns
+ * post-action observations and must keep diffing against the full sanitized tree.
+ */
+
+export interface ObserveScopeConfig {
+  /** FOCUS on. */
+  focus: boolean;
+  /** Optional FOCUS anchor; when absent, FOCUS scopes to the foreground app. */
+  focusAnchor?: FocusAnchor;
+  /** OVERVIEW on. */
+  overview: boolean;
+  /** REGION on. */
+  region: boolean;
+  /** Optional REGION box; when absent, REGION uses the inset content rectangle. */
+  regionBox?: NormalizedRegion;
+}
+
+/** Structural attributes OVERVIEW keeps on a retained node; all else is dropped. */
+const OVERVIEW_KEPT_ATTRS: ReadonlySet<string> = new Set([
+  "resource-id",
+  "class",
+  "className",
+  "content-desc",
+  "bounds",
+  "scrollable",
+  "clickable",
+]);
+
+type NodeRecord = Record<string, unknown>;
+
+/** Deep clone matching the repo's hierarchy-cloning convention (JSON round-trip). */
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/**
+ * Normalize a `node` slot to an attribute-bag array. The runtime node carries
+ * flattened attributes but `ViewHierarchyNode` has no string index signature, so
+ * we read through `unknown` and assert to `NodeRecord` (a single assertion, not a
+ * `as unknown as` double-cast). Handles the single-vs-array shape variance the
+ * root and child slots exhibit.
+ */
+function toRecordArray(node: unknown): NodeRecord[] {
+  if (Array.isArray(node)) {
+    return node as NodeRecord[];
+  }
+  if (node && typeof node === "object") {
+    return [node as NodeRecord];
+  }
+  return [];
+}
+
+/** Children of a node as an array (children live under `.node`). */
+function childrenOf(node: NodeRecord): NodeRecord[] {
+  return toRecordArray(node.node);
+}
+
+/** Read an attribute, preferring the flattened key and falling back to the raw `$` bag. */
+function attr(node: NodeRecord, key: string): unknown {
+  if (node[key] !== undefined) {
+    return node[key];
+  }
+  const raw = node.$;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return (raw as NodeRecord)[key];
+  }
+  return undefined;
+}
+
+function stringAttr(node: NodeRecord, key: string): string {
+  const value = attr(node, key);
+  return typeof value === "string" ? value : "";
+}
+
+function isTruthyFlag(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
+/**
+ * Read a node's bounds tolerant of both shapes the wire can carry: the
+ * `{left,top,right,bottom}` object and the `--observe-result-compact` positional
+ * tuple `[left, top, right, bottom]`. Returns null when unreadable.
+ */
+export function readBounds(value: unknown): ElementBounds | null {
+  if (Array.isArray(value) && value.length === 4 && value.every(n => typeof n === "number")) {
+    return { left: value[0], top: value[1], right: value[2], bottom: value[3] };
+  }
+  if (value && typeof value === "object") {
+    const b = value as NodeRecord;
+    if (
+      typeof b.left === "number" && typeof b.top === "number"
+      && typeof b.right === "number" && typeof b.bottom === "number"
+    ) {
+      return { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+    }
+  }
+  return null;
+}
+
+/** Half-open rectangle overlap: touching edges do not count as intersecting. */
+function intersects(a: ElementBounds, b: ElementBounds): boolean {
+  return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+}
+
+function countNodes(nodes: NodeRecord[]): number {
+  let total = 0;
+  for (const node of nodes) {
+    total += 1 + countNodes(childrenOf(node));
+  }
+  return total;
+}
+
+function rootNodes(obs: ObserveResult): NodeRecord[] {
+  return toRecordArray(obs.viewHierarchy?.hierarchy?.node);
+}
+
+function setRootNodes(obs: ObserveResult, nodes: NodeRecord[]): void {
+  const hierarchy = obs.viewHierarchy?.hierarchy;
+  if (hierarchy) {
+    // The `node` slot is typed as a single node but holds an array at runtime
+    // (see `ObserveResultOutput.toNodeArray`); write through a widened view.
+    (hierarchy as { node?: unknown }).node = nodes;
+  }
+}
+
+/** Replace a node's child array in place, deleting the key when empty. */
+function withChildren(node: NodeRecord, children: NodeRecord[]): NodeRecord {
+  const copy: NodeRecord = { ...node };
+  if (children.length > 0) {
+    copy.node = children;
+  } else {
+    delete copy.node;
+  }
+  return copy;
+}
+
+/* ------------------------------------------------------------------------ *
+ * FOCUS
+ * ------------------------------------------------------------------------ */
+
+/** Depth-first search for the first node matching a semantic anchor. */
+function findAnchor(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord | null {
+  for (const node of nodes) {
+    if (anchor.resourceId !== undefined && stringAttr(node, "resource-id") === anchor.resourceId) {
+      return node;
+    }
+    if (anchor.text !== undefined && anchor.text !== "" && stringAttr(node, "text").includes(anchor.text)) {
+      return node;
+    }
+    const found = findAnchor(childrenOf(node), anchor);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/** True when the node or any descendant belongs to the foreground package. */
+function subtreeHasPackage(node: NodeRecord, pkg: string): boolean {
+  const nodePkg = stringAttr(node, "package");
+  if (nodePkg === pkg) {
+    return true;
+  }
+  return childrenOf(node).some(child => subtreeHasPackage(child, pkg));
+}
+
+/**
+ * Prune a subtree to nodes belonging to (or on the path to) the foreground
+ * package. A node is retained when its own package matches, is unset (a generic
+ * container), or any descendant is retained — so chrome from other packages
+ * (`com.android.systemui`, IME) drops while app containers stay.
+ */
+function pruneToPackage(node: NodeRecord, pkg: string): NodeRecord | null {
+  const keptChildren = childrenOf(node)
+    .map(child => pruneToPackage(child, pkg))
+    .filter((child): child is NodeRecord => child !== null);
+  const nodePkg = stringAttr(node, "package");
+  const selfMatches = nodePkg === pkg || nodePkg === "";
+  if (keptChildren.length === 0 && !selfMatches) {
+    return null;
+  }
+  if (keptChildren.length === 0 && nodePkg === "") {
+    // A generic container with no matching descendants is empty chrome — drop it.
+    return null;
+  }
+  return withChildren(node, keptChildren);
+}
+
+function foregroundPackage(obs: ObserveResult): string {
+  return obs.viewHierarchy?.packageName || obs.activeWindow?.appId || "";
+}
+
+/**
+ * FOCUS transform. With an anchor, keep only the matched node's subtree. Without
+ * one, keep only the foreground app's nodes. Returns the (possibly unchanged)
+ * result plus how it resolved, for `observeScope`.
+ */
+export function scopeToFocus(
+  input: ObserveResult,
+  anchor?: FocusAnchor
+): { result: ObserveResult; focus: NonNullable<ObserveScopeMetadata["focus"]> } {
+  const obs = clone(input);
+  const roots = rootNodes(obs);
+
+  if (anchor && (anchor.resourceId !== undefined || anchor.text !== undefined)) {
+    const matched = findAnchor(roots, anchor);
+    if (matched) {
+      setRootNodes(obs, [matched]);
+    }
+    return { result: obs, focus: { by: "anchor", matched: matched !== null } };
+  }
+
+  const pkg = foregroundPackage(obs);
+  if (pkg === "") {
+    return { result: obs, focus: { by: "foreground-app", matched: false } };
+  }
+  const hasPackageAnywhere = roots.some(root => subtreeHasPackage(root, pkg));
+  if (!hasPackageAnywhere) {
+    // No node advertises the foreground package (e.g. iOS single-app roots) —
+    // scoping would blank the tree, so leave it untouched.
+    return { result: obs, focus: { by: "foreground-app", matched: false, packageName: pkg } };
+  }
+  const kept = roots
+    .map(root => pruneToPackage(root, pkg))
+    .filter((root): root is NodeRecord => root !== null);
+  setRootNodes(obs, kept);
+  return { result: obs, focus: { by: "foreground-app", matched: true, packageName: pkg } };
+}
+
+/* ------------------------------------------------------------------------ *
+ * REGION
+ * ------------------------------------------------------------------------ */
+
+/** The inset-adjusted content rectangle in pixels (screen minus system insets). */
+function contentRectPx(obs: ObserveResult): ElementBounds | null {
+  const size = obs.screenSize;
+  if (!size || typeof size.width !== "number" || typeof size.height !== "number") {
+    return null;
+  }
+  const insets = obs.systemInsets ?? { top: 0, bottom: 0, left: 0, right: 0 };
+  return {
+    left: insets.left ?? 0,
+    top: insets.top ?? 0,
+    right: size.width - (insets.right ?? 0),
+    bottom: size.height - (insets.bottom ?? 0),
+  };
+}
+
+/** Convert a normalized box to pixels using screen dimensions. */
+function regionToPx(obs: ObserveResult, box: NormalizedRegion): ElementBounds | null {
+  const size = obs.screenSize;
+  if (!size || typeof size.width !== "number" || typeof size.height !== "number") {
+    return null;
+  }
+  return {
+    left: box.x1 * size.width,
+    top: box.y1 * size.height,
+    right: box.x2 * size.width,
+    bottom: box.y2 * size.height,
+  };
+}
+
+/**
+ * Prune a node to the crop rectangle: keep it when its own bounds intersect the
+ * rect, or any descendant is kept, or it has no readable bounds (structural
+ * containers are never geometrically excluded). Off-rect leaves drop.
+ */
+function pruneToRect(node: NodeRecord, rect: ElementBounds): NodeRecord | null {
+  const keptChildren = childrenOf(node)
+    .map(child => pruneToRect(child, rect))
+    .filter((child): child is NodeRecord => child !== null);
+  if (keptChildren.length > 0) {
+    return withChildren(node, keptChildren);
+  }
+  const bounds = readBounds(attr(node, "bounds"));
+  if (bounds === null) {
+    return null;
+  }
+  return intersects(bounds, rect) ? withChildren(node, []) : null;
+}
+
+function filterElementsByRect(obs: ObserveResult, rect: ElementBounds): void {
+  const elements = obs.elements;
+  if (!elements) {
+    return;
+  }
+  const keep = <T extends { bounds?: unknown }>(item: T): boolean => {
+    const bounds = readBounds(item.bounds);
+    return bounds === null || intersects(bounds, rect);
+  };
+  elements.clickable = elements.clickable.filter(keep);
+  elements.scrollable = elements.scrollable.filter(keep);
+  elements.text = elements.text.filter(keep);
+  elements.media = elements.media.filter(keep);
+}
+
+/**
+ * REGION transform. Crops the hierarchy and the categorized `elements` to the
+ * pixel rectangle, and returns it for `observeScope`. When `box` is omitted the
+ * inset-adjusted content rectangle is used.
+ */
+export function scopeToRegion(
+  input: ObserveResult,
+  box?: NormalizedRegion
+): { result: ObserveResult; rectPx: ElementBounds | null } {
+  const obs = clone(input);
+  const rect = box ? regionToPx(obs, box) : contentRectPx(obs);
+  if (rect === null) {
+    return { result: obs, rectPx: null };
+  }
+  const kept = rootNodes(obs)
+    .map(root => pruneToRect(root, rect))
+    .filter((root): root is NodeRecord => root !== null);
+  setRootNodes(obs, kept);
+  filterElementsByRect(obs, rect);
+  return { result: obs, rectPx: rect };
+}
+
+/* ------------------------------------------------------------------------ *
+ * OVERVIEW
+ * ------------------------------------------------------------------------ */
+
+/** A node is structural when it has children, scrolls, or is addressable. */
+function isStructural(node: NodeRecord, hasKeptChildren: boolean): boolean {
+  return hasKeptChildren
+    || isTruthyFlag(attr(node, "scrollable"))
+    || stringAttr(node, "resource-id") !== "";
+}
+
+/** Keep only the structural-attribute allowlist on an overview node. */
+function trimToStructuralAttrs(node: NodeRecord): NodeRecord {
+  const out: NodeRecord = {};
+  for (const key of Object.keys(node)) {
+    if (key === "node") {
+      continue;
+    }
+    if (OVERVIEW_KEPT_ATTRS.has(key)) {
+      out[key] = node[key];
+    }
+  }
+  return out;
+}
+
+/**
+ * Collapse a subtree to its structural skeleton. Returns the retained node (or
+ * null when this node is an anonymous leaf) and `dropped` — the count of original
+ * nodes in this subtree NOT represented in the output. A dropped node has no kept
+ * descendants (`isStructural` forces any node with kept children to be kept), so
+ * dropping one drops its whole subtree. `dropped` below a kept node is surfaced as
+ * `omittedDescendants` so nothing vanishes silently.
+ */
+function toOverviewNode(node: NodeRecord): { node: NodeRecord | null; dropped: number } {
+  const results = childrenOf(node).map(toOverviewNode);
+  const keptChildren = results.map(r => r.node).filter((n): n is NodeRecord => n !== null);
+  const droppedBelow = results.reduce((sum, r) => sum + r.dropped, 0);
+
+  if (!isStructural(node, keptChildren.length > 0)) {
+    return { node: null, dropped: 1 + droppedBelow };
+  }
+
+  const trimmed = trimToStructuralAttrs(node);
+  if (keptChildren.length > 0) {
+    trimmed.node = keptChildren;
+  }
+  if (droppedBelow > 0) {
+    trimmed.omittedDescendants = droppedBelow;
+  }
+  return { node: trimmed, dropped: droppedBelow };
+}
+
+/**
+ * OVERVIEW transform. Drops `elements` (leaf-level detail the skeleton replaces)
+ * and collapses the hierarchy to structural/addressable nodes.
+ */
+export function toOverview(input: ObserveResult): ObserveResult {
+  const obs = clone(input);
+  const kept = rootNodes(obs)
+    .map(toOverviewNode)
+    .map(r => r.node)
+    .filter((n): n is NodeRecord => n !== null);
+  setRootNodes(obs, kept);
+  delete obs.elements;
+  return obs;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Compose + resolve
+ * ------------------------------------------------------------------------ */
+
+/** Mutable accumulator threaded through the scope stages. */
+interface ScopeRun {
+  current: ObserveResult;
+  applied: ObserveScopeKind[];
+  regionPx?: ElementBounds;
+  focus?: ObserveScopeMetadata["focus"];
+}
+
+/** True when a stage changed the node count (i.e. it materially scoped). */
+function nodeCountChanged(before: ObserveResult, after: ObserveResult): boolean {
+  return countNodes(rootNodes(before)) !== countNodes(rootNodes(after));
+}
+
+function runFocusStage(run: ScopeRun, cfg: ObserveScopeConfig): void {
+  const { result, focus } = scopeToFocus(run.current, cfg.focusAnchor);
+  run.focus = focus;
+  if (nodeCountChanged(run.current, result)) {
+    run.applied.push("focus");
+  }
+  run.current = result;
+}
+
+function runRegionStage(run: ScopeRun, cfg: ObserveScopeConfig): void {
+  const { result, rectPx } = scopeToRegion(run.current, cfg.regionBox);
+  if (rectPx) {
+    run.regionPx = rectPx;
+  }
+  if (nodeCountChanged(run.current, result)) {
+    run.applied.push("region");
+  }
+  run.current = result;
+}
+
+function runOverviewStage(run: ScopeRun): void {
+  // OVERVIEW always materially transforms (trims attributes, drops `elements`)
+  // even when the node count is unchanged, so it is unconditionally recorded.
+  run.current = toOverview(run.current);
+  run.applied.push("overview");
+}
+
+function buildScopeMetadata(run: ScopeRun, nodesBefore: number): ObserveScopeMetadata {
+  const metadata: ObserveScopeMetadata = {
+    applied: run.applied,
+    nodesBefore,
+    nodesAfter: countNodes(rootNodes(run.current)),
+  };
+  if (run.regionPx) {
+    metadata.regionPx = run.regionPx;
+  }
+  if (run.focus) {
+    metadata.focus = run.focus;
+  }
+  return metadata;
+}
+
+/**
+ * Apply the enabled scope transforms in order (focus -> region -> overview) and
+ * annotate `observeScope`. Pure: the input is never mutated. When nothing is
+ * enabled, returns the input unchanged (no clone, no metadata).
+ */
+export function applyObserveScopeExperiments(
+  input: ObserveResult,
+  cfg: ObserveScopeConfig
+): ObserveResult {
+  if (!cfg.focus && !cfg.region && !cfg.overview) {
+    return input;
+  }
+
+  const nodesBefore = countNodes(rootNodes(input));
+  const run: ScopeRun = { current: input, applied: [] };
+
+  if (cfg.focus) {
+    runFocusStage(run, cfg);
+  }
+  if (cfg.region) {
+    runRegionStage(run, cfg);
+  }
+  if (cfg.overview) {
+    runOverviewStage(run);
+  }
+
+  // Every stage returns a fresh clone, so `run.current` is never the input here;
+  // guard the theoretically-unreachable no-op case anyway.
+  const out = run.current === input ? clone(input) : run.current;
+  out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore);
+  return out;
+}
+
+/** The server experiment gates; each honors its `scope` dimension only when on. */
+export interface ObserveScopeFlags {
+  focus: boolean;
+  overview: boolean;
+  region: boolean;
+}
+
+/** A dimension is requested when the call set it to `true` or an object (not `false`/absent). */
+function isDimensionRequested(dim: boolean | object | undefined): boolean {
+  return dim !== undefined && dim !== false;
+}
+
+/** The anchor object of a `focus` request, or undefined for the `true` (foreground) form. */
+function focusAnchorOf(focus: ObserveScopeInput["focus"]): FocusAnchor | undefined {
+  return typeof focus === "object" ? focus : undefined;
+}
+
+/** The box of a `region` request, or undefined for the `true` (content-rect) form. */
+function regionBoxOf(region: ObserveScopeInput["region"]): NormalizedRegion | undefined {
+  return typeof region === "object" ? region : undefined;
+}
+
+/**
+ * Build an {@link ObserveScopeConfig} by intersecting the per-call `scope` request
+ * (from the `observe` tool input — where the agent picks where to zoom on THIS
+ * screen) with the server experiment flags. A dimension is applied only when both
+ * the call asked for it AND its flag is enabled, so the flag stays the dark-launch
+ * gate while the parameters travel in the tool call, not the environment.
+ */
+export function buildObserveScopeConfig(
+  flags: ObserveScopeFlags,
+  scope: ObserveScopeInput | undefined
+): ObserveScopeConfig {
+  return {
+    focus: flags.focus && isDimensionRequested(scope?.focus),
+    focusAnchor: focusAnchorOf(scope?.focus),
+    overview: flags.overview && scope?.overview === true,
+    region: flags.region && isDimensionRequested(scope?.region),
+    regionBox: regionBoxOf(scope?.region),
+  };
+}

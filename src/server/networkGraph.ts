@@ -1,4 +1,5 @@
 import type { NetworkEventWithId } from "../db/networkEventRepository";
+import { computePercentile } from "../utils/percentile";
 
 export interface GraphLeaf {
   method?: string;
@@ -40,19 +41,6 @@ function isParameterizedSegment(segment: string): boolean {
     return true;
   }
   return false;
-}
-
-function computePercentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) {
-    return 0;
-  }
-  const index = (p / 100) * (sorted.length - 1);
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) {
-    return sorted[lower];
-  }
-  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
 interface EventGroup {

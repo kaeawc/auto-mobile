@@ -75,14 +75,15 @@ export class SafeAreaAuditor {
   ): void {
     const bounds = readBounds(node);
     const categories = categoriesFor(node);
-    if (!bounds || categories.length === 0 || isScreenSized(bounds, screen) || node.enabled === "false") {return;}
+    if (!bounds || categories.length === 0 || !isOnScreen(bounds, screen) || isScreenSized(bounds, screen) || node.enabled === "false") {return;}
     this.inspectContent(node, bounds, categories, screen, content, warnings);
     this.inspectGestureRegion(node, bounds, categories, screen, systemGestures, mandatorySystemGestures, warnings);
   }
 
   private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, warnings: LayoutWarning[]): void {
     if (!content) {return;}
-    const sides = intersectingSides(bounds, screen, content.edges);
+    const sides = intersectingSides(bounds, screen, content.edges)
+      .filter(side => content.typesForSides([side]).length > 0);
     if (sides.length > 0) {warnings.push(this.warning(node, bounds, categories, content.typesForSides(sides), sides, "important-content-under-inset", "warning", screen, content.edges));}
   }
 
@@ -174,6 +175,10 @@ function isSystemNode(node: Node): boolean {
 
 function isScreenSized(bounds: ObservationEdgeInsets, screen: { width: number; height: number }): boolean {
   return bounds.left === 0 && bounds.top === 0 && bounds.right === screen.width && bounds.bottom === screen.height;
+}
+
+function isOnScreen(bounds: ObservationEdgeInsets, screen: { width: number; height: number }): boolean {
+  return bounds.right > 0 && bounds.bottom > 0 && bounds.left < screen.width && bounds.top < screen.height;
 }
 
 function intersectingSides(bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets): Side[] {

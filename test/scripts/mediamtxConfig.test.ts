@@ -9,15 +9,16 @@ import { IOS_FIRST_FRAME_TIMEOUT_MS } from "../../src/features/webrtc/IosH264Sou
  * `whipConnected` to `firstEncodedFrame` — the exact interval MediaMTX's
  * `webrtcTrackGatherTimeout` governs.
  *
- * iOS samples, n=6 (ms): 3356, 4164, 6158, 6436, 10570, 15065
- *   runs 30061346419, 30061350168, 30058014124/2, 30061342714, 30061358682, 30061354391
- * Android samples, n=3 (ms): 5141, 5164, 5924
+ * iOS samples, n=7 (ms): 3356, 3587, 4164, 6158, 6436, 10570, 15065
+ *   runs 30061346419, 30062724119, 30061350168, 30058014124/2, 30061342714,
+ *        30061358682, 30061354391
+ * Android samples, n=4 (ms): 5141, 5164, 5680, 5924
  *
  * iOS is bimodal: a 3-6s cluster and a 10-15s tail. Android is consistently fast.
  * The tail is why these timeouts were NOT tightened — see the note in
  * examples/mediamtx/mediamtx.yml.
  */
-const MEASURED_IOS_P50_MS = 6_297;
+const MEASURED_IOS_P50_MS = 6_158;
 const MEASURED_IOS_P95_MS = 15_065;
 
 /**

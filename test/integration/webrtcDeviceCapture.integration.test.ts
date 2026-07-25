@@ -11,6 +11,8 @@ import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
 import { IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS } from "../../src/features/webrtc/IosH264Source";
+import { WEBRTC_STREAM_LEASE_TTL_MS } from "../../src/server/webrtcStreamManager";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import {
   CaptureStageTimeline,
   captureRunIdentity,
@@ -580,6 +582,56 @@ let outcome: "passed" | "failed" = "failed";
 // interval between the fixture toggles that keep the screen changing across it.
 const EGRESS_WINDOW_MS = 2_000;
 const EGRESS_TOGGLE_INTERVAL_MS = 400;
+const STREAM_LEASE_HEARTBEAT_INTERVAL_MS = WEBRTC_STREAM_LEASE_TTL_MS / 3;
+
+interface StreamLeaseHeartbeat {
+  stop(): Promise<Error | null>;
+}
+
+/**
+ * Device capture exercises startup, active streaming, and a recovery viewer for
+ * longer than one stream lease. Keep the started stream owned for the duration
+ * of the test, while still allowing the manager to reclaim abandoned streams.
+ */
+function startStreamLeaseHeartbeat(
+  streamId: string,
+  leaseId: string,
+  socketPath: string,
+  timer: Timer = defaultTimer
+): StreamLeaseHeartbeat {
+  let stopped = false;
+  let failure: Error | null = null;
+  let inFlight: Promise<void> | null = null;
+
+  const renew = (): void => {
+    if (stopped || failure || inFlight) {
+      return;
+    }
+    inFlight = sendWebRtcStreamRequest(
+      { action: "status", id: `${streamId}-lease-heartbeat`, streamId, leaseId },
+      { socketPath, timeoutMs: 1_000 }
+    ).then(response => {
+      if (!response.success) {
+        throw new Error(`failed to renew WebRTC stream lease: ${response.error ?? "no error detail returned"}`);
+      }
+    }).catch(error => {
+      failure = error instanceof Error ? error : new Error(String(error));
+    }).finally(() => {
+      inFlight = null;
+    });
+  };
+
+  const interval = timer.setInterval(renew, STREAM_LEASE_HEARTBEAT_INTERVAL_MS);
+  (interval as { unref?: () => void }).unref?.();
+  return {
+    async stop(): Promise<Error | null> {
+      stopped = true;
+      timer.clearInterval(interval);
+      await inFlight;
+      return failure;
+    },
+  };
+}
 
 describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => {
   afterAll(async () => {
@@ -637,6 +689,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     let started = false;
     let observingStart = true;
     let startObserver: Promise<void> = Promise.resolve();
+    let leaseHeartbeat: StreamLeaseHeartbeat | undefined;
     try {
       await waitFor(async () => {
         if (mediamtx.exitCode !== null || mediamtx.signalCode !== null) {
@@ -694,9 +747,14 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       if (!response.success) {
         throw new Error(`failed to start device WebRTC stream: ${response.error ?? "no error detail returned"}`);
       }
+      const leaseId = response.stream?.lease?.id;
+      if (!leaseId) {
+        throw new Error("started device WebRTC stream did not return an ownership lease");
+      }
+      leaseHeartbeat = startStreamLeaseHeartbeat(streamId, leaseId, webRtcSocketPath);
       await waitFor(async () => {
         const status = await sendWebRtcStreamRequest(
-          { action: "status", id: `${streamId}-capture-status`, streamId },
+          { action: "status", id: `${streamId}-capture-status`, streamId, leaseId },
           { socketPath: webRtcSocketPath, timeoutMs: 1_000 }
         ).catch(() => undefined);
         if ((status?.stream?.framesSent ?? 0) === 0) {
@@ -800,6 +858,11 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
           expect(keyframeRecovered(baseline, recovered!)).toBe(true);
         });
       }
+      const leaseHeartbeatError = await leaseHeartbeat.stop();
+      leaseHeartbeat = undefined;
+      if (leaseHeartbeatError) {
+        throw leaseHeartbeatError;
+      }
       const stopped = await sendWebRtcStreamRequest(
         { action: "stop", id: `${streamId}-stop`, streamId },
         { socketPath: webRtcSocketPath }
@@ -818,6 +881,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       // only from job logs. runPhase re-throws, preserving the prior semantics
       // where a failed cleanup surfaces as a test failure.
       await timeline.runPhase("pipelineTeardown", async () => {
+        const leaseHeartbeatError = await leaseHeartbeat?.stop();
+        if (leaseHeartbeatError) {
+          console.warn(`WebRTC stream lease heartbeat failed during teardown: ${leaseHeartbeatError.message}`);
+        }
         // Nothing in the observer rejects today; swallow anyway so a future edit
         // cannot skip the teardown below and replace the real test failure.
         await startObserver.catch(() => undefined);

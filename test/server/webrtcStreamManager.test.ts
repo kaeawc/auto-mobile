@@ -954,6 +954,35 @@ describe("webrtcStreamManager", () => {
     expect(listWebRtcStreams()).toHaveLength(1);
   });
 
+  test("renews an owned lease through a status descriptor before capture expiry", async () => {
+    const timer = new FakeTimer();
+    const { publishers, sources } = installFakes();
+    setWebRtcStreamManagerDependencies({ timer });
+
+    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    expect(started.lease?.id).toBeDefined();
+
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS - 1);
+    const renewed = getWebRtcStreamDescriptor(started.streamId, started.lease?.id);
+    expect(renewed?.lease?.id).toBe(started.lease?.id);
+
+    // The original deadline has passed, but the status heartbeat retained the
+    // manager-owned source for another lease interval.
+    timer.advanceTime(1);
+    await flushPublisherStart();
+    expect(listWebRtcStreams()).toHaveLength(1);
+    expect(publishers[0].stopped).toBe(false);
+    expect(sources[0].stopped).toBe(false);
+
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS - 2);
+    expect(listWebRtcStreams()).toHaveLength(1);
+    timer.advanceTime(1);
+    await flushPublisherStart();
+    expect(listWebRtcStreams()).toEqual([]);
+    expect(publishers[0].stopped).toBe(true);
+    expect(sources[0].stopped).toBe(true);
+  });
+
   test("returns a typed stopped result when a waiting stream is stopped", async () => {
     const timer = new FakeTimer();
     setWebRtcStreamManagerDependencies({

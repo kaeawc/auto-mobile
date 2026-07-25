@@ -1407,8 +1407,9 @@ describe("IosH264Source", () => {
       Buffer.from([
         0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x2a,
         0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80,
+        // The output stream can pause immediately after the IDR, leaving it
+        // un-terminated until a later frame arrives.
         0, 0, 0, 1, 0x65, 0x80,
-        0, 0, 0, 1, 0x41, 0x80,
       ])
     );
     await flush();

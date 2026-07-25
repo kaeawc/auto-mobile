@@ -812,7 +812,10 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     try {
-      if (this.forcedKeyFrameParser.push(chunk).some(isKeyFrameNal)) {
+      if (
+        this.forcedKeyFrameParser.push(chunk).some(isKeyFrameNal) ||
+        this.forcedKeyFrameParser.hasBufferedNalType(NAL_TYPE_IDR)
+      ) {
         this.forcedKeyFrameEncoder = null;
         this.forcedKeyFrameParser = null;
       }

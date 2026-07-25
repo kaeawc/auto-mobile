@@ -12,7 +12,6 @@ import type {
   MalformedFrameError,
   NativeFrameMetrics,
 } from "../screen-stream";
-import { AUTOMOBILE_VERSION_ENV } from "../../constants/release";
 import { LatestFrameQueue } from "../screen-stream/LatestFrameQueue";
 import {
   iosSimulatorCaptureHelperPool,

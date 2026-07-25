@@ -109,6 +109,16 @@ export class FakeTimer implements Timer {
 
   /**
    * Advance time and resolve all pending sleeps, fire timeouts, and intervals that have elapsed.
+   *
+   * Caution: catch-up fires all due interval ticks SYNCHRONOUSLY within one call —
+   * no microtask boundary runs between them. A concurrency guard that drops a tick
+   * while a prior async tick is still pending (e.g. a `pending` latch) will therefore
+   * observe only the first of a caught-up burst, unlike a real event loop that yields
+   * between turns. Drive such a monitor by advancing one interval period at a time and
+   * draining microtasks between steps (see PerformanceMonitor.test.ts), not one large
+   * advance. For the same reason, avoid advancing by a huge multiple of a tiny interval
+   * (e.g. advanceTime(1_000_000) against a 1ms interval) — it spins that many synchronous
+   * callbacks.
    * @param ms - Milliseconds to advance
    */
   advanceTime(ms: number): void {

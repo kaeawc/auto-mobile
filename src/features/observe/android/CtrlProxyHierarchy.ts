@@ -879,6 +879,21 @@ export class CtrlProxyHierarchy {
     if (node["test-tag"]) {
       converted["test-tag"] = node["test-tag"];
     }
+    if (node["unique-id"]) {
+      converted["unique-id"] = node["unique-id"];
+    }
+    if (typeof node["collection-row-index"] === "number") {
+      converted["collection-row-index"] = node["collection-row-index"];
+    }
+    if (typeof node["collection-column-index"] === "number") {
+      converted["collection-column-index"] = node["collection-column-index"];
+    }
+    if (typeof node["visible-to-user"] === "boolean") {
+      converted["visible-to-user"] = node["visible-to-user"];
+    }
+    if (node["container-title"]) {
+      converted["container-title"] = node["container-title"];
+    }
     if (node["view-id"]) {
       converted["view-id"] = node["view-id"];
     }

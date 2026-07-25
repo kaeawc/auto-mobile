@@ -707,6 +707,25 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("longPress", 50, 50, 1000, element, undefined);
     });
+
+    test("reports a rejected advertised semantic long press without a coordinate fallback", async () => {
+      fakeTalkBackStrategy.setLongPressResult({
+        success: false,
+        method: "accessibility-action",
+        error: "performAction returned false",
+        semanticActionFailure: true,
+      });
+      const element = makeElement();
+
+      await expect(
+        (tapOnElement as any).executeAndroidTapWithAccessibility(
+          "longPress", 50, 50, element, 1000, {}, undefined
+        )
+      ).rejects.toThrow("Semantic long press failed");
+
+      expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
+      expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
+    });
   });
 });
 

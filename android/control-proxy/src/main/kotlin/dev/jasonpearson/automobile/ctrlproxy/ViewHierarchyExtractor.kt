@@ -820,6 +820,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       var liveRegion: String? = null
       var collectionInfo: String? = null
       var collectionItemInfo: String? = null
+      var collectionRowIndex: Int? = null
+      var collectionColumnIndex: Int? = null
       var rangeInfo: String? = null
       var inputType: String? = null
       var actions: List<String>? = null
@@ -836,6 +838,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         tooltipText = node.tooltipText?.toString()
         paneTitle = node.paneTitle?.toString()
       }
+      val apiGatedFields =
+        apiGatedNodeFields(
+          Build.VERSION.SDK_INT,
+          uniqueId = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null,
+          containerTitle =
+            if (Build.VERSION.SDK_INT >= 34) node.containerTitle?.toString() else null,
+        )
 
       // Extract accessibility actions
       val actionList = node.actionList
@@ -881,6 +890,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       // Extract collection item info
       node.collectionItemInfo?.let {
         collectionItemInfo = "row:${it.rowIndex},col:${it.columnIndex}"
+        collectionRowIndex = it.rowIndex
+        collectionColumnIndex = it.columnIndex
       }
 
       // Extract range info
@@ -997,6 +1008,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           node = nodeElement,
           stateDescription = stateDescription,
           testTag = testTag,
+          uniqueId = apiGatedFields.uniqueId,
+          visibleToUser = node.isVisibleToUser,
+          containerTitle = apiGatedFields.containerTitle,
           hintText = hintText,
           errorMessage = errorMessage,
           tooltipText = tooltipText,
@@ -1004,6 +1018,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           liveRegion = liveRegion,
           collectionInfo = collectionInfo,
           collectionItemInfo = collectionItemInfo,
+          collectionRowIndex = collectionRowIndex,
+          collectionColumnIndex = collectionColumnIndex,
           rangeInfo = rangeInfo,
           inputType = inputType,
           actions = actions,
@@ -1148,7 +1164,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     return if (map.isEmpty()) null else map
   }
 
-  private fun extractTestTag(extras: Map<String, String>?): String? {
+  private fun extractTestTag(extras: Map<String, String>?): String? = testTagFromExtras(extras)
+
+  internal fun testTagFromExtras(extras: Map<String, String>?): String? {
     if (extras.isNullOrEmpty()) return null
 
     val candidates =
@@ -1169,6 +1187,21 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     return extras.entries.firstOrNull { it.key.contains("testtag", ignoreCase = true) }?.value
   }
+
+  internal data class ApiGatedNodeFields(
+    val uniqueId: String?,
+    val containerTitle: String?,
+  )
+
+  internal fun apiGatedNodeFields(
+    sdkInt: Int,
+    uniqueId: String?,
+    containerTitle: String?,
+  ): ApiGatedNodeFields =
+    ApiGatedNodeFields(
+      uniqueId = if (sdkInt >= 33) uniqueId else null,
+      containerTitle = if (sdkInt >= 34) containerTitle else null,
+    )
 
   /** Check if element meets filter criteria (matches test expectations) */
   private fun meetsFilterCriteria(element: UIElementInfo, textFilter: String? = null): Boolean {
@@ -1208,6 +1241,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       !element.resourceId.isNullOrBlank() ||
       !element.contentDesc.isNullOrBlank() ||
       !element.testTag.isNullOrBlank() ||
+      !element.uniqueId.isNullOrBlank() ||
+      !element.containerTitle.isNullOrBlank() ||
       !element.role.isNullOrBlank() ||
       !element.stateDescription.isNullOrBlank() ||
       !element.errorMessage.isNullOrBlank() ||

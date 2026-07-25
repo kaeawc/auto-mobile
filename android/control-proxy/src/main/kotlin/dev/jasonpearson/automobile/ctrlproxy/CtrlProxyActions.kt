@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
+import dev.jasonpearson.automobile.protocol.NodeSelector
 
 /**
  * The device actions a decoded [dev.jasonpearson.automobile.protocol.WebSocketRequest] can trigger.
@@ -79,7 +80,12 @@ interface CtrlProxyActions {
 
   fun requestSelectAll(requestId: String?)
 
-  fun requestAction(requestId: String?, action: String, resourceId: String?)
+  fun requestAction(
+    requestId: String?,
+    action: String,
+    resourceId: String?,
+    selector: NodeSelector?,
+  )
 
   fun requestClipboard(requestId: String?, action: String, text: String?)
 

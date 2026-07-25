@@ -35,7 +35,10 @@ data class UIElementInfo(
   val fragment: String? = null, // Fragment class name when applicable
 
   // Additional accessibility semantics fields
-  @SerialName("test-tag") val testTag: String? = null, // Compose test tag
+  @SerialName("test-tag") val testTag: String? = null, // Compose or View accessibility-extra tag
+  @SerialName("unique-id") val uniqueId: String? = null, // Android-owned ID (API 33+)
+  @SerialName("visible-to-user") val visibleToUser: Boolean? = null,
+  @SerialName("container-title") val containerTitle: String? = null, // API 34+
   val role: String? = null, // Accessibility role (button, checkbox, etc.)
   @SerialName("state-description") val stateDescription: String? = null, // Custom state description
   @SerialName("error-message") val errorMessage: String? = null, // Error message for form fields
@@ -46,6 +49,8 @@ data class UIElementInfo(
   @SerialName("collection-info") val collectionInfo: String? = null, // Collection information
   @SerialName("collection-item-info")
   val collectionItemInfo: String? = null, // Collection item info
+  @SerialName("collection-row-index") val collectionRowIndex: Int? = null,
+  @SerialName("collection-column-index") val collectionColumnIndex: Int? = null,
   @SerialName("range-info") val rangeInfo: String? = null, // Range information for sliders/progress
   @SerialName("input-type") val inputType: String? = null, // Input type for text fields
   @SerialName("actions") val actions: List<String>? = null, // Available accessibility actions

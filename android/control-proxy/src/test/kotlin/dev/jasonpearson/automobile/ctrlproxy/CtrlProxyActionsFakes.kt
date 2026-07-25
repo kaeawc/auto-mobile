@@ -68,7 +68,12 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) {}
 
-  override fun requestAction(requestId: String?, action: String, resourceId: String?) {}
+  override fun requestAction(
+    requestId: String?,
+    action: String,
+    resourceId: String?,
+    selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
+  ) {}
 
   override fun requestClipboard(requestId: String?, action: String, text: String?) {}
 
@@ -271,8 +276,12 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
 
-  override fun requestAction(requestId: String?, action: String, resourceId: String?) =
-    record("requestAction", requestId, action, resourceId)
+  override fun requestAction(
+    requestId: String?,
+    action: String,
+    resourceId: String?,
+    selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
+  ) = record("requestAction", requestId, action, resourceId, selector)
 
   override fun requestClipboard(requestId: String?, action: String, text: String?) =
     record("requestClipboard", requestId, action, text)

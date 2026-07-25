@@ -164,13 +164,20 @@ export interface RequestSelectAllMessage {
 
 /**
  * `@SerialName("request_action")` → `RequestAction`.
- * The device also accepts optional `boundsLeft/Top/Right/Bottom`; the TS client omits them.
+ * `selector` is additive; `resourceId` remains for backwards compatibility.
  */
 export interface RequestActionMessage {
   type: "request_action";
   requestId: string;
   action: string;
   resourceId?: string;
+  selector?: {
+    resourceId?: string;
+    testTag?: string;
+    uniqueId?: string;
+    collectionRow?: number;
+    collectionColumn?: number;
+  };
 }
 
 /**
@@ -650,8 +657,19 @@ export const ctrlProxyRequests = {
     return { type: "request_screenshot", requestId: args.requestId };
   },
 
-  requestAction(args: { requestId: string; action: string; resourceId?: string }): RequestActionMessage {
-    return { type: "request_action", requestId: args.requestId, action: args.action, resourceId: args.resourceId };
+  requestAction(args: {
+    requestId: string;
+    action: string;
+    resourceId?: string;
+    selector?: RequestActionMessage["selector"];
+  }): RequestActionMessage {
+    return {
+      type: "request_action",
+      requestId: args.requestId,
+      action: args.action,
+      resourceId: args.resourceId,
+      selector: args.selector
+    };
   },
 
   requestClipboard(args: {

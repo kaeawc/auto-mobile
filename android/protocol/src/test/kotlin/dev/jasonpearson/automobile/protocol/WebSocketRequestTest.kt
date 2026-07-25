@@ -253,6 +253,19 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize request_action with stable selector`() {
+    val message =
+      """{"type":"request_action","requestId":"selector-1","action":"long_click","selector":{"testTag":"message_row_42","uniqueId":"android-node-7","collectionRow":4,"collectionColumn":0}}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestAction>(request)
+    assertEquals("message_row_42", request.selector?.testTag)
+    assertEquals("android-node-7", request.selector?.uniqueId)
+    assertEquals(4, request.selector?.collectionRow)
+    assertEquals(0, request.selector?.collectionColumn)
+  }
+
+  @Test
   fun `deserialize request_hit_test`() {
     val message = """{"type":"request_hit_test","requestId":"ht-1","x":320,"y":720}"""
     val request = json.decodeFromString<WebSocketRequest>(message)

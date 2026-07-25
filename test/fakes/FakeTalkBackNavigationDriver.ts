@@ -1,5 +1,9 @@
 import type { TalkBackNavigationDriver } from "../../src/features/talkback/TalkBackNavigationDriver";
-import type { A11yActionResult, A11yTapCoordinatesResult } from "../../src/features/observe/android/types";
+import type {
+  AccessibilityNodeSelector,
+  A11yActionResult,
+  A11yTapCoordinatesResult,
+} from "../../src/features/observe/android/types";
 import { FakeFocusNavigationDriver } from "./FakeFocusNavigationDriver";
 
 /**
@@ -13,7 +17,11 @@ export class FakeTalkBackNavigationDriver
   actionResult: A11yActionResult = { success: true, action: "click", totalTimeMs: 1 };
 
   tapHistory: Array<{ x: number; y: number; durationMs: number }> = [];
-  actionHistory: Array<{ action: string; resourceId?: string }> = [];
+  actionHistory: Array<{
+    action: string;
+    resourceId?: string;
+    selector?: AccessibilityNodeSelector;
+  }> = [];
 
   private tapOverrides: A11yTapCoordinatesResult[] = [];
   private actionOverrides: A11yActionResult[] = [];
@@ -58,6 +66,19 @@ export class FakeTalkBackNavigationDriver
 
   async requestAction(action: string, resourceId?: string): Promise<A11yActionResult> {
     this.actionHistory.push({ action, resourceId });
+
+    if (this.actionOverrides.length > 0) {
+      return this.actionOverrides.shift()!;
+    }
+
+    return this.actionResult;
+  }
+
+  async requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector
+  ): Promise<A11yActionResult> {
+    this.actionHistory.push({ action, selector });
 
     if (this.actionOverrides.length > 0) {
       return this.actionOverrides.shift()!;

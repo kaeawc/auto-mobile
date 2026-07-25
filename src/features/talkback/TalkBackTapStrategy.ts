@@ -1,6 +1,7 @@
 import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { AccessibilityNodeSelector } from "../observe/android/types";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import { FocusNavigationExecutor, type FocusNavigationDriverFactory } from "./FocusNavigationExecutor";
 import { FocusPathCalculator } from "./FocusPathCalculator";
@@ -15,6 +16,8 @@ export interface TalkBackTapResult {
    */
   method: "focus-navigation" | "accessibility-action" | "coordinate-fallback";
   error?: string;
+  /** A stable selector and advertised action rejected the semantic request. */
+  semanticActionFailure?: boolean;
   screenReaderNavigation?: ScreenReaderNavigationResult;
 }
 
@@ -36,6 +39,41 @@ interface TalkBackTapStrategyDependencies {
   executor?: FocusNavigationExecutor;
   driverFactory?: FocusNavigationDriverFactory;
   timer?: Timer;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+function selectorForElement(element: Element): AccessibilityNodeSelector | undefined {
+  const selector: AccessibilityNodeSelector = {
+    resourceId: nonEmptyString(element["resource-id"]),
+    testTag: nonEmptyString(element["test-tag"]),
+    uniqueId: nonEmptyString(element["unique-id"]),
+  };
+  const collectionRow = numberValue(element["collection-row-index"]);
+  const collectionColumn = numberValue(element["collection-column-index"]);
+  if (collectionRow !== undefined && collectionColumn !== undefined) {
+    selector.collectionRow = collectionRow;
+    selector.collectionColumn = collectionColumn;
+  }
+
+  return Object.values(selector).some(value => value !== undefined) ? selector : undefined;
+}
+
+function requiresNodeSelector(selector: AccessibilityNodeSelector): boolean {
+  return selector.testTag !== undefined ||
+    selector.uniqueId !== undefined ||
+    selector.collectionRow !== undefined ||
+    selector.collectionColumn !== undefined;
+}
+
+function advertisesAction(element: Element, action: string): boolean {
+  return Array.isArray(element.actions) && element.actions.includes(action);
 }
 
 /**
@@ -254,11 +292,10 @@ export class TalkBackTapStrategy {
    *
    * This is the default screen-reader activation model (#3936): deterministic,
    * a single accessibility action, and immune to the cursor-navigation failure
-   * modes of {@link executeTap}. It requires a resource-id to resolve the node;
-   * callers fall back to a coordinate gesture when this returns unsuccessful
-   * (e.g. no resource-id, or the node rejects the action).
+   * modes of {@link executeTap}. It uses the strongest stable selector observed
+   * for the target and callers fall back to a coordinate gesture when it fails.
    *
-   * @param element - The target element (must have a resource-id to activate directly)
+   * @param element - The target element (must have a stable accessibility selector)
    * @param driver - The TalkBack navigation driver
    * @returns Result indicating success/failure; method is "accessibility-action"
    */
@@ -266,16 +303,18 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
-    const resourceId = element["resource-id"] as string | undefined;
-    if (!resourceId) {
+    const selector = selectorForElement(element);
+    if (!selector) {
       return {
         success: false,
         method: "accessibility-action",
-        error: "Element has no resource-id for direct accessibility activation"
+        error: "Element has no stable selector for direct accessibility activation"
       };
     }
 
-    const result = await driver.requestAction("click", resourceId);
+    const result = requiresNodeSelector(selector)
+      ? await driver.requestNodeAction("click", selector)
+      : await driver.requestAction("click", selector.resourceId);
     if (result.success) {
       logger.info(`[TalkBackTapStrategy] Direct activation via ACTION_CLICK succeeded`);
       return { success: true, method: "accessibility-action" };
@@ -350,8 +389,10 @@ export class TalkBackTapStrategy {
   /**
    * Execute a long press on an element using ACTION_LONG_CLICK with coordinate gesture fallback.
    *
-   * Tries ACTION_LONG_CLICK first (requires resource-id), then falls back to
-   * a coordinate-based long press gesture via the accessibility service.
+   * An observed `long_click` action plus a stable selector is authoritative:
+   * a rejected action is returned to the caller instead of risking a gesture
+   * against a different row. Nodes without an advertised semantic action retain
+   * the coordinate fallback.
    *
    * @param x - X coordinate (for coordinate fallback)
    * @param y - Y coordinate (for coordinate fallback)
@@ -367,13 +408,23 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
-    const resourceId = element["resource-id"] as string | undefined;
+    const selector = selectorForElement(element);
 
-    if (resourceId) {
-      const longClickResult = await driver.requestAction("long_click", resourceId);
+    if (selector) {
+      const longClickResult = requiresNodeSelector(selector)
+        ? await driver.requestNodeAction("long_click", selector)
+        : await driver.requestAction("long_click", selector.resourceId);
       if (longClickResult.success) {
         logger.info(`[TalkBackTapStrategy] Long press via ACTION_LONG_CLICK succeeded`);
         return { success: true, method: "accessibility-action" };
+      }
+      if (advertisesAction(element, "long_click")) {
+        return {
+          success: false,
+          method: "accessibility-action",
+          error: longClickResult.error ?? "ACTION_LONG_CLICK failed",
+          semanticActionFailure: true,
+        };
       }
       logger.warn(
         `[TalkBackTapStrategy] ACTION_LONG_CLICK failed (${longClickResult.error}), ` +

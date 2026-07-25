@@ -160,11 +160,28 @@ data class RequestSelectAll(override val requestId: String? = null) : WebSocketR
 // =============================================================================
 
 @Serializable
+data class NodeSelector(
+  val resourceId: String? = null,
+  val testTag: String? = null,
+  val uniqueId: String? = null,
+  val collectionRow: Int? = null,
+  val collectionColumn: Int? = null,
+) {
+  fun hasCriteria(): Boolean =
+    resourceId != null ||
+      testTag != null ||
+      uniqueId != null ||
+      collectionRow != null ||
+      collectionColumn != null
+}
+
+@Serializable
 @SerialName("request_action")
 data class RequestAction(
   override val requestId: String? = null,
   val action: String, // e.g., long_click
   val resourceId: String? = null,
+  val selector: NodeSelector? = null,
   val boundsLeft: Int? = null,
   val boundsTop: Int? = null,
   val boundsRight: Int? = null,

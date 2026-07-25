@@ -428,7 +428,31 @@ class CtrlProxyMessageHandlerTest {
     dispatch(
       """{"type":"request_action","requestId":"a1","action":"long_click","resourceId":"com.app:id/x"}"""
     )
-    assertEquals("requestAction" to listOf<Any?>("a1", "long_click", "com.app:id/x"), lastCall)
+    assertEquals(
+      "requestAction" to listOf<Any?>("a1", "long_click", "com.app:id/x", null),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches request_action selector`() = runTest {
+    dispatch(
+      """{"type":"request_action","requestId":"a2","action":"long_click","selector":{"testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}"""
+    )
+    assertEquals(
+      "requestAction" to
+        listOf<Any?>(
+          "a2",
+          "long_click",
+          null,
+          dev.jasonpearson.automobile.protocol.NodeSelector(
+            testTag = "message_row_42",
+            collectionRow = 4,
+            collectionColumn = 0,
+          ),
+        ),
+      lastCall,
+    )
   }
 
   @Test

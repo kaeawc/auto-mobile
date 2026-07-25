@@ -139,6 +139,26 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       .toBe('{"type":"request_action","requestId":"a-2","action":"clear_focus"}');
   });
 
+  test("request_action carries a stable node selector with the legacy resource ID", () => {
+    expect(
+      serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({
+          requestId: "a-3",
+          action: "long_click",
+          resourceId: "com.example:id/row",
+          selector: {
+            resourceId: "com.example:id/row",
+            testTag: "message_row_42",
+            collectionRow: 4,
+            collectionColumn: 0,
+          },
+        })
+      )
+    ).toBe(
+      '{"type":"request_action","requestId":"a-3","action":"long_click","resourceId":"com.example:id/row","selector":{"resourceId":"com.example:id/row","testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}'
+    );
+  });
+
   test("request_clipboard — text included for copy, omitted when undefined", () => {
     expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-1", action: "copy", text: "hi" })))
       .toBe('{"type":"request_clipboard","requestId":"c-1","action":"copy","text":"hi"}');

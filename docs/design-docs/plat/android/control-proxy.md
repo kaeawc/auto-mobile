@@ -195,6 +195,42 @@ The accessibility service runs as a standard Android accessibility service that:
 4. Optionally streams updates via WebSocket for real-time observation
 5. Provides accessibility identifiers and semantic information for reliable element targeting
 
+## Stable Node Selectors
+
+AutoMobile observes the accessibility tree, not live `View` instances. Use the
+top-level `test-tag` hierarchy field as the app-owned, stable automation ID
+for both Compose and legacy Views.
+
+For a legacy View, place the value in the accessibility extras bundle from a
+delegate. This preserves the accessibility-owned `contentDescription` label:
+
+```kotlin
+ViewCompat.setAccessibilityDelegate(view, object : AccessibilityDelegateCompat() {
+  override fun onInitializeAccessibilityNodeInfo(
+    host: View,
+    info: AccessibilityNodeInfoCompat,
+  ) {
+    super.onInitializeAccessibilityNodeInfo(host, info)
+    info.extras.putString("test-tag", "widget_$someUniqueId")
+  }
+})
+```
+
+`View.setTag(Object)` and `View.setTag(int, Object)` are intentionally
+unsupported: neither value is part of `AccessibilityNodeInfo`, so the service
+cannot observe or select it.
+
+When a semantic action is available, AutoMobile can address a node using its
+observed `test-tag`, resource ID, Android unique ID, or collection row and
+column. Supplying multiple fields makes them an AND match, so a shared row
+layout ID can be safely combined with a per-row test tag or coordinates.
+
+`unique-id` is exposed on Android API 33 and later, but Android owns its
+stability and apps must not treat it as an app-controlled automation contract.
+`container-title` is exposed on API 34 and later. `visible-to-user` is a raw
+audit field only: AutoMobile does not use it to filter nodes because Android
+incorrectly marks valid Compose lazy-list and system UI nodes invisible.
+
 ## Version Management
 
 AutoMobile manages accessibility service versions automatically:

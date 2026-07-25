@@ -211,7 +211,12 @@ class CtrlProxyMessageHandler(
       is RequestImeAction -> actions.requestImeAction(request.requestId, request.action)
       is RequestSelectAll -> actions.requestSelectAll(request.requestId)
       is RequestAction ->
-        actions.requestAction(request.requestId, request.action, request.resourceId)
+        actions.requestAction(
+          request.requestId,
+          request.action,
+          request.resourceId,
+          request.selector,
+        )
       is RequestHitTest ->
         // Ahead-of-need: no TS client sends this and no device action is wired. Log loudly so a
         // future hit-test implementation notices the gap rather than silently dropping it.

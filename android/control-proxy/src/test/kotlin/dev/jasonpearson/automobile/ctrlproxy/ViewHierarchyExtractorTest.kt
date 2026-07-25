@@ -346,11 +346,58 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `testTagFromExtras supports the documented legacy View key`() {
+    assertEquals(
+      "message_row_42",
+      extractor.testTagFromExtras(mapOf("test-tag" to "message_row_42")),
+    )
+    assertEquals(
+      "compose_row_7",
+      extractor.testTagFromExtras(
+        mapOf("androidx.compose.ui.semantics.testTag" to "compose_row_7")
+      ),
+    )
+  }
+
+  @Test
+  fun `api gated audit fields only appear on supported Android versions`() {
+    assertEquals(
+      ViewHierarchyExtractor.ApiGatedNodeFields(uniqueId = null, containerTitle = null),
+      extractor.apiGatedNodeFields(32, uniqueId = "node-1", containerTitle = "Inbox"),
+    )
+    assertEquals(
+      ViewHierarchyExtractor.ApiGatedNodeFields(uniqueId = "node-1", containerTitle = null),
+      extractor.apiGatedNodeFields(33, uniqueId = "node-1", containerTitle = "Inbox"),
+    )
+    assertEquals(
+      ViewHierarchyExtractor.ApiGatedNodeFields(uniqueId = "node-1", containerTitle = "Inbox"),
+      extractor.apiGatedNodeFields(34, uniqueId = "node-1", containerTitle = "Inbox"),
+    )
+  }
+
+  @Test
+  fun `visibility audit field does not filter otherwise retained nodes`() = runTest {
+    val element = UIElementInfo(text = "Compose row", visibleToUser = false)
+    val node = json.encodeToJsonElement(UIElementInfo.serializer(), element)
+    val root = UIElementInfo(node = node)
+
+    val retained = extractor.extractChildrenFromHierarchy(root)
+
+    assertEquals(1, retained.size)
+    assertEquals(false, retained.single().visibleToUser)
+  }
+
+  @Test
   fun `semantic fields are serialized to JSON correctly`() {
     val element =
       UIElementInfo(
         text = "Button",
         testTag = "submit-button",
+        uniqueId = "android-node-7",
+        visibleToUser = false,
+        containerTitle = "Messages",
+        collectionRowIndex = 4,
+        collectionColumnIndex = 0,
         role = "button",
         stateDescription = "Enabled",
         actions = listOf("click"),
@@ -362,6 +409,13 @@ class ViewHierarchyExtractorTest {
 
     // Verify semantic fields appear in JSON with correct serialization names
     assertTrue("JSON should contain test-tag field", jsonString.contains("test-tag"))
+    assertTrue("JSON should contain unique-id field", jsonString.contains("unique-id"))
+    assertTrue("JSON should contain visible-to-user field", jsonString.contains("visible-to-user"))
+    assertTrue("JSON should contain container-title field", jsonString.contains("container-title"))
+    assertTrue(
+      "JSON should contain collection row and column fields",
+      jsonString.contains("collection-row-index") && jsonString.contains("collection-column-index"),
+    )
     assertTrue("JSON should contain role field", jsonString.contains("\"role\""))
     assertTrue(
       "JSON should contain state-description field",

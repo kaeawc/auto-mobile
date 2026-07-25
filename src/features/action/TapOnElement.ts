@@ -1467,6 +1467,11 @@ export class TapOnElement extends BaseVisualChange {
       );
 
       if (!longPressResult.success) {
+        if (longPressResult.semanticActionFailure) {
+          throw new Error(
+            `Semantic long press failed for the selected element: ${longPressResult.error ?? "unknown error"}`
+          );
+        }
         logger.warn(
           `[TapOnElement] Long press accessibility methods failed (${longPressResult.error}), ` +
           `falling back to ADB tap at (${x}, ${y})`

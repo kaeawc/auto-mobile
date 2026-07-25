@@ -355,9 +355,10 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getTapCount()).toBe(0); // No coordinate taps
     });
 
-    test("falls back to coordinate gesture when ACTION_LONG_CLICK fails", async () => {
+    test("does not fall back when an advertised semantic long click fails", async () => {
       const element = {
-        "resource-id": "test:id/button",
+        "test-tag": "message_row_42",
+        "actions": ["long_click"],
         "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
       } as Element;
 
@@ -365,10 +366,13 @@ describe("TalkBackTapStrategy", () => {
 
       const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("coordinate-fallback");
-      expect(driver.getTapCount()).toBe(1);
-      expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 1000 }); // Full duration for longPress
+      expect(result.success).toBe(false);
+      expect(result.method).toBe("accessibility-action");
+      expect(result.error).toContain("service unavailable");
+      expect(driver.actionHistory).toEqual([
+        { action: "long_click", selector: { testTag: "message_row_42" } }
+      ]);
+      expect(driver.getTapCount()).toBe(0);
     });
 
     test("uses coordinate gesture directly when element has no resource-id", async () => {

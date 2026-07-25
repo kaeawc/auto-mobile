@@ -60,6 +60,7 @@ test-androidx-espresso = "3.7.0"
 
 # Navigation versions
 navigation3 = "1.1.4"              # Used in playground app
+circuit = "0.35.1"
 
 # Kotlin ecosystem
 kotlinx-serialization-json = "1.11.0"
@@ -117,6 +118,8 @@ metro-runtime = { module = "dev.zacsweers.metro:runtime", version.ref = "metro" 
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
 navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+circuit-test = { module = "com.slack.circuit:circuit-test", version.ref = "circuit" }
+circuitx-navigation = { module = "com.slack.circuit:circuitx-navigation", version.ref = "circuit" }
 
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }

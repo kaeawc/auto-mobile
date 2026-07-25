@@ -81,15 +81,67 @@ fun AppNavigation() {
 
 ### Circuit Integration
 
-For Circuit navigation, use manual tracking:
+For automatic Circuit destination tracking, add CircuitX Navigation to your application:
 
 ```kotlin
-// When navigating in Circuit
+dependencies {
+    implementation("com.slack.circuit:circuitx-navigation:0.35.1")
+}
+```
+
+Create the AutoMobile listener and add it to your existing CircuitX navigator wrapper:
+
+```kotlin
+@Composable
+fun App() {
+    val autoMobileListener =
+        CircuitAdapter.rememberCircuitNavigationEventListener(
+            extractArguments = { screen -> screen.autoMobileArguments() },
+            extractMetadata = { screen -> screen.autoMobileMetadata() },
+        )
+
+    val navigator =
+        rememberInterceptingNavigator(
+            navigator = baseNavigator,
+            interceptors = interceptors,
+            eventListeners = existingListeners + autoMobileListener,
+        )
+
+    NavigableCircuitContent(navigator, navStack)
+}
+```
+
+The listener records the initial active screen and later committed stack mutations. It records the
+final active screen after an interceptor rewrites a navigation operation, and does not emit a
+destination for a consumed operation that leaves the stack unchanged.
+
+Register a listener with every independent or nested `InterceptingNavigator` whose destinations
+you want to track. The SDK keeps CircuitX optional, so the application provides the CircuitX
+dependency and chooses its version.
+
+Use manual tracking for plain `rememberCircuitNavigator(...)` instances, destinations outside the
+Circuit stack, or presentation-lifecycle events:
+
+```kotlin
+// Start the adapter once during application initialization.
+CircuitAdapter.start()
+
+// Track a Circuit screen while preserving its type-derived destination name.
+CircuitAdapter.trackScreen(
+    screen = profileScreen,
+    arguments = mapOf("userId" to userId),
+)
+
+// Track a destination that is not represented by a Circuit Screen.
 CircuitAdapter.trackNavigation(
-    destination = "ProfileScreen",
-    arguments = mapOf("userId" to userId)
+    destination = "ExternalProfile",
+    arguments = mapOf("userId" to userId),
 )
 ```
+
+CircuitX listeners do not observe plain Circuit navigators, consumed drawer or overlay operations,
+legacy fragments or activities, custom tabs, external intents, or a screen's visual-settled state
+after an animation. Track those destinations at the layer that presents them.
 
 ### Manual Tracking
 

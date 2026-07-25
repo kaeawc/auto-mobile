@@ -452,16 +452,22 @@ export class IosH264Source implements H264CaptureSource {
         await this.startCaptureAttempt(helperPath, target);
         return;
       } catch (error) {
-        if (!shouldRetryNoFirstFrame || attempt !== 0 || !(error instanceof NoFirstFrameError)) {
+        if (!shouldRetryNoFirstFrame || !(error instanceof NoFirstFrameError)) {
           throw toActionableError(error, "Failed to start iOS screen capture");
         }
-        // The failed lease is invalidated below, so one new ScreenCaptureKit session
+        await this.helper?.invalidate?.();
+        await this.stopCurrentHelper();
+        if (!this.isActive()) {
+          return;
+        }
+        if (attempt !== 0) {
+          throw toActionableError(error, "Failed to start iOS screen capture");
+        }
+        // The failed lease is invalidated above, so one new ScreenCaptureKit session
         // can recover a transient no-frame startup without surfacing a warning.
         logger.debug(
           `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(target)}; retrying once`
         );
-        await this.helper?.invalidate?.();
-        await this.stopCurrentHelper();
       }
     }
   }

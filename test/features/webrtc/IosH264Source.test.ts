@@ -448,6 +448,90 @@ describe("IosH264Source", () => {
     await pool.shutdown();
   });
 
+  test("evicts a second timed-out pooled Simulator helper before a later lease", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+    await flush();
+    timer.advanceTime(1);
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(helpers).toHaveLength(2);
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].stopped).toBe(true);
+
+    const replacement = pool.acquire({
+      binaryPath: FAKE_HELPER_PATH,
+      target: { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    });
+    await replacement.start();
+
+    expect(helpers).toHaveLength(3);
+    await replacement.stop();
+    await source.stop();
+    await pool.shutdown();
+  });
+
+  test("does not retry a pooled Simulator timeout after the source stops", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start();
+    await flush();
+    timer.advanceTime(1);
+    await source.stop();
+    timer.advanceTime(1);
+
+    await expect(started).resolves.toBeUndefined();
+    expect(helpers).toHaveLength(1);
+    await pool.shutdown();
+  });
+
   test("does not retry a direct Screen Recording denial from a pooled Simulator helper", async () => {
     const helpers: FakeFrameCaptureHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({

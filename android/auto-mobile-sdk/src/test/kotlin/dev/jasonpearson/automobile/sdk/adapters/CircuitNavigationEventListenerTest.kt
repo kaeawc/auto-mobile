@@ -22,17 +22,19 @@ import com.slack.circuitx.navigation.intercepting.NavigationInterceptor
 import com.slack.circuitx.navigation.intercepting.rememberInterceptingNavigator
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NavigationEvent
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
-import org.junit.Before
-import org.junit.Test
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import kotlin.coroutines.CoroutineContext
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
 
 class CircuitNavigationEventListenerTest {
 
@@ -228,6 +230,32 @@ class CircuitNavigationEventListenerTest {
       assertSame(initialListener, listener)
       assertEquals("updated", events.last().arguments["extractor"])
       assertEquals("updated", events.last().metadata["metadata"])
+    } finally {
+      composition.dispose()
+    }
+  }
+
+  @Test
+  fun `stop remains effective after listener recomposition`() = runTest {
+    var recompositionVersion by mutableStateOf(0)
+    val composition = TestComposition()
+
+    try {
+      composition.setContent {
+        val currentVersion = recompositionVersion
+        CircuitAdapter.rememberCircuitNavigationEventListener(
+          extractMetadata = { mapOf("version" to currentVersion.toString()) }
+        )
+      }
+
+      composition.awaitIdle()
+      assertTrue(CircuitAdapter.isActive())
+
+      CircuitAdapter.stop()
+      recompositionVersion = 1
+      composition.awaitIdle()
+
+      assertFalse(CircuitAdapter.isActive())
     } finally {
       composition.dispose()
     }

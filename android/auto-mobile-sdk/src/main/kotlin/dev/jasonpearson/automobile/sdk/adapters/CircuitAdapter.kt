@@ -58,9 +58,9 @@ object CircuitAdapter : NavigationFrameworkAdapter {
     val currentExtractArguments = rememberUpdatedState(extractArguments)
     val currentExtractMetadata = rememberUpdatedState(extractMetadata)
 
-    if (!isActive) start()
-
     return remember {
+      if (!isActive) start()
+
       object : NavigationEventListener {
         override fun onNavStackChanged(
           navStack: NavStackList<Screen>?,

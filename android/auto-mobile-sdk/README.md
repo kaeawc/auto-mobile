@@ -123,6 +123,9 @@ Use manual tracking for plain `rememberCircuitNavigator(...)` instances, destina
 Circuit stack, or presentation-lifecycle events:
 
 ```kotlin
+// Start the adapter once during application initialization.
+CircuitAdapter.start()
+
 // Track a Circuit screen while preserving its type-derived destination name.
 CircuitAdapter.trackScreen(
     screen = profileScreen,

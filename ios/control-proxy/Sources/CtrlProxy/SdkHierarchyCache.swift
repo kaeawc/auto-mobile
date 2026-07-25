@@ -25,6 +25,31 @@ public final class SdkHierarchyCache: SdkHierarchyCaching, @unchecked Sendable {
     }
 }
 
+/// Re-emits the latest XCUITest hierarchy after an SDK-only change.
+///
+/// The XCUITest structural hash does not include in-process SDK metadata, so
+/// chrome-only changes need this explicit path to refresh normal observations.
+final class SdkHierarchyRefreshPublisher {
+    private let hierarchyProvider: () -> ViewHierarchy?
+    private let enrich: (ViewHierarchy) -> ViewHierarchy
+    private let broadcast: (ViewHierarchy) -> Void
+
+    init(
+        hierarchyProvider: @escaping () -> ViewHierarchy?,
+        enrich: @escaping (ViewHierarchy) -> ViewHierarchy,
+        broadcast: @escaping (ViewHierarchy) -> Void
+    ) {
+        self.hierarchyProvider = hierarchyProvider
+        self.enrich = enrich
+        self.broadcast = broadcast
+    }
+
+    func publish() {
+        guard let hierarchy = hierarchyProvider() else { return }
+        broadcast(enrich(hierarchy))
+    }
+}
+
 // MARK: - Extraction from SDK Event Batches
 
 /// Extracts `view_hierarchy` events from SDK event batches POSTed to `/sdk-events`
@@ -36,17 +61,26 @@ public enum SdkHierarchyExtractor {
 
     /// Try to extract a view hierarchy event from the raw batch data.
     /// Called on every `POST /sdk-events` — skips full decode when no hierarchy event is present.
-    public static func extractIfPresent(from batchData: Data, into cache: any SdkHierarchyCaching) {
+    public static func extractIfPresent(
+        from batchData: Data,
+        into cache: any SdkHierarchyCaching,
+        onHierarchyUpdated: (() -> Void)? = nil
+    ) {
         // Fast path: skip full JSON decode if batch doesn't contain a hierarchy event
         guard let jsonString = String(data: batchData, encoding: .utf8),
               jsonString.contains(viewHierarchyEventType) else { return }
 
         guard let batch = try? JSONDecoder().decode(SdkEventBatchEnvelope.self, from: batchData) else { return }
 
+        var didUpdateHierarchy = false
         for event in batch.events where event.eventType == viewHierarchyEventType {
             if let hierarchy = try? JSONDecoder().decode(SdkViewHierarchyEventPayload.self, from: event.payload) {
                 cache.update(hierarchy.hierarchy)
+                didUpdateHierarchy = true
             }
+        }
+        if didUpdateHierarchy {
+            onHierarchyUpdated?()
         }
     }
 }

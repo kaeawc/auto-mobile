@@ -272,9 +272,17 @@ describe("SafeAreaAuditor", () => {
       source: "ios-sdk-safe-area",
       units: "points",
       safeArea: { top: 30, right: 0, bottom: 30, left: 0 },
+      systemChrome: {
+        visibility: "hidden",
+        statusBar: "hidden",
+        homeIndicatorAutoHideRequested: true,
+        source: "ios-status-bar-manager",
+      },
     };
 
-    expect(new SafeAreaAuditor().inspect(result)[0]?.insetTypes).toEqual(["safeArea"]);
+    const warning = new SafeAreaAuditor().inspect(result)[0];
+    expect(warning?.insetTypes).toEqual(["safeArea"]);
+    expect(warning?.insetPx).toEqual({ top: 30 });
   });
 
   test("reads iOS CtrlProxy attributes from the hierarchy attribute bag", () => {

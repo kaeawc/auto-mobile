@@ -34,6 +34,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.RecompositionSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
@@ -1792,6 +1793,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           tappableElement =
             toSystemInsetsInfo(
               windowInsets.getInsets(android.view.WindowInsets.Type.tappableElement())
+            ),
+          systemChrome =
+            SystemChromeInfo.fromAndroidBars(
+              statusBarVisible =
+                windowInsets.isVisible(android.view.WindowInsets.Type.statusBars()),
+              navigationBarVisible =
+                windowInsets.isVisible(android.view.WindowInsets.Type.navigationBars()),
             ),
         )
       } else {

@@ -210,6 +210,14 @@ const edgeInsetsSchema = z.object({
   left: z.number()
 });
 
+const systemChromeSchema = z.object({
+  visibility: z.enum(["visible", "hidden", "partial", "unknown"]),
+  statusBar: z.enum(["visible", "hidden", "unknown"]),
+  navigationBar: z.enum(["visible", "hidden", "unknown"]).optional(),
+  homeIndicatorAutoHideRequested: z.boolean().nullish(),
+  source: z.enum(["android-window-insets", "ios-status-bar-manager"]),
+});
+
 const observationInsetsSchema = z.object({
   available: z.boolean(),
   source: z.enum(["android-window-metrics", "android-resource-fallback", "ios-sdk-safe-area", "unavailable"]),
@@ -222,6 +230,7 @@ const observationInsetsSchema = z.object({
   mandatorySystemGestures: edgeInsetsSchema.nullish(),
   tappableElement: edgeInsetsSchema.nullish(),
   safeArea: edgeInsetsSchema.optional(),
+  systemChrome: systemChromeSchema.nullish(),
 });
 
 const layoutWarningSchema = z.object({

@@ -18,6 +18,36 @@ data class SystemBarsInsetsInfo(
   val stable: SystemInsetsInfo,
 )
 
+/** Current system-chrome visibility, distinct from edge-to-edge layout policy. */
+@Serializable
+data class SystemChromeInfo(
+  val visibility: String,
+  val statusBar: String,
+  val navigationBar: String? = null,
+  val homeIndicatorAutoHideRequested: Boolean? = null,
+  val source: String,
+) {
+  companion object {
+    fun fromAndroidBars(
+      statusBarVisible: Boolean,
+      navigationBarVisible: Boolean,
+    ): SystemChromeInfo {
+      val visibility =
+        when {
+          statusBarVisible && navigationBarVisible -> "visible"
+          !statusBarVisible && !navigationBarVisible -> "hidden"
+          else -> "partial"
+        }
+      return SystemChromeInfo(
+        visibility = visibility,
+        statusBar = if (statusBarVisible) "visible" else "hidden",
+        navigationBar = if (navigationBarVisible) "visible" else "hidden",
+        source = "android-window-insets",
+      )
+    }
+  }
+}
+
 /** Complete, typed inset snapshot captured with an accessibility hierarchy. */
 @Serializable
 data class ObservationInsetsInfo(
@@ -29,4 +59,5 @@ data class ObservationInsetsInfo(
   val systemGestures: SystemInsetsInfo? = null,
   val mandatorySystemGestures: SystemInsetsInfo? = null,
   val tappableElement: SystemInsetsInfo? = null,
+  val systemChrome: SystemChromeInfo? = null,
 )

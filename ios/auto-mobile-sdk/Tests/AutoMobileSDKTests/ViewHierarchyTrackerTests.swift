@@ -116,5 +116,48 @@ final class ViewHierarchyTrackerTests: XCTestCase {
         XCTAssertNotEqual(ViewHierarchyWalker.computeHash(baseline), ViewHierarchyWalker.computeHash(changedInsets))
         XCTAssertNotEqual(ViewHierarchyWalker.computeHash(baseline), ViewHierarchyWalker.computeHash(changedDimensions))
     }
+
+    func testHashChangesWhenSystemChromeVisibilityChanges() {
+        let baseline = SdkViewHierarchy(
+            screenScale: 3,
+            screenWidth: 390,
+            screenHeight: 844,
+            systemChrome: SdkSystemChrome(
+                visibility: "visible",
+                statusBar: "visible",
+                homeIndicatorAutoHideRequested: false,
+                source: "ios-status-bar-manager"
+            ),
+            root: nil
+        )
+        let hiddenChrome = SdkViewHierarchy(
+            screenScale: 3,
+            screenWidth: 390,
+            screenHeight: 844,
+            systemChrome: SdkSystemChrome(
+                visibility: "hidden",
+                statusBar: "hidden",
+                homeIndicatorAutoHideRequested: true,
+                source: "ios-status-bar-manager"
+            ),
+            root: nil
+        )
+
+        XCTAssertNotEqual(ViewHierarchyWalker.computeHash(baseline), ViewHierarchyWalker.computeHash(hiddenChrome))
+    }
+
+    func testSystemChromeVisibilityUsesObservedStatusBarRatherThanHomeIndicatorPreference() {
+        let visible = ViewHierarchyWalker.systemChrome(
+            statusBarHidden: false,
+            homeIndicatorAutoHideRequested: true
+        )
+        let hidden = ViewHierarchyWalker.systemChrome(
+            statusBarHidden: true,
+            homeIndicatorAutoHideRequested: false
+        )
+
+        XCTAssertEqual(visible.visibility, "visible")
+        XCTAssertEqual(hidden.visibility, "hidden")
+    }
 }
 #endif

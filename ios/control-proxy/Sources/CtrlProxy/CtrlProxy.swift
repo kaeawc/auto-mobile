@@ -17,6 +17,7 @@ public class CtrlProxy {
     private let sdkHierarchyCache: SdkHierarchyCache
     private let sdkHierarchyClient: SdkHierarchyClient
     private let sdkDatabaseClient: SdkDatabaseClient
+    private let sdkHierarchyRefreshPublisher: SdkHierarchyRefreshPublisher
 
     #if canImport(XCTest) && os(iOS)
         private var application: XCUIApplication?
@@ -45,6 +46,20 @@ public class CtrlProxy {
         )
         server = WebSocketServer(port: port, commandHandler: commandHandler, sdkHierarchyCache: sdkHierarchyCache)
         fpsMonitor = DisplayLinkFPSMonitor()
+        sdkHierarchyRefreshPublisher = SdkHierarchyRefreshPublisher(
+            hierarchyProvider: { [weak hierarchyDebouncer] in
+                hierarchyDebouncer?.getLastHierarchy()
+            },
+            enrich: { [weak commandHandler] hierarchy in
+                commandHandler?.enrichWithCachedSdkHierarchy(hierarchy) ?? hierarchy
+            },
+            broadcast: { [weak server] hierarchy in
+                server?.broadcastHierarchyUpdate(hierarchy)
+            }
+        )
+        server.onSdkHierarchyUpdated = { [weak self] in
+            self?.sdkHierarchyRefreshPublisher.publish()
+        }
     }
 
     #if canImport(XCTest) && os(iOS)

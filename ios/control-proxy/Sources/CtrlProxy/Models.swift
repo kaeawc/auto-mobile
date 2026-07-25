@@ -967,13 +967,37 @@ public struct ObservationInsetsInfo: Codable, Sendable {
     public let source: String
     public let units: String
     public let safeArea: EdgeInsetsInfo?
+    public let systemChrome: SystemChromeInfo?
 
     public static let unavailable = ObservationInsetsInfo(
         available: false,
         source: "unavailable",
         units: "unknown",
-        safeArea: nil
+        safeArea: nil,
+        systemChrome: nil
     )
+}
+
+public struct SystemChromeInfo: Codable, Sendable {
+    public let visibility: String
+    public let statusBar: String
+    public let navigationBar: String?
+    public let homeIndicatorAutoHideRequested: Bool?
+    public let source: String
+
+    public init(
+        visibility: String,
+        statusBar: String,
+        navigationBar: String? = nil,
+        homeIndicatorAutoHideRequested: Bool? = nil,
+        source: String
+    ) {
+        self.visibility = visibility
+        self.statusBar = statusBar
+        self.navigationBar = navigationBar
+        self.homeIndicatorAutoHideRequested = homeIndicatorAutoHideRequested
+        self.source = source
+    }
 }
 
 /// Window information

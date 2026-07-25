@@ -3865,6 +3865,66 @@
                 "left"
               ],
               "additionalProperties": false
+            },
+            "systemChrome": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "visibility": {
+                      "type": "string",
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "statusBar": {
+                      "type": "string",
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "unknown"
+                      ]
+                    },
+                    "navigationBar": {
+                      "type": "string",
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "unknown"
+                      ]
+                    },
+                    "homeIndicatorAutoHideRequested": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "android-window-insets",
+                        "ios-status-bar-manager"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "visibility",
+                    "statusBar",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -4439,6 +4499,66 @@
                     "left"
                   ],
                   "additionalProperties": false
+                },
+                "systemChrome": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "visible",
+                            "hidden",
+                            "partial",
+                            "unknown"
+                          ]
+                        },
+                        "statusBar": {
+                          "type": "string",
+                          "enum": [
+                            "visible",
+                            "hidden",
+                            "unknown"
+                          ]
+                        },
+                        "navigationBar": {
+                          "type": "string",
+                          "enum": [
+                            "visible",
+                            "hidden",
+                            "unknown"
+                          ]
+                        },
+                        "homeIndicatorAutoHideRequested": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "android-window-insets",
+                            "ios-status-bar-manager"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "visibility",
+                        "statusBar",
+                        "source"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [

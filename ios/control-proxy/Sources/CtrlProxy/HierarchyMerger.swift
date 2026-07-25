@@ -20,9 +20,34 @@ public enum HierarchyMerger {
         let safeArea = sdk.safeAreaInsets.map {
             EdgeInsetsInfo(top: $0.top, right: $0.right, bottom: $0.bottom, left: $0.left)
         }
-        let enrichedInsets = safeArea.map {
-            ObservationInsetsInfo(available: true, source: "ios-sdk-safe-area", units: "points", safeArea: $0)
-        } ?? xcuitest.insets
+        let systemChrome = sdk.systemChrome.map {
+            SystemChromeInfo(
+                visibility: $0.visibility,
+                statusBar: $0.statusBar,
+                homeIndicatorAutoHideRequested: $0.homeIndicatorAutoHideRequested,
+                source: $0.source
+            )
+        }
+        let enrichedInsets =
+            if let safeArea {
+                ObservationInsetsInfo(
+                    available: true,
+                    source: "ios-sdk-safe-area",
+                    units: "points",
+                    safeArea: safeArea,
+                    systemChrome: systemChrome
+                )
+            } else if let systemChrome {
+                ObservationInsetsInfo(
+                    available: xcuitest.insets.available,
+                    source: xcuitest.insets.source,
+                    units: xcuitest.insets.units,
+                    safeArea: xcuitest.insets.safeArea,
+                    systemChrome: systemChrome
+                )
+            } else {
+                xcuitest.insets
+            }
         guard let sdkRoot = sdk.root else {
             return ViewHierarchy(
                 updatedAt: xcuitest.updatedAt,

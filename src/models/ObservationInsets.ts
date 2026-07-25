@@ -14,6 +14,19 @@ export interface ObservationSystemBarsInsets {
 }
 
 /**
+ * Current system-chrome visibility for the foreground app window. It describes
+ * presentation state only; edge-to-edge layout remains an independent choice.
+ */
+export interface ObservationSystemChrome {
+  visibility: "visible" | "hidden" | "partial" | "unknown";
+  statusBar: "visible" | "hidden" | "unknown";
+  navigationBar?: "visible" | "hidden" | "unknown";
+  /** iOS only: the top view controller's preference, not observed visibility. Android serializes this as null. */
+  homeIndicatorAutoHideRequested?: boolean | null;
+  source: "android-window-insets" | "ios-status-bar-manager";
+}
+
+/**
  * Typed platform inset metadata. `systemInsets` remains the backwards-compatible
  * stable-system-bar alias used by existing gesture callers.
  */
@@ -28,6 +41,7 @@ export interface ObservationInsets {
   tappableElement?: ObservationEdgeInsets;
   /** UIKit's window safe area, including device and container-bar obstructions. */
   safeArea?: ObservationEdgeInsets;
+  systemChrome?: ObservationSystemChrome | null;
 }
 
 export interface LayoutWarning {

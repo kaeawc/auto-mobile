@@ -104,6 +104,11 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           const source = readFileSync(abs, "utf8");
           for (const match of source.matchAll(/(?<![A-Za-z0-9_.-])(android|ios)\/[A-Za-z0-9._/-]+/g)) {
             const path = match[0].replace(/\/+$/, "");
+            // SwiftPM's generated output can exist after a local native build
+            // but is never a source input for a TypeScript unit test.
+            if (path.split("/").includes(".build")) {
+              continue;
+            }
             if (!existsSync(join(ROOT, path))) {
               continue;
             }
@@ -138,7 +143,6 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     ["android/video-server", "bare dir named in a comment / workflow-YAML string; the kotlin tree under it is a declared input"],
     ["ios/control-proxy", "bare dir in a `cd ios/control-proxy && swift test` doc line; Sources/ under it is a declared input"],
     ["ios/screen-capture", "named only inside the workflow-YAML text asserted by webrtcDeviceIntegrationWorkflow.test.ts"],
-    ["ios/screen-capture/.build", "IosH264Source resolver test constructs this hypothetical path but uses an injected exists fake"],
     ["ios/control-proxy/CtrlProxy.xcodeproj", "xcodegen drift check rebuilds a copy in a temp dir; the tracked pbxproj is not a test cache input"],
     ["ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj", "same xcodegen drift fixture, copied into a temp repo"],
   ]);

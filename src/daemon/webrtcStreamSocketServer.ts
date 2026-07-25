@@ -156,7 +156,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     if (request.whipToken) {
       overrides.bearerToken = request.whipToken;
     }
-    if (request.iceServers && request.iceServers.length > 0) {
+    if (request.iceServers !== undefined) {
       overrides.iceServers = request.iceServers;
     }
     if (request.bitrateKbps !== undefined) {

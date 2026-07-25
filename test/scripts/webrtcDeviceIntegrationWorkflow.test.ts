@@ -160,7 +160,7 @@ describe("#4308 device WebRTC integration workflow", () => {
     );
   });
 
-  test("activates the product-booted Simulator window before iOS ScreenCaptureKit capture", () => {
+  test("waits for the product-booted Simulator window to be discoverable before iOS ScreenCaptureKit capture", () => {
     const iosSteps = workflow().jobs?.["ios-device-webrtc"]?.steps ?? [];
     const boot = iosSteps.find(step => step.name === "Boot and activate iOS Simulator");
     const capture = iosSteps.find(step => step.name === "Run iOS device capture integration");
@@ -171,6 +171,10 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(boot?.run).toContain("jq -r '.deviceId'");
     expect(boot?.run).toContain("killall Simulator");
     expect(boot?.run).toContain("open -a Simulator --args -CurrentDeviceUDID");
+    expect(boot?.run).toContain("xcrun simctl list devices --json");
+    expect(boot?.run).toContain('"${helper_path}" --list-simulators');
+    expect(boot?.run).toContain("simulator_window_ready=0");
+    expect(boot?.run).toContain("Selected Simulator window did not become discoverable by ScreenCaptureKit");
     expect(iosSteps.indexOf(boot!)).toBeLessThan(iosSteps.indexOf(capture!));
   });
 });

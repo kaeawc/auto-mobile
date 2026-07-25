@@ -365,6 +365,7 @@ describe("IosH264Source", () => {
   });
 
   test("retries a silent pooled Simulator helper once without replacing the source", async () => {
+    const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({
       createHelper: () => {
@@ -378,10 +379,12 @@ describe("IosH264Source", () => {
       helperPath: FAKE_HELPER_PATH,
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
+      firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
+      timer,
     });
 
     const started = source.start().then(
@@ -389,9 +392,7 @@ describe("IosH264Source", () => {
       error => error as Error
     );
     await flush();
-    helpers[0].emitStderr(
-      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
-    );
+    timer.advanceTime(1);
     await flush();
 
     expect(helpers).toHaveLength(2);

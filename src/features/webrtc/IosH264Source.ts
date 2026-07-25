@@ -106,6 +106,7 @@ export function defaultIosBitrateBps(size: EncoderSize, fps: number): number {
 export interface IosFrameCaptureHelper {
   start(): void | Promise<void>;
   stop(): Promise<unknown>;
+  invalidate?(): Promise<void>;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
   on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
   on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
@@ -457,6 +458,7 @@ export class IosH264Source implements H264CaptureSource {
         logger.warn(
           `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(target)}; retrying once`
         );
+        await this.helper?.invalidate?.();
         await this.stopCurrentHelper();
       }
     }

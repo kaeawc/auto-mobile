@@ -21,6 +21,7 @@ export const IOS_SIMULATOR_HELPER_IDLE_TTL_MS = 45_000;
 export interface IosSimulatorCaptureHelperLease {
   start(): void | Promise<void>;
   stop(): Promise<unknown>;
+  invalidate(): Promise<void>;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
   on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
   on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
@@ -166,6 +167,23 @@ export class IOSSimulatorCaptureHelperPool {
     }, this.idleTtlMs);
   }
 
+  async invalidate(lease: PooledSimulatorCaptureHelperLease): Promise<void> {
+    const entryKey = lease.entryKey;
+    lease.entryKey = null;
+    if (!entryKey) {
+      return;
+    }
+    await this.enqueue(async () => {
+      const entry = this.entries.get(entryKey);
+      if (!entry || !entry.leases.has(lease)) {
+        return;
+      }
+      await this.stopEntry(entry);
+    }).catch(error => {
+      logger.warn(`[IOSSimulatorCaptureHelperPool] failed helper stop failed: ${error}`);
+    });
+  }
+
   private wireHelper(entry: HelperEntry): void {
     entry.helper.on("frame", frame => {
       entry.latestFrame = frame;
@@ -294,6 +312,16 @@ class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimul
     await this.attachment?.catch(() => undefined);
     await this.pool.detach(this);
     return null;
+  }
+
+  async invalidate(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
+    this.started = false;
+    this.removeAllListeners();
+    await this.attachment?.catch(() => undefined);
+    await this.pool.invalidate(this);
   }
 
   get isStarted(): boolean {

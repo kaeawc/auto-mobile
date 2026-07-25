@@ -54,6 +54,9 @@ interface HelperEntry {
   leases: Set<PooledSimulatorCaptureHelperLease>;
   latestFrame: DecodedFrame | null;
   idleTimer: NodeJS.Timeout | null;
+  failed: boolean;
+  failedStopFailed: boolean;
+  failedStopError: unknown;
 }
 
 /**
@@ -122,11 +125,17 @@ export class IOSSimulatorCaptureHelperPool {
           leases: new Set(),
           latestFrame: null,
           idleTimer: null,
+          failed: false,
+          failedStopFailed: false,
+          failedStopError: undefined,
         };
         this.entries.set(targetKey, entry);
         this.wireHelper(entry);
       }
 
+      if (entry.failedStopFailed) {
+        throw entry.failedStopError;
+      }
       this.clearEntryIdleTimer(entry);
       entry.leases.add(lease);
       lease.entryKey = targetKey;
@@ -178,6 +187,10 @@ export class IOSSimulatorCaptureHelperPool {
       if (!entry || !entry.leases.has(lease)) {
         return;
       }
+      if (entry.failed) {
+        await this.stopFailedEntry(entry);
+        return;
+      }
       await this.stopEntry(entry);
     });
   }
@@ -192,19 +205,21 @@ export class IOSSimulatorCaptureHelperPool {
     entry.helper.on("audio", audio => this.broadcast(entry, "audio", audio));
     entry.helper.on("malformed", error => this.broadcast(entry, "malformed", error));
     entry.helper.on("stderr", line => {
-      this.broadcast(entry, "stderr", line);
       // The helper can report a terminal ScreenCaptureKit error without exiting.
       // Keeping that process warm would hand the next reconnect a frozen session.
       if (isFatalHelperStderr(line) && this.entries.get(entry.key) === entry) {
+        entry.failed = true;
         this.enqueueBestEffort(() => this.stopFailedEntry(entry), "failed helper stop failed");
       }
+      this.broadcast(entry, "stderr", line);
     });
     entry.helper.on("readiness", readiness => this.broadcast(entry, "readiness", readiness));
     entry.helper.on("error", error => {
-      this.broadcast(entry, "error", error);
       if (this.entries.get(entry.key) === entry) {
+        entry.failed = true;
         this.enqueueBestEffort(() => this.stopFailedEntry(entry), "failed helper stop failed");
       }
+      this.broadcast(entry, "error", error);
     });
     entry.helper.on("exit", info => {
       this.broadcast(entry, "exit", info);
@@ -236,7 +251,20 @@ export class IOSSimulatorCaptureHelperPool {
     if (this.entries.get(entry.key) !== entry) {
       return;
     }
-    await this.stopEntry(entry);
+    if (entry.failedStopFailed) {
+      throw entry.failedStopError;
+    }
+    this.clearEntryIdleTimer(entry);
+    try {
+      await entry.helper.stop();
+    } catch (error) {
+      entry.failedStopFailed = true;
+      entry.failedStopError = error;
+      throw error;
+    }
+    if (this.entries.get(entry.key) === entry) {
+      this.entries.delete(entry.key);
+    }
   }
 
   private async stopEntry(entry: HelperEntry): Promise<void> {

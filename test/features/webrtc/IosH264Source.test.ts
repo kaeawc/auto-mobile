@@ -452,6 +452,51 @@ describe("IosH264Source", () => {
     await pool.shutdown();
   });
 
+  test("fails closed when warning-triggered silent-helper cleanup fails", async () => {
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    helpers[0].stopError = new Error("helper stop failed");
+    helpers[0].emitStderr(
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+    );
+
+    try {
+      await flush();
+
+      expect(helpers).toHaveLength(1);
+      const error = await started;
+      expect(error).toBeInstanceOf(Error);
+      expect(error?.message).toBe(
+        "Failed to invalidate silent iOS Simulator capture: helper stop failed"
+      );
+    } finally {
+      await source.stop();
+      await pool.shutdown();
+    }
+  });
+
   test("evicts a second timed-out pooled Simulator helper before a later lease", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];

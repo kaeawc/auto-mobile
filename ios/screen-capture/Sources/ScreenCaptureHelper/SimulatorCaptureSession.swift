@@ -12,10 +12,10 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     private let writer: FrameWriter
     private let onFatalError: (Error) -> Void
     private let queue = DispatchQueue(label: "automobile.simulator-capture.frames")
+    let firstFrameSignal = FirstFrameSignal()
     private var stream: SCStream?
     private var configuredPixelWidth: Int = 0
     private var configuredPixelHeight: Int = 0
-    private var hasReceivedFrame = false
     private var fps: Int = CommandLineOptions.defaultSimulatorFPS
     private var audioEnabled = false
     private var windowID: UInt32 = 0
@@ -52,10 +52,6 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         self.stream = nil
     }
 
-    /// Whether at least one frame has been delivered since `start()`.
-    /// Used by the CLI to detect a silent screen-recording permission denial.
-    var hasReceivedAnyFrame: Bool { hasReceivedFrame }
-
     // MARK: - SCStreamOutput
 
     func stream(
@@ -87,17 +83,16 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         }
 
         if writer.write(sampleBuffer: sampleBuffer) {
-            if !hasReceivedFrame {
-                // Emitted from the frame queue, not the (possibly parked) main
-                // thread, so it survives to confirm the source actually started
-                // delivering frames — the "captureStarted but no firstFrame"
-                // distinction issue #4350 needs.
+            if !firstFrameSignal.hasReceivedFrame {
+                // Emitted from the frame queue to confirm the source actually
+                // started delivering frames — the "captureStarted but no
+                // firstFrame" distinction issue #4350 needs.
                 let marker = CaptureStartupMarker.line(
                     .firstFrame(windowID: windowID, width: actualWidth, height: actualHeight)
                 )
                 FileHandle.standardError.write(Data("\(marker)\n".utf8))
             }
-            hasReceivedFrame = true
+            firstFrameSignal.markReceivedFrame()
         }
     }
 
@@ -167,5 +162,24 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
             return nil
         }
         return status
+    }
+}
+
+/// Cross-queue state shared by the ScreenCaptureKit frame callback and the
+/// main-run-loop permission hint. Every access is protected by `lock`.
+final class FirstFrameSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var receivedFrame = false
+
+    var hasReceivedFrame: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return receivedFrame
+    }
+
+    func markReceivedFrame() {
+        lock.lock()
+        receivedFrame = true
+        lock.unlock()
     }
 }

@@ -3,13 +3,9 @@ import Foundation
 /// A stage in the iOS Simulator capture startup sequence, emitted on stderr so a
 /// CI failure can be pinpointed to the stage that stalled.
 ///
-/// The helper drives ScreenCaptureKit through `runBlocking`, which parks the main
-/// thread on a semaphore. The pre-existing 10s no-frames hint is scheduled on
-/// `DispatchQueue.main`, so it is never delivered when `startCapture()` itself
-/// hangs — the exact failure in issue #4350, where a run reached WHIP but never
-/// produced a frame and emitted no diagnostic at all. These markers are written
-/// synchronously to stderr around each blocking call, so the last one observed
-/// identifies the stalled stage:
+/// The helper starts ScreenCaptureKit from a main-actor task while `RunLoop.main`
+/// remains available. These markers are written synchronously to stderr around
+/// each blocking call, so the last one observed identifies the stalled stage:
 ///
 /// - `resolvingWindow` seen, `resolvedWindow` absent → stalled in window discovery
 /// - `startingCapture` seen, `captureStarted` absent → stalled in `startCapture()`

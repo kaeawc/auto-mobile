@@ -124,6 +124,7 @@ import type {
   A11yImeActionResult,
   A11ySelectAllResult,
   A11yActionResult,
+  AccessibilityNodeSelector,
   A11yClipboardResult,
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
@@ -780,6 +781,15 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     action: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yActionResult>;
 
+  requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    timeoutMs?: number,
+    perf?: PerformanceTracker
+  ): Promise<A11yActionResult>;
+
+  supportsNodeActionSelectors(perf?: PerformanceTracker): Promise<boolean>;
+
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string, timeoutMs?: number, perf?: PerformanceTracker
@@ -919,6 +929,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
   private supportedCommands: Set<string> | null = null;
+  private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
+  private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
 
   // Track foreground package for crash monitoring
   private lastForegroundPackage: string | null = null;
@@ -1585,7 +1597,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async requestAction(
-    action: string, resourceId?: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    action: string,
+    resourceId?: string,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    selector?: AccessibilityNodeSelector
   ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
 
@@ -1599,7 +1615,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       const requestId = this.requestManager.generateId("action");
-      logger.debug(`[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
+      logger.debug(
+        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, ` +
+        `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`
+      );
 
       const actionPromise = this.requestManager.register<A11yActionResult>(
         requestId, "action", timeoutMs,
@@ -1611,10 +1630,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId })
+          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector })
         );
         this.ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
+        logger.debug(
+          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, ` +
+          `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`
+        );
       });
 
       const result = await perf.track("waitForAction", () => actionPromise);
@@ -1632,6 +1654,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
       return { success: false, action, totalTimeMs: duration, error: `${error}` };
     }
+  }
+
+  async requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<A11yActionResult> {
+    return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector);
+  }
+
+  async supportsNodeActionSelectors(
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<boolean> {
+    const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+    if (connected && this.supportedCommands === null) {
+      await this.waitForHandshake();
+    }
+    return connected && this.isCommandSupported("node_selector_actions");
   }
 
   async requestClipboard(
@@ -3116,6 +3157,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private isCommandSupported(messageType: string): boolean {
     return this.supportedCommands?.has(messageType) === true;
+  }
+
+  private async waitForHandshake(
+    timeoutMs: number = AndroidCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS
+  ): Promise<void> {
+    const deadline = this.timer.now() + timeoutMs;
+    while (this.supportedCommands === null && this.timer.now() < deadline) {
+      await this.timer.sleep(AndroidCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+    }
   }
 
   private async persistCrash(event: SdkCrashPayload): Promise<void> {

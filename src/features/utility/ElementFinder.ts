@@ -251,6 +251,32 @@ export class DefaultElementFinder implements ElementFinder {
     return matches;
   }
 
+  private collectTestTagMatchesInRoots(
+    rootNodes: ViewHierarchyNode[],
+    testTag: string,
+    sortByArea: boolean = true
+  ): Element[] {
+    const matches: Element[] = [];
+
+    for (const searchNode of rootNodes) {
+      this.parser.traverseNode(searchNode, (node: any) => {
+        const nodeProperties = this.parser.extractNodeProperties(node);
+        if (nodeProperties["test-tag"] === testTag) {
+          const parsedNode = this.parser.parseNodeBounds(node);
+          if (parsedNode) {
+            matches.push(parsedNode);
+          }
+        }
+      });
+    }
+
+    if (sortByArea && matches.length > 0) {
+      this.sortElementsByArea(matches);
+    }
+
+    return matches;
+  }
+
   private findScrollableContainerInRoots(rootNodes: ViewHierarchyNode[]): Element | null {
     for (const rootNode of rootNodes) {
       let foundScrollable: Element | null = null;
@@ -481,6 +507,60 @@ export class DefaultElementFinder implements ElementFinder {
   ): Element | null {
     const matches = this.findElementsByResourceId(viewHierarchy, resourceId, container, partialMatch);
     return matches[0] ?? null;
+  }
+
+  /**
+   * Find elements by the top-level Android accessibility `test-tag` field.
+   */
+  findElementsByTestTag(
+    viewHierarchy: ViewHierarchyResult,
+    testTag: string,
+    container: { elementId?: string; text?: string } | null = null,
+    preserveTraversalOrder: boolean = false
+  ): Element[] {
+    if (!viewHierarchy || !testTag) {
+      return [];
+    }
+
+    const containerNode = container
+      ? this.findContainerNodeInternal(viewHierarchy, container)
+      : null;
+
+    if (container && !containerNode) {
+      return [];
+    }
+
+    if (containerNode) {
+      return this.collectTestTagMatchesInRoots(
+        [containerNode],
+        testTag,
+        !preserveTraversalOrder
+      );
+    }
+
+    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
+    const mainMatches = this.collectTestTagMatchesInRoots(
+      rootNodes,
+      testTag,
+      !preserveTraversalOrder
+    );
+    if (mainMatches.length > 0) {
+      return mainMatches;
+    }
+
+    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    for (const windowRoots of windowRootGroups) {
+      const windowMatches = this.collectTestTagMatchesInRoots(
+        windowRoots,
+        testTag,
+        !preserveTraversalOrder
+      );
+      if (windowMatches.length > 0) {
+        return windowMatches;
+      }
+    }
+
+    return [];
   }
 
   /**

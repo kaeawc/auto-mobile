@@ -50,6 +50,11 @@ export interface AccessibilityNode {
   "resource-id"?: string;
   "view-id"?: string;
   "test-tag"?: string;
+  "unique-id"?: string;
+  "collection-row-index"?: number;
+  "collection-column-index"?: number;
+  "visible-to-user"?: boolean;
+  "container-title"?: string;
   className?: string;
   packageName?: string;
   bounds?: {
@@ -74,6 +79,18 @@ export interface AccessibilityNode {
   extras?: Record<string, string>;
   recomposition?: RecompositionNodeInfo;
   node?: AccessibilityNode | AccessibilityNode[];
+}
+
+/**
+ * Stable fields observed from an accessibility node that can identify it for a semantic action.
+ * All populated fields must match the target node.
+ */
+export interface AccessibilityNodeSelector {
+  resourceId?: string;
+  testTag?: string;
+  uniqueId?: string;
+  collectionRow?: number;
+  collectionColumn?: number;
 }
 
 /**

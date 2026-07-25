@@ -173,7 +173,8 @@ class WebSocketServer(
                         WebSocketResponse.serializer(),
                         ConnectedResponse(
                           id = connectionId,
-                          supportedCommands = listOf("set_hierarchy_interval"),
+                          supportedCommands =
+                            listOf("set_hierarchy_interval", "node_selector_actions"),
                         ),
                       )
                     )

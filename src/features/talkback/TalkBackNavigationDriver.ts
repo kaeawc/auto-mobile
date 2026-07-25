@@ -1,6 +1,10 @@
 import type { BootedDevice } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { A11yActionResult, A11yTapCoordinatesResult } from "../observe/android/types";
+import type {
+  AccessibilityNodeSelector,
+  A11yActionResult,
+  A11yTapCoordinatesResult,
+} from "../observe/android/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { FocusNavigationDriver } from "./FocusNavigationExecutor";
 
@@ -23,6 +27,15 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
    * @param resourceId - Optional resource ID of the target element
    */
   requestAction(action: string, resourceId?: string): Promise<A11yActionResult>;
+
+  /** Request an accessibility action using stable fields observed from a node. */
+  requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector
+  ): Promise<A11yActionResult>;
+
+  /** Whether the connected runner can resolve stable node selectors. */
+  supportsNodeActionSelectors(): Promise<boolean>;
 }
 
 /**
@@ -60,6 +73,17 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
 
   async requestAction(action: string, resourceId?: string): Promise<A11yActionResult> {
     return this.accessibilityService.requestAction(action, resourceId);
+  }
+
+  async requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector
+  ): Promise<A11yActionResult> {
+    return this.accessibilityService.requestNodeAction(action, selector);
+  }
+
+  async supportsNodeActionSelectors(): Promise<boolean> {
+    return this.accessibilityService.supportsNodeActionSelectors();
   }
 }
 

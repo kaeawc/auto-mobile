@@ -28,6 +28,17 @@ export interface ElementSelector {
     }
   ): ElementSelectionResult;
 
+  selectByTestTag(
+    viewHierarchy: ViewHierarchyResult,
+    testTag: string,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      strategy?: ElementSelectionStrategy;
+      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
+      index?: number;
+    }
+  ): ElementSelectionResult;
+
   selectClickableSiblingOfText(
     viewHierarchy: ViewHierarchyResult,
     text: string,

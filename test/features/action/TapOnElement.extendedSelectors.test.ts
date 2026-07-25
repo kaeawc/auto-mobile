@@ -33,6 +33,13 @@ const createDefaultTapOnElement = () => {
   );
 };
 
+const longClickResult = (success: boolean, error?: string) => ({
+  success,
+  action: "long_click",
+  totalTimeMs: 1,
+  error,
+});
+
 const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) => ({
   bounds,
   text: "Item",
@@ -75,6 +82,16 @@ describe("TapOnElement extended selectors", () => {
       const error = (tapOn as any).validateOptions({
         action: "tap",
         elementId: "com.app:id/btn",
+      });
+      expect(error).toBeNull();
+    });
+
+    test("accepts testTag as sole selector", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const error = (tapOn as any).validateOptions({
+        action: "tap",
+        testTag: "message_row_42",
       });
       expect(error).toBeNull();
     });
@@ -147,6 +164,19 @@ describe("TapOnElement extended selectors", () => {
 
       expect(result.selection.element).not.toBeNull();
       expect(selector.lastResourceId).toBe("com.app:id/btn");
+    });
+
+    test("delegates testTag to selectByTestTag", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+
+      const result = (tapOn as any).findElementInHierarchy(
+        { testTag: "message_row_42", action: "tap" },
+        { hierarchy: { node: {} } }
+      );
+
+      expect(result.selection.element).not.toBeNull();
+      expect(selector.lastTestTag).toBe("message_row_42");
     });
 
     test("text + sibling delegates to selectClickableSiblingOfText", () => {
@@ -274,6 +304,69 @@ describe("TapOnElement extended selectors", () => {
       );
 
       expect(selector.lastStrategy).toBe("random");
+    });
+  });
+
+  describe("Android long press node selectors", () => {
+    const testTagElement = {
+      "test-tag": "message_row_42",
+      "actions": ["long_click"],
+      "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
+    } as any;
+
+    test("uses ACTION_LONG_CLICK with a stable test-tag selector", async () => {
+      const tapOn = createDefaultTapOnElement();
+      const nodeActions: unknown[] = [];
+      const service = {
+        supportsNodeActionSelectors: async () => true,
+        requestNodeAction: async (_action: string, selector: unknown) => {
+          nodeActions.push(selector);
+          return longClickResult(true);
+        },
+        requestAction: async () => longClickResult(true),
+      };
+      (tapOn as any).accessibilityService = service;
+
+      await (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement);
+
+      expect(nodeActions).toEqual([{ testTag: "message_row_42" }]);
+      expect((tapOn as any).adb.getAllCommands()).toEqual([]);
+    });
+
+    test("falls back to coordinates when a legacy runner lacks node selector support", async () => {
+      const tapOn = createDefaultTapOnElement();
+      const service = {
+        supportsNodeActionSelectors: async () => false,
+        requestNodeAction: async () => longClickResult(true),
+        requestAction: async () => longClickResult(true),
+      };
+      (tapOn as any).accessibilityService = service;
+
+      await (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement);
+
+      expect((tapOn as any).adb.getAllCommands()).toEqual([
+        "shell input touchscreen swipe 50 25 50 25 1000",
+      ]);
+    });
+
+    test("does not fall back after an advertised semantic long click fails", async () => {
+      const tapOn = createDefaultTapOnElement();
+      const nodeActions: unknown[] = [];
+      const service = {
+        supportsNodeActionSelectors: async () => true,
+        requestNodeAction: async (_action: string, selector: unknown) => {
+          nodeActions.push(selector);
+          return longClickResult(false, "service unavailable");
+        },
+        requestAction: async () => longClickResult(true),
+      };
+      (tapOn as any).accessibilityService = service;
+
+      await expect(
+        (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement)
+      ).rejects.toThrow("Semantic long press failed for the selected element: service unavailable");
+      expect(nodeActions).toEqual([{ testTag: "message_row_42" }]);
+      expect((tapOn as any).adb.getAllCommands()).toEqual([]);
     });
   });
 });

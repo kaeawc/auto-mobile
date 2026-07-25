@@ -59,6 +59,7 @@ export interface OpenLinkArgs {
 export interface TapOnArgs {
   selector: {
     elementId?: string;
+    testTag?: string;
     text?: string;
     textAny?: string[];
   };

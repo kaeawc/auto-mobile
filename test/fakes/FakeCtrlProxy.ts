@@ -687,6 +687,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
+  async supportsNodeActionSelectors(): Promise<boolean> {
+    return true;
+  }
+
   async requestTwoFingerSwipe(
     x1: number,
     y1: number,

@@ -63,6 +63,25 @@ export class DefaultElementSelector implements ElementSelector {
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
 
+  selectByTestTag(
+    viewHierarchy: ViewHierarchyResult,
+    testTag: string,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      strategy?: ElementSelectionStrategy;
+      index?: number;
+    }
+  ): ElementSelectionResult {
+    const strategy = options?.strategy ?? "first";
+    const matches = this.finder.findElementsByTestTag(
+      viewHierarchy,
+      testTag,
+      options?.container ?? null,
+      options?.index !== undefined
+    );
+    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+  }
+
   selectClickableParentByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,

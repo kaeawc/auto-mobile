@@ -38,7 +38,12 @@ import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
-import { TalkBackTapStrategy, type ScreenReaderNavigationResult } from "../talkback/TalkBackTapStrategy";
+import {
+  requiresNodeSelector,
+  stableNodeSelectorForElement,
+  TalkBackTapStrategy,
+  type ScreenReaderNavigationResult
+} from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory
@@ -231,9 +236,9 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   private validateOptions(options: TapOnElementOptions): string | null {
-    const selectorCount = [options.text, options.elementId, options.textAny].filter(Boolean).length;
+    const selectorCount = [options.text, options.elementId, options.testTag, options.textAny].filter(Boolean).length;
     if (selectorCount !== 1) {
-      return "tapOn requires exactly one of text, textAny, or elementId";
+      return "tapOn requires exactly one of text, textAny, elementId, or testTag";
     }
 
     if (options.textAny && options.textAny.length === 0) {
@@ -406,7 +411,21 @@ export class TapOnElement extends BaseVisualChange {
       };
     }
 
-    throw new ActionableError("tapOn requires non-blank text, textAny, or elementId to interact with");
+    return {
+      selection: this.elementSelector.selectByTestTag(viewHierarchy, this.requireTestTag(options), {
+        container: options.container,
+        strategy: options.selectionStrategy,
+        index: options.index
+      }),
+      containerFound
+    };
+  }
+
+  private requireTestTag(options: TapOnElementOptions): string {
+    if (!options.testTag) {
+      throw new ActionableError("tapOn requires non-blank text, textAny, elementId, or testTag to interact with");
+    }
+    return options.testTag;
   }
 
   private prepareViewHierarchyForResponse(
@@ -1345,7 +1364,7 @@ export class TapOnElement extends BaseVisualChange {
         await this.adb.executeCommand(`shell input touchscreen tap ${x} ${y}`, undefined, undefined, undefined, signal);
       }
     } else if (action === "longPress") {
-      await this.executeAndroidLongPress(x, y, durationMs, element?.["resource-id"], signal);
+      await this.executeAndroidLongPress(x, y, durationMs, element, signal);
     } else if (action === "doubleTap") {
       const first = await this.accessibilityService.requestTapCoordinates(x, y, 10);
       if (!first.success) {
@@ -1467,6 +1486,11 @@ export class TapOnElement extends BaseVisualChange {
       );
 
       if (!longPressResult.success) {
+        if (longPressResult.semanticActionFailure) {
+          throw new Error(
+            `Semantic long press failed for the selected element: ${longPressResult.error ?? "unknown error"}`
+          );
+        }
         logger.warn(
           `[TapOnElement] Long press accessibility methods failed (${longPressResult.error}), ` +
           `falling back to ADB tap at (${x}, ${y})`
@@ -1648,20 +1672,13 @@ export class TapOnElement extends BaseVisualChange {
     x: number,
     y: number,
     durationMs: number,
-    resourceId?: string,
+    element: Element,
     signal?: AbortSignal
   ): Promise<void> {
     throwIfAborted(signal);
-    if (resourceId) {
-      try {
-        const result = await this.accessibilityService.requestAction("long_click", resourceId);
-        if (result.success) {
-          return;
-        }
-        logger.warn(`[TapOnElement] Accessibility long click failed: ${result.error}`);
-      } catch (error) {
-        logger.warn(`[TapOnElement] Accessibility long click error: ${error}`);
-      }
+    const selector = stableNodeSelectorForElement(element);
+    if (selector && await this.trySemanticAndroidLongPress(element, selector)) {
+      return;
     }
 
     try {
@@ -1670,6 +1687,40 @@ export class TapOnElement extends BaseVisualChange {
       logger.warn(`[TapOnElement] touch input swipe failed, falling back to input swipe: ${error}`);
       await this.adb.executeCommand(`shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`, undefined, undefined, undefined, signal);
     }
+  }
+
+  private async trySemanticAndroidLongPress(
+    element: Element,
+    selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>
+  ): Promise<boolean> {
+    const needsNodeSelector = requiresNodeSelector(selector);
+    if (needsNodeSelector && !(await this.accessibilityService.supportsNodeActionSelectors())) {
+      logger.info(
+        "[TapOnElement] Runner does not support stable node selectors; using coordinate long press"
+      );
+      return false;
+    }
+
+    try {
+      const result = needsNodeSelector
+        ? await this.accessibilityService.requestNodeAction("long_click", selector)
+        : await this.accessibilityService.requestAction("long_click", selector.resourceId);
+      if (result.success) {
+        return true;
+      }
+      if (hasAccessibilityAction(element.actions, "long_click")) {
+        throw new ActionableError(
+          `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`
+        );
+      }
+      logger.warn(`[TapOnElement] Accessibility long click failed: ${result.error}`);
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      logger.warn(`[TapOnElement] Accessibility long click error: ${error}`);
+    }
+    return false;
   }
 
 

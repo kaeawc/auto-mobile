@@ -150,9 +150,10 @@ export const keyboardSchema = addDeviceTargetingToSchema(z.object({
 
 const tapOnSelectorSchema = z.union([
   z.object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") }).strict(),
+  z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
   z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
   z.object({ textAny: z.array(z.string().min(1)).min(1).describe("Ordered text variants; first visible match wins") }).strict()
-]).describe("Element to tap: elementId, text, or ordered text variants");
+]).describe("Element to tap: elementId, Android testTag, text, or ordered text variants");
 
 export const tapOnSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.object({
   selector: tapOnSelectorSchema,
@@ -498,6 +499,7 @@ export function registerInteractionTools() {
       text: args.selector.text,
       textAny: args.selector.textAny,
       elementId: args.selector.elementId,
+      testTag: args.selector.testTag,
       sibling: args.sibling,
       selectionStrategy: args.selectionStrategy,
       index: args.index,
@@ -1062,7 +1064,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware("openLink", "Open URL in browser", openLinkSchema, openLinkHandler);
 
-  ToolRegistry.registerDeviceAware("tapOn", "Tap an element by text/content-desc or resource-id; use sibling for adjacent controls.", tapOnSchema, tapOnHandler, { supportsProgress: true, outputSchema: tapOnResultSchema });
+  ToolRegistry.registerDeviceAware("tapOn", "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.", tapOnSchema, tapOnHandler, { supportsProgress: true, outputSchema: tapOnResultSchema });
 
   ToolRegistry.registerDeviceAware("tapAny", "Tap any clickable element; scope with container or scrollableContainer.", tapAnySchema, tapAnyHandler, { supportsProgress: true });
 

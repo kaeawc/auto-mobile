@@ -7830,7 +7830,7 @@
   },
   {
     "name": "tapOn",
-    "description": "Tap an element by text/content-desc or resource-id; use sibling for adjacent controls.",
+    "description": "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -7843,6 +7843,11 @@
               "type": "string",
               "minLength": 1,
               "description": "Resource ID, e.g. com.app:id/btn_login"
+            },
+            "testTag": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Android accessibility test tag"
             },
             "text": {
               "type": "string",
@@ -7867,6 +7872,11 @@
             },
             {
               "required": [
+                "testTag"
+              ]
+            },
+            {
+              "required": [
                 "text"
               ]
             },
@@ -7876,7 +7886,7 @@
               ]
             }
           ],
-          "description": "Element to tap: elementId, text, or ordered text variants"
+          "description": "Element to tap: elementId, Android testTag, text, or ordered text variants"
         },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",

@@ -34,6 +34,13 @@ export interface ElementFinder {
     partialMatch?: boolean
   ): Element | null;
 
+  findElementsByTestTag(
+    viewHierarchy: ViewHierarchyResult,
+    testTag: string,
+    container?: { elementId?: string; text?: string } | null,
+    preserveTraversalOrder?: boolean
+  ): Element[];
+
   findContainerNode(
     viewHierarchy: ViewHierarchyResult,
     container: { elementId?: string; text?: string }

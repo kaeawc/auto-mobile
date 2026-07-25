@@ -58,6 +58,7 @@ import dev.jasonpearson.automobile.protocol.NavigationEventData
 import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
+import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -104,6 +105,52 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
+
+internal data class NodeSelectorFields(
+  val resourceId: String?,
+  val testTag: String?,
+  val uniqueId: String?,
+  val collectionRow: Int?,
+  val collectionColumn: Int?,
+)
+
+internal fun nodeSelectorMatches(selector: NodeSelector, fields: NodeSelectorFields): Boolean {
+  if (!selector.hasCriteria()) return false
+  if (
+    selector.resourceId != null &&
+      (fields.resourceId == null ||
+        (fields.resourceId != selector.resourceId &&
+          !fields.resourceId.endsWith(":id/${selector.resourceId}")))
+  ) {
+    return false
+  }
+  if (selector.testTag != null && fields.testTag != selector.testTag) return false
+  if (selector.uniqueId != null && fields.uniqueId != selector.uniqueId) return false
+  if (selector.collectionRow != null && fields.collectionRow != selector.collectionRow) return false
+  if (selector.collectionColumn != null && fields.collectionColumn != selector.collectionColumn) {
+    return false
+  }
+  return true
+}
+
+internal fun nodeActionFailure(action: String, availableActionIds: Collection<Int>?): String? {
+  val actionId = nodeActionId(action) ?: return "Unsupported accessibility action: $action"
+  if (availableActionIds != null && actionId !in availableActionIds) {
+    return "Accessibility action is unavailable: $action"
+  }
+  return null
+}
+
+internal fun nodeActionId(action: String): Int? =
+  when (action) {
+    "click" -> AccessibilityNodeInfo.ACTION_CLICK
+    "long_click" -> AccessibilityNodeInfo.ACTION_LONG_CLICK
+    "focus" -> AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+    "clear_focus" -> AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS
+    "scroll_forward" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+    "scroll_backward" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+    else -> null
+  }
 
 /**
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
@@ -1177,8 +1224,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
 
-  override fun requestAction(requestId: String?, action: String, resourceId: String?) =
-    performNodeAction(requestId, action, resourceId)
+  override fun requestAction(
+    requestId: String?,
+    action: String,
+    resourceId: String?,
+    selector: NodeSelector?,
+  ) = performNodeAction(requestId, action, resourceId, selector)
 
   override fun requestClipboard(requestId: String?, action: String, text: String?) =
     performClipboard(requestId, action, text)
@@ -3268,19 +3319,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Perform accessibility node action (click, long_click, or focus) on an element identified by
-   * resource-id. Designed for TalkBack mode where coordinate-based taps may be intercepted.
+   * Perform an accessibility action on a node selected from observed stable fields. Resource ID is
+   * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
+   * IDs, and collection coordinates.
    */
-  private fun performNodeAction(requestId: String?, action: String, resourceId: String?) {
+  private fun performNodeAction(
+    requestId: String?,
+    action: String,
+    resourceId: String?,
+    selector: NodeSelector?,
+  ) {
     val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performAction: action='$action', resourceId='$resourceId'")
+    val effectiveSelector = selector?.takeIf { it.hasCriteria() }
+    val targetDescription = effectiveSelector?.toString() ?: "resource-id: $resourceId"
+    Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
     perfProvider.serial("performAction")
 
     try {
-      if (resourceId == null || resourceId.isEmpty()) {
+      if (effectiveSelector == null && resourceId.isNullOrEmpty()) {
         perfProvider.end()
         val errorTime = System.currentTimeMillis()
-        val error = "resource-id is required for accessibility actions"
+        val error = "A resource-id or stable node selector is required for accessibility actions"
         Log.w(TAG, error)
         launchRequestScope(requestId) {
           broadcastActionResult(requestId, action, false, error, errorTime - startTime)
@@ -3290,13 +3349,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       perfProvider.startOperation("findNode")
       val root = rootInActiveWindow
-      val targetNode = findNodeByResourceId(root, resourceId)
+      val targetNode =
+        if (effectiveSelector != null) {
+          findNodeBySelector(root, effectiveSelector)
+        } else if (resourceId != null) {
+          findNodeByResourceId(root, resourceId)
+        } else {
+          null
+        }
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
         perfProvider.end()
         val errorTime = System.currentTimeMillis()
-        val error = "Element not found with resource-id: $resourceId"
+        val error = "Element not found with $targetDescription"
         Log.w(TAG, error)
         launchRequestScope(requestId) {
           broadcastActionResult(requestId, action, false, error, errorTime - startTime)
@@ -3305,47 +3371,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       perfProvider.startOperation("executeAction")
-      val success =
-        when (action) {
-          "click" -> {
-            // ACTION_CLICK for single tap in TalkBack mode
-            targetNode.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-          }
-          "long_click" -> {
-            // ACTION_LONG_CLICK for long press in TalkBack mode
-            targetNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_LONG_CLICK
-            )
-          }
-          "focus" -> {
-            // ACTION_ACCESSIBILITY_FOCUS to set TalkBack cursor position
-            targetNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
-            )
-          }
-          "clear_focus" -> {
-            // ACTION_CLEAR_ACCESSIBILITY_FOCUS to clear TalkBack cursor
-            targetNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS
-            )
-          }
-          "scroll_forward" -> {
-            // ACTION_SCROLL_FORWARD for scrolling down/right in TalkBack mode
-            targetNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            )
-          }
-          "scroll_backward" -> {
-            // ACTION_SCROLL_BACKWARD for scrolling up/left in TalkBack mode
-            targetNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-            )
-          }
-          else -> {
-            Log.w(TAG, "Unknown action: $action")
-            false
-          }
-        }
+      val actionId = nodeActionId(action)
+      val actionError = nodeActionFailure(action, targetNode.actionList?.map { it.id })
+      val success = actionId != null && actionError == null && targetNode.performAction(actionId)
       perfProvider.endOperation("executeAction")
 
       targetNode.recycle()
@@ -3374,7 +3402,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           requestId,
           action,
           success,
-          if (success) null else "performAction returned false",
+          if (success) null else actionError ?: "performAction returned false",
           totalTime,
         )
       }
@@ -4420,6 +4448,70 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     return null
+  }
+
+  private fun findNodeBySelector(
+    root: android.view.accessibility.AccessibilityNodeInfo?,
+    selector: NodeSelector,
+  ): android.view.accessibility.AccessibilityNodeInfo? {
+    if (root == null) return null
+
+    if (matchesSelector(root, selector)) {
+      return root
+    }
+
+    for (i in 0 until root.childCount) {
+      val child = root.getChild(i) ?: continue
+      val found = findNodeBySelector(child, selector)
+      if (found != null) {
+        if (found != child) {
+          child.recycle()
+        }
+        return found
+      }
+      child.recycle()
+    }
+
+    return null
+  }
+
+  private fun matchesSelector(
+    node: android.view.accessibility.AccessibilityNodeInfo,
+    selector: NodeSelector,
+  ): Boolean =
+    nodeSelectorMatches(
+      selector,
+      NodeSelectorFields(
+        resourceId = node.viewIdResourceName,
+        testTag = extractTestTag(node),
+        uniqueId = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null,
+        collectionRow = node.collectionItemInfo?.rowIndex,
+        collectionColumn = node.collectionItemInfo?.columnIndex,
+      ),
+    )
+
+  private fun extractTestTag(node: android.view.accessibility.AccessibilityNodeInfo): String? {
+    val extras = node.extras ?: return null
+    val candidates =
+      listOf(
+        "androidx.compose.ui.semantics.testTag",
+        "androidx.compose.ui.semantics.TestTag",
+        "androidx.compose.ui.testTag",
+        "testTag",
+        "test-tag",
+      )
+    for (key in candidates) {
+      val value = extras.get(key)?.toString()
+      if (!value.isNullOrBlank()) {
+        return value
+      }
+    }
+    return extras
+      .keySet()
+      .firstOrNull { it.contains("testtag", ignoreCase = true) }
+      ?.let { key ->
+        extras.get(key)?.toString()
+      }
   }
 
   /** Find the currently focused editable node. */

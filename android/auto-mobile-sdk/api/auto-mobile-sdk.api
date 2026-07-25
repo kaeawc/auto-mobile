@@ -273,16 +273,6 @@ public final class dev.jasonpearson.automobile.sdk.SdkConstants {
   public static final int $stable;
 }
 Compiled from "CircuitAdapter.kt"
-public final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter$rememberCircuitNavigationEventListener$3$1 implements com.slack.circuitx.navigation.intercepting.NavigationEventListener {
-  public void onNavStackChanged(com.slack.circuit.runtime.navigation.NavStackList<com.slack.circuit.runtime.screen.Screen>, com.slack.circuitx.navigation.intercepting.NavigationContext);
-  public void onBackStackChanged(java.util.List<? extends com.slack.circuit.runtime.screen.Screen>, com.slack.circuitx.navigation.intercepting.NavigationContext);
-  public void goTo(com.slack.circuit.runtime.screen.Screen, com.slack.circuitx.navigation.intercepting.NavigationContext);
-  public void pop(com.slack.circuit.runtime.screen.PopResult, com.slack.circuitx.navigation.intercepting.NavigationContext);
-  public void forward(com.slack.circuitx.navigation.intercepting.NavigationContext);
-  public void backward(com.slack.circuitx.navigation.intercepting.NavigationContext);
-  public void resetRoot(com.slack.circuit.runtime.screen.Screen, com.slack.circuit.runtime.Navigator$StateOptions, com.slack.circuitx.navigation.intercepting.NavigationContext);
-}
-Compiled from "CircuitAdapter.kt"
 public final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter implements dev.jasonpearson.automobile.sdk.adapters.NavigationFrameworkAdapter {
   public static final dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter INSTANCE;
   public static final int $stable;

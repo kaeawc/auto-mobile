@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.adapters
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import com.slack.circuit.runtime.navigation.NavStackList
@@ -61,19 +62,24 @@ object CircuitAdapter : NavigationFrameworkAdapter {
     return remember {
       if (!isActive) start()
 
-      object : NavigationEventListener {
-        override fun onNavStackChanged(
-          navStack: NavStackList<Screen>?,
-          navigationContext: NavigationContext,
-        ) {
-          val screen = navStack?.active ?: return
-          trackScreen(
-            screen = screen,
-            arguments = currentExtractArguments.value(screen),
-            metadata = currentExtractMetadata.value(screen),
-          )
-        }
-      }
+      CircuitNavigationEventListener(currentExtractArguments, currentExtractMetadata)
+    }
+  }
+
+  private class CircuitNavigationEventListener(
+    private val extractArguments: State<(Screen) -> Map<String, Any?>>,
+    private val extractMetadata: State<(Screen) -> Map<String, String>>,
+  ) : NavigationEventListener {
+    override fun onNavStackChanged(
+      navStack: NavStackList<Screen>?,
+      navigationContext: NavigationContext,
+    ) {
+      val screen = navStack?.active ?: return
+      CircuitAdapter.trackScreen(
+        screen = screen,
+        arguments = extractArguments.value(screen),
+        metadata = extractMetadata.value(screen),
+      )
     }
   }
 

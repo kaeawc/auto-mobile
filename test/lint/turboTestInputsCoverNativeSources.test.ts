@@ -138,6 +138,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     ["android/video-server", "bare dir named in a comment / workflow-YAML string; the kotlin tree under it is a declared input"],
     ["ios/control-proxy", "bare dir in a `cd ios/control-proxy && swift test` doc line; Sources/ under it is a declared input"],
     ["ios/screen-capture", "named only inside the workflow-YAML text asserted by webrtcDeviceIntegrationWorkflow.test.ts"],
+    ["ios/screen-capture/.build", "IosH264Source resolver test constructs this hypothetical path but uses an injected exists fake"],
     ["ios/control-proxy/CtrlProxy.xcodeproj", "xcodegen drift check rebuilds a copy in a temp dir; the tracked pbxproj is not a test cache input"],
     ["ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj", "same xcodegen drift fixture, copied into a temp repo"],
   ]);

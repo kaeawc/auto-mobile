@@ -378,11 +378,15 @@ export class IosH264Source implements H264CaptureSource {
     logger.info("[IosH264Source] keyframe requested; restarting encoder to emit a fresh IDR");
     // Spawn the replacement first so the outgoing encoder's exit/error handlers
     // — all guarded by `this.encoder === encoder` — no-op instead of tearing the
-    // source down as a fatal crash. Then end its stdin and terminate it.
+    // source down as a fatal crash. Two retained input frames make the first
+    // IDR's Annex-B NAL terminate at the following access-unit boundary even
+    // while the capture helper is otherwise quiet. Then end its stdin and
+    // terminate it.
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
     this.startEncoder(size, true);
     if (this.lastHelperFrame) {
+      this.writeFrameToEncoder(this.lastHelperFrame);
       this.writeFrameToEncoder(this.lastHelperFrame);
     }
     oldEncoder.stdin.end();

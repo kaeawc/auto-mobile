@@ -756,7 +756,20 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
 
     expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+    expect(ctx.commands).not.toContain("forward --remove tcp:61234");
     expect(ctx.commands).not.toContain("shell kill -2 5678");
+  });
+
+  test("does not remove a replacement forward after this session's lease disappears", async () => {
+    const ctx = makeSource({
+      forwardListOutput: `${DEVICE.deviceId} tcp:${FORWARD_PORT} localabstract:someone_elses_socket\n`,
+    });
+    await startReady(ctx);
+
+    await ctx.source.stop();
+
+    expect(ctx.commands).toContain("forward --list");
+    expect(ctx.commands).not.toContain(`forward --remove tcp:${FORWARD_PORT}`);
   });
 
   test("reconciles an expired owned lease with a matching forward", async () => {

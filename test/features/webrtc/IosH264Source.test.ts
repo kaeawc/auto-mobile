@@ -1260,7 +1260,11 @@ describe("IosH264Source", () => {
     inputs[1].emit("drain");
 
     expect(encoders).toHaveLength(2);
-    expect(inputs[1].writes).toEqual([Buffer.alloc(4, 0x11), Buffer.alloc(4, 0x33)]);
+    expect(inputs[1].writes).toEqual([
+      Buffer.alloc(4, 0x11),
+      Buffer.alloc(4, 0x11),
+      Buffer.alloc(4, 0x33),
+    ]);
     expect(source.getFrameMetrics().encoder.droppedFrames).toBe(1);
   });
 
@@ -1340,7 +1344,7 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
-  test("requestKeyFrame replays a defensive copy of the latest frame into the replacement encoder", async () => {
+  test("requestKeyFrame preloads a replacement encoder with two defensive copies of the latest frame", async () => {
     const { source, helper, encoders, encoderSpawns, chunks, errors } = createRestartHarness();
 
     const firstFrame = frame(2, 2, 0x11);
@@ -1351,9 +1355,9 @@ describe("IosH264Source", () => {
     await flush();
 
     // ffmpeg cannot be signalled for an IDR mid-stream over a pipe; a request
-    // restarts the encoder. Replay the most recent frame so static capture can
-    // produce the replacement encoder's first SPS/PPS + IDR without waiting for
-    // the screen to change.
+    // restarts the encoder. Replay two copies of the most recent frame so static
+    // capture produces the replacement encoder's first SPS/PPS + IDR and the
+    // following access-unit boundary without waiting for the screen to change.
     expect(source.requestKeyFrame()).toBe(true);
 
     // A second encoder is spawned with identical argv, and the old one is ended
@@ -1361,13 +1365,13 @@ describe("IosH264Source", () => {
     expect(encoderSpawns).toHaveLength(2);
     expect(encoderSpawns[1].args).toEqual(encoderSpawns[0].args);
     expect(encoders[0].killed).toBe(true);
-    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x11));
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x11));
 
     // Later helper frames continue flowing into the replacement encoder, whose
     // output is forwarded to the same onData sink.
     helper.emitFrame(frame(2, 2, 0x22));
     expect(encoders[1].getStdinData()).toEqual(
-      Buffer.concat([Buffer.alloc(16, 0x11), Buffer.alloc(16, 0x22)])
+      Buffer.concat([Buffer.alloc(32, 0x11), Buffer.alloc(16, 0x22)])
     );
     encoders[1].stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
     await flush();

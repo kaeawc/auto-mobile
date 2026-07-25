@@ -151,22 +151,29 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function hasValidLeaseHeartbeat(lease: Record<string, unknown>): boolean {
+  const elapsedRealtimeMs = lease.heartbeatElapsedRealtimeMs;
+  return elapsedRealtimeMs === undefined ||
+    (isFiniteNumber(elapsedRealtimeMs) && elapsedRealtimeMs >= 0);
+}
+
 function isVideoServerLease(value: unknown): value is RawVideoServerLease {
   if (typeof value !== "object" || value === null) {
     return false;
   }
   const lease = value as Record<string, unknown>;
-  if (typeof lease.sessionToken !== "string" || !isSafeSessionToken(lease.sessionToken)) {return false;}
-  if (typeof lease.socketName !== "string" || typeof lease.deviceSerial !== "string") {return false;}
-  if (!isPositiveInteger(lease.ownerPid) || !isPositiveInteger(lease.pid)) {return false;}
-  if (!isPositiveInteger(lease.forwardPort)) {return false;}
-  if (!isFiniteNumber(lease.startedAtMs) || !isFiniteNumber(lease.heartbeatAtMs)) {
-    return false;
-  }
-  return (
-    lease.heartbeatElapsedRealtimeMs === undefined ||
-    (isFiniteNumber(lease.heartbeatElapsedRealtimeMs) && lease.heartbeatElapsedRealtimeMs >= 0)
-  );
+  return [
+    typeof lease.sessionToken === "string",
+    typeof lease.sessionToken === "string" && isSafeSessionToken(lease.sessionToken),
+    typeof lease.socketName === "string",
+    typeof lease.deviceSerial === "string",
+    isPositiveInteger(lease.ownerPid),
+    isPositiveInteger(lease.pid),
+    isPositiveInteger(lease.forwardPort),
+    isFiniteNumber(lease.startedAtMs),
+    isFiniteNumber(lease.heartbeatAtMs),
+    hasValidLeaseHeartbeat(lease),
+  ].every(Boolean);
 }
 
 function parseLeases(output: string): VideoServerLease[] {
@@ -360,8 +367,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     if (!this.running) {
       // This forward completed after stop() snapshotted its resources. It is
-      // still ours because this call just created it, so remove it directly.
-      await this.removeForward(port);
+      // still ours only while it retains this session's destination.
+      await this.removeForwardIfMatching(adb, port, session.socketName);
       return null;
     }
     this.forwardedPort = port;
@@ -977,7 +984,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (session) {
       await this.cleanupOwnedSession(session, port, deviceProcessId);
     } else if (port !== null) {
-      await this.removeForward(port);
+      logger.warn(
+        `[PersistentEncoderH264Source] refusing forward cleanup port=${port}: session identity is unavailable`
+      );
     }
   }
 
@@ -1033,19 +1042,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   ): Promise<void> {
     const adb = this.adbFactory.create(this.options.device);
     const lease = await this.readLease(adb, session.token);
-    if (
-      lease &&
-      lease.token === session.token &&
-      lease.socketName === session.socketName &&
-      lease.ownerPid === session.ownerPid &&
-      lease.deviceSerial === session.deviceSerial &&
-      // A cancellation can arrive after the server persisted its lease but
-      // before VIDEO_SESSION_READY handed its PID back to the host. The
-      // lease identity plus terminateProcessIfMatching's argv check still
-      // make that owned cleanup safe.
-      (expectedProcessId === null || lease.pid === expectedProcessId)
-    ) {
+    if (lease && this.isOwnedSessionLease(lease, session, expectedProcessId)) {
       await this.removeForwardIfMatching(adb, lease.forwardPort, lease.socketName);
+      await this.removeOwnedForward(adb, port, session.socketName, lease.forwardPort);
       await this.terminateProcessIfMatching(adb, lease);
       await this.removeLeaseIfMatching(adb, lease);
       return;
@@ -1054,14 +1053,35 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       logger.warn(
         `[PersistentEncoderH264Source] refusing owned-session process cleanup token=${session.token}: lease identity or PID mismatch`
       );
-      await this.removeForwardIfMatching(adb, lease.forwardPort, session.socketName);
-      if (port !== null && port !== lease.forwardPort) {
-        await this.removeForward(port);
-      }
+      await this.removeOwnedForward(adb, port, session.socketName);
       return;
     }
-    if (port !== null) {
-      await this.removeForward(port);
+    await this.removeOwnedForward(adb, port, session.socketName);
+  }
+
+  private isOwnedSessionLease(
+    lease: VideoServerLease,
+    session: VideoServerSession,
+    expectedProcessId: number | null
+  ): boolean {
+    // A cancellation can arrive after the server persisted its lease but before
+    // VIDEO_SESSION_READY handed its PID back to the host. The lease identity
+    // plus terminateProcessIfMatching's argv check still make owned cleanup safe.
+    return lease.token === session.token &&
+      lease.socketName === session.socketName &&
+      lease.ownerPid === session.ownerPid &&
+      lease.deviceSerial === session.deviceSerial &&
+      (expectedProcessId === null || lease.pid === expectedProcessId);
+  }
+
+  private async removeOwnedForward(
+    adb: ReturnType<AdbClientFactory["create"]>,
+    port: number | null,
+    socketName: string,
+    exceptPort?: number
+  ): Promise<void> {
+    if (port !== null && port !== exceptPort) {
+      await this.removeForwardIfMatching(adb, port, socketName);
     }
   }
 
@@ -1147,15 +1167,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       await adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${lease.token}.json`);
     } catch (error) {
       logger.debug(`[PersistentEncoderH264Source] stale-session lease cleanup failed: ${error}`);
-    }
-  }
-
-  private async removeForward(port: number): Promise<void> {
-    try {
-      const adb = this.adbFactory.create(this.options.device);
-      await adb.executeCommand(`forward --remove tcp:${port}`);
-    } catch (error) {
-      logger.debug(`[PersistentEncoderH264Source] forward --remove failed: ${error}`);
     }
   }
 

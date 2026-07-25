@@ -95,7 +95,7 @@ class VideoSessionLease(
 
   fun start() {
     if (running) return
-    if (!leaseDirectory.exists() && !leaseDirectory.mkdirs()) {
+    if (!leaseDirectory.mkdirs() && !leaseDirectory.isDirectory) {
       throw IllegalStateException("Unable to create video session lease directory")
     }
 

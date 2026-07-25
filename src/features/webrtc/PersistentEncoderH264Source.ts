@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { connect as netConnect } from "node:net";
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
+import { defaultIdGenerator } from "../../utils/IdGenerator";
+import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   defaultAdbClientFactory,
@@ -26,8 +27,7 @@ const VIDEO_SERVER_MAIN_CLASS = "dev.jasonpearson.automobile.video.VideoServer";
 export const VIDEO_SERVER_LEASE_DIRECTORY = "/data/local/tmp/automobile-video-sessions";
 /** A device heartbeat older than this is eligible for owned stale cleanup. */
 const STALE_LEASE_MS = 30_000;
-/** Server stdout line that carries its validated app_process PID and token. */
-const SESSION_READY_MARKER = "VIDEO_SESSION_READY";
+const SESSION_READY_PATTERN = /^VIDEO_SESSION_READY token=([^ ]+) pid=(\d+) socket=([^ ]+)$/;
 /** Server stdout line printed after capture has fully started. */
 const STREAMING_STARTED_MARKER = "Streaming started";
 
@@ -248,7 +248,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (this.localSocketReconnectWindowMs <= 0 || this.localSocketReconnectRetryMs <= 0) {
       throw new ActionableError("Local socket reconnect timings must be positive milliseconds.");
     }
-    this.sessionTokenFactory = options.sessionTokenFactory ?? randomUUID;
+    this.sessionTokenFactory = options.sessionTokenFactory ?? (() => defaultIdGenerator.next());
   }
 
   get isRunning(): boolean {
@@ -527,8 +527,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
           return;
         }
         stdoutBuffer += chunk.toString();
-        for (const line of stdoutBuffer.split(/\r?\n/)) {
-          const match = new RegExp(`^${SESSION_READY_MARKER} token=([^ ]+) pid=(\\d+) socket=([^ ]+)$`).exec(line);
+        const lines = stdoutBuffer.split(/\r?\n/);
+        stdoutBuffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const match = SESSION_READY_PATTERN.exec(line);
           if (!match) {
             continue;
           }
@@ -928,7 +930,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private async reconcileExpiredLeases(adb: ReturnType<AdbClientFactory["create"]>): Promise<void> {
     let leases: VideoServerLease[];
     try {
-      const result = await adb.executeCommand(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`);
+      const leaseListCommand =
+        `for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json; do ` +
+        '[ -f "$f" ] || continue; cat "$f"; printf "\\n"; done';
+      const result = await adb.executeCommand(`shell sh -c ${shellQuote(leaseListCommand)}`);
       leases = parseLeases(result.stdout);
     } catch (error) {
       logger.debug(`[PersistentEncoderH264Source] unable to read video session leases: ${error}`);

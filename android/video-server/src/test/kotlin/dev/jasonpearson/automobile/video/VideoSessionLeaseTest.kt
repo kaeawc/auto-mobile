@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.video
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -38,6 +39,7 @@ class VideoSessionLeaseTest {
     lease.start()
 
     val leaseFile = File(leaseDirectory, "session-0001.json")
+    assertTrue(leaseFile.exists())
     assertEquals(42_000L, writtenRecord?.heartbeatElapsedRealtimeMs)
     assertEquals(1_000L, writtenRecord?.heartbeatAtMs)
 

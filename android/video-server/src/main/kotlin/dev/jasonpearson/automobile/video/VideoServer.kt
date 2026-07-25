@@ -34,7 +34,7 @@ object VideoServer {
   @Volatile private var capture: ScreenCapture? = null
   private var audioCapture: AudioCapture? = null
   private var streamWriter: VideoStreamWriter? = null
-  private var sessionLease: VideoSessionLease? = null
+  @Volatile private var sessionLease: VideoSessionLease? = null
 
   @JvmStatic
   fun main(args: Array<String>) {

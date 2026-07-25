@@ -455,7 +455,11 @@ export class IosH264Source implements H264CaptureSource {
         if (!shouldRetryNoFirstFrame || !(error instanceof NoFirstFrameError)) {
           throw toActionableError(error, "Failed to start iOS screen capture");
         }
-        await this.helper?.invalidate?.();
+        try {
+          await this.helper?.invalidate?.();
+        } catch (error) {
+          throw toActionableError(error, "Failed to invalidate silent iOS Simulator capture");
+        }
         await this.stopCurrentHelper();
         if (!this.isActive()) {
           return;

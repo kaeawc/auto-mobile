@@ -179,8 +179,6 @@ export class IOSSimulatorCaptureHelperPool {
         return;
       }
       await this.stopEntry(entry);
-    }).catch(error => {
-      logger.warn(`[IOSSimulatorCaptureHelperPool] failed helper stop failed: ${error}`);
     });
   }
 

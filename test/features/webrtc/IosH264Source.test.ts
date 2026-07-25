@@ -46,6 +46,7 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   started = false;
   stopped = false;
   isRunning = false;
+  stopError: Error | null = null;
 
   start(): void {
     this.started = true;
@@ -55,6 +56,9 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   async stop(): Promise<null> {
     this.stopped = true;
     this.isRunning = false;
+    if (this.stopError) {
+      throw this.stopError;
+    }
     return null;
   }
 
@@ -528,6 +532,41 @@ describe("IosH264Source", () => {
     timer.advanceTime(1);
 
     await expect(started).resolves.toBeUndefined();
+    expect(helpers).toHaveLength(1);
+    await pool.shutdown();
+  });
+
+  test("fails instead of retrying when invalidating a silent pooled Simulator helper fails", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start();
+    await flush();
+    helpers[0].stopError = new Error("helper stop failed");
+    timer.advanceTime(1);
+
+    await expect(started).rejects.toThrow(
+      "Failed to invalidate silent iOS Simulator capture: helper stop failed"
+    );
     expect(helpers).toHaveLength(1);
     await pool.shutdown();
   });

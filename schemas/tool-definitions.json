@@ -3092,7 +3092,7 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Wait for a predicate before returning. Either `for` (DSL: appear|disappear|clickable|textEquals|countStable|stable) with elementId/text, or a legacy predicate: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
+          "description": "Wait by DSL (`for`) or legacy selector.",
           "properties": {
             "for": {
               "type": "string",
@@ -3104,7 +3104,7 @@
                 "countStable",
                 "stable"
               ],
-              "description": "DSL condition (selector-based, or stable=whole screen)"
+              "description": "DSL condition; stable is whole-screen"
             },
             "pollMs": {
               "type": "number",
@@ -3126,24 +3126,20 @@
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "description": "Ordered text variants; first visible match wins"
+              }
             },
             "className": {
-              "type": "string",
-              "description": "Element class name"
+              "type": "string"
             },
             "contentDescription": {
-              "type": "string",
-              "description": "Element content description / accessibility label"
+              "type": "string"
             },
             "matchType": {
               "type": "string",
               "enum": [
                 "all",
                 "any"
-              ],
-              "description": "Whether element predicates must all match one node, or any one may match"
+              ]
             },
             "textMatch": {
               "type": "string",
@@ -3157,23 +3153,18 @@
             "activeWindow": {
               "type": "object",
               "additionalProperties": false,
-              "description": "Foreground app/window predicates (provide an app id or activityName)",
               "properties": {
                 "appId": {
-                  "type": "string",
-                  "description": "Foreground app bundle ID / package name"
+                  "type": "string"
                 },
                 "packageName": {
-                  "type": "string",
-                  "description": "appId alias (Android package)"
+                  "type": "string"
                 },
                 "bundleId": {
-                  "type": "string",
-                  "description": "appId alias (iOS bundle)"
+                  "type": "string"
                 },
                 "activityName": {
-                  "type": "string",
-                  "description": "Foreground Android activity name (Android-only)"
+                  "type": "string"
                 }
               },
               "anyOf": [
@@ -3255,12 +3246,33 @@
             "timeout": {
               "type": "number",
               "description": "Wait timeout ms (default 5000)"
+            },
+            "timeoutMs": {
+              "type": "number",
+              "description": "Alias for timeout; matches waitForCondition"
             }
           },
           "anyOf": [
             {
+              "properties": {
+                "for": {
+                  "const": "stable"
+                }
+              },
               "required": [
                 "for"
+              ]
+            },
+            {
+              "required": [
+                "for",
+                "elementId"
+              ]
+            },
+            {
+              "required": [
+                "for",
+                "text"
               ]
             },
             {
@@ -5804,7 +5816,7 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Wait for a predicate before returning. Either `for` (DSL: appear|disappear|clickable|textEquals|countStable|stable) with elementId/text, or a legacy predicate: elementId, text, textAny, className, contentDescription, activeWindow, absent. textAny excludes the element predicates.",
+          "description": "Wait by DSL (`for`) or legacy selector.",
           "properties": {
             "for": {
               "type": "string",
@@ -5816,7 +5828,7 @@
                 "countStable",
                 "stable"
               ],
-              "description": "DSL condition (selector-based, or stable=whole screen)"
+              "description": "DSL condition; stable is whole-screen"
             },
             "pollMs": {
               "type": "number",
@@ -5838,24 +5850,20 @@
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "description": "Ordered text variants; first visible match wins"
+              }
             },
             "className": {
-              "type": "string",
-              "description": "Element class name"
+              "type": "string"
             },
             "contentDescription": {
-              "type": "string",
-              "description": "Element content description / accessibility label"
+              "type": "string"
             },
             "matchType": {
               "type": "string",
               "enum": [
                 "all",
                 "any"
-              ],
-              "description": "Whether element predicates must all match one node, or any one may match"
+              ]
             },
             "textMatch": {
               "type": "string",
@@ -5869,23 +5877,18 @@
             "activeWindow": {
               "type": "object",
               "additionalProperties": false,
-              "description": "Foreground app/window predicates (provide an app id or activityName)",
               "properties": {
                 "appId": {
-                  "type": "string",
-                  "description": "Foreground app bundle ID / package name"
+                  "type": "string"
                 },
                 "packageName": {
-                  "type": "string",
-                  "description": "appId alias (Android package)"
+                  "type": "string"
                 },
                 "bundleId": {
-                  "type": "string",
-                  "description": "appId alias (iOS bundle)"
+                  "type": "string"
                 },
                 "activityName": {
-                  "type": "string",
-                  "description": "Foreground Android activity name (Android-only)"
+                  "type": "string"
                 }
               },
               "anyOf": [
@@ -5967,12 +5970,33 @@
             "timeout": {
               "type": "number",
               "description": "Wait timeout ms (default 5000)"
+            },
+            "timeoutMs": {
+              "type": "number",
+              "description": "Alias for timeout; matches waitForCondition"
             }
           },
           "anyOf": [
             {
+              "properties": {
+                "for": {
+                  "const": "stable"
+                }
+              },
               "required": [
                 "for"
+              ]
+            },
+            {
+              "required": [
+                "for",
+                "elementId"
+              ]
+            },
+            {
+              "required": [
+                "for",
+                "text"
               ]
             },
             {
@@ -10305,6 +10329,37 @@
         "text": {
           "description": "Element text; for `textEquals` the exact expected value",
           "type": "string"
+        },
+        "container": {
+          "description": "Scope match to a container",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "description": "Container resource ID"
+                }
+              },
+              "required": [
+                "elementId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Container text"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          ]
         },
         "timeoutMs": {
           "description": "Budget ms (default 5000)",

@@ -16,6 +16,7 @@ import { loadAndroidHomeObserve, loadIosFractionalObserve } from "../fixtures/ob
 import { ToolRegistry, toolHasOutputSchema } from "../../src/server/toolRegistry";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import type { ObservationInsets } from "../../src/models/ObservationInsets";
 
 /**
  * `observe` outputSchema coverage (issue #3025). The headline `observe` tool had
@@ -115,13 +116,18 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
   });
 
   test("accepts the Android resource fallback without system-chrome visibility", () => {
+    const fallbackInsets: ObservationInsets = {
+      available: true,
+      source: "android-resource-fallback",
+      units: "physical-pixels",
+      systemBars: { visible: { top: 24, right: 0, bottom: 48, left: 0 }, stable: { top: 24, right: 0, bottom: 48, left: 0 } },
+      systemChrome: null,
+    };
+
+    expect(fallbackInsets.systemChrome).toBeNull();
     expect(() => observeResultSchema.parse({
       insets: {
-        available: true,
-        source: "android-resource-fallback",
-        units: "physical-pixels",
-        systemBars: { visible: { top: 24, right: 0, bottom: 48, left: 0 }, stable: { top: 24, right: 0, bottom: 48, left: 0 } },
-        systemChrome: null,
+        ...fallbackInsets,
       },
     })).not.toThrow();
   });

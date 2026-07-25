@@ -41,7 +41,7 @@ export interface ObservationInsets {
   tappableElement?: ObservationEdgeInsets;
   /** UIKit's window safe area, including device and container-bar obstructions. */
   safeArea?: ObservationEdgeInsets;
-  systemChrome?: ObservationSystemChrome;
+  systemChrome?: ObservationSystemChrome | null;
 }
 
 export interface LayoutWarning {

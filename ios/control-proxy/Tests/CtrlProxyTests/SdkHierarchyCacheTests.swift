@@ -83,4 +83,52 @@ final class SdkHierarchyCacheTests: XCTestCase {
 
         XCTAssertNil(cache.latest)
     }
+
+    func testHierarchyEventBroadcastsFreshChromeForUnchangedXcuitestHierarchy() throws {
+        let cache = SdkHierarchyCache()
+        let xcuitest = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            insets: .unavailable
+        )
+        var broadcasts: [ViewHierarchy] = []
+        let publisher = SdkHierarchyRefreshPublisher(
+            hierarchyProvider: { xcuitest },
+            enrich: { HierarchyMerger.merge(xcuitest: $0, sdk: cache.latest) },
+            broadcast: { broadcasts.append($0) }
+        )
+        let hierarchy = SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: "com.test.app",
+            screenScale: 3,
+            screenWidth: 375,
+            screenHeight: 812,
+            systemChrome: SdkSystemChrome(
+                visibility: "hidden",
+                statusBar: "hidden",
+                homeIndicatorAutoHideRequested: true,
+                source: "ios-status-bar-manager"
+            ),
+            root: nil
+        )
+        let payload = try JSONEncoder().encode(["hierarchy": hierarchy])
+        let batch = Data(
+            """
+            {"events":[{"eventType":"view_hierarchy","payload":"\(payload.base64EncodedString())"}]}
+            """.utf8
+        )
+
+        SdkHierarchyExtractor.extractIfPresent(
+            from: batch,
+            into: cache,
+            onHierarchyUpdated: publisher.publish
+        )
+
+        XCTAssertEqual(broadcasts.count, 1)
+        XCTAssertFalse(broadcasts[0].insets.available)
+        XCTAssertEqual(broadcasts[0].insets.systemChrome?.visibility, "hidden")
+    }
 }

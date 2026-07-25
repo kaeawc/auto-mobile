@@ -112,6 +112,7 @@ public class WebSocketServer: WebSocketServing {
     private let perfProvider: PerfProvider
     private let sdkHierarchyCache: SdkHierarchyCache?
     private let queue = DispatchQueue(label: "com.ctrlproxy.server")
+    var onSdkHierarchyUpdated: (() -> Void)?
 
     public var isRunning: Bool {
         listener != nil
@@ -183,7 +184,10 @@ public class WebSocketServer: WebSocketServing {
             connection: nwConnection,
             queue: queue,
             boundPort: port,
-            sdkHierarchyCache: sdkHierarchyCache
+            sdkHierarchyCache: sdkHierarchyCache,
+            onSdkHierarchyUpdated: { [weak self] in
+                self?.onSdkHierarchyUpdated?()
+            }
         ) { [weak self] message in
             self?.handleMessage(message, connectionId: connectionId)
         } onClose: { [weak self] in
@@ -517,6 +521,7 @@ class WebSocketConnection: WebSocketResponding {
     private let onMessage: (Data) -> Void
     private let onClose: () -> Void
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
+    private let onSdkHierarchyUpdated: (() -> Void)?
     /// The port the server is actually bound to; echoed in /health so the daemon
     /// can detect a runner/client port mismatch (issue #2735).
     private let boundPort: UInt16
@@ -528,6 +533,7 @@ class WebSocketConnection: WebSocketResponding {
         queue: DispatchQueue,
         boundPort: UInt16,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
+        onSdkHierarchyUpdated: (() -> Void)? = nil,
         onMessage: @escaping (Data) -> Void,
         onClose: @escaping () -> Void
     ) {
@@ -536,6 +542,7 @@ class WebSocketConnection: WebSocketResponding {
         self.queue = queue
         self.boundPort = boundPort
         self.sdkHierarchyCache = sdkHierarchyCache
+        self.onSdkHierarchyUpdated = onSdkHierarchyUpdated
         self.onMessage = onMessage
         self.onClose = onClose
     }
@@ -633,7 +640,11 @@ class WebSocketConnection: WebSocketResponding {
             if let bodyData = body.data(using: .utf8), !bodyData.isEmpty {
                 SdkEventBuffer.shared.append(bodyData)
                 if let cache = sdkHierarchyCache {
-                    SdkHierarchyExtractor.extractIfPresent(from: bodyData, into: cache)
+                    SdkHierarchyExtractor.extractIfPresent(
+                        from: bodyData,
+                        into: cache,
+                        onHierarchyUpdated: onSdkHierarchyUpdated
+                    )
                 }
                 print("[CtrlProxy] Received SDK event batch (\(bodyData.count) bytes)")
             } else {

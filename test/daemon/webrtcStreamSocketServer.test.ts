@@ -243,6 +243,7 @@ describe("WebRtcStreamSocketServer", () => {
         sources.push(source);
         return source as unknown as AndroidH264Source;
       },
+      resolveVideoJar: async () => null,
       now: () => new Date("2026-07-14T00:00:00.000Z"),
     });
     const server = new TestableServer({

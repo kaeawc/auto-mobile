@@ -61,7 +61,7 @@ export class SafeAreaAuditor {
     warnings: LayoutWarning[]
   ): void {
     const inspectedNode = withHierarchyAttributes(node);
-    if (!isForeignNode(inspectedNode, foregroundPackage)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, warnings);}
+    if (!isForeignNode(inspectedNode, foregroundPackage)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, warnings);}
     for (const child of asNodes(node.node)) {
       this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, warnings);
     }
@@ -73,20 +73,40 @@ export class SafeAreaAuditor {
     content: ContentInsets | null,
     systemGestures: ObservationEdgeInsets | undefined,
     mandatorySystemGestures: ObservationEdgeInsets | undefined,
+    foregroundPackage: string | undefined,
     warnings: LayoutWarning[]
   ): void {
     const bounds = readBounds(node);
     const categories = categoriesFor(node);
     if (!bounds || categories.length === 0 || !isOnScreen(bounds, screen) || isScreenSized(bounds, screen) || node.enabled === "false") {return;}
-    this.inspectContent(node, bounds, categories, screen, content, warnings);
+    this.inspectContent(node, bounds, categories, screen, content, foregroundPackage, warnings);
     this.inspectGestureRegion(node, bounds, categories, screen, systemGestures, mandatorySystemGestures, warnings);
   }
 
-  private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, warnings: LayoutWarning[]): void {
+  private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, foregroundPackage: string | undefined, warnings: LayoutWarning[]): void {
     if (!content) {return;}
     const sides = intersectingSides(bounds, screen, content.edges)
       .filter(side => content.typesForSides([side]).length > 0);
-    if (sides.length > 0) {warnings.push(this.warning(node, bounds, categories, content.typesForSides(sides), sides, "important-content-under-inset", "warning", screen, content.edges));}
+    if (sides.length === 0) {return;}
+    warnings.push(this.warning(
+      node,
+      bounds,
+      categories,
+      content.typesForSides(sides),
+      sides,
+      "important-content-under-inset",
+      this.contentSeverity(node, bounds, screen, content.edges, foregroundPackage),
+      screen,
+      content.edges
+    ));
+  }
+
+  private contentSeverity(node: Node, bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets, foregroundPackage: string | undefined): LayoutWarning["severity"] {
+    const overlap = overlapPercent(bounds, screen, insets);
+    if (isLargeContainer(node, bounds, screen) && !hasOverlappingContentDescendant(node, screen, insets, foregroundPackage)) {
+      return "info";
+    }
+    return overlap >= 50 ? "warning" : "info";
   }
 
   private inspectGestureRegion(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, systemGestures: ObservationEdgeInsets | undefined, mandatorySystemGestures: ObservationEdgeInsets | undefined, warnings: LayoutWarning[]): void {
@@ -199,6 +219,27 @@ function isOnScreen(bounds: ObservationEdgeInsets, screen: { width: number; heig
   return bounds.right > 0 && bounds.bottom > 0 && bounds.left < screen.width && bounds.top < screen.height;
 }
 
+function isLargeContainer(node: Node, bounds: ObservationEdgeInsets, screen: { width: number; height: number }): boolean {
+  return asNodes(node.node).length > 0
+    && bounds.right - bounds.left >= screen.width * 0.9
+    && (bounds.right - bounds.left) * (bounds.bottom - bounds.top) >= screen.width * screen.height * 0.2;
+}
+
+function hasOverlappingContentDescendant(node: Node, screen: { width: number; height: number }, insets: ObservationEdgeInsets, foregroundPackage: string | undefined): boolean {
+  return descendants(node).some(descendant => {
+    if (isForeignNode(descendant, foregroundPackage) || categoriesFor(descendant).length === 0) {return false;}
+    const bounds = readBounds(descendant);
+    return bounds !== null && intersectingSides(bounds, screen, insets).length > 0;
+  });
+}
+
+function descendants(node: Node): Node[] {
+  return asNodes(node.node).flatMap(child => {
+    const inspectedChild = withHierarchyAttributes(child);
+    return [inspectedChild, ...descendants(child)];
+  });
+}
+
 function intersectingSides(bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets): Side[] {
   return [
     bounds.top < insets.top ? "top" : undefined,
@@ -210,18 +251,40 @@ function intersectingSides(bounds: ObservationEdgeInsets, screen: { width: numbe
 
 function overlapPercent(bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets): number {
   const area = Math.max(1, (bounds.right - bounds.left) * (bounds.bottom - bounds.top));
-  const overlap = [
-    intersectArea(bounds, { left: 0, top: 0, right: screen.width, bottom: insets.top }),
-    intersectArea(bounds, { left: 0, top: screen.height - insets.bottom, right: screen.width, bottom: screen.height }),
-    intersectArea(bounds, { left: 0, top: 0, right: insets.left, bottom: screen.height }),
-    intersectArea(bounds, { left: screen.width - insets.right, top: 0, right: screen.width, bottom: screen.height }),
-  ].reduce((total, current) => total + current, 0);
+  const overlap = unionArea([
+    intersectBounds(bounds, { left: 0, top: 0, right: screen.width, bottom: insets.top }),
+    intersectBounds(bounds, { left: 0, top: screen.height - insets.bottom, right: screen.width, bottom: screen.height }),
+    intersectBounds(bounds, { left: 0, top: 0, right: insets.left, bottom: screen.height }),
+    intersectBounds(bounds, { left: screen.width - insets.right, top: 0, right: screen.width, bottom: screen.height }),
+  ].filter((region): region is ObservationEdgeInsets => region !== null));
   return Math.min(100, Math.round((overlap / area) * 100));
 }
 
-function intersectArea(a: ObservationEdgeInsets, b: ObservationEdgeInsets): number {
-  return Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
-    * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+function intersectBounds(a: ObservationEdgeInsets, b: ObservationEdgeInsets): ObservationEdgeInsets | null {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.right, b.right);
+  const bottom = Math.min(a.bottom, b.bottom);
+  return left < right && top < bottom ? { left, top, right, bottom } : null;
+}
+
+function unionArea(regions: ObservationEdgeInsets[]): number {
+  const xEdges = [...new Set(regions.flatMap(region => [region.left, region.right]))].sort((a, b) => a - b);
+  const yEdges = [...new Set(regions.flatMap(region => [region.top, region.bottom]))].sort((a, b) => a - b);
+  let area = 0;
+
+  for (let x = 0; x < xEdges.length - 1; x += 1) {
+    for (let y = 0; y < yEdges.length - 1; y += 1) {
+      const left = xEdges[x]!;
+      const top = yEdges[y]!;
+      const right = xEdges[x + 1]!;
+      const bottom = yEdges[y + 1]!;
+      if (regions.some(region => region.left <= left && region.top <= top && region.right >= right && region.bottom >= bottom)) {
+        area += (right - left) * (bottom - top);
+      }
+    }
+  }
+  return area;
 }
 
 function maxInsets(

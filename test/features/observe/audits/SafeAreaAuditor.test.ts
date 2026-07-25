@@ -78,6 +78,78 @@ describe("SafeAreaAuditor", () => {
     expect(warnings.map(warning => warning.element.viewId)).toEqual(["composer", "framework-button"]);
   });
 
+  test("downgrades large edge-to-edge containers when their content is inset", () => {
+    const result = observation();
+    result.insets!.systemBars!.visible = { top: 80, right: 0, bottom: 80, left: 0 };
+    result.viewHierarchy!.hierarchy.node = [{
+      "view-id": "close-sheet",
+      "content-desc": "Close sheet",
+      "clickable": "true",
+      "bounds": { left: 0, top: 0, right: 100, bottom: 180 },
+      "node": [
+        { "text": "Forward", "bounds": { left: 10, top: 80, right: 90, bottom: 110 } },
+        { "text": "Save", "bounds": { left: 10, top: 110, right: 90, bottom: 120 } },
+      ],
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([{
+      element: { viewId: "close-sheet" },
+      severity: "info",
+      overlapPercent: 78,
+    }]);
+  });
+
+  test("keeps fully occluded leaf content at warning severity", () => {
+    const result = observation();
+    result.viewHierarchy!.hierarchy.node = [{
+      "text": "Last item",
+      "view-id": "last-item",
+      "bounds": { left: 10, top: 180, right: 90, bottom: 200 },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([{
+      element: { viewId: "last-item" },
+      severity: "warning",
+      overlapPercent: 100,
+    }]);
+  });
+
+  test("downgrades leaf content with limited inset overlap", () => {
+    const result = observation();
+    result.viewHierarchy!.hierarchy.node = [{
+      "text": "Partially inset",
+      "view-id": "partial-item",
+      "bounds": { left: 10, top: 170, right: 90, bottom: 187 },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([{
+      element: { viewId: "partial-item" },
+      severity: "info",
+      overlapPercent: 41,
+    }]);
+  });
+
+  test("does not double count a corner shared by safe-area insets", () => {
+    const result = observation();
+    result.insets = {
+      available: true,
+      source: "ios-sdk-safe-area",
+      units: "points",
+      safeArea: { top: 10, right: 0, bottom: 0, left: 10 },
+    };
+    result.viewHierarchy!.hierarchy.node = [{
+      "text": "Corner leaf",
+      "view-id": "corner",
+      "bounds": { left: 0, top: 0, right: 40, bottom: 40 },
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([{
+      element: { viewId: "corner" },
+      severity: "info",
+      overlapPercent: 44,
+    }]);
+  });
+
   test("returns no warnings when measurements are unavailable", () => {
     const result = observation();
     result.insets = { available: false, source: "unavailable", units: "unknown" };

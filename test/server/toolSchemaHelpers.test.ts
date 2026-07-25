@@ -404,14 +404,14 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
 
 describe("inputTextSchema", () => {
   test("accepts supported Android input modes", () => {
-    for (const mode of ["a11y", "eventLast", "eventAll"]) {
+    for (const mode of ["a11y", "eventLast", "eventAll", "eventOnly"]) {
       const result = inputTextSchema.safeParse({ text: "hello", mode, platform: "android" });
       expect(result.success).toBe(true);
     }
   });
 
   test("accepts input modes for iOS callers so runtime can ignore them", () => {
-    for (const mode of ["a11y", "eventLast", "eventAll"]) {
+    for (const mode of ["a11y", "eventLast", "eventAll", "eventOnly"]) {
       const result = inputTextSchema.safeParse({ text: "hello", mode, platform: "ios" });
       expect(result.success).toBe(true);
     }

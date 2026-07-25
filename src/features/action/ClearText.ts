@@ -1,6 +1,7 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, ClearTextResult } from "../../models";
+import { BootedDevice, ClearTextResult, ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { ObserveResult } from "../../models";
@@ -9,6 +10,64 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
+
+export function getFocusedTextLength(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser()
+): number {
+  let textLength = 0;
+  const rootNodes = parser.extractRootNodes(viewHierarchy);
+
+  for (const rootNode of rootNodes) {
+    parser.traverseNode(rootNode, (node: any) => {
+      const nodeProperties = parser.extractNodeProperties(node);
+      if ((nodeProperties.focused === "true" || nodeProperties.focused === true) &&
+        nodeProperties.text && typeof nodeProperties.text === "string") {
+        textLength = Math.max(textLength, nodeProperties.text.length);
+      }
+    });
+  }
+
+  return textLength;
+}
+
+export function hasFocusedTextInput(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser()
+): boolean {
+  const rootNodes = parser.extractRootNodes(viewHierarchy);
+
+  for (const rootNode of rootNodes) {
+    let found = false;
+    parser.traverseNode(rootNode, (node: any) => {
+      if (found) {
+        return;
+      }
+
+      const nodeProperties = parser.extractNodeProperties(node);
+      const nodeClass = nodeProperties.class ?? nodeProperties.className;
+      if ((nodeProperties.focused === "true" || nodeProperties.focused === true) &&
+        typeof nodeClass === "string" &&
+        ANDROID_INPUT_CLASSES.some(inputClass => nodeClass.includes(inputClass))) {
+        found = true;
+      }
+    });
+
+    if (found) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export async function clearTextWithKeyEvents(adb: AdbExecutor, count: number): Promise<void> {
+  await adb.executeCommand("shell input keyevent KEYCODE_MOVE_END");
+
+  for (let index = 0; index < count; index++) {
+    await adb.executeCommand("shell input keyevent KEYCODE_DEL");
+  }
+}
 
 export class ClearText extends BaseVisualChange {
   private parser: ElementParser;
@@ -88,10 +147,7 @@ export class ClearText extends BaseVisualChange {
       return { success: true };
     }
 
-    let textLength = 0;
-
-    // Look for focused elements first by traversing and checking attributes
-    textLength = this.findFocusedElementTextLength(observeResult.viewHierarchy);
+    const textLength = getFocusedTextLength(observeResult.viewHierarchy, this.parser);
 
     // TODO: Move cursor to the end of the text
 
@@ -125,23 +181,6 @@ export class ClearText extends BaseVisualChange {
     }
   }
 
-  private findFocusedElementTextLength(viewHierarchy: any): number {
-    let textLength = 0;
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if ((nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-          nodeProperties.text && typeof nodeProperties.text === "string") {
-          textLength = Math.max(textLength, nodeProperties.text.length);
-        }
-      });
-    }
-
-    return textLength;
-  }
-
   private findAnyTextInputLength(viewHierarchy: any): number {
     let textLength = 0;
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
@@ -161,12 +200,6 @@ export class ClearText extends BaseVisualChange {
   }
 
   private async clearWithDeletes(count: number): Promise<void> {
-    // Move to end of field first to ensure we're deleting from the right position
-    await this.adb.executeCommand("shell input keyevent KEYCODE_MOVE_END");
-
-    // Send KEYCODE_DEL commands with no delay
-    for (let i = 0; i < count; i++) {
-      await this.adb.executeCommand("shell input keyevent KEYCODE_DEL");
-    }
+    await clearTextWithKeyEvents(this.adb, count);
   }
 }

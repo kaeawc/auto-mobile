@@ -2615,12 +2615,13 @@
           "minLength": 1
         },
         "mode": {
-          "description": "Android text mode: a11y default; eventLast helps autocomplete; eventAll sends key events",
+          "description": "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
           "type": "string",
           "enum": [
             "a11y",
             "eventLast",
-            "eventAll"
+            "eventAll",
+            "eventOnly"
           ]
         },
         "imeAction": {

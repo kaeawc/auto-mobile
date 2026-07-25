@@ -133,6 +133,10 @@ function emitIdr(encoder: FakeChildProcess): void {
   ]));
 }
 
+function emitTerminalIdr(encoder: FakeChildProcess): void {
+  encoder.stdout.push(Buffer.from([0, 0, 0, 1, 0x65, 0x80]));
+}
+
 async function startWithFrame(
   source: IosH264Source,
   helper: FakeFrameCaptureHelper,
@@ -1425,7 +1429,7 @@ describe("IosH264Source", () => {
     expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(1);
 
-    emitIdr(encoders[0]);
+    emitTerminalIdr(encoders[0]);
     await flush();
     expect(source.requestKeyFrame()).toBe(true);
     expect(encoderSpawns).toHaveLength(2);

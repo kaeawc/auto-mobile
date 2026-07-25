@@ -34,7 +34,7 @@ import type {
   H264CaptureSourceOptions,
   H264EncoderFrameMetrics,
 } from "./H264CaptureSource";
-import { H264AnnexBParser, isKeyFrameNal } from "./h264";
+import { H264AnnexBParser, isKeyFrameNal, NAL_TYPE_IDR } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 
@@ -830,8 +830,12 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     try {
-      this.encoderHasProducedIdr = this.encoderIdrParser.push(chunk).some(isKeyFrameNal);
+      this.encoderHasProducedIdr =
+        this.encoderIdrParser.push(chunk).some(isKeyFrameNal) ||
+        this.encoderIdrParser.hasBufferedNalType(NAL_TYPE_IDR);
     } catch (error) {
+      // The RTP writer will surface malformed Annex-B separately. Leave this
+      // gate closed so an unverified warming encoder is not recycled into PLI churn.
       logger.debug(`[IosH264Source] could not parse encoder output while awaiting initial IDR: ${error}`);
     }
   }

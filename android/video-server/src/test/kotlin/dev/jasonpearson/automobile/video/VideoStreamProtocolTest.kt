@@ -236,16 +236,23 @@ class VideoStreamProtocolTest {
   }
 
   @Test
-  fun reconnectWindowOnlyExpiresAfterAConnectedClientIsLost() {
-    val window = ClientReconnectWindow(windowMs = 5_000)
+  fun reconnectWindowExpiresAfterInitialAttachOrClientDisconnect() {
+    var elapsedRealtimeMs = 0L
+    val window = ReconnectWindow({ elapsedRealtimeMs }, durationMs = 5_000L)
 
-    assertEquals(false, window.hasExpired(10_000))
-    window.onClientConnected()
-    window.onClientDisconnected(100)
-    assertEquals(false, window.hasExpired(5_099))
-    assertEquals(true, window.hasExpired(5_100))
+    window.start()
+    elapsedRealtimeMs = 4_999L
+    assertEquals(false, window.isExpired())
+    elapsedRealtimeMs = 5_000L
+    assertEquals(true, window.isExpired())
 
-    window.onClientConnected()
-    assertEquals(false, window.hasExpired(10_000))
+    window.onClientAttached()
+    assertEquals(false, window.isExpired())
+    elapsedRealtimeMs = 5_200L
+    window.onClientDetached()
+    elapsedRealtimeMs = 10_199L
+    assertEquals(false, window.isExpired())
+    elapsedRealtimeMs = 10_200L
+    assertEquals(true, window.isExpired())
   }
 }

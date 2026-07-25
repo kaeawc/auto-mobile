@@ -46,6 +46,7 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   started = false;
   stopped = false;
   isRunning = false;
+  stopError: Error | null = null;
 
   start(): void {
     this.started = true;
@@ -55,6 +56,9 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   async stop(): Promise<null> {
     this.stopped = true;
     this.isRunning = false;
+    if (this.stopError) {
+      throw this.stopError;
+    }
     return null;
   }
 
@@ -362,6 +366,326 @@ describe("IosH264Source", () => {
     expect(helper.stopped).toBe(false);
     await pool.shutdown();
     expect(helper.stopped).toBe(true);
+  });
+
+  test("retries a silent pooled Simulator helper once without replacing the source", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+    await flush();
+
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(1, 1, 0x11));
+
+    expect(await started).toBeNull();
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].started).toBe(true);
+    await source.stop();
+    await pool.shutdown();
+  });
+
+  test("reports the existing no-frame error after a second silent pooled Simulator attempt", async () => {
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    helpers[0].emitStderr(
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+    );
+    await flush();
+
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitStderr(
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+    );
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toContain("Screen Recording permission");
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].stopped).toBe(true);
+    await pool.shutdown();
+  });
+
+  test("fails closed when warning-triggered silent-helper cleanup fails", async () => {
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    helpers[0].stopError = new Error("helper stop failed");
+    helpers[0].emitStderr(
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+    );
+
+    try {
+      await flush();
+
+      expect(helpers).toHaveLength(1);
+      const error = await started;
+      expect(error).toBeInstanceOf(Error);
+      expect(error?.message).toBe(
+        "Failed to invalidate silent iOS Simulator capture: helper stop failed"
+      );
+    } finally {
+      await source.stop();
+      await pool.shutdown();
+    }
+  });
+
+  test("evicts a second timed-out pooled Simulator helper before a later lease", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+    await flush();
+    timer.advanceTime(1);
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(helpers).toHaveLength(2);
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].stopped).toBe(true);
+
+    const replacement = pool.acquire({
+      binaryPath: FAKE_HELPER_PATH,
+      target: { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    });
+    await replacement.start();
+
+    expect(helpers).toHaveLength(3);
+    await replacement.stop();
+    await source.stop();
+    await pool.shutdown();
+  });
+
+  test("does not retry a pooled Simulator timeout after the source stops", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start();
+    await flush();
+    timer.advanceTime(1);
+    await source.stop();
+    timer.advanceTime(1);
+
+    await expect(started).resolves.toBeUndefined();
+    expect(helpers).toHaveLength(1);
+    await pool.shutdown();
+  });
+
+  test("fails instead of retrying when invalidating a silent pooled Simulator helper fails", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start();
+    await flush();
+    helpers[0].stopError = new Error("helper stop failed");
+    timer.advanceTime(1);
+
+    await expect(started).rejects.toThrow(
+      "Failed to invalidate silent iOS Simulator capture: helper stop failed"
+    );
+    expect(helpers).toHaveLength(1);
+    await pool.shutdown();
+  });
+
+  test("does not retry a direct Screen Recording denial from a pooled Simulator helper", async () => {
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    helpers[0].emitStderr(
+      "error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE."
+    );
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe(
+      "Failed to start iOS screen capture: screen-capture-helper reported an error: error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE."
+    );
+    expect(helpers).toHaveLength(1);
+    expect(helpers[0].stopped).toBe(true);
+    await pool.shutdown();
+  });
+
+  test("does not retry a silent physical-device helper", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      firstFrameTimeoutMs: 1,
+      timer,
+      onData: () => {},
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe("iOS screen capture did not produce a first frame.");
+    expect(helpers).toHaveLength(1);
+    expect(helpers[0].stopped).toBe(true);
   });
 
   test("requests simulator audio and forwards its PCM16LE chunks unchanged", async () => {

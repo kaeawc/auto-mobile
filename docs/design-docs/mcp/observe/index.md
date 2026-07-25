@@ -13,7 +13,7 @@ All collected data is assembled into an object containing (fields may be omitted
 
 - `updatedAt`: device timestamp (or server timestamp fallback)
 - `screenSize`: current screen dimensions (rotation-aware)
-- `insets`: typed safe-area and system-inset snapshot, including availability, source, units, system bars, cutouts, and Android gesture regions when available
+- `insets`: typed safe-area and system-inset snapshot, including availability, source, units, system bars, cutouts, Android gesture regions, and current system-chrome visibility when available
 - `systemInsets`: compatibility alias for the stable system-bar edges; prefer `insets` for new consumers
 - `rotation`: current device rotation value
 - `activeWindow`: current app/activity information when resolved
@@ -28,6 +28,15 @@ All collected data is assembled into an object containing (fields may be omitted
 - `error`: error messages encountered during observation
 
 Start AutoMobile with `--safe-area-warnings` or its equivalent alias `--edge-to-edge-warnings` to add report-only `layoutWarnings`. These flag text or interactive elements that may overlap safe areas, system bars, display cutouts, or Android gesture regions. Each warning includes `overflowPx` (how far the element extends into the unsafe region) and `insetPx` (the effective inset on that side), both in the observation's coordinate units. When a flagged descendant is fully contained by a flagged ancestor on the same unsafe side, the output keeps the descendant finding. Intentional edge-to-edge backgrounds and scrollable content remain advisory rather than failures.
+
+When available, `insets.systemChrome` provides the system-chrome state that explains a
+safe-area warning's screen context. Android reports the current visibility of the status
+and navigation bars from `WindowInsets`; hidden bars do not become additional unsafe
+regions. iOS reports actual status-bar visibility from the foreground `UIWindowScene` and
+may include the visible controller's home-indicator auto-hide preference. That preference is
+an app request, not proof that the home indicator is currently hidden. Older runners omit
+`systemChrome`, so clients must treat its absence as unknown rather than inferring it from
+zero insets.
 
 The observation gracefully handles various error conditions:
 

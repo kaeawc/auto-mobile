@@ -3865,6 +3865,52 @@
                 "left"
               ],
               "additionalProperties": false
+            },
+            "systemChrome": {
+              "type": "object",
+              "properties": {
+                "visibility": {
+                  "type": "string",
+                  "enum": [
+                    "visible",
+                    "hidden",
+                    "partial",
+                    "unknown"
+                  ]
+                },
+                "statusBar": {
+                  "type": "string",
+                  "enum": [
+                    "visible",
+                    "hidden",
+                    "unknown"
+                  ]
+                },
+                "navigationBar": {
+                  "type": "string",
+                  "enum": [
+                    "visible",
+                    "hidden",
+                    "unknown"
+                  ]
+                },
+                "homeIndicatorAutoHideRequested": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "android-window-insets",
+                    "ios-status-bar-manager"
+                  ]
+                }
+              },
+              "required": [
+                "visibility",
+                "statusBar",
+                "source"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -4437,6 +4483,52 @@
                     "right",
                     "bottom",
                     "left"
+                  ],
+                  "additionalProperties": false
+                },
+                "systemChrome": {
+                  "type": "object",
+                  "properties": {
+                    "visibility": {
+                      "type": "string",
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "partial",
+                        "unknown"
+                      ]
+                    },
+                    "statusBar": {
+                      "type": "string",
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "unknown"
+                      ]
+                    },
+                    "navigationBar": {
+                      "type": "string",
+                      "enum": [
+                        "visible",
+                        "hidden",
+                        "unknown"
+                      ]
+                    },
+                    "homeIndicatorAutoHideRequested": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "android-window-insets",
+                        "ios-status-bar-manager"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "visibility",
+                    "statusBar",
+                    "source"
                   ],
                   "additionalProperties": false
                 }

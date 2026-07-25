@@ -32,6 +32,7 @@ public enum ViewHierarchyWalker {
                 left: Double($0.safeAreaInsets.left)
             )
         }
+        let systemChrome = keyWindow.flatMap(systemChrome(for:))
 
         return SdkViewHierarchy(
             bundleId: bundleId,
@@ -39,6 +40,7 @@ public enum ViewHierarchyWalker {
             screenWidth: screenWidth,
             screenHeight: screenHeight,
             safeAreaInsets: safeAreaInsets,
+            systemChrome: systemChrome,
             root: rootNode
         )
     }
@@ -60,6 +62,15 @@ public enum ViewHierarchyWalker {
             hasher.combine(safeAreaInsets.right)
             hasher.combine(safeAreaInsets.bottom)
             hasher.combine(safeAreaInsets.left)
+        } else {
+            hasher.combine(false)
+        }
+        if let systemChrome = hierarchy.systemChrome {
+            hasher.combine(true)
+            hasher.combine(systemChrome.visibility)
+            hasher.combine(systemChrome.statusBar)
+            hasher.combine(systemChrome.homeIndicatorAutoHideRequested)
+            hasher.combine(systemChrome.source)
         } else {
             hasher.combine(false)
         }
@@ -88,6 +99,54 @@ public enum ViewHierarchyWalker {
                 if a.windowLevel != b.windowLevel { return a.windowLevel < b.windowLevel }
                 return !a.isKeyWindow && b.isKeyWindow
             })
+    }
+
+    private static func systemChrome(for window: UIWindow) -> SdkSystemChrome? {
+        guard #available(iOS 13.0, *),
+              let statusBarManager = window.windowScene?.statusBarManager
+        else {
+            return nil
+        }
+
+        let statusBarHidden = statusBarManager.isStatusBarHidden
+        let homeIndicatorAutoHideRequested = visibleViewController(from: window.rootViewController)?
+            .prefersHomeIndicatorAutoHidden
+        return systemChrome(
+            statusBarHidden: statusBarHidden,
+            homeIndicatorAutoHideRequested: homeIndicatorAutoHideRequested
+        )
+    }
+
+    static func systemChrome(
+        statusBarHidden: Bool,
+        homeIndicatorAutoHideRequested: Bool?
+    ) -> SdkSystemChrome {
+        return SdkSystemChrome(
+            visibility: statusBarHidden ? "hidden" : "visible",
+            statusBar: statusBarHidden ? "hidden" : "visible",
+            homeIndicatorAutoHideRequested: homeIndicatorAutoHideRequested,
+            source: "ios-status-bar-manager"
+        )
+    }
+
+    private static func visibleViewController(from controller: UIViewController?) -> UIViewController? {
+        guard let controller else { return nil }
+        if let presented = controller.presentedViewController, !presented.isBeingDismissed {
+            return visibleViewController(from: presented)
+        }
+        if let navigation = controller as? UINavigationController {
+            return visibleViewController(from: navigation.visibleViewController)
+        }
+        if let tab = controller as? UITabBarController {
+            return visibleViewController(from: tab.selectedViewController)
+        }
+        if let split = controller as? UISplitViewController {
+            return visibleViewController(from: split.viewControllers.last)
+        }
+        if let page = controller as? UIPageViewController {
+            return visibleViewController(from: page.viewControllers?.last)
+        }
+        return controller
     }
 
     private static func walkWindow(_ keyWindow: UIWindow) -> SdkViewNode? {

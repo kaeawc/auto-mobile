@@ -11,6 +11,8 @@ public struct SdkViewHierarchy: Codable, Sendable {
     public let screenHeight: Int
     /** UIWindow safe area in the same point coordinate space as view bounds. */
     public let safeAreaInsets: SdkEdgeInsets?
+    /** Current status-bar presentation for this app window. */
+    public let systemChrome: SdkSystemChrome?
     public let root: SdkViewNode?
 
     public init(
@@ -20,6 +22,7 @@ public struct SdkViewHierarchy: Codable, Sendable {
         screenWidth: Int,
         screenHeight: Int,
         safeAreaInsets: SdkEdgeInsets? = nil,
+        systemChrome: SdkSystemChrome? = nil,
         root: SdkViewNode?
     ) {
         self.timestamp = timestamp
@@ -28,6 +31,7 @@ public struct SdkViewHierarchy: Codable, Sendable {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
         self.safeAreaInsets = safeAreaInsets
+        self.systemChrome = systemChrome
         self.root = root
     }
 }
@@ -43,6 +47,27 @@ public struct SdkEdgeInsets: Codable, Sendable {
         self.right = right
         self.bottom = bottom
         self.left = left
+    }
+}
+
+/** System-chrome presentation captured from the foreground app's UIWindowScene. */
+public struct SdkSystemChrome: Codable, Sendable {
+    public let visibility: String
+    public let statusBar: String
+    /** The top view controller's preference, not observed home-indicator visibility. */
+    public let homeIndicatorAutoHideRequested: Bool?
+    public let source: String
+
+    public init(
+        visibility: String,
+        statusBar: String,
+        homeIndicatorAutoHideRequested: Bool? = nil,
+        source: String
+    ) {
+        self.visibility = visibility
+        self.statusBar = statusBar
+        self.homeIndicatorAutoHideRequested = homeIndicatorAutoHideRequested
+        self.source = source
     }
 }
 

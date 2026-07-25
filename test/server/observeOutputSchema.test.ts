@@ -58,6 +58,12 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         source: "ios-sdk-safe-area",
         units: "points",
         safeArea: { top: 59.5, right: 0, bottom: 34, left: 0 },
+        systemChrome: {
+          visibility: "hidden",
+          statusBar: "hidden",
+          homeIndicatorAutoHideRequested: true,
+          source: "ios-status-bar-manager",
+        },
       },
       layoutWarnings: [{
         type: "important-content-under-inset",
@@ -78,6 +84,12 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       overflowPx: { top: 30 },
       insetPx: { top: 59.5 },
     });
+    expect(parsed.data?.insets?.systemChrome).toEqual({
+      visibility: "hidden",
+      statusBar: "hidden",
+      homeIndicatorAutoHideRequested: true,
+      source: "ios-status-bar-manager",
+    });
   });
 
   test("accepts nullable Android inset categories", () => {
@@ -91,6 +103,12 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         systemGestures: null,
         mandatorySystemGestures: null,
         tappableElement: null,
+        systemChrome: {
+          visibility: "partial",
+          statusBar: "visible",
+          navigationBar: "hidden",
+          source: "android-window-insets",
+        },
       },
     })).not.toThrow();
   });

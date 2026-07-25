@@ -157,6 +157,19 @@ describe("DefaultElementFinder", () => {
     });
   });
 
+  describe("findElementsByTestTag", () => {
+    test("finds an exact top-level test tag", () => {
+      const hierarchy = makeHierarchy({
+        $: { "test-tag": "message_row_42", "bounds": bounds(0, 0, 100, 50) },
+      });
+
+      const results = finder.findElementsByTestTag(hierarchy, "message_row_42");
+
+      expect(results).toHaveLength(1);
+      expect(results[0]["test-tag"]).toBe("message_row_42");
+    });
+  });
+
   describe("hasContainerElement", () => {
     test("returns false for null hierarchy", () => {
       expect(finder.hasContainerElement(null as any, { text: "test" })).toBe(false);

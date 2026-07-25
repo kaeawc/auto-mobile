@@ -19,6 +19,14 @@ describe("tapOn schema", () => {
     expect(result.selector).toEqual({ elementId: "com.app:id/btn_login" });
   });
 
+  test("accepts selector with testTag", () => {
+    const result = tapOnSchema.parse({
+      platform: "android",
+      selector: { testTag: "message_row_42" },
+    });
+    expect(result.selector).toEqual({ testTag: "message_row_42" });
+  });
+
   test("accepts selector with ordered text variants", () => {
     const result = tapOnSchema.parse({
       platform: "ios",

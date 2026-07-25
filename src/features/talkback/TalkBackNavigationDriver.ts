@@ -33,6 +33,9 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
     action: string,
     selector: AccessibilityNodeSelector
   ): Promise<A11yActionResult>;
+
+  /** Whether the connected runner can resolve stable node selectors. */
+  supportsNodeActionSelectors(): Promise<boolean>;
 }
 
 /**
@@ -77,6 +80,10 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
     selector: AccessibilityNodeSelector
   ): Promise<A11yActionResult> {
     return this.accessibilityService.requestNodeAction(action, selector);
+  }
+
+  async supportsNodeActionSelectors(): Promise<boolean> {
+    return this.accessibilityService.supportsNodeActionSelectors();
   }
 }
 

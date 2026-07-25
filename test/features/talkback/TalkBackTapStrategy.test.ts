@@ -375,6 +375,36 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getTapCount()).toBe(0);
     });
 
+    test("uses a coordinate fallback for a test tag when the runner lacks selector support", async () => {
+      const element = {
+        "test-tag": "message_row_42",
+        "actions": ["long_click"],
+        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+      } as Element;
+      driver.setNodeActionSelectorsSupported(false);
+
+      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+
+      expect(result).toEqual({ success: true, method: "coordinate-fallback" });
+      expect(driver.getActionCount()).toBe(0);
+      expect(driver.tapHistory).toEqual([{ x: 50, y: 50, durationMs: 1000 }]);
+    });
+
+    test("does not use collection coordinates without another stable identity", async () => {
+      const element = {
+        "collection-row-index": 0,
+        "collection-column-index": 0,
+        "actions": ["long_click"],
+        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+      } as Element;
+
+      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+
+      expect(result).toEqual({ success: true, method: "coordinate-fallback" });
+      expect(driver.getActionCount()).toBe(0);
+      expect(driver.tapHistory).toEqual([{ x: 50, y: 50, durationMs: 1000 }]);
+    });
+
     test("uses coordinate gesture directly when element has no resource-id", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },

@@ -49,7 +49,7 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }
 
-function selectorForElement(element: Element): AccessibilityNodeSelector | undefined {
+export function stableNodeSelectorForElement(element: Element): AccessibilityNodeSelector | undefined {
   const selector: AccessibilityNodeSelector = {
     resourceId: nonEmptyString(element["resource-id"]),
     testTag: nonEmptyString(element["test-tag"]),
@@ -57,15 +57,18 @@ function selectorForElement(element: Element): AccessibilityNodeSelector | undef
   };
   const collectionRow = numberValue(element["collection-row-index"]);
   const collectionColumn = numberValue(element["collection-column-index"]);
-  if (collectionRow !== undefined && collectionColumn !== undefined) {
+  const hasStableIdentity = selector.resourceId !== undefined ||
+    selector.testTag !== undefined ||
+    selector.uniqueId !== undefined;
+  if (hasStableIdentity && collectionRow !== undefined && collectionColumn !== undefined) {
     selector.collectionRow = collectionRow;
     selector.collectionColumn = collectionColumn;
   }
 
-  return Object.values(selector).some(value => value !== undefined) ? selector : undefined;
+  return hasStableIdentity ? selector : undefined;
 }
 
-function requiresNodeSelector(selector: AccessibilityNodeSelector): boolean {
+export function requiresNodeSelector(selector: AccessibilityNodeSelector): boolean {
   return selector.testTag !== undefined ||
     selector.uniqueId !== undefined ||
     selector.collectionRow !== undefined ||
@@ -303,12 +306,20 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
-    const selector = selectorForElement(element);
+    const selector = stableNodeSelectorForElement(element);
     if (!selector) {
       return {
         success: false,
         method: "accessibility-action",
         error: "Element has no stable selector for direct accessibility activation"
+      };
+    }
+
+    if (requiresNodeSelector(selector) && !(await driver.supportsNodeActionSelectors())) {
+      return {
+        success: false,
+        method: "accessibility-action",
+        error: "Runner does not support stable node selectors"
       };
     }
 
@@ -408,9 +419,15 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver
   ): Promise<TalkBackTapResult> {
-    const selector = selectorForElement(element);
+    const selector = stableNodeSelectorForElement(element);
 
     if (selector) {
+      if (requiresNodeSelector(selector) && !(await driver.supportsNodeActionSelectors())) {
+        logger.info(
+          "[TalkBackTapStrategy] Runner does not support stable node selectors; using coordinate long press"
+        );
+        return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver);
+      }
       const longClickResult = requiresNodeSelector(selector)
         ? await driver.requestNodeAction("long_click", selector)
         : await driver.requestAction("long_click", selector.resourceId);

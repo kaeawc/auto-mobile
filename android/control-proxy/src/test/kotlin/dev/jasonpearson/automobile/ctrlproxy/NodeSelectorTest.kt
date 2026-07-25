@@ -11,8 +11,7 @@ import org.junit.Test
 class NodeSelectorTest {
   @Test
   fun `test tag selects a repeated row with a shared resource ID`() {
-    val selector =
-      NodeSelector(resourceId = "com.example:id/row", testTag = "message_row_42")
+    val selector = NodeSelector(resourceId = "com.example:id/row", testTag = "message_row_42")
     val target =
       NodeSelectorFields(
         resourceId = "com.example:id/row",
@@ -29,8 +28,7 @@ class NodeSelectorTest {
 
   @Test
   fun `collection coordinates disambiguate rows sharing an ID`() {
-    val selector =
-      NodeSelector(resourceId = "row", collectionRow = 4, collectionColumn = 0)
+    val selector = NodeSelector(resourceId = "row", collectionRow = 4, collectionColumn = 0)
     val target =
       NodeSelectorFields(
         resourceId = "com.example:id/row",
@@ -43,6 +41,21 @@ class NodeSelectorTest {
     assertTrue(nodeSelectorMatches(selector, target))
     assertFalse(nodeSelectorMatches(selector, target.copy(collectionRow = 5)))
     assertFalse(nodeSelectorMatches(selector, target.copy(collectionColumn = 1)))
+  }
+
+  @Test
+  fun `collection coordinates without a stable node identity do not select a row`() {
+    val coordinateOnly = NodeSelector(collectionRow = 0, collectionColumn = 0)
+    val firstListRow =
+      NodeSelectorFields(
+        resourceId = null,
+        testTag = null,
+        uniqueId = null,
+        collectionRow = 0,
+        collectionColumn = 0,
+      )
+
+    assertFalse(nodeSelectorMatches(coordinateOnly, firstListRow))
   }
 
   @Test

@@ -83,7 +83,7 @@ class WebSocketResponseTest {
     val response: WebSocketResponse =
       ConnectedResponse(
         id = 1,
-        supportedCommands = listOf("set_hierarchy_interval"),
+        supportedCommands = listOf("set_hierarchy_interval", "node_selector_actions"),
         timestamp = 1234567890L,
       )
 
@@ -91,7 +91,9 @@ class WebSocketResponseTest {
 
     assertTrue(encoded.contains(""""type":"connected""""))
     assertTrue(encoded.contains(""""id":1"""))
-    assertTrue(encoded.contains(""""supportedCommands":["set_hierarchy_interval"]"""))
+    assertTrue(
+      encoded.contains(""""supportedCommands":["set_hierarchy_interval","node_selector_actions"]""")
+    )
   }
 
   @Test

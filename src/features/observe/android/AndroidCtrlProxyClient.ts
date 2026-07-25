@@ -788,6 +788,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker
   ): Promise<A11yActionResult>;
 
+  supportsNodeActionSelectors(perf?: PerformanceTracker): Promise<boolean>;
+
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string, timeoutMs?: number, perf?: PerformanceTracker
@@ -927,6 +929,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
   private supportedCommands: Set<string> | null = null;
+  private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
+  private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
 
   // Track foreground package for crash monitoring
   private lastForegroundPackage: string | null = null;
@@ -1659,6 +1663,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<A11yActionResult> {
     return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector);
+  }
+
+  async supportsNodeActionSelectors(
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<boolean> {
+    const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+    if (connected && this.supportedCommands === null) {
+      await this.waitForHandshake();
+    }
+    return connected && this.isCommandSupported("node_selector_actions");
   }
 
   async requestClipboard(
@@ -3143,6 +3157,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private isCommandSupported(messageType: string): boolean {
     return this.supportedCommands?.has(messageType) === true;
+  }
+
+  private async waitForHandshake(
+    timeoutMs: number = AndroidCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS
+  ): Promise<void> {
+    const deadline = this.timer.now() + timeoutMs;
+    while (this.supportedCommands === null && this.timer.now() < deadline) {
+      await this.timer.sleep(AndroidCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+    }
   }
 
   private async persistCrash(event: SdkCrashPayload): Promise<void> {

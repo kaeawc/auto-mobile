@@ -168,11 +168,9 @@ data class NodeSelector(
   val collectionColumn: Int? = null,
 ) {
   fun hasCriteria(): Boolean =
-    resourceId != null ||
-      testTag != null ||
-      uniqueId != null ||
-      collectionRow != null ||
-      collectionColumn != null
+    (resourceId != null || testTag != null || uniqueId != null) &&
+      ((collectionRow == null && collectionColumn == null) ||
+        (collectionRow != null && collectionColumn != null))
 }
 
 @Serializable

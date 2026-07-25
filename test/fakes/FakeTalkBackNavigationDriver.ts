@@ -15,6 +15,7 @@ export class FakeTalkBackNavigationDriver
   implements TalkBackNavigationDriver {
   tapResult: A11yTapCoordinatesResult = { success: true, totalTimeMs: 1 };
   actionResult: A11yActionResult = { success: true, action: "click", totalTimeMs: 1 };
+  nodeActionSelectorsSupported = true;
 
   tapHistory: Array<{ x: number; y: number; durationMs: number }> = [];
   actionHistory: Array<{
@@ -32,6 +33,10 @@ export class FakeTalkBackNavigationDriver
 
   setActionResult(result: A11yActionResult): void {
     this.actionResult = result;
+  }
+
+  setNodeActionSelectorsSupported(supported: boolean): void {
+    this.nodeActionSelectorsSupported = supported;
   }
 
   queueTapResult(result: A11yTapCoordinatesResult): void {
@@ -85,5 +90,9 @@ export class FakeTalkBackNavigationDriver
     }
 
     return this.actionResult;
+  }
+
+  async supportsNodeActionSelectors(): Promise<boolean> {
+    return this.nodeActionSelectorsSupported;
   }
 }

@@ -17,6 +17,7 @@ export class FakeElementSelector implements ElementSelector {
   lastText?: string;
   textCalls: string[] = [];
   lastResourceId?: string;
+  lastTestTag?: string;
   nextElement: Element | null;
   nextIndexInMatches?: number;
   nextTotalMatches?: number;
@@ -84,6 +85,22 @@ export class FakeElementSelector implements ElementSelector {
     this.lastStrategy = options?.strategy;
     this.lastIndex = options?.index;
     this.lastResourceId = resourceId;
+    return this.buildSelectionResult(options?.strategy);
+  }
+
+  selectByTestTag(
+    viewHierarchy: ViewHierarchyResult,
+    testTag: string,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      strategy?: ElementSelectionStrategy;
+      index?: number;
+    }
+  ): ElementSelectionResult {
+    void viewHierarchy;
+    this.lastStrategy = options?.strategy;
+    this.lastIndex = options?.index;
+    this.lastTestTag = testTag;
     return this.buildSelectionResult(options?.strategy);
   }
 

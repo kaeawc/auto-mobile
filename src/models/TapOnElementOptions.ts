@@ -5,6 +5,7 @@ export interface TapOnElementOptions {
   text?: string;
   textAny?: string[];
   elementId?: string;
+  testTag?: string;
   // Selection strategy when multiple elements match (default: first)
   selectionStrategy?: ElementSelectionStrategy;
 

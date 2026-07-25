@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
-import { ActionableError, type BootedDevice } from "../../models";
+import { ActionableError, toActionableError, type BootedDevice } from "../../models";
 import { IOSScreenCaptureHelper } from "../screen-stream/IOSScreenCaptureHelper";
 import type {
   CaptureTarget,
@@ -453,9 +453,11 @@ export class IosH264Source implements H264CaptureSource {
         return;
       } catch (error) {
         if (!shouldRetryNoFirstFrame || attempt !== 0 || !(error instanceof NoFirstFrameError)) {
-          throw error;
+          throw toActionableError(error, "Failed to start iOS screen capture");
         }
-        logger.warn(
+        // The failed lease is invalidated below, so one new ScreenCaptureKit session
+        // can recover a transient no-frame startup without surfacing a warning.
+        logger.debug(
           `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(target)}; retrying once`
         );
         await this.helper?.invalidate?.();

@@ -479,7 +479,9 @@ describe("IosH264Source", () => {
 
     const error = await started;
     expect(error).toBeInstanceOf(Error);
-    expect(error?.message).toContain("Screen Recording permission is required");
+    expect(error?.message).toBe(
+      "Failed to start iOS screen capture: screen-capture-helper reported an error: error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE."
+    );
     expect(helpers).toHaveLength(1);
     expect(helpers[0].stopped).toBe(true);
     await pool.shutdown();

@@ -27,8 +27,9 @@ class FakeSource implements H264CaptureSource {
 class PersistentFakeSource extends FakeSource {
   keyFrameRequests = 0;
 
-  requestKeyFrame(): void {
+  requestKeyFrame(): boolean {
     this.keyFrameRequests++;
+    return true;
   }
 
   getTelemetry() {
@@ -91,7 +92,7 @@ describe("createAndroidH264CaptureSource", () => {
     const source = createAndroidH264CaptureSource(baseOptions(), "/tmp/automobile-video.jar", deps);
 
     await source.start();
-    source.requestKeyFrame?.();
+    expect(source.requestKeyFrame?.()).toBe(true);
 
     expect(persistent.keyFrameRequests).toBe(1);
     expect(source.getTelemetry?.()).toEqual({

@@ -113,19 +113,20 @@ export class AndroidH264Source implements H264CaptureSource {
    * emit an IDR mid-stream, so rotate the segment — restarting it re-emits
    * SPS/PPS + IDR. Throttled, and a no-op when not actively streaming.
    */
-  requestKeyFrame(): void {
+  requestKeyFrame(): boolean {
     const process = this.current;
     if (!this.running || !process) {
-      return;
+      return false;
     }
     const now = this.timer.now();
     if (now - this.lastForcedKeyFrameMs < ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS) {
-      return;
+      return false;
     }
     this.lastForcedKeyFrameMs = now;
     logger.info(`[AndroidH264Source] keyframe requested; rotating segment ${this.segmentCount} to emit a fresh IDR`);
     // Terminating triggers the exit handler, which starts the next segment.
     process.kill("SIGINT");
+    return true;
   }
 
   private async startSegment(): Promise<void> {

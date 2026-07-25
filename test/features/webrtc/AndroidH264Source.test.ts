@@ -140,12 +140,12 @@ describe("AndroidH264Source", () => {
     expect(processes).toHaveLength(1);
 
     // screenrecord cannot be signalled for an IDR mid-stream; a request rotates.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(true);
     expect(processes[0].killed).toContain("SIGINT");
     const killsAfterFirst = processes[0].killed.length;
 
     // A second request within the throttle window is coalesced away.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(processes[0].killed).toHaveLength(killsAfterFirst);
 
     // Complete the rotation so a fresh segment is running.
@@ -156,7 +156,7 @@ describe("AndroidH264Source", () => {
 
     // After the throttle interval, a request rotates the new segment.
     timer.advanceTime(ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS);
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(true);
     expect(processes[processes.length - 1].killed).toContain("SIGINT");
 
     await source.stop();

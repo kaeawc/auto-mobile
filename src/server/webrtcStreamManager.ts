@@ -344,7 +344,7 @@ function createStreamRecord(
           });
         }
       },
-      onKeyFrameRequest: () => streams.get(streamId)?.source?.requestKeyFrame?.(),
+      onKeyFrameRequest: () => streams.get(streamId)?.source?.requestKeyFrame?.() ?? false,
       onConnected: () => {
         const record = streams.get(streamId);
         if (record && record.publisher === publisherRef.current && !record.sourceFailed) {

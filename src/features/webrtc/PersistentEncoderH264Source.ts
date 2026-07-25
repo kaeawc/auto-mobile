@@ -234,6 +234,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private serverOutputObserver: ((chunk: Buffer) => void) | null = null;
   private serverOutputBuffer = "";
   private sawStreamingStarted = false;
+  private serverStartupInProgress: AdbProcess | null = null;
 
   constructor(options: PersistentEncoderH264SourceOptions) {
     this.options = options;
@@ -306,20 +307,22 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
    * without waiting for the periodic two-second I-frame interval. The publisher
    * throttles calls.
    */
-  requestKeyFrame(): void {
+  requestKeyFrame(): boolean {
     const socket = this.socket;
     if (!this.running || !socket) {
-      return;
+      return false;
     }
     this.telemetryInitialized = true;
     this.idrRequestCount++;
     this.pendingIdrRequests++;
     try {
       socket.write(Buffer.from([VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME]));
+      return true;
     } catch (error) {
       this.pendingIdrRequests--;
       // Best-effort: a dropped socket surfaces via its own error/close handler.
       logger.debug(`[PersistentEncoderH264Source] keyframe request write failed: ${error}`);
+      return false;
     }
   }
 
@@ -380,10 +383,12 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     });
 
     this.deviceProcessId = await this.waitForReady(server);
+    this.watchServer(server);
     return this.running ? server : null;
   }
 
   private async connectToServer(server: AdbProcess, port: number): Promise<void> {
+    this.serverStartupInProgress = server;
     const streamingStarted = this.options.audioEnabled
       ? this.waitForStreamingStarted(server)
       : null;
@@ -391,47 +396,72 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     // the marker in the gap between client connect and the later startup await.
     streamingStarted?.catch(() => {});
 
-    const socket = await this.connector(port);
-    if (!this.running) {
-      socket.destroy();
-      return;
-    }
-    this.socket = socket;
-    const startupAudioReady = this.options.audioEnabled
-      ? this.waitForStartupAudioReady()
-      : null;
-    let socketFailureMode: "startup" | "post-start" = this.options.audioEnabled
-      ? "startup"
-      : "post-start";
-    let rejectStartupSocketFailure: ((error: Error) => void) | undefined;
-    const startupSocketFailure = this.options.audioEnabled
-      ? new Promise<never>((_, reject) => {
-        rejectStartupSocketFailure = reject;
-      })
-      : null;
-    this.wireSocket(socket, error => {
-      if (socketFailureMode === "startup") {
-        rejectStartupSocketFailure?.(error);
-        return;
-      }
-      this.reconnectSocket(socket, error);
-    }, header => this.resolveStartupAudioHeader?.(header));
-
-    // For audio-enabled streams, REMOTE_SUBMIX initialization happens after the
-    // socket client connects. Do not resolve start() until that succeeds, or an
-    // unavailable audio source would look like a successful start followed by a
-    // reconnect-looping post-start failure.
-    if (this.options.audioEnabled) {
-      await Promise.race([
-        Promise.all([streamingStarted, startupAudioReady]),
-        startupSocketFailure,
-      ]);
+    const connection = this.connector(port);
+    let connectionWon = false;
+    let rejectServerFailure!: (error: Error) => void;
+    const serverFailure = new Promise<never>((_, reject) => {
+      rejectServerFailure = reject;
+    });
+    const onServerExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      rejectServerFailure(new Error(`video-server exited (code=${code}, signal=${signal})`));
+    };
+    const onServerError = (error: Error): void => {
+      rejectServerFailure(error);
+    };
+    server.once("exit", onServerExit);
+    server.once("error", onServerError);
+    try {
+      const socket = await Promise.race([connection, serverFailure]);
+      connectionWon = true;
       if (!this.running) {
+        socket.destroy();
         return;
       }
+      this.socket = socket;
+      const startupAudioReady = this.options.audioEnabled
+        ? this.waitForStartupAudioReady()
+        : null;
+      let socketFailureMode: "startup" | "post-start" = this.options.audioEnabled
+        ? "startup"
+        : "post-start";
+      let rejectStartupSocketFailure: ((error: Error) => void) | undefined;
+      const startupSocketFailure = this.options.audioEnabled
+        ? new Promise<never>((_, reject) => {
+          rejectStartupSocketFailure = reject;
+        })
+        : null;
+      this.wireSocket(socket, error => {
+        if (socketFailureMode === "startup") {
+          rejectStartupSocketFailure?.(error);
+          return;
+        }
+        this.reconnectSocket(socket, error);
+      }, header => this.resolveStartupAudioHeader?.(header));
+
+      // For audio-enabled streams, REMOTE_SUBMIX initialization happens after the
+      // socket client connects. Do not resolve start() until that succeeds, or an
+      // unavailable audio source would look like a successful start followed by a
+      // reconnect-looping post-start failure.
+      if (this.options.audioEnabled) {
+        await Promise.race([
+          Promise.all([streamingStarted, startupAudioReady]),
+          startupSocketFailure,
+        ]);
+        if (!this.running) {
+          return;
+        }
+      }
+      socketFailureMode = "post-start";
+    } finally {
+      server.removeListener("exit", onServerExit);
+      server.removeListener("error", onServerError);
+      if (!connectionWon) {
+        void connection.then(socket => socket.destroy(), () => {});
+      }
+      if (this.serverStartupInProgress === server) {
+        this.serverStartupInProgress = null;
+      }
     }
-    socketFailureMode = "post-start";
-    this.watchServer(server);
   }
 
   private watchServer(server: AdbProcess): void {
@@ -439,9 +469,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       if (this.server !== server) {return;}
       this.detachServerOutputObserver(server);
       this.server = null;
+      if (this.serverStartupInProgress === server) {return;}
       this.failIfRunning(new Error(`video-server exited (code=${code}, signal=${signal})`));
     });
-    server.once("error", (error: Error) => this.failIfRunning(error));
+    server.once("error", (error: Error) => {
+      if (this.serverStartupInProgress === server) {return;}
+      this.failIfRunning(error);
+    });
   }
 
   private buildServerArgs(): string[] {
@@ -1001,6 +1035,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         `[PersistentEncoderH264Source] refusing owned-session process cleanup token=${session.token}: lease identity or PID mismatch`
       );
       await this.removeForwardIfMatching(adb, lease.forwardPort, session.socketName);
+      if (port !== null && port !== lease.forwardPort) {
+        await this.removeForward(port);
+      }
       return;
     }
     if (port !== null) {

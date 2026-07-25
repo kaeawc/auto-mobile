@@ -257,12 +257,12 @@ describe("PersistentEncoderH264Source", () => {
     const ctx = makeSource();
     await startReady(ctx);
 
-    ctx.source.requestKeyFrame();
+    expect(ctx.source.requestKeyFrame()).toBe(true);
     expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
 
     await ctx.source.stop();
     // After stop, no socket is available; the request is a safe no-op.
-    ctx.source.requestKeyFrame();
+    expect(ctx.source.requestKeyFrame()).toBe(false);
     expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
   });
 
@@ -697,6 +697,53 @@ describe("PersistentEncoderH264Source", () => {
     ctx.processes[0].exit(137, "SIGKILL");
     expect(ctx.errors).toHaveLength(1);
     expect(ctx.errors[0].message).toContain("video-server exited");
+  });
+
+  test("handles a server error while socket connection is pending", async () => {
+    const lateSocket = new FakeSocket();
+    let resolveConnector: ((socket: StreamSocket) => void) | undefined;
+    const ctx = makeSource({
+      connector: () => new Promise<StreamSocket>(resolve => {
+        resolveConnector = resolve;
+      }),
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+    ctx.processes[0].ready();
+    await tick();
+
+    expect(ctx.processes[0].listenerCount("error")).toBeGreaterThan(0);
+    expect(() => ctx.processes[0].emit("error", new Error("server failed while connecting"))).not.toThrow();
+    await expect(startPromise).rejects.toThrow("server failed while connecting");
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
+
+    resolveConnector?.(lateSocket);
+    await tick();
+    expect(lateSocket.destroyed).toBe(true);
+  });
+
+  test("removes this source's forward when a matching-token lease has different identity", async () => {
+    const mismatchedLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_replacement",
+      sessionToken: SESSION_TOKEN,
+      pid: 5678,
+      ownerPid: process.pid,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: 95_000,
+      heartbeatAtMs: 100_000,
+      heartbeatElapsedRealtimeMs: 100_000,
+    });
+    const ctx = makeSource({ leaseOutput: mismatchedLease });
+    await startReady(ctx);
+
+    await ctx.source.stop();
+
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+    expect(ctx.commands).not.toContain("shell kill -2 5678");
   });
 
   test("reconciles an expired owned lease with a matching forward", async () => {

@@ -355,15 +355,15 @@ export class IosH264Source implements H264CaptureSource {
    * until that replacement emits its IDR. Safe to call before the encoder exists
    * (the first frame is already an IDR) or after the source has stopped.
    */
-  requestKeyFrame(): void {
+  requestKeyFrame(): boolean {
     const oldEncoder = this.encoder;
     const size = this.encoderSize;
     if (this.phase !== "running" || !oldEncoder || !size || this.forcedKeyFrameEncoder) {
-      return;
+      return false;
     }
     const now = this.timer.now();
     if (now - this.lastForcedKeyFrameMs < IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS) {
-      return;
+      return false;
     }
     this.lastForcedKeyFrameMs = now;
     logger.info("[IosH264Source] keyframe requested; restarting encoder to emit a fresh IDR");
@@ -378,6 +378,7 @@ export class IosH264Source implements H264CaptureSource {
     }
     oldEncoder.stdin.end();
     oldEncoder.kill("SIGTERM");
+    return true;
   }
 
   private async resolveCaptureTarget(helperPath: string): Promise<CaptureTarget> {

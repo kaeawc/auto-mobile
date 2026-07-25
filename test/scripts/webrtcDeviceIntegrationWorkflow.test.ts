@@ -165,8 +165,11 @@ describe("#4308 device WebRTC integration workflow", () => {
     const boot = iosSteps.find(step => step.name === "Boot and activate iOS Simulator");
     const capture = iosSteps.find(step => step.name === "Run iOS device capture integration");
 
+    expect(boot).toBeDefined();
+    expect(capture).toBeDefined();
     expect(boot?.run).toContain("bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000");
     expect(boot?.run).toContain("jq -r '.deviceId'");
+    expect(boot?.run).toContain("killall Simulator");
     expect(boot?.run).toContain("open -a Simulator --args -CurrentDeviceUDID");
     expect(iosSteps.indexOf(boot!)).toBeLessThan(iosSteps.indexOf(capture!));
   });

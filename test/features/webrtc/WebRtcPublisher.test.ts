@@ -411,7 +411,10 @@ describe("WebRtcPublisher keyframe requests", () => {
             publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
           }) as unknown as WhipClient,
-        onKeyFrameRequest: () => { requests++; },
+        onKeyFrameRequest: () => {
+          requests++;
+          return true;
+        },
       }
     );
     await publisher.start();
@@ -442,7 +445,7 @@ describe("WebRtcPublisher keyframe requests", () => {
             publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
           }) as unknown as WhipClient,
-        onKeyFrameRequest: () => {},
+        onKeyFrameRequest: () => true,
       }
     );
     await publisher.start();
@@ -566,7 +569,7 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
       { streamId: "s", whipEndpoint: "https://coord/whip", frameStallTimeoutMs: 4000 },
       {
         timer,
-        onKeyFrameRequest: () => {},
+        onKeyFrameRequest: () => true,
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
           ({
@@ -590,6 +593,46 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
 
     // The recovery remains bounded: an encoder that never emits an IDR still
     // follows the normal stalled-source reconnect path.
+    timer.advanceTime(2000);
+    expect(recoveries).toBe(1);
+
+    await publisher.stop();
+  });
+
+  test("does not extend the watchdog when a throttled PLI starts no recovery", async () => {
+    const timer = new FakeTimer();
+    const pc = new FakePeerConnection();
+    pc.connectionState = "connected";
+    let recoveryStarts = true;
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", frameStallTimeoutMs: 4000 },
+      {
+        timer,
+        onKeyFrameRequest: () => recoveryStarts,
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    await publisher.start();
+    timer.advanceTime(3000);
+    pc.pliSubscribers[0]();
+    recoveryStarts = false;
+    timer.advanceTime(KEYFRAME_REQUEST_MIN_INTERVAL_MS * 2);
+    pc.pliSubscribers[0]();
+
+    // The first PLI resets the deadline to t=7000. The second is throttled by
+    // the source and must not move it to t=9000. The watchdog checks at t=6000
+    // and t=8000, so only the latter can detect the original deadline.
+    timer.advanceTime(1000);
+    expect(recoveries).toBe(0);
     timer.advanceTime(2000);
     expect(recoveries).toBe(1);
 

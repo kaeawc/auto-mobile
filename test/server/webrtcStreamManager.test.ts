@@ -37,7 +37,7 @@ class FakePublisher {
   sourceFailureErrors: Error[] = [];
   onBeforeEstablish?: () => Promise<void> | void;
   onConnected?: () => Promise<void> | void;
-  onKeyFrameRequest?: () => void;
+  onKeyFrameRequest?: () => boolean;
   onSourceFailure?: (error: Error) => void;
   onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
   parameterSetPrimes: Array<{ sps: Buffer | null; pps: Buffer | null }> = [];
@@ -46,7 +46,7 @@ class FakePublisher {
     deps: {
       onBeforeEstablish?: () => Promise<void> | void;
       onConnected?: () => Promise<void> | void;
-      onKeyFrameRequest?: () => void;
+      onKeyFrameRequest?: () => boolean;
       onSourceFailure?: (error: Error) => void;
       onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
     }
@@ -126,8 +126,9 @@ class FakeSource {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  requestKeyFrame(): void {
+  requestKeyFrame(): boolean {
     this.keyFrameRequests++;
+    return true;
   }
 }
 

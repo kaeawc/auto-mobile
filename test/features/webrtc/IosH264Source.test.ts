@@ -1339,7 +1339,7 @@ describe("IosH264Source", () => {
     // restarts the encoder. Replay the most recent frame so static capture can
     // produce the replacement encoder's first SPS/PPS + IDR without waiting for
     // the screen to change.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(true);
 
     // A second encoder is spawned with identical argv, and the old one is ended
     // and killed rather than treated as a fatal crash.
@@ -1370,20 +1370,20 @@ describe("IosH264Source", () => {
     expect(encoderSpawns).toHaveLength(1);
 
     // A burst of relayed viewer PLIs collapses to a single restart.
-    source.requestKeyFrame();
-    source.requestKeyFrame();
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(source.requestKeyFrame()).toBe(false);
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(2);
 
     // Within the throttle window, another request is coalesced away.
     timer.advanceTime(IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS - 1);
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(2);
 
     // A replacement can take longer than the interval to initialize. Do not
     // replace it before its SPS/PPS + IDR confirms the prior request completed.
     timer.advanceTime(1);
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(2);
 
     encoders[1].stdout.push(
@@ -1398,7 +1398,7 @@ describe("IosH264Source", () => {
 
     // Once the replacement emits its IDR, the next request after the interval
     // can start another recovery attempt.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(true);
     expect(encoderSpawns).toHaveLength(3);
   });
 
@@ -1407,7 +1407,7 @@ describe("IosH264Source", () => {
 
     // No encoder yet: the first frame is already an IDR, so there is nothing to
     // restart. Must not throw or spawn.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(0);
 
     await startWithFrame(source, helper, frame(2, 2, 0x11));
@@ -1415,7 +1415,7 @@ describe("IosH264Source", () => {
 
     await source.stop();
     // After teardown there is no live encoder to restart.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(1);
   });
 

@@ -71,7 +71,7 @@ export interface H264CaptureSource {
    * rely on the periodic IDR interval. Implementations must be safe to call
    * frequently (throttle internally) and before/after the stream is running.
    */
-  requestKeyFrame?(): void;
+  requestKeyFrame?(): boolean;
   /** Optional precise encoder telemetry for the stream-status control plane. */
   getTelemetry?(): H264CaptureSourceTelemetry;
 }

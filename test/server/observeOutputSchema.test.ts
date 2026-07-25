@@ -66,12 +66,18 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         categories: ["text"],
         insetTypes: ["safeArea"],
         sides: ["top"],
+        overflowPx: { top: 30 },
+        insetPx: { top: 59.5 },
         overlapPercent: 100,
         confidence: "high",
       }],
     });
 
     expect(parsed.success).toBe(true);
+    expect(parsed.data?.layoutWarnings?.[0]).toMatchObject({
+      overflowPx: { top: 30 },
+      insetPx: { top: 59.5 },
+    });
   });
 
   test("accepts nullable Android inset categories", () => {
@@ -113,6 +119,8 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         categories: ["text"],
         insetTypes: ["safeArea"],
         sides: ["top"],
+        overflowPx: { top: 30 },
+        insetPx: { top: 59.5 },
         overlapPercent: 100,
         confidence: "high",
       }],

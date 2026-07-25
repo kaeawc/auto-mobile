@@ -43,6 +43,10 @@ export interface LayoutWarning {
   categories: Array<"text" | "interaction">;
   insetTypes: Array<"systemBars" | "displayCutout" | "safeArea" | "systemGestures" | "mandatorySystemGestures">;
   sides: Array<"top" | "right" | "bottom" | "left">;
+  /** Distance the element extends into each reported inset, in observation coordinate units. */
+  overflowPx: Partial<Record<"top" | "right" | "bottom" | "left", number>>;
+  /** Effective inset size for each reported side, in observation coordinate units. */
+  insetPx: Partial<Record<"top" | "right" | "bottom" | "left", number>>;
   overlapPercent: number;
   confidence: "high" | "medium";
 }

@@ -11,7 +11,10 @@ import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor"
 // The bulk of these assertions inject a fake exec seam so they never spawn a real
 // subprocess — real forks stall past a 30s timeout on contended CI runners (#2914).
 // A single retry-tolerant smoke test (bottom of the file) still exercises a real spawn.
-const FAST_TEST_TIMEOUT_MS = 100;
+// The injected seams complete in under 1ms, but a 100ms deadline flakes when the
+// full parallel suite pauses this worker. Keep a short bound without coupling
+// correctness to CI scheduler latency.
+const FAST_TEST_TIMEOUT_MS = 1_000;
 // Real subprocess smoke test only; forking under CI load can take seconds.
 const SMOKE_TEST_TIMEOUT_MS = 30_000;
 

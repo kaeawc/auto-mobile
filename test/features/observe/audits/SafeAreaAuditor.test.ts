@@ -150,6 +150,72 @@ describe("SafeAreaAuditor", () => {
     }]);
   });
 
+  test("includes the effective inset and overflow for each reported side", () => {
+    const warnings = new SafeAreaAuditor().inspect(observation());
+
+    expect(warnings).toMatchObject([
+      { element: { viewId: "title" }, overflowPx: { top: 12 }, insetPx: { top: 20 } },
+      { element: { viewId: "continue" }, overflowPx: { bottom: 16 }, insetPx: { bottom: 20 } },
+    ]);
+  });
+
+  test("collapses an under-inset container into its flagged leaf", () => {
+    const result = observation();
+    result.screenSize = { width: 1440, height: 3120 };
+    result.insets!.systemBars!.visible = { top: 0, right: 0, bottom: 84, left: 0 };
+    result.viewHierarchy!.hierarchy.node = [{
+      clickable: "true",
+      bounds: { left: 0, top: 2987, right: 1440, bottom: 3120 },
+      node: [{
+        text: "Row 19",
+        bounds: { left: 56, top: 3036, right: 521, bottom: 3106 },
+      }],
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toEqual([
+      expect.objectContaining({
+        element: expect.objectContaining({ text: "Row 19" }),
+        sides: ["bottom"],
+        overflowPx: { bottom: 70 },
+        insetPx: { bottom: 84 },
+        overlapPercent: 100,
+      }),
+    ]);
+  });
+
+  test("collapses an equal-bounds container into its flagged leaf", () => {
+    const result = observation();
+    result.viewHierarchy!.hierarchy.node = [{
+      clickable: "true",
+      bounds: { left: 1, top: 180, right: 99, bottom: 199 },
+      node: [{
+        text: "Label",
+        bounds: { left: 1, top: 180, right: 99, bottom: 199 },
+      }],
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toEqual([
+      expect.objectContaining({ element: expect.objectContaining({ text: "Label" }), sides: ["bottom"] }),
+    ]);
+  });
+
+  test("keeps an ancestor warning when its leaf does not cover every unsafe side", () => {
+    const result = observation();
+    result.viewHierarchy!.hierarchy.node = [{
+      clickable: "true",
+      bounds: { left: 1, top: 10, right: 99, bottom: 195 },
+      node: [{
+        text: "Label",
+        bounds: { left: 1, top: 180, right: 99, bottom: 195 },
+      }],
+    }] as any;
+
+    expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+      { element: { bounds: { left: 1, top: 10, right: 99, bottom: 195 } }, sides: ["top", "bottom"] },
+      { element: { text: "Label" }, sides: ["bottom"] },
+    ]);
+  });
+
   test("returns no warnings when measurements are unavailable", () => {
     const result = observation();
     result.insets = { available: false, source: "unavailable", units: "unknown" };

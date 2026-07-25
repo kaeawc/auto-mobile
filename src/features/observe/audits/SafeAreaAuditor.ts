@@ -7,6 +7,11 @@ type ContentInsets = {
   edges: ObservationEdgeInsets;
   typesForSides: (sides: Side[]) => LayoutWarning["insetTypes"];
 };
+type WarningCandidate = {
+  warning: LayoutWarning;
+  node: Node;
+  ancestors: Node[];
+};
 
 /**
  * Report-only edge-to-edge inspection. It intentionally warns about potential
@@ -27,9 +32,9 @@ export class SafeAreaAuditor {
 
     const contentInsets = this.contentInsets(insets);
     const foregroundPackage = result.activeWindow?.appId ?? result.viewHierarchy.packageName;
-    const warnings: LayoutWarning[] = [];
+    const warnings: WarningCandidate[] = [];
     for (const root of asNodes(result.viewHierarchy.hierarchy.node)) {
-      this.inspectNode(root, screen, contentInsets, insets.systemGestures, insets.mandatorySystemGestures, foregroundPackage, warnings);
+      this.inspectNode(root, screen, contentInsets, insets.systemGestures, insets.mandatorySystemGestures, foregroundPackage, [], warnings);
     }
     return dedupeWarnings(warnings);
   }
@@ -58,50 +63,85 @@ export class SafeAreaAuditor {
     systemGestures: ObservationEdgeInsets | undefined,
     mandatorySystemGestures: ObservationEdgeInsets | undefined,
     foregroundPackage: string | undefined,
-    warnings: LayoutWarning[]
+    ancestors: Node[],
+    warnings: WarningCandidate[]
   ): void {
     const inspectedNode = withHierarchyAttributes(node);
-    if (!isForeignNode(inspectedNode, foregroundPackage)) {this.inspectElement(inspectedNode, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, warnings);}
+    if (!isForeignNode(inspectedNode, foregroundPackage)) {
+      this.inspectElement(
+        inspectedNode,
+        node,
+        ancestors,
+        screen,
+        content,
+        systemGestures,
+        mandatorySystemGestures,
+        foregroundPackage,
+        warnings
+      );
+    }
     for (const child of asNodes(node.node)) {
-      this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, warnings);
+      this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, [...ancestors, node], warnings);
     }
   }
 
   private inspectElement(
     node: Node,
+    sourceNode: Node,
+    ancestors: Node[],
     screen: { width: number; height: number },
     content: ContentInsets | null,
     systemGestures: ObservationEdgeInsets | undefined,
     mandatorySystemGestures: ObservationEdgeInsets | undefined,
     foregroundPackage: string | undefined,
-    warnings: LayoutWarning[]
+    warnings: WarningCandidate[]
   ): void {
     const bounds = readBounds(node);
     const categories = categoriesFor(node);
     if (!bounds || categories.length === 0 || !isOnScreen(bounds, screen) || isScreenSized(bounds, screen) || node.enabled === "false") {return;}
-    this.inspectContent(node, bounds, categories, screen, content, foregroundPackage, warnings);
-    this.inspectGestureRegion(node, bounds, categories, screen, systemGestures, mandatorySystemGestures, warnings);
+    this.inspectContent(node, sourceNode, ancestors, bounds, categories, screen, content, foregroundPackage, warnings);
+    this.inspectGestureRegion(node, sourceNode, ancestors, bounds, categories, screen, systemGestures, mandatorySystemGestures, warnings);
   }
 
-  private inspectContent(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, content: ContentInsets | null, foregroundPackage: string | undefined, warnings: LayoutWarning[]): void {
+  private inspectContent(
+    node: Node,
+    sourceNode: Node,
+    ancestors: Node[],
+    bounds: ObservationEdgeInsets,
+    categories: LayoutWarning["categories"],
+    screen: { width: number; height: number },
+    content: ContentInsets | null,
+    foregroundPackage: string | undefined,
+    warnings: WarningCandidate[]
+  ): void {
     if (!content) {return;}
     const sides = intersectingSides(bounds, screen, content.edges)
       .filter(side => content.typesForSides([side]).length > 0);
     if (sides.length === 0) {return;}
-    warnings.push(this.warning(
-      node,
-      bounds,
-      categories,
-      content.typesForSides(sides),
-      sides,
-      "important-content-under-inset",
-      this.contentSeverity(node, bounds, screen, content.edges, foregroundPackage),
-      screen,
-      content.edges
-    ));
+    warnings.push({
+      warning: this.warning(
+        node,
+        bounds,
+        categories,
+        content.typesForSides(sides),
+        sides,
+        "important-content-under-inset",
+        this.contentSeverity(node, bounds, screen, content.edges, foregroundPackage),
+        screen,
+        content.edges
+      ),
+      node: sourceNode,
+      ancestors,
+    });
   }
 
-  private contentSeverity(node: Node, bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets, foregroundPackage: string | undefined): LayoutWarning["severity"] {
+  private contentSeverity(
+    node: Node,
+    bounds: ObservationEdgeInsets,
+    screen: { width: number; height: number },
+    insets: ObservationEdgeInsets,
+    foregroundPackage: string | undefined
+  ): LayoutWarning["severity"] {
     const overlap = overlapPercent(bounds, screen, insets);
     if (isLargeContainer(node, bounds, screen) && !hasOverlappingContentDescendant(node, screen, insets, foregroundPackage)) {
       return "info";
@@ -109,12 +149,18 @@ export class SafeAreaAuditor {
     return overlap >= 50 ? "warning" : "info";
   }
 
-  private inspectGestureRegion(node: Node, bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, systemGestures: ObservationEdgeInsets | undefined, mandatorySystemGestures: ObservationEdgeInsets | undefined, warnings: LayoutWarning[]): void {
+  private inspectGestureRegion(node: Node, sourceNode: Node, ancestors: Node[], bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, systemGestures: ObservationEdgeInsets | undefined, mandatorySystemGestures: ObservationEdgeInsets | undefined, warnings: WarningCandidate[]): void {
     if (!categories.includes("interaction")) {return;}
     const gesture = maxInsets(systemGestures, mandatorySystemGestures);
     if (!gesture) {return;}
     const sides = intersectingSides(bounds, screen, gesture);
-    if (sides.length > 0) {warnings.push(this.warning(node, bounds, ["interaction"], insetTypes(systemGestures, mandatorySystemGestures, "systemGestures", "mandatorySystemGestures", sides), sides, "interaction-in-system-gesture-region", "info", screen, gesture));}
+    if (sides.length > 0) {
+      warnings.push({
+        warning: this.warning(node, bounds, ["interaction"], insetTypes(systemGestures, mandatorySystemGestures, "systemGestures", "mandatorySystemGestures", sides), sides, "interaction-in-system-gesture-region", "info", screen, gesture),
+        node: sourceNode,
+        ancestors,
+      });
+    }
   }
 
   private warning(
@@ -141,6 +187,8 @@ export class SafeAreaAuditor {
       categories,
       insetTypes,
       sides,
+      overflowPx: overflowPx(bounds, screen, insets, sides),
+      insetPx: sideValues(insets, sides),
       overlapPercent: overlapPercent(bounds, screen, insets),
       confidence: node.occlusionState === "partial" ? "high" : "medium",
     };
@@ -249,6 +297,25 @@ function intersectingSides(bounds: ObservationEdgeInsets, screen: { width: numbe
   ].filter((side): side is Side => side !== undefined);
 }
 
+function overflowPx(
+  bounds: ObservationEdgeInsets,
+  screen: { width: number; height: number },
+  insets: ObservationEdgeInsets,
+  sides: Side[]
+): LayoutWarning["overflowPx"] {
+  const values: Record<Side, number> = {
+    top: Math.max(0, insets.top - bounds.top),
+    right: Math.max(0, bounds.right - (screen.width - insets.right)),
+    bottom: Math.max(0, bounds.bottom - (screen.height - insets.bottom)),
+    left: Math.max(0, insets.left - bounds.left),
+  };
+  return sideValues(values, sides);
+}
+
+function sideValues(insets: ObservationEdgeInsets, sides: Side[]): LayoutWarning["insetPx"] {
+  return Object.fromEntries(sides.map(side => [side, insets[side]]));
+}
+
 function overlapPercent(bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets): number {
   const area = Math.max(1, (bounds.right - bounds.left) * (bounds.bottom - bounds.top));
   const overlap = unionArea([
@@ -317,12 +384,44 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function dedupeWarnings(warnings: LayoutWarning[]): LayoutWarning[] {
+function dedupeWarnings(candidates: WarningCandidate[]): LayoutWarning[] {
+  const candidatesByNode = new Map<Node, WarningCandidate[]>();
+  for (const candidate of candidates) {
+    const nodeCandidates = candidatesByNode.get(candidate.node) ?? [];
+    nodeCandidates.push(candidate);
+    candidatesByNode.set(candidate.node, nodeCandidates);
+  }
+
+  const containerWarnings = new Set<WarningCandidate>();
+  for (const descendant of candidates) {
+    const ancestors = descendant.ancestors.flatMap(ancestorNode => candidatesByNode.get(ancestorNode) ?? []);
+    for (const ancestor of ancestors) {
+      if (
+        ancestor.warning.type === descendant.warning.type
+        && coversSides(ancestor.warning.sides, descendant.warning.sides)
+        && contains(ancestor.warning.element.bounds, descendant.warning.element.bounds)
+      ) {
+        containerWarnings.add(ancestor);
+      }
+    }
+  }
+
   const seen = new Set<string>();
-  return warnings.filter(warning => {
+  return candidates.filter(candidate => !containerWarnings.has(candidate)).filter(({ warning }) => {
     const key = `${warning.type}:${warning.element.viewId ?? warning.element.resourceId ?? warning.element.text ?? "unknown"}:${warning.sides.join(",")}`;
     if (seen.has(key)) {return false;}
     seen.add(key);
     return true;
-  });
+  }).map(candidate => candidate.warning);
+}
+
+function coversSides(required: Side[], candidate: Side[]): boolean {
+  return required.every(side => candidate.includes(side));
+}
+
+function contains(container: ObservationEdgeInsets, contained: ObservationEdgeInsets): boolean {
+  return container.left <= contained.left
+    && container.top <= contained.top
+    && container.right >= contained.right
+    && container.bottom >= contained.bottom;
 }

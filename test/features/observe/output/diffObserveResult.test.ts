@@ -426,6 +426,8 @@ describe("diffObserveResult", () => {
       categories: ["text"],
       insetTypes: ["safeArea"],
       sides: ["top"],
+      overflowPx: { top: 30 },
+      insetPx: { top: 59.5 },
       overlapPercent: 100,
       confidence: "high",
     } as const;

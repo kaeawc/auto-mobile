@@ -3980,6 +3980,42 @@
                   ]
                 }
               },
+              "overflowPx": {
+                "type": "object",
+                "properties": {
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  },
+                  "left": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "insetPx": {
+                "type": "object",
+                "properties": {
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  },
+                  "left": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
               "overlapPercent": {
                 "type": "integer",
                 "minimum": -9007199254740991,
@@ -4000,6 +4036,8 @@
               "categories",
               "insetTypes",
               "sides",
+              "overflowPx",
+              "insetPx",
               "overlapPercent",
               "confidence"
             ],

@@ -158,6 +158,39 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(result.insets.systemChrome?.source, "ios-status-bar-manager")
     }
 
+    func testMergeChromeOnlySdkPayloadPreservesUnavailableInsetMetadata() {
+        let hierarchy = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: makeElement(text: "Hello"),
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            insets: .unavailable
+        )
+        let sdkHierarchy = SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: "com.test.app",
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            systemChrome: SdkSystemChrome(
+                visibility: "hidden",
+                statusBar: "hidden",
+                homeIndicatorAutoHideRequested: true,
+                source: "ios-status-bar-manager"
+            ),
+            root: nil
+        )
+
+        let result = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdkHierarchy)
+
+        XCTAssertFalse(result.insets.available)
+        XCTAssertEqual(result.insets.source, "unavailable")
+        XCTAssertEqual(result.insets.units, "unknown")
+        XCTAssertNil(result.insets.safeArea)
+        XCTAssertEqual(result.insets.systemChrome?.visibility, "hidden")
+    }
+
     // MARK: - Exact Match
 
     func testExactBoundsMatch() {

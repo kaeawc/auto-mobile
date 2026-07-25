@@ -29,12 +29,20 @@ public enum HierarchyMerger {
             )
         }
         let enrichedInsets =
-            if safeArea != nil || systemChrome != nil {
+            if let safeArea {
                 ObservationInsetsInfo(
                     available: true,
                     source: "ios-sdk-safe-area",
                     units: "points",
                     safeArea: safeArea,
+                    systemChrome: systemChrome
+                )
+            } else if let systemChrome {
+                ObservationInsetsInfo(
+                    available: xcuitest.insets.available,
+                    source: xcuitest.insets.source,
+                    units: xcuitest.insets.units,
+                    safeArea: xcuitest.insets.safeArea,
                     systemChrome: systemChrome
                 )
             } else {

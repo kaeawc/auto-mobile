@@ -1,5 +1,5 @@
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, ImeAction, SendTextResult } from "../../models";
+import { BootedDevice, ImeAction, KeyboardResult, ObserveResult, SendTextResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -10,18 +10,37 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { resolveAutoInputMode } from "./resolveAutoInputMode";
 import { serverConfig } from "../../utils/ServerConfig";
+import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   buildAsciiKeyEventPlan,
   type KeyEventPlan
 } from "./asciiKeyEvents";
+import { Keyboard } from "./Keyboard";
 
-export type InputTextMode = "a11y" | "eventLast" | "eventAll";
+export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly";
+
+interface KeyboardCloser {
+  close(): Promise<KeyboardResult>;
+}
+
+type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory) => KeyboardCloser;
+
+const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory) => {
+  const keyboard = new Keyboard(device, adbFactory);
+  return {
+    close: () => keyboard.execute("close")
+  };
+};
 
 export class InputText extends BaseVisualChange {
   private androidInputKeyCombinationSupported: boolean | undefined;
 
-  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null) {
+  constructor(
+    device: BootedDevice,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
+    private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory
+  ) {
     super(device, adbFactoryOrExecutor);
     this.device = device;
   }
@@ -62,13 +81,19 @@ export class InputText extends BaseVisualChange {
     }
 
     return this.observedInteraction(
-      async () => {
+      async previousObserveResult => {
         try {
           // Platform-specific text input execution
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidTextInput", () =>
-                this.executeAndroidTextInput(text, imeAction, dismissKeyboard, resolvedMode)
+                this.executeAndroidTextInput(
+                  text,
+                  imeAction,
+                  dismissKeyboard,
+                  resolvedMode,
+                  previousObserveResult
+                )
               );
             case "ios":
               // dismissKeyboard is Android-only — it works around an emulator
@@ -113,7 +138,8 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    mode: InputTextMode = "a11y"
+    mode: InputTextMode = "a11y",
+    previousObserveResult?: ObserveResult
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     if (mode === "eventLast") {
       return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard);
@@ -121,6 +147,15 @@ export class InputText extends BaseVisualChange {
 
     if (mode === "eventAll") {
       return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard);
+    }
+
+    if (mode === "eventOnly") {
+      return this.executeAndroidEventOnlyTextInput(
+        text,
+        imeAction,
+        dismissKeyboard,
+        previousObserveResult
+      );
     }
 
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
@@ -263,6 +298,76 @@ export class InputText extends BaseVisualChange {
       text,
       imeAction,
       method: "eventAll"
+    };
+  }
+
+  private async executeAndroidEventOnlyTextInput(
+    text: string,
+    imeAction: ImeAction | undefined,
+    dismissKeyboard: boolean,
+    previousObserveResult?: ObserveResult
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const keyEventPlans: KeyEventPlan[] = [];
+    for (const char of Array.from(text)) {
+      const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+      if (!keyEventPlan) {
+        return {
+          success: false,
+          text,
+          error: `eventOnly cannot type ${JSON.stringify(char)} with Android key events`,
+          method: "eventOnly"
+        };
+      }
+      keyEventPlans.push(keyEventPlan);
+    }
+
+    const viewHierarchy = previousObserveResult?.viewHierarchy;
+    if (!viewHierarchy) {
+      return {
+        success: false,
+        text,
+        error: "eventOnly requires a current view hierarchy to clear the focused field",
+        method: "eventOnly"
+      };
+    }
+
+    if (!hasFocusedTextInput(viewHierarchy)) {
+      return {
+        success: false,
+        text,
+        error: "eventOnly requires a focused editable field",
+        method: "eventOnly"
+      };
+    }
+
+    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(viewHierarchy));
+    for (const keyEventPlan of keyEventPlans) {
+      await this.executeKeyEventPlan(keyEventPlan);
+    }
+
+    if (dismissKeyboard) {
+      const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
+      if (!keyboardResult.success) {
+        return {
+          success: false,
+          text,
+          error: `eventOnly input completed but keyboard dismissal failed: ${
+            keyboardResult.error ?? keyboardResult.message ?? "unknown error"
+          }`,
+          method: "eventOnly"
+        };
+      }
+    }
+
+    if (imeAction) {
+      await this.executeImeAction(imeAction);
+    }
+
+    return {
+      success: true,
+      text,
+      imeAction,
+      method: "eventOnly"
     };
   }
 

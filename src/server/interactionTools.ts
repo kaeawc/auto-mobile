@@ -338,8 +338,8 @@ export const clearStateSchema = withAppIdAliases(addDeviceTargetingToSchema(z.ob
 
 export const inputTextSchema = addDeviceTargetingToSchema(z.object({
   text: z.string().min(1),
-  mode: z.enum(["a11y", "eventLast", "eventAll"]).optional()
-    .describe("Android text mode: a11y default; eventLast helps autocomplete; eventAll sends key events"),
+  mode: z.enum(["a11y", "eventLast", "eventAll", "eventOnly"]).optional()
+    .describe("Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only"),
   imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
     .describe("IME action after input"),
   dismissKeyboard: z.boolean().optional()

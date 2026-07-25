@@ -4,8 +4,10 @@ import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import {
   encodeFrameHeader,
   IOSScreenCaptureHelper,
+  NATIVE_FRAME_METRICS_PREFIX,
   type CaptureTarget,
   type DecodedFrame,
+  type FrameDeliveryScheduler,
   type MalformedFrameError,
 } from "../../../src/features/screen-stream";
 
@@ -44,6 +46,27 @@ function withFakeSpawner(
 
 function flush(): Promise<void> {
   return new Promise(resolve => setImmediate(resolve));
+}
+
+async function flushFrameDelivery(): Promise<void> {
+  await flush();
+  await flush();
+}
+
+class ManualFrameDeliveryScheduler implements FrameDeliveryScheduler {
+  private callbacks: Array<() => void> = [];
+
+  schedule(callback: () => void): void {
+    this.callbacks.push(callback);
+  }
+
+  runNext(): void {
+    this.callbacks.shift()?.();
+  }
+
+  get size(): number {
+    return this.callbacks.length;
+  }
 }
 
 describe("IOSScreenCaptureHelper", () => {
@@ -104,7 +127,7 @@ describe("IOSScreenCaptureHelper", () => {
     expect(() => helper.start()).toThrow(/integer/);
   });
 
-  test("emits frame events for each decoded frame", async () => {
+  test("coalesces a burst into the newest decoded frame", async () => {
     const { fake, helper } = withFakeSpawner();
     const frames: DecodedFrame[] = [];
     helper.on("frame", f => frames.push(f));
@@ -115,13 +138,53 @@ describe("IOSScreenCaptureHelper", () => {
       encodeFrame(1, 1, 4, 20, 0x22),
     ]);
     fake.stdout.push(buf);
-    await flush();
+    await flushFrameDelivery();
 
-    expect(frames).toHaveLength(2);
-    expect(frames[0].header.timestampMs).toBe(10);
-    expect(frames[1].header.timestampMs).toBe(20);
-    expect(frames[0].pixels[0]).toBe(0x11);
-    expect(frames[1].pixels[0]).toBe(0x22);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].header.timestampMs).toBe(20);
+    expect(frames[0].pixels[0]).toBe(0x22);
+  });
+
+  test("bounds the pending frame and recovers with the newest frame once delivery runs", async () => {
+    const fake = new FakeChildProcess();
+    const scheduler = new ManualFrameDeliveryScheduler();
+    let now = 1_000;
+    const helper = new IOSScreenCaptureHelper({
+      binaryPath: "/fake/screen-capture-helper",
+      target: { kind: "device" },
+      now: () => now,
+      frameDeliveryScheduler: scheduler,
+      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+    });
+    const frames: DecodedFrame[] = [];
+    helper.on("frame", frame => frames.push(frame));
+    helper.start();
+
+    fake.stdout.push(Buffer.concat([
+      encodeFrame(1, 1, 4, 10, 0x10),
+      encodeFrame(1, 1, 4, 20, 0x20),
+      encodeFrame(1, 1, 4, 30, 0x30),
+    ]));
+
+    await flush();
+    now += 25;
+    expect(scheduler.size).toBe(1);
+    expect(helper.getFrameMetrics()).toEqual({
+      captureTimestampMs: 30,
+      frameAgeMs: 25,
+      queueDepth: 1,
+      droppedFrames: 2,
+      bytesQueued: 4,
+      highWaterMarkBytes: 4,
+      maxFrameBytes: 32 * 1024 * 1024,
+    });
+
+    scheduler.runNext();
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0].header.timestampMs).toBe(30);
+    expect(frames[0].pixels).toEqual(Buffer.alloc(4, 0x30));
+    expect(helper.getFrameMetrics().queueDepth).toBe(0);
   });
 
   test("simulator target also emits frame events", async () => {
@@ -130,7 +193,7 @@ describe("IOSScreenCaptureHelper", () => {
     helper.on("frame", f => frames.push(f));
     helper.start();
     fake.stdout.push(encodeFrame(2, 2, 8, 33, 0xfa));
-    await flush();
+    await flushFrameDelivery();
     expect(frames).toHaveLength(1);
     expect(frames[0].header.width).toBe(2);
   });
@@ -154,6 +217,39 @@ describe("IOSScreenCaptureHelper", () => {
 
     expect(audio).toEqual([Buffer.from([0x34, 0x12, 0xcc, 0xed])]);
     expect(malformed).toEqual([]);
+  });
+
+  test("emits native capture metrics carried over stderr without logging them", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const metrics = [];
+    const stderr: string[] = [];
+    helper.on("captureMetrics", value => metrics.push(value));
+    helper.on("stderr", line => stderr.push(line));
+    helper.start();
+
+    fake.stderr.push(Buffer.from(
+      `${NATIVE_FRAME_METRICS_PREFIX}${JSON.stringify({
+        captureTimestampMs: 42,
+        frameQueueAgeMs: 7.5,
+        frameQueueDepth: 1,
+        droppedFrames: 3,
+        bytesQueued: 8,
+        highWaterMarkBytes: 16,
+        lastOutputWriteDurationMs: 2,
+      })}\n`
+    ));
+    await flush();
+
+    expect(metrics).toEqual([{
+      captureTimestampMs: 42,
+      frameQueueAgeMs: 7.5,
+      frameQueueDepth: 1,
+      droppedFrames: 3,
+      bytesQueued: 8,
+      highWaterMarkBytes: 16,
+      lastOutputWriteDurationMs: 2,
+    }]);
+    expect(stderr).toEqual([]);
   });
 
   test("emits malformed events for invalid headers", async () => {

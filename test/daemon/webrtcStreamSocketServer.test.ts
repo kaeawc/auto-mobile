@@ -192,6 +192,20 @@ describe("WebRtcStreamSocketServer", () => {
     expect(started[0].overrides).toEqual({ iosSimulatorFps: 24 });
   });
 
+  test("start forwards an explicit empty ICE server list to disable the default STUN server", async () => {
+    const server = new TestableServer(makeDeps());
+    const socket = new FakeSocket();
+
+    await server.simulate(socket, {
+      id: "start-without-ice",
+      action: "start",
+      streamId: "no-ice",
+      iceServers: [],
+    });
+
+    expect(started[0].overrides).toEqual({ iceServers: [] });
+  });
+
   test("start forwards WHIP endpoint and stream stays visible until stop", async () => {
     const server = new TestableServer(makeDeps());
     const socket = new FakeSocket();

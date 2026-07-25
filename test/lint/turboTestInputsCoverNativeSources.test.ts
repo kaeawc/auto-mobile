@@ -104,6 +104,11 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           const source = readFileSync(abs, "utf8");
           for (const match of source.matchAll(/(?<![A-Za-z0-9_.-])(android|ios)\/[A-Za-z0-9._/-]+/g)) {
             const path = match[0].replace(/\/+$/, "");
+            // SwiftPM's generated output can exist after a local native build
+            // but is never a source input for a TypeScript unit test.
+            if (path.split("/").includes(".build")) {
+              continue;
+            }
             if (!existsSync(join(ROOT, path))) {
               continue;
             }

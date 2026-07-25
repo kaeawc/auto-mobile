@@ -1,4 +1,20 @@
 import type { BootedDevice } from "../../models";
+import type { NativeFrameMetrics } from "../screen-stream/IOSScreenCaptureHelper";
+import type { FrameQueueMetrics } from "../screen-stream/LatestFrameQueue";
+
+export interface H264EncoderFrameMetrics extends FrameQueueMetrics {
+  /** Duration of the last synchronous write into the encoder stdin buffer. */
+  outputWriteDurationMs: number | null;
+  /** Largest observed synchronous encoder-stdin write duration. */
+  outputWriteHighWaterDurationMs: number;
+}
+
+/** Queue and write-latency snapshots for the iOS raw-frame pipeline. */
+export interface H264CaptureSourceMetrics {
+  native: NativeFrameMetrics | null;
+  helper: FrameQueueMetrics | null;
+  encoder: H264EncoderFrameMetrics;
+}
 
 export interface H264CaptureSourceOptions {
   device: BootedDevice;
@@ -20,6 +36,8 @@ export interface H264CaptureSourceOptions {
    */
   fps?: number;
   audioEnabled?: boolean;
+  /** Receives bounded iOS capture-pipeline metrics when the source supports them. */
+  onFrameMetrics?: (metrics: H264CaptureSourceMetrics) => void;
 }
 
 /**

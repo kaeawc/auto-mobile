@@ -187,7 +187,8 @@ function createHarnessWithOverrides(options: Partial<ConstructorParameters<typeo
 // (requestKeyFrame) can be observed as a second spawn rather than reusing the
 // single encoder the other harnesses share.
 function createRestartHarness(
-  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {},
+  configureEncoder?: (encoder: FakeChildProcess) => void
 ) {
   const helper = new FakeFrameCaptureHelper();
   const encoders: FakeChildProcess[] = [];
@@ -204,6 +205,7 @@ function createRestartHarness(
     spawner: (command, args) => {
       encoderSpawns.push({ command, args });
       const encoder = new FakeChildProcess();
+      configureEncoder?.(encoder);
       encoders.push(encoder);
       return encoder as unknown as ChildProcessWithoutNullStreams;
     },
@@ -809,7 +811,7 @@ describe("IosH264Source", () => {
     expect(helper.started).toBe(false);
   });
 
-  test("drops frames while encoder stdin is backpressured and resumes on drain", async () => {
+  test("keeps only the newest frame while encoder stdin is backpressured and resumes on drain", async () => {
     const helper = new FakeFrameCaptureHelper();
     const encoder = new FakeChildProcess();
     const stdin = new BackpressuredWritable();
@@ -826,13 +828,92 @@ describe("IosH264Source", () => {
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     helper.emitFrame(frame(1, 1, 0x22));
-    stdin.emit("drain");
     helper.emitFrame(frame(1, 1, 0x33));
+
+    expect(source.getFrameMetrics()).toMatchObject({
+      encoder: {
+        captureTimestampMs: 1,
+        queueDepth: 1,
+        droppedFrames: 1,
+        bytesQueued: 4,
+        highWaterMarkBytes: 4,
+      },
+    });
+
+    stdin.emit("drain");
 
     expect(stdin.writes).toEqual([
       Buffer.alloc(4, 0x11),
       Buffer.alloc(4, 0x33),
     ]);
+  });
+
+  test("discards a retired encoder's queued frame when restarting for a keyframe", async () => {
+    const inputs: BackpressuredWritable[] = [];
+    const { source, helper, encoders } = createRestartHarness(
+      {},
+      encoder => {
+        const input = new BackpressuredWritable();
+        encoder.stdin = input as unknown as Writable;
+        inputs.push(input);
+      }
+    );
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    helper.emitFrame(frame(1, 1, 0x22));
+
+    source.requestKeyFrame();
+    helper.emitFrame(frame(1, 1, 0x33));
+    inputs[1].emit("drain");
+
+    expect(encoders).toHaveLength(2);
+    expect(inputs[1].writes).toEqual([Buffer.alloc(4, 0x33)]);
+    expect(source.getFrameMetrics().encoder.droppedFrames).toBe(1);
+  });
+
+  test("reports native, helper, and encoder queue metrics through the source callback", async () => {
+    const metrics: ReturnType<IosH264Source["getFrameMetrics"]>[] = [];
+    const { source, helper } = createHarness(IOS_DEVICE, {
+      onFrameMetrics: value => metrics.push(value),
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    helper.emit("frameMetrics", {
+      captureTimestampMs: 2,
+      frameAgeMs: 3,
+      queueDepth: 1,
+      droppedFrames: 4,
+      bytesQueued: 5,
+      highWaterMarkBytes: 6,
+      maxFrameBytes: 7,
+    });
+    helper.emit("captureMetrics", {
+      captureTimestampMs: 8,
+      frameQueueAgeMs: 9,
+      frameQueueDepth: 1,
+      droppedFrames: 10,
+      bytesQueued: 11,
+      highWaterMarkBytes: 12,
+      lastOutputWriteDurationMs: 13,
+    });
+
+    expect(metrics.at(-1)).toMatchObject({
+      native: {
+        captureTimestampMs: 8,
+        droppedFrames: 10,
+        lastOutputWriteDurationMs: 13,
+      },
+      helper: {
+        captureTimestampMs: 2,
+        frameAgeMs: 3,
+        highWaterMarkBytes: 6,
+      },
+      encoder: {
+        queueDepth: 0,
+        outputWriteDurationMs: expect.any(Number),
+        outputWriteHighWaterDurationMs: expect.any(Number),
+      },
+    });
   });
 
   test("ignores stale encoder errors after a restart creates a new encoder", async () => {

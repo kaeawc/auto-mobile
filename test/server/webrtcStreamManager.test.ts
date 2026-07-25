@@ -11,6 +11,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type {
   AndroidH264Source,
+  H264CaptureSourceMetrics,
   WebRtcPublisher,
   WebRtcStreamDescriptor,
 } from "../../src/features/webrtc";
@@ -492,6 +493,54 @@ describe("webrtcStreamManager", () => {
 
     capturedSourceOptions?.onAudioData?.(Buffer.from([1, 2, 3, 4]));
     expect(publishers[0].pcmAudioChunks).toEqual([Buffer.from([1, 2, 3, 4])]);
+  });
+
+  test("surfaces capture pipeline metrics on the live stream descriptor", async () => {
+    let sourceOptions:
+      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | undefined;
+    const metrics: H264CaptureSourceMetrics = {
+      native: {
+        captureTimestampMs: 10,
+        frameQueueAgeMs: 20,
+        frameQueueDepth: 1,
+        droppedFrames: 1,
+        bytesQueued: 2,
+        highWaterMarkBytes: 3,
+        lastOutputWriteDurationMs: 4,
+      },
+      helper: null,
+      encoder: {
+        captureTimestampMs: 5,
+        frameAgeMs: null,
+        queueDepth: 0,
+        droppedFrames: 6,
+        bytesQueued: 0,
+        highWaterMarkBytes: 7,
+        maxFrameBytes: 8,
+        outputWriteDurationMs: 9,
+        outputWriteHighWaterDurationMs: 10,
+      },
+    };
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: options => {
+        sourceOptions = options;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-24T00:00:00.000Z"),
+    });
+
+    const descriptor = await startWebRtcStream({
+      device: IOS,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    sourceOptions?.onFrameMetrics?.(metrics);
+
+    expect(getWebRtcStreamDescriptor(descriptor.streamId)?.frameMetrics).toEqual(metrics);
+    expect(listWebRtcStreams()[0].frameMetrics).toEqual(metrics);
   });
 
   test("threads the resolved iOS Simulator fps into the capture source options", async () => {

@@ -22,6 +22,44 @@ func logError(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
+private final class FrameMetricsReporter {
+    private static let linePrefix = "automobile-frame-metrics:"
+
+    private let writer: FrameWriter
+    private let output: (String) -> Void
+    private let queue = DispatchQueue(label: "automobile.screen-capture.metrics")
+    private var timer: DispatchSourceTimer?
+
+    init(writer: FrameWriter, output: @escaping (String) -> Void) {
+        self.writer = writer
+        self.output = output
+    }
+
+    func start() {
+        guard timer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in
+            self?.emitSnapshot()
+        }
+        self.timer = timer
+        timer.resume()
+    }
+
+    func stop() {
+        timer?.cancel()
+        timer = nil
+    }
+
+    private func emitSnapshot() {
+        guard let encoded = try? JSONEncoder().encode(writer.metrics()),
+              let json = String(data: encoded, encoding: .utf8) else {
+            return
+        }
+        output("\(Self.linePrefix)\(json)")
+    }
+}
+
 // ScreenCaptureKit failures can surface as Objective-C exceptions, which would
 // otherwise terminate this subprocess with only SIGABRT visible to its parent.
 // Emit the exception while stderr is still connected so the daemon artifact
@@ -136,6 +174,8 @@ case .captureSimulator(let windowID, let fps, let audio):
 
     let sink = FileHandleFrameSink(handle: .standardOutput)
     let writer = FrameWriter(sink: sink)
+    let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
+    metricsReporter.start()
     let simSession = SimulatorCaptureSession(writer: writer) { error in
         logError("error: ScreenCaptureKit stream stopped: \(error)")
     }
@@ -164,6 +204,7 @@ case .captureSimulator(let windowID, let fps, let audio):
     }
 
     installShutdownHandlers {
+        metricsReporter.stop()
         runBlocking { await simSession.stop() }
         exit(0)
     }
@@ -191,6 +232,8 @@ case .capture(let deviceID):
 
     let sink = FileHandleFrameSink(handle: .standardOutput)
     let writer = FrameWriter(sink: sink)
+    let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
+    metricsReporter.start()
     let captureSession = DeviceCaptureSession(writer: writer) { error in
         logError("error: iOS device capture failed: \(error)")
     }
@@ -203,6 +246,7 @@ case .capture(let deviceID):
     }
 
     installShutdownHandlers {
+        metricsReporter.stop()
         captureSession.stop()
         exit(0)
     }

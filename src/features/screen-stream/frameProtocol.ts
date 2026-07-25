@@ -45,8 +45,11 @@ const MAX_FRAME_DIMENSION = 16_384;
  * observed at exactly `width * 4`), so a full page of slack is generous.
  */
 const MAX_ROW_PADDING_BYTES = 4096;
-/** Largest plausible single-frame pixel payload (256 MiB). */
-const MAX_FRAME_PAYLOAD_BYTES = 256 * 1024 * 1024;
+/**
+ * Largest raw frame retained by the Node handoff. 32 MiB covers current iPhone
+ * and iPad BGRA captures while keeping one incomplete frame bounded.
+ */
+export const MAX_RAW_FRAME_BYTES = 32 * 1024 * 1024;
 /** Largest plausible audio record (16 MiB ≈ 17 minutes of 8 kHz PCM16LE). */
 const MAX_AUDIO_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
@@ -83,8 +86,9 @@ export interface MalformedFrameError {
 }
 
 export class FrameDecoder {
-  private buffer: Buffer = Buffer.alloc(0);
+  private readonly buffer = new BufferQueue();
   private pendingHeader: FrameHeader | null = null;
+  private highWaterMarkBytes = 0;
   /**
    * True while the decoder has lost frame alignment and is scanning for the next
    * valid marker. Malformed callbacks are suppressed in this state so one
@@ -101,41 +105,80 @@ export class FrameDecoder {
   push(
     chunk: Buffer,
     onMalformed?: (error: MalformedFrameError) => void,
-    onAudio?: (audio: DecodedAudio) => void
+    onAudio?: (audio: DecodedAudio) => void,
+    onFrame?: (frame: DecodedFrame) => void
   ): DecodedFrame[] {
-    if (chunk.length > 0) {
-      this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
-    }
-
     const frames: DecodedFrame[] = [];
+    let offset = 0;
+    while (offset < chunk.length) {
+      // Do not retain more than one valid raw frame plus its header, even when
+      // a synthetic or unusually coalesced stdout chunk carries many frames.
+      const available = FRAME_HEADER_SIZE + MAX_RAW_FRAME_BYTES - this.buffer.length;
+      if (available === 0) {
+        if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame)) {
+          throw new Error("FrameDecoder reached its raw-frame buffer limit without a complete frame");
+        }
+        continue;
+      }
+      const end = Math.min(chunk.length, offset + available);
+      this.buffer.append(chunk.subarray(offset, end));
+      this.highWaterMarkBytes = Math.max(this.highWaterMarkBytes, this.buffer.length);
+      offset = end;
+      this.decodeAvailable(frames, onMalformed, onAudio, onFrame);
+    }
+    return frames;
+  }
 
+  getMetrics(): FrameDecoderMetrics {
+    return {
+      bufferedBytes: this.buffer.length,
+      highWaterMarkBytes: this.highWaterMarkBytes,
+      maxBufferedBytes: FRAME_HEADER_SIZE + MAX_RAW_FRAME_BYTES,
+    };
+  }
+
+  private decodeAvailable(
+    frames: DecodedFrame[],
+    onMalformed?: (error: MalformedFrameError) => void,
+    onAudio?: (audio: DecodedAudio) => void,
+    onFrame?: (frame: DecodedFrame) => void
+  ): boolean {
+    let madeProgress = false;
     while (true) {
-      if (this.resynchronizing && !this.resynchronize()) {break;}
+      if (this.resynchronizing && !this.resynchronize()) {return madeProgress;}
 
       if (this.pendingHeader === null) {
         const outcome = this.takeHeader(onMalformed);
-        if (outcome === "starved") {break;}
-        if (outcome === "malformed") {continue;}
+        if (outcome === "starved") {return madeProgress;}
+        if (outcome === "malformed") {
+          madeProgress = true;
+          continue;
+        }
         this.pendingHeader = outcome;
+        madeProgress = true;
       }
 
       const pending = this.pendingHeader;
       const expected = payloadSize(pending);
-      if (this.buffer.length < expected) {break;}
+      if (this.buffer.length < expected) {return madeProgress;}
 
-      // Copy pixels to release the underlying chunk allocation; otherwise
-      // every emitted frame pins the entire upstream buffer in memory.
-      const payload = Buffer.from(this.buffer.subarray(0, expected));
-      this.buffer = this.buffer.subarray(expected);
+      // A single copy detaches the emitted frame from stdout chunks. The queue
+      // avoids the former concatenate-on-every-chunk behavior while retaining
+      // no more than this one completed payload.
+      const payload = this.buffer.takeDetached(expected);
       if (isAudioHeader(pending)) {
         onAudio?.({ pcm16le: payload });
       } else {
-        frames.push({ header: pending, pixels: payload });
+        const frame = { header: pending, pixels: payload };
+        if (onFrame) {
+          onFrame(frame);
+        } else {
+          frames.push(frame);
+        }
       }
       this.pendingHeader = null;
+      madeProgress = true;
     }
-
-    return frames;
   }
 
   /**
@@ -148,14 +191,15 @@ export class FrameDecoder {
     onMalformed?: (error: MalformedFrameError) => void
   ): FrameHeader | "starved" | "malformed" {
     if (this.buffer.length < FRAME_HEADER_SIZE) {return "starved";}
-    const reason = headerErrorAt(this.buffer, 0);
+    const bytes = this.buffer.peek(FRAME_HEADER_SIZE);
+    const reason = headerErrorAt(bytes, 0);
     if (reason) {
       this.resynchronizing = true;
-      onMalformed?.({ reason, header: parseFields(this.buffer, 0) });
+      onMalformed?.({ reason, header: parseFields(bytes, 0) });
       return "malformed";
     }
-    const header = parseFields(this.buffer, 0);
-    this.buffer = this.buffer.subarray(FRAME_HEADER_SIZE);
+    const header = parseFields(bytes, 0);
+    this.buffer.discard(FRAME_HEADER_SIZE);
     return header;
   }
 
@@ -172,18 +216,19 @@ export class FrameDecoder {
    * corrupt header follows it).
    */
   private resynchronize(): boolean {
+    const buffer = this.buffer.toBuffer();
     let searchFrom = 0;
-    while (searchFrom <= this.buffer.length - FRAME_MAGIC_BYTES.length) {
-      const index = this.buffer.indexOf(FRAME_MAGIC_BYTES, searchFrom);
+    while (searchFrom <= buffer.length - FRAME_MAGIC_BYTES.length) {
+      const index = buffer.indexOf(FRAME_MAGIC_BYTES, searchFrom);
       if (index < 0) {break;}
-      if (index + FRAME_HEADER_SIZE > this.buffer.length) {
+      if (index + FRAME_HEADER_SIZE > buffer.length) {
         // Marker present but the full header has not arrived yet: keep from here
         // and wait for more bytes before validating.
-        this.trimTo(index);
+        this.replaceBuffer(buffer.subarray(index));
         return false;
       }
-      if (headerErrorAt(this.buffer, index) === null) {
-        this.trimTo(index);
+      if (headerErrorAt(buffer, index) === null) {
+        this.replaceBuffer(buffer.subarray(index));
         this.resynchronizing = false;
         return true;
       }
@@ -192,16 +237,20 @@ export class FrameDecoder {
     // No validating marker in what has arrived. Keep only a possible marker
     // prefix straddling the chunk boundary; discard the rest so the retained
     // buffer never grows without bound during sustained garbage.
-    this.trimTo(Math.max(0, this.buffer.length - (FRAME_MAGIC_BYTES.length - 1)));
+    this.replaceBuffer(buffer.subarray(Math.max(0, buffer.length - (FRAME_MAGIC_BYTES.length - 1))));
     return false;
   }
 
-  /** Drop `offset` leading bytes, copying so the discarded allocation is freed. */
-  private trimTo(offset: number): void {
-    if (offset > 0) {
-      this.buffer = Buffer.from(this.buffer.subarray(offset));
-    }
+  /** Compact retained corrupt-stream bytes so discarded chunks can be released. */
+  private replaceBuffer(bytes: Buffer): void {
+    this.buffer.replace(bytes.length === 0 ? Buffer.alloc(0) : Buffer.from(bytes));
   }
+}
+
+export interface FrameDecoderMetrics {
+  bufferedBytes: number;
+  highWaterMarkBytes: number;
+  maxBufferedBytes: number;
 }
 
 function isAudioHeader(header: FrameHeader): boolean {
@@ -254,10 +303,100 @@ function fieldBoundsError(header: FrameHeader): MalformedFrameReason | null {
   if (header.bytesPerRow > header.width * 4 + MAX_ROW_PADDING_BYTES) {
     return "header_bytes_per_row_too_large";
   }
-  if (header.height * header.bytesPerRow > MAX_FRAME_PAYLOAD_BYTES) {
+  if (header.height * header.bytesPerRow > MAX_RAW_FRAME_BYTES) {
     return "header_payload_too_large";
   }
   return null;
+}
+
+/**
+ * Chunked byte storage prevents repeated whole-frame `Buffer.concat` copies as
+ * stdout arrives in pipe-sized pieces. Payload extraction performs one detached
+ * copy, which is needed because decoded frames outlive their stdout chunks.
+ */
+class BufferQueue {
+  private chunks: Buffer[] = [];
+  private headOffset = 0;
+  length = 0;
+
+  append(chunk: Buffer): void {
+    if (chunk.length === 0) {return;}
+    this.chunks.push(chunk);
+    this.length += chunk.length;
+  }
+
+  peek(length: number): Buffer {
+    if (length > this.length) {
+      throw new RangeError(`cannot peek ${length} bytes from ${this.length}-byte queue`);
+    }
+    const first = this.chunks[0];
+    const firstAvailable = first.length - this.headOffset;
+    if (firstAvailable >= length) {
+      return first.subarray(this.headOffset, this.headOffset + length);
+    }
+    const out = Buffer.allocUnsafe(length);
+    this.copyTo(out, length);
+    return out;
+  }
+
+  takeDetached(length: number): Buffer {
+    if (length > this.length) {
+      throw new RangeError(`cannot take ${length} bytes from ${this.length}-byte queue`);
+    }
+    const out = Buffer.allocUnsafe(length);
+    this.copyTo(out, length);
+    this.discard(length);
+    return out;
+  }
+
+  discard(length: number): void {
+    if (length > this.length) {
+      throw new RangeError(`cannot discard ${length} bytes from ${this.length}-byte queue`);
+    }
+    let remaining = length;
+    while (remaining > 0) {
+      const first = this.chunks[0];
+      const available = first.length - this.headOffset;
+      if (remaining < available) {
+        this.headOffset += remaining;
+        this.length -= remaining;
+        return;
+      }
+      this.chunks.shift();
+      this.headOffset = 0;
+      this.length -= available;
+      remaining -= available;
+    }
+  }
+
+  toBuffer(): Buffer {
+    if (this.length === 0) {return Buffer.alloc(0);}
+    const first = this.chunks[0];
+    if (this.chunks.length === 1) {
+      return first.subarray(this.headOffset);
+    }
+    const out = Buffer.allocUnsafe(this.length);
+    this.copyTo(out, this.length);
+    return out;
+  }
+
+  replace(bytes: Buffer): void {
+    this.chunks = bytes.length === 0 ? [] : [bytes];
+    this.headOffset = 0;
+    this.length = bytes.length;
+  }
+
+  private copyTo(destination: Buffer, length: number): void {
+    let copied = 0;
+    for (let index = 0; copied < length; index++) {
+      const chunk = this.chunks[index];
+      const start = index === 0 ? this.headOffset : 0;
+      const available = chunk.length - start;
+      const count = Math.min(available, length - copied);
+      chunk.copy(destination, copied, start, start + count);
+      copied += count;
+    }
+  }
 }
 
 /**

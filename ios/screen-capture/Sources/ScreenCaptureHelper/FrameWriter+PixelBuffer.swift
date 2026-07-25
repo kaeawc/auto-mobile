@@ -4,9 +4,10 @@ import Foundation
 import ScreenCaptureCore
 
 extension FrameWriter {
-    /// Writes one frame from a `CMSampleBuffer`, locking the underlying pixel
-    /// buffer for the duration of the synchronous sink write. Returns `false`
-    /// when the sample buffer has no image (e.g. dropped/idle frames).
+    /// Copies one frame from a `CMSampleBuffer` into the bounded latest-frame
+    /// queue. The pixel buffer stays locked only for that copy, never for a
+    /// potentially blocking stdout write. Returns `false` when no image exists
+    /// or when the raw frame exceeds the queue's fixed byte cap.
     @discardableResult
     func write(sampleBuffer: CMSampleBuffer) -> Bool {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return false }
@@ -14,12 +15,11 @@ extension FrameWriter {
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return false }
 
-        write(
+        return write(
             width: CVPixelBufferGetWidth(pixelBuffer),
             height: CVPixelBufferGetHeight(pixelBuffer),
             bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
             baseAddress: base
         )
-        return true
     }
 }

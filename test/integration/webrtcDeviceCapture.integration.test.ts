@@ -549,6 +549,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       AUTOMOBILE_DAEMON_PID_FILE_PATH: join(daemonDir, "daemon.pid"),
       AUTOMOBILE_DAEMON_LOCK_FILE_PATH: join(daemonDir, "daemon.lock"),
       AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: webRtcSocketPath,
+      // This test controls its Simulator fixture through simctl and does not
+      // use CtrlProxy, so do not compete for the hosted runner with a release
+      // download that is unrelated to capture -> WHIP -> WHEP.
+      AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "1",
     };
     delete daemonEnvironment.AUTOMOBILE_DB_PATH;
     delete daemonEnvironment.AUTO_MOBILE_DB_PATH;
@@ -608,7 +612,16 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         }
       })();
       const response = await sendWebRtcStreamRequest(
-        { action: "start", id: streamId, streamId, platform, whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip` },
+        {
+          action: "start",
+          id: streamId,
+          streamId,
+          platform,
+          whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip`,
+          // Both peers are local to the CI worker. Suppress the public STUN
+          // default so host-candidate negotiation cannot depend on runner DNS.
+          iceServers: [],
+        },
         { socketPath: webRtcSocketPath }
       );
       if (!response.success) {

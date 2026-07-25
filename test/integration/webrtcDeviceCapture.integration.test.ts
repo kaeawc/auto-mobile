@@ -58,6 +58,11 @@ interface ReaderDiagnostics {
   video: { frames: number; width: number; height: number; readyState: number };
 }
 
+interface ChromeReader {
+  chrome: ChildProcessWithoutNullStreams;
+  cdp: CdpClient;
+}
+
 class CdpClient {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (response: CdpResponse) => void; reject: (error: Error) => void }>();
@@ -152,7 +157,7 @@ function chromeDiagnostics(chrome: ChildProcessWithoutNullStreams, logFile: stri
  * stale user-data lock cannot wedge the relaunch. Returns the live process so
  * the caller can tear it down.
  */
-async function launchChromeReader(logFile: string): Promise<{ chrome: ChildProcessWithoutNullStreams; cdp: CdpClient }> {
+async function launchChromeReader(logFile: string): Promise<ChromeReader> {
   const maxAttempts = 2;
   let lastError: Error | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -234,6 +239,36 @@ async function subscribeReader(cdp: CdpClient): Promise<void> {
   } catch (error) {
     const diagnostics = await readerDiagnostics(cdp).catch(() => undefined);
     throw new Error(`${(error as Error).message}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`);
+  }
+}
+
+/**
+ * The macOS hosted image can leave a previously healthy Chrome renderer unable
+ * to create its next WHEP peer connection. A new browser/profile turns that
+ * browser-only flake into one bounded retry while preserving the actual
+ * keyframe-recovery assertion below.
+ */
+async function subscribeRecoveryReader(reader: ChromeReader, logFile: string): Promise<ChromeReader> {
+  try {
+    await subscribeReader(reader.cdp);
+    return reader;
+  } catch (firstError) {
+    reader.cdp.close();
+    await stop(reader.chrome);
+    await Bun.sleep(1_000);
+    const replacement = await launchChromeReader(logFile);
+    try {
+      await subscribeReader(replacement.cdp);
+      return replacement;
+    } catch (retryError) {
+      replacement.cdp.close();
+      await stop(replacement.chrome);
+      throw new Error(
+        `WHEP recovery reader failed after a fresh-browser retry: ` +
+        `first=${firstError instanceof Error ? firstError.message : String(firstError)}; ` +
+        `retry=${retryError instanceof Error ? retryError.message : String(retryError)}`
+      );
+    }
   }
 }
 
@@ -701,7 +736,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
           // A brand-new WHEP subscription is the relayed PLI: it renegotiates
           // with MediaMTX, which requests a keyframe upstream. The recovery
           // viewer starts cold, so its baseline is zero on both counters.
-          await subscribeReader(cdp!);
+          ({ chrome, cdp } = await subscribeRecoveryReader(
+            { chrome: chrome!, cdp: cdp! },
+            join(artifactDir, "chrome.log")
+          ));
           const baseline: KeyframeRecoverySample = { keyFramesDecoded: 0, framesDecoded: 0 };
           // Under a static Simulator screen the restarted encoder's IDR only
           // rides out on the next delivered frame (SimulatorCaptureSession drops

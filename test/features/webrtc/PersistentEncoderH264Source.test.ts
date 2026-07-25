@@ -495,6 +495,19 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
   });
 
+  test("rejects start (for fallback) when the server exits after readiness before socket connection", async () => {
+    const ctx = makeSource();
+    const startPromise = ctx.source.start();
+    await tick(); // push + spawn
+    ctx.processes[0].ready();
+    queueMicrotask(() => ctx.processes[0].exit(1, null));
+
+    await expect(startPromise).rejects.toThrow(/video-server exited \(code=1, signal=null\)/);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
+    expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
+  });
+
   test("cleans up a matching lease when stop wins before PID handoff", async () => {
     const lease = JSON.stringify({
       version: 1,

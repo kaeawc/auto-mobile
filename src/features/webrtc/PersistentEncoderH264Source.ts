@@ -235,6 +235,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private serverOutputBuffer = "";
   private sawStreamingStarted = false;
   private serverStartupInProgress: AdbProcess | null = null;
+  private serverStartupFailure: { server: AdbProcess; error: Error } | null = null;
 
   constructor(options: PersistentEncoderH264SourceOptions) {
     this.options = options;
@@ -280,6 +281,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       throw new ActionableError("Persistent encoder H.264 source already started.");
     }
     this.running = true;
+    this.serverStartupInProgress = null;
+    this.serverStartupFailure = null;
     try {
       await this.launch();
     } catch (error) {
@@ -383,12 +386,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     });
 
     this.deviceProcessId = await this.waitForReady(server);
+    this.serverStartupInProgress = server;
     this.watchServer(server);
     return this.running ? server : null;
   }
 
   private async connectToServer(server: AdbProcess, port: number): Promise<void> {
-    this.serverStartupInProgress = server;
+    this.throwIfServerStartupFailed(server);
     const streamingStarted = this.options.audioEnabled
       ? this.waitForStreamingStarted(server)
       : null;
@@ -464,16 +468,32 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
   }
 
+  private throwIfServerStartupFailed(server: AdbProcess): void {
+    const failure = this.serverStartupFailure;
+    if (failure?.server === server) {
+      throw failure.error;
+    }
+  }
+
   private watchServer(server: AdbProcess): void {
     server.once("exit", (code, signal) => {
       if (this.server !== server) {return;}
       this.detachServerOutputObserver(server);
       this.server = null;
-      if (this.serverStartupInProgress === server) {return;}
+      if (this.serverStartupInProgress === server) {
+        this.serverStartupFailure = {
+          server,
+          error: new Error(`video-server exited (code=${code}, signal=${signal})`),
+        };
+        return;
+      }
       this.failIfRunning(new Error(`video-server exited (code=${code}, signal=${signal})`));
     });
     server.once("error", (error: Error) => {
-      if (this.serverStartupInProgress === server) {return;}
+      if (this.serverStartupInProgress === server) {
+        this.serverStartupFailure = { server, error };
+        return;
+      }
       this.failIfRunning(error);
     });
   }

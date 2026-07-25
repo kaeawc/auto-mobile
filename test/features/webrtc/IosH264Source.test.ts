@@ -1228,7 +1228,7 @@ describe("IosH264Source", () => {
     ]);
   });
 
-  test("discards a retired encoder's queued frame when restarting for a keyframe", async () => {
+  test("discards a retired encoder's queued frame while replaying the last accepted frame", async () => {
     const inputs: BackpressuredWritable[] = [];
     const { source, helper, encoders } = createRestartHarness(
       {},
@@ -1247,7 +1247,7 @@ describe("IosH264Source", () => {
     inputs[1].emit("drain");
 
     expect(encoders).toHaveLength(2);
-    expect(inputs[1].writes).toEqual([Buffer.alloc(4, 0x33)]);
+    expect(inputs[1].writes).toEqual([Buffer.alloc(4, 0x11), Buffer.alloc(4, 0x33)]);
     expect(source.getFrameMetrics().encoder.droppedFrames).toBe(1);
   });
 
@@ -1327,14 +1327,18 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
-  test("requestKeyFrame restarts the ffmpeg encoder to emit a fresh IDR, keeping output flowing", async () => {
+  test("requestKeyFrame replays a defensive copy of the latest frame into the replacement encoder", async () => {
     const { source, helper, encoders, encoderSpawns, chunks, errors } = createRestartHarness();
 
-    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    const firstFrame = frame(2, 2, 0x11);
+    await startWithFrame(source, helper, firstFrame);
     expect(encoderSpawns).toHaveLength(1);
+    firstFrame.pixels.fill(0xff);
 
     // ffmpeg cannot be signalled for an IDR mid-stream over a pipe; a request
-    // restarts the encoder, whose first encoded frame is an SPS/PPS + IDR.
+    // restarts the encoder. Replay the most recent frame so static capture can
+    // produce the replacement encoder's first SPS/PPS + IDR without waiting for
+    // the screen to change.
     source.requestKeyFrame();
 
     // A second encoder is spawned with identical argv, and the old one is ended
@@ -1342,11 +1346,14 @@ describe("IosH264Source", () => {
     expect(encoderSpawns).toHaveLength(2);
     expect(encoderSpawns[1].args).toEqual(encoderSpawns[0].args);
     expect(encoders[0].killed).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x11));
 
-    // The next delivered frame flows into the new encoder, and its output (the
-    // fresh IDR) is forwarded to the same onData sink.
+    // Later helper frames continue flowing into the replacement encoder, whose
+    // output is forwarded to the same onData sink.
     helper.emitFrame(frame(2, 2, 0x22));
-    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x22));
+    expect(encoders[1].getStdinData()).toEqual(
+      Buffer.concat([Buffer.alloc(16, 0x11), Buffer.alloc(16, 0x22)])
+    );
     encoders[1].stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
     await flush();
 

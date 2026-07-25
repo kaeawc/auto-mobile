@@ -240,6 +240,7 @@ export class IosH264Source implements H264CaptureSource {
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
   private encoderBackpressured = false;
+  private lastHelperFrame: DecodedFrame | null = null;
   private teardownPromise: Promise<void> | null = null;
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
@@ -307,6 +308,7 @@ export class IosH264Source implements H264CaptureSource {
     this.lastHelperStderr = null;
     this.helperFrameMetrics = null;
     this.nativeFrameMetrics = null;
+    this.lastHelperFrame = null;
 
     try {
       const helperPath = await this.resolveHelperPath();
@@ -371,6 +373,9 @@ export class IosH264Source implements H264CaptureSource {
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
     this.startEncoder(size, true);
+    if (this.lastHelperFrame) {
+      this.writeFrameToEncoder(this.lastHelperFrame);
+    }
     oldEncoder.stdin.end();
     oldEncoder.kill("SIGTERM");
   }
@@ -674,6 +679,10 @@ export class IosH264Source implements H264CaptureSource {
       this.outputWriteHighWaterDurationMs,
       this.lastOutputWriteDurationMs
     );
+    this.lastHelperFrame = {
+      header: { ...frame.header },
+      pixels: Buffer.from(frame.pixels),
+    };
     if (accepted === false) {
       this.encoderBackpressured = true;
     }
@@ -924,6 +933,7 @@ export class IosH264Source implements H264CaptureSource {
     this.pendingFrames.clear();
     this.forcedKeyFrameEncoder = null;
     this.forcedKeyFrameParser = null;
+    this.lastHelperFrame = null;
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 

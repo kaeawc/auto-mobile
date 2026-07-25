@@ -232,9 +232,9 @@ export class IOSScreenCaptureHelper extends EventEmitter {
     if (proc === null) {return null;}
 
     if (proc.exitCode !== null || proc.killed) {
-      const result = await (this.exitPromise ?? Promise.resolve(null));
+      const result = await this.waitForExitWithinGrace();
       this.cleanupProcess(proc);
-      return result;
+      return result ?? { code: proc.exitCode, signal: proc.signalCode };
     }
     proc.kill("SIGTERM");
     const result = await this.waitForExitWithinGrace();

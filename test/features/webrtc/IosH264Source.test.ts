@@ -335,7 +335,7 @@ describe("IosH264Source", () => {
     expect(aborted).toBe(true);
   });
 
-  test("uses the shared simulator helper pool by default and leaves its capture warm after stream stop", async () => {
+  test("leaves an injected simulator helper pool warm after stream stop", async () => {
     const helper = new FakeFrameCaptureHelper();
     const pool = new IOSSimulatorCaptureHelperPool({
       createHelper: () => helper,

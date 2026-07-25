@@ -13,6 +13,9 @@ output_path="${1:?Usage: $0 <output-zip-path>}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/../.." && pwd)"
 package_dir="${project_root}/ios/screen-capture"
+output_dir="$(dirname "${output_path}")"
+mkdir -p "${output_dir}"
+output_path="$(cd "${output_dir}" && pwd -P)/$(basename "${output_path}")"
 archive_path="${output_path}.partial"
 
 rm -f "${archive_path}"
@@ -61,7 +64,6 @@ fi
 codesign "${codesign_args[@]}" "${helper_path}"
 codesign --verify --strict --verbose=2 "${helper_path}"
 
-mkdir -p "$(dirname "${output_path}")"
 (
   cd "${bin_path}"
   ditto -c -k --keepParent "screen-capture-helper" "${archive_path}"

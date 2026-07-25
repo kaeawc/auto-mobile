@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 import type {
   IosScreenCaptureHelperEvents,
   IosScreenCaptureHelperOptions,
@@ -14,6 +15,7 @@ class FakeSimulatorHelper extends EventEmitter {
   starts = 0;
   stops = 0;
   isRunning = false;
+  stopError: Error | null = null;
 
   start(): void {
     this.starts++;
@@ -23,6 +25,9 @@ class FakeSimulatorHelper extends EventEmitter {
   async stop(): Promise<null> {
     this.stops++;
     this.isRunning = false;
+    if (this.stopError) {
+      throw this.stopError;
+    }
     return null;
   }
 
@@ -39,6 +44,12 @@ function simulatorOptions(windowID = 42): IosScreenCaptureHelperOptions {
     binaryPath: "/fake/screen-capture-helper",
     target: { kind: "simulator", windowID, fps: 15 },
   };
+}
+
+async function flushMicrotasks(count = 5): Promise<void> {
+  for (let index = 0; index < count; index++) {
+    await Promise.resolve();
+  }
 }
 
 describe("IOSSimulatorCaptureHelperPool", () => {
@@ -105,9 +116,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
       pixels: Buffer.alloc(4),
     });
     helpers[0].emit("stderr", "error: ScreenCaptureKit stream stopped");
-    for (let i = 0; i < 5; i++) {
-      await Promise.resolve();
-    }
+    await flushMicrotasks();
 
     const second = pool.acquire(simulatorOptions());
     const secondFrames: number[] = [];
@@ -119,7 +128,37 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     expect(helpers[1].starts).toBe(1);
     expect(secondFrames).toEqual([]);
     await second.stop();
+    await first.stop();
     await pool.shutdown();
+  });
+
+  test("logs a rejected failed-helper cleanup instead of leaving an unhandled rejection", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const lease = pool.acquire(simulatorOptions());
+    lease.on("error", () => {});
+    await lease.start();
+    helpers[0].stopError = new Error("stop failed");
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      helpers[0].emit("error", new Error("capture failed"));
+      await flushMicrotasks();
+
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining("failed helper stop failed: Error: stop failed")
+      );
+    } finally {
+      warning.mockRestore();
+      await lease.stop();
+      await pool.shutdown();
+    }
   });
 
   test("does not create a helper when a lease stops before its queued attachment", async () => {

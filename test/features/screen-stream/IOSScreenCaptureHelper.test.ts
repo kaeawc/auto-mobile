@@ -376,6 +376,30 @@ describe("IOSScreenCaptureHelper", () => {
     }
   });
 
+  test("bounds a concurrent stop after SIGTERM instead of awaiting exit forever", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeChildProcess();
+    fake.kill = () => {
+      fake.killed = true;
+      return true;
+    };
+    const helper = new IOSScreenCaptureHelper({
+      binaryPath: "/fake/screen-capture-helper",
+      target: { kind: "simulator", windowID: 1 },
+      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+      timer,
+    });
+    helper.start();
+
+    const firstStop = helper.stop();
+    const concurrentStop = helper.stop();
+    timer.advanceTime(IOS_HELPER_STOP_GRACE_MS);
+
+    const [firstResult, concurrentResult] = await Promise.all([firstStop, concurrentStop]);
+    expect(firstResult?.signal).toBe("SIGKILL");
+    expect(concurrentResult).not.toBeNull();
+  });
+
   test("emits error event when underlying process emits error", async () => {
     const { fake, helper } = withFakeSpawner();
     const errors: Error[] = [];

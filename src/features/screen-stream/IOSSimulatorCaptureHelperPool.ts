@@ -162,7 +162,7 @@ export class IOSSimulatorCaptureHelperPool {
     this.clearEntryIdleTimer(entry);
     entry.idleTimer = this.timer.setTimeout(() => {
       entry.idleTimer = null;
-      void this.enqueue(() => this.stopIdleEntry(entry));
+      this.enqueueBestEffort(() => this.stopIdleEntry(entry), "idle helper stop failed");
     }, this.idleTtlMs);
   }
 
@@ -180,14 +180,14 @@ export class IOSSimulatorCaptureHelperPool {
       // The helper can report a terminal ScreenCaptureKit error without exiting.
       // Keeping that process warm would hand the next reconnect a frozen session.
       if (isFatalHelperStderr(line) && this.entries.get(entry.key) === entry) {
-        void this.enqueue(() => this.stopFailedEntry(entry));
+        this.enqueueBestEffort(() => this.stopFailedEntry(entry), "failed helper stop failed");
       }
     });
     entry.helper.on("readiness", readiness => this.broadcast(entry, "readiness", readiness));
     entry.helper.on("error", error => {
       this.broadcast(entry, "error", error);
       if (this.entries.get(entry.key) === entry) {
-        void this.enqueue(() => this.stopFailedEntry(entry));
+        this.enqueueBestEffort(() => this.stopFailedEntry(entry), "failed helper stop failed");
       }
     });
     entry.helper.on("exit", info => {
@@ -236,6 +236,12 @@ export class IOSSimulatorCaptureHelperPool {
     const next = this.transition.then(action, action);
     this.transition = next.catch(() => undefined);
     return next;
+  }
+
+  private enqueueBestEffort(action: () => Promise<void>, failureMessage: string): void {
+    void this.enqueue(action).catch(error => {
+      logger.warn(`[IOSSimulatorCaptureHelperPool] ${failureMessage}: ${error}`);
+    });
   }
 
   private clearEntryIdleTimer(entry: HelperEntry): void {

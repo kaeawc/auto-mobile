@@ -66,7 +66,7 @@ error rather than silently publishing video-only.
 `h264_videotoolbox`, and forwards raw H.264 Annex-B stdout chunks into the
 existing `WebRtcPublisher`. The helper is a sha256-verified signed universal
 archive downloaded from the matching GitHub Release and cached under
-`~/.auto-mobile/screen-capture-helper/` (issue #4392), so a normal macOS install
+`~/.auto-mobile/screen-capture-helper/` ([#4392](https://github.com/kaeawc/auto-mobile/issues/4392)), so a normal macOS install
 needs no Swift toolchain. The Swift package source is **not** shipped in the npm
 payload. For local Swift development, build it in a checkout and set
 `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` explicitly. ffmpeg is resolved from

@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,
   SCREEN_CAPTURE_HELPER_CACHE_FILENAME,
+  SCREEN_CAPTURE_HELPER_DOWNLOAD_TIMEOUT_MS,
   SCREEN_CAPTURE_HELPER_METADATA_FILENAME,
   ScreenCaptureHelperProvider,
   type ScreenCaptureHelperMetadata,
@@ -58,6 +59,10 @@ describe("ScreenCaptureHelperProvider", () => {
   afterEach(async () => {
     ScreenCaptureHelperProvider.resetInstances();
     await fs.rm(cacheDir, { recursive: true, force: true });
+  });
+
+  test("allows a cold release download a network-appropriate deadline", () => {
+    expect(SCREEN_CAPTURE_HELPER_DOWNLOAD_TIMEOUT_MS).toBe(30_000);
   });
 
   test("downloads, verifies, extracts, and caches the release helper", async () => {

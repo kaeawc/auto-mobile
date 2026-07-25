@@ -91,10 +91,10 @@ const validateWaitForTimeoutAliases = (
   value: { timeout?: number; timeoutMs?: number },
   ctx: z.RefinementCtx
 ): void => {
-  if (value.timeout !== undefined && value.timeoutMs !== undefined && value.timeout !== value.timeoutMs) {
+  if (value.timeout !== undefined && value.timeoutMs !== undefined) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "waitFor timeout and timeoutMs must match when both are provided",
+      message: "waitFor accepts either timeout or timeoutMs, not both",
     });
   }
 };
@@ -236,6 +236,7 @@ const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
 const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
+  not: { required: ["timeout", "timeoutMs"] },
   description: "Wait by DSL (`for`) or legacy selector.",
   properties: {
     for: {

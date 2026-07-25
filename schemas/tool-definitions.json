@@ -3092,6 +3092,12 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
+          "not": {
+            "required": [
+              "timeout",
+              "timeoutMs"
+            ]
+          },
           "description": "Wait by DSL (`for`) or legacy selector.",
           "properties": {
             "for": {
@@ -5830,6 +5836,12 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
+          "not": {
+            "required": [
+              "timeout",
+              "timeoutMs"
+            ]
+          },
           "description": "Wait by DSL (`for`) or legacy selector.",
           "properties": {
             "for": {

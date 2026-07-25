@@ -259,7 +259,7 @@ describe("waitFor back-compat", () => {
     });
   });
 
-  test("rejects conflicting timeout aliases across all waitFor forms", () => {
+  test("rejects dual timeout aliases across all waitFor forms", () => {
     for (const waitFor of [
       { for: "appear", elementId: "x" },
       { elementId: "x" },
@@ -268,7 +268,7 @@ describe("waitFor back-compat", () => {
       expect(() =>
         observeSchema.parse({
           platform: "android",
-          waitFor: { ...waitFor, timeout: 1000, timeoutMs: 2000 },
+          waitFor: { ...waitFor, timeout: 1000, timeoutMs: 1000 },
         })
       ).toThrow(/timeout/);
     }

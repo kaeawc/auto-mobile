@@ -299,6 +299,13 @@ describe("published observe waitFor input schema", () => {
     }
   });
 
+  test("rejects dual timeout aliases in the advertised schema", () => {
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "appear", elementId: "target", timeout: 1000, timeoutMs: 1000 },
+    }).valid).toBe(false);
+  });
+
   test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
     const toolDefinitions = JSON.parse(readFileSync(
       new URL("../../schemas/tool-definitions.json", import.meta.url),

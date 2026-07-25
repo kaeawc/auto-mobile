@@ -21,8 +21,8 @@ export interface ObservationSystemChrome {
   visibility: "visible" | "hidden" | "partial" | "unknown";
   statusBar: "visible" | "hidden" | "unknown";
   navigationBar?: "visible" | "hidden" | "unknown";
-  /** iOS only: the top view controller's preference, not observed visibility. */
-  homeIndicatorAutoHideRequested?: boolean;
+  /** iOS only: the top view controller's preference, not observed visibility. Android serializes this as null. */
+  homeIndicatorAutoHideRequested?: boolean | null;
   source: "android-window-insets" | "ios-status-bar-manager";
 }
 

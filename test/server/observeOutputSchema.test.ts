@@ -107,6 +107,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
           visibility: "partial",
           statusBar: "visible",
           navigationBar: "hidden",
+          homeIndicatorAutoHideRequested: null,
           source: "android-window-insets",
         },
       },

@@ -3897,7 +3897,14 @@
                       ]
                     },
                     "homeIndicatorAutoHideRequested": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "source": {
                       "type": "string",
@@ -4524,7 +4531,14 @@
                           ]
                         },
                         "homeIndicatorAutoHideRequested": {
-                          "type": "boolean"
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "source": {
                           "type": "string",

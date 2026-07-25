@@ -214,7 +214,7 @@ const systemChromeSchema = z.object({
   visibility: z.enum(["visible", "hidden", "partial", "unknown"]),
   statusBar: z.enum(["visible", "hidden", "unknown"]),
   navigationBar: z.enum(["visible", "hidden", "unknown"]).optional(),
-  homeIndicatorAutoHideRequested: z.boolean().optional(),
+  homeIndicatorAutoHideRequested: z.boolean().nullish(),
   source: z.enum(["android-window-insets", "ios-status-bar-manager"]),
 });
 

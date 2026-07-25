@@ -175,7 +175,14 @@ export class IOSSimulatorCaptureHelperPool {
     entry.helper.on("captureMetrics", metrics => this.broadcast(entry, "captureMetrics", metrics));
     entry.helper.on("audio", audio => this.broadcast(entry, "audio", audio));
     entry.helper.on("malformed", error => this.broadcast(entry, "malformed", error));
-    entry.helper.on("stderr", line => this.broadcast(entry, "stderr", line));
+    entry.helper.on("stderr", line => {
+      this.broadcast(entry, "stderr", line);
+      // The helper can report a terminal ScreenCaptureKit error without exiting.
+      // Keeping that process warm would hand the next reconnect a frozen session.
+      if (isFatalHelperStderr(line) && this.entries.get(entry.key) === entry) {
+        void this.enqueue(() => this.stopFailedEntry(entry));
+      }
+    });
     entry.helper.on("readiness", readiness => this.broadcast(entry, "readiness", readiness));
     entry.helper.on("error", error => {
       this.broadcast(entry, "error", error);
@@ -307,6 +314,10 @@ function helperTargetKey(target: CaptureTarget, binaryPath: string): string {
     fps: target.fps,
     audio: target.audio === true,
   });
+}
+
+function isFatalHelperStderr(line: string): boolean {
+  return line.trimStart().toLowerCase().startsWith("error:");
 }
 
 export const iosSimulatorCaptureHelperPool = new IOSSimulatorCaptureHelperPool();

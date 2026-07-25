@@ -89,6 +89,39 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     expect(secondFrames).toEqual([1, 2]);
   });
 
+  test("discards a helper reporting a fatal capture error before the next lease", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const first = pool.acquire(simulatorOptions());
+    await first.start();
+    helpers[0].emit("frame", {
+      header: { width: 1, height: 1, bytesPerRow: 4, timestampMs: 1 },
+      pixels: Buffer.alloc(4),
+    });
+    helpers[0].emit("stderr", "error: ScreenCaptureKit stream stopped");
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+
+    const second = pool.acquire(simulatorOptions());
+    const secondFrames: number[] = [];
+    second.on("frame", frame => secondFrames.push(frame.header.width));
+    await second.start();
+
+    expect(helpers).toHaveLength(2);
+    expect(helpers[0].stops).toBe(1);
+    expect(helpers[1].starts).toBe(1);
+    expect(secondFrames).toEqual([]);
+    await second.stop();
+    await pool.shutdown();
+  });
+
   test("does not create a helper when a lease stops before its queued attachment", async () => {
     const timer = new FakeTimer();
     const helpers: FakeSimulatorHelper[] = [];

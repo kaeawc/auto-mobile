@@ -558,6 +558,44 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
     await publisher.stop();
   });
 
+  test("gives an accepted PLI recovery a fresh bounded watchdog interval", async () => {
+    const timer = new FakeTimer();
+    const pc = new FakePeerConnection();
+    pc.connectionState = "connected";
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip", frameStallTimeoutMs: 4000 },
+      {
+        timer,
+        onKeyFrameRequest: () => {},
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({ answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      }
+    );
+    const internals = publisher as unknown as { notifySourceFailed: () => void };
+    let recoveries = 0;
+    internals.notifySourceFailed = () => { recoveries++; };
+
+    await publisher.start();
+    timer.advanceTime(3000);
+    pc.pliSubscribers[0]();
+
+    // The previous deadline was one second away, but this PLI starts a bounded
+    // source recovery and must not be immediately classified as a stalled source.
+    timer.advanceTime(3000);
+    expect(recoveries).toBe(0);
+
+    // The recovery remains bounded: an encoder that never emits an IDR still
+    // follows the normal stalled-source reconnect path.
+    timer.advanceTime(2000);
+    expect(recoveries).toBe(1);
+
+    await publisher.stop();
+  });
+
   test("is disabled when no timeout is configured", async () => {
     const timer = new FakeTimer();
     const publisher = connectedPublisher(undefined, timer);

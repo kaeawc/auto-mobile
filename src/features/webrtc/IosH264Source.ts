@@ -31,6 +31,7 @@ import type {
   H264CaptureSourceOptions,
   H264EncoderFrameMetrics,
 } from "./H264CaptureSource";
+import { H264AnnexBParser, isKeyFrameNal } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 
@@ -61,7 +62,10 @@ const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
  * signalled for an IDR mid-stream over a pipe, so `requestKeyFrame()` restarts
  * the encoder (whose first encoded frame is an SPS/PPS + IDR). That is
  * disruptive, so a burst of relayed viewer PLIs collapses to at most one restart
- * per this interval. Mirrors `ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS`.
+ * per this interval. A replacement that has not emitted its IDR also blocks later
+ * restarts, giving VideoToolbox time to initialize rather than repeatedly
+ * replacing its in-flight recovery. Mirrors
+ * `ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS`.
  */
 export const IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS = 3000;
 /** H.264 macroblock edge, in pixels. */
@@ -218,6 +222,8 @@ export class IosH264Source implements H264CaptureSource {
   private outputWriteHighWaterDurationMs = 0;
   private helperFrameMetrics: FrameQueueMetrics | null = null;
   private nativeFrameMetrics: NativeFrameMetrics | null = null;
+  private forcedKeyFrameEncoder: IosH264EncoderProcess | null = null;
+  private forcedKeyFrameParser: H264AnnexBParser | null = null;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -324,13 +330,14 @@ export class IosH264Source implements H264CaptureSource {
    * Restarting on demand — rather than shortening `-g` for every stream — keeps
    * the steady-state bitrate cost at zero: no extra keyframes are emitted unless
    * a viewer actually asks. A burst of PLIs is throttled to one restart per
-   * {@link IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}. Safe to call before the encoder
-   * exists (the first frame is already an IDR) or after the source has stopped.
+   * {@link IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}; later requests are also held
+   * until that replacement emits its IDR. Safe to call before the encoder exists
+   * (the first frame is already an IDR) or after the source has stopped.
    */
   requestKeyFrame(): void {
     const oldEncoder = this.encoder;
     const size = this.encoderSize;
-    if (this.phase !== "running" || !oldEncoder || !size) {
+    if (this.phase !== "running" || !oldEncoder || !size || this.forcedKeyFrameEncoder) {
       return;
     }
     const now = this.timer.now();
@@ -344,7 +351,7 @@ export class IosH264Source implements H264CaptureSource {
     // source down as a fatal crash. Then end its stdin and terminate it.
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
-    this.startEncoder(size);
+    this.startEncoder(size, true);
     oldEncoder.stdin.end();
     oldEncoder.kill("SIGTERM");
   }
@@ -553,7 +560,7 @@ export class IosH264Source implements H264CaptureSource {
     this.reportFrameMetrics();
   }
 
-  private startEncoder(size: EncoderSize): void {
+  private startEncoder(size: EncoderSize, awaitsForcedKeyFrame = false): void {
     const args = this.buildFfmpegArgs(size);
     logger.info(`[IosH264Source] starting ffmpeg encoder: ${this.ffmpegPath} ${args.join(" ")}`);
     const { process } = this.ffmpegClient.start({
@@ -569,10 +576,16 @@ export class IosH264Source implements H264CaptureSource {
     this.encoderSize = size;
     this.encoderBackpressured = false;
     this.lastEncoderStderr = null;
+    if (awaitsForcedKeyFrame) {
+      this.forcedKeyFrameEncoder = encoder;
+      this.forcedKeyFrameParser = new H264AnnexBParser();
+    }
 
     encoder.stdout.on("data", chunk => {
       if (this.isActive() && this.encoder === encoder) {
-        this.options.onData(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        this.recordForcedKeyFrame(encoder, data);
+        this.options.onData(data);
       }
     });
     encoder.stderr.on("data", chunk => {
@@ -644,6 +657,29 @@ export class IosH264Source implements H264CaptureSource {
   private withEncoderDiagnostics(error: Error): Error {
     const stderr = this.lastEncoderStderr;
     return stderr === null ? error : new Error(`${error.message}; stderr: ${stderr}`);
+  }
+
+  /**
+   * The replacement encoder begins with SPS/PPS + IDR. Do not let a recurring
+   * PLI replace it before that IDR arrives: VideoToolbox can take longer than
+   * the PLI cadence to initialize under CI load. The shared incremental parser
+   * preserves Annex-B boundaries across stdout chunks.
+   */
+  private recordForcedKeyFrame(encoder: IosH264EncoderProcess, chunk: Buffer): void {
+    if (this.forcedKeyFrameEncoder !== encoder || !this.forcedKeyFrameParser) {
+      return;
+    }
+    try {
+      if (this.forcedKeyFrameParser.push(chunk).some(isKeyFrameNal)) {
+        this.forcedKeyFrameEncoder = null;
+        this.forcedKeyFrameParser = null;
+      }
+    } catch (error) {
+      // The publisher separately treats malformed Annex-B media as a source
+      // failure. Keep this recovery guard closed rather than restarting an
+      // encoder whose replacement output we cannot prove contains an IDR.
+      logger.debug(`[IosH264Source] could not parse forced-keyframe output: ${error}`);
+    }
   }
 
   private buildFfmpegArgs(size: EncoderSize): string[] {
@@ -768,6 +804,8 @@ export class IosH264Source implements H264CaptureSource {
     this.encoderSize = null;
     this.encoderBackpressured = false;
     this.pendingFrames.clear();
+    this.forcedKeyFrameEncoder = null;
+    this.forcedKeyFrameParser = null;
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 

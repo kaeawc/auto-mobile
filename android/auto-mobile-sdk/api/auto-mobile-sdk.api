@@ -273,14 +273,33 @@ public final class dev.jasonpearson.automobile.sdk.SdkConstants {
   public static final int $stable;
 }
 Compiled from "CircuitAdapter.kt"
+final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter$TrackCircuitNavigation$4$1$2<T> implements kotlinx.coroutines.flow.FlowCollector {
+  public final java.lang.Object emit(com.slack.circuit.runtime.screen.Screen, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+  public java.lang.Object emit(java.lang.Object, kotlin.coroutines.Continuation);
+}
+Compiled from "CircuitAdapter.kt"
+final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter$TrackCircuitNavigation$4$1 extends kotlin.coroutines.jvm.internal.SuspendLambda implements kotlin.jvm.functions.Function2<kotlinx.coroutines.CoroutineScope, kotlin.coroutines.Continuation<? super kotlin.Unit>, java.lang.Object> {
+  public final java.lang.Object invokeSuspend(java.lang.Object);
+  public final kotlin.coroutines.Continuation<kotlin.Unit> create(java.lang.Object, kotlin.coroutines.Continuation<?>);
+  public final java.lang.Object invoke(kotlinx.coroutines.CoroutineScope, kotlin.coroutines.Continuation<? super kotlin.Unit>);
+  public java.lang.Object invoke(java.lang.Object, java.lang.Object);
+}
+Compiled from "CircuitAdapter.kt"
 public final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter implements dev.jasonpearson.automobile.sdk.adapters.NavigationFrameworkAdapter {
   public static final dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter INSTANCE;
   public static final int $stable;
   public void start();
   public void stop();
   public boolean isActive();
+  public final void TrackCircuitNavigation(com.slack.circuit.runtime.Navigator, kotlin.jvm.functions.Function1<? super com.slack.circuit.runtime.screen.Screen, ? extends java.util.Map<java.lang.String, ? extends java.lang.Object>>, kotlin.jvm.functions.Function1<? super com.slack.circuit.runtime.screen.Screen, ? extends java.util.Map<java.lang.String, java.lang.String>>, androidx.compose.runtime.Composer, int, int);
+  public final void trackScreen(com.slack.circuit.runtime.screen.Screen, java.util.Map<java.lang.String, ? extends java.lang.Object>, java.util.Map<java.lang.String, java.lang.String>);
+  public static void trackScreen$default(dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter, com.slack.circuit.runtime.screen.Screen, java.util.Map, java.util.Map, int, java.lang.Object);
   public final void trackNavigation(java.lang.String, java.util.Map<java.lang.String, ? extends java.lang.Object>, java.util.Map<java.lang.String, java.lang.String>);
   public static void trackNavigation$default(dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter, java.lang.String, java.util.Map, java.util.Map, int, java.lang.Object);
+}
+Compiled from "CircuitAdapter.kt"
+public final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapterKt {
+  public static final java.lang.String circuitDestinationName(java.lang.Object);
 }
 Compiled from "Navigation3Adapter.kt"
 final class dev.jasonpearson.automobile.sdk.adapters.Navigation3Adapter$TrackNavigation$4$1 extends kotlin.coroutines.jvm.internal.SuspendLambda implements kotlin.jvm.functions.Function2<kotlinx.coroutines.CoroutineScope, kotlin.coroutines.Continuation<? super kotlin.Unit>, java.lang.Object> {

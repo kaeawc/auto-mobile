@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.sdk.adapters
 
+import android.os.Parcel
+import com.slack.circuit.runtime.screen.Screen
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NavigationEvent
 import dev.jasonpearson.automobile.sdk.NavigationSource
@@ -108,6 +110,46 @@ class CircuitAdapterTest {
   }
 
   @Test
+  fun `trackScreen should derive destination from screen class name`() {
+    var receivedEvent: NavigationEvent? = null
+    AutoMobileSDK.addNavigationListener { event -> receivedEvent = event }
+
+    CircuitAdapter.start()
+    CircuitAdapter.trackScreen(ProfileScreen)
+
+    assertNotNull(receivedEvent)
+    assertEquals("ProfileScreen", receivedEvent?.destination)
+    assertEquals(NavigationSource.CIRCUIT, receivedEvent?.source)
+  }
+
+  @Test
+  fun `trackScreen should forward arguments and metadata`() {
+    var receivedEvent: NavigationEvent? = null
+    AutoMobileSDK.addNavigationListener { event -> receivedEvent = event }
+
+    val arguments = mapOf("userId" to "123")
+    val metadata = mapOf("transition" to "slide")
+
+    CircuitAdapter.start()
+    CircuitAdapter.trackScreen(ProfileScreen, arguments = arguments, metadata = metadata)
+
+    assertNotNull(receivedEvent)
+    assertEquals(arguments, receivedEvent?.arguments)
+    assertEquals(metadata, receivedEvent?.metadata)
+  }
+
+  @Test
+  fun `trackScreen should not notify SDK when inactive`() {
+    var receivedEvent: NavigationEvent? = null
+    AutoMobileSDK.addNavigationListener { event -> receivedEvent = event }
+
+    // Don't start the adapter.
+    CircuitAdapter.trackScreen(ProfileScreen)
+
+    assertNull(receivedEvent)
+  }
+
+  @Test
   fun `multiple trackNavigation calls should trigger multiple events`() {
     val receivedEvents = mutableListOf<NavigationEvent>()
     AutoMobileSDK.addNavigationListener { event -> receivedEvents.add(event) }
@@ -121,5 +163,12 @@ class CircuitAdapterTest {
     assertEquals("Screen1", receivedEvents[0].destination)
     assertEquals("Screen2", receivedEvents[1].destination)
     assertEquals("Screen3", receivedEvents[2].destination)
+  }
+
+  /** Minimal fake Circuit [Screen] used to exercise class-name-based destination derivation. */
+  private object ProfileScreen : Screen {
+    override fun describeContents(): Int = 0
+
+    override fun writeToParcel(dest: Parcel, flags: Int) = Unit
   }
 }

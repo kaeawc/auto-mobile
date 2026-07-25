@@ -81,14 +81,40 @@ fun AppNavigation() {
 
 ### Circuit Integration
 
-For Circuit navigation, use manual tracking:
+For Circuit navigation, register the automatic hook once with your `Navigator`. It observes
+the back stack and tracks every destination change (forward navigation, pops, and root resets)
+without any per-call bookkeeping:
 
 ```kotlin
-// When navigating in Circuit
-CircuitAdapter.trackNavigation(
-    destination = "ProfileScreen",
-    arguments = mapOf("userId" to userId)
-)
+@Composable
+fun App(circuit: Circuit) {
+    val backStack = rememberSaveableBackStack(root = HomeScreen)
+    val navigator = rememberCircuitNavigator(backStack)
+
+    // Register once — destinations are tracked as the back stack changes.
+    CircuitAdapter.TrackCircuitNavigation(navigator)
+
+    // Optionally extract arguments/metadata from the current Screen:
+    // CircuitAdapter.TrackCircuitNavigation(
+    //     navigator,
+    //     extractArguments = { screen -> mapOf("userId" to (screen as? ProfileScreen)?.userId) }
+    // )
+
+    NavigableCircuitContent(navigator, backStack)
+}
+```
+
+The Circuit dependency is declared `compileOnly`, so this integration only compiles when your app
+already depends on Circuit.
+
+For finer-grained control you can track a single `Screen`, or a raw destination string:
+
+```kotlin
+// Track a specific Screen; the destination name is derived from the screen's class.
+CircuitAdapter.trackScreen(ProfileScreen(userId), arguments = mapOf("userId" to userId))
+
+// Track a raw destination name when you are not holding a Screen.
+CircuitAdapter.trackNavigation(destination = "ProfileScreen", arguments = mapOf("userId" to userId))
 ```
 
 ### Manual Tracking

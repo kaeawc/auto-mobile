@@ -71,12 +71,17 @@ dependencies {
   // Navigation3 support for Compose navigation tracking
   implementation(libs.navigation3.runtime)
 
+  // Circuit — compileOnly so consumers who use Circuit bring their own dependency.
+  // The SDK only references the stable Navigator/Screen surface for automatic tracking.
+  compileOnly(libs.circuit.runtime)
+
   // Test dependencies
   testImplementation(libs.kotlin.test)
   testImplementation(libs.junit)
   testImplementation(libs.bundles.unit.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.okhttp)
+  testImplementation(libs.circuit.runtime)
 }
 
 // Configure Kotlin compilation options

@@ -53,12 +53,23 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     });
     const first = pool.acquire(simulatorOptions());
     const firstFrames: number[] = [];
+    const firstQueueDepths: number[] = [];
     first.on("frame", frame => firstFrames.push(frame.header.width));
+    first.on("frameMetrics", metrics => firstQueueDepths.push(metrics.queueDepth));
 
     await first.start();
     helpers[0].emit("frame", {
       header: { width: 1, height: 1, bytesPerRow: 4, timestampMs: 1 },
       pixels: Buffer.alloc(4),
+    });
+    helpers[0].emit("frameMetrics", {
+      captureTimestampMs: 1,
+      frameAgeMs: 0,
+      queueDepth: 1,
+      droppedFrames: 0,
+      bytesQueued: 4,
+      highWaterMarkBytes: 4,
+      maxFrameBytes: 32 * 1024 * 1024,
     });
     await first.stop();
 
@@ -74,6 +85,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     expect(helpers).toHaveLength(1);
     expect(helpers[0].starts).toBe(1);
     expect(firstFrames).toEqual([1]);
+    expect(firstQueueDepths).toEqual([1]);
     expect(secondFrames).toEqual([1, 2]);
   });
 

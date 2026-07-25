@@ -4,9 +4,11 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   IOSScreenCaptureHelper,
   type CaptureTarget,
+  type FrameQueueMetrics,
   type IosScreenCaptureHelperEvents,
   type IosScreenCaptureHelperOptions,
   type IosScreenCaptureReadiness,
+  type NativeFrameMetrics,
 } from "./IOSScreenCaptureHelper";
 import type {
   DecodedAudio,
@@ -20,6 +22,8 @@ export interface IosSimulatorCaptureHelperLease {
   start(): void | Promise<void>;
   stop(): Promise<unknown>;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
+  on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
+  on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
   on(event: "audio", listener: (audio: DecodedAudio) => void): this;
   on(event: "malformed", listener: (error: MalformedFrameError) => void): this;
   on(event: "stderr", listener: (line: string) => void): this;
@@ -167,6 +171,8 @@ export class IOSSimulatorCaptureHelperPool {
       entry.latestFrame = frame;
       this.broadcast(entry, "frame", frame);
     });
+    entry.helper.on("frameMetrics", metrics => this.broadcast(entry, "frameMetrics", metrics));
+    entry.helper.on("captureMetrics", metrics => this.broadcast(entry, "captureMetrics", metrics));
     entry.helper.on("audio", audio => this.broadcast(entry, "audio", audio));
     entry.helper.on("malformed", error => this.broadcast(entry, "malformed", error));
     entry.helper.on("stderr", line => this.broadcast(entry, "stderr", line));

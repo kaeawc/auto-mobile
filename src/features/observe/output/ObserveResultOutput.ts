@@ -523,7 +523,7 @@ function boundsKey(bounds: unknown): string {
 function nodeKey(node: Record<string, unknown>, siblingIndex: number): string {
   const resourceId = node["resource-id"] ?? "";
   const text = node["text"] ?? "";
-  return [resourceId, boundsKey(node["bounds"]), text, siblingIndex].join(" ");
+  return [resourceId, boundsKey(node["bounds"]), text, siblingIndex].join("\0");
 }
 
 /**
@@ -531,7 +531,7 @@ function nodeKey(node: Record<string, unknown>, siblingIndex: number): string {
  * distinct control char (U+0001) from the intra-key NUL (U+0000) so the two
  * levels of joining can never be confused.
  */
-const PATH_KEY_SEP = "";
+const PATH_KEY_SEP = "\x01";
 
 /** A node's own attributes, excluding the `node` child array (diffed separately). */
 function nodeAttributes(node: Record<string, unknown>): Record<string, unknown> {
@@ -751,7 +751,7 @@ function contentIdentityKey(attrs: Record<string, unknown>): string | null {
   // NUL-joined: `text`/`content-desc` can contain spaces, so a space separator
   // could let a value straddle a field boundary and collide; NUL cannot appear
   // in these attribute strings.
-  return [resourceId, viewId, contentDesc, text].join(" ");
+  return [resourceId, viewId, contentDesc, text].join("\0");
 }
 
 /** Index leftover diff nodes by their content-identity key, dropping keyless nodes. */
@@ -940,7 +940,7 @@ function iosStableIdentityKey(node: DiffRepairNode): string | null {
   if (boundsRegion === "") {
     return null;
   }
-  return [stableId, className, boundsRegion].join(" ");
+  return [stableId, className, boundsRegion].join("\0");
 }
 
 function indexByIosStableKey(nodes: DiffRepairNode[]): Map<string, number[]> {

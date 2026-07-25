@@ -3107,20 +3107,16 @@
               "description": "DSL condition; stable is whole-screen"
             },
             "pollMs": {
-              "type": "number",
-              "description": "Poll interval ms (default 150)"
+              "type": "number"
             },
             "stableReads": {
-              "type": "number",
-              "description": "Stable reads for countStable/stable (default 2)"
+              "type": "number"
             },
             "elementId": {
-              "type": "string",
-              "description": "Element resource ID / accessibility identifier"
+              "type": "string"
             },
             "text": {
-              "type": "string",
-              "description": "Element text; for `for:textEquals` the exact expected value"
+              "type": "string"
             },
             "textAny": {
               "type": "array",
@@ -3241,15 +3237,26 @@
                 "text": {
                   "type": "string"
                 }
-              }
+              },
+              "additionalProperties": false,
+              "oneOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                }
+              ]
             },
             "timeout": {
-              "type": "number",
-              "description": "Wait timeout ms (default 5000)"
+              "type": "number"
             },
             "timeoutMs": {
-              "type": "number",
-              "description": "Alias for timeout; matches waitForCondition"
+              "type": "number"
             }
           },
           "anyOf": [
@@ -3264,6 +3271,13 @@
               ]
             },
             {
+              "properties": {
+                "for": {
+                  "not": {
+                    "const": "textEquals"
+                  }
+                }
+              },
               "required": [
                 "for",
                 "elementId"
@@ -5831,20 +5845,16 @@
               "description": "DSL condition; stable is whole-screen"
             },
             "pollMs": {
-              "type": "number",
-              "description": "Poll interval ms (default 150)"
+              "type": "number"
             },
             "stableReads": {
-              "type": "number",
-              "description": "Stable reads for countStable/stable (default 2)"
+              "type": "number"
             },
             "elementId": {
-              "type": "string",
-              "description": "Element resource ID / accessibility identifier"
+              "type": "string"
             },
             "text": {
-              "type": "string",
-              "description": "Element text; for `for:textEquals` the exact expected value"
+              "type": "string"
             },
             "textAny": {
               "type": "array",
@@ -5965,15 +5975,26 @@
                 "text": {
                   "type": "string"
                 }
-              }
+              },
+              "additionalProperties": false,
+              "oneOf": [
+                {
+                  "required": [
+                    "elementId"
+                  ]
+                },
+                {
+                  "required": [
+                    "text"
+                  ]
+                }
+              ]
             },
             "timeout": {
-              "type": "number",
-              "description": "Wait timeout ms (default 5000)"
+              "type": "number"
             },
             "timeoutMs": {
-              "type": "number",
-              "description": "Alias for timeout; matches waitForCondition"
+              "type": "number"
             }
           },
           "anyOf": [
@@ -5988,6 +6009,13 @@
               ]
             },
             {
+              "properties": {
+                "for": {
+                  "not": {
+                    "const": "textEquals"
+                  }
+                }
+              },
               "required": [
                 "for",
                 "elementId"

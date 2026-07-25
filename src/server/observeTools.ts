@@ -87,6 +87,18 @@ const waitForCommonShape = {
   container: waitForContainerField
 };
 
+const validateWaitForTimeoutAliases = (
+  value: { timeout?: number; timeoutMs?: number },
+  ctx: z.RefinementCtx
+): void => {
+  if (value.timeout !== undefined && value.timeoutMs !== undefined && value.timeout !== value.timeoutMs) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "waitFor timeout and timeoutMs must match when both are provided",
+    });
+  }
+};
+
 // Stability / "settled" gate (issue #3490 §3). After the waitFor predicate first
 // matches, keep observing until the view hierarchy is unchanged for this long.
 export const settledSchema = z.object({
@@ -103,7 +115,7 @@ const waitForTextAnySchema = z.object({
   matchType: z.never().optional(),
   textMatch: z.never().optional(),
   ...waitForCommonShape,
-}).strict();
+}).strict().superRefine(validateWaitForTimeoutAliases);
 
 const waitForElementBaseSchema = z.object({
   for: z.never().optional(),
@@ -116,6 +128,7 @@ const waitForElementBaseSchema = z.object({
   textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match waitFor.text; does not affect contentDescription"),
   ...waitForCommonShape,
 }).strict().superRefine((value, ctx) => {
+  validateWaitForTimeoutAliases(value, ctx);
 
   if (value.textMatch === "regex" && value.text !== undefined) {
     try {
@@ -166,12 +179,7 @@ const waitForConditionDslSchema = z.object({
   activeWindow: z.never().optional(),
   absent: z.never().optional(),
 }).strict().superRefine((value, ctx) => {
-  if (value.timeout !== undefined && value.timeoutMs !== undefined && value.timeout !== value.timeoutMs) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "waitFor timeout and timeoutMs must match when both are provided",
-    });
-  }
+  validateWaitForTimeoutAliases(value, ctx);
   if (value.for === "stable") {
     return;
   }
@@ -235,10 +243,10 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
       enum: ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"],
       description: "DSL condition; stable is whole-screen",
     },
-    pollMs: { type: "number", description: "Poll interval ms (default 150)" },
-    stableReads: { type: "number", description: "Stable reads for countStable/stable (default 2)" },
-    elementId: { type: "string", description: "Element resource ID / accessibility identifier" },
-    text: { type: "string", description: "Element text; for `for:textEquals` the exact expected value" },
+    pollMs: { type: "number" },
+    stableReads: { type: "number" },
+    elementId: { type: "string" },
+    text: { type: "string" },
     textAny: {
       type: "array",
       items: { type: "string" },
@@ -275,9 +283,11 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
       type: "object",
       description: "Scope the match to a container element (by elementId or text)",
       properties: { elementId: { type: "string" }, text: { type: "string" } },
+      additionalProperties: false,
+      oneOf: [{ required: ["elementId"] }, { required: ["text"] }],
     },
-    timeout: { type: "number", description: "Wait timeout ms (default 5000)" },
-    timeoutMs: { type: "number", description: "Alias for timeout; matches waitForCondition" },
+    timeout: { type: "number" },
+    timeoutMs: { type: "number" },
   },
   // Enforce the same shape the runtime does: either the `for` DSL, or at least one
   // legacy predicate with textAny mutually exclusive from the element predicates /
@@ -285,7 +295,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   // so it is not part of the textAny exclusion set.
   anyOf: [
     { properties: { for: { const: "stable" } }, required: ["for"] },
-    { required: ["for", "elementId"] },
+    { properties: { for: { not: { const: "textEquals" } } }, required: ["for", "elementId"] },
     { required: ["for", "text"] },
     {
       required: ["textAny"],
@@ -506,7 +516,7 @@ export const buildConditionPredicate = (
       if (selector.text === undefined) {
         throw new ActionableError("waitFor \"for: textEquals\" requires text (the exact expected value)");
       }
-      return textEquals(finder, { elementId: selector.elementId }, selector.text);
+      return textEquals(finder, selector, selector.text);
     case "countStable":
       return countStable(finder, selector, options);
     default: {

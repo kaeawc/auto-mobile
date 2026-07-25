@@ -279,6 +279,26 @@ describe("published observe waitFor input schema", () => {
     }).valid).toBe(true);
   });
 
+  test("requires text for the advertised textEquals DSL form", () => {
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "textEquals", elementId: "counter" },
+    }).valid).toBe(false);
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "textEquals", elementId: "counter", text: "5" },
+    }).valid).toBe(true);
+  });
+
+  test("enforces the advertised container selector shape", () => {
+    for (const container of [{}, { elementId: "scope", text: "Scope" }]) {
+      expect(validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "appear", elementId: "target", container },
+      }).valid).toBe(false);
+    }
+  });
+
   test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
     const toolDefinitions = JSON.parse(readFileSync(
       new URL("../../schemas/tool-definitions.json", import.meta.url),

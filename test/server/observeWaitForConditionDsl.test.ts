@@ -104,6 +104,18 @@ describe("buildConditionPredicate", () => {
     expect(predicate(makeObservation([node({ "resource-id": "counter", "text": "5" })])).matched).toBe(true);
   });
 
+  test("textEquals -> retains its container scope", () => {
+    const predicate = buildConditionPredicate(finder, "textEquals", {
+      elementId: "counter",
+      text: "5",
+      container: { elementId: "checkout" },
+    });
+    expect(predicate(makeObservation([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "counter", "text": "5" })] }),
+      node({ "resource-id": "checkout", "node": [] }),
+    ])).matched).toBe(false);
+  });
+
   test("countStable -> settles once the match count repeats", () => {
     const predicate = buildConditionPredicate(finder, "countStable", { elementId: "row" }, { stableReads: 2 });
     expect(predicate(makeObservation([node({ "resource-id": "row" })])).matched).toBe(false);
@@ -247,13 +259,19 @@ describe("waitFor back-compat", () => {
     });
   });
 
-  test("DSL form rejects conflicting timeout and timeoutMs values", () => {
-    expect(() =>
-      observeSchema.parse({
-        platform: "android",
-        waitFor: { for: "appear", elementId: "x", timeout: 1000, timeoutMs: 2000 },
-      })
-    ).toThrow(/timeout/);
+  test("rejects conflicting timeout aliases across all waitFor forms", () => {
+    for (const waitFor of [
+      { for: "appear", elementId: "x" },
+      { elementId: "x" },
+      { textAny: ["x"] },
+    ]) {
+      expect(() =>
+        observeSchema.parse({
+          platform: "android",
+          waitFor: { ...waitFor, timeout: 1000, timeoutMs: 2000 },
+        })
+      ).toThrow(/timeout/);
+    }
   });
 
   test("DSL `for: stable` needs no selector", () => {

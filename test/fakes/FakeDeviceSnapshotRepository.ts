@@ -48,20 +48,28 @@ export class FakeDeviceSnapshotRepository {
     if (query.snapshotType) {
       results = results.filter(record => record.snapshotType === query.snapshotType);
     }
+    // Mirror the real SQL, which emits the ORDER BY clauses in the same order the
+    // repository adds them: last_accessed_at FIRST (primary), created_at SECOND
+    // (tie-break). Applying two SEPARATE stable sorts inverts that precedence —
+    // the last sort wins — so a single combined comparator is required (#4186).
+    const comparators: Array<(record: DeviceSnapshotRecord) => number> = [];
     if (query.orderByLastAccessed) {
-      results.sort((left, right) => {
-        const leftTime = Date.parse(left.lastAccessedAt);
-        const rightTime = Date.parse(right.lastAccessedAt);
-        const delta = leftTime - rightTime;
-        return query.orderByLastAccessed === "asc" ? delta : -delta;
-      });
+      const sign = query.orderByLastAccessed === "asc" ? 1 : -1;
+      comparators.push(record => Date.parse(record.lastAccessedAt) * sign);
     }
     if (query.orderByCreatedAt) {
+      const sign = query.orderByCreatedAt === "asc" ? 1 : -1;
+      comparators.push(record => Date.parse(record.createdAt) * sign);
+    }
+    if (comparators.length > 0) {
       results.sort((left, right) => {
-        const leftTime = Date.parse(left.createdAt);
-        const rightTime = Date.parse(right.createdAt);
-        const delta = leftTime - rightTime;
-        return query.orderByCreatedAt === "asc" ? delta : -delta;
+        for (const key of comparators) {
+          const delta = key(left) - key(right);
+          if (delta !== 0) {
+            return delta;
+          }
+        }
+        return 0;
       });
     }
     if (query.limit && query.limit > 0) {

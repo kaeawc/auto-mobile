@@ -47,8 +47,12 @@ export class FakeChildProcess extends EventEmitter implements Partial<ChildProce
         callback();
       },
     });
-    this.pid = Math.floor(Math.random() * 10000) + 1000;
+    // Deterministic fake pid: a fake must not reach for real randomness. A
+    // process-wide counter gives every instance a distinct, reproducible pid.
+    this.pid = FakeChildProcess.nextPid++;
   }
+
+  private static nextPid = 1000;
 
   /**
    * Configure spawn behavior

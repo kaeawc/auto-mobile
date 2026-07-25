@@ -271,6 +271,49 @@ describe("removeTempDbDir give-up tripwire (issue #2949)", () => {
   });
 });
 
+/**
+ * Degenerate `maxAttempts` rows (issue #4186). `maxAttempts: 0` makes the retry
+ * loop body run ZERO times, so removal is never even attempted and the helper
+ * silently "gives up" with no underlying error. That silent-skip is a footgun a
+ * caller could hit by threading a computed 0 through; pin it (mirrored across the
+ * async and sync helpers) so the behaviour cannot change unnoticed.
+ */
+describe("removeTempDbDir degenerate maxAttempts (issue #4186)", () => {
+  test("async maxAttempts:0 attempts no removal and gives up with no error", async () => {
+    let rmCalls = 0;
+    const gaveUpErrors: unknown[] = [];
+
+    await removeTempDbDir("/tmp/auto-mobile-degenerate", {
+      rm: async () => {
+        rmCalls += 1;
+      },
+      maxAttempts: 0,
+      delayMs: 1,
+      onGiveUp: (_dir, error) => gaveUpErrors.push(error),
+    });
+
+    expect(rmCalls).toBe(0);
+    expect(gaveUpErrors).toEqual([undefined]);
+  });
+
+  test("sync maxAttempts:0 attempts no removal and gives up with no error", () => {
+    let rmCalls = 0;
+    const gaveUpErrors: unknown[] = [];
+
+    removeTempDbDirSync("/tmp/auto-mobile-degenerate", {
+      rmSync: () => {
+        rmCalls += 1;
+      },
+      maxAttempts: 0,
+      delayMs: 1,
+      onGiveUp: (_dir, error) => gaveUpErrors.push(error),
+    });
+
+    expect(rmCalls).toBe(0);
+    expect(gaveUpErrors).toEqual([undefined]);
+  });
+});
+
 describe("removeTempDbDirSync (issue #2948)", () => {
   test("removes the dir on the first attempt and never sleeps when rmSync succeeds", () => {
     const timer = new FakeSyncTimer();

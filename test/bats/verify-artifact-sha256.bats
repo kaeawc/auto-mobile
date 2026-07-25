@@ -40,11 +40,18 @@ teardown() {
 # $1 = ipaSha256 value (may be empty)
 # $2 = videoJarSha256 value (optional; the field is omitted when unset, matching
 #      real registry entries that predate jar delivery)
+# $3 = screenCaptureHelperSha256 value (optional; the field is omitted when
+#      unset, matching releases that predate helper delivery)
 write_release_ts() {
   local video_line=""
+  local helper_line=""
   if [ "$#" -ge 2 ]; then
     video_line="
     videoJarSha256: \"$2\","
+  fi
+  if [ "$#" -ge 3 ]; then
+    helper_line="
+    screenCaptureHelperSha256: \"$3\","
   fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
@@ -53,6 +60,7 @@ export interface ReleaseChecksumEntry {
   ipaSha256: string;
   runnerSha256: string;
   videoJarSha256?: string;
+  screenCaptureHelperSha256?: string;
 }
 
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
@@ -60,7 +68,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",$video_line
+    runnerSha256: "",$video_line$helper_line
   },
 ];
 EOF
@@ -119,6 +127,31 @@ EOF
   write_release_ts "" "0000000000000000000000000000000000000000000000000000000000000000"
   cd "$PROJECT"
   run bash "$ABS_SCRIPT" "$ARTIFACT" videojar
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
+}
+
+@test "matching screenCaptureHelperSha256 verifies successfully (screencapturehelper platform)" {
+  write_release_ts "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" screencapturehelper
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "absent screenCaptureHelperSha256 reports 'no checksum', not a mismatch" {
+  write_release_ts "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" screencapturehelper
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+  [[ "$output" != *"SHA256 mismatch"* ]]
+}
+
+@test "mismatched screenCaptureHelperSha256 reports a mismatch" {
+  write_release_ts "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" screencapturehelper
   [ "$status" -ne 0 ]
   [[ "$output" == *"SHA256 mismatch"* ]]
 }

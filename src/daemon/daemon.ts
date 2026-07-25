@@ -88,6 +88,7 @@ import {
   type ObservationStreamHealth,
 } from "./ObservationStreamHealth";
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
+import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -1501,6 +1502,7 @@ export class Daemon {
     await stopTelemetryPushSocketServer();
     await stopWebRtcStreamSocketServer();
     await stopVideoStreamSocketServer();
+    await iosSimulatorCaptureHelperPool.shutdown();
     stopAppearanceSyncScheduler();
     stopPerformanceMonitor();
 

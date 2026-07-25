@@ -20,6 +20,7 @@ interface WorkflowDocument {
       run?: string;
       if?: string;
       "continue-on-error"?: boolean;
+      env?: Record<string, string>;
       with?: {
         filters?: string;
         "gradle-tasks"?: string;
@@ -148,5 +149,14 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(build?.with?.["gradle-tasks"]).toContain(":video-server:d8Dex");
     expect(emulator?.with?.script).toContain("AUTOMOBILE_VIDEO_SERVER_JAR");
     expect(emulator?.with?.script).toContain("AUTOMOBILE_REQUIRE_VIDEO_SERVER=1");
+  });
+
+  test("uses an explicit checkout helper only for the iOS integration fixture", () => {
+    const iosSteps = workflow().jobs?.["ios-device-webrtc"]?.steps ?? [];
+    const runCapture = iosSteps.find(step => step.name === "Run iOS device capture integration");
+
+    expect(runCapture?.env?.AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER).toContain(
+      "ios/screen-capture/.build/debug/screen-capture-helper"
+    );
   });
 });

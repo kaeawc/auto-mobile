@@ -143,6 +143,9 @@ jobs:
         env:
           AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"
           AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios
+          # The checked-out Swift package is a CI development fixture. Production
+          # installs resolve only the signed helper from GitHub Releases.
+          AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER: ${{ github.workspace }}/ios/screen-capture/.build/debug/screen-capture-helper
         run: bun run test:integration:webrtc-device
       # Print the legend for reading result.txt / stage-latency.json and the
       # benign chrome.log/mediamtx.log ERROR lines (#4308). if: always() so it

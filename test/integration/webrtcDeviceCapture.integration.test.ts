@@ -112,6 +112,46 @@ async function waitFor(predicate: () => Promise<boolean>, message: string, timeo
   throw new Error(message);
 }
 
+async function waitForWebRtcStreamSocket(socketPath: string): Promise<void> {
+  await waitFor(async () => {
+    try {
+      const response = await sendWebRtcStreamRequest(
+        { action: "list", id: `${streamId}-daemon-ready` },
+        { socketPath, timeoutMs: 1_000 }
+      );
+      return response.success;
+    } catch {
+      return false;
+    }
+  }, "AutoMobile daemon did not become ready");
+}
+
+async function startWebRtcDaemon(daemonEnvironment: NodeJS.ProcessEnv, socketPath: string): Promise<void> {
+  await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment }).catch(() => undefined);
+  await waitForWebRtcStreamSocket(socketPath);
+}
+
+/**
+ * Chrome startup can contend with the hosted runner enough for the daemon's
+ * short database-health probe to exit the isolated process. The integration
+ * assertion concerns device capture, so recover that process once before the
+ * measured stream request rather than reporting a raw ENOENT from the socket.
+ */
+async function ensureWebRtcDaemon(socketPath: string, daemonEnvironment: NodeJS.ProcessEnv): Promise<void> {
+  try {
+    const response = await sendWebRtcStreamRequest(
+      { action: "list", id: `${streamId}-daemon-health` },
+      { socketPath, timeoutMs: 1_000 }
+    );
+    if (response.success) {
+      return;
+    }
+  } catch {
+    // Restart below. The bounded readiness wait retains the underlying failure.
+  }
+  await startWebRtcDaemon(daemonEnvironment, socketPath);
+}
+
 async function stop(child: ChildProcessWithoutNullStreams | undefined): Promise<void> {
   if (!child || child.exitCode !== null || child.signalCode !== null) {return;}
   child.kill("SIGTERM");
@@ -608,21 +648,13 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         return mediamtx.exitCode === null && mediamtx.signalCode === null;
       }, "MediaMTX did not become ready");
       started = true;
-      await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment }).catch(() => undefined);
-      await waitFor(async () => {
-        try {
-          const response = await sendWebRtcStreamRequest(
-            { action: "list", id: `${streamId}-daemon-ready` },
-            { socketPath: webRtcSocketPath, timeoutMs: 1_000 }
-          );
-          return response.success;
-        } catch { return false; }
-      }, "AutoMobile daemon did not become ready");
+      await startWebRtcDaemon(daemonEnvironment, webRtcSocketPath);
       await launchFixture();
       profile = await captureProfile();
       // Chrome is launched before the measured window opens so its cold start —
       // seconds on a hosted runner — is not charged to the WHEP-connect stage.
       ({ chrome, cdp } = await launchChromeReader(join(artifactDir, "chrome.log")));
+      await ensureWebRtcDaemon(webRtcSocketPath, daemonEnvironment);
       timeline.mark("startRequest");
       // A video-only start returns as soon as the WHIP publish is accepted; the
       // capture source starts afterwards, so both transitions have to be

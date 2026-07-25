@@ -1,7 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Writable } from "node:stream";
-import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -13,6 +12,7 @@ import {
   IOS_WEBRTC_FFMPEG_ENV_ALIAS,
   IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
   IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
+  IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IosH264Source,
   defaultIosBitrateBps,
   resolveIosEncoderScale,
@@ -23,6 +23,7 @@ import {
   WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
   h264MacroblocksPerFrame,
 } from "../../../src/features/webrtc/h264Level";
+import { IOSSimulatorCaptureHelperPool } from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../../src/features/webrtc/webrtcStreamingConfig";
 import type { CaptureTarget, DecodedFrame } from "../../../src/features/screen-stream";
 
@@ -44,13 +45,16 @@ const fakeHelperPathExists = (candidate: string): boolean => candidate === FAKE_
 class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelper {
   started = false;
   stopped = false;
+  isRunning = false;
 
   start(): void {
     this.started = true;
+    this.isRunning = true;
   }
 
   async stop(): Promise<null> {
     this.stopped = true;
+    this.isRunning = false;
     return null;
   }
 
@@ -306,6 +310,58 @@ describe("IosH264Source", () => {
     expect(helperTargets).toEqual([
       { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
     ]);
+  });
+
+  test("fails target resolution within two seconds instead of waiting for capture startup", async () => {
+    const timer = new FakeTimer();
+    let aborted = false;
+    const { source, helper } = createHarness(IOS_SIMULATOR, {
+      timer,
+      simulatorWindowResolver: (_helperPath, _device, _audioEnabled, signal) =>
+        new Promise<number>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("resolver aborted"));
+          });
+        }),
+    });
+
+    const started = source.start();
+    await flush();
+    timer.advanceTime(IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS);
+
+    await expect(started).rejects.toThrow(/Timed out resolving iOS Simulator window/);
+    expect(helper.started).toBe(false);
+    expect(aborted).toBe(true);
+  });
+
+  test("leaves an injected simulator helper pool warm after stream stop", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => helper,
+    });
+    const encoder = new FakeChildProcess();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      simulatorHelperPool: pool,
+      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(1, 1, 0x11));
+    await started;
+    await source.stop();
+
+    expect(helper.started).toBe(true);
+    expect(helper.stopped).toBe(false);
+    await pool.shutdown();
+    expect(helper.stopped).toBe(true);
   });
 
   test("requests simulator audio and forwards its PCM16LE chunks unchanged", async () => {
@@ -1046,29 +1102,24 @@ describe("IosH264Source", () => {
     expect(helper.started).toBe(false);
   });
 
-  test("resolves helper paths relative to module roots, not process cwd", () => {
-    const repoRoot = path.resolve("repo");
-    const moduleDir = path.join(repoRoot, "src", "features", "webrtc");
-    const sourceBuild = path.join(
-      repoRoot,
-      "ios",
-      "screen-capture",
-      ".build",
-      "debug",
-      "screen-capture-helper"
-    );
-    const found = resolveIosScreenCaptureHelperPath(undefined, {
-      moduleDir,
+  test("requires an explicit local helper path instead of searching source or package builds", () => {
+    expect(() => resolveIosScreenCaptureHelperPath(undefined, {
       env: {},
-      exists: candidate => candidate === sourceBuild,
+      exists: () => false,
+    })).toThrow(/No executable screen-capture-helper/);
+  });
+
+  test("uses an explicit local development helper path", () => {
+    const found = resolveIosScreenCaptureHelperPath("/repo/ios/screen-capture/.build/release/screen-capture-helper", {
+      env: {},
+      exists: candidate => candidate.includes(".build/release"),
     });
 
-    expect(found).toBe(sourceBuild);
+    expect(found).toBe("/repo/ios/screen-capture/.build/release/screen-capture-helper");
   });
 
   test("prefers the helper path environment override", () => {
     const found = resolveIosScreenCaptureHelperPath(undefined, {
-      moduleDir: "/repo/src/features/webrtc",
       env: { [IOS_SCREEN_CAPTURE_HELPER_ENV]: "/custom/helper" },
       exists: candidate => candidate === "/custom/helper",
     });
@@ -1078,26 +1129,11 @@ describe("IosH264Source", () => {
 
   test("uses legacy helper path environment alias when preferred name is unset", () => {
     const found = resolveIosScreenCaptureHelperPath(undefined, {
-      moduleDir: "/repo/src/features/webrtc",
       env: { [IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS]: "/legacy/helper" },
       exists: candidate => candidate === "/legacy/helper",
     });
 
     expect(found).toBe("/legacy/helper");
-  });
-
-  test("returns null when no local helper exists (defers to the download provider)", () => {
-    // A published npm install has no ios/screen-capture/.build output and no
-    // override; the sync resolver returns null so ensureIosScreenCaptureHelper
-    // can fall through to the verified GitHub-release download (issue #4392).
-    const packageRoot = path.resolve("pkg-install");
-    const found = resolveIosScreenCaptureHelperPath(undefined, {
-      moduleDir: path.join(packageRoot, "dist", "src", "features", "webrtc"),
-      env: {},
-      exists: () => false,
-    });
-
-    expect(found).toBeNull();
   });
 
   test("prefers the ffmpeg environment override over the legacy alias", async () => {

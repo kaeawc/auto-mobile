@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   encodeFrameHeader,
+  IOS_HELPER_STOP_GRACE_MS,
   IOSScreenCaptureHelper,
   NATIVE_FRAME_METRICS_PREFIX,
   type CaptureTarget,
@@ -286,6 +288,30 @@ describe("IOSScreenCaptureHelper", () => {
     ]);
   });
 
+  test("maps Swift startup markers into readiness events", async () => {
+    const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
+    const phases: string[] = [];
+    helper.on("readiness", status => phases.push(status.phase));
+
+    helper.start();
+    fake.stderr.push(Buffer.from([
+      "capture-phase: permission-ready\n",
+      "capture-phase: resolved-window id=42 size=402x874\n",
+      "capture-phase: capture-started id=42\n",
+      "capture-phase: first-frame id=42 size=804x1748\n",
+    ].join("")));
+    await flush();
+
+    expect(phases).toEqual([
+      "helper-executable-found",
+      "helper-process-spawned",
+      "permission-ready",
+      "target-resolved",
+      "capture-started",
+      "first-frame",
+    ]);
+  });
+
   test("isRunning reflects process lifecycle", async () => {
     const { fake, helper } = withFakeSpawner();
     expect(helper.isRunning).toBe(false);
@@ -317,6 +343,61 @@ describe("IOSScreenCaptureHelper", () => {
     const { helper } = withFakeSpawner();
     const result = await helper.stop();
     expect(result).toBeNull();
+  });
+
+  test("escalates a stuck helper to SIGKILL and process-group cleanup after the grace period", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeChildProcess();
+    const signals: NodeJS.Signals[] = [];
+    const processGroupSignals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    fake.kill = signal => {
+      signals.push((signal ?? "SIGTERM") as NodeJS.Signals);
+      fake.killed = true;
+      return true;
+    };
+    const helper = new IOSScreenCaptureHelper({
+      binaryPath: "/fake/screen-capture-helper",
+      target: { kind: "simulator", windowID: 1 },
+      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+      timer,
+      processGroupKiller: (pid, signal) => processGroupSignals.push({ pid, signal }),
+    });
+    helper.start();
+
+    const stopped = helper.stop();
+    timer.advanceTime(IOS_HELPER_STOP_GRACE_MS);
+    await stopped;
+
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    if (process.platform === "darwin") {
+      expect(processGroupSignals).toEqual([{ pid: fake.pid, signal: "SIGKILL" }]);
+    } else {
+      expect(processGroupSignals).toEqual([]);
+    }
+  });
+
+  test("bounds a concurrent stop after SIGTERM instead of awaiting exit forever", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeChildProcess();
+    fake.kill = () => {
+      fake.killed = true;
+      return true;
+    };
+    const helper = new IOSScreenCaptureHelper({
+      binaryPath: "/fake/screen-capture-helper",
+      target: { kind: "simulator", windowID: 1 },
+      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+      timer,
+    });
+    helper.start();
+
+    const firstStop = helper.stop();
+    const concurrentStop = helper.stop();
+    timer.advanceTime(IOS_HELPER_STOP_GRACE_MS);
+
+    const [firstResult, concurrentResult] = await Promise.all([firstStop, concurrentStop]);
+    expect(firstResult?.signal).toBe("SIGKILL");
+    expect(concurrentResult).not.toBeNull();
   });
 
   test("emits error event when underlying process emits error", async () => {

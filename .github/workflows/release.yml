@@ -104,6 +104,19 @@ jobs:
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+  build-screen-capture-helper:
+    needs: validate-release-tag
+    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
+    uses: ./.github/workflows/build-screen-capture-helper.yml
+    secrets:
+      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+
   verify-and-release:
     if: needs.validate-release-tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-latest
@@ -112,6 +125,7 @@ jobs:
       - build-ctrl-proxy-ios-ipa
       - build-control-proxy-apk
       - build-video-server-jar
+      - build-screen-capture-helper
 
     steps:
       - name: Checkout code
@@ -164,7 +178,13 @@ jobs:
           name: video-server-jar
           path: /tmp
 
-      # These three steps run the release's only artifact-provenance gate, and
+      - name: "Download screen-capture-helper"
+        uses: actions/download-artifact@v7
+        with:
+          name: screen-capture-helper
+          path: /tmp
+
+      # These four steps run the release's only artifact-provenance gate, and
       # both halves of the original form failed open. `bash -e` without pipefail
       # takes its status from `tee`, so verify-artifact-sha256.sh's exit 1 on a
       # mismatch was discarded; and `grep | cut` takes its status from `cut`, so
@@ -206,6 +226,17 @@ jobs:
           [ -n "$CHECKSUM" ] || { echo "No checksum= line in jar verify log" >&2; exit 1; }
           echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
 
+      - name: "Verify screen-capture-helper SHA256 matches source"
+        id: verify_screen_capture_helper_checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify-artifact-sha256.sh \
+            /tmp/screen-capture-helper-macos-universal.zip screencapturehelper | tee /tmp/screen-capture-helper-verify.log
+          CHECKSUM=$(grep '^checksum=' /tmp/screen-capture-helper-verify.log | cut -d= -f2)
+          [ -n "$CHECKSUM" ] || { echo "No checksum= line in screen-capture-helper verify log" >&2; exit 1; }
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+
       - name: Generate release constants
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
@@ -216,6 +247,8 @@ jobs:
             ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
           VIDEO_JAR_SHA256:
             ${{ steps.verify_video_jar_checksum.outputs.checksum }}
+          SCREEN_CAPTURE_HELPER_SHA256:
+            ${{ steps.verify_screen_capture_helper_checksum.outputs.checksum }}
         run: bash scripts/generate-release-constants.sh
 
       - name: Verify release integrity
@@ -277,6 +310,7 @@ jobs:
           APK_CHECKSUM="${{ steps.verify_checksum.outputs.checksum }}"
           IPA_CHECKSUM="${{ steps.verify_ipa_checksum.outputs.checksum }}"
           VIDEO_JAR_CHECKSUM="${{ steps.verify_video_jar_checksum.outputs.checksum }}"
+          SCREEN_CAPTURE_HELPER_CHECKSUM="${{ steps.verify_screen_capture_helper_checksum.outputs.checksum }}"
           NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'\
             '"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'\
             '"Download the APK from the release assets below."
@@ -286,6 +320,9 @@ jobs:
           NOTES="${NOTES}"$'\n\n'"## video-server jar"$'\n\n'\
             '"**SHA256 Checksum:** \`${VIDEO_JAR_CHECKSUM}\`"$'\n\n'\
             '"Download automobile-video.jar from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## macOS screen-capture-helper"$'\n\n'\
+            '"**SHA256 Checksum:** \`${SCREEN_CAPTURE_HELPER_CHECKSUM}\`"$'\n\n'\
+            '"Download screen-capture-helper-macos-universal.zip from the release assets below."
 
           # Save to file for GitHub release
           echo "$NOTES" > release_notes.txt
@@ -462,6 +499,7 @@ jobs:
             /tmp/control-proxy-debug.apk
             /tmp/control-proxy.ipa
             /tmp/automobile-video.jar
+            /tmp/screen-capture-helper-macos-universal.zip
           draft: false
           prerelease: false
         env:
@@ -473,6 +511,7 @@ jobs:
           APK_CHECKSUM: ${{ steps.verify_checksum.outputs.checksum }}
           IPA_CHECKSUM: ${{ steps.verify_ipa_checksum.outputs.checksum }}
           VIDEO_JAR_CHECKSUM: ${{ steps.verify_video_jar_checksum.outputs.checksum }}
+          SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.verify_screen_capture_helper_checksum.outputs.checksum }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -486,6 +525,8 @@ jobs:
           echo "**IPA SHA256:** \`$IPA_CHECKSUM\`" >> "$S"
           echo "**video-server jar Built:** automobile-video.jar" >> "$S"
           echo "**video-server jar SHA256:** \`$VIDEO_JAR_CHECKSUM\`" >> "$S"
+          echo "**screen-capture-helper Built:** screen-capture-helper-macos-universal.zip" >> "$S"
+          echo "**screen-capture-helper SHA256:** \`$SCREEN_CAPTURE_HELPER_CHECKSUM\`" >> "$S"
           echo "" >> "$S"
           echo "### Published Artifacts" >> "$S"
           N="https://www.npmjs.com/package"

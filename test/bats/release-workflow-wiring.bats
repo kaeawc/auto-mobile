@@ -65,6 +65,26 @@
   grep -Fq "VIDEO_JAR_SHA256:" "$workflow"
 }
 
+@test "release delivery builds, verifies, and attaches the screen-capture-helper" {
+  local workflow=".github/workflows/release.yml"
+  grep -Fq "uses: ./.github/workflows/build-screen-capture-helper.yml" "$workflow"
+  grep -Fq "/tmp/screen-capture-helper-macos-universal.zip screencapturehelper" "$workflow"
+  grep -Fq "SCREEN_CAPTURE_HELPER_SHA256:" "$workflow"
+  grep -Fq "/tmp/screen-capture-helper-macos-universal.zip" "$workflow"
+
+  workflow=".github/workflows/prepare-release.yml"
+  grep -Fq "uses: ./.github/workflows/build-screen-capture-helper.yml" "$workflow"
+  grep -Fq "SCREEN_CAPTURE_HELPER_SHA256:" "$workflow"
+}
+
+@test "screen-capture-helper release builder signs, notarizes, and uploads the universal archive" {
+  local workflow=".github/workflows/build-screen-capture-helper.yml"
+  grep -Fq "setup-macos-signing-keychain.sh" "$workflow"
+  grep -Fq "build-screen-capture-helper-release.sh" "$workflow"
+  grep -Fq "name: screen-capture-helper" "$workflow"
+  grep -Fq "path: /tmp/screen-capture-helper-macos-universal.zip" "$workflow"
+}
+
 @test "build-video-server-jar.yml can verify a reproducible build (#3832)" {
   workflow=".github/workflows/build-video-server-jar.yml"
   grep -Fq "verify-reproducible" "$workflow"
@@ -259,7 +279,7 @@ wiring_requires_yq() {
 @test "release.yml artifact checksum gate cannot fail open (#4157)" {
   wiring_requires_yq
   local step
-  for step in verify_checksum verify_ipa_checksum verify_video_jar_checksum; do
+  for step in verify_checksum verify_ipa_checksum verify_video_jar_checksum verify_screen_capture_helper_checksum; do
     local script
     script="$(yq -r ".jobs.\"verify-and-release\".steps[] | select(.id == \"$step\") | .run" \
       ".github/workflows/release.yml" | grep -v '^[[:space:]]*#')"

@@ -64,15 +64,14 @@ error rather than silently publishing video-only.
 
 `IosH264Source` wraps that helper, pipes frames into `ffmpeg` with
 `h264_videotoolbox`, and forwards raw H.264 Annex-B stdout chunks into the
-existing `WebRtcPublisher`. The helper binary is resolved from
-`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`, then a repo-checkout Swift build output,
-then a sha256-verified prebuilt universal helper downloaded from the GitHub
-release and cached under `~/.auto-mobile/screen-capture-helper/` (issue #4392) —
-the same delivery pattern as the CtrlProxy APK/IPA and `automobile-video.jar`, so
-a normal macOS install needs no Swift toolchain. The helper Swift package source
-is **not** shipped in the npm payload; only a repo checkout (which has
-`ios/screen-capture/`) builds it locally. ffmpeg is resolved from `AUTOMOBILE_IOS_WEBRTC_FFMPEG` or
-`PATH`, and startup fails fast if ffmpeg or `h264_videotoolbox` is unavailable
+existing `WebRtcPublisher`. The helper is a sha256-verified signed universal
+archive downloaded from the matching GitHub Release and cached under
+`~/.auto-mobile/screen-capture-helper/` ([#4392](https://github.com/kaeawc/auto-mobile/issues/4392)), so a normal macOS install
+needs no Swift toolchain. The Swift package source is **not** shipped in the npm
+payload. For local Swift development, build it in a checkout and set
+`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` explicitly. ffmpeg is resolved from
+`AUTOMOBILE_IOS_WEBRTC_FFMPEG` or `PATH`, and startup fails fast if ffmpeg or
+`h264_videotoolbox` is unavailable
 or if simulator capture reports missing Screen Recording permission before the
 first frame.
 

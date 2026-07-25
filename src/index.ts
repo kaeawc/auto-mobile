@@ -30,6 +30,8 @@ import {
   SKIP_CTRL_PROXY_DOWNLOAD_FLAG,
 } from "./utils/ctrlProxyDownloadControl";
 import { prefetchVideoServerJar } from "./features/webrtc/videoServerJar";
+import { ScreenCaptureHelperProvider } from "./features/screen-stream/ScreenCaptureHelperProvider";
+import { WEBRTC_ENV } from "./features/webrtc/webrtcStreamingConfig";
 import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import { parseArgs } from "./cli/parseArgs";
 import {
@@ -207,6 +209,18 @@ async function main() {
     // that never stream pull nothing. Non-blocking; reuses the provider's
     // single-flight so a first stream shares this download (#3835).
     void prefetchVideoServerJar();
+    if (
+      process.platform === "darwin" &&
+      process.env[WEBRTC_ENV.WHIP_ENDPOINT]?.trim() &&
+      !process.env.AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER &&
+      !process.env.AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER
+    ) {
+      void ScreenCaptureHelperProvider.getInstance().ensure().catch(error => {
+        logger.warn(
+          `[SCREEN_CAPTURE_HELPER] Background prefetch failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+    }
 
     const featureFlagService = FeatureFlagService.getInstance();
 

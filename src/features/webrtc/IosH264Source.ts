@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { ActionableError, type BootedDevice } from "../../models";
 import { IOSScreenCaptureHelper } from "../screen-stream/IOSScreenCaptureHelper";
@@ -9,15 +8,19 @@ import type {
   DecodedFrame,
   FrameQueueMetrics,
   IosScreenCaptureHelperOptions,
+  IosScreenCaptureReadiness,
   MalformedFrameError,
   NativeFrameMetrics,
 } from "../screen-stream";
-import { AUTOMOBILE_VERSION_ENV } from "../../constants/release";
 import { LatestFrameQueue } from "../screen-stream/LatestFrameQueue";
+import {
+  iosSimulatorCaptureHelperPool,
+  type IOSSimulatorCaptureHelperPool,
+  type IosSimulatorCaptureHelperLease,
+} from "../screen-stream/IOSSimulatorCaptureHelperPool";
+import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { logger } from "../../utils/logger";
-import { ScreenCaptureHelperProvider } from "./ScreenCaptureHelperProvider";
 import {
   DefaultFfmpegClient,
   resolveFfmpegBinary,
@@ -37,13 +40,6 @@ import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 
 export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
 export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER";
-/**
- * When set (`1`/`true`), never touch the network for the screen-capture helper:
- * resolve from the explicit override or a local Swift build only (issue #4392).
- * Dedicated flag, mirroring `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD`.
- */
-export const IOS_SCREEN_CAPTURE_HELPER_SKIP_DOWNLOAD_ENV =
-  "AUTOMOBILE_SKIP_IOS_SCREEN_CAPTURE_HELPER_DOWNLOAD";
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
@@ -54,6 +50,8 @@ const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
  * value plus encoder startup. See test/scripts/mediamtxConfig.test.ts (#4345).
  */
 export const IOS_FIRST_FRAME_TIMEOUT_MS = 15_000;
+/** Fail target lookup quickly instead of consuming the capture startup budget. */
+export const IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS = 2_000;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 /** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
 const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
@@ -106,7 +104,7 @@ export function defaultIosBitrateBps(size: EncoderSize, fps: number): number {
 }
 
 export interface IosFrameCaptureHelper {
-  start(): void;
+  start(): void | Promise<void>;
   stop(): Promise<unknown>;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
   on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
@@ -114,6 +112,7 @@ export interface IosFrameCaptureHelper {
   on(event: "audio", listener: (audio: DecodedAudio) => void): this;
   on(event: "malformed", listener: (error: MalformedFrameError) => void): this;
   on(event: "stderr", listener: (line: string) => void): this;
+  on(event: "readiness", listener: (status: IosScreenCaptureReadiness) => void): this;
   on(event: "exit", listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): this;
   on(event: "error", listener: (error: Error) => void): this;
 }
@@ -134,7 +133,8 @@ export type IosFrameCaptureHelperFactory = (
 export type IosSimulatorWindowResolver = (
   helperPath: string,
   device: BootedDevice,
-  audioEnabled: boolean
+  audioEnabled: boolean,
+  signal: AbortSignal
 ) => Promise<number>;
 
 interface CommandResult {
@@ -144,21 +144,41 @@ interface CommandResult {
   signal: NodeJS.Signals | null;
 }
 
-type CommandRunner = (command: string, args: string[]) => Promise<CommandResult>;
+type CommandRunner = (command: string, args: string[], signal?: AbortSignal) => Promise<CommandResult>;
 
-const defaultCommandRunner: CommandRunner = (command, args) =>
+const defaultCommandRunner: CommandRunner = (command, args, signal) =>
   new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(`Command aborted: ${command}`));
+      return;
+    }
     const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      callback();
+    };
+    const abort = (): void => {
+      child.kill("SIGTERM");
+      finish(() => reject(new Error(`Command aborted: ${command}`)));
+    };
     child.stdout.on("data", chunk => {
       stdout += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     });
     child.stderr.on("data", chunk => {
       stderr += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     });
-    child.once("error", error => reject(error));
-    child.once("exit", (exitCode, signal) => resolve({ stdout, stderr, exitCode, signal }));
+    child.once("error", error => finish(() => reject(error)));
+    child.once("exit", (exitCode, exitSignal) =>
+      finish(() => resolve({ stdout, stderr, exitCode, signal: exitSignal }))
+    );
+    signal?.addEventListener("abort", abort, { once: true });
   });
 
 export interface IosH264SourceOptions extends H264CaptureSourceOptions {
@@ -170,10 +190,11 @@ export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   commandRunner?: CommandRunner;
   ffmpegClient?: FfmpegClient;
   helperPathExists?: (candidate: string) => boolean;
-  /** Injectable helper download provider; defaults to the shared singleton. */
-  helperProvider?: ScreenCaptureHelperEnsurer;
+  screenCaptureHelperProvider?: ScreenCaptureHelperEnsurer;
   timer?: Timer;
   firstFrameTimeoutMs?: number;
+  /** Host-scoped warm helper pool. Supplying createHelper bypasses it for tests. */
+  simulatorHelperPool?: IOSSimulatorCaptureHelperPool;
 }
 
 interface SimulatorWindowInfo {
@@ -192,6 +213,10 @@ export interface IosH264FrameMetrics extends H264CaptureSourceMetrics {}
 
 type IosH264SourcePhase = "idle" | "starting" | "running" | "stopping";
 
+export interface ScreenCaptureHelperEnsurer {
+  ensure(): Promise<string | null>;
+}
+
 export class IosH264Source implements H264CaptureSource {
   private readonly helperPath?: string;
   private readonly ffmpegPath: string;
@@ -201,10 +226,11 @@ export class IosH264Source implements H264CaptureSource {
   private readonly simulatorWindowResolver: IosSimulatorWindowResolver;
   private readonly commandRunner: CommandRunner;
   private readonly helperPathExists?: (candidate: string) => boolean;
-  private readonly helperProvider?: ScreenCaptureHelperEnsurer;
+  private readonly screenCaptureHelperProvider: ScreenCaptureHelperEnsurer;
   private readonly timer: Timer;
   private readonly firstFrameTimeoutMs: number;
   private readonly pendingFrames: LatestFrameQueue;
+  private readonly simulatorHelperPool: IOSSimulatorCaptureHelperPool;
 
   private helper: IosFrameCaptureHelper | null = null;
   private captureKind: CaptureTarget["kind"] | null = null;
@@ -246,17 +272,18 @@ export class IosH264Source implements H264CaptureSource {
     });
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     this.helperPathExists = options.helperPathExists;
-    this.helperProvider = options.helperProvider;
+    this.screenCaptureHelperProvider = options.screenCaptureHelperProvider ?? ScreenCaptureHelperProvider.getInstance();
     this.timer = options.timer ?? defaultTimer;
     this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? IOS_FIRST_FRAME_TIMEOUT_MS;
     this.pendingFrames = new LatestFrameQueue({
       maxFrameBytes: IOS_ENCODER_PENDING_FRAME_MAX_BYTES,
       now: () => this.timer.now(),
     });
+    this.simulatorHelperPool = options.simulatorHelperPool ?? iosSimulatorCaptureHelperPool;
     this.simulatorWindowResolver =
       options.simulatorWindowResolver ??
-      ((helperPath, device, audioEnabled) =>
-        defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner, audioEnabled));
+      ((helperPath, device, audioEnabled, signal) =>
+        defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner, audioEnabled, signal));
   }
 
   /** Snapshot of each bounded handoff from capture through VideoToolbox. */
@@ -279,11 +306,7 @@ export class IosH264Source implements H264CaptureSource {
     this.nativeFrameMetrics = null;
 
     try {
-      const helperPath = await ensureIosScreenCaptureHelper({
-        explicitPath: this.helperPath,
-        exists: this.helperPathExists,
-        provider: this.helperProvider,
-      });
+      const helperPath = await this.resolveHelperPath();
       await validateFfmpegAvailability(this.ffmpegClient, this.ffmpegPath, this.options.commandRunner);
       const target = await this.resolveCaptureTarget(helperPath);
       this.captureKind = target.kind;
@@ -292,12 +315,12 @@ export class IosH264Source implements H264CaptureSource {
       }
 
       logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
-      const helper = this.createHelper({ binaryPath: helperPath, target });
+      const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
       this.helper = helper;
       this.wireHelperFrames(helper);
       const firstAudio = this.options.audioEnabled ? this.waitForFirstAudio(helper) : null;
       const firstFrame = this.waitForFirstFrame(helper, target);
-      helper.start();
+      await helper.start();
       await Promise.all([firstFrame, firstAudio]);
     } catch (error) {
       this.phase = "stopping";
@@ -358,18 +381,72 @@ export class IosH264Source implements H264CaptureSource {
 
   private async resolveCaptureTarget(helperPath: string): Promise<CaptureTarget> {
     if (isIosSimulatorUdid(this.options.device.deviceId)) {
+      const windowID = await this.resolveSimulatorWindowIdWithDeadline(helperPath);
       return {
         kind: "simulator",
-        windowID: await this.simulatorWindowResolver(
-          helperPath,
-          this.options.device,
-          this.options.audioEnabled === true
-        ),
+        windowID,
         fps: this.fps,
         ...(this.options.audioEnabled === true ? { audio: true } : {}),
       };
     }
     return { kind: "device", deviceId: this.options.device.deviceId };
+  }
+
+  private async resolveHelperPath(): Promise<string> {
+    const configuredPath = this.helperPath ??
+      readEnvWithLegacy(process.env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS);
+    if (configuredPath) {
+      return resolveIosScreenCaptureHelperPath(configuredPath, {
+        exists: this.helperPathExists,
+        env: {},
+      });
+    }
+
+    const releasedPath = await this.screenCaptureHelperProvider.ensure();
+    if (releasedPath) {
+      return releasedPath;
+    }
+    throw new ActionableError(
+      "iOS WebRTC streaming requires a verified screen-capture-helper from the matching GitHub Release. " +
+      `For local development, run swift build in ios/screen-capture and set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the resulting absolute path.`
+    );
+  }
+
+  private async resolveSimulatorWindowIdWithDeadline(helperPath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const controller = new AbortController();
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.timer.clearTimeout(timeout);
+        callback();
+      };
+      const timeout = this.timer.setTimeout(() => {
+        controller.abort();
+        finish(() => reject(new ActionableError(
+          `Timed out resolving iOS Simulator window for ${this.options.device.name} after ${IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS}ms. Open the Simulator window and verify Screen Recording permission.`
+        )));
+      }, IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS);
+      void this.simulatorWindowResolver(
+        helperPath,
+        this.options.device,
+        this.options.audioEnabled === true,
+        controller.signal
+      ).then(
+        windowID => finish(() => resolve(windowID)),
+        error => finish(() => reject(error))
+      );
+    });
+  }
+
+  private createCaptureHelper(options: IosScreenCaptureHelperOptions): IosFrameCaptureHelper {
+    if (options.target.kind === "simulator" && !this.options.createHelper) {
+      return this.simulatorHelperPool.acquire(options) as IosSimulatorCaptureHelperLease;
+    }
+    return this.createHelper(options);
   }
 
   private waitForFirstFrame(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
@@ -515,6 +592,11 @@ export class IosH264Source implements H264CaptureSource {
           new Error(`screen-capture-helper reported an error: ${line}`)
         );
       }
+    });
+    helper.on("readiness", status => {
+      logger.debug(
+        `[IosH264Source] capture readiness phase=${status.phase} atMs=${status.atMs}${status.detail ? ` detail=${status.detail}` : ""}`
+      );
     });
   }
 
@@ -914,36 +996,18 @@ function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {
 
 export interface IosScreenCaptureHelperPathResolverOptions {
   env?: NodeJS.ProcessEnv;
-  moduleDir?: string;
   exists?: (candidate: string) => boolean;
 }
 
-/**
- * Synchronous, local-only resolution of the helper: an explicit path, the
- * `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override, then a repo-checkout Swift
- * `.build` output. Returns `null` when none exist — the full precedence (which
- * also downloads a verified prebuilt helper from GitHub releases) lives in
- * {@link ensureIosScreenCaptureHelper}.
- */
 export function resolveIosScreenCaptureHelperPath(
   explicitPath?: string,
   options: IosScreenCaptureHelperPathResolverOptions = {}
-): string | null {
+): string {
   const env = options.env ?? process.env;
-  const moduleDir = options.moduleDir ?? __dirname;
   const exists = options.exists ?? existsSync;
-  // Only a repo checkout has ios/screen-capture/.build — the Swift source is NOT
-  // shipped in the npm payload (issue #4392), so a published install has no local
-  // build path and falls through to the download provider. Walking moduleDir's
-  // ancestors reaches the repo root from either src/ or dist/src/.
-  const candidateRoots = ancestorDirs(moduleDir);
   const candidates = [
     explicitPath,
     readEnvWithLegacy(env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS),
-    ...candidateRoots.flatMap(root => [
-      path.join(root, "ios/screen-capture/.build/debug/screen-capture-helper"),
-      path.join(root, "ios/screen-capture/.build/release/screen-capture-helper"),
-    ]),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of candidates) {
@@ -952,56 +1016,8 @@ export function resolveIosScreenCaptureHelperPath(
     }
   }
 
-  return null;
-}
-
-/** Just the ensure() surface {@link ensureIosScreenCaptureHelper} needs from the provider. */
-export interface ScreenCaptureHelperEnsurer {
-  ensure(): Promise<string | null>;
-}
-
-export interface EnsureIosScreenCaptureHelperOptions extends IosScreenCaptureHelperPathResolverOptions {
-  explicitPath?: string;
-  /** Injectable for tests; defaults to the shared provider singleton. */
-  provider?: ScreenCaptureHelperEnsurer;
-}
-
-/**
- * Full resolution precedence for the iOS screen-capture helper (issue #4392),
- * layered on top of the download provider — mirrors `resolveVideoServerJar`:
- *
- *   1. Explicit path / `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` override.
- *   2. Repo-checkout Swift `.build` output (developer convenience).
- *   3. Verified prebuilt helper from GitHub releases (cached), unless
- *      `AUTOMOBILE_SKIP_IOS_SCREEN_CAPTURE_HELPER_DOWNLOAD` is set.
- *   4. else throw an actionable error.
- *
- * A checksum mismatch on a downloaded helper throws (from the provider) and is
- * intentionally never caught — corruption/tampering must stay fatal.
- */
-export async function ensureIosScreenCaptureHelper(
-  options: EnsureIosScreenCaptureHelperOptions = {}
-): Promise<string> {
-  const env = options.env ?? process.env;
-
-  const local = resolveIosScreenCaptureHelperPath(options.explicitPath, options);
-  if (local) {
-    return local;
-  }
-
-  const skip = isTruthyEnvValue(env[IOS_SCREEN_CAPTURE_HELPER_SKIP_DOWNLOAD_ENV]);
-  if (!skip) {
-    const provider = options.provider ?? ScreenCaptureHelperProvider.getInstance();
-    const downloaded = await provider.ensure();
-    if (downloaded) {
-      return downloaded;
-    }
-  }
-
   throw new ActionableError(
-    `iOS WebRTC streaming requires a screen-capture-helper. A supported macOS install downloads a ` +
-    `prebuilt one from the release matching ${AUTOMOBILE_VERSION_ENV}; if it is unavailable, set ` +
-    `${IOS_SCREEN_CAPTURE_HELPER_ENV} to an absolute path or run swift build in ios/screen-capture.`
+    `No executable screen-capture-helper was found at the configured path. Set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the absolute path of a local development build.`
   );
 }
 
@@ -1011,19 +1027,6 @@ function readEnvWithLegacy(
   legacyName: string
 ): string | undefined {
   return env[primaryName] ?? env[legacyName];
-}
-
-function ancestorDirs(startDir: string): string[] {
-  const dirs: string[] = [];
-  let current = path.resolve(startDir);
-  while (true) {
-    dirs.push(current);
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return dirs;
-    }
-    current = parent;
-  }
 }
 
 async function validateFfmpegAvailability(
@@ -1082,9 +1085,10 @@ async function defaultResolveSimulatorWindowId(
   helperPath: string,
   device: BootedDevice,
   commandRunner: CommandRunner,
-  audioEnabled: boolean
+  audioEnabled: boolean,
+  signal: AbortSignal
 ): Promise<number> {
-  const result = await commandRunner(helperPath, ["--list-simulators"]);
+  const result = await commandRunner(helperPath, ["--list-simulators"], signal);
   if (result.exitCode !== 0) {
     throw new ActionableError(
       `Unable to list iOS Simulator windows: ${result.stderr.trim() || `exited with code ${result.exitCode}`}`

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import path from "node:path";
 
 /**
  * Structural tripwire for `bunfig.toml`'s `[test].preload` (issues #3084/#4186).
@@ -12,13 +11,13 @@ import path from "node:path";
  * by PARSING the TOML (via Bun's native parser — no new dependency; smol-toml is
  * only a transitive dep of knip), not a substring grep.
  *
- * NOTE: bun discovers bunfig.toml from the repo root, so `process.cwd()` must be
- * the repo root for the second assertion to hold — which it is under
- * `bun test` / `turbo run test`.
+ * The file is resolved relative to THIS test (`import.meta.url`), not the working
+ * directory, so the tripwire holds regardless of the cwd the runner is invoked
+ * from.
  */
 describe("bunfig.toml test preload tripwire (#3084)", () => {
   const parsed = Bun.TOML.parse(
-    readFileSync(path.join(process.cwd(), "bunfig.toml"), "utf8")
+    readFileSync(new URL("../../bunfig.toml", import.meta.url), "utf8")
   ) as { test?: { preload?: string[] } };
 
   test("[test].preload is a non-empty array", () => {

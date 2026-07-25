@@ -136,4 +136,38 @@ describe("FakeDeviceSnapshotRepository", () => {
       await db.destroy();
     }
   });
+
+  // Offset-bearing timestamps whose LEXICAL (SQLite TEXT/BINARY) order disagrees
+  // with their INSTANT (Date.parse) order. "lex-first" reads 12:00:00Z; "lex-last"
+  // reads 13:00:00+02:00 == 11:00:00Z (an EARLIER instant). Lexically "12..." sorts
+  // before "13...", so SQLite returns lex-first, lex-last; by instant it is the
+  // reverse. A fake ordering on parsed instants would diverge from the real SQL.
+  const offsetRows = [
+    makeRecord({ snapshotName: "lex-first", lastAccessedAt: "2024-01-01T12:00:00Z" }),
+    makeRecord({ snapshotName: "lex-last", lastAccessedAt: "2024-01-01T13:00:00+02:00" }),
+  ];
+  const lastAccessedAscQuery: DeviceSnapshotQuery = { orderByLastAccessed: "asc" };
+
+  test("orders offset-bearing timestamps lexically like SQLite TEXT, not by instant", async () => {
+    const fake = new FakeDeviceSnapshotRepository();
+    const db = await createTestDatabase();
+    const real = new DeviceSnapshotRepository(db);
+    try {
+      for (const row of offsetRows) {
+        await fake.insertSnapshot(row);
+        await real.insertSnapshot(row);
+      }
+
+      const fakeNames = (await fake.listSnapshots(lastAccessedAscQuery)).map(r => r.snapshotName);
+      const realNames = (await real.listSnapshots(lastAccessedAscQuery)).map(r => r.snapshotName);
+
+      // Real SQLite orders the stored TEXT lexically: "12:00:00Z" < "13:00:00+02:00".
+      expect(realNames).toEqual(["lex-first", "lex-last"]);
+      // Instant order would be the reverse (13:00+02:00 == 11:00Z is earlier); the
+      // fake must match the real lexical order, not Date.parse instants.
+      expect(fakeNames).toEqual(realNames);
+    } finally {
+      await db.destroy();
+    }
+  });
 });

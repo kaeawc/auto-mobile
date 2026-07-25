@@ -52,19 +52,27 @@ export class FakeDeviceSnapshotRepository {
     // repository adds them: last_accessed_at FIRST (primary), created_at SECOND
     // (tie-break). Applying two SEPARATE stable sorts inverts that precedence —
     // the last sort wins — so a single combined comparator is required (#4186).
-    const comparators: Array<(record: DeviceSnapshotRecord) => number> = [];
+    // Compare the STORED timestamp strings lexically, not their parsed instants.
+    // The columns are TEXT and the real query orders them with SQLite's default
+    // BINARY collation, so offset-bearing or mixed-precision strings (e.g.
+    // "2024-01-01T00:00:00+02:00" vs "2023-12-31T23:00:00Z") sort by bytes, which
+    // can differ from Date.parse() instant order. Byte order on ASCII timestamp
+    // strings equals JS string comparison. This also sidesteps NaN from an
+    // unparseable date producing an unstable comparator.
+    const comparators: Array<(left: DeviceSnapshotRecord, right: DeviceSnapshotRecord) => number> = [];
+    const compareText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
     if (query.orderByLastAccessed) {
       const sign = query.orderByLastAccessed === "asc" ? 1 : -1;
-      comparators.push(record => Date.parse(record.lastAccessedAt) * sign);
+      comparators.push((left, right) => compareText(left.lastAccessedAt, right.lastAccessedAt) * sign);
     }
     if (query.orderByCreatedAt) {
       const sign = query.orderByCreatedAt === "asc" ? 1 : -1;
-      comparators.push(record => Date.parse(record.createdAt) * sign);
+      comparators.push((left, right) => compareText(left.createdAt, right.createdAt) * sign);
     }
     if (comparators.length > 0) {
       results.sort((left, right) => {
-        for (const key of comparators) {
-          const delta = key(left) - key(right);
+        for (const comparator of comparators) {
+          const delta = comparator(left, right);
           if (delta !== 0) {
             return delta;
           }

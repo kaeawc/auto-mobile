@@ -126,6 +126,13 @@ function flush(): Promise<void> {
   return new Promise(resolve => setImmediate(resolve));
 }
 
+function emitIdr(encoder: FakeChildProcess): void {
+  encoder.stdout.push(Buffer.from([
+    0, 0, 0, 1, 0x65, 0x80,
+    0, 0, 0, 1, 0x41, 0x80,
+  ]));
+}
+
 async function startWithFrame(
   source: IosH264Source,
   helper: FakeFrameCaptureHelper,
@@ -1241,6 +1248,8 @@ describe("IosH264Source", () => {
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     helper.emitFrame(frame(1, 1, 0x22));
+    emitIdr(encoders[0]);
+    await flush();
 
     source.requestKeyFrame();
     helper.emitFrame(frame(1, 1, 0x33));
@@ -1334,6 +1343,8 @@ describe("IosH264Source", () => {
     await startWithFrame(source, helper, firstFrame);
     expect(encoderSpawns).toHaveLength(1);
     firstFrame.pixels.fill(0xff);
+    emitIdr(encoders[0]);
+    await flush();
 
     // ffmpeg cannot be signalled for an IDR mid-stream over a pipe; a request
     // restarts the encoder. Replay the most recent frame so static capture can
@@ -1368,6 +1379,8 @@ describe("IosH264Source", () => {
 
     await startWithFrame(source, helper, frame(2, 2, 0x11));
     expect(encoderSpawns).toHaveLength(1);
+    emitIdr(encoders[0]);
+    await flush();
 
     // A burst of relayed viewer PLIs collapses to a single restart.
     expect(source.requestKeyFrame()).toBe(true);
@@ -1400,6 +1413,22 @@ describe("IosH264Source", () => {
     // can start another recovery attempt.
     expect(source.requestKeyFrame()).toBe(true);
     expect(encoderSpawns).toHaveLength(3);
+  });
+
+  test("does not replace an encoder while its initial IDR is still pending", async () => {
+    const { source, helper, encoders, encoderSpawns } = createRestartHarness();
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+
+    // VideoToolbox begins every encoder with an IDR. Replacing the initial
+    // encoder before it emits that frame turns an early PLI into restart churn.
+    expect(source.requestKeyFrame()).toBe(false);
+    expect(encoderSpawns).toHaveLength(1);
+
+    emitIdr(encoders[0]);
+    await flush();
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(encoderSpawns).toHaveLength(2);
   });
 
   test("requestKeyFrame is a no-op before the first frame and after stop", async () => {

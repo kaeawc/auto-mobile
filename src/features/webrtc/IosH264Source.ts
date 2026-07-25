@@ -254,6 +254,8 @@ export class IosH264Source implements H264CaptureSource {
   private nativeFrameMetrics: NativeFrameMetrics | null = null;
   private forcedKeyFrameEncoder: IosH264EncoderProcess | null = null;
   private forcedKeyFrameParser: H264AnnexBParser | null = null;
+  private encoderIdrParser = new H264AnnexBParser();
+  private encoderHasProducedIdr = false;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -352,13 +354,20 @@ export class IosH264Source implements H264CaptureSource {
    * the steady-state bitrate cost at zero: no extra keyframes are emitted unless
    * a viewer actually asks. A burst of PLIs is throttled to one restart per
    * {@link IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}; later requests are also held
-   * until that replacement emits its IDR. Safe to call before the encoder exists
-   * (the first frame is already an IDR) or after the source has stopped.
+   * until that replacement emits its IDR. Safe to call before the initial
+   * encoder emits its first IDR (that encoder will already satisfy the request)
+   * or after the source has stopped.
    */
   requestKeyFrame(): boolean {
     const oldEncoder = this.encoder;
     const size = this.encoderSize;
-    if (this.phase !== "running" || !oldEncoder || !size || this.forcedKeyFrameEncoder) {
+    if (
+      this.phase !== "running" ||
+      !oldEncoder ||
+      !size ||
+      !this.encoderHasProducedIdr ||
+      this.forcedKeyFrameEncoder
+    ) {
       return false;
     }
     const now = this.timer.now();
@@ -705,6 +714,8 @@ export class IosH264Source implements H264CaptureSource {
     this.encoder = encoder;
     this.encoderSize = size;
     this.encoderBackpressured = false;
+    this.encoderIdrParser = new H264AnnexBParser();
+    this.encoderHasProducedIdr = false;
     this.lastEncoderStderr = null;
     if (awaitsForcedKeyFrame) {
       this.forcedKeyFrameEncoder = encoder;
@@ -714,6 +725,7 @@ export class IosH264Source implements H264CaptureSource {
     encoder.stdout.on("data", chunk => {
       if (this.isActive() && this.encoder === encoder) {
         const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        this.recordEncoderIdr(encoder, data);
         this.recordForcedKeyFrame(encoder, data);
         this.options.onData(data);
       }
@@ -809,6 +821,18 @@ export class IosH264Source implements H264CaptureSource {
       // failure. Keep this recovery guard closed rather than restarting an
       // encoder whose replacement output we cannot prove contains an IDR.
       logger.debug(`[IosH264Source] could not parse forced-keyframe output: ${error}`);
+    }
+  }
+
+  /** Track the initial IDR before allowing a PLI to recycle the warming encoder. */
+  private recordEncoderIdr(encoder: IosH264EncoderProcess, chunk: Buffer): void {
+    if (this.encoder !== encoder || this.encoderHasProducedIdr) {
+      return;
+    }
+    try {
+      this.encoderHasProducedIdr = this.encoderIdrParser.push(chunk).some(isKeyFrameNal);
+    } catch (error) {
+      logger.debug(`[IosH264Source] could not parse encoder output while awaiting initial IDR: ${error}`);
     }
   }
 

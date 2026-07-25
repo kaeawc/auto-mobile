@@ -627,6 +627,7 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
     recoveryStarts = false;
     timer.advanceTime(KEYFRAME_REQUEST_MIN_INTERVAL_MS * 2);
     pc.pliSubscribers[0]();
+    expect(publisher.getDescriptor().readiness.idrRequestCount).toBe(1);
 
     // The first PLI resets the deadline to t=7000. The second is throttled by
     // the source and must not move it to t=9000. The watchdog checks at t=6000

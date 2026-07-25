@@ -367,13 +367,13 @@ export class WebRtcPublisher {
     }
     this.lastKeyFrameRequestMs = now;
     logger.debug(`[WebRTC] stream ${this.config.streamId} received PLI; requesting keyframe`);
-    this.noteKeyFrameRequest();
     try {
       const recoveryStarted = this.onKeyFrameRequest();
       // An accepted PLI can restart the iOS encoder. Do not let a watchdog
       // deadline that was already nearly expired tear down that recovery before
       // its replacement has a chance to emit the requested IDR.
       if (recoveryStarted) {
+        this.noteKeyFrameRequest();
         this.resetFrameWatchdogDeadline(pc);
       }
     } catch (error) {

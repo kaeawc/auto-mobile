@@ -71,12 +71,17 @@ dependencies {
   // Navigation3 support for Compose navigation tracking
   implementation(libs.navigation3.runtime)
 
+  // Optional CircuitX support. Consumers provide CircuitX when using this integration.
+  compileOnly(libs.circuitx.navigation)
+
   // Test dependencies
   testImplementation(libs.kotlin.test)
   testImplementation(libs.junit)
   testImplementation(libs.bundles.unit.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.okhttp)
+  testImplementation(libs.circuit.test)
+  testImplementation(libs.circuitx.navigation)
 }
 
 // Configure Kotlin compilation options

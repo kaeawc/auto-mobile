@@ -217,6 +217,8 @@ export interface ScreenCaptureHelperEnsurer {
   ensure(): Promise<string | null>;
 }
 
+class NoFirstFrameError extends ActionableError {}
+
 export class IosH264Source implements H264CaptureSource {
   private readonly helperPath?: string;
   private readonly ffmpegPath: string;
@@ -314,14 +316,7 @@ export class IosH264Source implements H264CaptureSource {
         return;
       }
 
-      logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
-      const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
-      this.helper = helper;
-      this.wireHelperFrames(helper);
-      const firstAudio = this.options.audioEnabled ? this.waitForFirstAudio(helper) : null;
-      const firstFrame = this.waitForFirstFrame(helper, target);
-      await helper.start();
-      await Promise.all([firstFrame, firstAudio]);
+      await this.startCaptureWithSimulatorRetry(helperPath, target);
     } catch (error) {
       this.phase = "stopping";
       await this.beginTeardown();
@@ -447,6 +442,35 @@ export class IosH264Source implements H264CaptureSource {
       return this.simulatorHelperPool.acquire(options) as IosSimulatorCaptureHelperLease;
     }
     return this.createHelper(options);
+  }
+
+  private async startCaptureWithSimulatorRetry(helperPath: string, target: CaptureTarget): Promise<void> {
+    const shouldRetryNoFirstFrame = target.kind === "simulator" && !this.options.createHelper;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.startCaptureAttempt(helperPath, target);
+        return;
+      } catch (error) {
+        if (!shouldRetryNoFirstFrame || attempt !== 0 || !(error instanceof NoFirstFrameError)) {
+          throw error;
+        }
+        logger.warn(
+          `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(target)}; retrying once`
+        );
+        await this.stopCurrentHelper();
+      }
+    }
+  }
+
+  private async startCaptureAttempt(helperPath: string, target: CaptureTarget): Promise<void> {
+    logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
+    const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
+    this.helper = helper;
+    this.wireHelperFrames(helper);
+    const firstAudio = this.options.audioEnabled ? this.waitForFirstAudio(helper) : null;
+    const firstFrame = this.waitForFirstFrame(helper, target);
+    await helper.start();
+    await Promise.all([firstFrame, firstAudio]);
   }
 
   private waitForFirstFrame(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
@@ -879,8 +903,6 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private async teardown(): Promise<void> {
-    this.cancelFirstAudioWait?.();
-    this.cancelFirstAudioWait = null;
     const encoder = this.encoder;
     this.encoder = null;
     this.encoderSize = null;
@@ -891,6 +913,15 @@ export class IosH264Source implements H264CaptureSource {
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 
+    await this.stopCurrentHelper();
+  }
+
+  private async stopCurrentHelper(): Promise<void> {
+    this.cancelFirstFrameWait?.();
+    this.cancelFirstFrameWait = null;
+    this.cancelFirstAudioWait?.();
+    this.cancelFirstAudioWait = null;
+    this.rejectFirstAudioWait = null;
     const helper = this.helper;
     this.helper = null;
     await helper?.stop().catch(error => {
@@ -960,11 +991,11 @@ function clampMacroblockAxis(value: number): number {
   return Math.min(WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME, Math.max(1, value));
 }
 
-function makeNoFramesError(target: CaptureTarget): ActionableError {
+function makeNoFramesError(target: CaptureTarget): NoFirstFrameError {
   const hint = target.kind === "simulator"
     ? " Grant Screen Recording permission to your terminal/IDE in System Settings > Privacy & Security > Screen Recording."
     : "";
-  return new ActionableError(`iOS screen capture did not produce a first frame.${hint}`);
+  return new NoFirstFrameError(`iOS screen capture did not produce a first frame.${hint}`);
 }
 
 function isNoFramesPermissionWarning(line: string): boolean {

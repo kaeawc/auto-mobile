@@ -323,7 +323,8 @@ function helperTargetKey(target: CaptureTarget, binaryPath: string): string {
 }
 
 function isFatalHelperStderr(line: string): boolean {
-  return line.trimStart().toLowerCase().startsWith("error:");
+  const normalized = line.trimStart().toLowerCase();
+  return normalized.startsWith("error:") || normalized.includes("warn: no frames received");
 }
 
 export const iosSimulatorCaptureHelperPool = new IOSSimulatorCaptureHelperPool();

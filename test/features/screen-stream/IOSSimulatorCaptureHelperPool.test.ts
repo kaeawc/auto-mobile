@@ -132,6 +132,39 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     await pool.shutdown();
   });
 
+  test("discards a silent helper before reusing its window and keeps another window active", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const silent = pool.acquire(simulatorOptions(42));
+    const concurrent = pool.acquire(simulatorOptions(99));
+    await silent.start();
+    await concurrent.start();
+
+    helpers[0].emit(
+      "stderr",
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+    );
+    await flushMicrotasks();
+
+    const replacement = pool.acquire(simulatorOptions(42));
+    await replacement.start();
+
+    expect(helpers).toHaveLength(3);
+    expect(helpers[0].stops).toBe(1);
+    expect(helpers[1].stops).toBe(0);
+    expect(helpers[2].starts).toBe(1);
+    await replacement.stop();
+    await concurrent.stop();
+    await silent.stop();
+    await pool.shutdown();
+  });
+
   test("logs a rejected failed-helper cleanup instead of leaving an unhandled rejection", async () => {
     const helpers: FakeSimulatorHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({

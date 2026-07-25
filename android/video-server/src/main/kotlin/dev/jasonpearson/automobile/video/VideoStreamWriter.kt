@@ -9,6 +9,38 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 
 /**
+ * Tracks the bounded clientless window using a monotonic clock so wall-clock changes cannot
+ * prematurely expire or indefinitely extend a capture session.
+ */
+internal class ReconnectWindow(
+  private val clock: () -> Long,
+  private val durationMs: Long,
+) {
+  private var clientlessSinceMs: Long? = null
+  private var clientAttached = false
+
+  fun start() {
+    clientAttached = false
+    clientlessSinceMs = clock()
+  }
+
+  fun onClientAttached() {
+    clientAttached = true
+    clientlessSinceMs = null
+  }
+
+  fun onClientDetached() {
+    clientAttached = false
+    clientlessSinceMs = clock()
+  }
+
+  fun isExpired(): Boolean {
+    val clientlessSince = clientlessSinceMs ?: return false
+    return !clientAttached && clock() - clientlessSince >= durationMs
+  }
+}
+
+/**
  * Writes encoded video packets to a LocalSocket using the VideoStreamProtocol binary framing. A
  * disconnected client is replaceable: the writer retains codec configuration plus the latest
  * complete keyframe and replays them before live packets to the next client.
@@ -20,13 +52,19 @@ class VideoStreamWriter(
   private val audioEnabled: Boolean = false,
   private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
+  private data class CachedPacket(
+    val trackId: Int,
+    val ptsAndFlags: Long,
+    val data: ByteArray,
+  )
+
   private var serverSocket: LocalServerSocket? = null
   private var clientSocket: LocalSocket? = null
   private var outputStream: OutputStream? = null
   private var commandHandler: ((Int) -> Unit)? = null
   private val lock = Any()
   private val packetCache = VideoPacketCache()
-  private val reconnectWindow = ClientReconnectWindow()
+  private val reconnectWindow = ReconnectWindow(nowMs, CLIENT_RECONNECT_WINDOW_MS)
 
   @Volatile private var stopped = false
 
@@ -61,6 +99,7 @@ class VideoStreamWriter(
    */
   fun start(onClientConnected: () -> Unit = {}) {
     serverSocket = LocalServerSocket(socketName)
+    synchronized(lock) { reconnectWindow.start() }
     println("Waiting for client connection on localabstract:$socketName")
     Thread(
         { acceptClients(onClientConnected) },
@@ -101,12 +140,12 @@ class VideoStreamWriter(
           try {
             writeStreamHeaderLocked()
             replayCachedVideoLocked()
-            reconnectWindow.onClientConnected()
+            reconnectWindow.onClientAttached()
             true
           } catch (e: IOException) {
             println("Error attaching video client: ${e.message}")
             closeClientLocked()
-            reconnectWindow.onClientDisconnected(nowMs())
+            reconnectWindow.onClientDetached()
             false
           }
         }
@@ -125,7 +164,7 @@ class VideoStreamWriter(
     Thread(
         {
           try {
-            while (!stopped) {
+            while (!stopped && isCurrentClient(client)) {
               val command = input.read()
               if (command < 0) break
               commandHandler?.invoke(command)
@@ -136,7 +175,7 @@ class VideoStreamWriter(
             synchronized(lock) {
               if (clientSocket === client) {
                 closeClientLocked()
-                reconnectWindow.onClientDisconnected(nowMs())
+                reconnectWindow.onClientDetached()
               }
             }
           }
@@ -172,10 +211,10 @@ class VideoStreamWriter(
       writePacketDataLocked(TRACK_ID_AUDIO, ptsUs and PTS_MASK, data)
     }
 
-  /** True once a prior client has failed to reconnect inside the bounded window. */
+  /** True once the initial or replacement client misses the bounded reconnect window. */
   fun reconnectWindowExpired(): Boolean =
     synchronized(lock) {
-      reconnectWindow.hasExpired(nowMs())
+      reconnectWindow.isExpired()
     }
 
   private fun writeStreamHeaderLocked() {
@@ -217,10 +256,13 @@ class VideoStreamWriter(
     } catch (e: IOException) {
       println("Error writing packet: ${e.message}")
       closeClientLocked()
-      reconnectWindow.onClientDisconnected(nowMs())
+      reconnectWindow.onClientDetached()
       return true
     }
   }
+
+  private fun isCurrentClient(client: LocalSocket): Boolean =
+    synchronized(lock) { clientSocket === client }
 
   private fun closeClientLocked() {
     try {
@@ -276,24 +318,4 @@ internal class VideoPacketCache {
       else -> listOf(cachedConfig.copyPacket(), cachedIdr.copyPacket())
     }
   }
-}
-
-internal class ClientReconnectWindow(
-  private val windowMs: Long = VideoStreamWriter.CLIENT_RECONNECT_WINDOW_MS
-) {
-  private var hasConnected = false
-  private var disconnectedAtMs: Long? = null
-
-  fun onClientConnected() {
-    hasConnected = true
-    disconnectedAtMs = null
-  }
-
-  fun onClientDisconnected(nowMs: Long) {
-    if (hasConnected && disconnectedAtMs == null) {
-      disconnectedAtMs = nowMs
-    }
-  }
-
-  fun hasExpired(nowMs: Long): Boolean = disconnectedAtMs?.let { nowMs - it >= windowMs } ?: false
 }

@@ -90,6 +90,15 @@ describe("H264AnnexBParser", () => {
     expect(afterFlush[0].equals(second)).toBe(true);
   });
 
+  test("identifies a complete header for the buffered trailing NAL without flushing it", () => {
+    const parser = new H264AnnexBParser();
+    const idr = makeNal(NAL_TYPE_IDR, 4);
+
+    expect(parser.push(Buffer.concat([START_4, idr]))).toEqual([]);
+    expect(parser.hasBufferedNalType(NAL_TYPE_IDR)).toBe(true);
+    expect(parser.flush()).toEqual([idr]);
+  });
+
   test("drops an unterminated oversized NAL instead of retaining it indefinitely", () => {
     const parser = new H264AnnexBParser(8);
 

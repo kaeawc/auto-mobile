@@ -34,7 +34,7 @@ import type {
   H264CaptureSourceOptions,
   H264EncoderFrameMetrics,
 } from "./H264CaptureSource";
-import { H264AnnexBParser, isKeyFrameNal } from "./h264";
+import { H264AnnexBParser, isKeyFrameNal, NAL_TYPE_IDR } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
 
@@ -240,6 +240,7 @@ export class IosH264Source implements H264CaptureSource {
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
   private encoderBackpressured = false;
+  private lastHelperFrame: DecodedFrame | null = null;
   private teardownPromise: Promise<void> | null = null;
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
@@ -253,6 +254,8 @@ export class IosH264Source implements H264CaptureSource {
   private nativeFrameMetrics: NativeFrameMetrics | null = null;
   private forcedKeyFrameEncoder: IosH264EncoderProcess | null = null;
   private forcedKeyFrameParser: H264AnnexBParser | null = null;
+  private encoderIdrParser = new H264AnnexBParser();
+  private encoderHasProducedIdr = false;
   private phase: IosH264SourcePhase = "idle";
 
   constructor(private readonly options: IosH264SourceOptions) {
@@ -307,6 +310,7 @@ export class IosH264Source implements H264CaptureSource {
     this.lastHelperStderr = null;
     this.helperFrameMetrics = null;
     this.nativeFrameMetrics = null;
+    this.lastHelperFrame = null;
 
     try {
       const helperPath = await this.resolveHelperPath();
@@ -350,29 +354,44 @@ export class IosH264Source implements H264CaptureSource {
    * the steady-state bitrate cost at zero: no extra keyframes are emitted unless
    * a viewer actually asks. A burst of PLIs is throttled to one restart per
    * {@link IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}; later requests are also held
-   * until that replacement emits its IDR. Safe to call before the encoder exists
-   * (the first frame is already an IDR) or after the source has stopped.
+   * until that replacement emits its IDR. Safe to call before the initial
+   * encoder emits its first IDR (that encoder will already satisfy the request)
+   * or after the source has stopped.
    */
-  requestKeyFrame(): void {
+  requestKeyFrame(): boolean {
     const oldEncoder = this.encoder;
     const size = this.encoderSize;
-    if (this.phase !== "running" || !oldEncoder || !size || this.forcedKeyFrameEncoder) {
-      return;
+    if (
+      this.phase !== "running" ||
+      !oldEncoder ||
+      !size ||
+      !this.encoderHasProducedIdr ||
+      this.forcedKeyFrameEncoder
+    ) {
+      return false;
     }
     const now = this.timer.now();
     if (now - this.lastForcedKeyFrameMs < IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS) {
-      return;
+      return false;
     }
     this.lastForcedKeyFrameMs = now;
     logger.info("[IosH264Source] keyframe requested; restarting encoder to emit a fresh IDR");
     // Spawn the replacement first so the outgoing encoder's exit/error handlers
     // — all guarded by `this.encoder === encoder` — no-op instead of tearing the
-    // source down as a fatal crash. Then end its stdin and terminate it.
+    // source down as a fatal crash. Two retained input frames make the first
+    // IDR's Annex-B NAL terminate at the following access-unit boundary even
+    // while the capture helper is otherwise quiet. Then end its stdin and
+    // terminate it.
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
     this.startEncoder(size, true);
+    if (this.lastHelperFrame) {
+      this.writeFrameToEncoder(this.lastHelperFrame);
+      this.writeFrameToEncoder(this.lastHelperFrame);
+    }
     oldEncoder.stdin.end();
     oldEncoder.kill("SIGTERM");
+    return true;
   }
 
   private async resolveCaptureTarget(helperPath: string): Promise<CaptureTarget> {
@@ -674,6 +693,10 @@ export class IosH264Source implements H264CaptureSource {
       this.outputWriteHighWaterDurationMs,
       this.lastOutputWriteDurationMs
     );
+    this.lastHelperFrame = {
+      header: { ...frame.header },
+      pixels: Buffer.from(frame.pixels),
+    };
     if (accepted === false) {
       this.encoderBackpressured = true;
     }
@@ -695,6 +718,8 @@ export class IosH264Source implements H264CaptureSource {
     this.encoder = encoder;
     this.encoderSize = size;
     this.encoderBackpressured = false;
+    this.encoderIdrParser = new H264AnnexBParser();
+    this.encoderHasProducedIdr = false;
     this.lastEncoderStderr = null;
     if (awaitsForcedKeyFrame) {
       this.forcedKeyFrameEncoder = encoder;
@@ -704,6 +729,7 @@ export class IosH264Source implements H264CaptureSource {
     encoder.stdout.on("data", chunk => {
       if (this.isActive() && this.encoder === encoder) {
         const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        this.recordEncoderIdr(encoder, data);
         this.recordForcedKeyFrame(encoder, data);
         this.options.onData(data);
       }
@@ -790,7 +816,10 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     try {
-      if (this.forcedKeyFrameParser.push(chunk).some(isKeyFrameNal)) {
+      if (
+        this.forcedKeyFrameParser.push(chunk).some(isKeyFrameNal) ||
+        this.forcedKeyFrameParser.hasBufferedNalType(NAL_TYPE_IDR)
+      ) {
         this.forcedKeyFrameEncoder = null;
         this.forcedKeyFrameParser = null;
       }
@@ -799,6 +828,22 @@ export class IosH264Source implements H264CaptureSource {
       // failure. Keep this recovery guard closed rather than restarting an
       // encoder whose replacement output we cannot prove contains an IDR.
       logger.debug(`[IosH264Source] could not parse forced-keyframe output: ${error}`);
+    }
+  }
+
+  /** Track the initial IDR before allowing a PLI to recycle the warming encoder. */
+  private recordEncoderIdr(encoder: IosH264EncoderProcess, chunk: Buffer): void {
+    if (this.encoder !== encoder || this.encoderHasProducedIdr) {
+      return;
+    }
+    try {
+      this.encoderHasProducedIdr =
+        this.encoderIdrParser.push(chunk).some(isKeyFrameNal) ||
+        this.encoderIdrParser.hasBufferedNalType(NAL_TYPE_IDR);
+    } catch (error) {
+      // The RTP writer will surface malformed Annex-B separately. Leave this
+      // gate closed so an unverified warming encoder is not recycled into PLI churn.
+      logger.debug(`[IosH264Source] could not parse encoder output while awaiting initial IDR: ${error}`);
     }
   }
 
@@ -924,6 +969,7 @@ export class IosH264Source implements H264CaptureSource {
     this.pendingFrames.clear();
     this.forcedKeyFrameEncoder = null;
     this.forcedKeyFrameParser = null;
+    this.lastHelperFrame = null;
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 

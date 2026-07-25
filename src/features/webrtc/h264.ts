@@ -96,6 +96,21 @@ export class H264AnnexBParser {
     return this.drain(true);
   }
 
+  /**
+   * Whether the incomplete trailing NAL has the requested type. This inspects
+   * only a complete start code plus its header and leaves the NAL buffered for
+   * normal boundary-aware delivery.
+   */
+  hasBufferedNalType(type: number): boolean {
+    const startCodes = this.findStartCodes(this.buffered);
+    const last = startCodes.at(-1);
+    if (!last) {
+      return false;
+    }
+    const headerOffset = last.offset + last.length;
+    return headerOffset < this.buffered.length && nalUnitType(this.buffered.subarray(headerOffset)) === type;
+  }
+
   private drain(final: boolean): Buffer[] {
     const nals: Buffer[] = [];
     const startCodes = this.findStartCodes(this.buffered);

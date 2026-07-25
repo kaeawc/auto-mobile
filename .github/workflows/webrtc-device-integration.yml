@@ -137,8 +137,51 @@ jobs:
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
           (cd ios/screen-capture && swift build)
-      - name: "Boot iOS Simulator"
-        run: bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000
+      - name: "Boot and activate iOS Simulator"
+        run: |
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 300000)"
+          simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+          if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
+            echo "::error::AutoMobile product boot returned no deviceId." >&2
+            exit 1
+          fi
+          # The capture source is a ScreenCaptureKit stream of Simulator.app's
+          # window, not the booted runtime alone. Product boot intentionally
+          # avoids opening the GUI; CI needs it visible before the first frame.
+          if pgrep -x Simulator >/dev/null; then
+            killall Simulator
+            for _ in {1..30}; do
+              pgrep -x Simulator >/dev/null || break
+              sleep 1
+            done
+            if pgrep -x Simulator >/dev/null; then
+              echo "::error::Simulator.app did not exit before activation." >&2
+              exit 1
+            fi
+          fi
+          open -a Simulator --args -CurrentDeviceUDID "${simulator_udid}"
+          helper_path="${GITHUB_WORKSPACE}/ios/screen-capture/.build/debug/screen-capture-helper"
+          simulator_name="$(xcrun simctl list devices --json | jq -r --arg udid "${simulator_udid}" \
+            '[.devices[][] | select(.udid == $udid) | .name] | first // empty')"
+          if [[ -z "${simulator_name}" ]]; then
+            echo "::error::Could not resolve the selected Simulator name." >&2
+            exit 1
+          fi
+          simulator_window_ready=0
+          for _ in {1..30}; do
+            simulator_windows="$("${helper_path}" --list-simulators 2>/dev/null || true)"
+            if printf '%s' "${simulator_windows}" | jq -e --arg name "${simulator_name}" \
+              '.windows | map(select((.title // "") | ascii_downcase | contains($name | ascii_downcase))) | length == 1' \
+              >/dev/null; then
+              simulator_window_ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${simulator_window_ready}" != "1" ]]; then
+            echo "::error::Selected Simulator window did not become discoverable by ScreenCaptureKit." >&2
+            exit 1
+          fi
       - name: "Run iOS device capture integration"
         env:
           AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"

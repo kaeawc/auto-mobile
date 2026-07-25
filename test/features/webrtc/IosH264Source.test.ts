@@ -126,6 +126,17 @@ function flush(): Promise<void> {
   return new Promise(resolve => setImmediate(resolve));
 }
 
+function emitIdr(encoder: FakeChildProcess): void {
+  encoder.stdout.push(Buffer.from([
+    0, 0, 0, 1, 0x65, 0x80,
+    0, 0, 0, 1, 0x41, 0x80,
+  ]));
+}
+
+function emitTerminalIdr(encoder: FakeChildProcess): void {
+  encoder.stdout.push(Buffer.from([0, 0, 0, 1, 0x65, 0x80]));
+}
+
 async function startWithFrame(
   source: IosH264Source,
   helper: FakeFrameCaptureHelper,
@@ -1228,7 +1239,7 @@ describe("IosH264Source", () => {
     ]);
   });
 
-  test("discards a retired encoder's queued frame when restarting for a keyframe", async () => {
+  test("discards a retired encoder's queued frame while replaying the last accepted frame", async () => {
     const inputs: BackpressuredWritable[] = [];
     const { source, helper, encoders } = createRestartHarness(
       {},
@@ -1241,13 +1252,19 @@ describe("IosH264Source", () => {
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     helper.emitFrame(frame(1, 1, 0x22));
+    emitIdr(encoders[0]);
+    await flush();
 
     source.requestKeyFrame();
     helper.emitFrame(frame(1, 1, 0x33));
     inputs[1].emit("drain");
 
     expect(encoders).toHaveLength(2);
-    expect(inputs[1].writes).toEqual([Buffer.alloc(4, 0x33)]);
+    expect(inputs[1].writes).toEqual([
+      Buffer.alloc(4, 0x11),
+      Buffer.alloc(4, 0x11),
+      Buffer.alloc(4, 0x33),
+    ]);
     expect(source.getFrameMetrics().encoder.droppedFrames).toBe(1);
   });
 
@@ -1327,26 +1344,35 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
-  test("requestKeyFrame restarts the ffmpeg encoder to emit a fresh IDR, keeping output flowing", async () => {
+  test("requestKeyFrame preloads a replacement encoder with two defensive copies of the latest frame", async () => {
     const { source, helper, encoders, encoderSpawns, chunks, errors } = createRestartHarness();
 
-    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    const firstFrame = frame(2, 2, 0x11);
+    await startWithFrame(source, helper, firstFrame);
     expect(encoderSpawns).toHaveLength(1);
+    firstFrame.pixels.fill(0xff);
+    emitIdr(encoders[0]);
+    await flush();
 
     // ffmpeg cannot be signalled for an IDR mid-stream over a pipe; a request
-    // restarts the encoder, whose first encoded frame is an SPS/PPS + IDR.
-    source.requestKeyFrame();
+    // restarts the encoder. Replay two copies of the most recent frame so static
+    // capture produces the replacement encoder's first SPS/PPS + IDR and the
+    // following access-unit boundary without waiting for the screen to change.
+    expect(source.requestKeyFrame()).toBe(true);
 
     // A second encoder is spawned with identical argv, and the old one is ended
     // and killed rather than treated as a fatal crash.
     expect(encoderSpawns).toHaveLength(2);
     expect(encoderSpawns[1].args).toEqual(encoderSpawns[0].args);
     expect(encoders[0].killed).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x11));
 
-    // The next delivered frame flows into the new encoder, and its output (the
-    // fresh IDR) is forwarded to the same onData sink.
+    // Later helper frames continue flowing into the replacement encoder, whose
+    // output is forwarded to the same onData sink.
     helper.emitFrame(frame(2, 2, 0x22));
-    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x22));
+    expect(encoders[1].getStdinData()).toEqual(
+      Buffer.concat([Buffer.alloc(32, 0x11), Buffer.alloc(16, 0x22)])
+    );
     encoders[1].stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
     await flush();
 
@@ -1361,38 +1387,57 @@ describe("IosH264Source", () => {
 
     await startWithFrame(source, helper, frame(2, 2, 0x11));
     expect(encoderSpawns).toHaveLength(1);
+    emitIdr(encoders[0]);
+    await flush();
 
     // A burst of relayed viewer PLIs collapses to a single restart.
-    source.requestKeyFrame();
-    source.requestKeyFrame();
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(source.requestKeyFrame()).toBe(false);
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(2);
 
     // Within the throttle window, another request is coalesced away.
     timer.advanceTime(IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS - 1);
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(2);
 
     // A replacement can take longer than the interval to initialize. Do not
     // replace it before its SPS/PPS + IDR confirms the prior request completed.
     timer.advanceTime(1);
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(2);
 
     encoders[1].stdout.push(
       Buffer.from([
         0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x2a,
         0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80,
+        // The output stream can pause immediately after the IDR, leaving it
+        // un-terminated until a later frame arrives.
         0, 0, 0, 1, 0x65, 0x80,
-        0, 0, 0, 1, 0x41, 0x80,
       ])
     );
     await flush();
 
     // Once the replacement emits its IDR, the next request after the interval
     // can start another recovery attempt.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(true);
     expect(encoderSpawns).toHaveLength(3);
+  });
+
+  test("does not replace an encoder while its initial IDR is still pending", async () => {
+    const { source, helper, encoders, encoderSpawns } = createRestartHarness();
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+
+    // VideoToolbox begins every encoder with an IDR. Replacing the initial
+    // encoder before it emits that frame turns an early PLI into restart churn.
+    expect(source.requestKeyFrame()).toBe(false);
+    expect(encoderSpawns).toHaveLength(1);
+
+    emitTerminalIdr(encoders[0]);
+    await flush();
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(encoderSpawns).toHaveLength(2);
   });
 
   test("requestKeyFrame is a no-op before the first frame and after stop", async () => {
@@ -1400,7 +1445,7 @@ describe("IosH264Source", () => {
 
     // No encoder yet: the first frame is already an IDR, so there is nothing to
     // restart. Must not throw or spawn.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(0);
 
     await startWithFrame(source, helper, frame(2, 2, 0x11));
@@ -1408,7 +1453,7 @@ describe("IosH264Source", () => {
 
     await source.stop();
     // After teardown there is no live encoder to restart.
-    source.requestKeyFrame();
+    expect(source.requestKeyFrame()).toBe(false);
     expect(encoderSpawns).toHaveLength(1);
   });
 

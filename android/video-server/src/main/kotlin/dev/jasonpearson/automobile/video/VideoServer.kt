@@ -27,8 +27,6 @@ import dev.jasonpearson.automobile.video.wrappers.DisplayControl
  * - `high`: 1080p @ 8 Mbps @ 60fps
  */
 object VideoServer {
-  private const val SOCKET_NAME = "automobile_video"
-
   @Volatile private var running = true
 
   @Volatile private var encoder: VideoEncoder? = null
@@ -36,6 +34,7 @@ object VideoServer {
   @Volatile private var capture: ScreenCapture? = null
   private var audioCapture: AudioCapture? = null
   private var streamWriter: VideoStreamWriter? = null
+  @Volatile private var sessionLease: VideoSessionLease? = null
 
   @JvmStatic
   fun main(args: Array<String>) {
@@ -46,11 +45,12 @@ object VideoServer {
       android.os.Looper.prepareMainLooper()
     }
 
-    // Parse arguments
+    running = true
     val quality = parseQuality(args)
     val bitrateOverride = parseIntFlag(args, "--bit-rate")
     val sizeOverride = parseSizeFlag(args)
     val audioEnabled = args.contains("--audio")
+    val session = VideoSessionArguments.parse(args)
 
     println("AutoMobile Video Server")
     println("Quality preset: ${quality.name}")
@@ -79,10 +79,23 @@ object VideoServer {
       )
 
     try {
-      run(outputWidth, outputHeight, displayInfo.densityDpi, bitrate, quality.fps, audioEnabled)
+      sessionLease =
+        session.token
+          ?.let { VideoSessionLease(session, android.os.Process.myPid()) }
+          ?.also { it.start() }
+      run(
+        outputWidth,
+        outputHeight,
+        displayInfo.densityDpi,
+        bitrate,
+        quality.fps,
+        audioEnabled,
+        session,
+      )
     } catch (e: Exception) {
       System.err.println("Error: ${e.message}")
       e.printStackTrace()
+    } finally {
       shutdown()
     }
   }
@@ -203,6 +216,7 @@ object VideoServer {
     bitrate: Int,
     fps: Int,
     audioEnabled: Boolean,
+    session: VideoSessionOptions,
   ) {
     // Create encoder
     encoder =
@@ -226,18 +240,29 @@ object VideoServer {
       FrameHeartbeat(clock = FrameHeartbeat.Clock { android.os.SystemClock.uptimeMillis() })
     heartbeat.start()
 
-    // The writer keeps the encoder alive while its LocalSocket client
-    // reconnects, replays cached decoder state, and requests a new IDR at attach.
-    streamWriter = VideoStreamWriter(SOCKET_NAME, width, height, audioEnabled)
+    // The writer keeps the encoder alive while its LocalSocket client reconnects, replays cached
+    // decoder state, and requests a new IDR at attach.
+    streamWriter = VideoStreamWriter(session.socketName, width, height, audioEnabled)
     streamWriter!!.startCommandReader { command ->
       if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {
         encoder?.requestKeyFrame()
         heartbeat.onKeyFrameRequested()
       }
     }
-    streamWriter!!.start {
-      encoder?.requestKeyFrame()
-      heartbeat.onKeyFrameRequested()
+    try {
+      streamWriter!!.start {
+        println("VIDEO_SESSION_CLIENT_ATTACH socket=${session.socketName}")
+        encoder?.requestKeyFrame()
+        heartbeat.onKeyFrameRequested()
+      }
+    } catch (error: Exception) {
+      VideoSessionLease.collisionDiagnostic(session.socketName, session.token)?.let(::println)
+      throw error
+    }
+    session.token?.let {
+      println(
+        "VIDEO_SESSION_READY token=$it pid=${android.os.Process.myPid()} socket=${session.socketName}"
+      )
     }
 
     if (audioEnabled) {
@@ -283,15 +308,16 @@ object VideoServer {
       }
 
       if (streamWriter!!.reconnectWindowExpired()) {
-        println("Client did not reconnect before the video reconnect window expired")
-        break
+        println("VIDEO_CLIENT_RECONNECT_EXPIRED socket=${session.socketName}")
+        running = false
       }
     }
 
-    shutdown()
+    running = false
   }
 
   private fun shutdown() {
+    running = false
     audioCapture?.stop()
     streamWriter?.stop()
     capture?.stop()
@@ -301,6 +327,8 @@ object VideoServer {
     streamWriter = null
     capture = null
     encoder = null
+    sessionLease?.stop()
+    sessionLease = null
 
     println("Shutdown complete")
   }

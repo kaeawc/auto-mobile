@@ -37,7 +37,7 @@ class FakePublisher {
   sourceFailureErrors: Error[] = [];
   onBeforeEstablish?: () => Promise<void> | void;
   onConnected?: () => Promise<void> | void;
-  onKeyFrameRequest?: () => void;
+  onKeyFrameRequest?: () => boolean;
   onSourceFailure?: (error: Error) => void;
   onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
   parameterSetPrimes: Array<{ sps: Buffer | null; pps: Buffer | null }> = [];
@@ -46,7 +46,7 @@ class FakePublisher {
     deps: {
       onBeforeEstablish?: () => Promise<void> | void;
       onConnected?: () => Promise<void> | void;
-      onKeyFrameRequest?: () => void;
+      onKeyFrameRequest?: () => boolean;
       onSourceFailure?: (error: Error) => void;
       onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
     }
@@ -126,8 +126,9 @@ class FakeSource {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  requestKeyFrame(): void {
+  requestKeyFrame(): boolean {
     this.keyFrameRequests++;
+    return true;
   }
 }
 
@@ -951,6 +952,35 @@ describe("webrtcStreamManager", () => {
     const timedOut = await waiting;
     expect(timedOut.failure?.code).toBe("publishing_timeout");
     expect(listWebRtcStreams()).toHaveLength(1);
+  });
+
+  test("renews an owned lease through a status descriptor before capture expiry", async () => {
+    const timer = new FakeTimer();
+    const { publishers, sources } = installFakes();
+    setWebRtcStreamManagerDependencies({ timer });
+
+    const started = await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    expect(started.lease?.id).toBeDefined();
+
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS - 1);
+    const renewed = getWebRtcStreamDescriptor(started.streamId, started.lease?.id);
+    expect(renewed?.lease?.id).toBe(started.lease?.id);
+
+    // The original deadline has passed, but the status heartbeat retained the
+    // manager-owned source for another lease interval.
+    timer.advanceTime(1);
+    await flushPublisherStart();
+    expect(listWebRtcStreams()).toHaveLength(1);
+    expect(publishers[0].stopped).toBe(false);
+    expect(sources[0].stopped).toBe(false);
+
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS - 2);
+    expect(listWebRtcStreams()).toHaveLength(1);
+    timer.advanceTime(1);
+    await flushPublisherStart();
+    expect(listWebRtcStreams()).toEqual([]);
+    expect(publishers[0].stopped).toBe(true);
+    expect(sources[0].stopped).toBe(true);
   });
 
   test("returns a typed stopped result when a waiting stream is stopped", async () => {

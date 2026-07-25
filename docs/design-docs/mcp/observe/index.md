@@ -34,9 +34,9 @@ safe-area warning's screen context. Android reports the current visibility of th
 and navigation bars from `WindowInsets`; hidden bars do not become additional unsafe
 regions. iOS reports actual status-bar visibility from the foreground `UIWindowScene` and
 may include the visible controller's home-indicator auto-hide preference. That preference is
-an app request, not proof that the home indicator is currently hidden. Older runners omit
-`systemChrome`, so clients must treat its absence as unknown rather than inferring it from
-zero insets.
+an app request, not proof that the home indicator is currently hidden. Older Android runners
+and iOS apps built with an older AutoMobile SDK omit `systemChrome`, so clients must treat its
+absence as unknown rather than inferring it from zero insets.
 
 The observation gracefully handles various error conditions:
 

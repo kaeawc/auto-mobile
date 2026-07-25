@@ -113,6 +113,18 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     })).not.toThrow();
   });
 
+  test("accepts the Android resource fallback without system-chrome visibility", () => {
+    expect(() => observeResultSchema.parse({
+      insets: {
+        available: true,
+        source: "android-resource-fallback",
+        units: "physical-pixels",
+        systemBars: { visible: { top: 24, right: 0, bottom: 48, left: 0 }, stable: { top: 24, right: 0, bottom: 48, left: 0 } },
+        systemChrome: null,
+      },
+    })).not.toThrow();
+  });
+
   test("accepts the frozen android-home observe fixture (object bounds)", () => {
     const { observe } = loadAndroidHomeObserve();
     expect(() => observeResultSchema.parse(observe)).not.toThrow();

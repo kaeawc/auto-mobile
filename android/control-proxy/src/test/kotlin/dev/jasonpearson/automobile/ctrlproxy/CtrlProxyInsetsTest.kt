@@ -48,6 +48,15 @@ class CtrlProxyInsetsTest {
     )
     assertEquals(
       SystemChromeInfo(
+        visibility = "partial",
+        statusBar = "hidden",
+        navigationBar = "visible",
+        source = "android-window-insets",
+      ),
+      SystemChromeInfo.fromAndroidBars(statusBarVisible = false, navigationBarVisible = true),
+    )
+    assertEquals(
+      SystemChromeInfo(
         visibility = "hidden",
         statusBar = "hidden",
         navigationBar = "hidden",

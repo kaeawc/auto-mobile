@@ -230,7 +230,7 @@ const observationInsetsSchema = z.object({
   mandatorySystemGestures: edgeInsetsSchema.nullish(),
   tappableElement: edgeInsetsSchema.nullish(),
   safeArea: edgeInsetsSchema.optional(),
-  systemChrome: systemChromeSchema.optional(),
+  systemChrome: systemChromeSchema.nullish(),
 });
 
 const layoutWarningSchema = z.object({

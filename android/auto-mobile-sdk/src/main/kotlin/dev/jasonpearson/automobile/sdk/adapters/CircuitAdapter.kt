@@ -141,9 +141,12 @@ object CircuitAdapter : NavigationFrameworkAdapter {
 /**
  * Derives a stable, human-readable destination name from a Circuit destination.
  *
- * Prefers the runtime class's simple name (e.g. `ProfileScreen`) and falls back to `toString()` for
- * anonymous destinations whose class has no simple name. Accepts [Any] rather than `Screen` so the
- * logic can be unit-tested without depending on Circuit types.
+ * Prefers the runtime class's simple name (e.g. `ProfileScreen`) and falls back to the fully
+ * qualified class name for anonymous destinations whose class has no simple name. The fallback uses
+ * `javaClass.name` rather than `toString()` because the default `Any.toString()` is identity-based
+ * on the JVM (`ClassName@hashCode`), which would give two instances of the same anonymous screen
+ * different names. Accepts [Any] rather than `Screen` so the logic can be unit-tested without
+ * depending on Circuit types.
  */
 internal fun circuitDestinationName(destination: Any): String =
-  destination::class.simpleName ?: destination.toString()
+  destination::class.simpleName ?: destination.javaClass.name

@@ -22,12 +22,15 @@ class CircuitDestinationNameTest {
   }
 
   @Test
-  fun `anonymous destination falls back to toString`() {
-    val anonymous = object {}
+  fun `anonymous destinations resolve to a stable name across instances`() {
+    // Each call instantiates the same anonymous class, so the derived name must be identical —
+    // the identity-based Any#toString() would otherwise differ per instance.
+    fun newAnonymousDestination(): Any = object {}
 
-    val name = circuitDestinationName(anonymous)
+    val first = circuitDestinationName(newAnonymousDestination())
+    val second = circuitDestinationName(newAnonymousDestination())
 
-    // Anonymous classes have no simple name, so the helper must fall back to a non-empty value.
-    assertTrue(name.isNotEmpty())
+    assertTrue(first.isNotEmpty())
+    assertEquals(first, second)
   }
 }

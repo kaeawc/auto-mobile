@@ -36,6 +36,8 @@ export const FU_A_TYPE = 28;
  * This value is an AutoMobile operational choice, not an RFC 6184 requirement.
  */
 export const DEFAULT_RTP_MTU = 1200;
+/** Bound incomplete Annex-B NAL retention for a wedged or malformed capture source. */
+export const MAX_ANNEX_B_BUFFER_BYTES = 4 * 1024 * 1024;
 
 /** Return the NAL unit type (lower 5 bits of the first byte). */
 export function nalUnitType(nal: Buffer): number {
@@ -73,9 +75,19 @@ export function isKeyFrameNal(nal: Buffer): boolean {
 export class H264AnnexBParser {
   private buffered: Buffer = Buffer.alloc(0);
 
+  constructor(private readonly maxBufferedBytes: number = MAX_ANNEX_B_BUFFER_BYTES) {
+    if (!Number.isSafeInteger(maxBufferedBytes) || maxBufferedBytes < 1) {
+      throw new Error("H.264 Annex-B parser buffer limit must be a positive integer.");
+    }
+  }
+
   /** Feed a chunk; returns any NAL units that became complete. */
   push(chunk: Buffer): Buffer[] {
     this.buffered = this.buffered.length === 0 ? chunk : Buffer.concat([this.buffered, chunk]);
+    if (this.buffered.length > this.maxBufferedBytes) {
+      this.buffered = Buffer.alloc(0);
+      throw new Error(`H.264 Annex-B parser buffer exceeded ${this.maxBufferedBytes} bytes without a complete NAL.`);
+    }
     return this.drain(false);
   }
 

@@ -116,7 +116,7 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale as `WIDTHxHEIGHT` (e.g. `720x1280`). | native |
 | `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` | iOS Simulator WebRTC capture rate. Integer in `[5, 60]`; values outside the range are rejected at stream start. Separate from the generic screen-capture rate used for MCP observation. | `15` |
 | `AUTOMOBILE_VIDEO_SERVER_JAR` | Explicit path to a built `automobile-video.jar` (persistent on-device encoder). Highest resolution precedence: when set it is used directly, ahead of the cached/downloaded release jar and the Gradle build output. | (resolution precedence, see below) |
-| `AUTOMOBILE_REQUIRE_VIDEO_SERVER` | When `1`/`true`, a degrade-to-`screenrecord` case (no verifiable jar available) becomes a hard `ActionableError` instead. For CI that must run the persistent encoder. A checksum **mismatch** is always fatal regardless of this flag. | unset |
+| `AUTOMOBILE_REQUIRE_VIDEO_SERVER` | When `1`/`true`, a degrade-to-`screenrecord` case returns `success: false` with a typed `capture_start_failed` screenshot fallback instead. For CI that must run the persistent encoder. A checksum mismatch has the same typed failure and is never accepted. | unset |
 | `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD` | When `1`/`true`, never fetch the jar from the network: resolve from the local override or Gradle build output only. Dedicated flag — **not** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` (the CtrlProxy APK is mandatory; the jar is optional and degrades). | unset |
 | `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` | Absolute path to a `screen-capture-helper` binary for iOS WebRTC capture. Highest precedence; set it to point at a custom or locally built helper. Never checksum-verified (it is your own artifact). | resolution precedence, see below |
 | `AUTOMOBILE_SKIP_IOS_SCREEN_CAPTURE_HELPER_DOWNLOAD` | When `1`/`true`, never fetch the helper from the network: resolve from the override or a local Swift build only. Dedicated flag, mirroring `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD`. | unset |
@@ -131,7 +131,8 @@ order: `AUTOMOBILE_VIDEO_SERVER_JAR` override → a valid cached download at
 `~/.auto-mobile/video-server/` → a fresh, sha256-verified download from the
 GitHub release → the local Gradle build output → else `screenrecord`. The jar is
 optional, so an unverifiable version degrades to `screenrecord`; a checksum
-**mismatch** is always fatal. `AUTOMOBILE_VERSION` (pin one coherent version) and
+**mismatch** returns a typed `capture_start_failed` screenshot fallback and is
+never accepted. `AUTOMOBILE_VERSION` (pin one coherent version) and
 `AUTOMOBILE_ASSET_BASE_URL` (offline mirror host) apply to the jar download just
 as they do to the CtrlProxy APK/IPA. See
 [WebRTC streaming — persistent-encoder delivery](../design-docs/mcp/observe/webrtc-streaming.md#persistent-encoder-delivery-automobile-videojar).

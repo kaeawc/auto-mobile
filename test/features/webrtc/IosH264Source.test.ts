@@ -977,7 +977,7 @@ describe("IosH264Source", () => {
 
   test("requestKeyFrame throttles a burst of PLIs to at most one restart per interval", async () => {
     const timer = new FakeTimer();
-    const { source, helper, encoderSpawns } = createRestartHarness({ timer });
+    const { source, helper, encoders, encoderSpawns } = createRestartHarness({ timer });
 
     await startWithFrame(source, helper, frame(2, 2, 0x11));
     expect(encoderSpawns).toHaveLength(1);
@@ -993,8 +993,24 @@ describe("IosH264Source", () => {
     source.requestKeyFrame();
     expect(encoderSpawns).toHaveLength(2);
 
-    // After the interval elapses, a request restarts again.
+    // A replacement can take longer than the interval to initialize. Do not
+    // replace it before its SPS/PPS + IDR confirms the prior request completed.
     timer.advanceTime(1);
+    source.requestKeyFrame();
+    expect(encoderSpawns).toHaveLength(2);
+
+    encoders[1].stdout.push(
+      Buffer.from([
+        0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x2a,
+        0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80,
+        0, 0, 0, 1, 0x65, 0x80,
+        0, 0, 0, 1, 0x41, 0x80,
+      ])
+    );
+    await flush();
+
+    // Once the replacement emits its IDR, the next request after the interval
+    // can start another recovery attempt.
     source.requestKeyFrame();
     expect(encoderSpawns).toHaveLength(3);
   });

@@ -86,9 +86,36 @@ Control plane:
 
 | File | Responsibility |
 |------|----------------|
-| `src/server/webrtcStreamManager.ts` | Per-device stream lifecycle; wires source ⇄ publisher; restarts the source on reconnect so a fresh keyframe follows |
-| `src/daemon/webrtcStreamSocketServer.ts` | `webrtc-stream.sock` request/response control (`start`/`stop`/`status`/`list`) |
+| `src/server/webrtcStreamManager.ts` | Per-device stream lifecycle; prepares and retains capture while it wires source ⇄ publisher |
+| `src/daemon/webrtcStreamSocketServer.ts` | `webrtc-stream.sock` request/response control (`start`/`stop`/`status`/`list`/`await`) |
 | `src/daemon/webrtcStreamClient.ts` | Minimal client for scripts/tooling |
+
+### Coordinator lifecycle
+
+`webrtcStreamManager` is the single per-device owner for the WHIP capture
+session. It moves through `idle`, `preparing`, `capture_ready`, `publishing`,
+`degraded`, `stopping`, and `failed`. Capture is prepared before the WHIP offer
+is sent, then remains warm while the publisher reconnects; a transient ICE or
+WHIP reconnect therefore does not restart ADB forwarding, the Android encoder,
+or the iOS helper.
+
+`start` returns after local capture is ready, before WHIP/ICE publishing
+finishes. Its descriptor includes a generated `streamId` and a short-lived
+lease. A client can use `await` to wait for `publishing` without delaying
+capture ownership, and renews its lease through `status` or `await`.
+
+The descriptor returned by `start`, `status`, and `list` includes
+`lifecycleState`, `sourceStarted`, structured `failure`, and timestamped
+`telemetry` for capture preparation, first media/IDR, SDP offer/answer, ICE
+connection, and first RTP. A degraded capture exposes
+`fallback: { mode: "screenshots", reason }`, so a client can switch to its
+normal screenshot observation path without parsing logs.
+
+Use the control socket's `await` action to wait independently for
+`capture_ready` or `publishing`; it requires a `streamId` and accepts bounded
+`timeoutMs`. A timeout returns a machine-readable `capture_ready_timeout` or
+`publishing_timeout` failure for that request without degrading the shared
+capture.
 
 ## Production fanout: MediaMTX
 
@@ -166,15 +193,28 @@ Newline-delimited JSON request/response.
 ```jsonc
 {
   "id": "1",                    // optional correlation id
-  "action": "start",            // "start" | "stop" | "status" | "list"
+  "action": "start",            // "start" | "stop" | "status" | "list" | "await"
   "deviceId": "emulator-5554",  // optional; defaults to the sole Android device
   "streamId": "ci-run-42",      // optional; generated if omitted
+  "leaseId": "lease_...",       // returned by start; renew/release this lease
   "whipEndpoint": "https://coord:8080/whip",  // optional override of env
   "whipToken": "…",             // optional bearer token
   "iceServers": [{ "urls": "stun:stun.l.google.com:19302" }],
   "bitrateKbps": 4000,          // optional
   "size": { "width": 720, "height": 1280 },   // optional downscale
   "audio": true                               // optional Android audio
+}
+```
+
+An `await` request only needs the stream identity and phase:
+
+```json
+{
+  "action": "await",
+  "streamId": "ci-run-42",
+  "leaseId": "lease_...",
+  "readiness": "capture_ready",
+  "timeoutMs": 30000
 }
 ```
 
@@ -188,9 +228,12 @@ Newline-delimited JSON request/response.
   "action": "start",
   "stream": {
     "streamId": "ci-run-42",
-    "state": "connected",       // idle|connecting|connected|reconnecting|failed|stopped
+    "state": "idle",            // publisher state; use lifecycleState for readiness
+    "lifecycleState": "capture_ready",
+    "lease": { "id": "lease_...", "expiresAt": "2026-07-24T00:01:00.000Z" },
+    "consumerCount": 1,
     "whipEndpoint": "https://coord:8080/whip",
-    "resourceUrl": "https://coord:8080/whip/ci-run-42",
+    "resourceUrl": null,        // populated after await(publishing)
     "iceServers": [ … ],
     "framesSent": 0,
     "packetsSent": 0,
@@ -236,9 +279,10 @@ Two independent reconnection layers:
 
 1. **Publisher → server.** `WebRtcPublisher` watches the peer
    `connectionState`; on `failed`/`disconnected` it tears down and re-publishes
-   over WHIP with backoff, restarting the capture source so a new SPS/PPS +
-   keyframe follows immediately. The WHIP `Location` resource URL is retained so
-   the stale session can be `DELETE`d.
+   over WHIP with backoff while retaining the prepared capture source. It asks
+   that source for a fresh keyframe after reconnect; only a capture failure
+   recreates the source. The WHIP `Location` resource URL is retained so the
+   stale session can be `DELETE`d.
 2. **Browser → server.** The browser's WHEP client re-subscribes to the same
    MediaMTX WHEP URL when its peer connection drops. MediaMTX replays cached
    SPS/PPS and a keyframe so a late or reconnecting viewer decodes immediately —
@@ -290,9 +334,9 @@ compromised:
 | Situation | Behavior |
 | --- | --- |
 | Checksum known + **matches** | use the jar |
-| Checksum known + **mismatch** | **fatal** `ActionableError` from stream start, even in degrade mode — a corrupted/tampered download is never silently accepted |
+| Checksum known + **mismatch** | stream start returns `success: false` with a typed `capture_start_failed` screenshot fallback; the corrupted/tampered jar is never accepted |
 | Checksum **absent** (a pin predating jar delivery / unknown) | **degrade** to `screenrecord` |
-| `AUTOMOBILE_REQUIRE_VIDEO_SERVER=1` | any degrade case becomes a **hard error** — for CI that must not silently fall back |
+| `AUTOMOBILE_REQUIRE_VIDEO_SERVER=1` | any degrade case returns the same typed screenshot fallback instead of starting a stream — for CI that must not silently fall back |
 | `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD=1` | **local-only** (override / Gradle build); the network is never touched. A dedicated flag — it does **not** overload `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`, whose CtrlProxy APK is mandatory |
 
 See [Environment variables](../../../using/environment-variables.md) for the full

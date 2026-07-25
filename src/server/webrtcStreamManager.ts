@@ -1,7 +1,7 @@
 import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   createH264CaptureSource,
   resolveVideoServerJar,
@@ -14,13 +14,56 @@ import {
   type WebRtcCaptureSourceState,
   type WebRtcPublisherConfig,
   type WebRtcPublisherDeps,
+  type WebRtcPublisherLifecycleEvent,
   type WebRtcStreamDescriptor,
   type WebRtcStreamingOverrides,
+  H264AnnexBParser,
+  nalUnitType,
+  NAL_TYPE_IDR,
+  NAL_TYPE_PPS,
+  NAL_TYPE_SPS,
 } from "../features/webrtc";
+
+export type VideoStreamLifecycleState =
+  | "idle"
+  | "preparing"
+  | "capture_ready"
+  | "publishing"
+  | "degraded"
+  | "stopping"
+  | "failed";
+
+export type VideoStreamFailureCode =
+  | "capture_start_failed"
+  | "capture_runtime_failed"
+  | "whip_publish_failed"
+  | "capture_ready_timeout"
+  | "publishing_timeout"
+  | "stopped";
+
+export interface VideoStreamFailure {
+  code: VideoStreamFailureCode;
+  message: string;
+  at: string;
+}
+
+export interface VideoStreamTelemetry {
+  requestReceived: string;
+  captureSourcePrepared?: string;
+  firstMediaFrame?: string;
+  firstIdr?: string;
+  sdpOffer?: string;
+  sdpAnswer?: string;
+  iceConnected?: string;
+  firstRtpSent?: string;
+  nonTrickleIceGatheringDelayMs?: number;
+}
 
 export interface StartWebRtcStreamRequest {
   device: BootedDevice;
   streamId?: string;
+  /** Existing lease identity to renew instead of minting another consumer. */
+  leaseId?: string;
   overrides?: WebRtcStreamingOverrides;
 }
 
@@ -47,18 +90,16 @@ interface WebRtcStreamRecord {
   lastSourceError: string | null;
   sourceTelemetry: H264CaptureSourceTelemetry | null;
   frameMetrics?: H264CaptureSourceMetrics;
-  /** Reservation token for a start that has not returned to its caller yet. */
-  startToken: symbol;
-}
-
-interface PendingWebRtcStart {
-  streamId: string;
-  device: BootedDevice;
-  config: ReturnType<typeof resolveWebRtcStreamingConfig>;
-  token: symbol;
-  cancelled: boolean;
-  /** Reject an audio startup waiter when this exact reservation is stopped. */
-  onCancelled?: () => void;
+  lifecycleState: VideoStreamLifecycleState;
+  failure: VideoStreamFailure | null;
+  telemetry: VideoStreamTelemetry;
+  sourceFailed: boolean;
+  mediaParser: H264AnnexBParser;
+  cachedSps: Buffer | null;
+  cachedPps: Buffer | null;
+  stateWaiters: Set<() => void>;
+  leases: Map<string, number>;
+  leaseExpiryHandle: NodeJS.Timeout | null;
 }
 
 export interface WebRtcStreamManagerDependencies {
@@ -73,6 +114,7 @@ export interface WebRtcStreamManagerDependencies {
    */
   resolveVideoJar: (device: BootedDevice) => Promise<string | null>;
   now: () => Date;
+  timer: Timer;
 }
 
 const defaultDependencies: WebRtcStreamManagerDependencies = {
@@ -82,19 +124,19 @@ const defaultDependencies: WebRtcStreamManagerDependencies = {
   resolveVideoJar: device =>
     device.platform === "android" ? resolveVideoServerJar() : Promise.resolve(null),
   now: () => new Date(),
+  timer: defaultTimer,
 };
 
 let dependencies: WebRtcStreamManagerDependencies = { ...defaultDependencies };
 const streams = new Map<string, WebRtcStreamRecord>();
-const startingDeviceIds = new Map<string, PendingWebRtcStart>();
-const startingStreamIds = new Map<string, PendingWebRtcStart>();
-const INITIAL_AUDIO_SOURCE_START_TIMEOUT_MS = 30_000;
 /**
  * Reconnect if a connected stream produces no frames for this long. Covers an
  * encoder/capture that wedges without dropping the peer connection (which would
  * otherwise leave the viewer on a frozen frame with no recovery).
  */
 const FRAME_STALL_TIMEOUT_MS = 10_000;
+export const DEFAULT_STREAM_READY_TIMEOUT_MS = 30_000;
+export const WEBRTC_STREAM_LEASE_TTL_MS = 60_000;
 
 /** Override manager dependencies (tests). */
 export function setWebRtcStreamManagerDependencies(
@@ -105,9 +147,12 @@ export function setWebRtcStreamManagerDependencies(
 
 /** Reset manager state and dependencies (tests). */
 export function resetWebRtcStreamManager(): void {
+  for (const record of streams.values()) {
+    if (record.leaseExpiryHandle) {
+      dependencies.timer.clearTimeout(record.leaseExpiryHandle);
+    }
+  }
   streams.clear();
-  startingDeviceIds.clear();
-  startingStreamIds.clear();
   dependencies = { ...defaultDependencies };
 }
 
@@ -131,10 +176,21 @@ async function withRecord(
   }
 }
 
+function leaseExpiryAt(record: WebRtcStreamRecord, leaseId: string): string | undefined {
+  const expiresAt = record.leases.get(leaseId);
+  if (expiresAt === undefined) {
+    return undefined;
+  }
+  return new Date(
+    dependencies.now().getTime() + Math.max(0, expiresAt - dependencies.timer.now())
+  ).toISOString();
+}
+
 /** Descriptor for a record, including the manager-owned capture-source state. */
-function describeRecord(record: WebRtcStreamRecord): WebRtcStreamDescriptor {
+function describeRecord(record: WebRtcStreamRecord, leaseId?: string): WebRtcStreamDescriptor {
   const descriptor = record.publisher.getDescriptor();
   const sourceTelemetry = record.source?.getTelemetry?.() ?? record.sourceTelemetry;
+  const leaseExpiresAt = leaseId ? leaseExpiryAt(record, leaseId) : undefined;
   return {
     ...descriptor,
     sourceStarted: record.sourceStarted,
@@ -145,7 +201,206 @@ function describeRecord(record: WebRtcStreamRecord): WebRtcStreamDescriptor {
       lastSourceError: record.lastSourceError,
     },
     frameMetrics: record.frameMetrics,
+    lifecycleState: record.lifecycleState,
+    failure: record.failure,
+    telemetry: record.telemetry,
+    fallback: record.lifecycleState === "degraded" || record.lifecycleState === "failed"
+      ? { mode: "screenshots", reason: record.failure?.code ?? "capture_unavailable" }
+      : null,
+    lease: leaseId && leaseExpiresAt ? { id: leaseId, expiresAt: leaseExpiresAt } : null,
+    consumerCount: record.leases.size,
   };
+}
+
+function scheduleLeaseExpiry(record: WebRtcStreamRecord): void {
+  if (record.leaseExpiryHandle) {
+    dependencies.timer.clearTimeout(record.leaseExpiryHandle);
+    record.leaseExpiryHandle = null;
+  }
+  const earliestExpiry = Math.min(...record.leases.values());
+  if (!Number.isFinite(earliestExpiry)) {
+    return;
+  }
+  record.leaseExpiryHandle = dependencies.timer.setTimeout(() => {
+    if (streams.get(record.streamId) !== record) {
+      return;
+    }
+    const now = dependencies.timer.now();
+    for (const [leaseId, expiresAt] of record.leases) {
+      if (expiresAt <= now) {
+        record.leases.delete(leaseId);
+      }
+    }
+    if (record.leases.size > 0) {
+      scheduleLeaseExpiry(record);
+      return;
+    }
+    streams.delete(record.streamId);
+    void stopActiveRecord(record).catch(error => {
+      logger.debug(`[WebRtcStream] lease expiry cleanup failed: ${error}`);
+    });
+  }, Math.max(0, earliestExpiry - dependencies.timer.now()));
+}
+
+function acquireLease(record: WebRtcStreamRecord, requestedLeaseId?: string): string {
+  const leaseId = requestedLeaseId && record.leases.has(requestedLeaseId)
+    ? requestedLeaseId
+    : `lease_${dependencies.idGenerator.next()}`;
+  record.leases.set(leaseId, dependencies.timer.now() + WEBRTC_STREAM_LEASE_TTL_MS);
+  scheduleLeaseExpiry(record);
+  return leaseId;
+}
+
+function releaseLease(record: WebRtcStreamRecord, leaseId: string): boolean {
+  const removed = record.leases.delete(leaseId);
+  if (!removed) {
+    return false;
+  }
+  scheduleLeaseExpiry(record);
+  return record.leases.size === 0;
+}
+
+function wakeStateWaiters(record: WebRtcStreamRecord): void {
+  for (const wake of record.stateWaiters) {
+    wake();
+  }
+  record.stateWaiters.clear();
+}
+
+function setLifecycleState(record: WebRtcStreamRecord, state: VideoStreamLifecycleState): void {
+  record.lifecycleState = state;
+  wakeStateWaiters(record);
+}
+
+function markFailure(
+  record: WebRtcStreamRecord,
+  code: VideoStreamFailureCode,
+  error: unknown,
+  state: "degraded" | "failed" = "failed"
+): void {
+  record.failure = {
+    code,
+    message: error instanceof Error ? error.message : String(error),
+    at: dependencies.now().toISOString(),
+  };
+  setLifecycleState(record, state);
+}
+
+function recordPublisherEvent(record: WebRtcStreamRecord, event: WebRtcPublisherLifecycleEvent): void {
+  const at = dependencies.now().toISOString();
+  const timestampField = publisherTimestampField(event);
+  if (timestampField) {
+    record.telemetry[timestampField] ??= at;
+  }
+  if (event === "ice_gathering_complete" || event === "ice_gathering_timeout") {
+    const offerTime = Date.parse(record.telemetry.sdpOffer ?? at);
+    record.telemetry.nonTrickleIceGatheringDelayMs ??= Math.max(0, dependencies.now().getTime() - offerTime);
+  }
+  if (event === "ice_connected" && !record.sourceFailed) {
+    setLifecycleState(record, "publishing");
+  }
+}
+
+function publisherTimestampField(
+  event: WebRtcPublisherLifecycleEvent
+): "sdpOffer" | "sdpAnswer" | "iceConnected" | "firstRtpSent" | undefined {
+  const fields: Partial<Record<WebRtcPublisherLifecycleEvent, "sdpOffer" | "sdpAnswer" | "iceConnected" | "firstRtpSent">> = {
+    sdp_offer_created: "sdpOffer",
+    ice_gathering_started: "sdpOffer",
+    whip_answer_received: "sdpAnswer",
+    ice_connected: "iceConnected",
+    first_rtp_sent: "firstRtpSent",
+  };
+  return fields[event];
+}
+
+function createStreamRecord(
+  streamId: string,
+  device: BootedDevice,
+  config: ReturnType<typeof resolveWebRtcStreamingConfig>,
+  jarPath: string | null,
+  bitrateBps: number | undefined,
+  requestReceived: string
+): WebRtcStreamRecord {
+  const publisherRef: { current?: WebRtcPublisher } = {};
+  let publisherStarted = false;
+  const publisher = dependencies.createPublisher(
+    {
+      streamId,
+      whipEndpoint: config.whipEndpoint,
+      bearerToken: config.bearerToken,
+      iceServers: config.iceServers,
+      bitrateBps,
+      trickleIce: config.trickleIce,
+      audioEnabled: config.audioEnabled,
+      frameStallTimeoutMs: FRAME_STALL_TIMEOUT_MS,
+    },
+    {
+      onBeforeEstablish: async () => {
+        const record = streams.get(streamId);
+        if ((publisherStarted && record?.sourceFailed) || !record?.sourceStarted) {
+          await withRecord(streamId, async currentRecord => {
+            await startSource(currentRecord);
+          });
+        }
+      },
+      onKeyFrameRequest: () => streams.get(streamId)?.source?.requestKeyFrame?.(),
+      onConnected: () => {
+        const record = streams.get(streamId);
+        if (record && record.publisher === publisherRef.current && !record.sourceFailed) {
+          setLifecycleState(record, "publishing");
+          record.publisher.primeH264ParameterSets(record.cachedSps, record.cachedPps);
+          record.source?.requestKeyFrame?.();
+        }
+      },
+      onSourceFailure: error => {
+        const record = streams.get(streamId);
+        if (record && record.publisher === publisherRef.current && !record.sourceFailed) {
+          record.sourceFailed = true;
+          markFailure(record, "capture_runtime_failed", error, "degraded");
+        }
+      },
+      onLifecycleEvent: event => {
+        const record = streams.get(streamId);
+        if (record && record.publisher === publisherRef.current) {
+          recordPublisherEvent(record, event);
+        }
+      },
+    }
+  );
+  publisherRef.current = publisher;
+  const record: WebRtcStreamRecord = {
+    streamId,
+    device,
+    publisher,
+    source: null,
+    jarPath,
+    bitrateBps,
+    size: config.size,
+    fps: config.iosSimulatorFps,
+    audioEnabled: config.audioEnabled,
+    startedAt: requestReceived,
+    sourceStarted: false,
+    lifecycleState: "preparing",
+    failure: null,
+    telemetry: { requestReceived },
+    sourceFailed: false,
+    mediaParser: new H264AnnexBParser(),
+    cachedSps: null,
+    cachedPps: null,
+    stateWaiters: new Set(),
+    leases: new Map(),
+    leaseExpiryHandle: null,
+    sourceState: "not_initialized",
+    lastSourceError: null,
+    sourceTelemetry: null,
+  };
+  const start = publisher.start.bind(publisher);
+  publisher.start = async () => {
+    await start();
+    publisherStarted = true;
+  };
+  return record;
 }
 
 /** Stop and clear the capture source for a stream (before each (re)establish). */
@@ -163,11 +418,9 @@ async function stopSource(record: WebRtcStreamRecord): Promise<void> {
 }
 
 /**
- * Start the capture source once the peer connection is live, routing its H.264
- * output into the publisher. Starting only after `connected` ensures the first
- * SPS/PPS + keyframe is sent over an established connection rather than dropped.
- * A capture failure is surfaced to the publisher so the reconnect loop runs
- * instead of leaving the viewer on a frozen frame.
+ * Prepare a local capture before the WHIP session. Source output is retained by
+ * the manager and delivered to the publisher once its RTP writer exists; this
+ * keeps ADB forwarding / the iOS helper warm across publish reconnects.
  */
 async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
   await stopSource(record);
@@ -180,15 +433,55 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
   }
   record.sourceState = "starting";
   const sourceRef: { current: H264CaptureSource | null } = { current: null };
-  const source = dependencies.createSource(
+  record.sourceFailed = false;
+  record.mediaParser = new H264AnnexBParser();
+  let source: H264CaptureSource | null = null;
+  source = dependencies.createSource(
     {
       device: record.device,
-      onData: chunk => record.publisher.writeH264Chunk(chunk),
-      onAudioData: chunk => record.publisher.writePcmAudioChunk(chunk),
+      onData: chunk => {
+        if (record.source !== source) {
+          return;
+        }
+        if (!record.telemetry.firstMediaFrame) {
+          record.telemetry.firstMediaFrame = dependencies.now().toISOString();
+        }
+        let nals: Buffer[];
+        try {
+          nals = record.mediaParser.push(chunk);
+        } catch (error) {
+          record.sourceFailed = true;
+          markFailure(record, "capture_runtime_failed", error, "degraded");
+          record.publisher.notifySourceFailed(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        for (const nal of nals) {
+          const type = nalUnitType(nal);
+          if (type === NAL_TYPE_SPS) {
+            record.cachedSps = Buffer.from(nal);
+          } else if (type === NAL_TYPE_PPS) {
+            record.cachedPps = Buffer.from(nal);
+          }
+          if (type === NAL_TYPE_IDR && !record.telemetry.firstIdr) {
+            record.telemetry.firstIdr = dependencies.now().toISOString();
+          }
+        }
+        record.publisher.writeH264Chunk(chunk);
+      },
+      onAudioData: chunk => {
+        if (record.source === source) {
+          record.publisher.writePcmAudioChunk(chunk);
+        }
+      },
       onError: error => {
+        if (record.source !== source) {
+          return;
+        }
         record.sourceState = "failed";
         record.lastSourceError = error.message;
-        record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
+        record.sourceTelemetry = source?.getTelemetry?.() ?? record.sourceTelemetry;
+        record.sourceFailed = true;
+        markFailure(record, "capture_runtime_failed", error, "degraded");
         record.publisher.notifySourceFailed(error);
       },
       bitrateBps: record.bitrateBps,
@@ -211,6 +504,9 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
     record.sourceState = "failed";
     record.lastSourceError = error instanceof Error ? error.message : String(error);
     record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
+    record.sourceFailed = true;
+    markFailure(record, "capture_start_failed", error, "degraded");
+    record.publisher.notifySourceFailed(error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
   // The stream may have been stopped while the source was starting. stop() only
@@ -224,108 +520,49 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
   record.sourceStarted = true;
   record.sourceState = "running";
   record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
+  record.telemetry.captureSourcePrepared ??= dependencies.now().toISOString();
+  if (!record.sourceFailed) {
+    record.failure = null;
+    setLifecycleState(record, "capture_ready");
+  }
   return true;
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timeout: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = defaultTimer.setTimeout(() => reject(new ActionableError(message)), timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timeout) {
-      defaultTimer.clearTimeout(timeout);
-    }
-  });
-}
-
-async function cleanupFailedStart(
-  streamId: string,
-  record: WebRtcStreamRecord,
-  publisher: WebRtcPublisher
-): Promise<void> {
-  if (streams.get(streamId) === record) {
-    streams.delete(streamId);
-  }
-  await record.source?.stop().catch(() => {});
-  await publisher.stop().catch(() => {});
-}
-
-function assertStreamStartAvailable(deviceId: string, streamId: string): void {
-  const existing = activeStreamForDevice(deviceId);
-  if (existing || startingDeviceIds.has(deviceId)) {
-    throw new ActionableError(
-      `WebRTC stream already active or starting for device ${deviceId} (streamId ${existing?.streamId ?? "pending"}). Stop it first.`
-    );
-  }
-  if (streams.has(streamId) || startingStreamIds.has(streamId)) {
+function assertNewStreamIdAvailable(streamId: string): void {
+  if (streams.has(streamId)) {
     throw new ActionableError(`WebRTC stream ${streamId} already active. Stop it first.`);
-  }
-}
-
-function stoppedPendingDescriptor(pending: PendingWebRtcStart): WebRtcStreamDescriptor {
-  return {
-    streamId: pending.streamId,
-    state: "stopped",
-    whipEndpoint: pending.config.whipEndpoint,
-    resourceUrl: null,
-    iceServers: pending.config.iceServers,
-    framesSent: 0,
-    packetsSent: 0,
-    audioPacketsSent: 0,
-    audioSamplesSent: 0,
-    readiness: {
-      lastEncodedFrameTimestampUs: null,
-      lastIdrTimestampUs: null,
-      idrRequestCount: null,
-      idrCompletionCount: null,
-      encodedAccessUnitCount: null,
-      publisherRtpPacketCount: null,
-      captureSourceState: "stopped",
-      lastSourceError: null,
-    },
-  };
-}
-
-/** Cancel a pending-only start, or return undefined when an active record must stop. */
-function stopPendingStart(streamId?: string): WebRtcStreamDescriptor | undefined {
-  if (!streamId && streams.size > 0 && startingStreamIds.size > 0) {
-    throw new ActionableError("Multiple WebRTC streams are active or starting; specify streamId to stop one.");
-  }
-  const pending = streamId
-    ? startingStreamIds.get(streamId)
-    : startingStreamIds.size === 1
-      ? startingStreamIds.values().next().value
-      : undefined;
-  if (!pending || streams.has(pending.streamId)) {
-    return undefined;
-  }
-  pending.cancelled = true;
-  pending.onCancelled?.();
-  startingDeviceIds.delete(pending.device.deviceId);
-  startingStreamIds.delete(pending.streamId);
-  return stoppedPendingDescriptor(pending);
-}
-
-/** Remove the matching reservation without affecting a replacement stream start. */
-function cancelRecordStart(record: WebRtcStreamRecord): void {
-  const pending = startingStreamIds.get(record.streamId);
-  if (pending?.token === record.startToken) {
-    pending.cancelled = true;
-    pending.onCancelled?.();
-    startingStreamIds.delete(record.streamId);
-  }
-  if (startingDeviceIds.get(record.device.deviceId)?.token === record.startToken) {
-    startingDeviceIds.delete(record.device.deviceId);
   }
 }
 
 /** Stop live media components while retaining best-effort cleanup semantics. */
 async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
+  setLifecycleState(record, "stopping");
   await stopSource(record);
   await record.publisher.stop().catch(error => {
     logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
   });
+}
+
+async function prepareAndPublish(record: WebRtcStreamRecord): Promise<void> {
+  try {
+    await record.publisher.start();
+    if (streams.get(record.streamId) !== record) {
+      throw new Error(`WebRTC stream ${record.streamId} was stopped before startup completed.`);
+    }
+  } catch (error) {
+    if (streams.get(record.streamId) !== record) {
+      return;
+    }
+    markFailure(
+      record,
+      record.failure?.code ?? "whip_publish_failed",
+      error,
+      record.failure ? "degraded" : "failed"
+    );
+    await record.publisher.stop().catch(stopError => {
+      logger.debug(`[WebRtcStream] publisher cleanup failed: ${stopError}`);
+    });
+  }
 }
 
 /**
@@ -338,185 +575,221 @@ async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
 export async function startWebRtcStream(
   request: StartWebRtcStreamRequest
 ): Promise<WebRtcStreamDescriptor> {
+  const requestReceived = dependencies.now().toISOString();
+  const existing = activeStreamForDevice(request.device.deviceId);
+  if (existing) {
+    return describeRecord(existing, acquireLease(existing, request.leaseId));
+  }
+
   const config = resolveWebRtcStreamingConfig(request.overrides);
   const streamId = request.streamId ?? `webrtc_${dependencies.idGenerator.next()}`;
-  // An explicit id reused across devices would otherwise overwrite the existing
-  // record, orphaning the first stream's publisher/source.
-  assertStreamStartAvailable(request.device.deviceId, streamId);
-
-  const startToken = Symbol(streamId);
-  const pending: PendingWebRtcStart = {
+  assertNewStreamIdAvailable(streamId);
+  const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
+  const record = createStreamRecord(
     streamId,
-    device: request.device,
+    request.device,
     config,
-    token: startToken,
-    cancelled: false,
-  };
-  startingDeviceIds.set(request.device.deviceId, pending);
-  startingStreamIds.set(streamId, pending);
+    null,
+    bitrateBps,
+    requestReceived
+  );
+  streams.set(streamId, record);
+  const leaseId = acquireLease(record, request.leaseId);
+
   try {
-    const bitrateBps = config.bitrateKbps ? config.bitrateKbps * 1000 : undefined;
-
-    // Resolve the persistent-encoder jar ONCE, before establishing the WHIP
-    // session — a fatal fail-mode (checksum mismatch, or REQUIRE with nothing
-    // available) must abort the stream start with its ActionableError rather than
-    // surfacing mid-capture. The download resolves here, off the per-frame path;
-    // startSource() only constructs the (synchronous) capture source. A degrade
-    // returns null → screenrecord.
-    const jarPath = await dependencies.resolveVideoJar(request.device);
-    if (pending.cancelled) {
-      throw new ActionableError(`WebRTC stream ${streamId} was stopped before startup completed.`);
+    record.jarPath = await dependencies.resolveVideoJar(request.device);
+    if (streams.get(streamId) !== record) {
+      return { ...describeRecord(record, leaseId), state: "stopped" };
     }
-
-    let settleInitialAudioSourceStart:
-    | ((result: { ok: true } | { ok: false; error: unknown }) => void)
-    | undefined;
-    let initialAudioSourceStartSettled = false;
-    let initialAudioSourceStartStarted = false;
-    const initialAudioSourceStart = config.audioEnabled
-      ? new Promise<void>((resolve, reject) => {
-        settleInitialAudioSourceStart = result => {
-          if (initialAudioSourceStartSettled) {
-            return;
-          }
-          initialAudioSourceStartSettled = true;
-          if (result.ok) {
-            resolve();
-          } else {
-            reject(result.error);
-          }
-        };
-      })
-      : null;
-    const settleInitialAudioStart = (error?: unknown): void => {
-      if (!config.audioEnabled) {
-        return;
-      }
-      settleInitialAudioSourceStart?.(error ? { ok: false, error } : { ok: true });
-    };
-    pending.onCancelled = () => {
-      // Once onConnected has begun starting the source, let that operation
-      // report its own result. This preserves a real source-start failure when
-      // a replacement stream is started with the same id.
-      if (!initialAudioSourceStartStarted) {
-        settleInitialAudioStart(new Error(`WebRTC stream ${streamId} was stopped before capture source started.`));
-      }
-    };
-
-    const publisherRef: { current?: WebRtcPublisher } = {};
-    const publisher = dependencies.createPublisher(
-      {
-        streamId,
-        whipEndpoint: config.whipEndpoint,
-        bearerToken: config.bearerToken,
-        iceServers: config.iceServers,
-        bitrateBps,
-        trickleIce: config.trickleIce,
-        audioEnabled: config.audioEnabled,
-        frameStallTimeoutMs: FRAME_STALL_TIMEOUT_MS,
-      },
-      {
-        onBeforeEstablish: () => withRecord(streamId, stopSource),
-        onKeyFrameRequest: () => {
-          // Route a relayed WHEP viewer PLI to the live capture source so its
-          // encoder emits a fresh IDR. Sources that cannot signal their encoder
-          // omit requestKeyFrame and rely on their periodic keyframe interval.
-          streams.get(streamId)?.source?.requestKeyFrame?.();
-        },
-        onConnected: async () => {
-          const currentRecord = streams.get(streamId);
-          if (!currentRecord || currentRecord.publisher !== publisherRef.current) {
-            settleInitialAudioStart(new Error(`WebRTC stream ${streamId} stopped before capture source started.`));
-            return;
-          }
-          try {
-            initialAudioSourceStartStarted = true;
-            const started = await startSource(currentRecord);
-            if (!started) {
-              const error = new Error(`WebRTC stream ${streamId} stopped before capture source started.`);
-              settleInitialAudioStart(error);
-              if (config.audioEnabled) {
-                throw error;
-              }
-              return;
-            }
-            settleInitialAudioStart();
-          } catch (error) {
-            settleInitialAudioStart(error);
-            throw error;
-          }
-        },
-      }
-    );
-    publisherRef.current = publisher;
-    const record: WebRtcStreamRecord = {
-      streamId,
-      device: request.device,
-      publisher,
-      source: null,
-      jarPath,
-      bitrateBps,
-      size: config.size,
-      fps: config.iosSimulatorFps,
-      audioEnabled: config.audioEnabled,
-      startedAt: dependencies.now().toISOString(),
-      sourceStarted: false,
-      sourceState: "not_initialized",
-      lastSourceError: null,
-      sourceTelemetry: null,
-      startToken,
-    };
-    streams.set(streamId, record);
-
-    try {
-      await publisher.start();
-      if (initialAudioSourceStart) {
-        await withTimeout(
-          initialAudioSourceStart,
-          INITIAL_AUDIO_SOURCE_START_TIMEOUT_MS,
-          "Timed out waiting for WebRTC audio capture source to start."
-        );
-      }
-    } catch (error) {
-      await cleanupFailedStart(streamId, record, publisher);
-      throw new ActionableError(
-        `Failed to start WebRTC stream: ${error instanceof Error ? error.message : String(error)}`
+    const sourceStarted = await startSource(record);
+    if (!sourceStarted) {
+      return { ...describeRecord(record, leaseId), state: "stopped" };
+    }
+    // Capture is now ready and its identifier is returned before WHIP/ICE
+    // completes, so callers can await publishing separately.
+    void prepareAndPublish(record);
+    return describeRecord(record, leaseId);
+  } catch (error) {
+    if (streams.get(streamId) === record) {
+      markFailure(
+        record,
+        record.failure?.code ?? "capture_start_failed",
+        error,
+        "degraded"
       );
+      await record.source?.stop().catch(() => {});
+      await record.publisher.stop().catch(() => {});
     }
-
-    return describeRecord(record);
-  } finally {
-    if (startingDeviceIds.get(request.device.deviceId) === pending) {
-      startingDeviceIds.delete(request.device.deviceId);
-    }
-    if (startingStreamIds.get(streamId) === pending) {
-      startingStreamIds.delete(streamId);
-    }
+    return describeRecord(record, leaseId);
   }
 }
 
-/** Stop a stream by id, or the sole active stream when id is omitted. */
-export async function stopWebRtcStream(streamId?: string): Promise<WebRtcStreamDescriptor> {
-  const stoppedPending = stopPendingStart(streamId);
-  if (stoppedPending) {
-    return stoppedPending;
-  }
+/** Release one lease, or stop a stream immediately when no lease is supplied. */
+export async function stopWebRtcStream(
+  streamId?: string,
+  leaseId?: string
+): Promise<WebRtcStreamDescriptor> {
   const record = resolveStreamRecord(streamId);
+  if (leaseId && !releaseLease(record, leaseId)) {
+    throw new ActionableError(`No active WebRTC lease ${leaseId} for stream ${record.streamId}.`);
+  }
+  if (leaseId && record.leases.size > 0) {
+    return describeRecord(record);
+  }
   streams.delete(record.streamId);
-  cancelRecordStart(record);
+  if (record.leaseExpiryHandle) {
+    dependencies.timer.clearTimeout(record.leaseExpiryHandle);
+    record.leaseExpiryHandle = null;
+  }
   await stopActiveRecord(record);
   return { ...describeRecord(record), state: "stopped" };
 }
 
 /** List reconnect descriptors for all active streams. */
 export function listWebRtcStreams(): WebRtcStreamDescriptor[] {
-  return Array.from(streams.values()).map(describeRecord);
+  return Array.from(streams.values()).map(record => describeRecord(record));
 }
 
 /** Get the reconnect descriptor for one stream (or null). */
-export function getWebRtcStreamDescriptor(streamId: string): WebRtcStreamDescriptor | null {
+export function getWebRtcStreamDescriptor(
+  streamId: string,
+  leaseId?: string
+): WebRtcStreamDescriptor | null {
   const record = streams.get(streamId);
-  return record ? describeRecord(record) : null;
+  if (!record) {
+    return null;
+  }
+  const activeLeaseId = leaseId ? acquireLease(record, leaseId) : undefined;
+  return describeRecord(record, activeLeaseId);
+}
+
+function isReadinessSatisfied(
+  record: WebRtcStreamRecord,
+  readiness: "capture_ready" | "publishing"
+): boolean {
+  if (readiness === "publishing") {
+    return record.lifecycleState === "publishing";
+  }
+  return record.sourceStarted &&
+    (record.lifecycleState === "capture_ready" || record.lifecycleState === "publishing");
+}
+
+function stoppedReadinessDescriptor(
+  record: WebRtcStreamRecord,
+  streamId: string,
+  readiness: "capture_ready" | "publishing",
+  leaseId?: string
+): WebRtcStreamDescriptor {
+  return {
+    ...describeRecord(record, leaseId),
+    state: "stopped",
+    failure: {
+      code: "stopped",
+      message: `WebRTC stream ${streamId} was stopped while waiting for ${readiness}.`,
+      at: dependencies.now().toISOString(),
+    },
+    fallback: null,
+  };
+}
+
+function readinessWaitDuration(remainingMs: number, hasLease: boolean): number {
+  return hasLease ? Math.min(remainingMs, WEBRTC_STREAM_LEASE_TTL_MS / 2) : remainingMs;
+}
+
+function waitForRecordStateChange(record: WebRtcStreamRecord, waitMs: number): Promise<void> {
+  return new Promise<void>(resolve => {
+    const timeout = dependencies.timer.setTimeout(() => {
+      record.stateWaiters.delete(wake);
+      resolve();
+    }, waitMs);
+    const wake = () => {
+      dependencies.timer.clearTimeout(timeout);
+      resolve();
+    };
+    record.stateWaiters.add(wake);
+  });
+}
+
+type ReadinessRecordResolution =
+  | { type: "active"; record: WebRtcStreamRecord }
+  | { type: "stopped"; descriptor: WebRtcStreamDescriptor };
+
+function resolveReadinessRecord(
+  streamId: string,
+  readiness: "capture_ready" | "publishing",
+  leaseId: string | undefined,
+  lastRecord: WebRtcStreamRecord | undefined
+): ReadinessRecordResolution {
+  const record = streams.get(streamId);
+  if (record) {
+    return { type: "active", record };
+  }
+  if (lastRecord?.lifecycleState === "stopping") {
+    return {
+      type: "stopped",
+      descriptor: stoppedReadinessDescriptor(lastRecord, streamId, readiness, leaseId),
+    };
+  }
+  throw new ActionableError(`No active WebRTC stream with id ${streamId}.`);
+}
+
+/**
+ * Wait for local capture or WHIP publishing without conflating the two phases.
+ * A timeout is a request-scoped result, not a capture failure, so one caller
+ * cannot degrade a stream that is still healthy for another consumer.
+ */
+export async function waitForWebRtcStreamReadiness(
+  streamId: string,
+  readiness: "capture_ready" | "publishing",
+  timeoutMs: number = DEFAULT_STREAM_READY_TIMEOUT_MS,
+  leaseId?: string
+): Promise<WebRtcStreamDescriptor> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new ActionableError("WebRTC stream readiness timeout must be a positive number of milliseconds.");
+  }
+  const deadline = dependencies.timer.now() + timeoutMs;
+  let activeLeaseId = leaseId;
+  let lastRecord: WebRtcStreamRecord | undefined;
+
+  for (;;) {
+    const resolved = resolveReadinessRecord(streamId, readiness, activeLeaseId, lastRecord);
+    if (resolved.type === "stopped") {
+      return resolved.descriptor;
+    }
+    const record = resolved.record;
+    lastRecord = record;
+    if (activeLeaseId) {
+      activeLeaseId = acquireLease(record, activeLeaseId);
+    }
+    if (isReadinessSatisfied(record, readiness)) {
+      return describeRecord(record, activeLeaseId);
+    }
+    if (record.lifecycleState === "degraded" || record.lifecycleState === "failed") {
+      return describeRecord(record, activeLeaseId);
+    }
+    const remainingMs = deadline - dependencies.timer.now();
+    if (remainingMs <= 0) {
+      return readinessTimeoutDescriptor(record, readiness, activeLeaseId);
+    }
+    await waitForRecordStateChange(record, readinessWaitDuration(remainingMs, Boolean(activeLeaseId)));
+  }
+}
+
+function readinessTimeoutDescriptor(
+  record: WebRtcStreamRecord,
+  readiness: "capture_ready" | "publishing",
+  leaseId?: string
+): WebRtcStreamDescriptor {
+  const code = readiness === "capture_ready" ? "capture_ready_timeout" : "publishing_timeout";
+  return {
+    ...describeRecord(record, leaseId),
+    failure: {
+      code,
+      message: `Timed out waiting for WebRTC stream ${record.streamId} to reach ${readiness}.`,
+      at: dependencies.now().toISOString(),
+    },
+    fallback: null,
+  };
 }
 
 function resolveStreamRecord(streamId?: string): WebRtcStreamRecord {

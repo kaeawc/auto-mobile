@@ -76,14 +76,14 @@ export interface WebRtcPublisherDeps {
   timer?: Timer;
   /**
    * Called at the start of each (re)establish, before the offer is built. The
-   * manager uses this to STOP any existing capture source so the next session
-   * starts clean.
+   * manager uses this to recreate capture only after a capture failure. A normal
+   * WHIP/ICE reconnect keeps the prepared encoder or helper alive.
    */
   onBeforeEstablish?: () => Promise<void> | void;
   /**
    * Called once the peer connection reaches `connected`. The manager uses this
-   * to START the capture source, so the first SPS/PPS + IDR is emitted over a
-   * live connection instead of being dropped before DTLS is ready.
+   * to mark publishing readiness and request a fresh IDR from its already-warm
+   * capture source.
    */
   onConnected?: () => Promise<void> | void;
   /**
@@ -93,7 +93,15 @@ export interface WebRtcPublisherDeps {
    * without waiting for the periodic IDR interval. Throttled by the publisher.
    */
   onKeyFrameRequest?: () => void;
+  /**
+   * Called when packetization rejects source media after H.264 capability
+   * validation. The manager must expose the failure and recreate capture for
+   * the reconnect instead of reporting a healthy publisher with no usable RTP.
+   */
+  onSourceFailure?: (error: Error) => void;
   onStateChange?: (state: ReconnectState) => void;
+  /** Significant publish milestones, owned by the stream coordinator for telemetry. */
+  onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
 }
 
 export type WebRtcCaptureSourceState =
@@ -119,6 +127,15 @@ export interface WebRtcStreamReadiness {
   lastSourceError: string | null;
 }
 
+export type WebRtcPublisherLifecycleEvent =
+  | "sdp_offer_created"
+  | "ice_gathering_started"
+  | "ice_gathering_complete"
+  | "ice_gathering_timeout"
+  | "whip_answer_received"
+  | "ice_connected"
+  | "first_rtp_sent";
+
 /** Reconnect descriptor surfaced to callers and the coordination-server API. */
 export interface WebRtcStreamDescriptor {
   streamId: string;
@@ -133,15 +150,43 @@ export interface WebRtcStreamDescriptor {
   audioSamplesSent: number;
   readiness: WebRtcStreamReadiness;
   /**
-   * True once the capture source for the current session has started. A
-   * video-only stream connects and *then* starts capture, so `state` alone
-   * cannot tell "WHIP publish accepted" from "capture running". Set by the
-   * stream manager, which owns source startup; absent on descriptors the
-   * publisher builds on its own.
+   * True once the manager-owned capture source is prepared. `state` alone
+   * cannot tell "WHIP publish accepted" from "capture running", so the manager
+   * surfaces this independently; absent on descriptors the publisher builds on
+   * its own.
    */
   sourceStarted?: boolean;
   /** Latest capture-pipeline metrics, when supplied by the active source. */
   frameMetrics?: H264CaptureSourceMetrics;
+  /** Coordinator lifecycle, including capture preparation before WHIP publish. */
+  lifecycleState?:
+    | "idle"
+    | "preparing"
+    | "capture_ready"
+    | "publishing"
+    | "degraded"
+    | "stopping"
+    | "failed";
+  /** Stable failure code for a caller that must fall back to screenshots. */
+  failure?: { code: string; message: string; at: string } | null;
+  /** Capture and publish milestones used to attribute cold-start delay. */
+  telemetry?: {
+    requestReceived: string;
+    captureSourcePrepared?: string;
+    firstMediaFrame?: string;
+    firstIdr?: string;
+    sdpOffer?: string;
+    sdpAnswer?: string;
+    iceConnected?: string;
+    firstRtpSent?: string;
+    nonTrickleIceGatheringDelayMs?: number;
+  };
+  /** Capture can no longer serve video; callers should use screenshot observation. */
+  fallback?: { mode: "screenshots"; reason: string } | null;
+  /** Lease returned to the control-plane caller that started or renewed this stream. */
+  lease?: { id: string; expiresAt: string } | null;
+  /** Number of active control-plane leases retaining this capture source. */
+  consumerCount?: number;
 }
 
 /**
@@ -166,6 +211,8 @@ export class WebRtcPublisher {
   private readonly onBeforeEstablish?: () => Promise<void> | void;
   private readonly onConnected?: () => Promise<void> | void;
   private readonly onKeyFrameRequest?: () => void;
+  private readonly onSourceFailure?: (error: Error) => void;
+  private readonly onLifecycleEvent?: (event: WebRtcPublisherLifecycleEvent) => void;
   private readonly controller: ReconnectController;
 
   private readonly trickleIce: boolean;
@@ -194,6 +241,7 @@ export class WebRtcPublisher {
   private pendingIdrRequests = 0;
   private encodedAccessUnitCount = 0;
   private publisherRtpPacketCount = 0;
+  private firstRtpSent = false;
 
   constructor(config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps = {}) {
     this.config = config;
@@ -203,6 +251,8 @@ export class WebRtcPublisher {
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
     this.onKeyFrameRequest = deps.onKeyFrameRequest;
+    this.onSourceFailure = deps.onSourceFailure;
+    this.onLifecycleEvent = deps.onLifecycleEvent;
     this.createPeerConnection =
       deps.createPeerConnection ??
       (iceServers =>
@@ -247,13 +297,35 @@ export class WebRtcPublisher {
   /** Feed a chunk of the raw H.264 (Annex-B) elementary stream. */
   writeH264Chunk(chunk: Buffer): void {
     try {
+      const framesBefore = this.writer?.stats.framesWritten ?? 0;
       this.writer?.writeChunk(chunk);
+      this.recordFirstRtpIfConnected(framesBefore);
     } catch (error) {
+      const sourceFailure = error instanceof Error ? error : new Error(String(error));
       logger.warn(
-        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${error instanceof Error ? error.message : String(error)}`
+        `[WebRTC] stream ${this.config.streamId} emitted an H.264 stream outside its negotiated capability: ${sourceFailure.message}`
       );
-      this.notifySourceFailed();
+      this.notifySourceFailed(sourceFailure);
     }
+  }
+
+  private recordFirstRtpIfConnected(framesBefore: number): void {
+    if (this.firstRtpSent || this.pc?.connectionState !== "connected") {
+      return;
+    }
+    if ((this.writer?.stats.framesWritten ?? 0) <= framesBefore) {
+      return;
+    }
+    this.firstRtpSent = true;
+    this.onLifecycleEvent?.("first_rtp_sent");
+  }
+
+  /**
+   * Prime the current RTP writer with parameter sets captured while the source
+   * was warm but no publisher track existed yet.
+   */
+  primeH264ParameterSets(sps: Buffer | null, pps: Buffer | null): void {
+    this.writer?.primeParameterSets(sps, pps);
   }
 
   /** Feed 8 kHz mono PCM16LE audio; ignored when audio is not enabled. */
@@ -265,7 +337,8 @@ export class WebRtcPublisher {
    * Report that the capture source failed. Unlike a WebRTC connection drop this
    * does not change the peer `connectionState`, so without this hook a dead
    * source would leave the viewer on a frozen frame with no recovery. Triggers
-   * the reconnect loop, which tears down and re-establishes (restarting capture).
+   * the reconnect loop, which tears down and re-establishes. The manager
+   * recreates capture only when this source-failure path requires it.
    */
   notifySourceFailed(error?: Error): void {
     if (this.closed) {
@@ -275,6 +348,7 @@ export class WebRtcPublisher {
     logger.warn(
       `[WebRTC] stream ${this.config.streamId} capture source failed${detail}; reconnecting`
     );
+    this.onSourceFailure?.(error ?? new Error("Capture source stopped producing media."));
     this.controller.notifyConnectionLost();
   }
 
@@ -329,6 +403,7 @@ export class WebRtcPublisher {
     await this.teardownActiveSession();
   }
 
+  // eslint-disable-next-line complexity -- WHIP setup requires explicit cleanup at each failure boundary.
   private async establish(): Promise<void> {
     if (this.closed) {
       throw new Error("Publisher closed.");
@@ -380,6 +455,7 @@ export class WebRtcPublisher {
         onAccessUnit: event => this.recordAccessUnit(event),
       });
       this.mediaTelemetryInitialized = true;
+      this.firstRtpSent = false;
       if (this.audioEnabled) {
         const audioTrack = new MediaStreamTrack({ kind: "audio", streamId: this.config.streamId });
         const audioTransceiver = pc.addTransceiver(audioTrack, { direction: "sendonly" });
@@ -389,14 +465,18 @@ export class WebRtcPublisher {
         });
       }
 
+      // Subscribe before createOffer()/setLocalDescription(): werift can emit a
+      // host candidate while installing the local description. The subscription
+      // buffers it until the SDP supplies the media/ICE context below.
+      const activateTrickle = this.trickleIce ? this.subscribeTrickle(pc) : undefined;
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      this.onLifecycleEvent?.("sdp_offer_created");
 
-      // Trickle ICE: start forwarding candidates (buffered until the resource URL
-      // is known) and publish the offer immediately instead of blocking on ICE
-      // gathering. Non-trickle: gather (bounded) before publishing.
-      if (this.trickleIce) {
-        this.startTrickle(pc);
+      // Trickle ICE publishes without waiting on gathering. Candidates emitted
+      // before local SDP activation are retained by subscribeTrickle.
+      if (activateTrickle) {
+        activateTrickle();
       } else {
         await this.waitForIceGathering(pc);
       }
@@ -410,6 +490,7 @@ export class WebRtcPublisher {
       // rtcp-mux-only attribute. It is an SDP signalling constraint; werift's
       // transport remains multiplexed after local description is installed.
       const session = await this.whip.publish(addWhipRtcpMuxOnly(localSdp));
+      this.onLifecycleEvent?.("whip_answer_received");
 
       // stop() may have run while we were awaiting ICE/WHIP. The WHIP session now
       // exists on the server but teardown already happened (before resourceUrl was
@@ -505,6 +586,7 @@ export class WebRtcPublisher {
       return;
     }
     this.connectedFired = true;
+    this.onLifecycleEvent?.("ice_connected");
     void Promise.resolve()
       .then(() => this.onConnected?.())
       .then(() => {
@@ -528,7 +610,7 @@ export class WebRtcPublisher {
    * connection-state change) yet the frame counter stops advancing. Baselined at
    * connect, so a source that never produces a first frame within the timeout is
    * also caught after capture startup completes. On a stall, route through
-   * reconnect (which restarts capture).
+   * reconnect and manager-directed capture recovery.
    */
   private startFrameWatchdog(pc: RTCPeerConnection): void {
     const timeout = this.config.frameStallTimeoutMs;
@@ -624,20 +706,20 @@ export class WebRtcPublisher {
    * buffered by the forwarder until the WHIP resource URL is known (set right
    * after publish), then PATCHed as `application/trickle-ice-sdpfrag`.
    */
-  private startTrickle(pc: RTCPeerConnection): void {
-    const contexts = parseTrickleIceMediaContexts(pc.localDescription?.sdp ?? "");
-    const forwarder = new TrickleIceForwarder((resourceUrl, fragment) => {
-      const etag = this.activeWhipEtag;
-      if (!etag) {
-        return;
-      }
-      void this.whip.patchCandidate(resourceUrl, etag, fragment).catch(error => {
-        logger.debug(`[WebRTC] trickle candidate PATCH failed: ${error}`);
-      });
-    }, contexts);
-    this.trickle = forwarder;
-    this.candidateSub = pc.onIceCandidate.subscribe(candidate => {
-      if (this.pc !== pc) {
+  private subscribeTrickle(pc: RTCPeerConnection): () => void {
+    const pendingCandidates: Array<{
+      candidate: string;
+      sdpMid?: string;
+      sdpMLineIndex?: number;
+    } | null | undefined> = [];
+    let forwarder: TrickleIceForwarder | null = null;
+    const addCandidate = (candidate: {
+      candidate: string;
+      sdpMid?: string;
+      sdpMLineIndex?: number;
+    } | null | undefined): void => {
+      if (!forwarder) {
+        pendingCandidates.push(candidate);
         return;
       }
       if (candidate) {
@@ -649,22 +731,52 @@ export class WebRtcPublisher {
       } else {
         forwarder.completeGathering();
       }
+    };
+    this.candidateSub = pc.onIceCandidate.subscribe(candidate => {
+      if (this.pc === pc) {
+        addCandidate(candidate);
+      }
     });
+
+    return () => {
+      if (this.pc !== pc || forwarder) {
+        return;
+      }
+      const contexts = parseTrickleIceMediaContexts(pc.localDescription?.sdp ?? "");
+      forwarder = new TrickleIceForwarder((resourceUrl, fragment) => {
+        const etag = this.activeWhipEtag;
+        if (!etag) {
+          return;
+        }
+        void this.whip.patchCandidate(resourceUrl, etag, fragment).catch(error => {
+          logger.debug(`[WebRTC] trickle candidate PATCH failed: ${error}`);
+        });
+      }, contexts);
+      this.trickle = forwarder;
+      for (const candidate of pendingCandidates) {
+        addCandidate(candidate);
+      }
+      pendingCandidates.length = 0;
+    };
   }
 
   private async waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
     if (pc.iceGatheringState === "complete") {
+      this.onLifecycleEvent?.("ice_gathering_complete");
       return;
     }
+    this.onLifecycleEvent?.("ice_gathering_started");
     try {
       await pc.iceGatheringStateChange.watch(
         state => state === "complete",
         ICE_GATHERING_TIMEOUT_MS
       );
+      this.onLifecycleEvent?.("ice_gathering_complete");
     } catch {
       // Timed out — proceed with whatever candidates gathered so far. Non-trickle
       // WHIP servers still often connect via the host/srflx candidates present.
       logger.warn(`[WebRTC] ICE gathering did not complete within ${ICE_GATHERING_TIMEOUT_MS}ms; publishing partial offer`);
+      this.onLifecycleEvent?.("ice_gathering_timeout");
     }
   }
 

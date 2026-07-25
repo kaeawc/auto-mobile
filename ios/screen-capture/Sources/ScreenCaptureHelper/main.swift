@@ -150,10 +150,9 @@ case .captureSimulator(let windowID, let fps, let audio):
         }
     }
 
-    // Emit stage markers synchronously to stderr before each blocking call. When
-    // `startCapture()` hangs, `runBlocking` parks the main thread, so the 10s
-    // permission hint (scheduled on the main queue) never fires — the last marker
-    // observed is then the only signal of which stage stalled (issue #4350).
+    // Emit stage markers synchronously to stderr before each blocking call. The
+    // capture start itself must not use `runBlocking`: ScreenCaptureKit completes
+    // it through the main run loop on recent macOS releases.
     logError(CaptureStartupMarker.line(.resolvingWindow(windowID: windowID)))
     let window: SCWindow
     switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
@@ -179,34 +178,38 @@ case .captureSimulator(let windowID, let fps, let audio):
     let simSession = SimulatorCaptureSession(writer: writer) { error in
         logError("error: ScreenCaptureKit stream stopped: \(error)")
     }
+    let firstFrameSignal = simSession.firstFrameSignal
 
     logError(CaptureStartupMarker.line(.startingCapture(windowID: windowID, fps: fps)))
-    if case .failure(let error) = runBlocking({
-        try await simSession.start(window: window, fps: fps, audio: audio)
-    }) {
-        logError("error: failed to start simulator capture: \(error)")
-        exit(1)
-    }
-    logError(CaptureStartupMarker.line(.captureStarted(windowID: windowID)))
-
-    // ScreenCaptureKit silently emits no frames when the host process lacks
-    // Screen Recording permission — there's no error to surface. Emit a hint
-    // on stderr if nothing arrives within the deadline; this leaves stdout
-    // (the frame channel) untouched.
-    DispatchQueue.main.asyncAfter(deadline: .now() + simulatorPermissionTimeoutSeconds) {
-        if !simSession.hasReceivedAnyFrame {
-            logError(
-                "warn: no frames received within \(simulatorPermissionTimeoutSeconds)s. "
-                + "Grant 'Screen Recording' to your terminal/IDE in "
-                + "System Settings → Privacy & Security → Screen Recording."
-            )
-        }
-    }
-
     installShutdownHandlers {
         metricsReporter.stop()
-        runBlocking { await simSession.stop() }
-        exit(0)
+        Task { @MainActor in
+            await simSession.stop()
+            exit(0)
+        }
+    }
+    Task { @MainActor in
+        do {
+            try await simSession.start(window: window, fps: fps, audio: audio)
+            logError(CaptureStartupMarker.line(.captureStarted(windowID: windowID)))
+
+            // ScreenCaptureKit silently emits no frames when the host process
+            // lacks Screen Recording permission — there's no error to surface.
+            // Emit a hint on stderr if nothing arrives within the deadline; this
+            // leaves stdout (the frame channel) untouched.
+            _ = Timer.scheduledTimer(withTimeInterval: simulatorPermissionTimeoutSeconds, repeats: false) { _ in
+                if !firstFrameSignal.hasReceivedFrame {
+                    logError(
+                        "warn: no frames received within \(simulatorPermissionTimeoutSeconds)s. "
+                        + "Grant 'Screen Recording' to your terminal/IDE in "
+                        + "System Settings → Privacy & Security → Screen Recording."
+                    )
+                }
+            }
+        } catch {
+            logError("error: failed to start simulator capture: \(error)")
+            exit(1)
+        }
     }
     RunLoop.main.run()
 

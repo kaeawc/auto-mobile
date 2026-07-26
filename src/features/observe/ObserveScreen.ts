@@ -540,7 +540,8 @@ export class RealObserveScreen implements ObserveScreen {
           };
         }
 
-        result.screenIdentity = deriveIosScreenIdentity(result.viewHierarchy);
+        result.screenIdentity = this.viewHierarchy.getScreenIdentity?.(result.viewHierarchy?.packageName)
+          ?? deriveIosScreenIdentity(result.viewHierarchy);
 
         perf.end();
         break;

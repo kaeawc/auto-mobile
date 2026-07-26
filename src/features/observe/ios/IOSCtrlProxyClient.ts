@@ -18,6 +18,7 @@ import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
   HighlightShape,
+  ScreenIdentity,
   ImeAction,
   ViewHierarchyResult,
 } from "../../../models";
@@ -119,6 +120,7 @@ import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
 import { decodeCtrlProxyMessage } from "./decodeCtrlProxyMessage";
 import { DefaultIosSdkEventIngestor, type IosSdkEventIngestor } from "./IosSdkEventIngestor";
+import { deriveIosSdkScreenIdentity } from "./IosSdkScreenIdentity";
 
 // Import types
 import type {
@@ -405,6 +407,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
+  private readonly sdkScreenIdentitiesByApplicationId = new Map<string, ScreenIdentity>();
 
   private constructor(
     device: BootedDevice,
@@ -466,6 +469,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public static getExistingInstance(deviceId: string): IOSCtrlProxyClient | null {
     return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
+  }
+
+  /** Return the latest app-provided navigation identity without doing I/O. */
+  public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
+    return applicationId ? this.sdkScreenIdentitiesByApplicationId.get(applicationId) : undefined;
   }
 
   /**
@@ -888,6 +896,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cancelScreenshotBackoff();
     this.stopSdkEventPolling();
     this.cachedHierarchy = null;
+    this.sdkScreenIdentitiesByApplicationId.clear();
     this.supportedCommands = null;
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
@@ -927,6 +936,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
               const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
               const payload = JSON.parse(payloadJson) as Record<string, unknown>;
               const timestamp = (payload.timestamp as number) ?? Date.now();
+              this.rememberSdkScreenIdentity(envelope.eventType, batch.bundleId, payload);
               await this.sdkEventIngestor.recordSdkEvent(
                 { type: envelope.eventType, timestamp, payload },
                 batch.bundleId ?? null,
@@ -948,6 +958,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (this.sdkEventPollInterval) {
       this.timer.clearInterval(this.sdkEventPollInterval);
       this.sdkEventPollInterval = null;
+    }
+  }
+
+  private rememberSdkScreenIdentity(
+    eventType: string,
+    applicationId: string | undefined,
+    payload: Record<string, unknown>,
+  ): void {
+    if (!applicationId) {
+      return;
+    }
+    const identity = deriveIosSdkScreenIdentity(eventType, applicationId, payload);
+    if (identity) {
+      this.sdkScreenIdentitiesByApplicationId.set(applicationId, identity);
     }
   }
 

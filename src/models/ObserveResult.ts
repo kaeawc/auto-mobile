@@ -95,8 +95,12 @@ export interface ScreenIdentity {
   key: string;
   components: {
     bundleId?: string;
+    /** SDK-reported destination / route, when the app integrates AutoMobileSDK. */
+    navigationRoute?: string;
     navigationTitle?: string;
     selectedTab?: string;
+    /** SDK-reported modal or sheet presentation route, when available. */
+    presentation?: string;
     modalClass?: string;
     modalTitle?: string;
     focusedElementId?: string;

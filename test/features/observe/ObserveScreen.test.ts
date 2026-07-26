@@ -215,6 +215,52 @@ describe("ObserveScreen", function() {
         resetObserveCacheStore();
       }
     });
+
+    test("prefers an SDK-backed iOS screen identity for the observed bundle", async function() {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        packageName: "dev.jasonpearson.automobile.Playground",
+        updatedAt: 123,
+        screenScale: 3,
+        screenWidth: 402,
+        screenHeight: 874,
+        hierarchy: { node: { $: { class: "XCUIApplication" } } },
+      } as any);
+      viewHierarchy.configureScreenIdentity({
+        platform: "ios",
+        source: "sdk",
+        confidence: "high",
+        key: '[["bundle","dev.jasonpearson.automobile.Playground"],["route","SettingsTab"]]',
+        components: {
+          bundleId: "dev.jasonpearson.automobile.Playground",
+          navigationRoute: "SettingsTab",
+        },
+      });
+
+      try {
+        const screen = new RealObserveScreen(
+          { deviceId: "ios-test-device", name: "iPhone", platform: "ios" },
+          new FakeAdbClientFactory(fakeAdb),
+          {
+            viewHierarchy,
+            cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+            performanceAuditor: { run: async () => undefined } as any,
+            accessibilityAuditor: { run: async () => undefined } as any,
+            accessibilityStateDetector: { run: async () => undefined } as any,
+          }
+        );
+
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(result.screenIdentity).toMatchObject({
+          source: "sdk",
+          confidence: "high",
+          components: { navigationRoute: "SettingsTab" },
+        });
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
   });
 
   describe("Unit Tests for Focused Element Functionality", function() {

@@ -4,6 +4,7 @@ import type { FeatureFlagDefinition } from "../../../src/features/featureFlags/F
 import { FakeFeatureFlagRepository } from "../../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../../fakes/FakeFeatureFlagApplier";
 import { FakeToolListChangedNotifier } from "../../fakes/FakeToolListChangedNotifier";
+import type { ToolListChangedNotifier } from "../../../src/features/featureFlags/ToolListChangedNotifier";
 
 // Covers the three flags that change what `tools/list` returns (outputSchema
 // advertisement or tool availability) plus one unrelated flag, so we can assert
@@ -99,5 +100,28 @@ describe("FeatureFlagService tools/list_changed notifications", () => {
     // Must not throw despite no notifier being provided.
     const updated = await service.setFlag("debug", true);
     expect(updated.enabled).toBe(true);
+  });
+
+  test("keeps the flag committed even if a throwing notifier rejects setFlag", async () => {
+    // The notifier is documented as best-effort and unguarded (FeatureFlagService
+    // commits the flag BEFORE notifying). If a notifier violates that contract by
+    // throwing, the caller sees a rejection for a change that already happened —
+    // this pins that observable outcome so a regression can't silently swallow it.
+    const throwingNotifier: ToolListChangedNotifier = {
+      notifyToolListChanged(): void {
+        throw new Error("notifier boom");
+      },
+    };
+    const service = new FeatureFlagService(
+      new FakeFeatureFlagRepository(),
+      new FakeFeatureFlagApplier(),
+      TEST_DEFINITIONS,
+      throwingNotifier
+    );
+    await service.listFlags();
+
+    await expect(service.setFlag("debug", true)).rejects.toThrow("notifier boom");
+    // The flag is already persisted despite the rejection.
+    expect(service.isEnabled("debug")).toBe(true);
   });
 });

@@ -145,6 +145,25 @@ export function calculateMode(values: number[]): number | undefined {
 }
 
 /**
+ * Calculate the median of an array of numbers.
+ *
+ * For an even-sized sample the median is the mean of the two central values;
+ * for an odd-sized sample it is the central value. The input is not mutated —
+ * a copy is sorted — so callers can rely on their array's order being preserved.
+ *
+ * @param values - Array of numeric values
+ * @returns Median value, or undefined if the array is empty
+ */
+export function calculateMedian(values: number[]): number | undefined {
+  if (values.length === 0) {
+    return undefined;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+/**
  * Safe division that handles zero divisor.
  * Used for calculating anomaly multipliers.
  *
@@ -163,10 +182,14 @@ export function safeDivide(current: number, baseline: number): number {
  * Calculate cutoff date for cleanup operations.
  *
  * @param daysOld - Number of days before which items are considered stale
+ * @param nowMs - Current time in epoch milliseconds. Injectable so tests can pin
+ *   the clock (e.g. a FakeTimer's `now()`) and avoid the real-clock double-read
+ *   that flakes when the function and its caller straddle midnight. Defaults to
+ *   `Date.now()`, preserving the production behavior for existing callers.
  * @returns ISO string of the cutoff date
  */
-export function getCutoffDate(daysOld: number): string {
-  const cutoffDate = new Date();
+export function getCutoffDate(daysOld: number, nowMs: number = Date.now()): string {
+  const cutoffDate = new Date(nowMs);
   cutoffDate.setDate(cutoffDate.getDate() - daysOld);
   return cutoffDate.toISOString();
 }

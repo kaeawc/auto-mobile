@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
 import { AndroidSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/AndroidSystemConfigurationAdapter";
 import { IosSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/IosSystemConfigurationAdapter";
@@ -39,66 +39,16 @@ describe("SystemConfigurationAdapter", () => {
     includes: (s: string) => stdout.includes(s),
   });
 
-  describe("FakeSystemConfigurationAdapter", () => {
-    let fake: FakeSystemConfigurationAdapter;
+  // (FakeSystemConfigurationAdapter self-tests moved to
+  // test/fakes/FakeSystemConfigurationAdapter.test.ts — they exercise only the
+  // fake, not production code.)
 
-    beforeEach(() => {
-      fake = new FakeSystemConfigurationAdapter();
-    });
-
-    it("records each method invocation", async () => {
-      await fake.setLocale("ja-JP", { broadcast: true });
-      await fake.setTimeZone("Asia/Tokyo");
-      await fake.setTextDirection(true, {});
-      await fake.set24HourFormat(true);
-      await fake.setCalendarSystem("japanese");
-      await fake.getCalendarSystem();
-      await fake.getLocalizationSettings();
-      await fake.broadcastLocaleChange();
-
-      expect(fake.wasMethodCalled("setLocale")).toBe(true);
-      expect(fake.wasMethodCalled("setTimeZone")).toBe(true);
-      expect(fake.wasMethodCalled("setTextDirection")).toBe(true);
-      expect(fake.wasMethodCalled("set24HourFormat")).toBe(true);
-      expect(fake.wasMethodCalled("setCalendarSystem")).toBe(true);
-      expect(fake.wasMethodCalled("getCalendarSystem")).toBe(true);
-      expect(fake.wasMethodCalled("getLocalizationSettings")).toBe(true);
-      expect(fake.wasMethodCalled("broadcastLocaleChange")).toBe(true);
-    });
-
-    it("captures call arguments in the recorded operation string", async () => {
-      await fake.setLocale("fr-CA", { broadcast: false });
-      await fake.setTimeZone("Europe/Paris");
-
-      const ops = fake.getExecutedOperations();
-      expect(ops).toContain("setLocale:fr-CA:false");
-      expect(ops).toContain("setTimeZone:Europe/Paris");
-    });
-
-    it("clears recorded history on demand", async () => {
-      await fake.broadcastLocaleChange();
-      fake.clearHistory();
-      expect(fake.getExecutedOperations()).toEqual([]);
-    });
-
-    it("returns the configured stub results", async () => {
-      fake.setLocaleResult = { success: false, languageTag: "x-y", error: "stubbed" };
-      const result = await fake.setLocale("x-y", {});
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("stubbed");
-    });
-
-    it("counts each invocation independently", async () => {
-      await fake.broadcastLocaleChange();
-      await fake.broadcastLocaleChange();
-      await fake.broadcastLocaleChange();
-      expect(fake.getCallCount("broadcastLocaleChange")).toBe(3);
-    });
-  });
-
-  // Two platform adapters plus the fake all satisfy
-  // SystemConfigurationAdapter. Data-driven so each gets the same
-  // conformance checks without duplicating describe blocks.
+  // Two platform adapters plus the fake all satisfy SystemConfigurationAdapter.
+  // The conformance guard is the compile-time `SystemConfigurationAdapter`
+  // annotation on the constructed adapter: if a shared member is dropped from an
+  // implementation, `c.build()` no longer assigns to the interface-typed local
+  // and this file fails to type-check. The former runtime `typeof x === "function"`
+  // assertions restated what the type system already enforces, so they are gone.
   interface AdapterCase {
     name: string;
     build: () => SystemConfigurationAdapter;
@@ -121,16 +71,9 @@ describe("SystemConfigurationAdapter", () => {
 
   for (const c of cases) {
     describe(c.name, () => {
-      it("satisfies the SystemConfigurationAdapter interface", () => {
+      it("constructs as a SystemConfigurationAdapter", () => {
         const adapter: SystemConfigurationAdapter = c.build();
-        expect(typeof adapter.setLocale).toBe("function");
-        expect(typeof adapter.setTimeZone).toBe("function");
-        expect(typeof adapter.setTextDirection).toBe("function");
-        expect(typeof adapter.set24HourFormat).toBe("function");
-        expect(typeof adapter.setCalendarSystem).toBe("function");
-        expect(typeof adapter.getCalendarSystem).toBe("function");
-        expect(typeof adapter.getLocalizationSettings).toBe("function");
-        expect(typeof adapter.broadcastLocaleChange).toBe("function");
+        expect(adapter).toBeDefined();
       });
     });
   }

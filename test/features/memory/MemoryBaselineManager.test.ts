@@ -227,6 +227,158 @@ describe("MemoryBaselineManager - Unit Tests", function() {
       // Unreachable objects multiplier should be 0 when null
       expect(result.unreachableObjectsMultiplier).toBe(0);
     });
+
+    // Ratio table exercising the safeDivide boundaries every multiplier shares.
+    // Uses `new MemoryBaselineManager()` with NO database — calculateAnomalyMultiplier
+    // is pure and the lazy `db` getter is never resolved (issue #3067).
+    describe("multiplier ratios", function() {
+      const pureManager = new MemoryBaselineManager();
+
+      function baselineWithJava(javaBaseline: number): MemoryBaseline {
+        return {
+          id: 1,
+          device_id: "test-device",
+          package_name: "com.example.app",
+          tool_name: "tapOn",
+          java_heap_baseline_mb: javaBaseline,
+          native_heap_baseline_mb: 30,
+          gc_count_baseline: 5,
+          gc_duration_baseline_ms: 100,
+          unreachable_objects_baseline: 100,
+          sample_count: 10,
+          last_updated: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        };
+      }
+
+      function metricsWithJava(javaCurrent: number): MemoryMetrics {
+        const snapshot = { javaHeapMb: javaCurrent, nativeHeapMb: 30, totalPssMb: 100, timestamp: 0, raw: "" };
+        return {
+          preSnapshot: snapshot,
+          postSnapshot: snapshot,
+          javaHeapGrowthMb: 0,
+          nativeHeapGrowthMb: 0,
+          totalPssGrowthMb: 0,
+          gcEvents: [],
+          gcCount: 5,
+          gcTotalDurationMs: 100,
+          unreachableObjects: null,
+        };
+      }
+
+      const cases: Array<[string, number, number, number]> = [
+        ["doubled heap is 2x", 100, 50, 2],
+        ["unchanged heap is 1x", 50, 50, 1],
+        ["shrunk heap is a fractional multiplier (negative growth)", 25, 50, 0.5],
+        ["strongly shrunk heap approaches zero", 5, 50, 0.1],
+        ["zero current over positive baseline is 0", 0, 50, 0],
+        ["positive current over zero baseline is Infinity", 100, 0, Infinity],
+        ["zero current over zero baseline collapses to 1.0", 0, 0, 1.0],
+      ];
+
+      test.each(cases)("%s", function(_name, current, baseline, expected) {
+        const result = pureManager.calculateAnomalyMultiplier(baselineWithJava(baseline), metricsWithJava(current));
+        expect(result.javaHeapMultiplier).toBe(expected);
+      });
+    });
+  });
+
+  describe("updateBaseline EMA blend", function() {
+    let testDb: Kysely<DatabaseSchema>;
+    let dbManager: MemoryBaselineManager;
+
+    beforeEach(async function() {
+      testDb = await createTestDatabase();
+      dbManager = new MemoryBaselineManager(testDb);
+    });
+
+    afterEach(async function() {
+      await testDb.destroy();
+    });
+
+    function makeMetrics(values: {
+      java: number;
+      native: number;
+      gcCount: number;
+      gcDur: number;
+      unreachable: number;
+    }): MemoryMetrics {
+      const snapshot = {
+        javaHeapMb: values.java,
+        nativeHeapMb: values.native,
+        totalPssMb: values.java + values.native,
+        timestamp: 0,
+        raw: "",
+      };
+      return {
+        preSnapshot: snapshot,
+        postSnapshot: snapshot,
+        javaHeapGrowthMb: 0,
+        nativeHeapGrowthMb: 0,
+        totalPssGrowthMb: 0,
+        gcEvents: [],
+        gcCount: values.gcCount,
+        gcTotalDurationMs: values.gcDur,
+        unreachableObjects: { count: values.unreachable } as MemoryMetrics["unreachableObjects"],
+      } as MemoryMetrics;
+    }
+
+    test("stores the raw metrics as the baseline on the first observation", async function() {
+      await dbManager.updateBaseline(
+        "device-1",
+        "com.example.app",
+        "tapOn",
+        makeMetrics({ java: 100, native: 40, gcCount: 8, gcDur: 200, unreachable: 10 })
+      );
+
+      const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
+      expect(baseline?.java_heap_baseline_mb).toBeCloseTo(100);
+      expect(baseline?.native_heap_baseline_mb).toBeCloseTo(40);
+      expect(baseline?.sample_count).toBe(1);
+    });
+
+    test("blends a second observation as alpha*new + (1-alpha)*old", async function() {
+      await dbManager.updateBaseline(
+        "device-1",
+        "com.example.app",
+        "tapOn",
+        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 })
+      );
+
+      // alpha 0.3: java = 0.3*60 + 0.7*100 = 88 (an inverted alpha would give 72).
+      await dbManager.updateBaseline(
+        "device-1",
+        "com.example.app",
+        "tapOn",
+        makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 }),
+        0.3
+      );
+
+      const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
+      expect(baseline?.java_heap_baseline_mb).toBeCloseTo(88);
+      expect(baseline?.native_heap_baseline_mb).toBeCloseTo(0.3 * 30 + 0.7 * 80);
+      expect(baseline?.gc_count_baseline).toBeCloseTo(0.3 * 20 + 0.7 * 10);
+      expect(baseline?.sample_count).toBe(2);
+    });
+
+    test("uses the default EMA alpha of 0.3 when none is supplied", async function() {
+      await dbManager.updateBaseline(
+        "device-1",
+        "com.example.app",
+        "tapOn",
+        makeMetrics({ java: 100, native: 80, gcCount: 10, gcDur: 200, unreachable: 100 })
+      );
+      // No alpha argument -> DEFAULT_EMA_ALPHA (0.3): 0.3*60 + 0.7*100 = 88.
+      await dbManager.updateBaseline(
+        "device-1",
+        "com.example.app",
+        "tapOn",
+        makeMetrics({ java: 60, native: 30, gcCount: 20, gcDur: 100, unreachable: 200 })
+      );
+
+      const baseline = await dbManager.getBaseline("device-1", "com.example.app", "tapOn");
+      expect(baseline?.java_heap_baseline_mb).toBeCloseTo(88);
+    });
   });
 
   describe("cleanupStaleBaselines", function() {

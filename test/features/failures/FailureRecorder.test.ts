@@ -194,58 +194,33 @@ describe("FailureRecorder", () => {
       ...baseContext,
     });
 
-    test("returns medium when no error code", async () => {
-      await recorder.recordToolFailure(makeInput());
-
-      expect(repo.last().severity).toBe("medium");
-    });
-
-    test("returns critical for CRASH error codes", async () => {
-      await recorder.recordToolFailure(makeInput("APP_CRASH"));
-
-      expect(repo.last().severity).toBe("critical");
-    });
-
-    test("returns critical for FATAL error codes", async () => {
-      await recorder.recordToolFailure(makeInput("FATAL_ERROR"));
-
-      expect(repo.last().severity).toBe("critical");
-    });
-
-    test("returns high for TIMEOUT error codes", async () => {
-      await recorder.recordToolFailure(makeInput("TIMEOUT"));
-
-      expect(repo.last().severity).toBe("high");
-    });
-
-    test("returns high for CONNECTION error codes", async () => {
-      await recorder.recordToolFailure(makeInput("CONNECTION_REFUSED"));
-
-      expect(repo.last().severity).toBe("high");
-    });
-
-    test("returns high for NOT_FOUND error codes", async () => {
-      await recorder.recordToolFailure(makeInput("ELEMENT_NOT_FOUND"));
-
-      expect(repo.last().severity).toBe("high");
-    });
-
-    test("returns low for SKIPPED error codes", async () => {
-      await recorder.recordToolFailure(makeInput("SKIPPED"));
-
-      expect(repo.last().severity).toBe("low");
-    });
-
-    test("returns low for IGNORED error codes", async () => {
-      await recorder.recordToolFailure(makeInput("IGNORED"));
-
-      expect(repo.last().severity).toBe("low");
-    });
-
-    test("returns medium for unknown error codes", async () => {
-      await recorder.recordToolFailure(makeInput("SOMETHING_ELSE"));
-
-      expect(repo.last().severity).toBe("medium");
+    // errorCode -> severity. Classification is substring-based, case-sensitive,
+    // and order-sensitive (CRASH/FATAL beat TIMEOUT/CONNECTION/NOT_FOUND, which
+    // beat SKIPPED/IGNORED). Boundary rows pin that precedence, case-sensitivity
+    // and the empty/undefined fallbacks.
+    const cases: Array<[string, string | undefined, string]> = [
+      ["undefined error code is medium", undefined, "medium"],
+      ["empty error code is medium", "", "medium"],
+      ["APP_CRASH is critical", "APP_CRASH", "critical"],
+      ["FATAL_ERROR is critical", "FATAL_ERROR", "critical"],
+      ["TIMEOUT is high", "TIMEOUT", "high"],
+      ["CONNECTION_REFUSED is high", "CONNECTION_REFUSED", "high"],
+      ["ELEMENT_NOT_FOUND is high", "ELEMENT_NOT_FOUND", "high"],
+      ["SKIPPED is low", "SKIPPED", "low"],
+      ["IGNORED is low", "IGNORED", "low"],
+      ["unknown error code is medium", "SOMETHING_ELSE", "medium"],
+      // Precedence: CRASH is checked before TIMEOUT.
+      ["CRASH_TIMEOUT resolves to critical (CRASH wins)", "CRASH_TIMEOUT", "critical"],
+      // Precedence: TIMEOUT is checked before SKIPPED.
+      ["TIMEOUT_SKIPPED resolves to high (TIMEOUT wins)", "TIMEOUT_SKIPPED", "high"],
+      // Case-sensitivity: the matcher is upper-case only.
+      ["lower-case app_crash is medium (no match)", "app_crash", "medium"],
+      // Substring: CRASH matches anywhere in the code.
+      ["PRECRASHED is critical (substring match)", "PRECRASHED", "critical"],
+    ];
+    test.each(cases)("%s", async (_name, errorCode, expected) => {
+      await recorder.recordToolFailure(makeInput(errorCode));
+      expect(repo.last().severity).toBe(expected);
     });
   });
 
@@ -339,58 +314,29 @@ describe("FailureRecorder", () => {
       ...baseContext,
     });
 
-    test("returns critical for OutOfMemory", async () => {
-      await recorder.recordCrash(makeInput("OutOfMemoryError"));
-
-      expect(repo.last().severity).toBe("critical");
-    });
-
-    test("returns critical for StackOverflow", async () => {
-      await recorder.recordCrash(makeInput("StackOverflowError"));
-
-      expect(repo.last().severity).toBe("critical");
-    });
-
-    test("returns critical for Fatal exceptions", async () => {
-      await recorder.recordCrash(makeInput("FatalException"));
-
-      expect(repo.last().severity).toBe("critical");
-    });
-
-    test("returns high for NullPointer", async () => {
-      await recorder.recordCrash(makeInput("NullPointerException"));
-
-      expect(repo.last().severity).toBe("high");
-    });
-
-    test("returns high for IllegalState", async () => {
-      await recorder.recordCrash(makeInput("IllegalStateException"));
-
-      expect(repo.last().severity).toBe("high");
-    });
-
-    test("returns high for SecurityException", async () => {
-      await recorder.recordCrash(makeInput("SecurityException"));
-
-      expect(repo.last().severity).toBe("high");
-    });
-
-    test("returns low for NumberFormat", async () => {
-      await recorder.recordCrash(makeInput("NumberFormatException"));
-
-      expect(repo.last().severity).toBe("low");
-    });
-
-    test("returns low for ParseException", async () => {
-      await recorder.recordCrash(makeInput("ParseException"));
-
-      expect(repo.last().severity).toBe("low");
-    });
-
-    test("returns medium for generic exceptions", async () => {
-      await recorder.recordCrash(makeInput("RuntimeException"));
-
-      expect(repo.last().severity).toBe("medium");
+    // exceptionType -> severity. Critical (OutOfMemory/StackOverflow/Fatal) is
+    // checked before high (NullPointer/IllegalState/SecurityException), which is
+    // checked before low (NumberFormat/ParseException); everything else is medium.
+    const cases: Array<[string, string, string]> = [
+      ["OutOfMemoryError is critical", "OutOfMemoryError", "critical"],
+      ["StackOverflowError is critical", "StackOverflowError", "critical"],
+      ["FatalException is critical", "FatalException", "critical"],
+      ["NullPointerException is high", "NullPointerException", "high"],
+      ["IllegalStateException is high", "IllegalStateException", "high"],
+      ["SecurityException is high", "SecurityException", "high"],
+      ["NumberFormatException is low", "NumberFormatException", "low"],
+      ["ParseException is low", "ParseException", "low"],
+      ["generic exception is medium", "RuntimeException", "medium"],
+      // Precedence: Fatal (critical) is checked before NullPointer (high).
+      ["FatalNullPointerException is critical (Fatal wins)", "FatalNullPointerException", "critical"],
+      // Case-sensitivity: matcher is exact-case, so lower-case falls through.
+      ["lower-case outofmemoryerror is medium (no match)", "outofmemoryerror", "medium"],
+      // Substring: OutOfMemory matches inside a wrapper name.
+      ["MyOutOfMemoryWrapper is critical (substring match)", "MyOutOfMemoryWrapper", "critical"],
+    ];
+    test.each(cases)("%s", async (_name, exceptionType, expected) => {
+      await recorder.recordCrash(makeInput(exceptionType));
+      expect(repo.last().severity).toBe(expected);
     });
   });
 
@@ -534,34 +480,22 @@ describe("FailureRecorder", () => {
       ...baseContext,
     });
 
-    test("returns medium for SecurityException", async () => {
-      await recorder.recordNonFatal(makeInput("SecurityException"));
-
-      expect(repo.last().severity).toBe("medium");
-    });
-
-    test("returns medium for IllegalState", async () => {
-      await recorder.recordNonFatal(makeInput("IllegalStateException"));
-
-      expect(repo.last().severity).toBe("medium");
-    });
-
-    test("returns medium for NullPointer", async () => {
-      await recorder.recordNonFatal(makeInput("NullPointerException"));
-
-      expect(repo.last().severity).toBe("medium");
-    });
-
-    test("returns low for most other exceptions", async () => {
-      await recorder.recordNonFatal(makeInput("IOException"));
-
-      expect(repo.last().severity).toBe("low");
-    });
-
-    test("returns low for unknown exceptions", async () => {
-      await recorder.recordNonFatal(makeInput("CustomException"));
-
-      expect(repo.last().severity).toBe("low");
+    // Handled (non-fatal) errors top out at medium (Security/IllegalState/
+    // NullPointer); everything else is low.
+    const cases: Array<[string, string, string]> = [
+      ["SecurityException is medium", "SecurityException", "medium"],
+      ["IllegalStateException is medium", "IllegalStateException", "medium"],
+      ["NullPointerException is medium", "NullPointerException", "medium"],
+      ["IOException is low", "IOException", "low"],
+      ["unknown exception is low", "CustomException", "low"],
+      // Substring: SecurityException matches inside a wrapper name.
+      ["AppSecurityExceptionWrapper is medium (substring match)", "AppSecurityExceptionWrapper", "medium"],
+      // Case-sensitivity: lower-case falls through to low.
+      ["lower-case securityexception is low (no match)", "securityexception", "low"],
+    ];
+    test.each(cases)("%s", async (_name, exceptionType, expected) => {
+      await recorder.recordNonFatal(makeInput(exceptionType));
+      expect(repo.last().severity).toBe(expected);
     });
   });
 

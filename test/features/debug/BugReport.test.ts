@@ -265,11 +265,15 @@ describe("BugReport", () => {
 
       await bugReport.execute({ logcatLines: 0 });
 
-      const logcatCalls = adbFactory.getFakeClient().getCommandCalls()
-        .filter(c => c.command.includes("logcat"));
-      for (const call of logcatCalls) {
-        expect(call.command).toContain("-t 0");
-      }
+      const logcatCommands = adbFactory.getFakeClient().getCommandCalls()
+        .map(c => c.command)
+        .filter(command => command.includes("logcat"));
+      // Assert the exact commands, not a per-element predicate over a possibly
+      // empty list — an empty array would satisfy a `for...of` loop vacuously.
+      expect(logcatCommands).toEqual([
+        "shell logcat -d -t 0 *:E",
+        "shell logcat -d -t 0 *:W",
+      ]);
     });
   });
 

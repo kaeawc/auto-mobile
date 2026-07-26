@@ -257,22 +257,23 @@ describe("PerformanceMonitor", () => {
       expect(data!.packageName).toBe("com.example.app");
     });
 
-    it("should prevent concurrent tick execution", async () => {
-      // Use a slow ADB response to test concurrent prevention
-      fakeAdbClient.setCommandResult("shell dumpsys gfxinfo com.example.app reset", "");
-
+    it("drops an overlapping tick while a prior tick is still in flight", async () => {
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
-      // Trigger multiple ticks quickly
-      fakeTimer.advanceTime(PerformanceMonitor.TICK_INTERVAL_MS);
-      fakeTimer.advanceTime(PerformanceMonitor.TICK_INTERVAL_MS);
-      await Promise.resolve();
-      await Promise.resolve();
+      // Two interval periods elapse in ONE synchronous advance, so both catch-up
+      // ticks fire back-to-back before either async body can settle. The `pending`
+      // guard must drop the second while the first is still in flight.
+      fakeTimer.advanceTime(PerformanceMonitor.TICK_INTERVAL_MS * 2);
+      for (let i = 0; i < 4; i += 1) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
 
-      // Should only process one tick at a time
-      expect(fakePusher.getPushCount()).toBeLessThanOrEqual(2);
+      // Exactly one tick ran to completion — not two. (Negative control: the
+      // "should push data every tick interval" test drains between ticks and
+      // sees 1, 2, 3, proving this assertion is not vacuously true.)
+      expect(fakePusher.getPushCount()).toBe(1);
     });
   });
 

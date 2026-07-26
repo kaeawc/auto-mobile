@@ -485,7 +485,7 @@ export class RealObserveScreen implements ObserveScreen {
 
         break;
 
-      case "ios":
+      case "ios": {
         perf.serial("ios_collect");
         await this.hierarchyCollector.collect(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
 
@@ -551,6 +551,7 @@ export class RealObserveScreen implements ObserveScreen {
 
         perf.end();
         break;
+      }
     }
   }
 

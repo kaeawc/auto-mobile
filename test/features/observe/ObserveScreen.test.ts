@@ -275,7 +275,7 @@ describe("ObserveScreen", function() {
           },
         },
       } as any);
-      viewHierarchy.getScreenIdentity = async () => {
+      viewHierarchy.getScreenIdentity = () => {
         throw new Error("SDK refresh unavailable");
       };
 

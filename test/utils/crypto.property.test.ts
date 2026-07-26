@@ -9,9 +9,19 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 const service = new NodeCryptoService();
 const bytes = fc.uint8Array({ maxLength: 128 }).map(a => Buffer.from(a));
 const data = fc.oneof(fc.string({ maxLength: 128 }), bytes);
+const md5Hex = (d: string | Buffer): string => nodeCrypto.createHash("md5").update(d).digest("hex");
 const sha256Hex = (buffer: Buffer): string => nodeCrypto.createHash("sha256").update(buffer).digest("hex");
 
 describe("NodeCryptoService.generateCacheKey (property-based)", () => {
+  test("equals an independently-computed MD5 of the input", () => {
+    // Oracle check: a regression returning a constant or truncated SHA-256 would
+    // still satisfy determinism + 32-hex + static≡instance, so pin it to real MD5.
+    fc.assert(
+      fc.property(data, d => service.generateCacheKey(d) === md5Hex(d)),
+      RUN_OPTIONS
+    );
+  });
+
   test("is deterministic — the same input yields the same key", () => {
     fc.assert(
       fc.property(data, d => {

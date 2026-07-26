@@ -32,69 +32,33 @@ describe("addDeviceTargetingToSchema", () => {
 
   const extended = addDeviceTargetingToSchema(baseSchema);
 
-  test("accepts base fields without device targeting", () => {
-    const result = extended.safeParse({ bundleId: "com.example.app" });
-    expect(result.success).toBe(true);
-  });
-
-  test("accepts deviceId injected by plan executor", () => {
-    const result = extended.safeParse({
-      bundleId: "com.example.app",
-      deviceId: "emulator-5554",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("accepts device label for multi-device plans", () => {
-    const result = extended.safeParse({
-      bundleId: "com.example.app",
-      device: "A",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("accepts sessionUuid for session-based targeting", () => {
-    const result = extended.safeParse({
-      bundleId: "com.example.app",
-      sessionUuid: "abc-123",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("accepts platform for device-aware targeting", () => {
-    const result = extended.safeParse({
-      bundleId: "com.example.app",
-      platform: "ios",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("rejects invalid platform value", () => {
-    const result = extended.safeParse({
-      bundleId: "com.example.app",
-      platform: "windows",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  test("accepts all device targeting fields together", () => {
-    const result = extended.safeParse({
-      bundleId: "com.example.app",
-      deviceId: "emulator-5554",
-      device: "A",
-      sessionUuid: "abc-123",
-      keepScreenAwake: true,
-      platform: "android",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("rejects unknown fields not in base or device targeting", () => {
-    const result = extended.safeParse({
-      bundleId: "com.example.app",
-      unknownField: "surprise",
-    });
-    expect(result.success).toBe(false);
+  // P1 (issue #4181, rank 11): the 8 accept/reject siblings collapsed into a
+  // table keyed on the expected outcome, PLUS degenerate boundary rows
+  // (platform "" / null, device wrong-type, keepScreenAwake wrong-type, bare
+  // base) that did not exist before. `bundleId` is always supplied; each row
+  // adds the field(s) under test.
+  test.each([
+    ["bare base (no targeting)", {}, true],
+    ["deviceId injected by plan executor", { deviceId: "emulator-5554" }, true],
+    ["device label for multi-device plans", { device: "A" }, true],
+    ["sessionUuid for session targeting", { sessionUuid: "abc-123" }, true],
+    ["platform ios", { platform: "ios" }, true],
+    ["platform android", { platform: "android" }, true],
+    ["keepScreenAwake boolean", { keepScreenAwake: true }, true],
+    [
+      "all targeting fields together",
+      { deviceId: "emulator-5554", device: "A", sessionUuid: "abc-123", keepScreenAwake: true, platform: "android" },
+      true,
+    ],
+    ["invalid platform value", { platform: "windows" }, false],
+    ["empty-string platform (degenerate)", { platform: "" }, false],
+    ["null platform (degenerate)", { platform: null }, false],
+    ["numeric device label (degenerate)", { device: 7 }, false],
+    ["non-boolean keepScreenAwake (degenerate)", { keepScreenAwake: "yes" }, false],
+    ["unknown field not in base or targeting", { unknownField: "surprise" }, false],
+  ] as const)("%s -> success=%s", (_label, extension, shouldSucceed) => {
+    const result = extended.safeParse({ bundleId: "com.example.app", ...extension });
+    expect(result.success).toBe(shouldSucceed);
   });
 
   test("preserves existing platform definition instead of overwriting", () => {
@@ -375,31 +339,28 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ["systemTraySchema", systemTraySchema, { action: "open", platform: "ios" }],
   ];
 
-  for (const [name, schema, baseInput] of toolSchemas) {
-    test(`${name} accepts platform: "ios"`, () => {
-      const input = { ...baseInput, platform: "ios" };
-      const result = schema.safeParse(input);
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.platform).toBe("ios");
-      }
-    });
+  // P2 (issue #4181, rank 12): the hand-rolled 42x3 for-loop emitting three
+  // tests per schema collapsed into a single test.each over the same matrix.
+  test.each(toolSchemas)("%s accepts platform ios", (_name, schema, baseInput) => {
+    const result = schema.safeParse({ ...baseInput, platform: "ios" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.platform).toBe("ios");
+    }
+  });
 
-    test(`${name} accepts platform: "android"`, () => {
-      const input = { ...baseInput, platform: "android" };
-      const result = schema.safeParse(input);
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.platform).toBe("android");
-      }
-    });
+  test.each(toolSchemas)("%s accepts platform android", (_name, schema, baseInput) => {
+    const result = schema.safeParse({ ...baseInput, platform: "android" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.platform).toBe("android");
+    }
+  });
 
-    test(`${name} rejects invalid platform`, () => {
-      const input = { ...baseInput, platform: "windows" };
-      const result = schema.safeParse(input);
-      expect(result.success).toBe(false);
-    });
-  }
+  test.each(toolSchemas)("%s rejects invalid platform", (_name, schema, baseInput) => {
+    const result = schema.safeParse({ ...baseInput, platform: "windows" });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("inputTextSchema", () => {

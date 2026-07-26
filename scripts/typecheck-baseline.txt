@@ -177,8 +177,6 @@ src/server/interactionTools.ts: error TS2322: Type 'SwipeDirection | undefined' 
 src/server/navigationTools.ts: error TS2339: Property 'coverage' does not exist on type 'ExploreExecutionResult'.
 src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
 src/server/navigationTools.ts: error TS2339: Property 'screensDiscovered' does not exist on type 'ExploreExecutionResult'.
-src/server/navigationTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'GetNavigationGraphArgs'.
-src/server/navigationTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'GetNavigationGraphArgs'.
 src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
@@ -196,7 +194,6 @@ src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is no
 src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
 src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
-src/utils/ProcessExecutor.ts: error TS2769: No overload matches this call.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
 src/utils/android-cmdline-tools/AdbClient.ts: error TS2339: Property 'stdout' does not exist on type 'ExecResult | PromiseLike<ExecResult>'.
@@ -206,8 +203,6 @@ src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<
 src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
-src/utils/ios-cmdline-tools/DeviceAppManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
-src/utils/ios-cmdline-tools/DeviceAppManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string | undefined>' is not assignable to type 'Promise<void>'.
 src/utils/mcpVersion.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
 src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
@@ -253,7 +248,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 27 :: src/db/migrator.ts: error TS7006: Parameter 'index' implicitly has an 'any' type.
 # swap-fp: 27,45 :: src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 28 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'DataTypeExpression'.
-# swap-fp: 28,61 :: src/server/navigationTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'GetNavigationGraphArgs'.
 # swap-fp: 29 :: src/server/systemTrayHelpers.ts: error TS2741: Property 'getDeviceTimestampMs' is missing in type 'AdbExecutor' but required in type 'SystemTrayAdb'.
 # swap-fp: 3 :: src/daemon/failuresStreamSocketServer.ts: error TS2559: Type 'FailuresStreamSocketRequest' has no properties in common with type 'SocketRequest'.
 # swap-fp: 3 :: src/daemon/performanceStreamSocketServer.ts: error TS2559: Type 'PerformanceStreamSocketRequest' has no properties in common with type 'SocketRequest'.
@@ -274,7 +268,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 33 :: src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableParentsContainingText' does not exist on type 'ElementFinder'.
 # swap-fp: 33 :: src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableSiblingsOfResourceId' does not exist on type 'ElementFinder'.
 # swap-fp: 33 :: src/features/utility/DefaultElementSelector.ts: error TS2339: Property 'findClickableSiblingsOfText' does not exist on type 'ElementFinder'.
-# swap-fp: 33 :: src/utils/ProcessExecutor.ts: error TS2769: No overload matches this call.
 # swap-fp: 34 :: src/features/accessibility/ContrastChecker.ts: error TS2532: Object is possibly 'undefined'.
 # swap-fp: 36 :: src/features/action/TapAnyElement.ts: error TS2339: Property 'doubleTap' does not exist on type 'IOSCtrlProxyClient'.
 # swap-fp: 36 :: src/features/action/TapAnyElement.ts: error TS2339: Property 'longPress' does not exist on type 'IOSCtrlProxyClient'.
@@ -345,7 +338,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 78 :: src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 # swap-fp: 8,8 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
-# swap-fp: 86,86 :: src/utils/ios-cmdline-tools/DeviceAppManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
 # swap-fp: 88 :: src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"latestOnly" | "limit" | "lookbackDays" | "orderDirection" | "testClass" | "testMethod"'.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 # swap-fp: 9 :: src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.

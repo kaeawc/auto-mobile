@@ -122,7 +122,9 @@ function flattenZodIssues(issues: ZodIssue[]): ZodIssue[] {
   return flattened;
 }
 
-function formatToolParamError(toolName: string, error: unknown): string {
+// Exported for direct unit testing of the container-hint branch (issue #4181,
+// rank 7). The hint is only appended for tapOn/swipeOn container issues.
+export function formatToolParamError(toolName: string, error: unknown): string {
   if (!(error instanceof ZodError)) {
     return String(error);
   }

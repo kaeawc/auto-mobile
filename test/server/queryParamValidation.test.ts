@@ -48,4 +48,60 @@ describe("queryParamValidation", () => {
       expect(Object.getPrototypeOf(queryParamsToRecord("limit=1"))).toBeNull();
     });
   });
+
+  // Issue #4181, rank 8: optionalInteger delegates to bare Number(), which
+  // accepts hex/exponent/whitespace forms that a query-string integer should
+  // arguably reject, and applies an implicit min:0 floor. These rows PIN the
+  // real behavior — including the surprising ones — so a change is visible.
+  describe("optionalInteger boundary table", () => {
+    test.each([
+      // [label, input, options, expected]
+      ["undefined passes through", undefined, {}, undefined],
+      ["blank string is undefined", "   ", {}, undefined],
+      ["plain integer", "42", {}, 42],
+      ["zero accepted by default (implicit min:0)", "0", {}, 0],
+      ["surrounding whitespace trimmed", "  7  ", {}, 7],
+      ["hex literal silently accepted as decimal", "0x10", {}, 16],
+      ["exponent literal silently accepted", "1e3", {}, 1000],
+      ["explicit min honored", "5", { min: 5 }, 5],
+      ["negative allowed when min is negative", "-3", { min: -5 }, -3],
+    ] as const)("returns %s", (_label, input, options, expected) => {
+      expect(optionalInteger(input, "limit", options)).toBe(expected);
+    });
+
+    test.each([
+      ["negative rejected by implicit min:0 floor", "-1", {}],
+      ["fractional rejected", "1.5", {}],
+      ["non-numeric rejected", "abc", {}],
+      ["empty-after-parse NaN rejected", "NaN", {}],
+      ["infinity rejected", "Infinity", {}],
+      ["above explicit max rejected", "11", { max: 10 }],
+      ["below explicit min rejected", "2", { min: 5 }],
+    ] as const)("throws for %s", (_label, input, options) => {
+      expect(() => optionalInteger(input, "limit", options)).toThrow("Invalid limit");
+    });
+  });
+
+  describe("optionalBoolean boundary table", () => {
+    test.each([
+      ["undefined passes through", undefined, undefined],
+      ["blank string is undefined", "  ", undefined],
+      ["true literal", "true", true],
+      ["TRUE case-insensitive", "TRUE", true],
+      ["1 is true", "1", true],
+      ["false literal", "false", false],
+      ["FALSE case-insensitive", "FALSE", false],
+      ["0 is false", "0", false],
+    ] as const)("returns %s", (_label, input, expected) => {
+      expect(optionalBoolean(input, "flag")).toBe(expected);
+    });
+
+    test.each([
+      ["yes", "yes"],
+      ["2", "2"],
+      ["empty-after-trim is undefined not error", "sometimes"],
+    ] as const)("throws for unrecognized %s", (_label, input) => {
+      expect(() => optionalBoolean(input, "flag")).toThrow("Invalid flag");
+    });
+  });
 });

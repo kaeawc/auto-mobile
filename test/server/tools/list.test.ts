@@ -1,10 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { FakeToolRegistry } from "../../fakes/FakeToolRegistry";
 import { z } from "zod";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 
@@ -20,54 +16,6 @@ const listToolsResponseSchema = z.object({
 describe("MCP Tools List", () => {
   let fixture: McpTestFixture;
 
-  test("given no tools are registered, endpoint should return an empty list", async function() {
-
-    // Create fake registry with no tools registered
-    const fakeRegistry = new FakeToolRegistry();
-
-    // Save original method
-    const originalGetToolDefinitions = ToolRegistry.getToolDefinitions;
-
-    // Replace with fake that returns no tools
-    (ToolRegistry as any).getToolDefinitions = () => fakeRegistry.getTools();
-
-    try {
-      // Create server using createMcpServer()
-      const server = createMcpServer();
-
-      // Create linked in-memory transports for client-server communication
-      const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-
-      // Connect server to its transport
-      await server.connect(serverTransport);
-
-      // Create client using the linked transport
-      const client = new Client({
-        name: "test-client",
-        version: "0.0.1"
-      });
-
-      await client.connect(clientTransport);
-
-      // Send list_tools request
-      const result = await client.request({
-        method: "tools/list",
-        params: {}
-      }, listToolsResponseSchema);
-
-      // Verify empty tools list
-      expect(typeof result).toBe("object");
-      expect(result).toHaveProperty("tools");
-      expect(Array.isArray(result.tools)).toBe(true);
-      expect(result.tools).toHaveLength(0);
-
-      await client.close();
-    } finally {
-      // Restore the original method
-      (ToolRegistry as any).getToolDefinitions = originalGetToolDefinitions;
-    }
-  });
-
   describe("with default registry", () => {
     beforeAll(async () => {
       fixture = new McpTestFixture();
@@ -78,6 +26,30 @@ describe("MCP Tools List", () => {
       if (fixture) {
         await fixture.teardown();
       }
+    });
+
+    // Item 14 / D10 (issue #4181): the old empty-list test monkey-patched the
+    // ToolRegistry singleton's getToolDefinitions method — a leak-prone global
+    // mutation that also asserted nothing real (it fed the handler a fake).
+    // Replaced with a real gating guard: the tools/list wire output must mirror
+    // getToolDefinitions() EXACTLY. If the ListTools handler ever served
+    // getAllTools() instead, plan-only tools (barrier/criticalSection in daemon
+    // mode) would leak onto the wire and this set comparison would red.
+    test("tools/list serves exactly getToolDefinitions(), not the full registry", async function() {
+      const { client } = fixture.getContext();
+
+      const result = await client.request(
+        { method: "tools/list", params: {} },
+        listToolsResponseSchema
+      );
+
+      const wireNames = result.tools.map(tool => tool.name).sort();
+      const advertisedNames = ToolRegistry.getToolDefinitions().map(tool => tool.name).sort();
+      const allToolNames = ToolRegistry.getAllTools().map(tool => tool.name).sort();
+
+      expect(wireNames).toEqual(advertisedNames);
+      // The wire must never expose more than the advertised set.
+      expect(wireNames.length).toBeLessThanOrEqual(allToolNames.length);
     });
 
     test("given a tool is registered, endpoint should return a list with that tool", async function() {

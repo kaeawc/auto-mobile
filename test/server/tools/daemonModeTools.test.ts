@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../../src/utils/debug";
+import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 
 describe("Daemon-only MCP tools", () => {
   beforeEach(() => {
@@ -90,5 +92,60 @@ describe("Daemon-only MCP tools", () => {
       expect(ToolRegistry.getTool(toolName)).toBeDefined();
       expect(embeddedSdkNames).toContain(toolName);
     }
+  });
+});
+
+// Issue #4181, rank 1 (A1): the registry-level assertions above prove
+// getToolDefinitions()/getTool() hide these tools, but the regression that
+// matters is over the WIRE — a raw MCP client must not be able to call them.
+// The CallTool handler resolves names through getTool() (index.ts). Mutating
+// that resolve to getToolForPlan() would make criticalSection/barrier/setUIState
+// directly callable; these rows red on that mutation because the call would no
+// longer be rejected as an unknown tool.
+describe("plan-only/debug-only tools are ungated over the wire", () => {
+  let fixture: McpTestFixture;
+
+  const permissiveResult = z.object({}).passthrough();
+
+  beforeAll(async () => {
+    (ToolRegistry as any).tools.clear();
+    // Daemon mode registers criticalSection/barrier plan-only; debug OFF keeps
+    // setUIState plan-only (resolvable via getToolForPlan, hidden from getTool).
+    fixture = new McpTestFixture({ daemonMode: true });
+    await fixture.setup();
+  });
+
+  afterAll(async () => {
+    if (fixture) {
+      await fixture.teardown();
+    }
+    (ToolRegistry as any).tools.clear();
+  });
+
+  test.each(["criticalSection", "barrier", "setUIState"])(
+    "%s is rejected as an unknown tool when called directly over the wire",
+    async name => {
+      const { client } = fixture.getContext();
+      await expect(
+        client.request({ method: "tools/call", params: { name, arguments: {} } }, permissiveResult)
+      ).rejects.toThrow("Unknown tool");
+    }
+  );
+
+  test("a normally-advertised tool is NOT rejected as unknown (control)", async () => {
+    // executePlan is advertised in both modes, so it resolves through getTool
+    // and does not produce an "Unknown tool" rejection (it may fail validation,
+    // but not with that message).
+    const { client } = fixture.getContext();
+    let message = "";
+    try {
+      await client.request(
+        { method: "tools/call", params: { name: "executePlan", arguments: {} } },
+        permissiveResult
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).not.toContain("Unknown tool");
   });
 });

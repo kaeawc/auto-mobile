@@ -88,6 +88,7 @@ final class EventPersistenceTests: XCTestCase {
     func testPersistAndLoadNavigationEvent() {
         let event = SdkNavigationEvent(
             timestamp: 1000,
+            sequenceNumber: 7,
             destination: "/home",
             source: .swiftUINavigation,
             arguments: ["id": "42"],
@@ -102,9 +103,21 @@ final class EventPersistenceTests: XCTestCase {
             XCTAssertEqual(nav.destination, "/home")
             XCTAssertEqual(nav.source, .swiftUINavigation)
             XCTAssertEqual(nav.arguments["id"], "42")
+            XCTAssertEqual(nav.sequenceNumber, 7)
         } else {
             XCTFail("Expected SdkNavigationEvent")
         }
+    }
+
+    func testNavigationEventDecodesLegacyPayloadWithoutSequenceNumber() throws {
+        let legacyJson = Data("""
+        {"eventType":"navigation","timestamp":1000,"destination":"/home",\
+        "source":"swiftui_navigation","arguments":{},"metadata":{}}
+        """.utf8)
+
+        let event = try JSONDecoder().decode(SdkNavigationEvent.self, from: legacyJson)
+
+        XCTAssertNil(event.sequenceNumber)
     }
 
     func testPersistEmptyArrayReturnsNil() {

@@ -2214,6 +2214,36 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("uses the navigation sequence to order same-millisecond SDK events", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encode = (destination: string, sequenceNumber: number): string => Buffer.from(JSON.stringify({
+        destination,
+        timestamp: 100,
+        sequenceNumber,
+      })).toString("base64");
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [{
+          bundleId: "com.example.ios",
+          events: [
+            { eventType: "navigation", payload: encode("NewScreen", 2) },
+            { eventType: "navigation", payload: encode("OldScreen", 1) },
+          ],
+        }],
+      })) as unknown as typeof fetch;
+
+      try {
+        const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
+
+        expect(identity?.components.navigationRoute).toBe("NewScreen");
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
     test("does not restore an SDK identity after the connection closes during a poll", async function() {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);

@@ -31,6 +31,8 @@ public enum SdkEventType: String, Codable, Sendable {
 public struct SdkNavigationEvent: SdkEvent {
     public private(set) var eventType: SdkEventType = .navigation
     public let timestamp: Int64
+    /// Monotonic per-SDK navigation order used to break same-millisecond timestamp ties.
+    public let sequenceNumber: Int64?
     public let destination: String
     public let source: NavigationSourceType
     public let arguments: [String: String]
@@ -38,12 +40,14 @@ public struct SdkNavigationEvent: SdkEvent {
 
     public init(
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        sequenceNumber: Int64? = nil,
         destination: String,
         source: NavigationSourceType,
         arguments: [String: String] = [:],
         metadata: [String: String] = [:]
     ) {
         self.timestamp = timestamp
+        self.sequenceNumber = sequenceNumber
         self.destination = destination
         self.source = source
         self.arguments = arguments

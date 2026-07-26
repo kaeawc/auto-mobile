@@ -408,7 +408,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
   private readonly sdkScreenIdentitiesByApplicationId = new Map<string, ScreenIdentity>();
-  private readonly sdkScreenIdentityTimestampsByApplicationId = new Map<string, number>();
+  private readonly sdkScreenIdentityOrdersByApplicationId = new Map<
+    string,
+    { timestamp: number; sequenceNumber?: number }
+  >();
   private sdkEventPollGeneration = 0;
   private sdkEventPollAbortController: AbortController | null = null;
   private sdkEventPollInFlight: { generation: number; promise: Promise<void> } | null = null;
@@ -924,7 +927,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.sdkEventPollAbortController = null;
     this.cachedHierarchy = null;
     this.sdkScreenIdentitiesByApplicationId.clear();
-    this.sdkScreenIdentityTimestampsByApplicationId.clear();
+    this.sdkScreenIdentityOrdersByApplicationId.clear();
     this.supportedCommands = null;
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
@@ -1035,10 +1038,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
       const payload = JSON.parse(payloadJson) as Record<string, unknown>;
       const timestamp = (payload.timestamp as number) ?? Date.now();
+      const sequenceNumber = typeof payload.sequenceNumber === "number"
+        ? payload.sequenceNumber
+        : undefined;
       if (generation !== this.sdkEventPollGeneration) {
         return;
       }
-      this.rememberSdkScreenIdentity(envelope.eventType, applicationId, payload, timestamp);
+      this.rememberSdkScreenIdentity(
+        envelope.eventType,
+        applicationId,
+        payload,
+        timestamp,
+        sequenceNumber,
+      );
       await this.sdkEventIngestor.recordSdkEvent(
         { type: envelope.eventType, timestamp, payload },
         applicationId ?? null,
@@ -1061,15 +1073,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     applicationId: string | undefined,
     payload: Record<string, unknown>,
     timestamp: number,
+    sequenceNumber: number | undefined,
   ): void {
     if (!applicationId) {
       return;
     }
     const identity = deriveIosSdkScreenIdentity(eventType, applicationId, payload);
-    const currentTimestamp = this.sdkScreenIdentityTimestampsByApplicationId.get(applicationId);
-    if (identity && (currentTimestamp === undefined || timestamp >= currentTimestamp)) {
+    const currentOrder = this.sdkScreenIdentityOrdersByApplicationId.get(applicationId);
+    const isNewer = currentOrder === undefined
+      || timestamp > currentOrder.timestamp
+      || (timestamp === currentOrder.timestamp
+        && sequenceNumber !== undefined
+        && currentOrder.sequenceNumber !== undefined
+        && sequenceNumber > currentOrder.sequenceNumber);
+    if (identity && isNewer) {
       this.sdkScreenIdentitiesByApplicationId.set(applicationId, identity);
-      this.sdkScreenIdentityTimestampsByApplicationId.set(applicationId, timestamp);
+      this.sdkScreenIdentityOrdersByApplicationId.set(applicationId, { timestamp, sequenceNumber });
     }
   }
 

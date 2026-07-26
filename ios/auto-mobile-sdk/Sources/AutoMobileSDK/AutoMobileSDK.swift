@@ -17,6 +17,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _sdkContext: SdkContext?
     private var _configuration: AutoMobileConfiguration?
     private var eventBuffer: SdkEventBuffer?
+    private var navigationSequenceNumber: Int64 = 0
     private var _dropCounter: DefaultDropCounter?
     private var eventPersistence: (any EventPersisting)?
     private var sessionTracker: SessionTracker?
@@ -188,6 +189,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         lock.lock()
         let currentListeners = listeners
+        navigationSequenceNumber += 1
+        let sequenceNumber = navigationSequenceNumber
         lock.unlock()
 
         for listener in currentListeners {
@@ -197,6 +200,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         // Buffer as SDK event
         let sdkEvent = SdkNavigationEvent(
             timestamp: event.timestamp,
+            sequenceNumber: sequenceNumber,
             destination: event.destination,
             source: NavigationSourceType(rawValue: event.source.rawValue) ?? .custom,
             arguments: event.arguments,
@@ -312,6 +316,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _isInitialized = false
         _bundleId = nil
         _configuration = nil
+        navigationSequenceNumber = 0
         lock.unlock()
 
         bufferToShutdown?.shutdown()

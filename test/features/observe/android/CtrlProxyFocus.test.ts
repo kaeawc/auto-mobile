@@ -5,7 +5,7 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../../src/models";
-import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
+import { FakeWebSocket, WebSocketState, createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function() {
@@ -207,14 +207,21 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function() 
     }
   });
 
-  test("returns error (throws) when WebSocket is not connected", async function() {
-    const { factory } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+  test("setAccessibilityFocus throws a connection error when the socket cannot connect", async function() {
+    // Drive a genuine connection failure: sendAction calls ensureConnected itself, so an
+    // instant-failure socket makes ensureConnected return false and the delegate surfaces the
+    // "Failed to connect to accessibility service" error. The /connect/i matcher pins THAT cause
+    // so a harness TypeError can no longer masquerade as a connection failure (the old bare
+    // rejects.toThrow() accepted any throw, and — because the capturing socket connects fine —
+    // actually exercised the RequestManager timeout path, duplicating the timeout test above).
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createInstantFailureWebSocketFactory(fakeTimer),
+      fakeTimer
+    );
     try {
-      // No ensureConnected; fakeAdb forward is set but we never open the socket via the client.
-      // sendAction will attempt to connect; if it cannot it returns a connection error.
-      const result = client.setAccessibilityFocus("com.example:id/title", 50);
-      await expect(result).rejects.toThrow();
+      await expect(client.setAccessibilityFocus("com.example:id/title", 50)).rejects.toThrow(/connect/i);
     } finally {
       await client.close();
     }

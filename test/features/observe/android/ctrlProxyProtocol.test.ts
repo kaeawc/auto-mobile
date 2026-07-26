@@ -102,250 +102,386 @@ describe("ctrlProxyProtocol — Kotlin contract coverage", () => {
   );
 });
 
+
+/**
+ * Byte-for-byte wire contract for every builder in `ctrlProxyRequests`, as a single parameterized
+ * table. Each row pairs a builder invocation with the exact JSON string the device must receive.
+ * The rows are the specification: a drift in field name, order, optionality, or null-vs-omitted
+ * handling fails the matching row rather than silently breaking the wire.
+ *
+ * The `builder` tag on each row feeds the completeness guard below, which fails when a new builder
+ * ships with zero wire coverage (builder #37) — closing the gap the old per-case tests left open.
+ */
 describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
-  test("request_hierarchy", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchy({ requestId: "req-1", disableAllFiltering: false })))
-      .toBe('{"type":"request_hierarchy","requestId":"req-1","disableAllFiltering":false}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchy({ requestId: "req-2", disableAllFiltering: true })))
-      .toBe('{"type":"request_hierarchy","requestId":"req-2","disableAllFiltering":true}');
+  const shape: HighlightBoxShape = { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } };
+  const shapeJson = '{"type":"box","bounds":{"x":1,"y":2,"width":3,"height":4}}';
+  const longCert = "A".repeat(4096);
+  const networkRules: NetworkMockRuleSync[] = [{
+    mockId: "m1", host: "example.com", path: "/v1", method: "GET",
+    limit: null, remaining: null, statusCode: 200,
+    responseHeaders: { "content-type": "application/json" },
+    responseBody: "{}", contentType: "application/json",
+  }];
+
+  interface BuilderCase {
+    builder: keyof typeof ctrlProxyRequests;
+    name: string;
+    actual: string;
+    expected: string;
+  }
+
+  const cases: BuilderCase[] = [
+    {
+      builder: "requestHierarchy",
+      name: "disableAllFiltering false",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchy({ requestId: "req-1", disableAllFiltering: false })),
+      expected: '{"type":"request_hierarchy","requestId":"req-1","disableAllFiltering":false}',
+    },
+    {
+      builder: "requestHierarchy",
+      name: "disableAllFiltering true",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchy({ requestId: "req-2", disableAllFiltering: true })),
+      expected: '{"type":"request_hierarchy","requestId":"req-2","disableAllFiltering":true}',
+    },
+    {
+      builder: "requestHierarchyIfStale",
+      name: "positive sinceTimestamp",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchyIfStale({ requestId: "stale-1", sinceTimestamp: 1720000000000 })),
+      expected: '{"type":"request_hierarchy_if_stale","requestId":"stale-1","sinceTimestamp":1720000000000}',
+    },
+    {
+      builder: "requestHierarchyIfStale",
+      name: "negative sinceTimestamp (boundary) is sent verbatim",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchyIfStale({ requestId: "stale-neg", sinceTimestamp: -1 })),
+      expected: '{"type":"request_hierarchy_if_stale","requestId":"stale-neg","sinceTimestamp":-1}',
+    },
+    {
+      builder: "setHierarchyInterval",
+      name: "numeric interval",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({ intervalMs: 500 })),
+      expected: '{"type":"set_hierarchy_interval","intervalMs":500}',
+    },
+    {
+      builder: "setHierarchyInterval",
+      name: "explicit null interval is kept (not omitted)",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({ intervalMs: null })),
+      expected: '{"type":"set_hierarchy_interval","intervalMs":null}',
+    },
+    {
+      builder: "setHierarchyInterval",
+      name: "non-finite interval (boundary) serializes to null per JSON.stringify",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({ intervalMs: Number.POSITIVE_INFINITY })),
+      expected: '{"type":"set_hierarchy_interval","intervalMs":null}',
+    },
+    {
+      builder: "requestScreenshot",
+      name: "requestId only",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId: "s-1" })),
+      expected: '{"type":"request_screenshot","requestId":"s-1"}',
+    },
+    {
+      builder: "requestAction",
+      name: "resourceId included when present",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-1", action: "long_click", resourceId: "res" })),
+      expected: '{"type":"request_action","requestId":"a-1","action":"long_click","resourceId":"res"}',
+    },
+    {
+      builder: "requestAction",
+      name: "resourceId omitted when undefined",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-2", action: "clear_focus" })),
+      expected: '{"type":"request_action","requestId":"a-2","action":"clear_focus"}',
+    },
+    {
+      builder: "requestAction",
+      name: "empty-string resourceId (boundary) is sent, not omitted",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-empty", action: "x", resourceId: "" })),
+      expected: '{"type":"request_action","requestId":"a-empty","action":"x","resourceId":""}',
+    },
+    {
+      builder: "requestAction",
+      name: "stable node selector carried alongside the legacy resource id",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({
+        requestId: "a-3",
+        action: "long_click",
+        resourceId: "com.example:id/row",
+        selector: { resourceId: "com.example:id/row", testTag: "message_row_42", collectionRow: 4, collectionColumn: 0 },
+      })),
+      expected: '{"type":"request_action","requestId":"a-3","action":"long_click","resourceId":"com.example:id/row","selector":{"resourceId":"com.example:id/row","testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}',
+    },
+    {
+      builder: "requestClipboard",
+      name: "text included for copy",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-1", action: "copy", text: "hi" })),
+      expected: '{"type":"request_clipboard","requestId":"c-1","action":"copy","text":"hi"}',
+    },
+    {
+      builder: "requestClipboard",
+      name: "text omitted for paste",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-2", action: "paste" })),
+      expected: '{"type":"request_clipboard","requestId":"c-2","action":"paste"}',
+    },
+    {
+      builder: "requestClipboard",
+      name: "empty-string text (boundary) is sent",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-3", action: "copy", text: "" })),
+      expected: '{"type":"request_clipboard","requestId":"c-3","action":"copy","text":""}',
+    },
+    {
+      builder: "requestClipboard",
+      name: "unicode text (boundary) is sent unescaped",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-u", action: "copy", text: "café ☕ 日本語" })),
+      expected: '{"type":"request_clipboard","requestId":"c-u","action":"copy","text":"café ☕ 日本語"}',
+    },
+    {
+      builder: "requestSettingsGet",
+      name: "namespace + key",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsGet({ requestId: "sg-1", namespace: "system", key: "font_scale" })),
+      expected: '{"type":"request_settings_get","requestId":"sg-1","namespace":"system","key":"font_scale"}',
+    },
+    {
+      builder: "requestSettingsPut",
+      name: "string value",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsPut({ requestId: "sp-1", namespace: "secure", key: "k", value: "v", valueType: "string" })),
+      expected: '{"type":"request_settings_put","requestId":"sp-1","namespace":"secure","key":"k","value":"v","valueType":"string"}',
+    },
+    {
+      builder: "requestSettingsPut",
+      name: "explicit null value is kept",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsPut({ requestId: "sp-2", namespace: "global", key: "k", value: null, valueType: "int" })),
+      expected: '{"type":"request_settings_put","requestId":"sp-2","namespace":"global","key":"k","value":null,"valueType":"int"}',
+    },
+    {
+      builder: "requestSettingsList",
+      name: "namespace",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsList({ requestId: "sl-1", namespace: "global" })),
+      expected: '{"type":"request_settings_list","requestId":"sl-1","namespace":"global"}',
+    },
+    {
+      builder: "installCaCert",
+      name: "certificate payload",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.installCaCert({ requestId: "ca-1", certificate: "PEMDATA" })),
+      expected: '{"type":"install_ca_cert","requestId":"ca-1","certificate":"PEMDATA"}',
+    },
+    {
+      builder: "installCaCert",
+      name: "very-long certificate (boundary) is sent verbatim",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.installCaCert({ requestId: "ca-long", certificate: longCert })),
+      expected: `{"type":"install_ca_cert","requestId":"ca-long","certificate":"${longCert}"}`,
+    },
+    {
+      builder: "installCaCertFromPath",
+      name: "device path",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.installCaCertFromPath({ requestId: "ca-2", devicePath: "/sdcard/x.crt" })),
+      expected: '{"type":"install_ca_cert_from_path","requestId":"ca-2","devicePath":"/sdcard/x.crt"}',
+    },
+    {
+      builder: "removeCaCert",
+      name: "alias",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.removeCaCert({ requestId: "ca-3", alias: "user-alias" })),
+      expected: '{"type":"remove_ca_cert","requestId":"ca-3","alias":"user-alias"}',
+    },
+    {
+      builder: "getDeviceOwnerStatus",
+      name: "requestId only",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.getDeviceOwnerStatus({ requestId: "do-1" })),
+      expected: '{"type":"get_device_owner_status","requestId":"do-1"}',
+    },
+    {
+      builder: "getPermission",
+      name: "permission + requestPermission",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.getPermission({ requestId: "p-1", permission: "android.permission.CAMERA", requestPermission: true })),
+      expected: '{"type":"get_permission","requestId":"p-1","permission":"android.permission.CAMERA","requestPermission":true}',
+    },
+    {
+      builder: "requestDeviceInfo",
+      name: "requestId only",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestDeviceInfo({ requestId: "di-1" })),
+      expected: '{"type":"request_device_info","requestId":"di-1"}',
+    },
+    {
+      builder: "getCurrentFocus",
+      name: "requestId only",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.getCurrentFocus({ requestId: "cf-1" })),
+      expected: '{"type":"get_current_focus","requestId":"cf-1"}',
+    },
+    {
+      builder: "getTraversalOrder",
+      name: "requestId only",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.getTraversalOrder({ requestId: "to-1" })),
+      expected: '{"type":"get_traversal_order","requestId":"to-1"}',
+    },
+    {
+      builder: "addHighlight",
+      name: "id and shape both present",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-1", id: "hi", shape })),
+      expected: `{"type":"add_highlight","requestId":"h-1","id":"hi","shape":${shapeJson}}`,
+    },
+    {
+      builder: "addHighlight",
+      name: "id and shape both absent",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-2" })),
+      expected: '{"type":"add_highlight","requestId":"h-2"}',
+    },
+    {
+      builder: "addHighlight",
+      name: "id only drops shape without disturbing key order",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-3", id: "hi" })),
+      expected: '{"type":"add_highlight","requestId":"h-3","id":"hi"}',
+    },
+    {
+      builder: "addHighlight",
+      name: "shape only",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-4", shape })),
+      expected: `{"type":"add_highlight","requestId":"h-4","shape":${shapeJson}}`,
+    },
+    {
+      builder: "listPreferenceFiles",
+      name: "packageName",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.listPreferenceFiles({ requestId: "lp-1", packageName: "com.x" })),
+      expected: '{"type":"list_preference_files","requestId":"lp-1","packageName":"com.x"}',
+    },
+    {
+      builder: "getPreferences",
+      name: "packageName + fileName",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.getPreferences({ requestId: "gp-1", packageName: "com.x", fileName: "prefs" })),
+      expected: '{"type":"get_preferences","requestId":"gp-1","packageName":"com.x","fileName":"prefs"}',
+    },
+    {
+      builder: "subscribeStorage",
+      name: "packageName + fileName",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.subscribeStorage({ requestId: "ss-1", packageName: "com.x", fileName: "prefs" })),
+      expected: '{"type":"subscribe_storage","requestId":"ss-1","packageName":"com.x","fileName":"prefs"}',
+    },
+    {
+      builder: "unsubscribeStorage",
+      name: "latent-bug shape: only subscriptionId is sent",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.unsubscribeStorage({ requestId: "us-1", subscriptionId: "com.x:prefs" })),
+      expected: '{"type":"unsubscribe_storage","requestId":"us-1","subscriptionId":"com.x:prefs"}',
+    },
+    {
+      builder: "getPreference",
+      name: "packageName + fileName + key",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.getPreference({ requestId: "gpr-1", packageName: "com.x", fileName: "prefs", key: "k" })),
+      expected: '{"type":"get_preference","requestId":"gpr-1","packageName":"com.x","fileName":"prefs","key":"k"}',
+    },
+    {
+      builder: "setPreference",
+      name: "string value",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setPreference({ requestId: "setp-1", packageName: "com.x", fileName: "prefs", key: "k", value: "v", valueType: "STRING" })),
+      expected: '{"type":"set_preference","requestId":"setp-1","packageName":"com.x","fileName":"prefs","key":"k","value":"v","valueType":"STRING"}',
+    },
+    {
+      builder: "setPreference",
+      name: "explicit null value is kept",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setPreference({ requestId: "setp-2", packageName: "com.x", fileName: "prefs", key: "k", value: null, valueType: "INT" })),
+      expected: '{"type":"set_preference","requestId":"setp-2","packageName":"com.x","fileName":"prefs","key":"k","value":null,"valueType":"INT"}',
+    },
+    {
+      builder: "removePreference",
+      name: "packageName + fileName + key",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.removePreference({ requestId: "rp-1", packageName: "com.x", fileName: "prefs", key: "k" })),
+      expected: '{"type":"remove_preference","requestId":"rp-1","packageName":"com.x","fileName":"prefs","key":"k"}',
+    },
+    {
+      builder: "clearPreferences",
+      name: "packageName + fileName",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.clearPreferences({ requestId: "cp-1", packageName: "com.x", fileName: "prefs" })),
+      expected: '{"type":"clear_preferences","requestId":"cp-1","packageName":"com.x","fileName":"prefs"}',
+    },
+    {
+      builder: "requestGlobalAction",
+      name: "action",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestGlobalAction({ requestId: "ga-1", action: "back" })),
+      expected: '{"type":"request_global_action","requestId":"ga-1","action":"back"}',
+    },
+    {
+      builder: "setRecompositionTracking",
+      name: "enabled flag",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setRecompositionTracking({ requestId: "rt-1", enabled: true })),
+      expected: '{"type":"set_recomposition_tracking","requestId":"rt-1","enabled":true}',
+    },
+    {
+      builder: "setAccessibilityFlags",
+      name: "no requestId on the wire",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setAccessibilityFlags({
+        includeNotImportantViews: true, reportViewIds: false, retrieveInteractiveWindows: true, occlusionEnabled: false,
+      })),
+      expected: '{"type":"set_accessibility_flags","includeNotImportantViews":true,"reportViewIds":false,"retrieveInteractiveWindows":true,"occlusionEnabled":false}',
+    },
+    {
+      builder: "setNetworkMockRules",
+      name: "no requestId, rules array passed through",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules: networkRules })),
+      expected: '{"type":"set_network_mock_rules","rules":[{"mockId":"m1","host":"example.com","path":"/v1","method":"GET","limit":null,"remaining":null,"statusCode":200,"responseHeaders":{"content-type":"application/json"},"responseBody":"{}","contentType":"application/json"}]}',
+    },
+    {
+      builder: "setNetworkErrorSimulation",
+      name: "enabled with values",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkErrorSimulation({ enabled: true, errorType: "timeout", limit: 3, expiresAtEpochMs: 1720000000000 })),
+      expected: '{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":3,"expiresAtEpochMs":1720000000000}',
+    },
+    {
+      builder: "setNetworkErrorSimulation",
+      name: "disabled normalizes omitted fields to explicit nulls",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkErrorSimulation({ enabled: false })),
+      expected: '{"type":"set_network_error_simulation","enabled":false,"errorType":null,"limit":null,"expiresAtEpochMs":null}',
+    },
+    {
+      builder: "requestInstalledPackages",
+      name: "userId present",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestInstalledPackages({ requestId: "ip-1", includeSystem: true, userId: 0 })),
+      expected: '{"type":"request_installed_packages","requestId":"ip-1","includeSystem":true,"userId":0}',
+    },
+    {
+      builder: "requestInstalledPackages",
+      name: "omitted userId normalized to explicit null",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestInstalledPackages({ requestId: "ip-2", includeSystem: false })),
+      expected: '{"type":"request_installed_packages","requestId":"ip-2","includeSystem":false,"userId":null}',
+    },
+    {
+      builder: "requestInstalledPackages",
+      name: "negative userId (boundary) is sent verbatim",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestInstalledPackages({ requestId: "ip-neg", includeSystem: false, userId: -5 })),
+      expected: '{"type":"request_installed_packages","requestId":"ip-neg","includeSystem":false,"userId":-5}',
+    },
+    {
+      builder: "requestPackageInfo",
+      name: "packageName + includePermissions",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestPackageInfo({ requestId: "pi-1", packageName: "com.x", includePermissions: true })),
+      expected: '{"type":"request_package_info","requestId":"pi-1","packageName":"com.x","includePermissions":true}',
+    },
+    {
+      builder: "requestLaunchIntent",
+      name: "packageName",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.requestLaunchIntent({ requestId: "li-1", packageName: "com.x" })),
+      expected: '{"type":"request_launch_intent","requestId":"li-1","packageName":"com.x"}',
+    },
+    {
+      builder: "startRecording",
+      name: "no requestId on the wire",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()),
+      expected: '{"type":"start_recording"}',
+    },
+    {
+      builder: "stopRecording",
+      name: "no requestId on the wire",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()),
+      expected: '{"type":"stop_recording"}',
+    },
+  ];
+
+  test.each(cases)("$builder — $name", ({ actual, expected }) => {
+    expect(actual).toBe(expected);
   });
 
-  test("request_hierarchy_if_stale", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestHierarchyIfStale({ requestId: "stale-1", sinceTimestamp: 1720000000000 })))
-      .toBe('{"type":"request_hierarchy_if_stale","requestId":"stale-1","sinceTimestamp":1720000000000}');
-  });
-
-  test("set_hierarchy_interval", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({ intervalMs: 500 })))
-      .toBe('{"type":"set_hierarchy_interval","intervalMs":500}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setHierarchyInterval({ intervalMs: null })))
-      .toBe('{"type":"set_hierarchy_interval","intervalMs":null}');
-  });
-
-  test("request_screenshot", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId: "s-1" })))
-      .toBe('{"type":"request_screenshot","requestId":"s-1"}');
-  });
-
-  // `request_two_finger_swipe` has no builder here: like the other gesture commands
-  // (request_swipe/tap/drag/pinch), it is emitted through the shared sendCommand()/createMessage()
-  // path (#2988), and its field-level wire shape is asserted in CtrlProxyGestures.test.ts. The type
-  // stays in the union + KOTLIN_SERIAL_NAMES drift check above.
-
-  test("request_action — resourceId included when present, omitted when undefined", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-1", action: "long_click", resourceId: "res" })))
-      .toBe('{"type":"request_action","requestId":"a-1","action":"long_click","resourceId":"res"}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-2", action: "clear_focus" })))
-      .toBe('{"type":"request_action","requestId":"a-2","action":"clear_focus"}');
-  });
-
-  test("request_action carries a stable node selector with the legacy resource ID", () => {
-    expect(
-      serializeCtrlProxyRequest(
-        ctrlProxyRequests.requestAction({
-          requestId: "a-3",
-          action: "long_click",
-          resourceId: "com.example:id/row",
-          selector: {
-            resourceId: "com.example:id/row",
-            testTag: "message_row_42",
-            collectionRow: 4,
-            collectionColumn: 0,
-          },
-        })
-      )
-    ).toBe(
-      '{"type":"request_action","requestId":"a-3","action":"long_click","resourceId":"com.example:id/row","selector":{"resourceId":"com.example:id/row","testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}'
-    );
-  });
-
-  test("request_clipboard — text included for copy, omitted when undefined", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-1", action: "copy", text: "hi" })))
-      .toBe('{"type":"request_clipboard","requestId":"c-1","action":"copy","text":"hi"}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-2", action: "paste" })))
-      .toBe('{"type":"request_clipboard","requestId":"c-2","action":"paste"}');
-  });
-
-  test("request_settings_get", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsGet({ requestId: "sg-1", namespace: "system", key: "font_scale" })))
-      .toBe('{"type":"request_settings_get","requestId":"sg-1","namespace":"system","key":"font_scale"}');
-  });
-
-  test("request_settings_put — value string and explicit null", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsPut({ requestId: "sp-1", namespace: "secure", key: "k", value: "v", valueType: "string" })))
-      .toBe('{"type":"request_settings_put","requestId":"sp-1","namespace":"secure","key":"k","value":"v","valueType":"string"}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsPut({ requestId: "sp-2", namespace: "global", key: "k", value: null, valueType: "int" })))
-      .toBe('{"type":"request_settings_put","requestId":"sp-2","namespace":"global","key":"k","value":null,"valueType":"int"}');
-  });
-
-  test("request_settings_list", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestSettingsList({ requestId: "sl-1", namespace: "global" })))
-      .toBe('{"type":"request_settings_list","requestId":"sl-1","namespace":"global"}');
-  });
-
-  test("install_ca_cert", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.installCaCert({ requestId: "ca-1", certificate: "PEMDATA" })))
-      .toBe('{"type":"install_ca_cert","requestId":"ca-1","certificate":"PEMDATA"}');
-  });
-
-  test("install_ca_cert_from_path", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.installCaCertFromPath({ requestId: "ca-2", devicePath: "/sdcard/x.crt" })))
-      .toBe('{"type":"install_ca_cert_from_path","requestId":"ca-2","devicePath":"/sdcard/x.crt"}');
-  });
-
-  test("remove_ca_cert", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.removeCaCert({ requestId: "ca-3", alias: "user-alias" })))
-      .toBe('{"type":"remove_ca_cert","requestId":"ca-3","alias":"user-alias"}');
-  });
-
-  test("get_device_owner_status", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.getDeviceOwnerStatus({ requestId: "do-1" })))
-      .toBe('{"type":"get_device_owner_status","requestId":"do-1"}');
-  });
-
-  test("get_permission", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.getPermission({ requestId: "p-1", permission: "android.permission.CAMERA", requestPermission: true })))
-      .toBe('{"type":"get_permission","requestId":"p-1","permission":"android.permission.CAMERA","requestPermission":true}');
-  });
-
-  test("request_device_info", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestDeviceInfo({ requestId: "di-1" })))
-      .toBe('{"type":"request_device_info","requestId":"di-1"}');
-  });
-
-  test("get_current_focus", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.getCurrentFocus({ requestId: "cf-1" })))
-      .toBe('{"type":"get_current_focus","requestId":"cf-1"}');
-  });
-
-  test("get_traversal_order", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.getTraversalOrder({ requestId: "to-1" })))
-      .toBe('{"type":"get_traversal_order","requestId":"to-1"}');
-  });
-
-  test("add_highlight — id/shape included, omitted, and mixed (independent guards)", () => {
-    const shape: HighlightBoxShape = { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } };
-    const shapeJson = '{"type":"box","bounds":{"x":1,"y":2,"width":3,"height":4}}';
-    // both present
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-1", id: "hi", shape })))
-      .toBe(`{"type":"add_highlight","requestId":"h-1","id":"hi","shape":${shapeJson}}`);
-    // both absent
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-2" })))
-      .toBe('{"type":"add_highlight","requestId":"h-2"}');
-    // id only (shape undefined) — guard must drop shape without disturbing key order
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-3", id: "hi" })))
-      .toBe('{"type":"add_highlight","requestId":"h-3","id":"hi"}');
-    // shape only (id undefined)
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.addHighlight({ requestId: "h-4", shape })))
-      .toBe(`{"type":"add_highlight","requestId":"h-4","shape":${shapeJson}}`);
-  });
-
-  test("empty strings are sent (not omitted) — matches the unconditional legacy send", () => {
-    // resourceId/text are assigned unconditionally by the builder, so "" serializes as "" (only
-    // `undefined` is omitted). This mirrors the pre-migration JSON.stringify send sites.
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestAction({ requestId: "a-3", action: "x", resourceId: "" })))
-      .toBe('{"type":"request_action","requestId":"a-3","action":"x","resourceId":""}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestClipboard({ requestId: "c-3", action: "copy", text: "" })))
-      .toBe('{"type":"request_clipboard","requestId":"c-3","action":"copy","text":""}');
-  });
-
-  test("list_preference_files", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.listPreferenceFiles({ requestId: "lp-1", packageName: "com.x" })))
-      .toBe('{"type":"list_preference_files","requestId":"lp-1","packageName":"com.x"}');
-  });
-
-  test("get_preferences", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.getPreferences({ requestId: "gp-1", packageName: "com.x", fileName: "prefs" })))
-      .toBe('{"type":"get_preferences","requestId":"gp-1","packageName":"com.x","fileName":"prefs"}');
-  });
-
-  test("subscribe_storage", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.subscribeStorage({ requestId: "ss-1", packageName: "com.x", fileName: "prefs" })))
-      .toBe('{"type":"subscribe_storage","requestId":"ss-1","packageName":"com.x","fileName":"prefs"}');
-  });
-
-  test("unsubscribe_storage — latent-bug shape: only subscriptionId is sent", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.unsubscribeStorage({ requestId: "us-1", subscriptionId: "com.x:prefs" })))
-      .toBe('{"type":"unsubscribe_storage","requestId":"us-1","subscriptionId":"com.x:prefs"}');
-  });
-
-  test("get_preference", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.getPreference({ requestId: "gpr-1", packageName: "com.x", fileName: "prefs", key: "k" })))
-      .toBe('{"type":"get_preference","requestId":"gpr-1","packageName":"com.x","fileName":"prefs","key":"k"}');
-  });
-
-  test("set_preference — value string and explicit null", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setPreference({ requestId: "setp-1", packageName: "com.x", fileName: "prefs", key: "k", value: "v", valueType: "STRING" })))
-      .toBe('{"type":"set_preference","requestId":"setp-1","packageName":"com.x","fileName":"prefs","key":"k","value":"v","valueType":"STRING"}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setPreference({ requestId: "setp-2", packageName: "com.x", fileName: "prefs", key: "k", value: null, valueType: "INT" })))
-      .toBe('{"type":"set_preference","requestId":"setp-2","packageName":"com.x","fileName":"prefs","key":"k","value":null,"valueType":"INT"}');
-  });
-
-  test("remove_preference", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.removePreference({ requestId: "rp-1", packageName: "com.x", fileName: "prefs", key: "k" })))
-      .toBe('{"type":"remove_preference","requestId":"rp-1","packageName":"com.x","fileName":"prefs","key":"k"}');
-  });
-
-  test("clear_preferences", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.clearPreferences({ requestId: "cp-1", packageName: "com.x", fileName: "prefs" })))
-      .toBe('{"type":"clear_preferences","requestId":"cp-1","packageName":"com.x","fileName":"prefs"}');
-  });
-
-  test("request_global_action", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestGlobalAction({ requestId: "ga-1", action: "back" })))
-      .toBe('{"type":"request_global_action","requestId":"ga-1","action":"back"}');
-  });
-
-  test("set_recomposition_tracking", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setRecompositionTracking({ requestId: "rt-1", enabled: true })))
-      .toBe('{"type":"set_recomposition_tracking","requestId":"rt-1","enabled":true}');
-  });
-
-  test("set_accessibility_flags — no requestId on the wire", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setAccessibilityFlags({
-      includeNotImportantViews: true, reportViewIds: false, retrieveInteractiveWindows: true, occlusionEnabled: false,
-    }))).toBe('{"type":"set_accessibility_flags","includeNotImportantViews":true,"reportViewIds":false,"retrieveInteractiveWindows":true,"occlusionEnabled":false}');
-  });
-
-  test("set_network_mock_rules — no requestId, rules array passed through", () => {
-    const rules: NetworkMockRuleSync[] = [{
-      mockId: "m1", host: "example.com", path: "/v1", method: "GET",
-      limit: null, remaining: null, statusCode: 200,
-      responseHeaders: { "content-type": "application/json" },
-      responseBody: "{}", contentType: "application/json",
-    }];
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })))
-      .toBe('{"type":"set_network_mock_rules","rules":[{"mockId":"m1","host":"example.com","path":"/v1","method":"GET","limit":null,"remaining":null,"statusCode":200,"responseHeaders":{"content-type":"application/json"},"responseBody":"{}","contentType":"application/json"}]}');
-  });
-
-  test("set_network_error_simulation — enabled with values, disabled with explicit nulls", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkErrorSimulation({
-      enabled: true, errorType: "timeout", limit: 3, expiresAtEpochMs: 1720000000000,
-    }))).toBe('{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":3,"expiresAtEpochMs":1720000000000}');
-    // Mirrors the reconnect sync passing sim?.errorType (undefined) → normalized to explicit null.
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkErrorSimulation({ enabled: false })))
-      .toBe('{"type":"set_network_error_simulation","enabled":false,"errorType":null,"limit":null,"expiresAtEpochMs":null}');
-  });
-
-  test("request_installed_packages — userId present vs. explicit null", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestInstalledPackages({ requestId: "ip-1", includeSystem: true, userId: 0 })))
-      .toBe('{"type":"request_installed_packages","requestId":"ip-1","includeSystem":true,"userId":0}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestInstalledPackages({ requestId: "ip-2", includeSystem: false })))
-      .toBe('{"type":"request_installed_packages","requestId":"ip-2","includeSystem":false,"userId":null}');
-  });
-
-  test("request_package_info", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestPackageInfo({ requestId: "pi-1", packageName: "com.x", includePermissions: true })))
-      .toBe('{"type":"request_package_info","requestId":"pi-1","packageName":"com.x","includePermissions":true}');
-  });
-
-  test("request_launch_intent", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.requestLaunchIntent({ requestId: "li-1", packageName: "com.x" })))
-      .toBe('{"type":"request_launch_intent","requestId":"li-1","packageName":"com.x"}');
-  });
-
-  test("start_recording / stop_recording — no requestId on the wire", () => {
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording())).toBe('{"type":"start_recording"}');
-    expect(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording())).toBe('{"type":"stop_recording"}');
+  // Completeness guard: every builder in the module must have at least one wire row above, and the
+  // total builder count is pinned. Ship builder #37 without a row and this fails — not a silently
+  // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
+  // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 36", () => {
+    const builderNames = Object.keys(ctrlProxyRequests);
+    expect(builderNames.length).toBe(36);
+    const covered = new Set(cases.map(row => row.builder));
+    expect([...covered].sort()).toEqual([...builderNames].sort());
   });
 });

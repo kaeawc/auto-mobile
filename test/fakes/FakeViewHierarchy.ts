@@ -1,5 +1,5 @@
 import type { ViewHierarchy } from "../../src/features/observe/interfaces/ViewHierarchy";
-import type { Element, ViewHierarchyResult } from "../../src/models";
+import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/models";
 
 /**
  * Fake implementation of ViewHierarchy for testing.
@@ -10,6 +10,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
   private configuredHierarchy: ViewHierarchyResult = { hierarchy: {} };
   private configuredFocusedElement: Element | null = null;
   private configuredAccessibilityFocusedElement: Element | null = null;
+  private configuredScreenIdentity: ScreenIdentity | undefined;
   private shouldFail = false;
   private failureError: Error | null = null;
 
@@ -36,6 +37,18 @@ export class FakeViewHierarchy implements ViewHierarchy {
    */
   async configureRecompositionTracking(_enabled: boolean, _perf?: any): Promise<void> {
     // No-op for testing
+  }
+
+  getScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
+    const identity = this.configuredScreenIdentity;
+    if (
+      applicationId
+      && identity?.components.bundleId
+      && identity.components.bundleId !== applicationId
+    ) {
+      return undefined;
+    }
+    return identity;
   }
 
   /**
@@ -94,6 +107,11 @@ export class FakeViewHierarchy implements ViewHierarchy {
     this.configuredAccessibilityFocusedElement = element;
   }
 
+  /** Configure the optional SDK-backed iOS screen identity. */
+  configureScreenIdentity(identity: ScreenIdentity | undefined): void {
+    this.configuredScreenIdentity = identity;
+  }
+
   /**
    * Configure to throw an error on getViewHierarchy().
    */
@@ -132,6 +150,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
     this.configuredHierarchy = { hierarchy: {} };
     this.configuredFocusedElement = null;
     this.configuredAccessibilityFocusedElement = null;
+    this.configuredScreenIdentity = undefined;
     this.shouldFail = false;
     this.failureError = null;
   }

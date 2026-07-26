@@ -111,8 +111,10 @@ const screenIdentitySchema = z.object({
   key: z.string(),
   components: z.object({
     bundleId: z.string().optional(),
+    navigationRoute: z.string().optional(),
     navigationTitle: z.string().optional(),
     selectedTab: z.string().optional(),
+    presentation: z.string().optional(),
     modalClass: z.string().optional(),
     modalTitle: z.string().optional(),
     focusedElementId: z.string().optional(),

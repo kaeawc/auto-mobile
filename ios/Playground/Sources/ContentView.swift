@@ -1,7 +1,7 @@
 import AutoMobileSDK
 import SwiftUI
 
-enum Tab: Hashable {
+enum Tab: String, Hashable {
     case discover
     case demos
     case settings
@@ -45,12 +45,19 @@ struct ContentView: View {
                 .tag(Tab.settings)
         }
         .tint(.autoMobileRed)
-        .onChange(of: selectedTab) { _, newTab in
-            SwiftUINavigationAdapter.shared.trackNavigation(
-                destination: "\(newTab)",
-                metadata: ["type": "tab_switch"]
-            )
+        .onAppear {
+            trackTab(selectedTab)
         }
+        .onChange(of: selectedTab) { _, newTab in
+            trackTab(newTab)
+        }
+    }
+
+    private func trackTab(_ tab: Tab) {
+        SwiftUINavigationAdapter.shared.trackNavigation(
+            destination: tab.rawValue,
+            metadata: ["type": "tab_switch"]
+        )
     }
 }
 

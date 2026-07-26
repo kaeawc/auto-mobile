@@ -18,6 +18,7 @@ import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
   HighlightShape,
+  ScreenIdentity,
   ImeAction,
   ViewHierarchyResult,
 } from "../../../models";
@@ -119,6 +120,7 @@ import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
 import { decodeCtrlProxyMessage } from "./decodeCtrlProxyMessage";
 import { DefaultIosSdkEventIngestor, type IosSdkEventIngestor } from "./IosSdkEventIngestor";
+import { deriveIosSdkScreenIdentity } from "./IosSdkScreenIdentity";
 
 // Import types
 import type {
@@ -317,6 +319,32 @@ export interface IosNetworkErrorSimulationConfig {
   expiresAtEpochMs?: number | null;
 }
 
+type SdkEventPollResult = {
+  receivedEvents: boolean;
+  rememberedApplicationIds: Set<string>;
+};
+
+type SdkScreenIdentityPollGeneration = {
+  clearGeneration: number;
+  applicationGenerations: Map<string, number>;
+};
+
+type DecodedSdkEvent = {
+  eventType: string;
+  applicationId: string | undefined;
+  payload: Record<string, unknown>;
+  timestamp: number;
+  sequenceNumber: number | undefined;
+};
+
+function numberOrDefault(value: number | null | undefined): number {
+  return value ?? 0;
+}
+
+function nullWhenAbsent<T>(value: T | null | undefined): T | null {
+  return value ?? null;
+}
+
 /**
  * Command rawValues a *fresh* iOS CtrlProxy runner advertises in its `connected`
  * handshake that the released v0.0.38 runner predates. The runner exposes no
@@ -405,6 +433,25 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
+  private readonly sdkScreenIdentitiesByApplicationId = new Map<string, ScreenIdentity>();
+  private readonly sdkScreenIdentityOrdersByApplicationId = new Map<
+    string,
+    { timestamp: number; sequenceNumber?: number }
+  >();
+  private readonly sdkScreenIdentityGenerationsByApplicationId = new Map<string, number>();
+  private readonly sdkScreenIdentitySessionsByApplicationId = new Map<string, string>();
+  private readonly sdkScreenIdentityStartedSessionsByApplicationId = new Map<string, string>();
+  private readonly sdkScreenIdentitySessionEpochsByApplicationId = new Map<string, number>();
+  private readonly sdkScreenIdentityRetiredSessionsByApplicationId = new Map<string, Set<string>>();
+  private readonly sdkScreenIdentityTrackingGenerationsByApplicationId = new Map<string, number>();
+  private readonly sdkScreenIdentityTrackingDisabledApplicationIds = new Set<string>();
+  private sdkScreenIdentityClearGeneration = 0;
+  private sdkEventPollGeneration = 0;
+  private sdkEventPollAbortController: AbortController | null = null;
+  private sdkEventPollInFlight: { generation: number; promise: Promise<SdkEventPollResult> } | null = null;
+  private static readonly SDK_EVENT_POLL_TIMEOUT_MS = 2000;
+  private static readonly SDK_IDENTITY_REFRESH_TIMEOUT_MS = 100;
+  private static readonly SDK_IDENTITY_REFRESH_RETRY_MS = 10;
 
   private constructor(
     device: BootedDevice,
@@ -466,6 +513,70 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public static getExistingInstance(deviceId: string): IOSCtrlProxyClient | null {
     return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
+  }
+
+  /** Return the latest app-provided navigation identity without doing I/O. */
+  public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
+    return applicationId ? this.sdkScreenIdentitiesByApplicationId.get(applicationId) : undefined;
+  }
+
+  /** Remove SDK navigation state after an app process is replaced. */
+  public clearSdkScreenIdentity(applicationId?: string): void {
+    if (applicationId) {
+      this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
+      this.invalidateSdkScreenIdentity(applicationId);
+      return;
+    }
+    this.sdkScreenIdentityClearGeneration++;
+    this.sdkScreenIdentityGenerationsByApplicationId.clear();
+    this.sdkScreenIdentityTrackingDisabledApplicationIds.clear();
+    this.sdkScreenIdentitySessionsByApplicationId.clear();
+    this.sdkScreenIdentityStartedSessionsByApplicationId.clear();
+    this.sdkScreenIdentitySessionEpochsByApplicationId.clear();
+    this.sdkScreenIdentityRetiredSessionsByApplicationId.clear();
+    this.sdkScreenIdentityTrackingGenerationsByApplicationId.clear();
+    this.sdkScreenIdentitiesByApplicationId.clear();
+    this.sdkScreenIdentityOrdersByApplicationId.clear();
+  }
+
+  /**
+   * Drain the CtrlProxy SDK-event queue before returning the current identity.
+   * Observe calls this after reading the hierarchy so a navigation event does
+   * not wait for the background poll interval before it reaches the diff gate.
+   */
+  public async refreshSdkScreenIdentity(applicationId?: string): Promise<ScreenIdentity | undefined> {
+    const deadline = this.timer.now() + IOSCtrlProxyClient.SDK_IDENTITY_REFRESH_TIMEOUT_MS;
+    while (this.timer.now() < deadline) {
+      const result = await this.pollSdkEventsUntil(deadline);
+      const refreshed = applicationId
+        ? result?.rememberedApplicationIds.has(applicationId)
+        : result?.receivedEvents;
+      if (refreshed) {
+        break;
+      }
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(IOSCtrlProxyClient.SDK_IDENTITY_REFRESH_RETRY_MS, remaining));
+    }
+    return this.getSdkScreenIdentity(applicationId);
+  }
+
+  private async pollSdkEventsUntil(deadline: number): Promise<SdkEventPollResult | undefined> {
+    const remaining = deadline - this.timer.now();
+    if (remaining <= 0) {
+      return undefined;
+    }
+    let timeoutId: ReturnType<Timer["setTimeout"]> | null = null;
+    const timeout = new Promise<undefined>(resolve => {
+      timeoutId = this.timer.setTimeout(() => resolve(undefined), remaining);
+    });
+    const drained = await Promise.race([this.pollSdkEvents(), timeout]);
+    if (timeoutId) {
+      this.timer.clearTimeout(timeoutId);
+    }
+    return drained;
   }
 
   /**
@@ -887,7 +998,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected onConnectionClosed(): void {
     this.cancelScreenshotBackoff();
     this.stopSdkEventPolling();
+    this.sdkEventPollGeneration++;
+    this.sdkEventPollAbortController?.abort();
+    this.sdkEventPollAbortController = null;
     this.cachedHierarchy = null;
+    this.clearSdkScreenIdentity();
     this.supportedCommands = null;
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
@@ -909,39 +1024,154 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private startSdkEventPolling(): void {
     this.stopSdkEventPolling();
+    void this.pollSdkEvents();
+    this.sdkEventPollInterval = this.timer.setInterval(() => {
+      void this.pollSdkEvents();
+    }, 2000);
+  }
+
+  private async pollSdkEvents(): Promise<SdkEventPollResult> {
+    const generation = this.sdkEventPollGeneration;
+    if (this.sdkEventPollInFlight?.generation === generation) {
+      return this.sdkEventPollInFlight.promise;
+    }
+
+    const promise = this.pollSdkEventsOnce(generation);
+    const inFlight = { generation, promise };
+    this.sdkEventPollInFlight = inFlight;
+    void promise.finally(() => {
+      if (this.sdkEventPollInFlight === inFlight) {
+        this.sdkEventPollInFlight = null;
+      }
+    }).catch(error => logger.debug(`[IOSCtrlProxy] SDK event poll cleanup failed: ${error}`));
+    return promise;
+  }
+
+  private async pollSdkEventsOnce(generation: number): Promise<SdkEventPollResult> {
+    const pollGeneration: SdkScreenIdentityPollGeneration = {
+      clearGeneration: this.sdkScreenIdentityClearGeneration,
+      applicationGenerations: new Map(this.sdkScreenIdentityGenerationsByApplicationId),
+    };
     const host = this.resolveWebSocketHost();
     const url = `http://${host}:${this.port}/sdk-events`;
-    this.sdkEventPollInterval = this.timer.setInterval(async () => {
-      try {
-        const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
-        if (!resp.ok) {return;}
-        const batches = await resp.json() as Array<{
-          bundleId?: string;
-          events?: Array<{ eventType: string; payload: string }>;
-        }>;
-        for (const batch of batches) {
-          if (!batch.events) {continue;}
-          for (const envelope of batch.events) {
-            try {
-              // SDK envelopes have base64-encoded payload
-              const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
-              const payload = JSON.parse(payloadJson) as Record<string, unknown>;
-              const timestamp = (payload.timestamp as number) ?? Date.now();
-              await this.sdkEventIngestor.recordSdkEvent(
-                { type: envelope.eventType, timestamp, payload },
-                batch.bundleId ?? null,
-              );
-            } catch (error) {
-              // Malformed SDK envelope (bad base64/JSON) — skip it, but leave a trace.
-              logger.debug(`[IOSCtrlProxy] skipping malformed SDK event envelope: ${error}`);
-            }
-          }
-        }
-      } catch (error) {
-        // Polling failure is non-fatal (endpoint down, timeout) — trace at debug.
-        logger.debug(`[IOSCtrlProxy] SDK event poll failed: ${error}`);
+    const abortController = new AbortController();
+    this.sdkEventPollAbortController = abortController;
+    const timeoutId = this.timer.setTimeout(
+      () => abortController.abort(),
+      IOSCtrlProxyClient.SDK_EVENT_POLL_TIMEOUT_MS,
+    );
+    try {
+      const resp = await fetch(url, { signal: abortController.signal });
+      if (generation !== this.sdkEventPollGeneration) {return this.emptySdkEventPollResult();}
+      if (!resp.ok) {return this.emptySdkEventPollResult();}
+      const batches = await resp.json() as Array<{
+        bundleId?: string;
+        events?: Array<{ eventType: string; payload: string }>;
+      }>;
+      const pollResult = await this.processSdkEventBatches(batches, generation, pollGeneration);
+      return pollResult;
+    } catch (error) {
+      // Polling failure is non-fatal (endpoint down, timeout) — trace at debug.
+      logger.debug(`[IOSCtrlProxy] SDK event poll failed: ${error}`);
+      return this.emptySdkEventPollResult();
+    } finally {
+      this.timer.clearTimeout(timeoutId);
+      if (this.sdkEventPollAbortController === abortController) {
+        this.sdkEventPollAbortController = null;
       }
-    }, 2000);
+    }
+  }
+
+  private async processSdkEventBatches(
+    batches: Array<{ bundleId?: string; events?: Array<{ eventType: string; payload: string }> }>,
+    generation: number,
+    pollGeneration: SdkScreenIdentityPollGeneration,
+  ): Promise<SdkEventPollResult> {
+    const events = this.decodeSdkEventBatches(batches, generation);
+    const rememberedApplicationIds = new Set<string>();
+    for (const event of events) {
+      if (generation !== this.sdkEventPollGeneration) {
+        return this.emptySdkEventPollResult();
+      }
+      const lifecycleEventHasCurrentPoll = this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration);
+      if (this.applySdkScreenIdentityLifecycleEvent(event)) {
+        if (lifecycleEventHasCurrentPoll && event.applicationId) {
+          pollGeneration.applicationGenerations.set(
+            event.applicationId,
+            this.getSdkScreenIdentityGeneration(event.applicationId),
+          );
+        }
+        continue;
+      }
+      if (this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration)
+        && this.rememberSdkScreenIdentity(
+          event.eventType,
+          event.applicationId,
+          event.payload,
+          event.timestamp,
+          event.sequenceNumber,
+        )) {
+        rememberedApplicationIds.add(event.applicationId!);
+      }
+    }
+    for (const event of events) {
+      if (generation !== this.sdkEventPollGeneration) {
+        return this.emptySdkEventPollResult();
+      }
+      await this.sdkEventIngestor.recordSdkEvent(
+        { type: event.eventType, timestamp: event.timestamp, payload: event.payload },
+        event.applicationId ?? null,
+      );
+    }
+    return { receivedEvents: events.length > 0, rememberedApplicationIds };
+  }
+
+  private decodeSdkEventBatches(
+    batches: Array<{ bundleId?: string; events?: Array<{ eventType: string; payload: string }> }>,
+    generation: number,
+  ): DecodedSdkEvent[] {
+    const decodedEvents: DecodedSdkEvent[] = [];
+    for (const batch of batches) {
+      if (generation !== this.sdkEventPollGeneration) {
+        return [];
+      }
+      for (const envelope of batch.events ?? []) {
+        const event = this.decodeSdkEventEnvelope(batch.bundleId, envelope);
+        if (event) {
+          decodedEvents.push(event);
+        }
+      }
+    }
+    return decodedEvents;
+  }
+
+  private decodeSdkEventEnvelope(
+    applicationId: string | undefined,
+    envelope: { eventType: string; payload: string },
+  ): DecodedSdkEvent | undefined {
+    try {
+      const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
+      const decodedPayload = JSON.parse(payloadJson);
+      if (!decodedPayload || typeof decodedPayload !== "object" || Array.isArray(decodedPayload)) {
+        throw new Error("SDK event payload must be an object");
+      }
+      const payload = decodedPayload as Record<string, unknown>;
+      return {
+        eventType: envelope.eventType,
+        applicationId,
+        payload,
+        timestamp: typeof payload.timestamp === "number" && Number.isFinite(payload.timestamp)
+          ? payload.timestamp
+          : this.timer.now(),
+        sequenceNumber: typeof payload.sequenceNumber === "number" && Number.isSafeInteger(payload.sequenceNumber)
+          ? payload.sequenceNumber
+          : undefined,
+      };
+    } catch (error) {
+      // Malformed SDK envelope (bad base64/JSON) — skip it, but leave a trace.
+      logger.debug(`[IOSCtrlProxy] skipping malformed SDK event envelope: ${error}`);
+      return undefined;
+    }
   }
 
   private stopSdkEventPolling(): void {
@@ -949,6 +1179,190 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.timer.clearInterval(this.sdkEventPollInterval);
       this.sdkEventPollInterval = null;
     }
+  }
+
+  private rememberSdkScreenIdentity(
+    eventType: string,
+    applicationId: string | undefined,
+    payload: Record<string, unknown>,
+    timestamp: number,
+    sequenceNumber: number | undefined,
+  ): boolean {
+    if (!applicationId
+      || !this.activateSdkScreenIdentitySession(applicationId, payload)
+      || !this.isSdkScreenIdentityTrackingEnabled(applicationId, payload)) {
+      return false;
+    }
+    const identity = deriveIosSdkScreenIdentity(eventType, applicationId, payload);
+    const currentOrder = this.sdkScreenIdentityOrdersByApplicationId.get(applicationId);
+    const isNewer = currentOrder === undefined
+      || timestamp > currentOrder.timestamp
+      || (timestamp === currentOrder.timestamp
+        && (sequenceNumber === undefined
+          || currentOrder.sequenceNumber === undefined
+          || sequenceNumber > currentOrder.sequenceNumber));
+    if (identity && isNewer) {
+      this.sdkScreenIdentitiesByApplicationId.set(applicationId, identity);
+      this.sdkScreenIdentityOrdersByApplicationId.set(applicationId, { timestamp, sequenceNumber });
+      return true;
+    }
+    return false;
+  }
+
+  private emptySdkEventPollResult(): SdkEventPollResult {
+    return { receivedEvents: false, rememberedApplicationIds: new Set() };
+  }
+
+  private getSdkScreenIdentityGeneration(applicationId: string): number {
+    return this.sdkScreenIdentityGenerationsByApplicationId.get(applicationId) ?? 0;
+  }
+
+  private invalidateSdkScreenIdentity(applicationId: string, retireSession: boolean = true): void {
+    this.sdkScreenIdentityGenerationsByApplicationId.set(
+      applicationId,
+      this.getSdkScreenIdentityGeneration(applicationId) + 1,
+    );
+    const sessionId = this.sdkScreenIdentitySessionsByApplicationId.get(applicationId);
+    if (retireSession && sessionId) {
+      this.retireSdkScreenIdentitySession(applicationId, sessionId);
+    }
+    if (retireSession) {
+      this.sdkScreenIdentityStartedSessionsByApplicationId.delete(applicationId);
+      this.sdkScreenIdentitySessionEpochsByApplicationId.delete(applicationId);
+    }
+    this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
+    this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
+  }
+
+  private applySdkScreenIdentityLifecycleEvent(event: DecodedSdkEvent): boolean {
+    if (!event.applicationId || event.eventType !== "lifecycle") {
+      return false;
+    }
+    if (event.payload.state === "sdk_session_started") {
+      this.startSdkScreenIdentitySession(event.applicationId, event.payload);
+      return true;
+    }
+    if (!this.activateSdkScreenIdentitySession(event.applicationId, event.payload)) {
+      return true;
+    }
+    const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(event.payload);
+    const currentGeneration = this.sdkScreenIdentityTrackingGenerationsByApplicationId.get(event.applicationId);
+    if (trackingGeneration === undefined || currentGeneration === undefined || trackingGeneration >= currentGeneration) {
+      if (trackingGeneration !== undefined) {
+        this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(event.applicationId, trackingGeneration);
+      }
+    } else {
+      return true;
+    }
+    if (event.payload.state === "sdk_tracking_disabled") {
+      this.sdkScreenIdentityTrackingDisabledApplicationIds.add(event.applicationId);
+      this.invalidateSdkScreenIdentity(event.applicationId, false);
+      return true;
+    }
+    if (event.payload.state === "sdk_tracking_enabled") {
+      this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(event.applicationId);
+      return true;
+    }
+    return false;
+  }
+
+  private activateSdkScreenIdentitySession(applicationId: string, payload: Record<string, unknown>): boolean {
+    const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
+    if (!sessionId) {
+      return true;
+    }
+    if (this.sdkScreenIdentityRetiredSessionsByApplicationId.get(applicationId)?.has(sessionId)) {
+      return false;
+    }
+    const sessionEpoch = this.getSdkScreenIdentitySessionEpoch(payload);
+    const currentEpoch = this.sdkScreenIdentitySessionEpochsByApplicationId.get(applicationId);
+    const currentSessionId = this.sdkScreenIdentitySessionsByApplicationId.get(applicationId);
+    if (sessionEpoch !== undefined && currentEpoch !== undefined
+      && (sessionEpoch < currentEpoch || (sessionEpoch === currentEpoch && currentSessionId && currentSessionId !== sessionId))) {
+      return false;
+    }
+    const startedSessionId = this.sdkScreenIdentityStartedSessionsByApplicationId.get(applicationId);
+    if (startedSessionId && startedSessionId !== sessionId
+      && (sessionEpoch === undefined || currentEpoch === undefined || sessionEpoch <= currentEpoch)) {
+      return false;
+    }
+    if (currentSessionId && currentSessionId !== sessionId) {
+      this.retireSdkScreenIdentitySession(applicationId, currentSessionId);
+      this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
+      this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
+      this.resetSdkScreenIdentityTrackingState(applicationId, payload);
+      this.sdkScreenIdentityStartedSessionsByApplicationId.set(applicationId, sessionId);
+    }
+    this.sdkScreenIdentitySessionsByApplicationId.set(applicationId, sessionId);
+    if (sessionEpoch !== undefined) {
+      this.sdkScreenIdentitySessionEpochsByApplicationId.set(applicationId, sessionEpoch);
+    }
+    return true;
+  }
+
+  private startSdkScreenIdentitySession(applicationId: string, payload: Record<string, unknown>): boolean {
+    const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
+    if (!sessionId || !this.activateSdkScreenIdentitySession(applicationId, payload)) {
+      return false;
+    }
+    this.sdkScreenIdentityStartedSessionsByApplicationId.set(applicationId, sessionId);
+    return true;
+  }
+
+  private resetSdkScreenIdentityTrackingState(applicationId: string, payload: Record<string, unknown>): void {
+    this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
+    const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(payload);
+    if (trackingGeneration === undefined) {
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.delete(applicationId);
+    } else {
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(applicationId, trackingGeneration);
+    }
+  }
+
+  private retireSdkScreenIdentitySession(applicationId: string, sessionId: string): void {
+    let retiredSessions = this.sdkScreenIdentityRetiredSessionsByApplicationId.get(applicationId);
+    if (!retiredSessions) {
+      retiredSessions = new Set<string>();
+      this.sdkScreenIdentityRetiredSessionsByApplicationId.set(applicationId, retiredSessions);
+    }
+    retiredSessions.add(sessionId);
+  }
+
+  private isSdkScreenIdentityTrackingEnabled(applicationId: string, payload: Record<string, unknown>): boolean {
+    const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(payload);
+    const currentGeneration = this.sdkScreenIdentityTrackingGenerationsByApplicationId.get(applicationId);
+    if (this.sdkScreenIdentityTrackingDisabledApplicationIds.has(applicationId)) {
+      if (trackingGeneration === undefined || currentGeneration === undefined || trackingGeneration <= currentGeneration) {
+        return false;
+      }
+      this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
+    }
+    if (trackingGeneration !== undefined && (currentGeneration === undefined || trackingGeneration > currentGeneration)) {
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(applicationId, trackingGeneration);
+    }
+    return true;
+  }
+
+  private getSdkScreenIdentityTrackingGeneration(payload: Record<string, unknown>): number | undefined {
+    return typeof payload.trackingGeneration === "number" && Number.isSafeInteger(payload.trackingGeneration)
+      ? payload.trackingGeneration
+      : undefined;
+  }
+
+  private getSdkScreenIdentitySessionEpoch(payload: Record<string, unknown>): number | undefined {
+    return typeof payload.sessionEpoch === "number" && Number.isSafeInteger(payload.sessionEpoch)
+      ? payload.sessionEpoch
+      : undefined;
+  }
+
+  private isSdkScreenIdentityPollCurrent(
+    applicationId: string | undefined,
+    pollGeneration: SdkScreenIdentityPollGeneration,
+  ): applicationId is string {
+    return applicationId !== undefined
+      && pollGeneration.clearGeneration === this.sdkScreenIdentityClearGeneration
+      && (pollGeneration.applicationGenerations.get(applicationId) ?? 0)
+        === this.getSdkScreenIdentityGeneration(applicationId);
   }
 
   /**
@@ -1143,17 +1557,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     // Convert iOS performance snapshot to PerformanceStreamData format
+    const fps = numberOrDefault(snapshot.fps);
     const streamData: PerformanceStreamData = {
-      fps: snapshot.fps ?? 0,
-      frameTimeMs: snapshot.frameTimeMs ?? 0,
-      jankFrames: snapshot.jankFrames ?? 0,
+      fps,
+      frameTimeMs: numberOrDefault(snapshot.frameTimeMs),
+      jankFrames: numberOrDefault(snapshot.jankFrames),
       droppedFrames: 0, // iOS doesn't report this separately
-      memoryUsageMb: snapshot.memoryUsageMb ?? 0,
-      cpuUsagePercent: snapshot.cpuUsagePercent ?? 0,
-      touchLatencyMs: snapshot.touchLatencyMs ?? null,
-      timeToInteractiveMs: snapshot.ttiMs ?? null,
-      screenName: snapshot.screenName ?? null,
-      isResponsive: (snapshot.fps ?? 0) >= 50, // Consider responsive if FPS >= 50
+      memoryUsageMb: numberOrDefault(snapshot.memoryUsageMb),
+      cpuUsagePercent: numberOrDefault(snapshot.cpuUsagePercent),
+      touchLatencyMs: nullWhenAbsent(snapshot.touchLatencyMs),
+      timeToInteractiveMs: nullWhenAbsent(snapshot.ttiMs),
+      screenName: nullWhenAbsent(snapshot.screenName),
+      isResponsive: fps >= 50, // Consider responsive if FPS >= 50
       recompositionCount: null,
       recompositionRate: null,
     };
@@ -1700,16 +2115,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         return { success: false, error: result.error || "No screenshot data" };
       }
 
-      // Cache screen dimensions from hierarchy if available.
-      // screenWidth/screenHeight are in iOS points — multiply by screenScale to get pixels,
-      // matching the screenshot image resolution and the TakeScreenshot path (which reads PNG header pixels).
-      if (this.cachedHierarchy?.hierarchy?.screenWidth && this.cachedHierarchy?.hierarchy?.screenHeight) {
-        const scale = this.cachedHierarchy.hierarchy.screenScale ?? 1;
-        this.cachedScreenDimensions = {
-          width: Math.round(this.cachedHierarchy.hierarchy.screenWidth * scale),
-          height: Math.round(this.cachedHierarchy.hierarchy.screenHeight * scale),
-        };
-      }
+      this.cacheScreenDimensionsFromHierarchy();
 
       return {
         success: true,
@@ -1719,6 +2125,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     } catch (error) {
       return { success: false, error: `${error}` };
     }
+  }
+
+  private cacheScreenDimensionsFromHierarchy(): void {
+    const hierarchy = this.cachedHierarchy?.hierarchy;
+    if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
+      return;
+    }
+    // screenWidth/screenHeight are in iOS points — multiply by screenScale to get pixels,
+    // matching the screenshot image resolution and the TakeScreenshot path (which reads PNG header pixels).
+    const scale = hierarchy.screenScale ?? 1;
+    this.cachedScreenDimensions = {
+      width: Math.round(hierarchy.screenWidth * scale),
+      height: Math.round(hierarchy.screenHeight * scale),
+    };
   }
 
   /**

@@ -10,6 +10,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 
 /**
  * Physical-device app terminator. `DeviceAppManager` satisfies this
@@ -176,9 +177,16 @@ export class TerminateApp extends BaseVisualChange {
 
     // Physical iOS devices (00008XXX / 40-char UDID) can't be driven by simctl;
     // route them through devicectl instead. Simulators keep the simctl path.
-    const terminateLogic = isIosSimulatorUdid(this.device.deviceId)
+    const terminateTransport = isIosSimulatorUdid(this.device.deviceId)
       ? () => this.terminateSimulator(bundleId, perf)
       : () => this.terminatePhysicalDevice(bundleId, perf);
+    const terminateLogic = async (): Promise<TerminateAppResult> => {
+      const result = await terminateTransport();
+      if (result.success) {
+        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
+      }
+      return result;
+    };
 
     // Perf-tree ownership (issue #3037): `executeiOS` opens the "terminateApp"
     // block, so it — the single owner — must close it. The terminate helpers no

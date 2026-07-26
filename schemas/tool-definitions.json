@@ -4723,10 +4723,16 @@
                 "bundleId": {
                   "type": "string"
                 },
+                "navigationRoute": {
+                  "type": "string"
+                },
                 "navigationTitle": {
                   "type": "string"
                 },
                 "selectedTab": {
+                  "type": "string"
+                },
+                "presentation": {
                   "type": "string"
                 },
                 "modalClass": {
@@ -8885,10 +8891,16 @@
                         "bundleId": {
                           "type": "string"
                         },
+                        "navigationRoute": {
+                          "type": "string"
+                        },
                         "navigationTitle": {
                           "type": "string"
                         },
                         "selectedTab": {
+                          "type": "string"
+                        },
+                        "presentation": {
                           "type": "string"
                         },
                         "modalClass": {
@@ -9043,10 +9055,16 @@
                         "bundleId": {
                           "type": "string"
                         },
+                        "navigationRoute": {
+                          "type": "string"
+                        },
                         "navigationTitle": {
                           "type": "string"
                         },
                         "selectedTab": {
+                          "type": "string"
+                        },
+                        "presentation": {
                           "type": "string"
                         },
                         "modalClass": {
@@ -9137,10 +9155,16 @@
                         "bundleId": {
                           "type": "string"
                         },
+                        "navigationRoute": {
+                          "type": "string"
+                        },
                         "navigationTitle": {
                           "type": "string"
                         },
                         "selectedTab": {
+                          "type": "string"
+                        },
+                        "presentation": {
                           "type": "string"
                         },
                         "modalClass": {

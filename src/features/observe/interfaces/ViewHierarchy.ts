@@ -1,4 +1,4 @@
-import type { Element, ViewHierarchyResult } from "../../../models";
+import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 
@@ -6,6 +6,12 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
  * Interface for retrieving and managing view hierarchy data.
  */
 export interface ViewHierarchy {
+  /**
+   * Return the latest app-provided iOS navigation identity, if this hierarchy
+   * reader has one. Optional so hierarchy-only fakes do not need an SDK seam.
+   */
+  getScreenIdentity?(applicationId?: string): ScreenIdentity | undefined | Promise<ScreenIdentity | undefined>;
+
   /**
    * Retrieve the view hierarchy of the current screen.
    * @param queryOptions - Optional query options for targeted element retrieval

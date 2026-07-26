@@ -353,7 +353,9 @@ export class LaunchApp extends BaseVisualChange {
           // need here: invalidateCache() (fixed in #4193) forces a refetch, but the
           // invalidated entry is still served as a stale fallback if that refetch
           // fails — and pre-terminate data for a wiped app must never be served.
-          IOSCtrlProxyClient.getInstance(this.device).clearCache();
+          const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
+          ctrlProxyClient.clearCache();
+          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
           launchResult = await perf.track("launch", () =>
             simulator
               ? this.simctl.launchApp(bundleId, { foregroundIfRunning: false })

@@ -1424,10 +1424,11 @@ describe("diffObserveResult — volatile occlusion exclusion (#4399)", () => {
 describe("isSameObservationScreen", () => {
   const iosIdentity = (
     key: string,
-    confidence: "high" | "medium" | "low" = "high"
+    confidence: "high" | "medium" | "low" = "high",
+    source: "heuristic" | "sdk" = "heuristic",
   ): ObserveResult["screenIdentity"] => ({
     platform: "ios",
-    source: "heuristic",
+    source,
     confidence,
     key,
     components: {
@@ -1486,6 +1487,21 @@ describe("isSameObservationScreen", () => {
       screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=New Reminder"),
     });
     expect(isSameObservationScreen(a, b)).toBe(false);
+  });
+
+  test("SDK navigation route changes prevent a cross-screen diff", () => {
+    const a = obs({ "resource-id": "a" }, {
+      screenIdentity: iosIdentity("sdk:Discover", "high", "sdk"),
+    });
+    const sameRoute = obs({ "resource-id": "b" }, {
+      screenIdentity: iosIdentity("sdk:Discover", "high", "sdk"),
+    });
+    const nextRoute = obs({ "resource-id": "c" }, {
+      screenIdentity: iosIdentity("sdk:Settings", "high", "sdk"),
+    });
+
+    expect(isSameObservationScreen(a, sameRoute)).toBe(true);
+    expect(isSameObservationScreen(a, nextRoute)).toBe(false);
   });
 
   test("different medium-confidence iOS screen identity → false", () => {

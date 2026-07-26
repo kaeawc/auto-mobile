@@ -92,6 +92,26 @@ describe("sanitizeObserveResult", () => {
       expect(out.viewHierarchy).not.toBe(observe.viewHierarchy);
     });
 
+    test("preserves an SDK-backed screen identity while compacting observation output", () => {
+      const observe: ObserveResult = {
+        updatedAt: 1,
+        screenSize: { width: 100, height: 200 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        screenIdentity: {
+          platform: "ios",
+          source: "sdk",
+          confidence: "high",
+          key: '[["bundle","dev.jasonpearson.automobile.Playground"],["route","SettingsTab"]]',
+          components: {
+            bundleId: "dev.jasonpearson.automobile.Playground",
+            navigationRoute: "SettingsTab",
+          },
+        },
+      };
+
+      expect(sanitizeObserveResult(observe, COMPACT).screenIdentity).toEqual(observe.screenIdentity);
+    });
+
     test("completes well under the 100ms unit-test budget", () => {
       const { observe } = loadAndroidHomeObserve();
       const start = performance.now();

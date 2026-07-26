@@ -138,6 +138,7 @@ struct DemosTab: View {
                 }
             }
             .navigationTitle("Demos")
+            .trackNavigation(destination: "demos", metadata: ["type": "tab_switch"])
         }
     }
 }

@@ -1,6 +1,6 @@
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { BootedDevice, ObserveResult } from "../../models";
+import { BootedDevice, ObserveResult, ScreenIdentity } from "../../models";
 import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
@@ -485,7 +485,7 @@ export class RealObserveScreen implements ObserveScreen {
 
         break;
 
-      case "ios":
+      case "ios": {
         perf.serial("ios_collect");
         await this.hierarchyCollector.collect(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
 
@@ -540,10 +540,21 @@ export class RealObserveScreen implements ObserveScreen {
           };
         }
 
-        result.screenIdentity = deriveIosScreenIdentity(result.viewHierarchy);
+        let sdkScreenIdentity: ScreenIdentity | undefined;
+        try {
+          sdkScreenIdentity = await this.viewHierarchy.getScreenIdentity?.(result.viewHierarchy?.packageName);
+        } catch (error) {
+          // The hierarchy remains valid when the optional SDK refresh fails.
+          logger.debug(`[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`);
+        }
+        const hierarchyScreenIdentity = deriveIosScreenIdentity(result.viewHierarchy);
+        result.screenIdentity = hierarchyScreenIdentity?.components.modalClass
+          ? hierarchyScreenIdentity
+          : sdkScreenIdentity ?? hierarchyScreenIdentity;
 
         perf.end();
         break;
+      }
     }
   }
 

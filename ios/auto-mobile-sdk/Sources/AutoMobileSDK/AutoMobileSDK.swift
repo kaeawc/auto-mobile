@@ -8,6 +8,7 @@ import UIKit
 /// crash detection, and more.
 public final class AutoMobileSDK: @unchecked Sendable {
     public static let shared = AutoMobileSDK()
+    private static let sessionEpochDefaultsKey = "com.kaeawc.auto-mobile.sdk.session-epoch"
 
     private let lock = NSLock()
     private var listeners: [NavigationListener] = []
@@ -17,6 +18,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _sdkContext: SdkContext?
     private var _configuration: AutoMobileConfiguration?
     private var eventBuffer: SdkEventBuffer?
+    private var navigationSequenceNumber: Int64 = 0
+    private var sdkSessionId: String?
+    private var sdkSessionEpoch: Int64?
+    private var trackingGeneration: Int64 = 0
     private var _dropCounter: DefaultDropCounter?
     private var eventPersistence: (any EventPersisting)?
     private var sessionTracker: SessionTracker?
@@ -49,6 +54,11 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         let resolvedBundleId = bundleId ?? Bundle.main.bundleIdentifier
         _bundleId = resolvedBundleId
+        let newSessionId = UUID().uuidString
+        let newSessionEpoch = Self.nextSessionEpoch()
+        sdkSessionId = newSessionId
+        sdkSessionEpoch = newSessionEpoch
+        trackingGeneration = 0
         _configuration = configuration
 
         let counter = DefaultDropCounter()
@@ -85,6 +95,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
         lock.unlock()
 
         buffer.start()
+        SdkEventBroadcaster.shared.broadcastBatch(
+            bundleId: resolvedBundleId,
+            events: [SdkLifecycleEvent(state: "sdk_session_started", bundleId: resolvedBundleId, sessionId: newSessionId, sessionEpoch: newSessionEpoch, trackingGeneration: 0)]
+        )
 
         // Replay any pending batches from previous sessions and clean up old ones
         persistence.cleanup(maxAgeDays: 7)
@@ -188,6 +202,11 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         lock.lock()
         let currentListeners = listeners
+        navigationSequenceNumber += 1
+        let sequenceNumber = navigationSequenceNumber
+        let currentSessionId = sdkSessionId
+        let currentSessionEpoch = sdkSessionEpoch
+        let currentTrackingGeneration = trackingGeneration
         lock.unlock()
 
         for listener in currentListeners {
@@ -197,12 +216,20 @@ public final class AutoMobileSDK: @unchecked Sendable {
         // Buffer as SDK event
         let sdkEvent = SdkNavigationEvent(
             timestamp: event.timestamp,
+            sequenceNumber: sequenceNumber,
+            sessionId: currentSessionId,
+            sessionEpoch: currentSessionEpoch,
+            trackingGeneration: currentTrackingGeneration,
             destination: event.destination,
             source: NavigationSourceType(rawValue: event.source.rawValue) ?? .custom,
             arguments: event.arguments,
             metadata: event.metadata
         )
         eventBuffer?.add(sdkEvent)
+        // Navigation is control-plane state for observe/diff, not bulk telemetry.
+        // Flush it immediately so a post-action observation can fetch the current
+        // screen identity instead of waiting for the regular telemetry cadence.
+        eventBuffer?.flush()
     }
 
     /// Number of registered listeners.
@@ -308,6 +335,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _isInitialized = false
         _bundleId = nil
         _configuration = nil
+        navigationSequenceNumber = 0
+        sdkSessionId = nil
+        sdkSessionEpoch = nil
+        trackingGeneration = 0
         lock.unlock()
 
         bufferToShutdown?.shutdown()
@@ -328,10 +359,18 @@ public final class AutoMobileSDK: @unchecked Sendable {
     /// are paused. When re-enabled, subsystems resume.
     public func setEnabled(_ enabled: Bool) {
         lock.lock()
+        let wasEnabled = _isEnabled
+        if wasEnabled != enabled {
+            trackingGeneration += 1
+        }
         _isEnabled = enabled
         let buffer = eventBuffer
         let initialized = _isInitialized
         let config = _configuration
+        let bundleId = _bundleId
+        let currentSessionId = sdkSessionId
+        let currentSessionEpoch = sdkSessionEpoch
+        let currentTrackingGeneration = trackingGeneration
         lock.unlock()
 
         buffer?.isBufferEnabled = enabled
@@ -339,6 +378,22 @@ public final class AutoMobileSDK: @unchecked Sendable {
             buffer?.start()
         } else {
             buffer?.stop()
+        }
+
+        // Screen identity is control-plane state. Send this transition directly
+        // instead of through the disabled buffer so CtrlProxy can discard an
+        // identity that would otherwise outlive SDK tracking.
+        if initialized && wasEnabled != enabled {
+            SdkEventBroadcaster.shared.broadcastBatch(
+                bundleId: bundleId,
+                events: [SdkLifecycleEvent(
+                    state: enabled ? "sdk_tracking_enabled" : "sdk_tracking_disabled",
+                    bundleId: bundleId,
+                    sessionId: currentSessionId,
+                    sessionEpoch: currentSessionEpoch,
+                    trackingGeneration: currentTrackingGeneration
+                )]
+            )
         }
 
         // Propagate to all subsystems (only if initialized). Skip subsystems
@@ -357,6 +412,15 @@ public final class AutoMobileSDK: @unchecked Sendable {
         }
         // Crashes: signal handlers can't be safely uninstalled; the exception handler
         // already checks AutoMobileSDK.shared.isEnabled before posting events.
+    }
+
+    private static func nextSessionEpoch() -> Int64 {
+        let defaults = UserDefaults.standard
+        let previousEpoch = Int64(defaults.integer(forKey: sessionEpochDefaultsKey))
+        let currentMilliseconds = Int64(Date().timeIntervalSince1970 * 1000)
+        let nextEpoch = previousEpoch == Int64.max ? currentMilliseconds : max(previousEpoch + 1, currentMilliseconds)
+        defaults.set(nextEpoch, forKey: sessionEpochDefaultsKey)
+        return nextEpoch
     }
 
     /// Whether the SDK has been initialized.

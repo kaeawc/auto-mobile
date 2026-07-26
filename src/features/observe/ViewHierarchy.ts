@@ -2,6 +2,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-c
 import { logger, LogLevel } from "../../utils/logger";
 import { BootedDevice } from "../../models";
 import { Element } from "../../models";
+import { ScreenIdentity } from "../../models";
 import { ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -66,6 +67,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     }
 
     await this.accessibilityServiceClient.setRecompositionTrackingEnabled(enabled, perf);
+  }
+
+  async getScreenIdentity(applicationId?: string): Promise<ScreenIdentity | undefined> {
+    if (this.device.platform !== "ios") {
+      return undefined;
+    }
+    return IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)
+      ?.refreshSdkScreenIdentity(applicationId);
   }
 
   /**

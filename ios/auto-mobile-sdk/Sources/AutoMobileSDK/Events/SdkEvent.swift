@@ -31,6 +31,14 @@ public enum SdkEventType: String, Codable, Sendable {
 public struct SdkNavigationEvent: SdkEvent {
     public private(set) var eventType: SdkEventType = .navigation
     public let timestamp: Int64
+    /// Monotonic per-SDK navigation order used to break same-millisecond timestamp ties.
+    public let sequenceNumber: Int64?
+    /// Per-process SDK identity used to reject navigation from replaced app processes.
+    public let sessionId: String?
+    /// Persistent process order used to reject delayed events from an older SDK session.
+    public let sessionEpoch: Int64?
+    /// Monotonic SDK tracking state used to order enable/disable control events.
+    public let trackingGeneration: Int64?
     public let destination: String
     public let source: NavigationSourceType
     public let arguments: [String: String]
@@ -38,12 +46,20 @@ public struct SdkNavigationEvent: SdkEvent {
 
     public init(
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        sequenceNumber: Int64? = nil,
+        sessionId: String? = nil,
+        sessionEpoch: Int64? = nil,
+        trackingGeneration: Int64? = nil,
         destination: String,
         source: NavigationSourceType,
         arguments: [String: String] = [:],
         metadata: [String: String] = [:]
     ) {
         self.timestamp = timestamp
+        self.sequenceNumber = sequenceNumber
+        self.sessionId = sessionId
+        self.sessionEpoch = sessionEpoch
+        self.trackingGeneration = trackingGeneration
         self.destination = destination
         self.source = source
         self.arguments = arguments
@@ -276,17 +292,26 @@ public struct SdkLifecycleEvent: SdkEvent {
     public let state: String
     public let bundleId: String?
     public let details: [String: String]
+    public let sessionId: String?
+    public let sessionEpoch: Int64?
+    public let trackingGeneration: Int64?
 
     public init(
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         state: String,
         bundleId: String? = nil,
-        details: [String: String] = [:]
+        details: [String: String] = [:],
+        sessionId: String? = nil,
+        sessionEpoch: Int64? = nil,
+        trackingGeneration: Int64? = nil
     ) {
         self.timestamp = timestamp
         self.state = state
         self.bundleId = bundleId
         self.details = details
+        self.sessionId = sessionId
+        self.sessionEpoch = sessionEpoch
+        self.trackingGeneration = trackingGeneration
     }
 }
 

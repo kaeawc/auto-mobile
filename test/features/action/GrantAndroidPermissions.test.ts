@@ -198,6 +198,52 @@ describe("GrantAndroidPermissions", () => {
     expect(result.results[0].error).toContain("SecurityException");
   });
 
+  test("flags a blank permission name as an (empty) failure that fails the batch", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult(
+      "shell pm grant --user 0 com.example.app android.permission.CAMERA",
+      ""
+    );
+
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute("com.example.app", {
+      permissions: ["   ", "android.permission.CAMERA"],
+      userId: 0,
+    });
+
+    // The blank name never reaches adb but is recorded as a required failure.
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0].operationId).toBe("pm_grant:(empty)");
+    expect(result.results[0].success).toBe(false);
+    expect(result.results[0].countsTowardSuccess).toBe(true);
+    expect(result.results[0].error).toBe("empty permission name");
+    expect(result.results[1].success).toBe(true);
+
+    // One required step failed → batch fails and the aggregate names it.
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Failed step(s): pm_grant:(empty)");
+  });
+
+  test("aggregates failed step operationIds into the error message", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult(
+      "shell pm grant --user 0 com.example.app android.permission.SEND_SMS",
+      "",
+      "java.lang.SecurityException: Permission denial"
+    );
+
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute("com.example.app", {
+      permissions: ["android.permission.SEND_SMS"],
+      userId: 0,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Failed step(s): pm_grant:android.permission.SEND_SMS");
+  });
+
   test("non-Android device returns structured failure without adb", async () => {
     const factory = new FakeAdbClientFactory();
     const iosDevice: BootedDevice = {

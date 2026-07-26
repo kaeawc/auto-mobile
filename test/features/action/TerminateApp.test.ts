@@ -280,9 +280,12 @@ describe("TerminateApp (Android)", () => {
   test("treats grep -c failure as not installed instead of throwing", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
-    // Simulate grep -c exiting with code 1 when package is not found
+    // Simulate the install-probe shell command throwing (grep -c exits 1 when the
+    // package is absent). The error key MUST be the exact command string — the
+    // fake matches errors by exact command, so a substring key never fires and
+    // the catch-and-degrade path stays untested (issue #4169 item 5).
     fakeAdb.setCommandError(
-      "grep -c com.example.app",
+      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
       new Error("Command failed with exit code 1")
     );
 

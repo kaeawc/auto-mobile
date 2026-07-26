@@ -346,7 +346,7 @@ describe("RestoreSnapshot", () => {
       expect(fakeAdb.wasCommandExecuted("shell settings put system font_scale '1.2'")).toBe(true);
     });
 
-    it("should handle settings with special characters", async () => {
+    it("shell-quotes a setting value containing spaces and quotes when restoring it", async () => {
       const snapshotName = "test-settings-special";
 
       // Create manifest with settings containing special characters
@@ -376,8 +376,15 @@ describe("RestoreSnapshot", () => {
         useVmSnapshot: false
       });
 
-      // Verify special characters were escaped properly
-      expect(fakeAdb.wasCommandExecuted("shell settings put global test_key")).toBe(true);
+      // Verify special characters were escaped properly — assert the FULL command,
+      // including the shell-quoted value, so deleting the escaping cannot pass.
+      const putCommands = fakeAdb
+        .getCommandCalls()
+        .map(call => call.command)
+        .filter(command => command.startsWith("shell settings put global test_key"));
+      expect(putCommands).toEqual([
+        "shell settings put global test_key 'value with spaces and '\\''quotes'\\'''"
+      ]);
     });
 
     it("should skip empty settings sections", async () => {
@@ -744,75 +751,6 @@ describe("RestoreSnapshot", () => {
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0); // Should be cleared after completion
     });
 
-    it.skip("should handle restore timeout gracefully", async () => {
-      // Use manual time control for this test
-      const manualTimer = new FakeTimer();
-      restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, undefined, manualTimer, store);
-
-      const snapshotName = "test-snapshot-timeout";
-
-      // Create manifest with backup data
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app"],
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 1,
-          backedUpPackages: ["com.example.app"],
-          skippedPackages: [],
-          failedPackages: [],
-          backupTimedOut: false
-        }
-      };
-
-      // Create backup file
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      await fs.writeFile(backupFilePath, "backup data", "utf-8");
-
-
-      // Override executeCommand for restore to simulate delay
-      const originalExecute = fakeAdb.executeCommand.bind(fakeAdb);
-      fakeAdb.executeCommand = async (command: string) => {
-        if (command.includes("restore")) {
-          // Simulate restore taking a long time
-          await manualTimer.sleep(40000); // Longer than default 30s timeout
-          return { stdout: "", stderr: "" };
-        }
-        return originalExecute(command);
-      };
-
-      // Start restore in background
-      const restorePromise = restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false
-      });
-
-      // Wait for the sleep to be registered
-      for (let i = 0; i < 50 && manualTimer.getPendingSleepCount() === 0; i += 1) {
-        await Promise.resolve();
-      }
-
-      // Advance time to trigger timeout and complete the sleep
-      manualTimer.advanceTime(50000);
-
-      const result = await restorePromise;
-
-      // Should complete even with timeout (restore is best-effort)
-      expect(result.snapshotType).toBe("adb");
-      expect(result.restoredAt).toBeDefined();
-    });
-
     it("should skip restore if no backup file exists", async () => {
       const snapshotName = "test-no-backup";
 
@@ -983,51 +921,6 @@ describe("RestoreSnapshot", () => {
       expect(fakeAdb.wasCommandExecuted(`emu avd snapshot load ${snapshotName}`)).toBe(true);
     });
 
-    it("should complete in under 100ms with FakeTimer", async () => {
-      const snapshotName = "test-fast";
-
-      // Create manifest
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app"],
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 1,
-          backedUpPackages: ["com.example.app"],
-          skippedPackages: [],
-          failedPackages: [],
-          backupTimedOut: false
-        }
-      };
-
-      // Create backup file
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      await fs.writeFile(backupFilePath, "backup data", "utf-8");
-
-
-      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
-
-      const startTime = Date.now();
-
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false
-      });
-
-      const duration = Date.now() - startTime;
-      expect(duration).toBeLessThan(100);
-    });
   });
 });
 

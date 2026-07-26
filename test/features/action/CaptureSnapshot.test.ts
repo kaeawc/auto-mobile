@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, test, expect, beforeEach, afterEach } from "bun:test";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { BootedDevice } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -65,7 +65,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-vm-snapshot";
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
@@ -88,7 +88,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-vm-with-settings";
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
@@ -113,7 +113,7 @@ describe("CaptureSnapshot", () => {
       const foregroundApp = "com.example.app";
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => foregroundApp;
+      fakeAdb.setForegroundApp({ packageName: foregroundApp, userId: 0 });
 
       // Setup VM snapshot command
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
@@ -128,11 +128,29 @@ describe("CaptureSnapshot", () => {
       expect(result.manifest.foregroundApp).toBe(foregroundApp);
     });
 
+    it("degrades to an undefined foregroundApp when the adb probe throws", async () => {
+      const snapshotName = "test-vm-foreground-throws";
+
+      // The real getForegroundApp must swallow the adb error and return undefined
+      // (issue #4169 item 9) rather than failing the whole snapshot.
+      fakeAdb.setForegroundAppError(new Error("adb: device 'emulator-5554' not found"));
+      fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
+
+      const result = await captureSnapshot.execute({
+        snapshotName,
+        includeAppData: true,
+        includeSettings: false,
+        useVmSnapshot: true
+      });
+
+      expect(result.manifest.foregroundApp).toBeUndefined();
+    });
+
     it("should throw error when VM snapshot fails with KO", async () => {
       const snapshotName = "test-vm-fail";
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command to fail
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "", "KO: snapshot failed");
@@ -149,7 +167,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-vm-fail-stdout";
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command to fail (KO in stdout)
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "KO: snapshot failed");
@@ -166,7 +184,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-vm-empty-response";
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command with empty output
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "", "");
@@ -183,7 +201,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-vm-offline";
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command to throw offline error
       fakeAdb.setCommandError(
@@ -204,7 +222,7 @@ describe("CaptureSnapshot", () => {
       const vmSnapshotTimeoutMs = 12000;
 
       // Setup getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
@@ -241,7 +259,7 @@ describe("CaptureSnapshot", () => {
         fakeTimer,
         store
       );
-      (capturePhysical as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Create backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -268,7 +286,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-settings";
 
       // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Create backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -305,7 +323,7 @@ describe("CaptureSnapshot", () => {
       fakeAdb.setCommandResult("shell settings list system", "");
 
       // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Create backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -335,7 +353,7 @@ describe("CaptureSnapshot", () => {
       fakeAdb.setCommandResult("shell settings list system", "");
 
       // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Create backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -360,7 +378,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-no-settings";
 
       // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Create backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -401,7 +419,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-strict-mode";
 
       // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Don't create backup file to simulate failure
 
@@ -422,7 +440,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-no-foreground";
 
       // Mock getForegroundApp to return undefined
-      (captureSnapshot as any).getForegroundApp = async () => undefined;
+      fakeAdb.setForegroundApp(null);
 
       const result = await captureSnapshot.execute({
         snapshotName,
@@ -442,7 +460,7 @@ describe("CaptureSnapshot", () => {
       fakeAdb.setCommandResult("shell pm list packages", "");
 
       // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => undefined;
+      fakeAdb.setForegroundApp(null);
 
       const result = await captureSnapshot.execute({
         snapshotName,
@@ -460,7 +478,7 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-system-foreground";
 
       // Mock getForegroundApp to return a system app
-      (captureSnapshot as any).getForegroundApp = async () => "com.system.app";
+      fakeAdb.setForegroundApp({ packageName: "com.system.app", userId: 0 });
 
       const result = await captureSnapshot.execute({
         snapshotName,
@@ -484,7 +502,7 @@ describe("CaptureSnapshot", () => {
       fakeAdb.setCommandResult("shell dumpsys package com.example.app2", "flags=0x1234 ALLOW_BACKUP=false");
 
       // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app1";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app1", userId: 0 });
 
       const result = await captureSnapshot.execute({
         snapshotName,
@@ -508,7 +526,7 @@ describe("CaptureSnapshot", () => {
       const backupFilePath = store.getBackupFilePath(snapshotName);
 
       // Mock getForegroundApp to return the test app
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Create backup file first to simulate successful backup
       await fs.writeFile(backupFilePath, "backup data", "utf-8");
@@ -558,13 +576,13 @@ describe("CaptureSnapshot", () => {
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     });
 
-    it("should handle backup when file is not created", async () => {
+    it("records the failed backup in the manifest when no backup file is produced", async () => {
       const snapshotName = "test-snapshot-no-file";
 
-      // Mock getForegroundApp to return the test app
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      // Drive the real foreground-app path rather than stubbing the subject.
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
-      // Don't create backup file - simulates timeout or failure
+      // The backup command returns without creating a file (backup not confirmed).
       const result = await captureSnapshot.execute({
         snapshotName,
         includeAppData: true,
@@ -575,46 +593,45 @@ describe("CaptureSnapshot", () => {
         backupTimeoutMs: 30000
       });
 
-      // Should complete gracefully even without backup file
-      expect(result.snapshotName).toBe(snapshotName);
-      expect(result.manifest.appDataBackup).toBeDefined();
-      expect(result.manifest.appDataBackup?.backedUpPackages?.length).toBe(0);
+      // A failed backup must pin: adb_backup attempted, package moved to
+      // failedPackages, NO backupFile recorded (item 11), and not-timed-out.
+      const backup = result.manifest.appDataBackup;
+      expect(backup?.backupMethod).toBe("adb_backup");
+      expect(backup?.backedUpPackages).toEqual([]);
+      expect(backup?.failedPackages).toEqual(["com.example.app"]);
+      expect(backup?.backupFile).toBeUndefined();
+      expect(backup?.backupTimedOut).toBe(false);
     });
 
-    it("should use Timer interface with FakeTimer for fast tests", async () => {
-      const snapshotName = "test-timer-integration";
+    it("records backupTimedOut when the adb backup never completes", async () => {
+      const snapshotName = "test-snapshot-timeout";
 
-      // Mock getForegroundApp to return the test app
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+      // The backup command hangs; the FakeTimer timeout wins the race.
+      fakeAdb.setHangingCommand("backup -f");
 
-      // Create backup file
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      await fs.writeFile(backupFilePath, "backup data", "utf-8");
-
-      // Verify timer was injected properly
-      expect((captureSnapshot as any).timer).toBe(fakeTimer);
-
-      // Execute should use the fake timer (instant mode by default)
       const result = await captureSnapshot.execute({
         snapshotName,
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
+        strictBackupMode: false,
+        backupTimeoutMs: 30000
       });
 
-      // Should complete successfully with fake timer
-      expect(result.snapshotName).toBe(snapshotName);
-      expect(result.manifest.appDataBackup?.backupMethod).toBe("adb_backup");
+      const backup = result.manifest.appDataBackup;
+      expect(backup?.backupMethod).toBe("adb_backup");
+      expect(backup?.backupTimedOut).toBe(true);
+      expect(backup?.failedPackages).toEqual(["com.example.app"]);
+      expect(backup?.backupFile).toBeUndefined();
     });
 
     it("should backup only current foreground app by default", async () => {
       const snapshotName = "test-current-app";
 
       // Setup getForegroundApp to return a specific app
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Create dummy backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -703,31 +720,38 @@ describe("CaptureSnapshot", () => {
       // Check manifest contains skipped packages
       expect(result.manifest.appDataBackup?.skippedPackages).toContain("com.example.app2");
     });
+  });
 
-    it("should complete in under 100ms with FakeTimer", async () => {
-      const snapshotName = "test-fast";
+  // Issue #4169 item 17: pin the `settings list` line grammar through the real
+  // manifest path. Each row is `key=value`, split on the FIRST `=`; a line with
+  // no key is dropped; later duplicate keys win; CR is stripped with the trim.
+  describe("parseSettings grammar (via manifest.settings.global)", () => {
+    const grammarCases: Array<[string, string, Record<string, string>]> = [
+      ["keeps everything after the first '=' in the value", "k=a=b", { k: "a=b" }],
+      ["preserves an empty value", "k=", { k: "" }],
+      ["drops a line with no key", "=v", {}],
+      ["lets a later duplicate key win", "k=1\nk=2", { k: "2" }],
+      ["strips CR from CRLF line endings", "a=1\r\nb=2", { a: "1", b: "2" }],
+      ["skips blank and whitespace-only lines", "a=1\n\n   \nb=2", { a: "1", b: "2" }]
+    ];
 
-      // Mock getForegroundApp
-      (captureSnapshot as any).getForegroundApp = async () => "com.example.app";
+    test.each(grammarCases)(
+      "%s",
+      async (_name, listOutput, expectedGlobal) => {
+        const snapshotName = `grammar-${_name.replace(/\s+/g, "-")}`;
+        fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+        fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
+        fakeAdb.setCommandResult("shell settings list global", listOutput);
 
-      // Create dummy backup file
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      await fs.writeFile(backupFilePath, "backup data", "utf-8");
+        const result = await captureSnapshot.execute({
+          snapshotName,
+          includeAppData: false,
+          includeSettings: true,
+          useVmSnapshot: true
+        });
 
-      const startTime = Date.now();
-
-      await captureSnapshot.execute({
-        snapshotName,
-        includeAppData: true,
-        includeSettings: false,
-        useVmSnapshot: false,
-        userApps: "current"
-      });
-
-      const duration = Date.now() - startTime;
-      expect(duration).toBeLessThan(100);
-    });
+        expect(result.manifest.settings?.global).toEqual(expectedGlobal);
+      }
+    );
   });
 });

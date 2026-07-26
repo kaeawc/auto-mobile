@@ -357,4 +357,70 @@ describe("AppPermissions", () => {
     expect(result.error).toContain("reset");
     expect(iosPhysicalClient.calls).toEqual([]);
   });
+
+  // Issue #4169 item 6: an unsupported request must fail loudly, not be silently
+  // accepted. Android-only fields have no meaning on iOS, and a request that asks
+  // for nothing at all must not report success.
+  describe("rejects unsupported requests", () => {
+    test("rejects the Android-only notificationPolicyAccess field on iOS", async () => {
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+
+      const result = await permissions.setPermissions("com.example.app", {
+        action: "grant",
+        notificationPolicyAccess: true,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.operations).toEqual([]);
+      expect(result.changedCount).toBe(0);
+      expect(result.failedCount).toBe(0);
+      expect(result.error).toBe(
+        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess"
+      );
+    });
+
+    test("rejects the Android-only scheduleExactAlarm field on iOS", async () => {
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+
+      const result = await permissions.setPermissions("com.example.app", {
+        action: "grant",
+        scheduleExactAlarm: "allow",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "setAppPermissions does not support the following fields on iOS: scheduleExactAlarm"
+      );
+    });
+
+    test("lists every unsupported field when several are supplied on iOS", async () => {
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+
+      const result = await permissions.setPermissions("com.example.app", {
+        action: "grant",
+        notificationPolicyAccess: true,
+        scheduleExactAlarm: "allow",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess, scheduleExactAlarm"
+      );
+    });
+
+    test("fails an empty Android request instead of silently succeeding", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      const permissions = new AppPermissions(androidDevice, { adbFactory });
+
+      const result = await permissions.setPermissions("com.example.app", {});
+
+      expect(result.success).toBe(false);
+      expect(result.operations.map(operation => operation.operationId)).toEqual([
+        "app_permissions:no_operation",
+      ]);
+      expect(result.error).toBe(
+        "Provide at least one permission or Android-specific permission option"
+      );
+    });
+  });
 });

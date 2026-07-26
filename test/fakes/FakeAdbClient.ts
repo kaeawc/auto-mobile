@@ -18,8 +18,12 @@ export class FakeAdbClient implements FakeAdbClientContract {
     signal?: AbortSignal;
   }> = [];
   private commandResults: Map<string, { stdout: string; stderr: string }> = new Map();
+  private commandResultSequences: Map<string, Array<{ stdout: string; stderr: string }>> = new Map();
+  private commandSequenceCursor: Map<string, number> = new Map();
   private commandErrors: Map<string, Error> = new Map();
   private foregroundApp: { packageName: string; userId: number } | null = null;
+  private foregroundAppError: Error | null = null;
+  private hangingCommandPatterns: string[] = [];
   private users: Array<{ userId: number; name: string; flags?: number; running?: boolean }> = [];
 
   /**
@@ -39,8 +43,27 @@ export class FakeAdbClient implements FakeAdbClientContract {
       throw error;
     }
 
-    // Return configured result or default success
-    const result = this.commandResults.get(command) || { stdout: "", stderr: "" };
+    // A hanging command never resolves — used to let a racing timeout win
+    // deterministically (e.g. an adb backup the user never confirms). Safe
+    // because the caller races it against a FakeTimer setTimeout, so nothing
+    // actually blocks the test.
+    if (this.hangingCommandPatterns.some(pattern => command.includes(pattern))) {
+      return new Promise(() => {});
+    }
+
+    // A scripted sequence takes precedence: each call to the same command returns
+    // the next entry, and the final entry repeats once exhausted. This lets a
+    // pre/post-uninstall re-check observe a state transition without monkeypatching.
+    const sequence = this.commandResultSequences.get(command);
+    let result: { stdout: string; stderr: string };
+    if (sequence && sequence.length > 0) {
+      const cursor = this.commandSequenceCursor.get(command) ?? 0;
+      result = sequence[Math.min(cursor, sequence.length - 1)];
+      this.commandSequenceCursor.set(command, cursor + 1);
+    } else {
+      // Return configured result or default success
+      result = this.commandResults.get(command) || { stdout: "", stderr: "" };
+    }
     return {
       stdout: result.stdout,
       stderr: result.stderr,
@@ -58,6 +81,19 @@ export class FakeAdbClient implements FakeAdbClientContract {
   }
 
   /**
+   * Script successive results for repeated calls to the exact same command.
+   * Call N returns entry N; once exhausted the last entry repeats. Takes
+   * precedence over {@link setCommandResult} for the same command.
+   */
+  setCommandResultSequence(command: string, results: Array<{ stdout: string; stderr?: string }>): void {
+    this.commandResultSequences.set(
+      command,
+      results.map(entry => ({ stdout: entry.stdout, stderr: entry.stderr ?? "" }))
+    );
+    this.commandSequenceCursor.set(command, 0);
+  }
+
+  /**
    * Configure a command to throw an error
    */
   setCommandError(command: string, error: Error): void {
@@ -69,6 +105,22 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   setForegroundApp(app: { packageName: string; userId: number } | null): void {
     this.foregroundApp = app;
+    this.foregroundAppError = null;
+  }
+
+  /**
+   * Configure getForegroundApp() to reject, exercising a caller's degrade path.
+   */
+  setForegroundAppError(error: Error | null): void {
+    this.foregroundAppError = error;
+  }
+
+  /**
+   * Make any command containing `pattern` never resolve. A racing timeout must
+   * be the one to settle the operation.
+   */
+  setHangingCommand(pattern: string): void {
+    this.hangingCommandPatterns.push(pattern);
   }
 
   /**
@@ -82,6 +134,9 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * Return the current foreground app
    */
   async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+    if (this.foregroundAppError) {
+      throw this.foregroundAppError;
+    }
     return this.foregroundApp;
   }
 

@@ -147,16 +147,16 @@ describe("InstallApp", () => {
     expect(fakeHost.wasCommandExecuted("aapt2")).toBe(true);
     expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
 
+    // Nesting invariant (issue #4169 item 15): the whole install is owned by a
+    // single "installApp" root and every phase is nested under it. Asserting the
+    // exact child NAMES makes a pure rename of a perf block break CI with no
+    // behavior change; asserting the ownership SHAPE still catches the real
+    // regression — a premature perf.end() that reparents phases to the top level.
     const timings = perf.getTimings() as TimingEntry[];
+    expect(timings).toHaveLength(1);
     const installEntry = timings[0];
     expect(installEntry.name).toBe("installApp");
-    const childNames = (installEntry.children as TimingEntry[]).map(entry => entry.name);
-    expect(childNames).toEqual([
-      "extractPackageName",
-      "detectTargetUser",
-      "checkInstalled",
-      "adbInstall"
-    ]);
+    expect((installEntry.children as TimingEntry[]).length).toBeGreaterThan(0);
   });
 
   test("falls back to package diffing when aapt is unavailable", async () => {
@@ -288,88 +288,104 @@ describe("InstallApp", () => {
     expect(fakeInstaller.calls[0].artifactPath).toBe(ipaPath);
   });
 
-  test("rejects .ipa on iOS simulator with clear error", async () => {
-    const ipaPath = "/tmp/MyApp.ipa";
-    const perf = createPerformanceTracker(true, fakeTimer);
+  // Issue #4169 item 7: artifact-extension routing as one specification table,
+  // including the boundary rows that were previously unspecified — a double
+  // extension (".apk.zip" → ".zip"), a trailing dot ("/tmp/MyApp." → "." per
+  // path.extname), a dotfile ("/tmp/.apk" → "" — no extension), and a bare name
+  // (no extension → ""). Rejections throw BEFORE any device I/O, so no host /
+  // locator / simctl fakes are needed.
+  describe("artifact extension routing rejects the wrong artifact", () => {
+    // Android accepts only .apk; the thrown message echoes the extracted ext.
+    const androidRejections: Array<[string, string]> = [
+      [".app bundle", "/tmp/MyApp.app"],
+      [".ipa file", "/tmp/MyApp.ipa"],
+      [".zip file", "/tmp/MyApp.zip"],
+      ["double extension keeps only the last segment", "/tmp/MyApp.apk.zip"],
+      ["trailing dot", "/tmp/MyApp."],
+      ["dotfile with no real extension", "/tmp/.apk"],
+      ["no extension", "/tmp/MyApp"]
+    ];
+    const androidExpectedExt: Record<string, string> = {
+      "/tmp/MyApp.app": ".app",
+      "/tmp/MyApp.ipa": ".ipa",
+      "/tmp/MyApp.zip": ".zip",
+      "/tmp/MyApp.apk.zip": ".zip",
+      "/tmp/MyApp.": ".",
+      "/tmp/.apk": "",
+      "/tmp/MyApp": ""
+    };
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf
+    test.each(androidRejections)("Android rejects a %s", async (_name, artifactPath) => {
+      const perf = createPerformanceTracker(true, fakeTimer);
+      const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+
+      await expect(installApp.execute(artifactPath)).rejects.toThrow(
+        `Android devices only support .apk files, but got "${androidExpectedExt[artifactPath]}" file. Use an .apk file for Android installation.`
+      );
+    });
+
+    // iOS simulator accepts only .app; an .ipa gets a simulator-specific message,
+    // anything else falls through to the generic "only .app/.ipa" message.
+    const iosSimulatorRejections: Array<[string, string, string]> = [
+      [
+        ".ipa file",
+        "/tmp/MyApp.ipa",
+        "iOS simulators do not support .ipa files. Use a .app bundle built for the simulator instead."
+      ],
+      [
+        ".apk file",
+        "/tmp/app-debug.apk",
+        'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got ".apk" file.'
+      ],
+      [
+        ".zip file",
+        "/tmp/MyApp.zip",
+        'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got ".zip" file.'
+      ],
+      [
+        "trailing dot",
+        "/tmp/MyApp.",
+        'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got "." file.'
+      ],
+      [
+        "no extension",
+        "/tmp/MyApp",
+        'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got "" file.'
+      ]
+    ];
+
+    test.each(iosSimulatorRejections)(
+      "iOS simulator rejects a %s",
+      async (_name, artifactPath, expectedMessage) => {
+        const perf = createPerformanceTracker(true, fakeTimer);
+        const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf);
+
+        await expect(installApp.execute(artifactPath)).rejects.toThrow(expectedMessage);
+      }
     );
 
-    await expect(installApp.execute(ipaPath)).rejects.toThrow(
-      "iOS simulators do not support .ipa files. Use a .app bundle built for the simulator instead."
-    );
-  });
+    // iOS physical accepts only .ipa; a .app gets a physical-specific message.
+    const iosPhysicalRejections: Array<[string, string, string]> = [
+      [
+        ".app bundle",
+        "/tmp/MyApp.app",
+        "iOS physical devices do not support .app bundles. Use a signed .ipa file instead."
+      ],
+      [
+        ".apk file",
+        "/tmp/app-debug.apk",
+        'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got ".apk" file.'
+      ]
+    ];
 
-  test("rejects .app on iOS physical device with clear error", async () => {
-    const appPath = "/tmp/MyApp.app";
-    const perf = createPerformanceTracker(true, fakeTimer);
+    test.each(iosPhysicalRejections)(
+      "iOS physical device rejects a %s",
+      async (_name, artifactPath, expectedMessage) => {
+        const perf = createPerformanceTracker(true, fakeTimer);
+        const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, null, null, () => perf);
 
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf
-    );
-
-    await expect(installApp.execute(appPath)).rejects.toThrow(
-      "iOS physical devices do not support .app bundles. Use a signed .ipa file instead."
-    );
-  });
-
-  test("rejects .apk on iOS device with clear error", async () => {
-    const apkPath = "/tmp/app-debug.apk";
-    const perf = createPerformanceTracker(true, fakeTimer);
-
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf
-    );
-
-    await expect(installApp.execute(apkPath)).rejects.toThrow(
-      'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got ".apk" file.'
-    );
-  });
-
-  test("rejects .app on Android device with clear error", async () => {
-    const appPath = "/tmp/MyApp.app";
-    const perf = createPerformanceTracker(true, fakeTimer);
-
-    const installApp = new InstallApp(
-      device,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      () => perf
-    );
-
-    await expect(installApp.execute(appPath)).rejects.toThrow(
-      'Android devices only support .apk files, but got ".app" file. Use an .apk file for Android installation.'
-    );
-  });
-
-  test("rejects .ipa on Android device with clear error", async () => {
-    const ipaPath = "/tmp/MyApp.ipa";
-    const perf = createPerformanceTracker(true, fakeTimer);
-
-    const installApp = new InstallApp(
-      device,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      () => perf
-    );
-
-    await expect(installApp.execute(ipaPath)).rejects.toThrow(
-      'Android devices only support .apk files, but got ".ipa" file. Use an .apk file for Android installation.'
+        await expect(installApp.execute(artifactPath)).rejects.toThrow(expectedMessage);
+      }
     );
   });
 
@@ -581,42 +597,6 @@ describe("InstallApp", () => {
     const result = await installApp.execute("/tmp/app.APK");
 
     expect(result.success).toBe(true);
-  });
-
-  test("rejects unknown extension on iOS", async () => {
-    const perf = createPerformanceTracker(true, fakeTimer);
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf);
-
-    await expect(installApp.execute("/tmp/MyApp.zip")).rejects.toThrow(
-      'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got ".zip" file.'
-    );
-  });
-
-  test("rejects unknown extension on Android", async () => {
-    const perf = createPerformanceTracker(true, fakeTimer);
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
-
-    await expect(installApp.execute("/tmp/MyApp.zip")).rejects.toThrow(
-      'Android devices only support .apk files, but got ".zip" file.'
-    );
-  });
-
-  test("rejects file with no extension on iOS", async () => {
-    const perf = createPerformanceTracker(true, fakeTimer);
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf);
-
-    await expect(installApp.execute("/tmp/MyApp")).rejects.toThrow(
-      'iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got "" file.'
-    );
-  });
-
-  test("rejects file with no extension on Android", async () => {
-    const perf = createPerformanceTracker(true, fakeTimer);
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
-
-    await expect(installApp.execute("/tmp/MyApp")).rejects.toThrow(
-      'Android devices only support .apk files, but got "" file.'
-    );
   });
 
   test("iOS physical device install returns warning about bundle ID detection", async () => {

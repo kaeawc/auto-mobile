@@ -43,8 +43,13 @@ export class Idle {
       "com.android.settings"
     ];
 
+    // Match by prefix, not substring. Reverse containment
+    // (`sysPackage.includes(packageName)`) misclassified short strings like "a"
+    // or "com" as system launchers because they are substrings of a real system
+    // package name (issue #4172). A package is a system launcher only when it IS
+    // one of these packages or a sub-package (e.g. "com.miui.home.settings").
     return systemPackages.some(sysPackage =>
-      packageName.includes(sysPackage) || sysPackage.includes(packageName)
+      packageName === sysPackage || packageName.startsWith(`${sysPackage}.`)
     );
   }
 
@@ -156,8 +161,10 @@ export class Idle {
         this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`)
       );
 
-      // Wait for measurement period to accumulate data
-      await defaultTimer.sleep(measurementDelayMs);
+      // Wait for measurement period to accumulate data. Use the injected timer
+      // (not defaultTimer) so this method is FakeTimer-testable and never costs
+      // real wall-clock in a test (issue #4172).
+      await this.timer.sleep(measurementDelayMs);
 
       // Take immediate measurement with no previous state
       return await this.getUiStability(

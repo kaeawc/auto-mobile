@@ -375,7 +375,9 @@ export class RealObserveScreen implements ObserveScreen {
 
   createBaseResult(): ObserveResult {
     return {
-      updatedAt: new Date().toISOString(),
+      // Derive the timestamp from the injected timer so the source is pinnable
+      // in tests instead of the real wall clock (issue #4172 item 9).
+      updatedAt: new Date(this.timer.now()).toISOString(),
       screenSize: { width: 0, height: 0 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       insets: { available: false, source: "unavailable", units: "unknown" }

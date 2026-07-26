@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Idle } from "../../../src/features/observe/Idle";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { BootedDevice } from "../../../src/models";
+import { BootedDevice, TouchIdleResult } from "../../../src/models";
 import { logger } from "../../../src/utils/logger";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("Idle - Unit Tests", function() {
   let idle: Idle;
@@ -20,81 +21,86 @@ describe("Idle - Unit Tests", function() {
   });
 
   describe("getTouchStatus", function() {
-    const startTime = 1000;
-    const hardLimitMs = 10000;
+    // Inject FakeTimer so the read of "now" is deterministic and the boundary
+    // between `>=` (isIdle) and `<` (hard limit) is pinned. The previous version
+    // patched the global Date.now and restored it as the last statement, which
+    // leaked the patched clock onto every later test whenever an assertion threw
+    // (issue #4172).
+    const buildIdle = (now: number): Idle => {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(now);
+      const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+      return new Idle(device, new FakeAdbClientFactory(new FakeAdbExecutor()), timer);
+    };
 
-    test("should return idle when touch events have been idle long enough", function() {
-      const lastEventTime = 2000;
-      const timeoutMs = 500;
-      const currentTime = 3000; // 1000ms since last event
+    interface TouchCase {
+      name: string;
+      now: number;
+      startTime: number;
+      lastEventTime: number;
+      timeoutMs: number;
+      hardLimitMs: number;
+      expected: TouchIdleResult;
+    }
 
-      // Mock Date.now to return predictable time
-      const originalDateNow = Date.now;
-      Date.now = () => currentTime;
+    const cases: TouchCase[] = [
+      {
+        name: "idleTime exactly equals timeoutMs -> idle (>= boundary)",
+        now: 3000, startTime: 1000, lastEventTime: 2500, timeoutMs: 500, hardLimitMs: 10000,
+        expected: { isIdle: true, shouldContinue: false, currentElapsed: 2000, idleTime: 500 }
+      },
+      {
+        name: "idleTime one ms below timeoutMs -> not idle, keep going",
+        now: 3000, startTime: 1000, lastEventTime: 2501, timeoutMs: 500, hardLimitMs: 10000,
+        expected: { isIdle: false, shouldContinue: true, currentElapsed: 2000, idleTime: 499 }
+      },
+      {
+        name: "idle well past timeout, within hard limit -> idle, stop",
+        now: 3000, startTime: 1000, lastEventTime: 2000, timeoutMs: 500, hardLimitMs: 10000,
+        expected: { isIdle: true, shouldContinue: false, currentElapsed: 2000, idleTime: 1000 }
+      },
+      {
+        name: "recent event -> not idle, keep going",
+        now: 3000, startTime: 1000, lastEventTime: 2800, timeoutMs: 500, hardLimitMs: 10000,
+        expected: { isIdle: false, shouldContinue: true, currentElapsed: 2000, idleTime: 200 }
+      },
+      {
+        name: "currentElapsed exactly equals hardLimitMs while not idle -> stop (< boundary)",
+        now: 11000, startTime: 1000, lastEventTime: 10800, timeoutMs: 5000, hardLimitMs: 10000,
+        expected: { isIdle: false, shouldContinue: false, currentElapsed: 10000, idleTime: 200 }
+      },
+      {
+        name: "currentElapsed one ms below hardLimitMs while not idle -> keep going",
+        now: 10999, startTime: 1000, lastEventTime: 10800, timeoutMs: 5000, hardLimitMs: 10000,
+        expected: { isIdle: false, shouldContinue: true, currentElapsed: 9999, idleTime: 199 }
+      },
+      {
+        name: "hard limit exceeded while idle -> idle, stop",
+        now: 12000, startTime: 1000, lastEventTime: 2800, timeoutMs: 500, hardLimitMs: 10000,
+        expected: { isIdle: true, shouldContinue: false, currentElapsed: 11000, idleTime: 9200 }
+      },
+      {
+        name: "hard limit exceeded while not idle -> stop anyway",
+        now: 12000, startTime: 1000, lastEventTime: 11500, timeoutMs: 5000, hardLimitMs: 10000,
+        expected: { isIdle: false, shouldContinue: false, currentElapsed: 11000, idleTime: 500 }
+      },
+      {
+        name: "zero elapsed and zero idle at start with zero timeout -> idle immediately",
+        now: 1000, startTime: 1000, lastEventTime: 1000, timeoutMs: 0, hardLimitMs: 10000,
+        expected: { isIdle: true, shouldContinue: false, currentElapsed: 0, idleTime: 0 }
+      },
+      {
+        name: "clock before startTime yields negative elapsed -> not idle, keep going",
+        now: 900, startTime: 1000, lastEventTime: 800, timeoutMs: 500, hardLimitMs: 10000,
+        expected: { isIdle: false, shouldContinue: true, currentElapsed: -100, idleTime: 100 }
+      }
+    ];
 
-      const result = idle.getTouchStatus(startTime, lastEventTime, timeoutMs, hardLimitMs);
-
-      expect(result.isIdle).toBe(true);
-      expect(result.shouldContinue).toBe(false);
-      expect(result.currentElapsed).toBe(2000); // currentTime - startTime
-      expect(result.idleTime).toBe(1000); // currentTime - lastEventTime
-
-      // Restore original Date.now
-      Date.now = originalDateNow;
-    });
-
-    test("should return not idle when touch events are recent", function() {
-      const lastEventTime = 2800;
-      const timeoutMs = 500;
-      const currentTime = 3000; // 200ms since last event (< timeoutMs)
-
-      const originalDateNow = Date.now;
-      Date.now = () => currentTime;
-
-      const result = idle.getTouchStatus(startTime, lastEventTime, timeoutMs, hardLimitMs);
-
-      expect(result.isIdle).toBe(false);
-      expect(result.shouldContinue).toBe(true);
-      expect(result.currentElapsed).toBe(2000);
-      expect(result.idleTime).toBe(200);
-
-      Date.now = originalDateNow;
-    });
-
-    test("should return shouldContinue false when hard limit is reached", function() {
-      const lastEventTime = 2800;
-      const timeoutMs = 500;
-      const currentTime = 12000; // Exceeds hard limit
-
-      const originalDateNow = Date.now;
-      Date.now = () => currentTime;
-
-      const result = idle.getTouchStatus(startTime, lastEventTime, timeoutMs, hardLimitMs);
-
-      expect(result.isIdle).toBe(true); // idleTime (9200ms) > timeoutMs (500ms)
-      expect(result.shouldContinue).toBe(false); // currentElapsed (11000ms) > hardLimitMs (10000ms)
-      expect(result.currentElapsed).toBe(11000);
-      expect(result.idleTime).toBe(9200);
-
-      Date.now = originalDateNow;
-    });
-
-    test("should return shouldContinue false when hard limit is reached and not idle", function() {
-      const lastEventTime = 11500; // Very recent event
-      const timeoutMs = 5000; // Long timeout so it won't be idle
-      const currentTime = 12000; // Exceeds hard limit
-
-      const originalDateNow = Date.now;
-      Date.now = () => currentTime;
-
-      const result = idle.getTouchStatus(startTime, lastEventTime, timeoutMs, hardLimitMs);
-
-      expect(result.isIdle).toBe(false); // idleTime (500ms) < timeoutMs (5000ms)
-      expect(result.shouldContinue).toBe(false); // !false && false = false (hard limit exceeded)
-      expect(result.currentElapsed).toBe(11000);
-      expect(result.idleTime).toBe(500);
-
-      Date.now = originalDateNow;
+    cases.forEach(({ name, now, startTime, lastEventTime, timeoutMs, hardLimitMs, expected }) => {
+      test(`getTouchStatus reports ${name}`, function() {
+        const result = buildIdle(now).getTouchStatus(startTime, lastEventTime, timeoutMs, hardLimitMs);
+        expect(result).toEqual(expected);
+      });
     });
   });
 
@@ -299,166 +305,72 @@ describe("Idle - Unit Tests", function() {
   });
 
   describe("checkStabilityCriteria", function() {
-    test("should return true when all criteria are met", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: 50,
-        percentile90th: 80,
-        percentile95th: 150
-      };
+    // Actual thresholds (Idle.checkStabilityCriteria): floored p50 < 100,
+    // p90 < 100, p95 < 200; percentiles are only evaluated when
+    // totalFramesDelta === null OR (totalFramesDelta > 0 AND totalFrames >= 5).
+    // The boundary rows pin the strict `<` on each threshold and the `>= 5`
+    // frame floor -- flipping any comparison flips a row.
+    const stableDeltas = {
+      missedVsyncDelta: 0,
+      slowUiThreadDelta: 0,
+      frameDeadlineMissedDelta: 0,
+      totalFramesDelta: 1 as number | null
+    };
 
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
+    interface StabilityCase {
+      name: string;
+      deltas: { missedVsyncDelta: number; slowUiThreadDelta: number; frameDeadlineMissedDelta: number; totalFramesDelta: number | null };
+      percentiles: { percentile50th: number | null; percentile90th: number | null; percentile95th: number | null };
+      totalFrames: number | null;
+      expected: boolean;
+    }
 
-      expect(result).toBe(true);
+    const cases: StabilityCase[] = [
+      { name: "all deltas zero and percentiles under thresholds", deltas: stableDeltas, percentiles: { percentile50th: 50, percentile90th: 80, percentile95th: 150 }, totalFrames: 10, expected: true },
+      { name: "non-zero missed-vsync delta", deltas: { ...stableDeltas, missedVsyncDelta: 1 }, percentiles: { percentile50th: 50, percentile90th: 80, percentile95th: 150 }, totalFrames: 10, expected: false },
+      { name: "non-zero slow-ui-thread delta", deltas: { ...stableDeltas, slowUiThreadDelta: 1 }, percentiles: { percentile50th: 50, percentile90th: 80, percentile95th: 150 }, totalFrames: 10, expected: false },
+      { name: "non-zero frame-deadline-missed delta", deltas: { ...stableDeltas, frameDeadlineMissedDelta: 1 }, percentiles: { percentile50th: 50, percentile90th: 80, percentile95th: 150 }, totalFrames: 10, expected: false },
+      { name: "p50 exactly at the 100 threshold (not < 100)", deltas: stableDeltas, percentiles: { percentile50th: 100, percentile90th: 80, percentile95th: 150 }, totalFrames: 10, expected: false },
+      { name: "p50 one below the 100 threshold", deltas: stableDeltas, percentiles: { percentile50th: 99, percentile90th: 80, percentile95th: 150 }, totalFrames: 10, expected: true },
+      { name: "p90 exactly at the 100 threshold", deltas: stableDeltas, percentiles: { percentile50th: 50, percentile90th: 100, percentile95th: 150 }, totalFrames: 10, expected: false },
+      { name: "p95 exactly at the 200 threshold (not < 200)", deltas: stableDeltas, percentiles: { percentile50th: 50, percentile90th: 80, percentile95th: 200 }, totalFrames: 10, expected: false },
+      { name: "p95 one below the 200 threshold", deltas: stableDeltas, percentiles: { percentile50th: 50, percentile90th: 80, percentile95th: 199 }, totalFrames: 10, expected: true },
+      { name: "fractional percentiles floored under thresholds", deltas: stableDeltas, percentiles: { percentile50th: 99.9, percentile90th: 99.9, percentile95th: 199.9 }, totalFrames: 10, expected: true },
+      { name: "null percentiles treated as zero", deltas: stableDeltas, percentiles: { percentile50th: null, percentile90th: null, percentile95th: null }, totalFrames: 10, expected: true },
+      { name: "no new frames skips huge percentiles", deltas: { ...stableDeltas, totalFramesDelta: 0 }, percentiles: { percentile50th: 550, percentile90th: 550, percentile95th: 550 }, totalFrames: 10, expected: true },
+      { name: "too few frames (4 < 5) skips huge percentiles", deltas: stableDeltas, percentiles: { percentile50th: 550, percentile90th: 550, percentile95th: 550 }, totalFrames: 4, expected: true },
+      { name: "frames exactly at the 5-frame floor evaluates percentiles", deltas: stableDeltas, percentiles: { percentile50th: 550, percentile90th: 550, percentile95th: 550 }, totalFrames: 5, expected: false },
+      { name: "null totalFramesDelta always evaluates percentiles (fails on huge)", deltas: { ...stableDeltas, totalFramesDelta: null }, percentiles: { percentile50th: 550, percentile90th: 550, percentile95th: 550 }, totalFrames: 2, expected: false },
+      { name: "null totalFramesDelta with in-range percentiles passes", deltas: { ...stableDeltas, totalFramesDelta: null }, percentiles: { percentile50th: 50, percentile90th: 80, percentile95th: 150 }, totalFrames: 2, expected: true }
+    ];
+
+    cases.forEach(({ name, deltas, percentiles, totalFrames, expected }) => {
+      test(`checkStabilityCriteria returns ${expected} when ${name}`, function() {
+        expect(idle.checkStabilityCriteria(deltas, percentiles, totalFrames)).toBe(expected);
+      });
     });
+  });
 
-    test("should return false when deltas are non-zero", function() {
-      const deltas = {
-        missedVsyncDelta: 1,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: 50,
-        percentile90th: 80,
-        percentile95th: 150
-      };
+  describe("getUiStabilitySnapshot", function() {
+    // The measurement delay must sleep on the injected timer, not defaultTimer,
+    // so the method is testable without real wall-clock (issue #4172). We assert
+    // the pending sleep is registered on the FakeTimer and that the method
+    // completes only once that sleep is resolved.
+    test("sleeps on the injected timer for the measurement delay", async function() {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
+      const fakeAdb = new FakeAdbExecutor();
+      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      const snapshotIdle = new Idle(device, new FakeAdbClientFactory(fakeAdb), timer);
 
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
+      const result = await snapshotIdle.getUiStabilitySnapshot("com.example.app", 200);
 
-      expect(result).toBe(false);
-    });
-
-    test("should return false when 50th percentile exceeds threshold", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: 250, // > 200
-        percentile90th: 80,
-        percentile95th: 150
-      };
-
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
-
-      expect(result).toBe(false);
-    });
-
-    test("should return false when 90th percentile exceeds threshold", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: 50,
-        percentile90th: 250, // > 200
-        percentile95th: 150
-      };
-
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
-
-      expect(result).toBe(false);
-    });
-
-    test("should return false when 95th percentile exceeds threshold", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: 50,
-        percentile90th: 80,
-        percentile95th: 450 // > 400
-      };
-
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
-
-      expect(result).toBe(false);
-    });
-
-    test("should handle null percentiles as zero", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: null,
-        percentile90th: null,
-        percentile95th: null
-      };
-
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
-
-      expect(result).toBe(true); // null values become 0, which passes thresholds
-    });
-
-    test("should handle fractional percentiles by flooring them", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: 99.9, // floors to 99 (< 100)
-        percentile90th: 99.9, // floors to 99 (< 100)
-        percentile95th: 199.9 // floors to 199 (< 200)
-      };
-
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
-
-      expect(result).toBe(true);
-    });
-
-    test("should ignore percentiles when no new frames are rendered", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 0
-      };
-      const percentiles = {
-        percentile50th: 550,
-        percentile90th: 550,
-        percentile95th: 550
-      };
-
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 10);
-
-      expect(result).toBe(true);
-    });
-
-    test("should ignore percentiles when there are too few frames", function() {
-      const deltas = {
-        missedVsyncDelta: 0,
-        slowUiThreadDelta: 0,
-        frameDeadlineMissedDelta: 0,
-        totalFramesDelta: 1
-      };
-      const percentiles = {
-        percentile50th: 550,
-        percentile90th: 550,
-        percentile95th: 550
-      };
-
-      const result = idle.checkStabilityCriteria(deltas, percentiles, 2);
-
-      expect(result).toBe(true);
+      expect(result).toBeDefined();
+      // The measurement delay slept on the injected timer, not defaultTimer. If
+      // the source reverted to defaultTimer this history would be empty (and the
+      // test would hang on a real sleep without auto-advance).
+      expect(timer.getSleepHistory()).toContain(200);
     });
   });
 
@@ -519,60 +431,50 @@ describe("Idle - Unit Tests", function() {
   });
 
   describe("isSystemLauncher", function() {
-    test("should identify Android system UI packages", function() {
-      const systemPackages = [
-        "com.android.systemui",
-        "com.android.launcher3",
-        "com.google.android.apps.nexuslauncher",
-        "com.samsung.android.app.launcher",
-        "com.miui.home",
-        "com.oneplus.launcher",
-        "android",
-        "com.android.settings"
-      ];
+    // A package is a system launcher only when it IS a known system package or a
+    // sub-package of one (exact match or a `<pkg>.` prefix). The prior
+    // implementation used two-way substring containment, which classified any
+    // short substring of a system package name -- "a", "com", "android" -- as a
+    // system launcher (issue #4172). These rows pin the prefix semantics; the
+    // reverse-containment rows are the regression guard.
+    const invoke = (packageName: string | null | undefined): boolean =>
+      (idle as any).isSystemLauncher(packageName);
 
-      systemPackages.forEach(packageName => {
-        // Access the private method via any type casting for testing
-        const result = (idle as any).isSystemLauncher(packageName);
-        expect(result, `Expected ${packageName} to be identified as system package`).toBe(true);
-      });
-    });
+    const cases: Array<{ pkg: string | null | undefined; expected: boolean; why: string }> = [
+      // Exact known system/launcher packages.
+      { pkg: "com.android.systemui", expected: true, why: "exact systemui" },
+      { pkg: "com.android.launcher3", expected: true, why: "exact launcher3" },
+      { pkg: "com.google.android.apps.nexuslauncher", expected: true, why: "exact nexuslauncher" },
+      { pkg: "com.samsung.android.app.launcher", expected: true, why: "exact samsung launcher" },
+      { pkg: "com.miui.home", expected: true, why: "exact miui home" },
+      { pkg: "com.oneplus.launcher", expected: true, why: "exact oneplus" },
+      { pkg: "com.android.settings", expected: true, why: "exact settings" },
+      // Sub-packages of a known system package (prefix match).
+      { pkg: "com.miui.home.settings", expected: true, why: "sub-package of miui.home" },
+      { pkg: "com.android.launcher3.dev", expected: true, why: "sub-package of launcher3" },
+      { pkg: "com.sec.android.app.launcher.homescreen", expected: true, why: "sub-package of sec launcher" },
+      // Regular apps.
+      { pkg: "com.example.myapp", expected: false, why: "unrelated app" },
+      { pkg: "com.spotify.music", expected: false, why: "unrelated app" },
+      { pkg: "org.mozilla.firefox", expected: false, why: "unrelated app" },
+      { pkg: "com.whatsapp", expected: false, why: "unrelated app" },
+      // Reverse-containment regression rows: substrings of system package names
+      // that must NOT be classified as system launchers.
+      { pkg: "a", expected: false, why: "single char (was true via reverse containment)" },
+      { pkg: "com", expected: false, why: "bare com (was true via reverse containment)" },
+      { pkg: "com.android", expected: false, why: "bare com.android (was true via reverse containment)" },
+      { pkg: "android", expected: false, why: "bare android is not in the curated list" },
+      // Launcher-looking but not an actual system package (already false, stays false).
+      { pkg: "com.example.launcherpad", expected: false, why: "looks launcher-y but unrelated" },
+      // Falsy inputs.
+      { pkg: "", expected: false, why: "empty string" },
+      { pkg: null, expected: false, why: "null" },
+      { pkg: undefined, expected: false, why: "undefined" }
+    ];
 
-    test("should not identify regular app packages as system packages", function() {
-      const regularPackages = [
-        "com.example.myapp",
-        "com.google.android.apps.photos",
-        "com.spotify.music",
-        "com.facebook.katana",
-        "com.whatsapp",
-        "org.mozilla.firefox"
-      ];
-
-      regularPackages.forEach(packageName => {
-        const result = (idle as any).isSystemLauncher(packageName);
-        expect(result, `Expected ${packageName} to NOT be identified as system package`).toBe(false);
-      });
-    });
-
-    test("should handle partial package name matches for launchers", function() {
-      const partialMatches = [
-        "com.sec.android.app.launcher.homescreen", // Contains launcher
-        "com.miui.home.settings", // Contains miui.home
-        "com.android.launcher3.dev" // Contains launcher3
-      ];
-
-      partialMatches.forEach(packageName => {
-        const result = (idle as any).isSystemLauncher(packageName);
-        expect(result, `Expected ${packageName} to be identified as system package (partial match)`).toBe(true);
-      });
-    });
-
-    test("should handle empty or invalid package names", function() {
-      const invalidPackages = ["", null, undefined];
-
-      invalidPackages.forEach(packageName => {
-        const result = (idle as any).isSystemLauncher(packageName);
-        expect(result, `Expected ${packageName} to NOT be identified as system package`).toBe(false);
+    cases.forEach(({ pkg, expected, why }) => {
+      test(`isSystemLauncher returns ${expected} for ${JSON.stringify(pkg)} (${why})`, function() {
+        expect(invoke(pkg)).toBe(expected);
       });
     });
   });

@@ -192,6 +192,26 @@ describe("RealHierarchyPlatformValidator", () => {
       expect(validator.validate("android", viewHierarchy)).toEqual({ valid: true });
       expect(validator.validate("ios", viewHierarchy)).toEqual({ valid: true });
     });
+
+    test("accepts a hierarchy carrying BOTH platforms' signals for either platform", () => {
+      // The mismatch guard only fires on a hierarchy that is purely the OTHER
+      // platform (`ios && !android`). A hierarchy carrying both an iOS signal
+      // (screenScale) and an Android signal (density + android.* class) is
+      // ambiguous, so it is accepted for both platforms rather than rejected
+      // (issue #4172 item 11). This pins that bypass so any future tightening of
+      // the guard is a deliberate, visible change.
+      const both = {
+        hierarchy: {
+          node: { $: { class: "android.widget.FrameLayout" } },
+        },
+        screenScale: 3.0,
+        density: 440,
+        sdkInt: 34,
+      } as unknown as ViewHierarchyResult;
+
+      expect(validator.validate("android", both)).toEqual({ valid: true });
+      expect(validator.validate("ios", both)).toEqual({ valid: true });
+    });
   });
 });
 

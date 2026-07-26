@@ -39,12 +39,19 @@ describe("ObserveScreen", function() {
       expect(result.systemInsets).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
     });
 
-    test("should create base result with valid ISO timestamp", function() {
-      const result = observeScreen.createBaseResult();
+    test("stamps updatedAt from the injected clock, not the wall clock", function() {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(Date.parse("2023-06-15T12:00:00.000Z"));
+      const pinnedObserveScreen = new RealObserveScreen(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        undefined,
+        timer
+      );
 
-      const updatedAt = new Date(result.updatedAt);
-      expect(updatedAt.getTime()).not.toBe(NaN);
-      expect(Math.abs(Date.now() - updatedAt.getTime())).toBeLessThan(5000); // Within 5 seconds
+      const result = pinnedObserveScreen.createBaseResult();
+
+      expect(result.updatedAt).toBe("2023-06-15T12:00:00.000Z");
     });
 
     test("should append error message to empty error field", function() {
@@ -72,44 +79,10 @@ describe("ObserveScreen", function() {
       expect(result.error).toBe("Existing error; New error");
     });
 
-    test("should append multiple errors correctly", function() {
-      const result: ObserveResult = {
-        updatedAt: "2023-01-01T00:00:00.000Z",
-        screenSize: { width: 0, height: 0 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
-      };
-
-      observeScreen.appendError(result, "First error");
-      observeScreen.appendError(result, "Second error");
-      observeScreen.appendError(result, "Third error");
-
-      expect(result.error).toBe("First error; Second error; Third error");
-    });
-
-    test("should handle special characters in error messages", function() {
-      const result: ObserveResult = {
-        updatedAt: "2023-01-01T00:00:00.000Z",
-        screenSize: { width: 0, height: 0 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
-      };
-
-      observeScreen.appendError(result, "Error with: semicolon");
-      observeScreen.appendError(result, "Error with \"quotes\"");
-
-      expect(result.error).toBe("Error with: semicolon; Error with \"quotes\"");
-    });
-
-    test("should handle empty error message gracefully", function() {
-      const result: ObserveResult = {
-        updatedAt: "2023-01-01T00:00:00.000Z",
-        screenSize: { width: 0, height: 0 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
-      };
-
-      observeScreen.appendError(result, "");
-
-      expect(result.error).toBe("");
-    });
+    // The join rules (semicolon separator, empty-message handling, N-way
+    // accumulation) are exercised directly in ObserveError.test.ts. appendError
+    // is only a thin delegate, so these two tests pin the delegation itself
+    // (empty -> set, existing -> joined) and the rest were removed (issue #4172 D9).
 
     test("should populate observable element lists", async function() {
       const viewHierarchy = new FakeViewHierarchy();

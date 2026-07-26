@@ -95,6 +95,40 @@ describe("UninstallApp (iOS simulator)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("Invalid package name provided");
   });
+
+  test("forces keepData to false on iOS even when the caller requests keepData:true", async () => {
+    fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    fakeUninstaller.uninstallApp = async (deviceUdid, bundleId, isSimulator) => {
+      fakeUninstaller.calls.push({ deviceUdid, bundleId, isSimulator });
+      fakeSimctl.setInstalledApps([]);
+    };
+
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    // iOS cannot keep app data during uninstall — the request must be ignored.
+    const result = await uninstall.execute("com.example.app", true);
+
+    expect(result.success).toBe(true);
+    expect(result.keepData).toBe(false);
+  });
+});
+
+describe("UninstallApp (unsupported platform)", () => {
+  test("throws for an unknown platform instead of silently no-oping", async () => {
+    const webDevice = {
+      deviceId: "web-device-1",
+      name: "web",
+      platform: "web"
+    } as unknown as BootedDevice;
+
+    const uninstall = new UninstallApp(
+      webDevice,
+      nullAdbFactory,
+      new FakeSimctl(),
+      new FakeDeviceAppUninstaller()
+    );
+
+    await expect(uninstall.execute("com.example.app")).rejects.toThrow("Unsupported platform: web");
+  });
 });
 
 describe("UninstallApp (iOS physical device)", () => {
@@ -141,19 +175,6 @@ describe("UninstallApp (Android)", () => {
 
   let fakeAdb: FakeAdbClient;
 
-  function setupAndroidApp(adb: FakeAdbClient, packageName: string, userId: number): void {
-    // pm list packages --user N (all packages)
-    adb.setCommandResult(
-      `shell pm list packages --user ${userId}`,
-      `package:${packageName}\npackage:com.android.settings`
-    );
-    // pm list packages -s --user N (system packages)
-    adb.setCommandResult(
-      `shell pm list packages -s --user ${userId}`,
-      "package:com.android.settings"
-    );
-  }
-
   function setupNoApp(adb: FakeAdbClient, userId: number): void {
     adb.setCommandResult(
       `shell pm list packages --user ${userId}`,
@@ -169,25 +190,14 @@ describe("UninstallApp (Android)", () => {
     fakeAdb = new FakeAdbClient();
   });
 
-  test("uninstalls installed foreground app", async () => {
+  test("emits force-stop then a data-clearing pm uninstall for the target user", async () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
-    setupAndroidApp(fakeAdb, "com.example.app", 0);
-
-    // After uninstall, the second listPackages call should show no app
-    let uninstallCalled = false;
-    const origExecute = fakeAdb.executeCommand.bind(fakeAdb);
-    fakeAdb.executeCommand = async (cmd: string, ...rest: any[]) => {
-      if (cmd.includes("pm uninstall")) {
-        uninstallCalled = true;
-        // Simulate removal: update package list results
-        fakeAdb.setCommandResult(
-          "shell pm list packages --user 0",
-          "package:com.android.settings"
-        );
-      }
-      return origExecute(cmd, ...rest);
-    };
+    // Pre-uninstall the app is present; the post-uninstall re-check sees it gone.
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
+      { stdout: "package:com.example.app\npackage:com.android.settings" },
+      { stdout: "package:com.android.settings" }
+    ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
     const result = await uninstall.execute("com.example.app");
@@ -196,33 +206,32 @@ describe("UninstallApp (Android)", () => {
     expect(result.wasInstalled).toBe(true);
     expect(result.keepData).toBe(false);
     expect(result.userId).toBe(0);
-    expect(uninstallCalled).toBe(true);
+
+    // Assert the exact emitted commands — no -k because keepData is false.
+    const commands = fakeAdb.getCommandCalls().map(call => call.command);
+    expect(commands).toContain("shell am force-stop --user 0 com.example.app");
+    expect(commands).toContain("shell pm uninstall --user 0 com.example.app");
+    expect(commands).not.toContain("shell pm uninstall --user 0 -k com.example.app");
   });
 
-  test("uninstalls with keepData flag", async () => {
+  test("emits pm uninstall -k when keepData is requested", async () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
-    setupAndroidApp(fakeAdb, "com.example.app", 0);
-
-    let keepDataCmd = false;
-    const origExecute = fakeAdb.executeCommand.bind(fakeAdb);
-    fakeAdb.executeCommand = async (cmd: string, ...rest: any[]) => {
-      if (cmd.includes("pm uninstall") && cmd.includes("-k")) {
-        keepDataCmd = true;
-        fakeAdb.setCommandResult(
-          "shell pm list packages --user 0",
-          "package:com.android.settings"
-        );
-      }
-      return origExecute(cmd, ...rest);
-    };
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
+      { stdout: "package:com.example.app\npackage:com.android.settings" },
+      { stdout: "package:com.android.settings" }
+    ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
     const result = await uninstall.execute("com.example.app", true);
 
     expect(result.success).toBe(true);
     expect(result.keepData).toBe(true);
-    expect(keepDataCmd).toBe(true);
+
+    // The -k flag preserves app data; assert the exact command carried it.
+    const commands = fakeAdb.getCommandCalls().map(call => call.command);
+    expect(commands).toContain("shell pm uninstall --user 0 -k com.example.app");
+    expect(commands).not.toContain("shell pm uninstall --user 0 com.example.app");
   });
 
   test("returns not installed when package is missing", async () => {
@@ -246,26 +255,19 @@ describe("UninstallApp (Android)", () => {
     ]);
     // App installed under work profile (userId 10)
     setupNoApp(fakeAdb, 0);
-    setupAndroidApp(fakeAdb, "com.example.app", 10);
-
-    let uninstallUserId: number | null = null;
-    const origExecute = fakeAdb.executeCommand.bind(fakeAdb);
-    fakeAdb.executeCommand = async (cmd: string, ...rest: any[]) => {
-      if (cmd.includes("pm uninstall --user 10")) {
-        uninstallUserId = 10;
-        fakeAdb.setCommandResult(
-          "shell pm list packages --user 10",
-          "package:com.android.settings"
-        );
-      }
-      return origExecute(cmd, ...rest);
-    };
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 10", [
+      { stdout: "package:com.example.app\npackage:com.android.settings" },
+      { stdout: "package:com.android.settings" }
+    ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
     const result = await uninstall.execute("com.example.app");
 
     expect(result.userId).toBe(10);
-    expect(uninstallUserId).toBe(10);
+    // The uninstall must target the work-profile user, not user 0.
+    const commands = fakeAdb.getCommandCalls().map(call => call.command);
+    expect(commands).toContain("shell pm uninstall --user 10 com.example.app");
+    expect(commands).not.toContain("shell pm uninstall --user 0 com.example.app");
   });
 
   test("returns failure for blank package name", async () => {

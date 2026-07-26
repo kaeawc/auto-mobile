@@ -184,4 +184,37 @@ describe("IosSimulatorPermissions", () => {
     await expect(reader.readPermissions(simulatorDevice.deviceId, "com.example.app")).resolves.toEqual([]);
     expect(sqlite.calls.map(call => call.command)).toEqual(["sqlite3", "sqlite3"]);
   });
+
+  // Issue #4169 item 14: a bundle id containing a single quote (or double quote /
+  // backslash) must not be able to break out of, or inject into, the TCC query.
+  // The value is carried as a BOUND `.parameter set :appId` value and the WHERE
+  // clause references `:appId`, so the raw id never lands in the SQL string.
+  describe("SqliteTccPermissionReader binds the bundle id safely", () => {
+    // [name, appId, expected bound .parameter set value including its wrapping quotes]
+    const bindCases: Array<[string, string, string]> = [
+      ["plain id", "com.example.app", "\"com.example.app\""],
+      ["single-quote injection attempt", "com.evil'); drop table access;--", "\"com.evil'); drop table access;--\""],
+      ["double-quote and backslash are escaped", "com.a\"b\\c", "\"com.a\\\"b\\\\c\""]
+    ];
+
+    test.each(bindCases)(
+      "binds :appId for %s instead of interpolating it",
+      async (_name, appId, expectedParameterValue) => {
+        const sqlite = new FakeSqliteCommandExecutor();
+        const reader = new SqliteTccPermissionReader(sqlite, "/Users/tester");
+
+        await reader.readPermissions(simulatorDevice.deviceId, appId, ["camera"]);
+
+        // The SELECT is the second sqlite3 invocation (the first reads pragma table_info).
+        const selectCall = sqlite.calls[1];
+        const setAppId = selectCall.args.find(arg => arg.startsWith(".parameter set :appId"));
+        expect(setAppId).toBe(`.parameter set :appId ${expectedParameterValue}`);
+
+        // The query text references the bound parameter and never the raw id.
+        const query = selectCall.args.at(-1) ?? "";
+        expect(query).toContain("where client = :appId");
+        expect(query).not.toContain(appId);
+      }
+    );
+  });
 });

@@ -570,12 +570,16 @@ object DaemonSocketPaths {
 
   fun socketPath(): String {
     val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.sock"
+    return resolveDaemonPath(
+      System.getenv("AUTOMOBILE_DAEMON_SOCKET_PATH")
+        ?: System.getenv("AUTO_MOBILE_DAEMON_SOCKET_PATH"),
+      "/tmp/auto-mobile-daemon-$userId.sock",
+    )
   }
 
   fun pidFilePath(): String {
     val userId = getUserId()
-    return resolvePidFilePath(
+    return resolveDaemonPath(
       System.getenv("AUTOMOBILE_DAEMON_PID_FILE_PATH")
         ?: System.getenv("AUTO_MOBILE_DAEMON_PID_FILE_PATH"),
       "/tmp/auto-mobile-daemon-$userId.pid",
@@ -583,10 +587,11 @@ object DaemonSocketPaths {
     )
   }
 
-  internal fun resolvePidFilePath(
+  internal fun resolveDaemonPath(
     override: String?,
     defaultPath: String,
-    daemonLaunchCwd: String,
+    daemonLaunchCwd: String =
+      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
   ): String {
     val configuredPath = override?.trim().takeUnless { it.isNullOrEmpty() } ?: return defaultPath
     val path = Path.of(configuredPath)
@@ -599,7 +604,8 @@ object DaemonSocketPaths {
     resolveClientVersion(
       daemonPackageVersion = System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION"),
       automobileVersion = System.getenv("AUTOMOBILE_VERSION"),
-      manifestVersion = DaemonSocketPaths::class.java.`package`?.implementationVersion,
+      manifestVersion =
+        DaemonSocketPaths::class.java.`package`?.implementationVersion ?: DesktopBuildInfo.VERSION,
     )
 
   internal fun resolveClientVersion(

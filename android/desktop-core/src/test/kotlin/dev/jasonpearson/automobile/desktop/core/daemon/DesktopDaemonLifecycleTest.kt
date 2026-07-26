@@ -352,11 +352,11 @@ class DesktopDaemonLifecycleTest {
   fun `resolves PID-file overrides using the daemon launch directory`() {
     assertEquals(
       "/tmp/automobile/daemon.pid",
-      DaemonSocketPaths.resolvePidFilePath("daemon.pid", "/tmp/default.pid", "/tmp/automobile"),
+      DaemonSocketPaths.resolveDaemonPath("daemon.pid", "/tmp/default.pid", "/tmp/automobile"),
     )
     assertEquals(
       "/var/run/automobile.pid",
-      DaemonSocketPaths.resolvePidFilePath(
+      DaemonSocketPaths.resolveDaemonPath(
         "/var/run/automobile.pid",
         "/tmp/default.pid",
         "/tmp/automobile",

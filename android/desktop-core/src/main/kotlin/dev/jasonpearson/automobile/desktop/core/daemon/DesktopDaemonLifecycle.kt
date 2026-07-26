@@ -59,7 +59,7 @@ internal class JsonDaemonPidFileReader(
         DaemonPidState(
           version =
             pidData["version"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
-          launchArguments = pidData["options"]?.jsonObject?.toLaunchArguments().orEmpty(),
+          launchArguments = (pidData["options"] as? JsonObject)?.toLaunchArguments().orEmpty(),
         )
       )
     } catch (_: Exception) {
@@ -100,7 +100,10 @@ internal class JsonDaemonPidFileReader(
     booleanOption("embeddedSdk", "--embedded-sdk")
     booleanOption("dismissKeyboardAfterInput", "--dismiss-keyboard-after-input")
     val eventAllMarkers = this@toLaunchArguments["eventAllMarkers"] as? JsonArray
-    val markerValues = eventAllMarkers?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
+    val markerValues =
+      eventAllMarkers
+        ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+        .orEmpty()
     if (markerValues.isNotEmpty()) {
       addAll(listOf("--event-all-markers", markerValues.joinToString(",")))
     } else {
@@ -187,10 +190,10 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
     descendants.forEach(ProcessHandle::destroy)
     process.destroy()
     if (!process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-      descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
       process.destroyForcibly()
       process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
     }
+    descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
   }
 
   internal fun commandTimeoutMillis(
@@ -296,10 +299,10 @@ internal class DesktopDaemonLifecycle(
       }
 
       val action = if (daemonAvailable) "restart" else "start"
-      val command =
-        packageDaemonCommand(expectedVersion, action, currentDaemon?.launchArguments.orEmpty())
       val commandResult =
         try {
+          val command =
+            packageDaemonCommand(expectedVersion, action, currentDaemon?.launchArguments.orEmpty())
           commandExecutor.execute(command)
         } catch (error: Exception) {
           return DaemonLifecycleResult.Failure(
@@ -371,7 +374,6 @@ internal class DesktopDaemonLifecycle(
     currentVersion: String?,
     expectedVersion: String,
   ): Boolean {
-    if (!versionsMatch(currentVersion, expectedVersion)) return socketChecker.isReady()
     repeat(SOCKET_PROBE_ATTEMPTS) { attempt ->
       if (socketChecker.isReady()) return true
       if (attempt + 1 < SOCKET_PROBE_ATTEMPTS) timer.sleep(SOCKET_PROBE_RETRY_DELAY_MS)

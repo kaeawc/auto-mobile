@@ -53,7 +53,11 @@ curl --fail --silent --show-error --max-time 5 \
 # CtrlProxy polls its SDK endpoint every two seconds after the warm-up observe.
 # Query through the public, daemon-backed tool until the batched events appear.
 for attempt in 1 2 3 4 5; do
-  graph="$(auto-mobile --debug --cli getNavigationGraph --platform ios --deviceId "${device_id}")"
+  if ! graph="$(auto-mobile --debug --cli getNavigationGraph --platform ios --deviceId "${device_id}")"; then
+    echo "getNavigationGraph attempt ${attempt} failed; retrying in 2s..." >&2
+    sleep 2
+    continue
+  fi
   if jq -e --arg home "${home_screen}" --arg detail "${detail_screen}" \
     '(if .content? then (.content[] | select(.type == "text").text | fromjson) else . end) as $result
       | ([$result.screens[].name] | index($home)) != null

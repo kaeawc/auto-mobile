@@ -82,6 +82,21 @@ describe("NavigateTo", () => {
   });
 
   describe("execute", () => {
+    test("creates the default UI-state setup after resolving an options session", async () => {
+      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+
+      await navigateTo.execute({
+        targetScreen: "HomeScreen",
+        platform: "android",
+        sessionUuid: "options-session"
+      });
+
+      const uiStateSetup = (navigateTo as unknown as {
+        uiStateSetup: { sessionUuid?: string } | null;
+      }).uiStateSetup;
+      expect(uiStateSetup?.sessionUuid).toBe("options-session");
+    });
+
     test("should return error when no current screen", async () => {
       // Inject fakeGraph via constructor
       navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);

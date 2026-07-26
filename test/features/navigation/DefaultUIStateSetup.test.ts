@@ -298,5 +298,19 @@ describe("DefaultUIStateSetup", () => {
       });
       expect(fakeAdb.getAllCommands()).toEqual([]);
     });
+
+    test("preserves Android's coordinate outside-tap recovery for popups", async () => {
+      const setup = makeSetup(nullObserve);
+
+      const dismissed = await (
+        setup as unknown as {
+          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).dismissTopModal({ type: "popup", layer: 1, windowId: 42 }, "android");
+
+      expect(dismissed).toBe(true);
+      const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
+      expect(fakeAdb.wasCommandExecuted("shell input tap 50 50")).toBe(true);
+    });
   });
 });

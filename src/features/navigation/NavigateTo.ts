@@ -39,7 +39,7 @@ export class NavigateTo {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private navigationManager: NavigationGraphService;
-  private uiStateSetup: UIStateSetup;
+  private uiStateSetup: UIStateSetup | null;
   private screenWaiter: ScreenTransitionWaiter;
   private timer: Timer;
   private pathOptimizer: PathOptimizer | undefined;
@@ -66,8 +66,7 @@ export class NavigateTo {
     this.pathOptimizer = pathOptimizer;
     this.sessionUuid = sessionUuid;
 
-    // Use injected dependencies or create defaults
-    this.uiStateSetup = uiStateSetup || new DefaultUIStateSetup(this.device, this.adb, undefined, timer, sessionUuid);
+    this.uiStateSetup = uiStateSetup;
     this.screenWaiter = screenWaiter || new DefaultScreenTransitionWaiter(
       this.navigationManager,
       NavigateTo.POLL_INTERVAL_MS
@@ -87,6 +86,9 @@ export class NavigateTo {
     const startTime = this.timer.now();
     const { targetScreen } = options;
     this.sessionUuid ??= options.sessionUuid;
+    const uiStateSetup = this.uiStateSetup
+      ?? new DefaultUIStateSetup(this.device, this.adb, undefined, this.timer, this.sessionUuid);
+    this.uiStateSetup = uiStateSetup;
 
     try {
       // Get current screen from navigation graph
@@ -235,14 +237,14 @@ export class NavigateTo {
           if (edge.interaction) {
             // Set up scroll position if required (must happen before UI state setup)
             if (edge.uiState?.scrollPosition) {
-              const scrollAction = await this.uiStateSetup.setupScrollPosition(edge.uiState.scrollPosition, options.platform);
+              const scrollAction = await uiStateSetup.setupScrollPosition(edge.uiState.scrollPosition, options.platform);
               if (scrollAction) {
                 executedPath.push(scrollAction);
               }
             }
 
             // Set up required UI state before executing the tool call
-            const setupActions = await this.uiStateSetup.setupUIState(edge, options.platform);
+            const setupActions = await uiStateSetup.setupUIState(edge, options.platform);
             if (setupActions.length > 0) {
               executedPath.push(...setupActions);
             }

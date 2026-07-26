@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import type { ExecResult } from "../../src/models";
+import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyProcessClient } from "../../src/utils/ios/IOSCtrlProxyProcessClient";
@@ -436,6 +435,42 @@ describe("IOSCtrlProxyManager", function() {
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
+
+    // PARAM-2 (#4177 item 8): the #2731 service-port-beats-default ordering had
+    // no test with BOTH candidate ports answering. The service port is probed
+    // first, so when both a runner on the service port and one on the default
+    // port answer validly for this device, the service port's report wins.
+    test("prefers the service port over the default when BOTH answer for this device (#2731)", async function() {
+      installHealthFakes({
+        8767: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8767 }),
+        8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 }),
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+      (manager as unknown as { servicePort: number }).servicePort = 8767;
+
+      expect(await manager.getReportedRunnerPort()).toBe(8767);
+    });
+
+    // PARAM-2: a truncated/non-JSON health body can't confirm the device, so the
+    // reported port must be nulled rather than partially parsed.
+    test("returns null when the health body is truncated JSON", async function() {
+      installHealthFakes({
+        8765: `{"status":"ok","deviceId":"${testDevice.deviceId}","port":87`,
+      });
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor
+      );
+
+      expect(await manager.getReportedRunnerPort()).toBeNull();
+    });
   });
 
   describe("getCapabilities", function() {
@@ -462,21 +497,52 @@ describe("IOSCtrlProxyManager", function() {
     });
   });
 
+  // REWRITE-2 (#4177 item 6): the old "should not throw" tests passed even with
+  // the method bodies deleted. `isRunning` caches its health result for
+  // STATUS_CACHE_TTL, so a stale cached `false` is served until the cache is
+  // cleared. These assert the observable re-probe: only after clearing does a
+  // now-healthy endpoint flip the cached answer.
   describe("clearCaches", function() {
-    test("should clear all cached state", function() {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+    test("forces isRunning to re-probe the health endpoint after clearing", async function() {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          ""
+        )
+      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
 
-      // This should not throw
+      expect(await manager.isRunning()).toBe(false);   // probes, caches false
+      healthy = true;
+      expect(await manager.isRunning()).toBe(false);   // cached false is served
       manager.clearCaches();
+      expect(await manager.isRunning()).toBe(true);     // cache cleared → re-probe
     });
   });
 
   describe("resetSetupState", function() {
-    test("should reset setup state and clear caches", function() {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+    test("clears the running cache so isRunning re-probes", async function() {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          ""
+        )
+      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
 
-      // This should not throw
+      expect(await manager.isRunning()).toBe(false);
+      healthy = true;
+      expect(await manager.isRunning()).toBe(false);
       manager.resetSetupState();
+      expect(await manager.isRunning()).toBe(true);
     });
   });
 
@@ -2188,162 +2254,6 @@ describe("IOSCtrlProxyManager", function() {
         /port 8765 still held by PID 5555 .*xcodebuild test-without-building/
       );
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
-    });
-  });
-});
-
-function createExecResult(stdout: string, stderr: string): ExecResult {
-  return {
-    stdout,
-    stderr,
-    toString: () => stdout,
-    trim: () => stdout.trim(),
-    includes: (searchString: string) => stdout.includes(searchString)
-  };
-}
-
-describe("FakeIOSCtrlProxyManager", function() {
-  let fakeManager: FakeIOSCtrlProxyManager;
-
-  beforeEach(function() {
-    fakeManager = new FakeIOSCtrlProxyManager();
-  });
-
-  describe("state configuration", function() {
-    test("should configure installed state", async function() {
-      expect(await fakeManager.isInstalled()).toBe(false);
-
-      fakeManager.setInstalled(true);
-      expect(await fakeManager.isInstalled()).toBe(true);
-    });
-
-    test("should configure running state", async function() {
-      expect(await fakeManager.isRunning()).toBe(false);
-
-      fakeManager.setRunning(true);
-      expect(await fakeManager.isRunning()).toBe(true);
-    });
-
-    test("should configure available state", async function() {
-      expect(await fakeManager.isAvailable()).toBe(false);
-
-      fakeManager.setAvailable(true);
-      expect(await fakeManager.isAvailable()).toBe(true);
-    });
-  });
-
-  describe("operation tracking", function() {
-    test("should track isInstalled calls", async function() {
-      await fakeManager.isInstalled();
-      await fakeManager.isInstalled();
-
-      expect(fakeManager.wasMethodCalled("isInstalled")).toBe(true);
-      expect(fakeManager.getCallCount("isInstalled")).toBe(2);
-    });
-
-    test("should track isRunning calls", async function() {
-      await fakeManager.isRunning();
-
-      expect(fakeManager.wasMethodCalled("isRunning")).toBe(true);
-      expect(fakeManager.getCallCount("isRunning")).toBe(1);
-    });
-
-    test("should track setup calls with force parameter", async function() {
-      await fakeManager.setup(false);
-      await fakeManager.setup(true);
-
-      const operations = fakeManager.getExecutedOperations();
-      expect(operations).toContain("setup:force=false");
-      expect(operations).toContain("setup:force=true");
-    });
-
-    test("should clear history", async function() {
-      await fakeManager.isInstalled();
-      await fakeManager.isRunning();
-
-      expect(fakeManager.getExecutedOperations().length).toBe(2);
-
-      fakeManager.clearHistory();
-      expect(fakeManager.getExecutedOperations().length).toBe(0);
-    });
-  });
-
-  describe("start and stop", function() {
-    test("should set running state on start", async function() {
-      expect(await fakeManager.isRunning()).toBe(false);
-
-      await fakeManager.start();
-      expect(await fakeManager.isRunning()).toBe(true);
-      expect(fakeManager.wasMethodCalled("start")).toBe(true);
-    });
-
-    test("should clear running state on stop", async function() {
-      fakeManager.setRunning(true);
-      expect(await fakeManager.isRunning()).toBe(true);
-
-      await fakeManager.stop();
-      expect(await fakeManager.isRunning()).toBe(false);
-      expect(fakeManager.wasMethodCalled("stop")).toBe(true);
-    });
-
-    test("should fail start when configured to fail", async function() {
-      fakeManager.setStartShouldFail(true);
-
-      await expect(fakeManager.start()).rejects.toThrow("Failed to start IOSCtrlProxy");
-    });
-
-    test("should fail stop when configured to fail", async function() {
-      fakeManager.setStopShouldFail(true);
-
-      await expect(fakeManager.stop()).rejects.toThrow("Failed to stop IOSCtrlProxy");
-    });
-  });
-
-  describe("setup", function() {
-    test("should return success when service starts", async function() {
-      const result = await fakeManager.setup();
-
-      expect(result.success).toBe(true);
-      expect(result.message).toBe("IOSCtrlProxy started successfully");
-    });
-
-    test("should return already running message when service is running", async function() {
-      fakeManager.setRunning(true);
-
-      const result = await fakeManager.setup(false);
-
-      expect(result.success).toBe(true);
-      expect(result.message).toBe("IOSCtrlProxy was already running");
-    });
-
-    test("should force restart even when running", async function() {
-      fakeManager.setRunning(true);
-
-      const result = await fakeManager.setup(true);
-
-      expect(result.success).toBe(true);
-      expect(result.message).toBe("IOSCtrlProxy started successfully");
-    });
-
-    test("should return failure when setup fails", async function() {
-      fakeManager.setSetupShouldFail(true);
-
-      const result = await fakeManager.setup();
-
-      expect(result.success).toBe(false);
-      expect(result.message).toBe("Failed to setup IOSCtrlProxy");
-      expect(result.error).toBe("Mock setup failure");
-    });
-  });
-
-  describe("getServicePort", function() {
-    test("should return default port", function() {
-      expect(fakeManager.getServicePort()).toBe(8765);
-    });
-
-    test("should return configured port", function() {
-      fakeManager.setServicePort(9999);
-      expect(fakeManager.getServicePort()).toBe(9999);
     });
   });
 });

@@ -70,6 +70,39 @@ describe("XcodebuildClient executeCommand timeout", () => {
     expect(capturedSignal?.aborted).toBe(false);
   });
 
+  test("refuses to run a non-probe command when xcodebuild is not installed", async () => {
+    // The only refusal branch in the file (executeCommand, not-a-probe path) was
+    // untested. The availability probe (`-version`) fails, so a real command
+    // must be turned away rather than executed against a missing toolchain.
+    const client = new XcodebuildClient(async (_file, args) => {
+      if (args.join(" ") === "-version") {
+        throw new Error("xcodebuild: command not found");
+      }
+      return createExecResult("should not reach", "");
+    });
+
+    await expect(client.executeCommand(["-showBuildSettings"])).rejects.toThrow(
+      "xcodebuild is not available. Please install Xcode to continue."
+    );
+  });
+
+  test("releases the injected timer handle after a timed command completes", async () => {
+    // Timer hygiene: the finally must clear the timeout on the INJECTED timer, not
+    // the global one, or the FakeTimer keeps a dangling pending timeout (a real
+    // handle leak in production). getPendingTimeoutCount() must return to 0.
+    const timer = new FakeTimer();
+    const client = new XcodebuildClient(async (_file, args) => {
+      if (args.join(" ") === "-version") {
+        return createExecResult("Xcode 26.5", "");
+      }
+      return createExecResult("ok", "");
+    }, timer);
+
+    await client.executeCommand(["-list"], { timeoutMs: 5000 });
+
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("bounds the availability probe within the command timeout", async () => {
     const timer = new FakeTimer();
     let probeSignal: AbortSignal | undefined;

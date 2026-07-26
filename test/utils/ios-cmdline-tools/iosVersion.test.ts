@@ -26,6 +26,48 @@ describe("parseIosMajorVersion", () => {
     expect(parseIosMajorVersion("")).toBeNull();
     expect(parseIosMajorVersion("unknown")).toBeNull();
   });
+
+  // Boundary table: the leading-digit regex `/^(\d+)/` on trimmed input has
+  // several surprising-but-load-bearing outcomes that no earlier test pins.
+  // `"0"` returns the falsy `0` (NOT null), so callers must use `=== null`, not
+  // truthiness, to detect "unknown". `"1e309"` reads only the leading `1` (the
+  // exponent is not part of the leading digit run — it is NOT parsed as
+  // Infinity). `"018"` reads `18` (base-10, no octal). Negatives and
+  // leading-dot forms have no leading digit and are "unknown".
+  const boundaryRows: ReadonlyArray<{ input: string; expected: number | null }> = [
+    { input: "0", expected: 0 },
+    { input: "1", expected: 1 },
+    { input: "018", expected: 18 },
+    { input: "1e309", expected: 1 },
+    { input: "26.2", expected: 26 },
+    { input: "17.5.1", expected: 17 },
+    { input: "18", expected: 18 },
+    { input: "007", expected: 7 },
+    { input: "42abc", expected: 42 },
+    { input: "  9 ", expected: 9 },
+    { input: "\t26.0\n", expected: 26 },
+    { input: "-3", expected: null },
+    { input: ".5", expected: null },
+    { input: "v18", expected: null },
+    { input: "iOS 18", expected: null },
+    { input: "unknown", expected: null },
+    { input: " ", expected: null },
+    { input: "NaN", expected: null },
+    { input: "Infinity", expected: null },
+  ];
+
+  for (const { input, expected } of boundaryRows) {
+    test(`parses ${JSON.stringify(input)} as ${expected === null ? "null" : expected}`, () => {
+      expect(parseIosMajorVersion(input)).toBe(expected);
+    });
+  }
+
+  test("distinguishes the falsy 0 from unknown (null)", () => {
+    // Regression guard: callers must not collapse `0` into "unknown".
+    expect(parseIosMajorVersion("0")).toBe(0);
+    expect(parseIosMajorVersion("0")).not.toBeNull();
+    expect(parseIosMajorVersion("x")).toBeNull();
+  });
 });
 
 describe("iosMajorVersionFromSimctlListDevices", () => {

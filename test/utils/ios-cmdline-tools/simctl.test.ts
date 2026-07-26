@@ -638,13 +638,49 @@ describe("Simctl", function() {
       expect(runtimes[0].isAvailable).toBe(true);
     });
 
-    test("should throw when runtimes command fails", async function() {
-      mockExecAsync = async (): Promise<ExecResult> => {
-        throw new Error("simctl failed");
+    // REWRITE (#4177 item 2): a bare `rejects.toThrow()` here passed on the
+    // availability-probe error, not the `list runtimes` command error, because
+    // `ensureLocalSimctlAvailable` fires first. Let the probe succeed so only the
+    // real command fails, and assert the *command's* message surfaces.
+    test("surfaces the runtimes command error, not the availability-probe error", async function() {
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 0.0", "");
+        }
+        throw new Error("simctl list runtimes exploded");
       };
 
       simctl = new Simctl(null, mockExecAsync);
-      await expect(simctl.getRuntimes()).rejects.toThrow();
+      await expect(simctl.getRuntimes()).rejects.toThrow("simctl list runtimes exploded");
+    });
+
+    // ADD (#4177 item 3): malformed simctl output must degrade to "no runtimes"
+    // via the catch, and a valid payload that simply omits the `runtimes` key
+    // must degrade via `data.runtimes ?? []` — a different branch (SimCtlClient
+    // :1119) that no test pinned. A regression in either would silently report
+    // zero installed runtimes with no error.
+    test("returns an empty list when the runtimes JSON is malformed (swallow)", async function() {
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 0.0", "");
+        }
+        return createExecResult("this is not { valid json", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+      expect(await simctl.getRuntimes()).toEqual([]);
+    });
+
+    test("returns an empty list when the runtimes key is absent (data.runtimes ?? [])", async function() {
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 0.0", "");
+        }
+        return createExecResult(JSON.stringify({ notRuntimes: [] }), "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+      expect(await simctl.getRuntimes()).toEqual([]);
     });
   });
 
@@ -671,13 +707,43 @@ describe("Simctl", function() {
       expect(types[0].name).toBe("iPhone 17 Pro");
     });
 
-    test("should throw when devicetypes command fails", async function() {
-      mockExecAsync = async (): Promise<ExecResult> => {
-        throw new Error("simctl failed");
+    // REWRITE (#4177 item 2): as with getRuntimes, assert the command error and
+    // not the availability probe.
+    test("surfaces the devicetypes command error, not the availability-probe error", async function() {
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 0.0", "");
+        }
+        throw new Error("simctl list devicetypes exploded");
       };
 
       simctl = new Simctl(null, mockExecAsync);
-      await expect(simctl.getDeviceTypes()).rejects.toThrow();
+      await expect(simctl.getDeviceTypes()).rejects.toThrow("simctl list devicetypes exploded");
+    });
+
+    // ADD (#4177 item 3): malformed / key-absent payloads degrade to [].
+    test("returns an empty list when the devicetypes JSON is malformed (swallow)", async function() {
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 0.0", "");
+        }
+        return createExecResult("<<< not json >>>", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+      expect(await simctl.getDeviceTypes()).toEqual([]);
+    });
+
+    test("returns an empty list when the devicetypes key is absent (data.devicetypes ?? [])", async function() {
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 0.0", "");
+        }
+        return createExecResult(JSON.stringify({ somethingElse: 1 }), "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+      expect(await simctl.getDeviceTypes()).toEqual([]);
     });
   });
 
@@ -721,56 +787,62 @@ describe("Simctl", function() {
       }
     }
 
-    test("skips open -a Simulator when AUTOMOBILE_IOS_HEADLESS=true (no launchctl probe)", async function() {
-      process.env[HEADLESS_ENV] = "true";
-      try {
-        simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
-        await simctl.openSimulatorApp();
-        expect(openCalls()).toHaveLength(0);
-        expect(launchctlCalls()).toHaveLength(0);
-      } finally {
-        restoreEnv();
-      }
-    });
+    // Decision table (#4177 item 4 / PARAM-1). Resolution order that MUST hold:
+    //   1. A non-darwin host can never launch Simulator.app, so it is headless
+    //      regardless of the override — this gate must come BEFORE the override
+    //      is consumed, otherwise AUTOMOBILE_IOS_HEADLESS=false (or "") would
+    //      shell `open -a Simulator` on Linux/Windows (the bug this pins).
+    //   2. On darwin, the env override short-circuits the launchctl probe:
+    //      "true"/"1" ⇒ headless (skip), anything else defined ⇒ force GUI.
+    //   3. With no override on darwin, probe launchctl: "Aqua" ⇒ GUI, otherwise
+    //      headless; a probe failure falls back to GUI.
+    // expectedProbes is the launchctl-probe count; the override path must never
+    // probe (short-circuit), so an override row always expects 0 probes.
+    type Manager = "Aqua" | "System" | Error;
+    const headlessRows: ReadonlyArray<{
+      override: string | undefined;
+      platform: NodeJS.Platform;
+      manager: Manager;
+      expectedOpens: number;
+      expectedProbes: number;
+    }> = [
+      // darwin, no override → launchctl decides
+      { override: undefined, platform: "darwin", manager: "Aqua", expectedOpens: 1, expectedProbes: 1 },
+      { override: undefined, platform: "darwin", manager: "System", expectedOpens: 0, expectedProbes: 1 },
+      { override: undefined, platform: "darwin", manager: new Error("launchctl unavailable"), expectedOpens: 1, expectedProbes: 1 },
+      // darwin, override short-circuits the probe
+      { override: "true", platform: "darwin", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      { override: "1", platform: "darwin", manager: "System", expectedOpens: 0, expectedProbes: 0 },
+      { override: "false", platform: "darwin", manager: "System", expectedOpens: 1, expectedProbes: 0 },
+      { override: "0", platform: "darwin", manager: "System", expectedOpens: 1, expectedProbes: 0 },
+      { override: "", platform: "darwin", manager: "System", expectedOpens: 1, expectedProbes: 0 },
+      { override: "maybe", platform: "darwin", manager: "Aqua", expectedOpens: 1, expectedProbes: 0 },
+      // non-darwin → always headless, never probes, never opens, whatever the override
+      { override: undefined, platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      { override: "true", platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      { override: "false", platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      { override: "false", platform: "win32", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+      { override: "", platform: "linux", manager: "Aqua", expectedOpens: 0, expectedProbes: 0 },
+    ];
 
-    test("forces open -a Simulator when AUTOMOBILE_IOS_HEADLESS=false even if session is non-Aqua", async function() {
-      process.env[HEADLESS_ENV] = "false";
-      try {
-        simctl = new Simctl(null, recordingExec("System"), new FakeTimer(), "darwin");
-        await simctl.openSimulatorApp();
-        expect(openCalls()).toHaveLength(1);
-        expect(launchctlCalls()).toHaveLength(0);
-      } finally {
-        restoreEnv();
-      }
-    });
-
-    test("calls open -a Simulator when launchctl reports an Aqua GUI session", async function() {
-      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
-      await simctl.openSimulatorApp();
-      expect(launchctlCalls()).toHaveLength(1);
-      expect(openCalls()).toHaveLength(1);
-    });
-
-    test("skips open -a Simulator when launchctl reports a non-Aqua (headless) session", async function() {
-      simctl = new Simctl(null, recordingExec("System"), new FakeTimer(), "darwin");
-      await simctl.openSimulatorApp();
-      expect(launchctlCalls()).toHaveLength(1);
-      expect(openCalls()).toHaveLength(0);
-    });
-
-    test("skips open -a Simulator on non-darwin platforms without any exec", async function() {
-      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "linux");
-      await simctl.openSimulatorApp();
-      expect(calls).toHaveLength(0);
-    });
-
-    test("attempts open -a Simulator when launchctl probe fails (safe fallback)", async function() {
-      simctl = new Simctl(null, recordingExec(new Error("launchctl unavailable")), new FakeTimer(), "darwin");
-      await simctl.openSimulatorApp();
-      expect(launchctlCalls()).toHaveLength(1);
-      expect(openCalls()).toHaveLength(1);
-    });
+    for (const row of headlessRows) {
+      const label = `override=${JSON.stringify(row.override)} platform=${row.platform} manager=${row.manager instanceof Error ? "probe-error" : row.manager}`;
+      test(`opens×${row.expectedOpens} probes×${row.expectedProbes} for ${label}`, async function() {
+        if (row.override === undefined) {
+          delete process.env[HEADLESS_ENV];
+        } else {
+          process.env[HEADLESS_ENV] = row.override;
+        }
+        try {
+          simctl = new Simctl(null, recordingExec(row.manager), new FakeTimer(), row.platform);
+          await simctl.openSimulatorApp();
+          expect(openCalls()).toHaveLength(row.expectedOpens);
+          expect(launchctlCalls()).toHaveLength(row.expectedProbes);
+        } finally {
+          restoreEnv();
+        }
+      });
+    }
 
     test("caches the headless detection so launchctl is probed at most once", async function() {
       simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");

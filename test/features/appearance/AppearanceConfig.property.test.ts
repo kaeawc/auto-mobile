@@ -39,9 +39,14 @@ describe("parseAppearanceConfig (property-based)", () => {
     );
   });
 
-  test("a valid mode is accepted case- and whitespace-insensitively", () => {
+  test("a valid mode is accepted under any casing and surrounding whitespace", () => {
+    const ws = fc.string({ unit: fc.constantFrom(" ", "\t", "\n", "\r"), maxLength: 3 });
+    const mixedCase = (w: string): fc.Arbitrary<string> =>
+      fc.array(fc.boolean(), { minLength: w.length, maxLength: w.length })
+        .map(bits => w.split("").map((ch, i) => (bits[i] ? ch.toUpperCase() : ch)).join(""));
+    // Arbitrary casing (e.g. "LiGhT") wrapped in arbitrary trimmable whitespace.
     const cased = fc.constantFrom(...MODES).chain(m =>
-      fc.tuple(fc.constantFrom(m, m.toUpperCase(), `  ${m}  `)).map(([v]) => ({ expected: m, value: v }))
+      fc.record({ expected: fc.constant(m), value: fc.tuple(ws, mixedCase(m), ws).map(([a, b, c]) => `${a}${b}${c}`) })
     );
     fc.assert(
       fc.property(cased, ({ expected, value }) => parseAppearanceConfig({ defaultMode: value }).defaultMode === expected),

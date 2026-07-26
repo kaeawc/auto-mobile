@@ -101,14 +101,33 @@ and unit-testable without a device.
 
 ### Pairing is identity, never elapsed time
 
-The daemon assigns a monotonic `captureSequence` per device on every
-`hierarchy_update` it pushes, and echoes that id on every `screenshot_update`
-whose `screenWidth`/`screenHeight` were derived from that hierarchy. (Both
-platforms' capture clients cache the screen dimensions *from* a hierarchy and then
-push that same hierarchy, so "the newest hierarchy pushed for this device" is
-exactly the capture the screenshot's geometry came from.) Equal ids therefore mean
-"these two messages describe the same captured device state" — a fact, not an
-inference.
+The daemon assigns a monotonic `captureSequence` on every `hierarchy_update` it
+pushes. A `screenshot_update` carries that id **only when the daemon has verified
+that the frame's real pixel dimensions match the geometry its capture client
+claimed for it**; otherwise the field is absent. Equal ids therefore mean "these
+two messages describe the same captured device state" — a fact, not an inference.
+
+That verification is the load-bearing part. A capture client's declared
+`screenWidth`/`screenHeight` are read from a screen-dimension cache derived from
+the last hierarchy it processed, so they are a *claim*, not a measurement: when
+the device resolution changes, a screenshot can carry fresh 720x1560 pixels while
+the cache — and the claim — is still the previous 1080x2340. Echoing "the newest
+hierarchy pushed for this device" onto such a frame would stamp the stale
+geometry's id onto new pixels and let a client pair them, reintroducing the exact
+mis-scaled tap one level down. So the daemon measures the frame's header and
+refuses to stamp on mismatch. It also publishes the *measured* dimensions, so a
+client falling back to them maps through the pixels it is actually rendering.
+
+The identity source is monotonic for the daemon process's lifetime and is never
+reset, so an id cannot be reused after a device reconnect and collide with a
+pre-drop hierarchy a client still holds. On connection loss the device's *current*
+id is dropped, so screenshots arriving before the first post-reconnect hierarchy
+carry none.
+
+A frame gets no identity — and the client fails closed with
+`CaptureIdentityUnavailable` — whenever it cannot be proven: unmeasurable bytes, a
+caller whose dimensions have no tracked capture (e.g. a one-off screenshot that
+reads its own PNG header), before the first hierarchy, or after a reconnect.
 
 Two things that look like they would work, and do not:
 
@@ -127,6 +146,12 @@ Two things that look like they would work, and do not:
 The only time values this policy compares are **client-stamped receive instants
 against the client's own clock**, for recency. No comparison mixes clocks.
 
+That client clock must be **monotonic**, not wall time. A wall clock can step
+backwards (NTP correction, a manual change, a VM or laptop resuming); a backwards
+step while a source is stalled makes a frame's computed age negative, so every
+freshness bound passes and a frozen mirror stays controllable. Reserve wall time
+for display timestamps.
+
 Because staleness is the passage of time rather than an event, a client must
 re-evaluate availability on a timer as well as on source updates. A stalled relay
 produces nothing at all.
@@ -144,9 +169,9 @@ Expressed as snapshot transitions:
 
 | Event | Transition | What the client renders |
 | --- | --- | --- |
-| Input forwarded successfully | `Idle -> AwaitingSnapshot`, recording the dispatched `sequence` | The **retained** pre-input snapshot, unchanged and still clickable — it is the best available truth. A screenshot-only update in this interval carries a `captureSequence` the retained hierarchy does not match, so it yields no snapshot and does not replace what is on screen |
+| Input forwarded successfully | `Idle -> AwaitingSnapshot`, recording the dispatched `captureSequence` | The **retained** pre-input snapshot, unchanged and still clickable — it is the best available truth. A screenshot-only update in this interval carries a `captureSequence` the retained hierarchy does not match, so it yields no snapshot and does not replace what is on screen |
 | Input not dispatched (off-screen point, or the bounded queue rejected it) | no transition | Unchanged; nothing reached the device, so there is nothing to wait for |
-| First snapshot with a strictly greater `sequence` | `AwaitingSnapshot -> Settled` | The new snapshot |
+| First snapshot from a strictly greater **capture** | `AwaitingSnapshot -> Settled` | The new snapshot |
 | No superseding snapshot within 3000 ms | `AwaitingSnapshot -> Settled` | Whatever is current; the freshness bound above independently retires the stale frame and drops control |
 | Input failed or was rejected | `-> Settled` immediately | Unchanged state plus the daemon's actionable error |
 | Device switch, stream disconnect, mode change | `-> Idle` | A pending wait is dropped; an input from the previous context never settles one in the new context |
@@ -154,8 +179,16 @@ Expressed as snapshot transitions:
 Two consequences worth stating explicitly:
 
 - **Settling implies both sources caught up.** A snapshot exists only when its
-  screenshot and hierarchy are paired, so a client can never settle on a fresh
-  screenshot that still carries the pre-input hierarchy.
+  screenshot and hierarchy share a capture identity, so a client can never settle
+  on a fresh screenshot that still carries the pre-input hierarchy. Note this must
+  key on the **capture** id, not on the client's own per-update counter: that
+  counter advances for every applied screenshot, including a duplicate or keepalive
+  frame still belonging to the pre-input capture.
+
+- **The retained snapshot owns its pixels.** While awaiting, the client renders the
+  retained snapshot's *bytes and dimensions* as well as its tree. Pulling the bytes
+  from newest-independent state would put new pixels on screen against the clicked
+  snapshot's old hierarchy — the half-updated frame this policy exists to prevent.
 - **A failed input clears nothing.** It did not change the device, so no rendered
   state is stale. Clearing the screenshot, hierarchy or selection on failure would
   destroy useful state for no reason.

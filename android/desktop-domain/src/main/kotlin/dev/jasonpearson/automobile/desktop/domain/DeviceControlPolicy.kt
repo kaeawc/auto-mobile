@@ -231,6 +231,7 @@ public object DeviceControlPolicy {
         frameHeight = frameHeight,
         deviceWidth = deviceWidth,
         deviceHeight = deviceHeight,
+        screenshotData = screenshot.data,
         hierarchy = hierarchy.hierarchy,
         captureSequence = captureSequence,
         screenshotSequence = screenshot.sequence,

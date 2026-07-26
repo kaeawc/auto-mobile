@@ -28,12 +28,13 @@ public enum class PostInputRefreshState {
  * poll.**
  *
  * Expressed as snapshot transitions, so it is reproducible by a non-desktop client:
- * - **Success.** The client records the [DeviceFrameSnapshot.sequence] it dispatched through and
- *   enters [PostInputRefreshState.AwaitingSnapshot]. It keeps rendering the pre-input snapshot; it
- *   does not clear, blank, or re-request anything. The next snapshot the observation stream
- *   produces with a strictly greater sequence settles the wait. Because a snapshot only exists when
- *   its screenshot and hierarchy are paired, "settled" means *both* have caught up — a client can
- *   never settle on a new screenshot still carrying the pre-input hierarchy.
+ * - **Success.** The client records the [DeviceFrameSnapshot.captureSequence] it dispatched through
+ *   and enters [PostInputRefreshState.AwaitingSnapshot]. It keeps rendering the pre-input snapshot
+ *   — pixels, dimensions and tree together — and does not clear, blank, or re-request anything. The
+ *   wait settles on the first snapshot from a strictly greater **capture**. Because a snapshot only
+ *   exists when its screenshot and hierarchy share a capture identity, "settled" means *both* have
+ *   caught up; a duplicate or keepalive screenshot still belonging to the pre-input capture does
+ *   not settle it, even though it advances the client's own source counter.
  * - **Timeout.** If no superseding snapshot arrives within [REFRESH_TIMEOUT_MS], the wait settles
  *   anyway. The ordinary freshness bound in [DeviceControlPolicy] independently retires the stale
  *   frame and drops control, so a timeout degrades to inspector mode rather than to a false
@@ -53,7 +54,7 @@ public enum class PostInputRefreshState {
  * Pure and Compose-free; `nowMs` is supplied by the caller so tests need no real timers.
  */
 public class PostInputRefreshTracker(private val timeoutMs: Long = REFRESH_TIMEOUT_MS) {
-  private var awaitingAfterSequence: Long? = null
+  private var awaitingAfterCapture: Long? = null
   private var awaitingSinceMs: Long = 0L
 
   /** Current state; see [PostInputRefreshState]. */
@@ -65,7 +66,7 @@ public class PostInputRefreshTracker(private val timeoutMs: Long = REFRESH_TIMEO
    * first snapshot with a strictly greater sequence.
    */
   public fun onInputSucceeded(snapshot: DeviceFrameSnapshot, nowMs: Long) {
-    awaitingAfterSequence = snapshot.sequence
+    awaitingAfterCapture = snapshot.captureSequence
     awaitingSinceMs = nowMs
     state = PostInputRefreshState.AwaitingSnapshot
   }
@@ -75,18 +76,24 @@ public class PostInputRefreshTracker(private val timeoutMs: Long = REFRESH_TIMEO
    * inspector state is stale and none is cleared.
    */
   public fun onInputFailed() {
-    awaitingAfterSequence = null
+    awaitingAfterCapture = null
     state = PostInputRefreshState.Settled
   }
 
   /**
-   * Offer the newest snapshot. Settles the wait when [snapshot] supersedes the dispatched one.
-   * Returns true when this call settled a pending wait.
+   * Offer the newest snapshot. Settles the wait when [snapshot] comes from a strictly newer capture
+   * than the one the input was dispatched through. Returns true when this call settled a pending
+   * wait.
    */
   public fun onSnapshot(snapshot: DeviceFrameSnapshot, nowMs: Long): Boolean {
-    val awaited = awaitingAfterSequence ?: return false
-    if (snapshot.sequence <= awaited && nowMs - awaitingSinceMs < timeoutMs) return false
-    awaitingAfterSequence = null
+    val awaited = awaitingAfterCapture ?: return false
+    // A NEWER CAPTURE, not merely a newer client-side source sequence. The client bumps its source
+    // sequence for every screenshot it applies — including a duplicate or keepalive frame that
+    // still belongs to the pre-input capture — so settling on that would report "the device caught
+    // up" the moment any frame arrived, contradicting this policy's guarantee that both the
+    // screenshot and the hierarchy moved on.
+    if (snapshot.captureSequence <= awaited && nowMs - awaitingSinceMs < timeoutMs) return false
+    awaitingAfterCapture = null
     state = PostInputRefreshState.Settled
     return true
   }
@@ -96,16 +103,16 @@ public class PostInputRefreshTracker(private val timeoutMs: Long = REFRESH_TIMEO
    * true when this call settled a pending wait.
    */
   public fun onTick(nowMs: Long): Boolean {
-    if (awaitingAfterSequence == null) return false
+    if (awaitingAfterCapture == null) return false
     if (nowMs - awaitingSinceMs < timeoutMs) return false
-    awaitingAfterSequence = null
+    awaitingAfterCapture = null
     state = PostInputRefreshState.Settled
     return true
   }
 
   /** Drop any pending wait, e.g. on a device switch, stream disconnect or mode change. */
   public fun reset() {
-    awaitingAfterSequence = null
+    awaitingAfterCapture = null
     state = PostInputRefreshState.Idle
   }
 

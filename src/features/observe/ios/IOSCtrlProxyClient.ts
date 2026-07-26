@@ -2048,7 +2048,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     try {
-      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata);
+      // Dimensions come from cacheScreenDimensionsFromHierarchy (points * screenScale, matched to
+      // the screenshot's pixel resolution), so they have a tracked capture identity. The server
+      // verifies them against the frame's real pixels before stamping it (issue #3348).
+      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
+        geometryFromTrackedCapture: true,
+      });
     } catch (error) {
       logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
     }

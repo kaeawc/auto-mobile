@@ -202,7 +202,7 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
 internal fun rememberLiveVideoFrame(
   source: VideoStreamSource?,
   deviceId: String?,
-  nowMs: () -> Long = { System.currentTimeMillis() },
+  nowMs: () -> Long = MONOTONIC_NOW_MS,
   frameConverter:
     suspend (
       dev.jasonpearson.automobile.desktop.core.video.DecodedFrame
@@ -282,6 +282,20 @@ internal fun rememberControlFreshnessTick(
 
 /** Re-evaluation period for control freshness; see [rememberControlFreshnessTick]. */
 internal const val CONTROL_FRESHNESS_TICK_MS: Long = 250L
+
+/**
+ * The clock every frame-age and refresh-deadline decision uses (issue #3348).
+ *
+ * Deliberately monotonic rather than wall time. `System.currentTimeMillis()` can step **backwards**
+ * — NTP correction, a manual clock change, a VM or laptop resuming — and a backwards step while a
+ * source is stalled makes a frame's computed age negative, so every freshness bound passes and the
+ * ticker happily keeps a FROZEN mirror controllable. `System.nanoTime()` has no such step; its
+ * origin is arbitrary, which is fine because only differences are ever computed from it.
+ *
+ * Wall time is still what the daemon stamps for display (`lastScreenshotTimestamp`); it must never
+ * be mixed into an age comparison.
+ */
+internal val MONOTONIC_NOW_MS: () -> Long = { System.nanoTime() / 1_000_000L }
 
 internal interface AutoMobileDeviceStreamEventSink {
   fun disconnectLayout()
@@ -533,7 +547,7 @@ fun AutoMobileContent(
         null
       }
     }
-  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId)
+  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId, MONOTONIC_NOW_MS)
   // Forces the control-availability decision to be re-evaluated on a timer, not only when a source
   // produces an update (issue #3348). A stalled relay produces nothing at all — its staleness is
   // visible only as time passing — so without this a frozen mirror would stay clickable until some
@@ -701,7 +715,7 @@ fun AutoMobileContent(
         scope = screenshotScope,
         clientProvider = { controlClientProvider?.invoke() },
         platform = { controlPlatform.value },
-        nowMs = { System.currentTimeMillis() },
+        nowMs = MONOTONIC_NOW_MS,
         publishError = { message -> deviceControlTapError = message },
       )
     }
@@ -1620,14 +1634,21 @@ fun AutoMobileContent(
           // successful tap the clicked snapshot is retained until a genuinely superseding one
           // arrives (issue #3348's refresh policy). A screenshot-only update in the meantime does
           // not pair with the retained hierarchy, so it produces no snapshot and must not replace
-          // the coherent picture on screen. Falls back to live state before the first snapshot.
+          // the coherent picture on screen.
+          //
+          // EVERYTHING the view draws and maps through comes from this one snapshot — pixels,
+          // dimensions and tree together. Taking the bytes from newest-independent state while
+          // retaining the hierarchy would put new pixels on screen against the clicked snapshot's
+          // old tree, which is the half-updated frame this policy exists to prevent. Falls back to
+          // live state only before the first snapshot exists.
           val renderSnapshot = deviceControlSession.renderSnapshot
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(
-              screenshotData = layoutInspectorState.screenshotData,
+              screenshotData =
+                renderSnapshot?.screenshotData ?: layoutInspectorState.screenshotData,
               liveFrame = liveVideoFrame?.bitmap,
-              screenWidth = layoutInspectorState.screenWidth,
-              screenHeight = layoutInspectorState.screenHeight,
+              screenWidth = renderSnapshot?.deviceWidth ?: layoutInspectorState.screenWidth,
+              screenHeight = renderSnapshot?.deviceHeight ?: layoutInspectorState.screenHeight,
               rotation = layoutInspectorState.rotation,
               hierarchy = renderSnapshot?.hierarchy?.root ?: layoutInspectorState.hierarchy,
               selectedElementId = layoutInspectorState.selectedElementId,

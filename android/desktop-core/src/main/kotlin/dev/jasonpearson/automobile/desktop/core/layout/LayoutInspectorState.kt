@@ -27,13 +27,15 @@ import kotlinx.coroutines.launch
  * @param debounceContext coroutine context for the hierarchy-update debounce. Defaults to the UI
  *   dispatcher in production; tests inject a `TestDispatcher` to drive the debounce
  *   deterministically with virtual time (no real timers).
- * @param nowMs client wall clock, stamped onto each applied update so device control can bound how
- *   old the rendered frame is (issue #3348). Injected so tests are deterministic without real
- *   timers.
+ * @param nowMs the client's MONOTONIC clock, stamped onto each applied update so device control can
+ *   bound how old the rendered frame is (issue #3348). Monotonic, not wall time: a backwards
+ *   wall-clock step (NTP, manual change, VM resume) would make a stalled frame's computed age
+ *   negative and leave a frozen mirror controllable. Injected so tests are deterministic without
+ *   real timers.
  */
 class LayoutInspectorState(
   debounceContext: CoroutineContext = Dispatchers.Main,
-  private val nowMs: () -> Long = { System.currentTimeMillis() },
+  private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
   /** Debounce window for rapid hierarchy updates from the stream. */
   companion object {
@@ -273,6 +275,9 @@ class LayoutInspectorState(
         receivedAtMs = nowMs(),
         width = width,
         height = height,
+        // Pair the pixels into the facts, so a snapshot built from them owns the frame it
+        // describes and a retained snapshot can render its own bytes (issue #3348).
+        data = data,
       )
   }
 

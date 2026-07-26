@@ -14,6 +14,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -257,34 +258,59 @@ class DeviceControlSessionTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session = session(scope, FakeAutoMobileClient())
 
-    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    val clickedPixels = byteArrayOf(1, 1, 1)
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L, data = clickedPixels)
     assertNotNull(session.evaluate(clicked).snapshotOrNull)
     val retained = assertNotNull(session.renderSnapshot)
+    assertSame(clickedPixels, retained.screenshotData)
 
     session.tap(retained, point)
     advanceUntilIdle()
     assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
 
-    // A screenshot-only update lands: new capture id on the screenshot, hierarchy unchanged.
+    // A screenshot-only update lands: new capture id and NEW PIXELS, hierarchy unchanged.
+    val newPixels = byteArrayOf(2, 2, 2)
     val screenshotOnly =
       clicked.copy(
         screenshot =
-          clicked.screenshot?.copy(sequence = 20L, captureSequence = 8L, width = 720, height = 1560)
+          clicked.screenshot?.copy(
+            sequence = 20L,
+            captureSequence = 8L,
+            width = 720,
+            height = 1560,
+            data = newPixels,
+          )
       )
     assertNull(
       session.evaluate(screenshotOnly).snapshotOrNull,
       "an unpaired update yields no snapshot",
     )
     assertEquals(retained, session.renderSnapshot, "the retained snapshot stays on screen")
+    // Finding 3: the PIXELS must not change either. Rendering the new bytes against the retained
+    // hierarchy would be the half-updated frame this policy exists to prevent.
+    assertSame(
+      clickedPixels,
+      session.renderSnapshot?.screenshotData,
+      "the displayed pixels stay on the clicked snapshot until a paired one supersedes it",
+    )
+    assertEquals(1080, session.renderSnapshot?.deviceWidth, "and so do the mapping dimensions")
     assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
 
     // Once the paired hierarchy catches up, the superseding snapshot settles the wait and replaces
     // what is rendered.
-    val superseding = paired(captureSequence = 8L, sourceSequence = 21L, width = 720, height = 1560)
+    val superseding =
+      paired(
+        captureSequence = 8L,
+        sourceSequence = 21L,
+        width = 720,
+        height = 1560,
+        data = newPixels,
+      )
     val next = assertNotNull(session.evaluate(superseding).snapshotOrNull)
     assertEquals(PostInputRefreshState.Settled, session.refreshState)
     assertEquals(next, session.renderSnapshot)
     assertEquals(720, session.renderSnapshot?.deviceWidth)
+    assertSame(newPixels, session.renderSnapshot?.screenshotData, "pixels advance only now")
     scope.cancel()
   }
 
@@ -294,6 +320,7 @@ class DeviceControlSessionTest {
     sourceSequence: Long,
     width: Int = 1080,
     height: Int = 2340,
+    data: ByteArray? = null,
   ) =
     DeviceControlInputs(
       enabled = true,
@@ -309,6 +336,7 @@ class DeviceControlSessionTest {
           receivedAtMs = 1_000L,
           width = width,
           height = height,
+          data = data,
         ),
       hierarchy =
         HierarchyFrameFacts(

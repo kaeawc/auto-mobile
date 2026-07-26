@@ -2905,7 +2905,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const screenHeight = this.cachedScreenDimensions?.height ?? 2340;
 
     try {
-      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata);
+      // The dimensions above come from cachedScreenDimensions, which updateCachedScreenDimensions
+      // derives from the hierarchies pushed through this same server — so they have a tracked
+      // capture identity. The server still verifies them against the frame's real pixels before
+      // stamping it (issue #3348).
+      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
+        geometryFromTrackedCapture: true,
+      });
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
     }

@@ -64,6 +64,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = 9_900L,
         width = 1080,
         height = 2340,
+        data = null,
       ),
     hierarchy: HierarchyFrameFacts? =
       HierarchyFrameFacts(
@@ -201,6 +202,7 @@ class DeviceControlPolicyTest {
               receivedAtMs = 9_900L,
               width = 720,
               height = 1560,
+              data = null,
             ),
           hierarchy =
             HierarchyFrameFacts(
@@ -247,6 +249,36 @@ class DeviceControlPolicyTest {
   }
 
   @Test
+  fun `a screenshot whose pixels outran the hierarchy carries no identity and cannot mis-scale`() {
+    // The daemon refuses to stamp a capture id on a frame whose real pixels do not match the
+    // geometry its capture client claimed — the resolution-change window where fresh 720x1560
+    // pixels are pushed before the hierarchy that describes them. The client must then refuse to
+    // build a snapshot at all, rather than mapping the new pixels through the stale 1080x2340
+    // bounds. The two share an aspect ratio, so no geometry check downstream could catch it.
+    val decision =
+      DeviceControlPolicy.evaluate(
+        inputs(
+          screenshot =
+            ScreenshotFrameFacts(
+              deviceId = device,
+              sequence = 30L,
+              captureSequence = null, // daemon could not prove the pairing
+              receivedAtMs = 9_900L,
+              width = 720,
+              height = 1560,
+              data = null,
+            )
+        ),
+        now,
+      )
+    assertNull(decision.snapshotOrNull, "no snapshot means no mapping and no tap")
+    assertEquals(
+      DeviceControlBlockReason.CaptureIdentityUnavailable,
+      (decision as DeviceControlDecision.Blocked).reason,
+    )
+  }
+
+  @Test
   fun `control fails closed against a daemon that does not stamp capture identity`() {
     // Without the shared id there is no way to prove the two messages describe one capture, so
     // control is unavailable rather than guessing from time or dimensions.
@@ -262,6 +294,7 @@ class DeviceControlPolicyTest {
               receivedAtMs = 9_900L,
               width = 1080,
               height = 2340,
+              data = null,
             )
         )
       ),
@@ -313,6 +346,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - DeviceControlPolicy.SCREENSHOT_MAX_AGE_MS - 1,
         width = 1080,
         height = 2340,
+        data = null,
       )
     assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(screenshot = stale)))
   }

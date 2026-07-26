@@ -30,6 +30,11 @@ public enum class DeviceFrameSource {
  *   itself. Compared only against the client clock, for recency.
  * @param width reported device screen width for this frame.
  * @param height reported device screen height for this frame.
+ * @param data the encoded frame bytes. Carried so a snapshot owns the PIXELS it describes, not just
+ *   their dimensions: while a post-input refresh is pending the retained snapshot is what the view
+ *   renders, and pulling bytes from newest-independent state would put new pixels on screen against
+ *   the retained hierarchy — the half-updated frame this whole mechanism exists to prevent.
+ *   Compared by identity, never by content (see [DeviceFrameSnapshot]).
  */
 public data class ScreenshotFrameFacts(
   val deviceId: String?,
@@ -38,7 +43,35 @@ public data class ScreenshotFrameFacts(
   val receivedAtMs: Long,
   val width: Int,
   val height: Int,
-)
+  val data: ByteArray?,
+) {
+  // ByteArray uses reference equality, which would make every copy of an otherwise-identical facts
+  // object unequal. Identity is exactly what we want here — a snapshot is tied to the specific
+  // frame buffer it was built from — so compare the reference explicitly rather than letting the
+  // generated equals silently do something else.
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is ScreenshotFrameFacts) return false
+    return deviceId == other.deviceId &&
+      sequence == other.sequence &&
+      captureSequence == other.captureSequence &&
+      receivedAtMs == other.receivedAtMs &&
+      width == other.width &&
+      height == other.height &&
+      data === other.data
+  }
+
+  override fun hashCode(): Int {
+    var result = deviceId?.hashCode() ?: 0
+    result = 31 * result + sequence.hashCode()
+    result = 31 * result + (captureSequence?.hashCode() ?: 0)
+    result = 31 * result + receivedAtMs.hashCode()
+    result = 31 * result + width
+    result = 31 * result + height
+    result = 31 * result + System.identityHashCode(data)
+    return result
+  }
+}
 
 /**
  * One observation-stream hierarchy update, with the provenance needed to pair it with a screenshot
@@ -104,6 +137,9 @@ public data class LiveFrameFacts(
  * @param deviceWidth effective device-coordinate width used for mapping — hierarchy root bounds
  *   when present, else the observation stream's reported screen width.
  * @param deviceHeight effective device-coordinate height used for mapping.
+ * @param screenshotData the encoded observation frame paired into this snapshot. Together with
+ *   [hierarchy] and the geometry this makes the snapshot the single source for everything the view
+ *   renders AND maps through, so a retained snapshot cannot show new pixels against an old tree.
  * @param hierarchy the hierarchy paired into this snapshot; may be null only when the update
  *   carried no parsed tree.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
@@ -120,6 +156,7 @@ public data class DeviceFrameSnapshot(
   val frameHeight: Int,
   val deviceWidth: Int,
   val deviceHeight: Int,
+  val screenshotData: ByteArray?,
   val hierarchy: ParsedHierarchy?,
   val captureSequence: Long,
   val screenshotSequence: Long,
@@ -133,4 +170,29 @@ public data class DeviceFrameSnapshot(
    */
   public val mappingBounds: Pair<Int, Int>
     get() = deviceWidth to deviceHeight
+
+  // [screenshotData] is a ByteArray, so the generated equals would compare it by reference while
+  // the generated hashCode would too — consistent, but easy to misread. Spell it out: a snapshot
+  // is identified by its provenance, and two snapshots with the same sequences ARE the same
+  // snapshot regardless of buffer identity.
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is DeviceFrameSnapshot) return false
+    return deviceId == other.deviceId &&
+      sequence == other.sequence &&
+      captureSequence == other.captureSequence &&
+      screenshotSequence == other.screenshotSequence &&
+      hierarchySequence == other.hierarchySequence &&
+      liveFrameSequence == other.liveFrameSequence
+  }
+
+  override fun hashCode(): Int {
+    var result = deviceId.hashCode()
+    result = 31 * result + sequence.hashCode()
+    result = 31 * result + captureSequence.hashCode()
+    result = 31 * result + screenshotSequence.hashCode()
+    result = 31 * result + hierarchySequence.hashCode()
+    result = 31 * result + (liveFrameSequence?.hashCode() ?: 0)
+    return result
+  }
 }

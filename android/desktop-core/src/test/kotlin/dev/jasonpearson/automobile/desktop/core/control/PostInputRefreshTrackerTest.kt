@@ -15,20 +15,26 @@ import kotlin.test.assertTrue
  */
 class PostInputRefreshTrackerTest {
 
-  private fun snapshot(sequence: Long) =
+  /**
+   * [sourceSequence] is the client's own per-update counter; [captureSequence] is the daemon's
+   * capture identity. They are deliberately independent here — the client bumps its counter for
+   * every applied screenshot, including one that still belongs to the pre-input capture.
+   */
+  private fun snapshot(sourceSequence: Long, captureSequence: Long = sourceSequence) =
     DeviceFrameSnapshot(
       deviceId = "emulator-5554",
-      sequence = sequence,
-      capturedAtMs = 1_000L + sequence,
+      sequence = sourceSequence,
+      capturedAtMs = 1_000L + sourceSequence,
       source = DeviceFrameSource.Screenshot,
       frameWidth = 1080,
       frameHeight = 2340,
       deviceWidth = 1080,
       deviceHeight = 2340,
+      screenshotData = null,
       hierarchy = null,
-      captureSequence = sequence,
-      screenshotSequence = sequence,
-      hierarchySequence = sequence,
+      captureSequence = captureSequence,
+      screenshotSequence = sourceSequence,
+      hierarchySequence = sourceSequence,
       liveFrameSequence = null,
     )
 
@@ -47,9 +53,35 @@ class PostInputRefreshTrackerTest {
     assertFalse(tracker.onSnapshot(snapshot(10L), nowMs = 100L))
     assertEquals(PostInputRefreshState.AwaitingSnapshot, tracker.state)
 
-    // The first snapshot with a strictly greater sequence does. Because a snapshot exists only
-    // when its screenshot and hierarchy are paired, this means BOTH caught up.
+    // The first snapshot from a strictly greater CAPTURE does. Because a snapshot exists only when
+    // its screenshot and hierarchy share a capture identity, this means BOTH caught up.
     assertTrue(tracker.onSnapshot(snapshot(11L), nowMs = 200L))
+    assertEquals(PostInputRefreshState.Settled, tracker.state)
+  }
+
+  @Test
+  fun `a duplicate screenshot from the pre-input capture does not settle the wait`() {
+    // The client bumps its own source sequence for EVERY applied screenshot, including a duplicate
+    // or keepalive frame that still belongs to the capture the input was dispatched through.
+    // Settling on that would claim the device caught up while the pre-input hierarchy is still
+    // what a tap would map through — the opposite of what this policy promises.
+    val tracker = PostInputRefreshTracker()
+    tracker.onInputSucceeded(snapshot(sourceSequence = 10L, captureSequence = 7L), nowMs = 0L)
+
+    assertFalse(
+      tracker.onSnapshot(snapshot(sourceSequence = 11L, captureSequence = 7L), nowMs = 100L),
+      "a newer source sequence within the same capture must not settle",
+    )
+    assertFalse(
+      tracker.onSnapshot(snapshot(sourceSequence = 12L, captureSequence = 7L), nowMs = 200L),
+      "nor does another one",
+    )
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, tracker.state)
+
+    // Only a genuinely newer capture settles it.
+    assertTrue(
+      tracker.onSnapshot(snapshot(sourceSequence = 13L, captureSequence = 8L), nowMs = 300L)
+    )
     assertEquals(PostInputRefreshState.Settled, tracker.state)
   }
 

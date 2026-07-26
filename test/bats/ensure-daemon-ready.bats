@@ -28,6 +28,9 @@ make_mock_auto_mobile() {
   cat > "${MOCK_BIN}/auto-mobile" <<SCRIPT
 #!/usr/bin/env bash
 if [ "\$1" = "--daemon" ] && [ "\$2" = "start" ]; then
+  if [ "\$3" = "--debug" ]; then
+    printf '%s\n' "enabled" > "${MOCK_BIN}/debug-mode"
+  fi
   printf '%s\n' "\${AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS:-unset}" > "${MOCK_BIN}/startup-timeout"
   exit 0
 elif [ "\$1" = "--daemon" ] && [ "\$2" = "health" ]; then
@@ -117,4 +120,11 @@ SCRIPT
   run env AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS=45000 bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(cat "${MOCK_BIN}/startup-timeout")" = "45000" ]
+}
+
+@test "starts the daemon in debug mode when requested" {
+  make_mock_auto_mobile 0
+  run env AUTOMOBILE_DAEMON_DEBUG=1 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${MOCK_BIN}/debug-mode")" = "enabled" ]
 }

@@ -25,6 +25,7 @@
 # Env overrides (used by tests to keep runs fast):
 #   DAEMON_READY_MAX_ATTEMPTS   max health-poll attempts (default 30)
 #   DAEMON_READY_DELAY_SECONDS  initial delay between polls, seconds (default 1)
+#   AUTOMOBILE_DAEMON_DEBUG      start the daemon with --debug when set to 1
 
 set -uo pipefail
 
@@ -70,8 +71,14 @@ fi
 echo "auto-mobile resolved at: $(command -v auto-mobile)"
 
 # Start the daemon (idempotent — an already-running, version-matched daemon is
-# reused by the Swift test's ensureDaemonRunning()).
-auto-mobile --daemon start || true
+# reused by the Swift test's ensureDaemonRunning()). Some CI integrations query
+# debug-only tools after readiness, so let their workflow opt in before this
+# first start rather than trying to retrofit debug mode onto a live daemon.
+daemon_start_args=(--daemon start)
+if [[ "${AUTOMOBILE_DAEMON_DEBUG:-}" == "1" ]]; then
+  daemon_start_args+=(--debug)
+fi
+auto-mobile "${daemon_start_args[@]}" || true
 
 max_attempts="${DAEMON_READY_MAX_ATTEMPTS:-30}"
 delay="${DAEMON_READY_DELAY_SECONDS:-1}"

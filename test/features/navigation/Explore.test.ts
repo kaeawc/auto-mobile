@@ -481,6 +481,18 @@ describe("Explore", () => {
         registry.deviceSessionManager = originalDeviceSessionManager;
       }
     });
+
+    test("propagates a failed dead-end recovery instead of reporting exploration success", async () => {
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
+        success: false,
+        error: "Back navigation was rejected"
+      }));
+      explore = new Explore(device, null, fakeTimer, fakeGraph);
+
+      await expect((explore as any).handleDeadEnd()).rejects.toThrow(
+        "pressButton failed on android: Back navigation was rejected"
+      );
+    });
   });
 
   describe("element tracking", () => {

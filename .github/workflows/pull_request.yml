@@ -1734,6 +1734,8 @@ jobs:
       # by `bun add -g .`) is thereby on PATH for the swift-test step.
       - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        env:
+          AUTOMOBILE_DAEMON_DEBUG: "1"
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)

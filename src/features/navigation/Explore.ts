@@ -787,6 +787,7 @@ export class Explore extends BaseVisualChange {
       await this.timer.sleep(1000);
     } catch (error) {
       logger.warn(`[Explore] Failed to navigate back: ${error}`);
+      throw error;
     }
   }
 
@@ -820,6 +821,7 @@ export class Explore extends BaseVisualChange {
       this.consecutiveBackCount = 0;
     } catch (error) {
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
+      throw error;
     }
   }
 

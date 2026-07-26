@@ -380,6 +380,44 @@ class DeviceControlPolicyTest {
   }
 
   @Test
+  fun `a scaled live frame is blocked rather than mapped through mismatched bounds`() {
+    // A live mirror frame carries no capture identity, so nothing pairs it with the observation
+    // state. A fresh 720x1560 frame against 1080x2340 mapping bounds shares an aspect ratio
+    // exactly, so an aspect check accepts it — and a center click is then sent as (540,1170)
+    // instead of (360,780). Only an exact dimension match can exclude a scale change.
+    val scaled =
+      LiveFrameFacts(
+        deviceId = device,
+        sequence = 903L,
+        receivedAtMs = now - 50L,
+        width = 720,
+        height = 1560,
+      )
+    assertEquals(
+      DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
+      blockedReason(inputs(liveFrame = scaled)),
+    )
+  }
+
+  @Test
+  fun `a live frame in logical points against pixel bounds is blocked, not accepted`() {
+    // The iOS shape: hierarchy bounds in points, mirror pixels at 3x. An exact match is impossible
+    // here, so control is unavailable while mirroring rather than acting on an unverifiable pair.
+    val points =
+      LiveFrameFacts(
+        deviceId = device,
+        sequence = 904L,
+        receivedAtMs = now - 50L,
+        width = 360,
+        height = 780,
+      )
+    assertEquals(
+      DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
+      blockedReason(inputs(liveFrame = points)),
+    )
+  }
+
+  @Test
   fun `a live frame is held to the same orientation as the mapping bounds`() {
     // A live video frame is always display-oriented, so an orientation difference means the mirror
     // and the mapping bounds are out of sync. This is the cross-check provenance cannot supply for
@@ -393,7 +431,7 @@ class DeviceControlPolicyTest {
         height = 1080,
       )
     assertEquals(
-      DeviceControlBlockReason.GeometryMismatch,
+      DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
       blockedReason(inputs(liveFrame = rotatedMirror)),
     )
   }

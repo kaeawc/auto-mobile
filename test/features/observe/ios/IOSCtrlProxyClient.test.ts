@@ -2743,7 +2743,22 @@ describe("IOSCtrlProxyClient", function() {
       return socket;
     };
 
-    const setCachedHierarchy = (screenWidth: number, screenHeight: number, screenScale: number): void => {
+    /**
+     * Forward a hierarchy the way processMessage does: the SOURCE hierarchy is handed to the push
+     * alongside the converted result. The cache is deliberately left holding something ELSE, which
+     * is the real request/response ordering — processMessage forwards the converted response before
+     * requestHierarchySync resumes and installs it in the cache.
+     */
+    const forwardHierarchy = (screenWidth: number, screenHeight: number, screenScale: number): void => {
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+        screenWidth,
+        screenHeight,
+        screenScale,
+      });
+    };
+
+    /** Put a DIFFERENT hierarchy in the cache, so a cache-reading implementation is caught. */
+    const setStaleCache = (screenWidth: number, screenHeight: number, screenScale: number): void => {
       (ctrlProxyClient as any).cachedHierarchy = {
         hierarchy: { screenWidth, screenHeight, screenScale },
         receivedAt: fakeTimer.now(),
@@ -2751,20 +2766,21 @@ describe("IOSCtrlProxyClient", function() {
       };
     };
 
-    test("trusts new geometry as soon as the hierarchy carrying it is forwarded", async function() {
+    test("derives geometry from the hierarchy being forwarded, not from the cache", async function() {
       await startStreamServer();
       const geometry = (ctrlProxyClient as any).screenGeometry;
 
-      // Device is at 1170x2532 points-scaled pixels.
-      setCachedHierarchy(390, 844, 3);
-      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+      // The cache is EMPTY, exactly as it is when the first request/response hierarchy is forwarded
+      // (processMessage pushes before requestHierarchySync installs it). A cache-reading
+      // implementation clears geometry here and never establishes provenance at all.
+      forwardHierarchy(390, 844, 3);
       expect(geometry.bind()).toEqual({ captureSequence: expect.any(Number), width: 1170, height: 2532 });
 
-      // Resolution changes. Deriving geometry AFTER the push would vouch for the OLD dimensions and
-      // then clear the flag when the new ones landed, leaving the new geometry untrusted until yet
-      // another hierarchy arrived.
-      setCachedHierarchy(320, 693, 3);
-      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+      // Now the cache holds the PREVIOUS hierarchy while a resolution-changing response is
+      // forwarded. A cache-reading implementation would associate the new capture id with the old
+      // 1170x2532 dimensions, so screenshots could not pair until another hierarchy arrived.
+      setStaleCache(390, 844, 3);
+      forwardHierarchy(320, 693, 3);
 
       const bound = geometry.bind();
       expect(bound).not.toBeNull();
@@ -2772,17 +2788,17 @@ describe("IOSCtrlProxyClient", function() {
       expect(bound.height).toBe(2079);
     });
 
-    test("clears tracked geometry when a hierarchy reports none", async function() {
+    test("clears tracked geometry when the forwarded hierarchy reports none", async function() {
       await startStreamServer();
       const geometry = (ctrlProxyClient as any).screenGeometry;
 
-      setCachedHierarchy(390, 844, 3);
-      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+      forwardHierarchy(390, 844, 3);
       expect(geometry.bind()).not.toBeNull();
 
-      // A hierarchy with no usable screen size must not leave the previous dimensions vouched for.
-      (ctrlProxyClient as any).cachedHierarchy = { hierarchy: {}, receivedAt: fakeTimer.now(), fresh: true };
-      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+      // A forwarded hierarchy with no usable screen size must not leave the previous dimensions
+      // vouched for — even though the cache still holds a perfectly good one.
+      setStaleCache(390, 844, 3);
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {} as any);
       expect(geometry.bind()).toBeNull();
     });
   });

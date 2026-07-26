@@ -97,7 +97,8 @@ and unit-testable without a device.
 | Both messages carry a `captureSequence` at all | Older daemons do not stamp one; control fails closed rather than guessing |
 | `now - screenshot.receivedAt <= 5000 ms` | The daemon may stop pushing without disconnecting |
 | `now - liveFrame.receivedAt <= 1000 ms` (when a live frame is displayed) | **Recency** — this is what catches the stalled mirror |
-| Displayed frame and mapping bounds agree in aspect | A cross-check for the live path, which has no daemon timestamp to pair against |
+| Displayed **screenshot** and mapping bounds agree in aspect (rotation-tolerant) | A screenshot may be a downscale, and iOS reports pixels against point-space bounds |
+| Displayed **live mirror frame** matches the mapping bounds EXACTLY | See below — an aspect check would accept a scale change |
 
 ### Pairing is identity, never elapsed time
 
@@ -117,6 +118,21 @@ geometry's id onto new pixels and let a client pair them, reintroducing the exac
 mis-scaled tap one level down. So the daemon measures the frame's header and
 refuses to stamp on mismatch. It also publishes the *measured* dimensions, so a
 client falling back to them maps through the pixels it is actually rendering.
+
+### Residual: request-send is not device-capture
+
+Identity is bound when the client **sends** the screenshot request, not when the
+device actually captures the pixels. The device captures some time later, so if
+navigation reaches a **same-size** screen inside that window, screen B's pixels
+carry screen A's identity and pair with screen A's hierarchy. No client-side
+signal distinguishes this: the dimensions are identical, and the client has no
+visibility into what was on screen at capture time.
+
+Closing it requires the device to report the hierarchy or UI state it captured
+against — a CtrlProxy protocol change plus an APK/IPA re-cut — so it is out of
+scope for the client-side consolidation. It is tracked with the daemon-side
+frame-context validation work in
+[#4505](https://github.com/kaeawc/auto-mobile/issues/4505).
 
 The identity source is monotonic for the daemon process's lifetime and is never
 reset, so an id cannot be reused after a device reconnect and collide with a
@@ -155,6 +171,23 @@ for display timestamps.
 Because staleness is the passage of time rather than an event, a client must
 re-evaluate availability on a timer as well as on source updates. A stalled relay
 produces nothing at all.
+
+### Live mirror frames carry no identity
+
+The WebRTC mirror is a separate transport with no link to the observation
+stream's captures, so none of the pairing above says anything about its pixels.
+Their dimensions are all that is left, and an aspect check accepts any uniform
+scale — a fresh 720x1560 mirror frame passes against 1080x2340 mapping bounds,
+and a center click is then sent as (540,1170) instead of (360,780).
+
+A client displaying a live mirror frame must therefore require its dimensions to
+match the mapping bounds **exactly**, which is the only thing that excludes a
+scale change. Where the platform makes that impossible — iOS reports hierarchy
+bounds in logical points against pixel frames — control is **blocked** rather
+than acting on an unverifiable pair. Losing control while mirroring is
+acceptable; sending a mis-scaled tap to real hardware is not. Giving live frames
+a real capture identity needs WebRTC-side plumbing, tracked under
+[#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
 
 ## Post-input refresh policy
 

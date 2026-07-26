@@ -34,11 +34,16 @@ public enum class DeviceControlBlockReason {
   CaptureIdentityUnavailable,
   /** The displayed frame is older than the freshness bound for its source. */
   StaleFrame,
-  /**
-   * The displayed frame and the mapping bounds disagree geometrically. Retained specifically for
-   * the live-video path, which carries no daemon timestamp to pair against the hierarchy.
-   */
+  /** The displayed screenshot and the mapping bounds disagree geometrically. */
   GeometryMismatch,
+
+  /**
+   * A live mirror frame is the displayed surface and its dimensions do not match the mapping bounds
+   * exactly. Live frames carry no capture identity, so an exact dimension match is the only
+   * available proof that they describe the same screen; anything else — including a uniform scale,
+   * which an aspect check would accept — could mis-scale a tap. See [DeviceControlPolicy.evaluate].
+   */
+  LiveFrameGeometryUnverifiable,
 }
 
 /** The outcome of [DeviceControlPolicy.evaluate]. */
@@ -196,19 +201,33 @@ public object DeviceControlPolicy {
 
     val frameWidth = liveFrame?.width ?: screenshot.width
     val frameHeight = liveFrame?.height ?: screenshot.height
-    // Geometry cross-check. Provenance already covers the observation path; this remains the only
-    // available cross-check for the live frame, which carries no daemon timestamp to pair — a
-    // rotation the mirror has applied but the hierarchy has not (or vice versa) shows up here.
-    if (
+
+    if (liveFrame != null) {
+      // The live mirror carries NO capture identity — it is a separate WebRTC transport with no
+      // link to the observation stream's captures — so none of the pairing above says anything
+      // about these pixels. All that is left is their dimensions, and an aspect check accepts any
+      // uniform scale: a fresh 720x1560 mirror frame passes against 1080x2340 mapping bounds, and
+      // a center click is then sent as (540,1170) instead of (360,780).
+      //
+      // So require the mirror's pixels to match the mapping bounds EXACTLY. That excludes a scale
+      // change, which is the whole failure mode. Where the platform makes an exact match
+      // impossible — iOS reports hierarchy bounds in logical points against pixel frames — control
+      // is blocked rather than accepting an unverifiable pair. Losing control while mirroring is
+      // acceptable; sending a mis-scaled tap to real hardware is not.
+      //
+      // Giving live frames a real identity needs WebRTC-side plumbing; tracked under #1099.
+      if (frameWidth != deviceWidth || frameHeight != deviceHeight) {
+        return blocked(DeviceControlBlockReason.LiveFrameGeometryUnverifiable)
+      }
+    } else if (
       !isGeometryConsistent(
         frameWidth = frameWidth,
         frameHeight = frameHeight,
         deviceWidth = deviceWidth,
         deviceHeight = deviceHeight,
-        // A live frame is always in display orientation, so an orientation difference means the
-        // sources are out of sync. A polled screenshot may arrive in native pixel orientation
-        // (notably iOS) and the renderer rotates it, so a difference there is expected.
-        allowRotation = liveFrame == null,
+        // A polled screenshot may arrive in native pixel orientation (notably iOS) and the renderer
+        // rotates it, so an orientation difference there is expected.
+        allowRotation = true,
       )
     ) {
       return blocked(DeviceControlBlockReason.GeometryMismatch)

@@ -58,6 +58,13 @@ export class TrackedScreenGeometry {
    * current capture" at push time would label A's pixels with B's identity and let them pair. The
    * binding is taken before the request goes out, so the frame keeps the identity that was current
    * when it was requested.
+   *
+   * RESIDUAL: this binds at request-SEND, not at device CAPTURE. The device captures some time
+   * later, so navigating to a SAME-SIZE screen inside that window still mis-pairs — B's pixels
+   * carry A's identity. No client-side signal can distinguish it; closing it needs the device to
+   * report the state it captured against (a CtrlProxy protocol change plus an APK/IPA re-cut), and
+   * is tracked with the daemon-side frame-context validation in
+   * https://github.com/kaeawc/auto-mobile/issues/4505.
    */
   bind(): ScreenGeometryBinding | null {
     const current = this.current;

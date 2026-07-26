@@ -11,7 +11,7 @@ internal interface DaemonSocketChecker {
 }
 
 internal class FileDaemonSocketChecker(
-  private val socketPath: String = DaemonSocketPaths.socketPath(),
+  private val socketPath: String = DaemonSocketPaths.socketPath()
 ) : DaemonSocketChecker {
   override fun exists(): Boolean = File(socketPath).exists()
 }
@@ -69,19 +69,19 @@ internal object SystemDaemonRetryTimer : DaemonRetryTimer {
 }
 
 internal sealed interface DaemonLifecycleResult {
-  data class Ready(
-    val restarted: Boolean,
-  ) : DaemonLifecycleResult
+  data class Ready(val restarted: Boolean) : DaemonLifecycleResult
 
-  data class Failure(
-    val message: String,
-  ) : DaemonLifecycleResult
+  data class Failure(val message: String) : DaemonLifecycleResult
+}
+
+internal interface DaemonLifecycleEnsurer {
+  fun ensureVersionMatchedDaemon(): DaemonLifecycleResult
 }
 
 /**
  * Ensures the desktop only connects to a daemon that reports the same release version as the
- * desktop jar. The socket protocol gate remains the final authority; this lifecycle makes the
- * UI restart a skewed shared daemon before that gate rejects every ordinary request.
+ * desktop jar. The socket protocol gate remains the final authority; this lifecycle makes the UI
+ * restart a skewed shared daemon before that gate rejects every ordinary request.
  */
 internal class DesktopDaemonLifecycle(
   private val expectedVersionProvider: () -> String? = DaemonSocketPaths::resolveClientVersion,
@@ -90,58 +90,68 @@ internal class DesktopDaemonLifecycle(
   private val commandExecutor: DaemonCommandExecutor = SystemDaemonCommandExecutor,
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
-) {
-  fun ensureVersionMatchedDaemon(): DaemonLifecycleResult {
-    val expectedVersion = expectedVersionProvider()
-      ?: return DaemonLifecycleResult.Failure(
-        "Cannot verify the AutoMobile daemon version because this desktop build has no version. " +
-          "Rebuild or reinstall the desktop application, then try again."
-      )
-    val currentVersion = pidFileReader.readVersion()
-    if (versionsMatch(currentVersion, expectedVersion)) {
-      return DaemonLifecycleResult.Ready(restarted = false)
-    }
+) : DaemonLifecycleEnsurer {
+  override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
+    synchronized(lifecycleLock) {
+      val expectedVersion =
+        expectedVersionProvider()
+          ?: return DaemonLifecycleResult.Failure(
+            "Cannot verify the AutoMobile daemon version because this desktop build has no version. " +
+              "Rebuild or reinstall the desktop application, then try again."
+          )
+      val currentVersion = pidFileReader.readVersion()
+      val daemonAvailable = socketChecker.exists()
+      if (daemonAvailable && versionsMatch(currentVersion, expectedVersion)) {
+        return DaemonLifecycleResult.Ready(restarted = false)
+      }
 
-    val action = if (socketChecker.exists()) "restart" else "start"
-    val command = packageDaemonCommand(expectedVersion, action)
-    val commandResult =
-      try {
-        commandExecutor.execute(command)
-      } catch (error: Exception) {
+      if (declaresFullVersion(expectedVersion)) {
         return DaemonLifecycleResult.Failure(
-          "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
-            "Install Node.js with npx available, then try again."
+          "AutoMobile desktop source build $expectedVersion cannot start a matching published daemon. " +
+            "Start the daemon from the same checkout, then try again."
         )
-    }
-    if (commandResult.exitCode != 0) {
-      val detail =
-        commandResult.output.trim().takeIf { it.isNotEmpty() }
-          ?: "Install @kaeawc/auto-mobile@$expectedVersion and try again."
+      }
+
+      val action = if (daemonAvailable) "restart" else "start"
+      val command = packageDaemonCommand(expectedVersion, action)
+      val commandResult =
+        try {
+          commandExecutor.execute(command)
+        } catch (error: Exception) {
+          return DaemonLifecycleResult.Failure(
+            "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
+              "Install Node.js with npx available, then try again."
+          )
+        }
+      if (commandResult.exitCode != 0) {
+        val detail =
+          commandResult.output.trim().takeIf { it.isNotEmpty() }
+            ?: "Install @kaeawc/auto-mobile@$expectedVersion and try again."
+        return DaemonLifecycleResult.Failure(
+          "Could not $action AutoMobile $expectedVersion (exit code ${commandResult.exitCode}). $detail"
+        )
+      }
+
+      var actualVersion: String? = null
+      repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
+        actualVersion = pidFileReader.readVersion()
+        if (socketChecker.exists() && versionsMatch(actualVersion, expectedVersion)) {
+          return DaemonLifecycleResult.Ready(restarted = true)
+        }
+        if (attempt + 1 < verificationAttempts.coerceAtLeast(1)) {
+          timer.sleep(VERIFICATION_RETRY_DELAY_MS)
+        }
+      }
       return DaemonLifecycleResult.Failure(
-        "Could not $action AutoMobile $expectedVersion (exit code ${commandResult.exitCode}). $detail"
+        "AutoMobile daemon version mismatch: desktop requires $expectedVersion, but the daemon " +
+          "reports ${actualVersion ?: "no version"}. Stop the existing daemon and retry so " +
+          "@kaeawc/auto-mobile@$expectedVersion can start."
       )
     }
-
-    var actualVersion: String? = null
-    repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
-      actualVersion = pidFileReader.readVersion()
-      if (versionsMatch(actualVersion, expectedVersion)) {
-        return DaemonLifecycleResult.Ready(restarted = true)
-      }
-      if (attempt + 1 < verificationAttempts.coerceAtLeast(1)) {
-        timer.sleep(VERIFICATION_RETRY_DELAY_MS)
-      }
-    }
-    return DaemonLifecycleResult.Failure(
-      "AutoMobile daemon version mismatch: desktop requires $expectedVersion, but the daemon " +
-        "reports ${actualVersion ?: "no version"}. Stop the existing daemon and retry so " +
-        "@kaeawc/auto-mobile@$expectedVersion can start."
-    )
-  }
 
   private fun packageDaemonCommand(version: String, action: String): List<String> =
     listOf(
-      "npx",
+      npxExecutable(System.getProperty("os.name", "")),
       "-y",
       "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
       "--daemon",
@@ -152,12 +162,24 @@ internal class DesktopDaemonLifecycle(
     actualVersion: String?,
     expectedVersion: String,
   ): Boolean {
-    val actualRelease = DaemonSocketPaths.releaseVersion(actualVersion?.trim().orEmpty())
-    val expectedRelease = DaemonSocketPaths.releaseVersion(expectedVersion.trim())
+    val actual = actualVersion?.trim().orEmpty()
+    val expected = expectedVersion.trim()
+    if (declaresFullVersion(expected)) {
+      return actual.isNotEmpty() && actual == expected
+    }
+    val actualRelease = DaemonSocketPaths.releaseVersion(actual)
+    val expectedRelease = DaemonSocketPaths.releaseVersion(expected)
     return actualRelease.isNotEmpty() && actualRelease == expectedRelease
   }
 
+  private fun declaresFullVersion(version: String): Boolean =
+    DaemonSocketPaths.releaseVersion(version) != version
+
+  internal fun npxExecutable(osName: String): String =
+    if (osName.lowercase().contains("win")) "npx.cmd" else "npx"
+
   private companion object {
+    val lifecycleLock = Any()
     const val DEFAULT_VERIFICATION_ATTEMPTS = 20
     const val VERIFICATION_RETRY_DELAY_MS = 100L
   }

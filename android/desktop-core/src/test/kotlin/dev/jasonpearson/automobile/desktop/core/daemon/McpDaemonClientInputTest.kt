@@ -38,6 +38,26 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `socket requests surface lifecycle failures before opening the socket`() {
+    val lifecycle =
+      object : DaemonLifecycleEnsurer {
+        override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
+          DaemonLifecycleResult.Failure("daemon version mismatch")
+      }
+
+    val error =
+      assertFailsWith<DaemonUnavailableException> {
+        McpDaemonClient(
+            socketPathValue = "/tmp/not-a-daemon.sock",
+            daemonLifecycle = lifecycle,
+          )
+          .ping()
+      }
+
+    assertEquals("daemon version mismatch", error.message)
+  }
+
+  @Test
   fun `inputTap serializes to input tap socket request`() {
     val responseResult =
       """

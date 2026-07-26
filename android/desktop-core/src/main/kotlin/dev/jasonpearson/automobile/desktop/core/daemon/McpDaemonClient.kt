@@ -29,6 +29,16 @@ class McpDaemonClient(
   private val json: Json = DaemonJson,
   private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
 ) : AutoMobileClient {
+  private var daemonLifecycle: DaemonLifecycleEnsurer? =
+    if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
+
+  internal constructor(
+    socketPathValue: String,
+    daemonLifecycle: DaemonLifecycleEnsurer,
+  ) : this(socketPathValue = socketPathValue) {
+    this.daemonLifecycle = daemonLifecycle
+  }
+
   val socketPath: String
     get() = socketPathValue
 
@@ -472,6 +482,7 @@ class McpDaemonClient(
     method: String,
     params: JsonObject = JsonObject(emptyMap()),
   ): DaemonResponse {
+    ensureVersionMatchedDaemon()
     ensureSocketExists()
 
     val address = UnixDomainSocketAddress.of(socketPathValue)
@@ -505,6 +516,14 @@ class McpDaemonClient(
     val path = File(socketPathValue).toPath()
     if (!Files.exists(path)) {
       throw DaemonUnavailableException("Daemon socket not found at $socketPathValue")
+    }
+  }
+
+  private fun ensureVersionMatchedDaemon() {
+    when (val result = daemonLifecycle?.ensureVersionMatchedDaemon()) {
+      is DaemonLifecycleResult.Failure -> throw DaemonUnavailableException(result.message)
+      is DaemonLifecycleResult.Ready,
+      null -> Unit
     }
   }
 

@@ -14,7 +14,7 @@ class DesktopDaemonLifecycleTest {
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(exists = true),
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40+gabc123")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
@@ -28,12 +28,34 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `starts when a matching pid file remains after the daemon socket disappears`() {
+    val commands = FakeDaemonCommandExecutor()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40", "0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertTrue(result.restarted)
+    assertEquals(
+      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start")),
+      commands.commands,
+    )
+  }
+
+  @Test
   fun `restarts a skewed daemon through the pinned desktop package`() {
     val commands = FakeDaemonCommandExecutor()
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(exists = true),
+        socketChecker = FakeDaemonSocketChecker(listOf(true, true)),
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
@@ -55,7 +77,7 @@ class DesktopDaemonLifecycleTest {
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(exists = false),
+        socketChecker = FakeDaemonSocketChecker(listOf(false, true)),
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
@@ -72,12 +94,12 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `uses the release package when the desktop build has a source stamp`() {
+  fun `reports source build skew instead of launching a release daemon`() {
     val commands = FakeDaemonCommandExecutor()
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40+gabc123" },
-        socketChecker = FakeDaemonSocketChecker(exists = false),
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40+gdef456")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
@@ -85,11 +107,9 @@ class DesktopDaemonLifecycleTest {
 
     val result = lifecycle.ensureVersionMatchedDaemon()
 
-    assertIs<DaemonLifecycleResult.Ready>(result)
-    assertEquals(
-      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start")),
-      commands.commands,
-    )
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertTrue(result.message.contains("source build"))
+    assertTrue(commands.commands.isEmpty())
   }
 
   @Test
@@ -98,7 +118,7 @@ class DesktopDaemonLifecycleTest {
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(exists = true),
+        socketChecker = FakeDaemonSocketChecker(listOf(true, true, true)),
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.39")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = timer,
@@ -118,7 +138,7 @@ class DesktopDaemonLifecycleTest {
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(exists = false),
+        socketChecker = FakeDaemonSocketChecker(listOf(false)),
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(exitCode = 1, output = ""),
         timer = FakeDaemonRetryTimer(),
@@ -130,15 +150,25 @@ class DesktopDaemonLifecycleTest {
     assertTrue(result.message.contains("Install @kaeawc/auto-mobile@0.0.40"))
   }
 
-  private class FakeDaemonSocketChecker(
-    private val exists: Boolean,
-  ) : DaemonSocketChecker {
-    override fun exists(): Boolean = exists
+  @Test
+  fun `uses the Windows npm command shim`() {
+    val lifecycle = DesktopDaemonLifecycle()
+
+    assertEquals("npx.cmd", lifecycle.npxExecutable("Windows 11"))
+    assertEquals("npx", lifecycle.npxExecutable("Mac OS X"))
   }
 
-  private class FakeDaemonPidFileReader(
-    private val versions: List<String?>,
-  ) : DaemonPidFileReader {
+  private class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {
+    private var reads = 0
+
+    override fun exists(): Boolean {
+      val index = reads.coerceAtMost(states.lastIndex)
+      reads++
+      return states[index]
+    }
+  }
+
+  private class FakeDaemonPidFileReader(private val versions: List<String?>) : DaemonPidFileReader {
     private var reads = 0
 
     override fun readVersion(): String? {

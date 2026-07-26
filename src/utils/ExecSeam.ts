@@ -4,8 +4,8 @@ import { createExecResult } from "./execResult";
 
 /**
  * Node exec option names as passed to the underlying `execFile`/`promisify`
- * seam. Shared by the shell (`ProcessExecutor`) and file+argv
- * (`HostCommandExecutor`) executors so the mapping lives in one place.
+ * seam. Shared by argv-first host-command owners so the mapping lives in one
+ * place.
  */
 export interface ExecSeamOptions {
   timeout?: number;

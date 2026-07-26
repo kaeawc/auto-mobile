@@ -1,13 +1,12 @@
 import type { ChildProcess, SpawnOptions } from "child_process";
 import type { ExecResult } from "../../src/models";
-import type { ProcessExecOptions, ProcessExecutor } from "../../src/utils/ProcessExecutor";
-import type { HostCommandOptions, HostCommandExecutor } from "../../src/utils/HostCommandExecutor";
+import type { HostCommandOptions, HostProcessExecutor } from "../../src/utils/HostCommandExecutor";
 import { FakeChildProcess } from "./FakeChildProcess";
 
 /**
  * Fake ProcessExecutor for testing command execution and process spawning.
  */
-export class FakeProcessExecutor implements ProcessExecutor, HostCommandExecutor {
+export class FakeProcessExecutor implements HostProcessExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
   private commandHandlers: Array<{ pattern: string; handler: (command: string) => ExecResult | Promise<ExecResult> }> = [];
   private defaultResponse: ExecResult = this.createExecResult("", "");
@@ -43,7 +42,7 @@ export class FakeProcessExecutor implements ProcessExecutor, HostCommandExecutor
     return [...this.spawnResponses];
   }
 
-  async exec(command: string, _options?: ProcessExecOptions): Promise<ExecResult> {
+  async exec(command: string, _options?: HostCommandOptions): Promise<ExecResult> {
     this.executedCommands.push(command);
     for (const { pattern, handler } of this.commandHandlers) {
       if (command.includes(pattern)) {

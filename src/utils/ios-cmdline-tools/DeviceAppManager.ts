@@ -7,12 +7,14 @@ import { hashAppBundle } from "./AppBundleHasher";
 import { isProcessAlreadyGoneError } from "./iosProcessErrors";
 import { iosMajorVersionFromDevicectlDetails } from "./iosVersion";
 import { logger } from "../logger";
-import { shellQuote as quoteShell } from "../shellQuote";
+import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import type { Logger } from "../logger";
 
 interface DeviceAppManagerDependencies {
   platform: () => NodeJS.Platform;
-  exec: (command: string) => Promise<ExecResult>;
+  execute?: (file: string, args: string[]) => Promise<ExecResult>;
+  /** @deprecated Test compatibility for the former shell-string dependency. */
+  exec?: (command: string) => Promise<ExecResult>;
   readFile: (path: string) => Promise<string>;
   mkdtemp: (prefix: string) => Promise<string>;
   rm: (path: string) => Promise<void>;
@@ -28,20 +30,7 @@ type LaunchPreconditionResult =
 
 const defaultDependencies: DeviceAppManagerDependencies = {
   platform: () => process.platform,
-  exec: async command => {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const result = await promisify(exec)(command);
-    const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-    const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
-    return {
-      stdout,
-      stderr,
-      toString() { return stdout; },
-      trim() { return stdout.trim(); },
-      includes(searchString: string) { return stdout.includes(searchString); }
-    };
-  },
+  execute: (file, args) => new DefaultHostCommandExecutor().executeCommand(file, args),
   readFile: async path => fs.readFile(path, "utf-8"),
   mkdtemp: async prefix => fs.mkdtemp(prefix),
   rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -388,6 +377,12 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     this.deps = deps;
   }
 
+  private execute(file: string, args: string[]): Promise<ExecResult> {
+    if (this.deps.execute) {return this.deps.execute(file, args);}
+    if (this.deps.exec) {return this.deps.exec([file, ...args].join(" "));}
+    throw new Error("DeviceAppManager requires an argv command executor");
+  }
+
   private getLaunchPrecondition(): LaunchPreconditionResult {
     if (this.deps.platform() !== "darwin") {
       return { ok: false, reason: "non-darwin" };
@@ -410,7 +405,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return false;
     }
     try {
-      await this.deps.exec("xcrun devicectl --version");
+      await this.execute("xcrun", ["devicectl", "--version"]);
       return true;
     } catch (error) {
       // `devicectl --version` fails when Xcode 15+ isn't installed; that just means physical-device URL launch is unavailable.
@@ -423,9 +418,8 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * Open a URL on a physical iOS device (Xcode 15+/iOS 17+) by launching
    * `bundleId` with the URL as its launch payload. For http(s) URLs the caller
    * passes `com.apple.mobilesafari` so Safari resolves universal links;
-   * custom-scheme URLs pass the owning/target app bundle id. `--device <udid>`
-   * is passed unquoted (UDIDs are `[0-9A-F-]`), while the user-controlled url +
-   * bundle id are single-quoted to prevent shell injection. Near-clone of
+   * custom-scheme URLs pass the owning/target app bundle id. Values are passed
+   * as argv, so URLs and bundle ids cannot alter command structure. Near-clone of
    * {@link launchApp}, differing only by the `--payload-url` flag; kept distinct
    * because it carries no PID-capture/JSON-output plumbing.
    */
@@ -434,15 +428,15 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     if (!precondition.ok) {
       throw new ActionableError("Opening URLs on a physical iOS device requires macOS");
     }
-    const command = [
-      "xcrun", "devicectl", "device", "process", "launch",
+    const args = [
+      "devicectl", "device", "process", "launch",
       "--device", deviceUdid,            // unquoted, matching the other devicectl calls
-      "--payload-url", quoteShell(url),
+      "--payload-url", url,
       "--terminate-existing",
-      quoteShell(bundleId)
-    ].join(" ");
+      bundleId
+    ];
     try {
-      await this.deps.exec(command);
+      await this.execute("xcrun", args);
     } catch (error) {
       throw toActionableError(error, `Failed to open URL on physical iOS device ${bundleId}`);
     }
@@ -507,18 +501,17 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     try {
       let bundleOnDisk: string | null;
       try {
-        const infoCommand = [
-          "xcrun",
+        const infoArgs = [
           "devicectl",
           "device",
           "info",
           "apps",
           "--device", deviceUdid,
           "--bundle-id", bundleId,
-          "--json-output", quoteShell(jsonPath),
+          "--json-output", jsonPath,
           "--quiet"
-        ].join(" ");
-        await this.deps.exec(infoCommand);
+        ];
+        await this.execute("xcrun", infoArgs);
 
         const raw = await this.deps.readFile(jsonPath);
         const data = JSON.parse(raw) as unknown;
@@ -532,18 +525,17 @@ export class DeviceAppManager implements DeviceUrlLauncher {
         }
 
         copyDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-device-app-"));
-        const copyCommand = [
-          "xcrun",
+        const copyArgs = [
           "devicectl",
           "device",
           "copy",
           "from",
           "--device", deviceUdid,
-          "--source", quoteShell(bundlePath),
-          "--destination", quoteShell(copyDir),
+          "--source", bundlePath,
+          "--destination", copyDir,
           "--quiet"
-        ].join(" ");
-        await this.deps.exec(copyCommand);
+        ];
+        await this.execute("xcrun", copyArgs);
 
         bundleOnDisk = await findAppBundleInDir(copyDir, this.deps);
       } catch (error) {
@@ -572,18 +564,17 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     if (this.deps.platform() !== "darwin") {
       return;
     }
-    const command = [
-      "xcrun",
+    const args = [
       "devicectl",
       "device",
       "uninstall",
       "app",
       "--device", deviceUdid,
-      quoteShell(bundleId),
+      bundleId,
       "--quiet"
-    ].join(" ");
+    ];
     try {
-      await this.deps.exec(command);
+      await this.execute("xcrun", args);
     } catch (error) {
       throw toActionableError(error, `Failed to uninstall ${bundleId} on physical iOS device`);
     }
@@ -593,18 +584,17 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     if (this.deps.platform() !== "darwin") {
       throw new ActionableError("Physical device app installation requires macOS");
     }
-    const command = [
-      "xcrun",
+    const args = [
       "devicectl",
       "device",
       "install",
       "app",
       "--device", deviceUdid,
-      quoteShell(artifactPath),
+      artifactPath,
       "--quiet"
-    ].join(" ");
+    ];
     try {
-      await this.deps.exec(command);
+      await this.execute("xcrun", args);
     } catch (error) {
       throw toActionableError(error, "Failed to install app on physical iOS device");
     }
@@ -647,19 +637,18 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-launch-"));
     const jsonPath = join(tempDir, "launch.json");
     try {
-      const command = [
-        "xcrun",
+      const args = [
         "devicectl",
         "device",
         "process",
         "launch",
         "--device", deviceUdid,
         ...(options.terminateExisting ? ["--terminate-existing"] : []),
-        "--json-output", quoteShell(jsonPath),
+        "--json-output", jsonPath,
         "--quiet",
-        quoteShell(bundleId)
-      ].join(" ");
-      await this.deps.exec(command);
+        bundleId
+      ];
+      await this.execute("xcrun", args);
 
       const raw = await this.deps.readFile(jsonPath);
       const pid = findProcessIdentifier(JSON.parse(raw));
@@ -719,8 +708,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return { wasInstalled: true, wasRunning: false };
     }
 
-    const terminateCommand = [
-      "xcrun",
+    const terminateArgs = [
       "devicectl",
       "device",
       "process",
@@ -729,9 +717,9 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       "--pid", String(pid),
       "--kill",
       "--quiet"
-    ].join(" ");
+    ];
     try {
-      await this.deps.exec(terminateCommand);
+      await this.execute("xcrun", terminateArgs);
     } catch (error) {
       const message = getExecErrorText(error);
       // Race (#3054): the PID resolved from `info processes` exited before the
@@ -772,18 +760,17 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
     const jsonPath = join(tempDir, "apps.json");
     try {
-      const infoCommand = [
-        "xcrun",
+      const infoArgs = [
         "devicectl",
         "device",
         "info",
         "apps",
         "--device", deviceUdid,
         "--bundle-id", bundleId,
-        "--json-output", quoteShell(jsonPath),
+        "--json-output", jsonPath,
         "--quiet"
-      ].join(" ");
-      await this.deps.exec(infoCommand);
+      ];
+      await this.execute("xcrun", infoArgs);
 
       const raw = await this.deps.readFile(jsonPath);
       const data = JSON.parse(raw) as unknown;
@@ -807,17 +794,16 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
     const jsonPath = join(tempDir, "processes.json");
     try {
-      const command = [
-        "xcrun",
+      const args = [
         "devicectl",
         "device",
         "info",
         "processes",
         "--device", deviceUdid,
-        "--json-output", quoteShell(jsonPath),
+        "--json-output", jsonPath,
         "--quiet"
-      ].join(" ");
-      await this.deps.exec(command);
+      ];
+      await this.execute("xcrun", args);
 
       const raw = await this.deps.readFile(jsonPath);
       return findRunningProcessPid(JSON.parse(raw), bundlePath);
@@ -838,17 +824,16 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
     const jsonPath = join(tempDir, "details.json");
     try {
-      const command = [
-        "xcrun",
+      const args = [
         "devicectl",
         "device",
         "info",
         "details",
         "--device", deviceUdid,
-        "--json-output", quoteShell(jsonPath),
+        "--json-output", jsonPath,
         "--quiet"
-      ].join(" ");
-      await this.deps.exec(command);
+      ];
+      await this.execute("xcrun", args);
       const raw = await this.deps.readFile(jsonPath);
       return iosMajorVersionFromDevicectlDetails(raw);
     } catch (error) {
@@ -871,7 +856,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
 
     let appPath: string;
     try {
-      const result = await this.deps.exec(`xcrun simctl get_app_container ${quoteShell(deviceUdid)} ${quoteShell(bundleId)} app`);
+      const result = await this.execute("xcrun", ["simctl", "get_app_container", deviceUdid, bundleId, "app"]);
       appPath = result.trim();
     } catch (error) {
       const errorMessage = getErrorMessage(error);
@@ -900,7 +885,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     if (this.deps.platform() !== "darwin") {
       return;
     }
-    await this.deps.exec(`xcrun simctl uninstall ${quoteShell(deviceUdid)} ${quoteShell(bundleId)}`);
+    await this.execute("xcrun", ["simctl", "uninstall", deviceUdid, bundleId]);
   }
 }
 

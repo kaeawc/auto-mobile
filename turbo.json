@@ -81,6 +81,12 @@
       "outputs": [],
       "outputLogs": "new-only"
     },
+    "check:host-shell-boundary": {
+      "description": "Prevent new production host-shell execution",
+      "inputs": ["src/**", "scripts/check-host-shell-boundary.ts", "package.json"],
+      "outputs": [],
+      "outputLogs": "new-only"
+    },
     "test:coverage": {
       "description": "Run tests with coverage reporting to coverage/. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach; without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
       "inputs": [

@@ -1,4 +1,4 @@
-import type { ProcessExecutor } from "../../../utils/ProcessExecutor";
+import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import { logger } from "../../../utils/logger";
 import type {
   BootedDevice,
@@ -21,7 +21,6 @@ import {
 } from "./parsing";
 import {
   buildAppleLanguages,
-  iosSpawnCommand,
   isIosSimulator,
   parseAppleTimeFormatRaw,
 } from "./iosHelpers";
@@ -39,7 +38,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   constructor(
     private readonly device: BootedDevice,
-    private readonly processExecutor: ProcessExecutor
+    private readonly processExecutor: HostCommandExecutor
   ) {}
 
   async setLocale(languageTag: string, _options: BroadcastOptions): Promise<SetLocaleResult> {
@@ -50,13 +49,12 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     try {
       const previousLanguageTag = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
       const appleLocale = this.toAppleLocale(languageTag);
-      await this.iosDefaultsWrite(".GlobalPreferences", "AppleLocale", appleLocale);
+      await this.iosDefaultsWrite(".GlobalPreferences", "AppleLocale", [appleLocale]);
 
       const languages = this.buildAppleLanguages(languageTag);
-      const arrayArgs = languages.map(l => `"${l}"`).join(" ");
-      await this.processExecutor.exec(
-        iosSpawnCommand(this.device.deviceId, `defaults write .GlobalPreferences AppleLanguages -array ${arrayArgs}`)
-      );
+      await this.processExecutor.executeCommand("xcrun", [
+        "simctl", "spawn", this.device.deviceId, "defaults", "write", ".GlobalPreferences", "AppleLanguages", "-array", ...languages
+      ]);
 
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
       if (!readBack || readBack !== appleLocale) {
@@ -97,10 +95,10 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       await this.iosDefaultsWrite(
         "com.apple.mobiletimerd",
         "AutomaticTimeZoneSetting",
-        "-bool NO"
+        ["-bool", "NO"]
       );
 
-      await this.iosDefaultsWrite(".GlobalPreferences", "AppleTimeZone", zoneId);
+      await this.iosDefaultsWrite(".GlobalPreferences", "AppleTimeZone", [zoneId]);
 
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
       if (!readBack || readBack !== zoneId) {
@@ -144,8 +142,11 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       const previousRaw = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
       const previousFormat = normalizeTimeFormat(parseAppleTimeFormatRaw(previousRaw));
 
-      const boolValue = enabled ? "-bool YES" : "-bool NO";
-      await this.iosDefaultsWrite(".GlobalPreferences", "AppleICUForce24HourTime", boolValue);
+      await this.iosDefaultsWrite(
+        ".GlobalPreferences",
+        "AppleICUForce24HourTime",
+        ["-bool", enabled ? "YES" : "NO"]
+      );
 
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
       const expectedReadBack = enabled ? "1" : "0";
@@ -180,7 +181,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
     try {
       const previousCalendarSystem = await this.iosDefaultsRead(".GlobalPreferences", "AppleCalendar");
-      await this.iosDefaultsWrite(".GlobalPreferences", "AppleCalendar", calendarSystem);
+      await this.iosDefaultsWrite(".GlobalPreferences", "AppleCalendar", [calendarSystem]);
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleCalendar");
       if (!readBack || readBack !== calendarSystem) {
         return {
@@ -279,9 +280,9 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   private async iosDefaultsRead(domain: string, key: string): Promise<string | null> {
     try {
-      const result = await this.processExecutor.exec(
-        iosSpawnCommand(this.device.deviceId, `defaults read ${domain} ${key}`)
-      );
+      const result = await this.processExecutor.executeCommand("xcrun", [
+        "simctl", "spawn", this.device.deviceId, "defaults", "read", domain, key
+      ]);
       return normalizeSettingValue(result.stdout);
     } catch (error) {
       // `defaults read` fails when the domain/key has never been set on this
@@ -291,10 +292,10 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     }
   }
 
-  private async iosDefaultsWrite(domain: string, key: string, value: string): Promise<void> {
-    await this.processExecutor.exec(
-      iosSpawnCommand(this.device.deviceId, `defaults write ${domain} ${key} ${value}`)
-    );
+  private async iosDefaultsWrite(domain: string, key: string, valueArgs: string[]): Promise<void> {
+    await this.processExecutor.executeCommand("xcrun", [
+      "simctl", "spawn", this.device.deviceId, "defaults", "write", domain, key, ...valueArgs
+    ]);
   }
 
   private toAppleLocale(languageTag: string): string {

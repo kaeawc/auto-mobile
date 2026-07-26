@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import { homedir, platform } from "os";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 
 /**
@@ -33,10 +33,8 @@ export interface SystemDetection {
    */
   fileExists(path: string): Promise<boolean>;
 
-  /**
-   * Execute a command and get the result
-   */
-  exec(command: string): Promise<{ stdout: string; stderr: string }>;
+  /** Execute a command with structured argv and get the result. */
+  executeCommand(file: string, args?: string[]): Promise<{ stdout: string; stderr: string }>;
 }
 
 /**
@@ -63,8 +61,8 @@ export class DefaultSystemDetection implements SystemDetection {
     return existsSync(path);
   }
 
-  async exec(command: string): Promise<{ stdout: string; stderr: string }> {
-    const execAsync = promisify(exec);
-    return execAsync(command) as Promise<{ stdout: string; stderr: string }>;
+  async executeCommand(file: string, args: string[] = []): Promise<{ stdout: string; stderr: string }> {
+    const execFileAsync = promisify(execFile);
+    return execFileAsync(file, args) as Promise<{ stdout: string; stderr: string }>;
   }
 }

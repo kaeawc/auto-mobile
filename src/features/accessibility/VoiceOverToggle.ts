@@ -3,8 +3,7 @@ import { logger } from "../../utils/logger";
 import type { VoiceOverResult } from "../../models/AccessibilityResult";
 import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
-import type { ProcessExecutor } from "../../utils/ProcessExecutor";
-import { DefaultProcessExecutor } from "../../utils/ProcessExecutor";
+import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -16,7 +15,7 @@ export class VoiceOverToggle {
   constructor(
     private readonly device: BootedDevice,
     private readonly detector: IosVoiceOverDetector = iosVoiceOverDetector,
-    private readonly processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
+    private readonly processExecutor: HostCommandExecutor = new DefaultHostCommandExecutor(),
     private readonly timer: Timer = defaultTimer
   ) {}
 
@@ -38,19 +37,19 @@ export class VoiceOverToggle {
     // raw out of toggle(), matching TalkBackToggle's graceful contract (#3921).
     const boolValue = enabled ? "YES" : "NO";
     try {
-      await this.processExecutor.exec(
-        `xcrun simctl spawn ${this.device.deviceId} defaults write com.apple.Accessibility VoiceOverTouchEnabled -bool ${boolValue}`
-      );
-      await this.processExecutor.exec(
-        `xcrun simctl spawn ${this.device.deviceId} notifyutil -p com.apple.accessibility.VoiceOverStatusDidChange`
-      );
+      await this.processExecutor.executeCommand("xcrun", [
+        "simctl", "spawn", this.device.deviceId, "defaults", "write", "com.apple.Accessibility", "VoiceOverTouchEnabled", "-bool", boolValue
+      ]);
+      await this.processExecutor.executeCommand("xcrun", [
+        "simctl", "spawn", this.device.deviceId, "notifyutil", "-p", "com.apple.accessibility.VoiceOverStatusDidChange"
+      ]);
       const serviceCommand = enabled
         ? "launchctl kickstart -p system/com.apple.VoiceOverTouch"
         : "launchctl kill SIGTERM system/com.apple.VoiceOverTouch";
       try {
-        await this.processExecutor.exec(
-          `xcrun simctl spawn ${this.device.deviceId} ${serviceCommand}`
-        );
+        await this.processExecutor.executeCommand("xcrun", [
+          "simctl", "spawn", this.device.deviceId, ...serviceCommand.split(" ")
+        ]);
       } catch (error) {
         if (enabled || !this.isServiceAlreadyStopped(error)) {
           throw error;

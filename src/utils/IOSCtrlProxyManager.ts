@@ -9,7 +9,7 @@ import { ActionableError } from "../models/ActionableError";
 import { resolvePinnedVersion } from "../constants/release";
 import { type ChildProcess } from "child_process";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
-import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "./HostCommandExecutor";
 import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
 import { XcodebuildClient, type Xcodebuild } from "./ios-cmdline-tools/XcodebuildClient";
 import { DeviceAppManager } from "./ios-cmdline-tools/DeviceAppManager";
@@ -22,7 +22,6 @@ import {
 } from "./ios/IOSHostPortAvailabilityChecker";
 import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
 import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
-import type { HostCommandExecutor } from "./HostCommandExecutor";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 /**
@@ -132,7 +131,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly timer: Timer;
   private servicePort: number;
   private readonly builder: IOSCtrlProxyBuilder;
-  private readonly processExecutor: ProcessExecutor;
+  private readonly processExecutor: HostProcessExecutor;
   private readonly xcodebuild: Xcodebuild;
   private readonly processClient: IOSCtrlProxyProcessClient;
   private readonly signingManager: XcodeSigningManager;
@@ -212,7 +211,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     device: BootedDevice,
     timer: Timer = defaultTimer,
     builder?: IOSCtrlProxyBuilder,
-    processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
+    processExecutor: HostProcessExecutor = new DefaultHostCommandExecutor(),
     signingManager: XcodeSigningManager = new XcodeSigningManager(),
     deviceAppManager: DeviceAppManager = new DeviceAppManager(),
     remoteRunner?: RemoteCtrlProxyIOSRunner,
@@ -328,7 +327,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     device: BootedDevice,
     timer: Timer,
     builder: IOSCtrlProxyBuilder | undefined,
-    processExecutor: ProcessExecutor & HostCommandExecutor,
+    processExecutor: HostProcessExecutor,
     signingManager?: XcodeSigningManager,
     deviceAppManager?: DeviceAppManager,
     remoteRunner?: RemoteCtrlProxyIOSRunner,
@@ -346,7 +345,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       remoteRunner,
       hostPortAvailabilityChecker,
       xcodebuild ?? new XcodebuildClient(
-        async (file, args) => processExecutor.exec([file, ...args].join(" ")),
+        async (file, args) => processExecutor.executeCommand(file, args),
         timer,
         (command, args, options) => processExecutor.spawn(command, args, options)
       ),
@@ -523,8 +522,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           return installed;
         }
 
-        const { stdout } = await this.processExecutor.exec(
-          `ideviceinstaller -u ${this.device.deviceId} -l 2>/dev/null | grep ${IOSCtrlProxyManager.BUNDLE_ID}`
+        const { stdout } = await this.processExecutor.executeCommand(
+          "ideviceinstaller",
+          ["-u", this.device.deviceId, "-l"]
         );
         const installed = stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
         this.cachedInstalled = { isInstalled: installed, timestamp: this.timer.now() };
@@ -2276,7 +2276,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           return result.data.stdout.includes(this.device.deviceId);
         }
 
-        const { stdout } = await this.processExecutor.exec("xcrun simctl list devices");
+        const { stdout } = await this.processExecutor.executeCommand("xcrun", ["simctl", "list", "devices"]);
         return stdout.includes(this.device.deviceId);
       } catch (error) {
         // `xcrun simctl list devices` failing (Xcode tooling missing/misconfigured)
@@ -2295,7 +2295,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return result.data.stdout.split("\n").some(line => line.trim() === this.device.deviceId);
       }
 
-      const { stdout } = await this.processExecutor.exec("idevice_id -l");
+      const { stdout } = await this.processExecutor.executeCommand("idevice_id", ["-l"]);
       return stdout.split("\n").some(line => line.trim() === this.device.deviceId);
     } catch (error) {
       // `idevice_id -l` failing (libimobiledevice missing, or no physical device

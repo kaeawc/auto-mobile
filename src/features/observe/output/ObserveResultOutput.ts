@@ -701,8 +701,22 @@ function elementValuesEqual(a: unknown, b: unknown): boolean {
  * re-flood localized diffs the way `extras` once did. Excluded from the
  * *changed* comparison only; pairing and `added`/`removed` reconstruction are
  * unaffected.
+ *
+ * `occlusionState` / `occludedBy` / `occludedByViewId` (issue #4399): the
+ * Android occlusion pass reports these as capture metadata, not durable UI
+ * state. They are excluded from the Android stable-identity content hash because
+ * two captures of an unchanged screen can disagree on all three. Emitting them
+ * here would therefore make `--actions-diff-observe` report phantom changes and
+ * make element mirrors disagree for a stable focused node. They remain on
+ * added/removed nodes for reconstruction and are never identity keys.
  */
-export const DIFF_IGNORED_ATTRS: ReadonlySet<string> = new Set(["extras", "view-id"]);
+export const DIFF_IGNORED_ATTRS: ReadonlySet<string> = new Set([
+  "extras",
+  "view-id",
+  "occlusionState",
+  "occludedBy",
+  "occludedByViewId",
+]);
 
 /** Per-attribute diff of two attribute maps (union of keys). */
 function diffAttributes(
@@ -726,6 +740,30 @@ function diffAttributes(
     }
   }
   return changes;
+}
+
+/**
+ * `SafeAreaAuditor` derives a warning's confidence from `occlusionState`.
+ * Occlusion is volatile capture metadata, so confidence-only warning churn must
+ * not reintroduce the phantom action diff excluded at the node level. Preserve
+ * all other warning fields and preserve the original values when a material
+ * warning change is emitted.
+ */
+function layoutWarningsEqual(a: unknown, b: unknown): boolean {
+  const withoutDerivedConfidence = (value: unknown): unknown => {
+    if (!Array.isArray(value)) {
+      return value;
+    }
+    return value.map(warning => {
+      if (!warning || typeof warning !== "object" || Array.isArray(warning)) {
+        return warning;
+      }
+      const copy = { ...(warning as Record<string, unknown>) };
+      delete copy.confidence;
+      return copy;
+    });
+  };
+  return valuesEqual(withoutDerivedConfidence(a), withoutDerivedConfidence(b));
 }
 
 /**
@@ -1123,7 +1161,10 @@ export function diffObserveResult(
   const baseRecord = baseline as unknown as Record<string, unknown>;
   const nextRecord = next as unknown as Record<string, unknown>;
   for (const field of scalarFields) {
-    if (!valuesEqual(baseRecord[field], nextRecord[field])) {
+    const equal = field === "layoutWarnings"
+      ? layoutWarningsEqual(baseRecord[field], nextRecord[field])
+      : valuesEqual(baseRecord[field], nextRecord[field]);
+    if (!equal) {
       fields[field] = { from: baseRecord[field], to: nextRecord[field] };
     }
   }

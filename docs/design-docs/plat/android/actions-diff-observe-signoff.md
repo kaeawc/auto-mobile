@@ -213,6 +213,29 @@ above:
 
 ### Follow-ups
 
+### Addendum: occlusion-metadata stability ([#4399](https://github.com/kaeawc/auto-mobile/issues/4399))
+
+The Android occlusion pass is enabled by default and emits
+`occlusionState`/`occludedBy`/`occludedByViewId` on hierarchy nodes. The
+capture-layer stable-identity code already excludes these fields because they
+can churn between captures of the same screen. The action-diff comparison now
+uses the same policy: matched-node deltas and Element mirror fields ignore all
+three attributes. `SafeAreaAuditor` derives a warning's `confidence` from
+`occlusionState`, so the diff also treats a confidence-only `layoutWarnings`
+change as unchanged; any material warning change remains emitted.
+
+**Android emulator sign-off (2026-07-25):** with a branch daemon running
+`--actions-diff-observe --safe-area-warnings` and occlusion enabled, two
+consecutive real Android emulator captures were fed through the same
+`sanitizeObserveResult → diffObserveResult` path used by
+`finalizeToolResponse`. The output had `added=0`, `removed=0`, `changed=0`, and
+no `fields`. This sample did not itself exhibit the documented nondeterministic
+occlusion churn, so the exact churn suppression is pinned by the deterministic
+unit regressions in `diffObserveResult.test.ts`: node-only churn, mirror-only
+churn, and `layoutWarnings.confidence`-only churn produce no diff, while a real
+node or warning change remains visible. `recompositionMetrics` remains diffed;
+there is no evidence that it is volatile.
+
 - Capture-layer: emit real stable node identity so scroll diffs collapse the
   id-less/text-less cascade (the residual opacity in §4) — the genuine fix
   #3107 pointed at, orthogonal to the diff format. **Landed as #3228**: the TS

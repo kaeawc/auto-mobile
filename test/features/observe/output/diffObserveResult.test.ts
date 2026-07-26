@@ -1331,6 +1331,96 @@ describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", (
   });
 });
 
+describe("diffObserveResult — volatile occlusion exclusion (#4399)", () => {
+  const node = (extra: Record<string, unknown> = {}) => ({
+    "resource-id": "covered",
+    "bounds": { left: 0, top: 0, right: 100, bottom: 40 },
+    "text": "Continue",
+    ...extra,
+  });
+
+  const warning = (confidence: "high" | "medium") => ({
+    type: "important-content-under-inset",
+    severity: "warning",
+    element: { viewId: "covered", bounds: { left: 0, top: 0, right: 100, bottom: 40 } },
+    categories: ["text"],
+    insetTypes: ["systemBars"],
+    sides: ["top"],
+    overflowPx: { top: 40 },
+    insetPx: { top: 59 },
+    overlapPercent: 100,
+    confidence,
+  } as const);
+
+  test("occlusion-only node churn produces no changed entry", () => {
+    const baseline = obs(node({
+      occlusionState: "partial",
+      occludedBy: "android.view.View",
+      occludedByViewId: "overlay-a",
+    }));
+    const next = obs(node({
+      occlusionState: "visible",
+      occludedBy: "",
+      occludedByViewId: "overlay-b",
+    }));
+
+    expect(diffObserveResult(baseline, next).changed).toEqual([]);
+  });
+
+  test("a real node change remains visible beside occlusion churn", () => {
+    const baseline = obs(node({ occlusionState: "partial", occludedBy: "overlay-a" }));
+    const next = obs(node({ occlusionState: "visible", occludedBy: "overlay-b", checked: "true" }));
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(Object.keys(diff.changed[0].changes)).toEqual(["checked"]);
+  });
+
+  test("an element mirror whose only change is occlusion churn is not reported", () => {
+    const baseline = obs(node(), {
+      focusedElement: node({ occlusionState: "partial", occludedBy: "overlay-a" }) as any,
+    });
+    const next = obs(node(), {
+      focusedElement: node({ occlusionState: "visible", occludedBy: "overlay-b" }) as any,
+    });
+
+    expect(diffObserveResult(baseline, next).fields).toBeUndefined();
+  });
+
+  test("layout-warning confidence churn caused by occlusion is not reported", () => {
+    const baseline = obs(node(), { layoutWarnings: [warning("high")] });
+    const next = obs(node(), { layoutWarnings: [warning("medium")] });
+
+    expect(diffObserveResult(baseline, next).fields).toBeUndefined();
+  });
+
+  test("a substantive layout-warning change remains visible", () => {
+    const baseline = obs(node(), { layoutWarnings: [warning("high")] });
+    const next = obs(node(), {
+      layoutWarnings: [{ ...warning("medium"), severity: "info" }],
+    });
+
+    expect(diffObserveResult(baseline, next).fields!.layoutWarnings).toBeDefined();
+  });
+
+  test("recomposition metrics remain a visible node change", () => {
+    const baseline = obs(node({ recompositionMetrics: { count: 2 } }));
+    const next = obs(node({ recompositionMetrics: { count: 3 } }));
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(Object.keys(diff.changed[0].changes)).toEqual(["recompositionMetrics"]);
+  });
+
+  test("the shared ignore set names every volatile occlusion attribute", () => {
+    expect([...DIFF_IGNORED_ATTRS]).toEqual(expect.arrayContaining([
+      "occlusionState",
+      "occludedBy",
+      "occludedByViewId",
+    ]));
+  });
+});
+
 describe("isSameObservationScreen", () => {
   const iosIdentity = (
     key: string,

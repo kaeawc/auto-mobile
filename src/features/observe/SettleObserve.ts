@@ -10,41 +10,18 @@ const DEFAULT_POLL_MS = 150;
 const DEFAULT_STABLE_READS = 2;
 
 /**
- * Node attributes that churn nondeterministically between two captures of the
- * *same* screen and therefore must not, on their own, read as instability.
- *
- * `diffObserveResult`'s own `DIFF_IGNORED_ATTRS` already drops `extras` and the
- * synthetic `view-id`, but the occlusion attributes are diffed — and the Android
- * capture layer documents them as volatile for exactly this reason: they are
- * excluded from the content-identity hash in
- * `src/features/observe/android/StableNodeIdentity.ts` ("`occlusionState` /
- * `occludedBy` / `occludedByViewId` churn nondeterministically between captures",
- * #3051, #3519). Occlusion is on by default (`ServerConfig`), so without this a
- * genuinely idle Android screen would produce a `changed` entry every poll and
- * `settleObserve` would never settle. The action-diff (`--actions-diff-observe`)
- * path has the same latent exposure but is out of scope here (follow-up).
- */
-const STABILITY_VOLATILE_ATTRS: ReadonlySet<string> = new Set([
-  "occlusionState",
-  "occludedBy",
-  "occludedByViewId",
-]);
-
-/**
  * Whether a structural diff represents a *stable* screen for settle purposes.
  * Stable means: nothing added or removed, no diffed top-level `fields` changed
  * (`diffObserveResult` only sets `fields` on an actual change, so absence means
- * unchanged), and every `changed` entry touches only volatile attributes that do
- * not count as instability (see {@link STABILITY_VOLATILE_ATTRS}). A `changed`
- * entry that touches any real attribute keeps the screen not-yet-settled.
+ * unchanged), and no matched node changes. The shared diff ignores volatile
+ * capture attributes, including occlusion metadata, so every remaining change is
+ * actionable instability.
  */
 function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
-  if (diff.added.length !== 0 || diff.removed.length !== 0 || diff.fields !== undefined) {
-    return false;
-  }
-  return diff.changed.every(entry =>
-    Object.keys(entry.changes).every(attr => STABILITY_VOLATILE_ATTRS.has(attr))
-  );
+  return diff.added.length === 0
+    && diff.removed.length === 0
+    && diff.changed.length === 0
+    && diff.fields === undefined;
 }
 
 /**

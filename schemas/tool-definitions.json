@@ -3098,7 +3098,6 @@
               "timeoutMs"
             ]
           },
-          "description": "Wait by DSL (`for`) or legacy selector.",
           "properties": {
             "for": {
               "type": "string",
@@ -3109,8 +3108,7 @@
                 "textEquals",
                 "countStable",
                 "stable"
-              ],
-              "description": "DSL condition; stable is whole-screen"
+              ]
             },
             "pollMs": {
               "type": "number"
@@ -3235,7 +3233,6 @@
             },
             "container": {
               "type": "object",
-              "description": "Scope the match to a container element (by elementId or text)",
               "properties": {
                 "elementId": {
                   "type": "string"
@@ -3274,13 +3271,21 @@
               },
               "required": [
                 "for"
-              ]
+              ],
+              "not": {
+                "required": [
+                  "container"
+                ]
+              }
             },
             {
               "properties": {
                 "for": {
                   "not": {
-                    "const": "textEquals"
+                    "enum": [
+                      "stable",
+                      "textEquals"
+                    ]
                   }
                 }
               },
@@ -3290,6 +3295,13 @@
               ]
             },
             {
+              "properties": {
+                "for": {
+                  "not": {
+                    "const": "stable"
+                  }
+                }
+              },
               "required": [
                 "for",
                 "text"
@@ -5842,7 +5854,6 @@
               "timeoutMs"
             ]
           },
-          "description": "Wait by DSL (`for`) or legacy selector.",
           "properties": {
             "for": {
               "type": "string",
@@ -5853,8 +5864,7 @@
                 "textEquals",
                 "countStable",
                 "stable"
-              ],
-              "description": "DSL condition; stable is whole-screen"
+              ]
             },
             "pollMs": {
               "type": "number"
@@ -5979,7 +5989,6 @@
             },
             "container": {
               "type": "object",
-              "description": "Scope the match to a container element (by elementId or text)",
               "properties": {
                 "elementId": {
                   "type": "string"
@@ -6018,13 +6027,21 @@
               },
               "required": [
                 "for"
-              ]
+              ],
+              "not": {
+                "required": [
+                  "container"
+                ]
+              }
             },
             {
               "properties": {
                 "for": {
                   "not": {
-                    "const": "textEquals"
+                    "enum": [
+                      "stable",
+                      "textEquals"
+                    ]
                   }
                 }
               },
@@ -6034,6 +6051,13 @@
               ]
             },
             {
+              "properties": {
+                "for": {
+                  "not": {
+                    "const": "stable"
+                  }
+                }
+              },
               "required": [
                 "for",
                 "text"

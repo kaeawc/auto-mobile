@@ -181,6 +181,12 @@ const waitForConditionDslSchema = z.object({
 }).strict().superRefine((value, ctx) => {
   validateWaitForTimeoutAliases(value, ctx);
   if (value.for === "stable") {
+    if (value.container !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'waitFor "for: stable" does not support container',
+      });
+    }
     return;
   }
   if (value.elementId === undefined && value.text === undefined) {
@@ -237,12 +243,10 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   not: { required: ["timeout", "timeoutMs"] },
-  description: "Wait by DSL (`for`) or legacy selector.",
   properties: {
     for: {
       type: "string",
       enum: ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"],
-      description: "DSL condition; stable is whole-screen",
     },
     pollMs: { type: "number" },
     stableReads: { type: "number" },
@@ -282,7 +286,6 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
     container: {
       type: "object",
-      description: "Scope the match to a container element (by elementId or text)",
       properties: { elementId: { type: "string" }, text: { type: "string" } },
       additionalProperties: false,
       oneOf: [{ required: ["elementId"] }, { required: ["text"] }],
@@ -295,9 +298,9 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   // matchType / textMatch. `absent` composes with everything (including textAny),
   // so it is not part of the textAny exclusion set.
   anyOf: [
-    { properties: { for: { const: "stable" } }, required: ["for"] },
-    { properties: { for: { not: { const: "textEquals" } } }, required: ["for", "elementId"] },
-    { required: ["for", "text"] },
+    { properties: { for: { const: "stable" } }, required: ["for"], not: { required: ["container"] } },
+    { properties: { for: { not: { enum: ["stable", "textEquals"] } } }, required: ["for", "elementId"] },
+    { properties: { for: { not: { const: "stable" } } }, required: ["for", "text"] },
     {
       required: ["textAny"],
       not: {

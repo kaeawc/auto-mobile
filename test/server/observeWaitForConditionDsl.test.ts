@@ -282,6 +282,15 @@ describe("waitFor back-compat", () => {
     expect(parsed.waitFor).toMatchObject({ for: "stable" });
   });
 
+  test("DSL `for: stable` rejects container because settling is whole-screen", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "android",
+        waitFor: { for: "stable", container: { elementId: "scope" } },
+      })
+    ).toThrow(/does not support container/);
+  });
+
   test("DSL `for: appear` without a selector is rejected", () => {
     expect(() =>
       observeSchema.parse({ platform: "android", waitFor: { for: "appear" } })

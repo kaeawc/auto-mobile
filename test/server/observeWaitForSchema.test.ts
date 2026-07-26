@@ -277,6 +277,10 @@ describe("published observe waitFor input schema", () => {
       platform: "android",
       waitFor: { for: "stable" },
     }).valid).toBe(true);
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "stable", container: { elementId: "scope" } },
+    }).valid).toBe(false);
   });
 
   test("requires text for the advertised textEquals DSL form", () => {

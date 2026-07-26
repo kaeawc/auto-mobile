@@ -3,6 +3,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import type { BootedDevice } from "../../models";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
+import { SetAndroidNotificationsEnabled } from "./SetAndroidNotificationsEnabled";
 import { SetAndroidNotificationPolicyAccess } from "./SetAndroidNotificationPolicyAccess";
 import { SetAndroidScheduleExactAlarmAppOp, type ScheduleExactAlarmAppOpMode } from "./SetAndroidScheduleExactAlarmAppOp";
 import {
@@ -55,6 +56,7 @@ export interface SetAppPermissionsInput {
   action?: AppPermissionAction;
   permissions?: string[];
   userId?: number;
+  notificationsEnabled?: boolean;
   notificationPolicyAccess?: boolean;
   scheduleExactAlarm?: ScheduleExactAlarmAppOpMode;
 }
@@ -179,6 +181,9 @@ export class AppPermissions {
     if (input.notificationPolicyAccess !== undefined) {
       unsupportedFields.push("notificationPolicyAccess");
     }
+    if (input.notificationsEnabled !== undefined) {
+      unsupportedFields.push("notificationsEnabled");
+    }
     if (input.scheduleExactAlarm !== undefined) {
       unsupportedFields.push("scheduleExactAlarm");
     }
@@ -264,30 +269,35 @@ export class AppPermissions {
     const operations: AppPermissionOperationResult[] = [];
 
     if (permissions.length > 0) {
-      if (action !== "grant") {
-        operations.push({
-          operationId: `android_runtime_permissions:${action}`,
-          success: false,
-          changedCount: 0,
-          failedCount: permissions.length,
-          error: "Android runtime permission mutations currently support action=grant only",
-        });
-      } else {
-        const grantResult = await new GrantAndroidPermissions(this.device, this.adbFactory).execute(appId, {
-          permissions,
-          userId: input.userId,
-        });
-        const changedCount = grantResult.results.filter(result => result.success && !result.skipped).length;
-        const failedCount = grantResult.results.filter(result => result.countsTowardSuccess && !result.success && !result.skipped).length;
-        operations.push({
-          operationId: "android_runtime_permissions:grant",
-          success: grantResult.success,
-          changedCount,
-          failedCount,
-          result: grantResult,
-          ...(grantResult.error ? { error: grantResult.error } : {}),
-        });
-      }
+      const permissionResult = await new GrantAndroidPermissions(this.device, this.adbFactory).execute(appId, {
+        action,
+        permissions,
+        userId: input.userId,
+      });
+      const changedCount = permissionResult.results.filter(result => result.success && !result.skipped).length;
+      const failedCount = permissionResult.results.filter(result => result.countsTowardSuccess && !result.success && !result.skipped).length;
+      operations.push({
+        operationId: `android_runtime_permissions:${action}`,
+        success: permissionResult.success,
+        changedCount,
+        failedCount,
+        result: permissionResult,
+        ...(permissionResult.error ? { error: permissionResult.error } : {}),
+      });
+    }
+
+    if (input.notificationsEnabled !== undefined) {
+      const result = await new SetAndroidNotificationsEnabled(this.device, this.adbFactory).execute(appId, {
+        enabled: input.notificationsEnabled,
+      });
+      operations.push({
+        operationId: "android_notifications_enabled",
+        success: result.success,
+        changedCount: result.success ? 1 : 0,
+        failedCount: result.success ? 0 : 1,
+        result,
+        ...(result.error ? { error: result.error } : {}),
+      });
     }
 
     if (input.notificationPolicyAccess !== undefined) {

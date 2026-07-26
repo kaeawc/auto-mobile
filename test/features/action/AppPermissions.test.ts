@@ -44,6 +44,7 @@ describe("AppPermissions", () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
     client.setCommandResult("shell pm grant --user 0 com.example.app android.permission.CAMERA", "");
+    client.setCommandResult("shell cmd notification set_enabled com.example.app true", "");
     client.setCommandResult("shell cmd notification allow_dnd com.example.app", "");
     client.setCommandResult("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM allow", "");
 
@@ -51,20 +52,105 @@ describe("AppPermissions", () => {
     const result = await permissions.setPermissions("com.example.app", {
       permissions: ["android.permission.CAMERA"],
       userId: 0,
+      notificationsEnabled: true,
       notificationPolicyAccess: true,
       scheduleExactAlarm: "allow",
     });
 
     expect(result.success).toBe(true);
-    expect(result.changedCount).toBe(3);
+    expect(result.changedCount).toBe(4);
     expect(result.operations.map(operation => operation.operationId)).toEqual([
       "android_runtime_permissions:grant",
+      "android_notifications_enabled",
       "android_notification_policy_access",
       "android_schedule_exact_alarm_appop",
     ]);
     expect(client.wasCommandExecuted("shell pm grant --user 0 com.example.app android.permission.CAMERA")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification set_enabled com.example.app true")).toBe(true);
     expect(client.wasCommandExecuted("shell cmd notification allow_dnd com.example.app")).toBe(true);
     expect(client.wasCommandExecuted("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM allow")).toBe(true);
+  });
+
+  test("aggregates Android revoke and notification command failures", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell pm revoke --user 0 com.example.app android.permission.CAMERA", "");
+    client.setCommandResult(
+      "shell cmd notification set_enabled com.example.app false",
+      "",
+      "SecurityException: notification access denied"
+    );
+
+    const permissions = new AppPermissions(androidDevice, { adbFactory });
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "revoke",
+      permissions: ["android.permission.CAMERA"],
+      userId: 0,
+      notificationsEnabled: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.changedCount).toBe(1);
+    expect(result.failedCount).toBe(1);
+    expect(result.operations.map(operation => ({
+      operationId: operation.operationId,
+      success: operation.success,
+      changedCount: operation.changedCount,
+      failedCount: operation.failedCount,
+    }))).toEqual([
+      {
+        operationId: "android_runtime_permissions:revoke",
+        success: true,
+        changedCount: 1,
+        failedCount: 0,
+      },
+      {
+        operationId: "android_notifications_enabled",
+        success: false,
+        changedCount: 0,
+        failedCount: 1,
+      },
+    ]);
+    expect(result.error).toContain("SecurityException");
+  });
+
+  test("disables Android notifications independently of runtime permissions", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell cmd notification set_enabled com.example.app false", "");
+
+    const permissions = new AppPermissions(androidDevice, { adbFactory });
+    const result = await permissions.setPermissions("com.example.app", {
+      notificationsEnabled: false,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(1);
+    expect(result.failedCount).toBe(0);
+    expect(result.operations.map(operation => operation.operationId)).toEqual([
+      "android_notifications_enabled",
+    ]);
+    expect(client.wasCommandExecuted("shell cmd notification set_enabled com.example.app false")).toBe(true);
+  });
+
+  test("reports Android reset as one standard operation", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell pm reset-permissions", "");
+
+    const permissions = new AppPermissions(androidDevice, { adbFactory });
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "reset",
+      permissions: ["all"],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(1);
+    expect(result.failedCount).toBe(0);
+    expect(result.operations.map(operation => operation.operationId)).toEqual([
+      "android_runtime_permissions:reset",
+    ]);
+    expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(true);
   });
 
   test("queries Android runtime permission state from dumpsys package", async () => {

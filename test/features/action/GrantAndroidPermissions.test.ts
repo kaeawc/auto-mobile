@@ -52,6 +52,107 @@ describe("GrantAndroidPermissions", () => {
     expect(calls).toContain("shell pm grant --user 0 com.example.app android.permission.CAMERA");
   });
 
+  test("runs pm revoke for each permission with the resolved target user", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult(
+      "shell pm revoke --user 12 com.example.app android.permission.POST_NOTIFICATIONS",
+      ""
+    );
+
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute("com.example.app", {
+      action: "revoke",
+      permissions: ["android.permission.POST_NOTIFICATIONS"],
+      userId: 12,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.userId).toBe(12);
+    expect(result.results).toEqual([
+      {
+        operationId: "pm_revoke:android.permission.POST_NOTIFICATIONS",
+        permission: "android.permission.POST_NOTIFICATIONS",
+        success: true,
+        countsTowardSuccess: true,
+      },
+    ]);
+    expect(
+      client.wasCommandExecuted(
+        "shell pm revoke --user 12 com.example.app android.permission.POST_NOTIFICATIONS"
+      )
+    ).toBe(true);
+  });
+
+  test("resets all Android runtime permissions through pm reset-permissions", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult("shell pm reset-permissions", "");
+
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute("com.example.app", {
+      action: "reset",
+      permissions: ["all"],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.results).toEqual([
+      {
+        operationId: "pm_reset_permissions",
+        success: true,
+        countsTowardSuccess: true,
+      },
+    ]);
+    expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(true);
+  });
+
+  test("rejects reset scopes other than permissions=['all']", async () => {
+    const factory = new FakeAdbClientFactory();
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute("com.example.app", {
+      action: "reset",
+      permissions: ["android.permission.CAMERA"],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.results).toEqual([
+      {
+        operationId: "pm_reset_permissions",
+        success: false,
+        countsTowardSuccess: true,
+        error: "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+      },
+    ]);
+    expect(result.error).toContain("pm_reset_permissions");
+  });
+
+  test("reports a pm reset-permissions failure as a required operation failure", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    client.setCommandResult(
+      "shell pm reset-permissions",
+      "",
+      "java.lang.SecurityException: Permission reset denied"
+    );
+
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute("com.example.app", {
+      action: "reset",
+      permissions: ["all"],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.results).toEqual([
+      {
+        operationId: "pm_reset_permissions",
+        success: false,
+        countsTowardSuccess: true,
+        error: "java.lang.SecurityException: Permission reset denied",
+      },
+    ]);
+    expect(result.error).toContain("pm_reset_permissions");
+  });
+
   test("marks failure when stderr contains SecurityException", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();

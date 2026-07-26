@@ -99,6 +99,9 @@ steps:
   - tool: setAppPermissions
     appId: com.example.app
     scheduleExactAlarm: allow
+  - tool: setAppPermissions
+    appId: com.example.app
+    notificationsEnabled: false
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(true);

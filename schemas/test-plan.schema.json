@@ -453,11 +453,11 @@
                   "revoke",
                   "reset"
                 ],
-                "description": "Permission action. Defaults to grant."
+                "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
               },
               "permissions": {
                 "type": "array",
-                "description": "Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'",
+                "description": "Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'",
                 "minItems": 1,
                 "items": {
                   "type": "string",
@@ -467,7 +467,11 @@
               "userId": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Android user id for runtime permission grants"
+                "description": "Android user id for runtime permission grants and revokes"
+              },
+              "notificationsEnabled": {
+                "type": "boolean",
+                "description": "Android only: enable or disable app notifications independently of POST_NOTIFICATIONS"
               },
               "notificationPolicyAccess": {
                 "type": "boolean",
@@ -511,6 +515,12 @@
                 "required": [
                   "appId",
                   "permissions"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "notificationsEnabled"
                 ]
               },
               {
@@ -1173,7 +1183,7 @@
             "revoke",
             "reset"
           ],
-          "description": "Permission action. Defaults to grant."
+          "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
         },
         "permissions": {
           "type": "array",
@@ -1182,12 +1192,16 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'"
+          "description": "Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'"
         },
         "userId": {
           "type": "integer",
           "minimum": 0,
-          "description": "Android user id for runtime permission grants"
+          "description": "Android user id for runtime permission grants and revokes"
+        },
+        "notificationsEnabled": {
+          "type": "boolean",
+          "description": "Android only: enable or disable app notifications independently of POST_NOTIFICATIONS"
         },
         "notificationPolicyAccess": {
           "type": "boolean",
@@ -1227,6 +1241,11 @@
         }
       },
       "anyOf": [
+        {
+          "required": [
+            "notificationsEnabled"
+          ]
+        },
         {
           "required": [
             "permissions"

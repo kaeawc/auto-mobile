@@ -139,9 +139,14 @@ describe("app permission tools", () => {
     })).not.toThrow();
     expect(() => setAppTool!.schema.parse({
       appId: "com.example.app",
+      notificationsEnabled: false,
+    })).not.toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
       permissions: ["android.permission.POST_NOTIFICATIONS"],
       userId: 10,
     })).not.toThrow();
+    expect(setAppTool?.description).toContain("notification state");
 
     expect(getAppTool).toBeDefined();
     expect(getAppTool?.requiresDevice).toBe(true);

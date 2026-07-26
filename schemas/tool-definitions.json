@@ -6894,7 +6894,7 @@
   },
   {
     "name": "setAppPermissions",
-    "description": "Grant, revoke, reset, or configure app permissions on Android devices, iOS simulators (grant/revoke/reset), and iOS physical devices (reset only, permissions=['all'] supported)",
+    "description": "Grant, revoke, reset, or configure app permissions and notification state on Android devices, iOS simulators (grant/revoke/reset), and iOS physical devices (reset only, permissions=['all'] supported)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -6903,7 +6903,7 @@
           "type": "string"
         },
         "action": {
-          "description": "Permission action; defaults to grant. Android supports grant; iOS simulators support grant/revoke/reset; iOS physical devices support reset only, including permissions=['all'].",
+          "description": "Permission action; defaults to grant. Android supports grant/revoke/reset; iOS simulators support grant/revoke/reset; Android reset requires permissions=['all'] and resets runtime permissions device-wide. iOS physical devices support reset only, including permissions=['all'].",
           "type": "string",
           "enum": [
             "grant",
@@ -6912,7 +6912,7 @@
           ]
         },
         "permissions": {
-          "description": "Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'",
+          "description": "Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'",
           "type": "array",
           "items": {
             "type": "string",
@@ -6924,6 +6924,10 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "notificationsEnabled": {
+          "description": "Android: enable or disable app notifications independently of POST_NOTIFICATIONS",
+          "type": "boolean"
         },
         "notificationPolicyAccess": {
           "description": "Android: set DND policy access",

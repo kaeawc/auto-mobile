@@ -70,19 +70,24 @@ export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSche
     action: appPermissionActionSchema
       .optional()
       .describe(
-        "Permission action; defaults to grant. Android supports grant; iOS simulators " +
-        "support grant/revoke/reset; iOS physical devices support reset only, including permissions=['all']."
+        "Permission action; defaults to grant. Android supports grant/revoke/reset; iOS simulators " +
+        "support grant/revoke/reset; Android reset requires permissions=['all'] and resets runtime permissions " +
+        "device-wide. iOS physical devices support reset only, including permissions=['all']."
       ),
     permissions: z
       .array(z.string().min(1))
       .optional()
-      .describe("Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'"),
+      .describe("Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'"),
     userId: z
       .number()
       .int()
       .nonnegative()
       .optional()
       .describe("Android user id"),
+    notificationsEnabled: z
+      .boolean()
+      .optional()
+      .describe("Android: enable or disable app notifications independently of POST_NOTIFICATIONS"),
     notificationPolicyAccess: z
       .boolean()
       .optional()
@@ -95,6 +100,7 @@ export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSche
 )).refine(
   args =>
     (args.permissions !== undefined && args.permissions.length > 0) ||
+    args.notificationsEnabled !== undefined ||
     args.notificationPolicyAccess !== undefined ||
     args.scheduleExactAlarm !== undefined,
   "Provide at least one permission or platform-specific permission option"
@@ -276,6 +282,7 @@ export function registerAppTools(
       action: args.action,
       permissions: args.permissions,
       userId: args.userId,
+      notificationsEnabled: args.notificationsEnabled,
       notificationPolicyAccess: args.notificationPolicyAccess,
       scheduleExactAlarm: args.scheduleExactAlarm,
     });
@@ -333,7 +340,7 @@ export function registerAppTools(
 
   ToolRegistry.registerDeviceAware(
     "setAppPermissions",
-    "Grant, revoke, reset, or configure app permissions on Android devices, iOS simulators " +
+    "Grant, revoke, reset, or configure app permissions and notification state on Android devices, iOS simulators " +
     "(grant/revoke/reset), and iOS physical devices (reset only, permissions=['all'] supported)",
     setAppPermissionsSchema,
     setAppPermissionsHandler

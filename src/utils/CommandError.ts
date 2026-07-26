@@ -31,7 +31,7 @@ function commandLine(command: string, args: string[] = []): string {
 }
 
 export function formatCommandError(error: unknown, options: CommandErrorFormatOptions): string {
-  const err = error as NodeJS.ErrnoException & {
+  const err = (error ?? {}) as NodeJS.ErrnoException & {
     stdout?: string | Buffer;
     stderr?: string | Buffer;
     signal?: NodeJS.Signals;

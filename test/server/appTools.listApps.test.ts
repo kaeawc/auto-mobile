@@ -198,7 +198,7 @@ describe("app permission tools", () => {
     expect(ToolRegistry.getTool("getIosSimulatorPermissions")).toBeUndefined();
   });
 
-  test("advertises reset's required permission and device-wide user scope", () => {
+  test("advertises Android permission action scope", () => {
     const setAppPermissions = ToolRegistry.getToolDefinitions({ includeUnavailable: true })
       .find(tool => tool.name === "setAppPermissions");
     const validate = new Ajv2020({ strict: false }).compile(setAppPermissions!.inputSchema);
@@ -231,9 +231,8 @@ describe("app permission tools", () => {
       permissions: ["camera"],
       platform: "ios",
     })).toBe(true);
-    expect(setAppPermissions!.inputSchema.properties?.action.description).toContain("Android reset");
-    expect(setAppPermissions.inputSchema.properties?.permissions.description).toContain("Android reset");
-    expect(setAppPermissions.inputSchema.properties?.userId.description).toContain("grant/revoke");
-    expect(setAppPermissions.inputSchema.properties?.notificationsEnabled.description).toContain("POST_NOTIFICATIONS");
+    expect(setAppPermissions!.description).toContain("grant/revoke use userId");
+    expect(setAppPermissions.description).toContain("reset is device-wide ['all']");
+    expect(setAppPermissions.description).toContain("exclude POST_NOTIFICATIONS");
   });
 });

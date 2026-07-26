@@ -120,6 +120,10 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(withAppIdAliases(a
   delete properties.action?.type;
   delete properties.scheduleExactAlarm?.type;
   for (const name of [
+    "action",
+    "permissions",
+    "userId",
+    "notificationsEnabled",
     "notificationPolicyAccess",
     "scheduleExactAlarm",
     "sessionUuid",
@@ -383,7 +387,7 @@ export function registerAppTools(
 
   ToolRegistry.registerDeviceAware(
     "setAppPermissions",
-    "Set permissions; notification state excludes POST_NOTIFICATIONS.",
+    "Set permissions; Android grant/revoke use userId, reset is device-wide ['all'], notifications exclude POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler
   );

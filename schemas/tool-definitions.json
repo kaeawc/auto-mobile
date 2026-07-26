@@ -6900,7 +6900,7 @@
   },
   {
     "name": "setAppPermissions",
-    "description": "Set permissions; notification state excludes POST_NOTIFICATIONS.",
+    "description": "Set permissions; Android grant/revoke use userId, reset is device-wide ['all'], notifications exclude POST_NOTIFICATIONS.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -6909,7 +6909,6 @@
           "type": "string"
         },
         "action": {
-          "description": "Action (default grant). Android reset requires permissions=['all'] device-wide; iOS physical devices support reset only.",
           "enum": [
             "grant",
             "revoke",
@@ -6917,7 +6916,6 @@
           ]
         },
         "permissions": {
-          "description": "Permissions; Android reset accepts only 'all'; physical iOS accepts it too",
           "type": "array",
           "items": {
             "type": "string",
@@ -6925,13 +6923,11 @@
           }
         },
         "userId": {
-          "description": "Android user ID for grant/revoke, not reset",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
         "notificationsEnabled": {
-          "description": "Android notification state, independent of POST_NOTIFICATIONS",
           "type": "boolean"
         },
         "notificationPolicyAccess": {

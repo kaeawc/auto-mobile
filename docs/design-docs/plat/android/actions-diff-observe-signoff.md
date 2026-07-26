@@ -213,7 +213,7 @@ above:
 
 ### Follow-ups
 
-### Addendum: occlusion-metadata stability (#4399)
+### Addendum: occlusion-metadata stability ([#4399](https://github.com/kaeawc/auto-mobile/issues/4399))
 
 The Android occlusion pass is enabled by default and emits
 `occlusionState`/`occludedBy`/`occludedByViewId` on hierarchy nodes. The

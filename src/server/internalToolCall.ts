@@ -70,6 +70,7 @@ export function throwIfInternalToolFailed(
           ? parsed as { success?: unknown; error?: unknown }
           : undefined;
       } catch (error) {
+        // Plain-text tool output has no structured failure signal to propagate.
         logger.debug(`[internalToolCall] Could not parse ${toolName} response: ${error}`);
         return undefined;
       }

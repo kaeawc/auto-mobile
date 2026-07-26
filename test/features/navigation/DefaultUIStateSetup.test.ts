@@ -88,6 +88,49 @@ describe("DefaultUIStateSetup", () => {
     expect(calls).toBe(0);
   });
 
+  describe("selected-element setup", () => {
+    afterEach(() => {
+      ToolRegistry.clearTools();
+    });
+
+    function setupWithNoSelections(): DefaultUIStateSetup {
+      const setup = makeSetup();
+      (setup as unknown as {
+        getCurrentUIState: () => Promise<{ modalStack: ModalState[]; selectedElements: [] }>;
+      }).getCurrentUIState = async () => ({ modalStack: [], selectedElements: [] });
+      return setup;
+    }
+
+    test("uses a content-description selector for a missing content-description-only selection", async () => {
+      let capturedArgs: Record<string, unknown> | undefined;
+      ToolRegistry.register("tapOn", "tapOn", {}, async args => {
+        capturedArgs = args;
+        return createStructuredToolResponse({ success: true });
+      });
+      const setup = setupWithNoSelections();
+
+      const actions = await setup.setupUIState({
+        uiState: { selectedElements: [{ contentDesc: "Open settings" }] },
+      } as NavigationEdge, "android");
+
+      expect(capturedArgs?.selector).toEqual({ contentDesc: "Open settings" });
+      expect(actions).toEqual(['tapOn({"contentDesc":"Open settings"})']);
+    });
+
+    test("does not report a selected-element tap when its internal tool response fails", async () => {
+      ToolRegistry.register("tapOn", "tapOn", {}, async () =>
+        createStructuredToolResponse({ success: false, error: "element is disabled" })
+      );
+      const setup = setupWithNoSelections();
+
+      const actions = await setup.setupUIState({
+        uiState: { selectedElements: [{ text: "Settings" }] },
+      } as NavigationEdge, "android");
+
+      expect(actions).toEqual([]);
+    });
+  });
+
   // Regression for issue #2897 (sibling of the toolRegistry scroll-position fix):
   // `swipeOn`'s handler returns an MCP envelope from createStructuredToolResponse,
   // which hoists only `success`/`error` to the top level — `found` lives under

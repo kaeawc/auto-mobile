@@ -226,20 +226,20 @@ export class DefaultUIStateSetup implements UIStateSetup {
     const missing: Array<{ text?: string; resourceId?: string; contentDesc?: string }> = [];
 
     for (const req of required) {
-      // Skip elements without text (we need text to tap on them)
-      if (!req.text) {
+      if (!req.text && !req.resourceId && !req.contentDesc) {
         continue;
       }
 
       // Check if this element is already selected
       const isSelected = current.some(curr =>
         (req.text && curr.text === req.text) ||
-        (req.resourceId && curr.resourceId === req.resourceId)
+        (req.resourceId && curr.resourceId === req.resourceId) ||
+        (req.contentDesc && curr.contentDesc === req.contentDesc)
       );
 
       if (!isSelected) {
         missing.push(req);
-        logger.info(`[UI_STATE_SETUP] Missing selection: ${req.text || req.resourceId}`);
+        logger.info(`[UI_STATE_SETUP] Missing selection: ${req.text || req.resourceId || req.contentDesc}`);
       }
     }
 
@@ -294,11 +294,14 @@ export class DefaultUIStateSetup implements UIStateSetup {
         args.selector = { text: element.text };
       } else if (element.resourceId) {
         args.selector = { elementId: element.resourceId };
+      } else if (element.contentDesc) {
+        args.selector = { contentDesc: element.contentDesc };
       }
 
       // Internal setup tap (#3087) via the callInternal seam (#3108): no
       // diff/strip, no baseline advance.
-      await ToolRegistry.callInternal(tapTool, args);
+      const response = await ToolRegistry.callInternal(tapTool, args);
+      throwIfInternalToolFailed(response, tapTool, platform);
 
       // Small delay for UI to update
       await this.sleep(100);

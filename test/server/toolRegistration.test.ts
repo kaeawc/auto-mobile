@@ -118,13 +118,14 @@ class ToolRegistrationValidator {
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "explore",
+    "getNavigationGraph",
+    "navigateTo",
 
     // Feature-flag controlled tools
     "criticalSection",
     "executePlan",
 
-    // Resource-only tools (exposed as resources, not tools)
-    "getNavigationGraph",
   ]);
 
   extractSchemaNames(module: ToolModule): string[] {

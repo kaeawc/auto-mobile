@@ -3,6 +3,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { Explore, ExploreOptions } from "../features/navigation/Explore";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
@@ -35,14 +36,23 @@ export const exploreSchema = addDeviceTargetingToSchema(z.object({
 export interface NavigateToArgs {
   targetScreen: string;
   platform: Platform;
+  sessionUuid?: string;
 }
 
 export interface GetNavigationGraphArgs {
   platform: Platform;
+  sessionUuid?: string;
 }
 
 export interface ExploreArgs extends ExploreOptions {
   platform: Platform;
+  sessionUuid?: string;
+}
+
+function getNavigationManager(sessionUuid?: string): NavigationGraphManager {
+  return sessionUuid
+    ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+    : NavigationGraphManager.getInstance();
 }
 
 // Register navigation tools
@@ -54,7 +64,16 @@ export function registerNavigationTools() {
     progress?: ProgressCallback
   ) => {
     try {
-      const navigateTo = new NavigateTo(device);
+      const navigationManager = getNavigationManager(args.sessionUuid);
+      const navigateTo = new NavigateTo(
+        device,
+        undefined,
+        null,
+        null,
+        navigationManager,
+        undefined,
+        new DefaultPathOptimizer(navigationManager)
+      );
       const options: NavigateToOptions = {
         targetScreen: args.targetScreen,
         platform: args.platform || "android"
@@ -83,9 +102,7 @@ export function registerNavigationTools() {
     args: GetNavigationGraphArgs
   ) => {
     try {
-      const manager = args.sessionUuid
-        ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
-        : NavigationGraphManager.getInstance();
+      const manager = getNavigationManager(args.sessionUuid);
       const stats = await manager.getStats();
       const graph = await manager.exportGraph();
 
@@ -128,7 +145,7 @@ export function registerNavigationTools() {
     signal?: AbortSignal
   ) => {
     try {
-      const explore = new Explore(device);
+      const explore = new Explore(device, null, undefined, getNavigationManager(args.sessionUuid));
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
         timeoutMs: args.timeoutMs,

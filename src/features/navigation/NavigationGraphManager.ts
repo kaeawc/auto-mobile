@@ -216,6 +216,19 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Install a session-scoped instance for testing only.
+   *
+   * This preserves the production session lookup path while allowing focused
+   * tests to use an in-memory database instead of the shared file database.
+   */
+  public static setInstanceForSessionForTesting(
+    sessionId: string,
+    instance: NavigationGraphManager
+  ): void {
+    NavigationGraphManager.sessionInstances.set(sessionId, instance);
+  }
+
+  /**
    * Create a new instance for testing with injected dependencies.
    *
    * Precondition for recordNavigationEvent's atomicity: `repository` and
@@ -233,9 +246,10 @@ export class NavigationGraphManager implements NavigationGraphService {
    */
   public static createForTesting(
     repository?: NavigationRepository,
-    testCoverageRepository?: TestCoverageRepository
+    testCoverageRepository?: TestCoverageRepository,
+    timer?: Timer
   ): NavigationGraphManager {
-    return new NavigationGraphManager(repository, testCoverageRepository);
+    return new NavigationGraphManager(repository, testCoverageRepository, timer);
   }
 
   /**

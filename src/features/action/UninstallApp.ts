@@ -9,6 +9,7 @@ import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
+import { IOSCtrlProxyClient } from "../observe/ios";
 
 export interface DeviceAppUninstaller {
   uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
@@ -90,6 +91,7 @@ export class UninstallApp {
       const installed = (await listApps.execute()).find(app => app === bundleId) !== undefined;
 
       if (!installed) {
+        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
         return {
           success: true,
           packageName: bundleId,
@@ -122,6 +124,8 @@ export class UninstallApp {
           error: "Failed to uninstall application"
         };
       }
+
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
 
       return {
         success: true,

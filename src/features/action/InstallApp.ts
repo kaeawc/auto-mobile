@@ -13,6 +13,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
+import { IOSCtrlProxyClient } from "../observe/ios";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -70,10 +71,16 @@ export class InstallApp {
       this.validateiOSArtifact(ext);
       if (ext === ".ipa") {
         const result = await perf.track("iOSPhysicalInstall", () => this.executeiOSPhysical(artifactPath, perf, signal));
+        if (result.success) {
+          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity();
+        }
         perf.end();
         return { ...result, userId: 0 };
       }
       const result = await perf.track("iOSInstall", () => this.executeiOSSimulator(artifactPath, perf, signal));
+      if (result.success) {
+        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(result.packageName);
+      }
       perf.end();
       return { ...result, userId: 0 };
     }

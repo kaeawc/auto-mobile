@@ -16,7 +16,7 @@ import {
 } from "../../src/daemon/manager";
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
-import type { DaemonStatus } from "../../src/daemon/types";
+import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
@@ -75,6 +75,31 @@ describe("daemonBuildIdentityStatusLines", () => {
     expect(text).toContain("1111111111111111");
     expect(text).toContain("/wt/dist/src/index.js");
     expect(text).toContain("--daemon restart");
+  });
+});
+
+describe("DaemonManager restart", () => {
+  test("preserves PID-recorded options when no replacement options are requested", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new DaemonManager(undefined, undefined, timer);
+    const recordedOptions: DaemonOptions = {
+      debug: true,
+      toolOutputsDir: "/tmp/automobile-artifacts",
+      eventAllMarkers: ["@", "#"],
+    };
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      options: recordedOptions,
+    });
+    const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    await manager.restart();
+
+    expect(statusSpy).toHaveBeenCalledTimes(1);
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy).toHaveBeenCalledWith(recordedOptions);
   });
 });
 

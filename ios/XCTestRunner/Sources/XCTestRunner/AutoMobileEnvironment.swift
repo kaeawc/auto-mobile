@@ -473,7 +473,8 @@ public enum DaemonManager {
     static func ensureDaemonRunningResult(
         repoRoot: String?,
         timeoutSeconds: TimeInterval,
-        runtime: DaemonRuntime
+        runtime: DaemonRuntime,
+        callerAssetVersion: String? = resolveCallerAssetVersionPin()
     )
         -> DaemonStartupResult
     {
@@ -494,7 +495,7 @@ public enum DaemonManager {
             )
             let assetVersionSkew = requiresAssetVersionPinFailure(
                 daemonAssetVersion: runtime.readDaemonAssetVersion(),
-                callerPinnedVersion: resolveCallerAssetVersionPin()
+                callerPinnedVersion: callerAssetVersion
             )
             if requiresImmediateAssetVersionPinFailure(
                 assetVersionSkew: assetVersionSkew,
@@ -510,7 +511,12 @@ public enum DaemonManager {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed - \(failure)")
                     return failure
                 }
-                return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds, runtime: runtime)
+                return waitForVersionMatchedDaemon(
+                    repoRoot: repoRoot,
+                    timeoutSeconds: timeoutSeconds,
+                    runtime: runtime,
+                    callerAssetVersion: callerAssetVersion
+                )
             }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
             return .ready
@@ -522,7 +528,12 @@ public enum DaemonManager {
             return failure
         }
 
-        return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds, runtime: runtime)
+        return waitForVersionMatchedDaemon(
+            repoRoot: repoRoot,
+            timeoutSeconds: timeoutSeconds,
+            runtime: runtime,
+            callerAssetVersion: callerAssetVersion
+        )
     }
 
     /// Wait for the daemon to become ready and confirm its recorded version matches this runner's.
@@ -534,7 +545,8 @@ public enum DaemonManager {
     private static func waitForVersionMatchedDaemon(
         repoRoot: String?,
         timeoutSeconds: TimeInterval,
-        runtime: DaemonRuntime
+        runtime: DaemonRuntime,
+        callerAssetVersion: String?
     )
         -> DaemonStartupResult
     {
@@ -549,9 +561,9 @@ public enum DaemonManager {
             daemonBuildId: runtime.readDaemonBuildId(),
             daemonEntryScript: runtime.readDaemonEntryScript(),
             repoRoot: repoRoot
-        ) || requiresAssetVersionPinFailure(
-            daemonAssetVersion: runtime.readDaemonAssetVersion(),
-            callerPinnedVersion: resolveCallerAssetVersionPin()
+            ) || requiresAssetVersionPinFailure(
+                daemonAssetVersion: runtime.readDaemonAssetVersion(),
+                callerPinnedVersion: callerAssetVersion
         ) {
             PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
             if requiresAssetVersionPinFailure(

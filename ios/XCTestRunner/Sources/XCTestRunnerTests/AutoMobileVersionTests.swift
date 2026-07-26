@@ -222,7 +222,8 @@ final class AutoMobileVersionTests: XCTestCase {
         let result = DaemonManager.ensureDaemonRunningResult(
             repoRoot: repoRoot.path,
             timeoutSeconds: 0,
-            runtime: runtime
+            runtime: runtime,
+            callerAssetVersion: nil
         )
 
         XCTAssertEqual(result, .ready)

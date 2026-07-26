@@ -35,15 +35,14 @@ export interface DbWriteBarrier {
    * touching the hot-path nav-event↔hierarchy-update ordering that "preserve SDK
    * screen names" depends on.
    *
-   * Why not {@link track} here? `await track(() => write())` would work today —
-   * the current post-#3063 ordering test tolerates the one extra microtask tick
-   * `track` adds — but the #2885 author flagged this specific interleaving as
-   * timing-sensitive, and a future regression from that tick would be SILENT (no
-   * test guards it). `trackExisting` takes on *zero* ordering risk instead of a
-   * small-but-untested one, which is the right trade for a best-effort drain
-   * feature. Prefer plain {@link track} everywhere the caller does not already own
-   * the started promise on an ordering-sensitive path — this method is the narrow
-   * exception, not the default.
+   * Why not {@link track} here? `await track(() => write())` starts the write at
+   * the same time, but adds one promise-resolution turn before the navigation
+   * handler resumes. The #3506 ordering guard proves that lets a concurrent
+   * hierarchy path resume first. Keep `trackExisting` for this narrow hot path so
+   * the caller can await its original promise with no extra turn. Prefer plain
+   * {@link track} everywhere the caller does not already own the started promise
+   * on an ordering-sensitive path — this method is the narrow exception, not the
+   * default.
    *
    * Contract / misuse warning: the returned promise NEVER rejects (it resolves the
    * value on success and `undefined` on rejection) so a fire-and-forget

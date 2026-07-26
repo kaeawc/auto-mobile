@@ -5,16 +5,15 @@ import type { ConditionEvaluation, ConditionPredicate } from "./interfaces/WaitF
 
 /**
  * A declarative selector for the built-in condition predicates. Deliberately the
- * narrow `{ elementId?, text? }` shape the `ElementFinder` container API already
- * speaks (issue #4389) — the predicates evaluate through the finder rather than
- * re-walking the tree.
+ * narrow selector/container shapes the `ElementFinder` API already speaks (issue
+ * #4389) — the predicates evaluate through the finder rather than re-walking the
+ * tree.
  */
 export interface ConditionSelector {
   elementId?: string;
   text?: string;
+  container?: { elementId?: string; text?: string };
 }
-
-const NO_CONTAINER = null;
 
 /** Exact match for the selector via the finder (resource-id preferred, then text). */
 function findMatch(
@@ -22,11 +21,12 @@ function findMatch(
   viewHierarchy: ViewHierarchyResult,
   selector: ConditionSelector
 ): Element | null {
+  const container = selector.container ?? null;
   if (selector.elementId !== undefined) {
-    return finder.findElementByResourceId(viewHierarchy, selector.elementId, NO_CONTAINER);
+    return finder.findElementByResourceId(viewHierarchy, selector.elementId, container);
   }
   if (selector.text !== undefined) {
-    return finder.findElementByText(viewHierarchy, selector.text, NO_CONTAINER, false, false);
+    return finder.findElementByText(viewHierarchy, selector.text, container, false, false);
   }
   return null;
 }
@@ -41,11 +41,12 @@ function findNearMatches(
   viewHierarchy: ViewHierarchyResult,
   selector: ConditionSelector
 ): Element[] {
+  const container = selector.container ?? null;
   if (selector.elementId !== undefined) {
-    return finder.findElementsByResourceId(viewHierarchy, selector.elementId, NO_CONTAINER, true);
+    return finder.findElementsByResourceId(viewHierarchy, selector.elementId, container, true);
   }
   if (selector.text !== undefined) {
-    return finder.findElementsByText(viewHierarchy, selector.text, NO_CONTAINER, true, false);
+    return finder.findElementsByText(viewHierarchy, selector.text, container, true, false);
   }
   return [];
 }
@@ -87,17 +88,18 @@ export function disappear(finder: ElementFinder, selector: ConditionSelector): C
   };
 }
 
-/** All elements matching the selector (exact match, no container scope). */
+/** All elements matching the selector (exact match, optionally container-scoped). */
 function findAllMatches(
   finder: ElementFinder,
   viewHierarchy: ViewHierarchyResult,
   selector: ConditionSelector
 ): Element[] {
+  const container = selector.container ?? null;
   if (selector.elementId !== undefined) {
-    return finder.findElementsByResourceId(viewHierarchy, selector.elementId, NO_CONTAINER, false);
+    return finder.findElementsByResourceId(viewHierarchy, selector.elementId, container, false);
   }
   if (selector.text !== undefined) {
-    return finder.findElementsByText(viewHierarchy, selector.text, NO_CONTAINER, false, false);
+    return finder.findElementsByText(viewHierarchy, selector.text, container, false, false);
   }
   return [];
 }
@@ -152,18 +154,18 @@ export function textEquals(
       return { matched: false, candidates: [] };
     }
     if (selector.elementId !== undefined) {
-      const located = finder.findElementByResourceId(viewHierarchy, selector.elementId, NO_CONTAINER);
+      const located = finder.findElementByResourceId(viewHierarchy, selector.elementId, selector.container ?? null);
       if (located && (located.text ?? "") === expected) {
         return { matched: true, matchedElement: located, candidates: [located] };
       }
       return { matched: false, candidates: located ? [located] : [] };
     }
     // No locator: an exact (case-sensitive) text match IS the located element.
-    const located = finder.findElementByText(viewHierarchy, expected, NO_CONTAINER, false, true);
+    const located = finder.findElementByText(viewHierarchy, expected, selector.container ?? null, false, true);
     if (located) {
       return { matched: true, matchedElement: located, candidates: [located] };
     }
-    return { matched: false, candidates: findNearMatches(finder, viewHierarchy, { text: expected }) };
+    return { matched: false, candidates: findNearMatches(finder, viewHierarchy, { text: expected, container: selector.container }) };
   };
 }
 

@@ -83,7 +83,20 @@ const waitForCommonShape = {
   activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
   absent: absentPredicateSchema.optional().describe("Wait until an element matching these fields is absent"),
   timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
+  timeoutMs: z.number().optional().describe("Alias for timeout; use timeoutMs when migrating to waitForCondition"),
   container: waitForContainerField
+};
+
+const validateWaitForTimeoutAliases = (
+  value: { timeout?: number; timeoutMs?: number },
+  ctx: z.RefinementCtx
+): void => {
+  if (value.timeout !== undefined && value.timeoutMs !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "waitFor accepts either timeout or timeoutMs, not both",
+    });
+  }
 };
 
 // Stability / "settled" gate (issue #3490 §3). After the waitFor predicate first
@@ -102,7 +115,7 @@ const waitForTextAnySchema = z.object({
   matchType: z.never().optional(),
   textMatch: z.never().optional(),
   ...waitForCommonShape,
-}).strict();
+}).strict().superRefine(validateWaitForTimeoutAliases);
 
 const waitForElementBaseSchema = z.object({
   for: z.never().optional(),
@@ -115,6 +128,7 @@ const waitForElementBaseSchema = z.object({
   textMatch: z.enum(["exact", "contains", "regex"]).optional().describe("How to match waitFor.text; does not affect contentDescription"),
   ...waitForCommonShape,
 }).strict().superRefine((value, ctx) => {
+  validateWaitForTimeoutAliases(value, ctx);
 
   if (value.textMatch === "regex" && value.text !== undefined) {
     try {
@@ -155,12 +169,8 @@ const waitForConditionDslSchema = z.object({
   pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
   stableReads: z.number().optional().describe("Consecutive stable reads for countStable/stable (default 2)"),
   timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
-  // `container` is declared `never` (not accepted) on the DSL form: the #4389
-  // predicate builders match whole-screen (NO_CONTAINER), so accepting it would
-  // silently ignore it. Threading container scope into the predicates is a
-  // follow-up. `never` keeps the inferred union structurally compatible with the
-  // legacy arms (which do read `container`) while rejecting it on DSL requests.
-  container: z.never().optional(),
+  timeoutMs: z.number().optional().describe("Alias for timeout; matches waitForCondition"),
+  container: waitForContainerField,
   textAny: z.never().optional(),
   className: z.never().optional(),
   contentDescription: z.never().optional(),
@@ -169,7 +179,14 @@ const waitForConditionDslSchema = z.object({
   activeWindow: z.never().optional(),
   absent: z.never().optional(),
 }).strict().superRefine((value, ctx) => {
+  validateWaitForTimeoutAliases(value, ctx);
   if (value.for === "stable") {
+    if (value.container !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'waitFor "for: stable" does not support container',
+      });
+    }
     return;
   }
   if (value.elementId === undefined && value.text === undefined) {
@@ -225,35 +242,25 @@ const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
 const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  description:
-    "Wait for a predicate before returning. Either `for` (DSL: appear|disappear|clickable|" +
-    "textEquals|countStable|stable) with elementId/text, or a legacy predicate: elementId, " +
-    "text, textAny, className, contentDescription, activeWindow, absent. textAny excludes " +
-    "the element predicates.",
+  not: { required: ["timeout", "timeoutMs"] },
   properties: {
     for: {
       type: "string",
       enum: ["appear", "disappear", "clickable", "textEquals", "countStable", "stable"],
-      description: "DSL condition (selector-based, or stable=whole screen)",
     },
-    pollMs: { type: "number", description: "Poll interval ms (default 150)" },
-    stableReads: { type: "number", description: "Stable reads for countStable/stable (default 2)" },
-    elementId: { type: "string", description: "Element resource ID / accessibility identifier" },
-    text: { type: "string", description: "Element text; for `for:textEquals` the exact expected value" },
+    pollMs: { type: "number" },
+    stableReads: { type: "number" },
+    elementId: { type: "string" },
+    text: { type: "string" },
     textAny: {
       type: "array",
       items: { type: "string" },
-      description: "Ordered text variants; first visible match wins",
     },
-    className: { type: "string", description: "Element class name" },
-    contentDescription: {
-      type: "string",
-      description: "Element content description / accessibility label",
-    },
+    className: { type: "string" },
+    contentDescription: { type: "string" },
     matchType: {
       type: "string",
       enum: ["all", "any"],
-      description: "Whether element predicates must all match one node, or any one may match",
     },
     textMatch: {
       type: "string",
@@ -263,15 +270,11 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     activeWindow: {
       type: "object",
       additionalProperties: false,
-      description: "Foreground app/window predicates (provide an app id or activityName)",
       properties: {
-        appId: { type: "string", description: "Foreground app bundle ID / package name" },
-        packageName: { type: "string", description: "appId alias (Android package)" },
-        bundleId: { type: "string", description: "appId alias (iOS bundle)" },
-        activityName: {
-          type: "string",
-          description: "Foreground Android activity name (Android-only)",
-        },
+        appId: { type: "string" },
+        packageName: { type: "string" },
+        bundleId: { type: "string" },
+        activityName: { type: "string" },
       },
       anyOf: [
         { required: ["appId"] },
@@ -283,17 +286,21 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
     container: {
       type: "object",
-      description: "Scope the match to a container element (by elementId or text)",
       properties: { elementId: { type: "string" }, text: { type: "string" } },
+      additionalProperties: false,
+      oneOf: [{ required: ["elementId"] }, { required: ["text"] }],
     },
-    timeout: { type: "number", description: "Wait timeout ms (default 5000)" },
+    timeout: { type: "number" },
+    timeoutMs: { type: "number" },
   },
   // Enforce the same shape the runtime does: either the `for` DSL, or at least one
   // legacy predicate with textAny mutually exclusive from the element predicates /
   // matchType / textMatch. `absent` composes with everything (including textAny),
   // so it is not part of the textAny exclusion set.
   anyOf: [
-    { required: ["for"] },
+    { properties: { for: { const: "stable" } }, required: ["for"], not: { required: ["container"] } },
+    { properties: { for: { not: { enum: ["stable", "textEquals"] } } }, required: ["for", "elementId"] },
+    { properties: { for: { not: { const: "stable" } } }, required: ["for", "text"] },
     {
       required: ["textAny"],
       not: {
@@ -440,6 +447,7 @@ export const waitForConditionSchema = addDeviceTargetingToSchema(z.object({
   for: z.enum(WAIT_FOR_CONDITION_KINDS).describe("appear|disappear|clickable|textEquals|countStable"),
   elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
   text: z.string().optional().describe("Element text; for `textEquals` the exact expected value"),
+  container: waitForContainerField,
   timeoutMs: z.number().optional().describe("Budget ms (default 5000)"),
   pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
   stableReads: z.number().optional().describe("Stable reads for countStable (default 2)")
@@ -512,7 +520,7 @@ export const buildConditionPredicate = (
       if (selector.text === undefined) {
         throw new ActionableError("waitFor \"for: textEquals\" requires text (the exact expected value)");
       }
-      return textEquals(finder, { elementId: selector.elementId }, selector.text);
+      return textEquals(finder, selector, selector.text);
     case "countStable":
       return countStable(finder, selector, options);
     default: {
@@ -528,8 +536,7 @@ export const buildConditionPredicate = (
  * (`RealSettleObserve`); every other kind runs `RealWaitForCondition` with the
  * predicate for that kind. `awaitedElement` carries the matched element (never set
  * for settle / countStable, which have no single element); `awaitTimeout` reflects
- * "did not settle" / "timed out". `container` is not yet threaded into the
- * primitives' finder path — a follow-up.
+ * "did not settle" / "timed out".
  */
 const runWaitForConditionDsl = async (
   observeScreen: ObserveScreen,
@@ -540,7 +547,7 @@ const runWaitForConditionDsl = async (
   const pollMs = waitFor.pollMs;
   if (waitFor.for === "stable") {
     const settle = await new RealSettleObserve(observeScreen, timer).execute({
-      timeoutMs: waitFor.timeout,
+      timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
       pollMs,
       stableReads: waitFor.stableReads,
       signal,
@@ -557,11 +564,11 @@ const runWaitForConditionDsl = async (
   const predicate = buildConditionPredicate(
     finder,
     waitFor.for,
-    { elementId: waitFor.elementId, text: waitFor.text },
+    { elementId: waitFor.elementId, text: waitFor.text, container: waitFor.container },
     { stableReads: waitFor.stableReads }
   );
   const result = await new RealWaitForCondition(observeScreen, timer).execute(predicate, {
-    timeoutMs: waitFor.timeout,
+    timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
     pollMs,
     signal,
   });
@@ -608,7 +615,7 @@ export const runWaitForConditionTool = async (
   const predicate = buildConditionPredicate(
     finder,
     args.for,
-    { elementId: args.elementId, text: args.text },
+    { elementId: args.elementId, text: args.text, container: args.container },
     { stableReads: args.stableReads }
   );
   return new RealWaitForCondition(observeScreen, timer).execute(predicate, {
@@ -955,7 +962,7 @@ export const waitForObservation = async (
   }
 
   const startTime = timer.now();
-  const timeoutMs = waitFor.timeout ?? 5000;
+  const timeoutMs = waitFor.timeout ?? waitFor.timeoutMs ?? 5000;
   const settled = waitFor.settled;
   const finder = new DefaultElementFinder();
   const queryOptions = {

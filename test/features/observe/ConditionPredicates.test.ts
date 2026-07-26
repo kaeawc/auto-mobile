@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
-import { clickable, countStable, textEquals } from "../../../src/features/observe/ConditionPredicates";
+import { clickable, countStable, disappear, textEquals } from "../../../src/features/observe/ConditionPredicates";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 
 /**
@@ -89,6 +89,15 @@ describe("clickable predicate", () => {
     expect(evaluation.matched).toBe(false);
     expect(evaluation.candidates).toEqual([]);
   });
+
+  test("only evaluates a matching element inside its container", () => {
+    const predicate = clickable(finder, { elementId: "submit", container: { elementId: "checkout" } });
+    const evaluation = predicate(obs([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "submit", "clickable": true })] }),
+      node({ "resource-id": "checkout", "node": [node({ "resource-id": "submit", "clickable": false })] }),
+    ]));
+    expect(evaluation.matched).toBe(false);
+  });
 });
 
 describe("textEquals predicate", () => {
@@ -119,6 +128,15 @@ describe("textEquals predicate", () => {
   test("does NOT match when the located element is absent", () => {
     const predicate = textEquals(finder, { elementId: "counter" }, "5");
     const evaluation = predicate(obs([node({ "resource-id": "other", "text": "5" })]));
+    expect(evaluation.matched).toBe(false);
+  });
+
+  test("does not use an exact-text match outside its container", () => {
+    const predicate = textEquals(finder, { elementId: "counter", container: { elementId: "checkout" } }, "5");
+    const evaluation = predicate(obs([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "counter", "text": "5" })] }),
+      node({ "resource-id": "checkout", "node": [node({ "resource-id": "counter", "text": "4" })] }),
+    ]));
     expect(evaluation.matched).toBe(false);
   });
 });
@@ -167,5 +185,30 @@ describe("countStable predicate", () => {
       node({ "resource-id": "row", "text": "b" }),
     ])).matched).toBe(false);
     expect(predicate(obs([node({ "resource-id": "row", "text": "a" })])).matched).toBe(false);
+  });
+
+  test("counts only matches in its container", () => {
+    const predicate = countStable(finder, { elementId: "row", container: { elementId: "checkout" } });
+    expect(predicate(obs([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "row" })] }),
+      node({ "resource-id": "checkout", "node": [] }),
+    ])).matched).toBe(false);
+    expect(predicate(obs([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "row" }), node({ "resource-id": "row" })] }),
+      node({ "resource-id": "checkout", "node": [] }),
+    ])).matched).toBe(true);
+  });
+});
+
+describe("disappear predicate", () => {
+  const finder = new DefaultElementFinder();
+
+  test("treats a matching element outside its container as absent", () => {
+    const predicate = disappear(finder, { elementId: "spinner", container: { elementId: "checkout" } });
+    const evaluation = predicate(obs([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "spinner" })] }),
+      node({ "resource-id": "checkout", "node": [] }),
+    ]));
+    expect(evaluation.matched).toBe(true);
   });
 });

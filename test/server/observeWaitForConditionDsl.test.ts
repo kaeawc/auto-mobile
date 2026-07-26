@@ -74,6 +74,19 @@ describe("buildConditionPredicate", () => {
     expect(predicate(makeObservation([node({ "resource-id": "submit" })])).matched).toBe(true);
   });
 
+  test("appear -> scopes its finder lookup to the requested container", () => {
+    const predicate = buildConditionPredicate(finder, "appear", {
+      elementId: "submit",
+      container: { elementId: "checkout" },
+    });
+    const observation = makeObservation([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "submit" })] }),
+      node({ "resource-id": "checkout", "node": [] }),
+    ]);
+
+    expect(predicate(observation).matched).toBe(false);
+  });
+
   test("disappear -> matches an absent element", () => {
     const predicate = buildConditionPredicate(finder, "disappear", { elementId: "spinner" });
     expect(predicate(makeObservation([node({ "resource-id": "content" })])).matched).toBe(true);
@@ -89,6 +102,18 @@ describe("buildConditionPredicate", () => {
     const predicate = buildConditionPredicate(finder, "textEquals", { elementId: "counter", text: "5" });
     expect(predicate(makeObservation([node({ "resource-id": "counter", "text": "50" })])).matched).toBe(false);
     expect(predicate(makeObservation([node({ "resource-id": "counter", "text": "5" })])).matched).toBe(true);
+  });
+
+  test("textEquals -> retains its container scope", () => {
+    const predicate = buildConditionPredicate(finder, "textEquals", {
+      elementId: "counter",
+      text: "5",
+      container: { elementId: "checkout" },
+    });
+    expect(predicate(makeObservation([
+      node({ "resource-id": "other", "node": [node({ "resource-id": "counter", "text": "5" })] }),
+      node({ "resource-id": "checkout", "node": [] }),
+    ])).matched).toBe(false);
   });
 
   test("countStable -> settles once the match count repeats", () => {
@@ -218,12 +243,52 @@ describe("waitFor back-compat", () => {
     expect(parsed.waitFor).toMatchObject({ for: "clickable", elementId: "com.app:id/submit" });
   });
 
+  test("DSL form accepts a container scope and the timeoutMs alias", () => {
+    const parsed = observeSchema.parse({
+      platform: "android",
+      waitFor: {
+        for: "clickable",
+        elementId: "com.app:id/submit",
+        container: { elementId: "com.app:id/form" },
+        timeoutMs: 8000,
+      },
+    });
+    expect(parsed.waitFor).toMatchObject({
+      container: { elementId: "com.app:id/form" },
+      timeoutMs: 8000,
+    });
+  });
+
+  test("rejects dual timeout aliases across all waitFor forms", () => {
+    for (const waitFor of [
+      { for: "appear", elementId: "x" },
+      { elementId: "x" },
+      { textAny: ["x"] },
+    ]) {
+      expect(() =>
+        observeSchema.parse({
+          platform: "android",
+          waitFor: { ...waitFor, timeout: 1000, timeoutMs: 1000 },
+        })
+      ).toThrow(/timeout/);
+    }
+  });
+
   test("DSL `for: stable` needs no selector", () => {
     const parsed = observeSchema.parse({
       platform: "android",
       waitFor: { for: "stable", timeout: 3000 },
     });
     expect(parsed.waitFor).toMatchObject({ for: "stable" });
+  });
+
+  test("DSL `for: stable` rejects container because settling is whole-screen", () => {
+    expect(() =>
+      observeSchema.parse({
+        platform: "android",
+        waitFor: { for: "stable", container: { elementId: "scope" } },
+      })
+    ).toThrow(/does not support container/);
   });
 
   test("DSL `for: appear` without a selector is rejected", () => {
@@ -284,6 +349,15 @@ describe("waitForConditionSchema", () => {
   test("requires a selector for appear", () => {
     expect(() => waitForConditionSchema.parse({ platform: "android", for: "appear" })).toThrow();
   });
+
+  test("accepts a container scope", () => {
+    expect(waitForConditionSchema.parse({
+      platform: "android",
+      for: "appear",
+      elementId: "row",
+      container: { text: "Recent orders" },
+    })).toMatchObject({ container: { text: "Recent orders" } });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -324,6 +398,36 @@ describe("runWaitForConditionTool", () => {
     );
     expect(result.matched).toBe(true);
     expect(result.matchedElement?.["resource-id"]).toBe("submit");
+  });
+
+  test("does not satisfy a condition from outside the requested container", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveSequence([
+      makeObservation([
+        node({ "resource-id": "other", "node": [node({ "resource-id": "submit" })] }),
+        node({ "resource-id": "checkout", "node": [] }),
+      ], 10),
+      makeObservation([
+        node({ "resource-id": "other", "node": [node({ "resource-id": "submit" })] }),
+        node({ "resource-id": "checkout", "node": [node({ "resource-id": "submit" })] }),
+      ], 20),
+    ]);
+
+    const result = await runWaitForConditionTool(
+      observeScreen,
+      {
+        platform: "android",
+        for: "appear",
+        elementId: "submit",
+        container: { elementId: "checkout" },
+      } as any,
+      timer
+    );
+
+    expect(result.matched).toBe(true);
+    expect(result.observation.updatedAt).toBe(20);
   });
 });
 

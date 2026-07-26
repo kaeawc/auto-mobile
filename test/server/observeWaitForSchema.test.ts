@@ -268,6 +268,48 @@ describe("published observe waitFor input schema", () => {
     ]));
   });
 
+  test("rejects selectorless predicate DSL forms while permitting whole-screen stable", () => {
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "appear" },
+    }).valid).toBe(false);
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "stable" },
+    }).valid).toBe(true);
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "stable", container: { elementId: "scope" } },
+    }).valid).toBe(false);
+  });
+
+  test("requires text for the advertised textEquals DSL form", () => {
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "textEquals", elementId: "counter" },
+    }).valid).toBe(false);
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "textEquals", elementId: "counter", text: "5" },
+    }).valid).toBe(true);
+  });
+
+  test("enforces the advertised container selector shape", () => {
+    for (const container of [{}, { elementId: "scope", text: "Scope" }]) {
+      expect(validatePublishedObserveInput({
+        platform: "android",
+        waitFor: { for: "appear", elementId: "target", container },
+      }).valid).toBe(false);
+    }
+  });
+
+  test("rejects dual timeout aliases in the advertised schema", () => {
+    expect(validatePublishedObserveInput({
+      platform: "android",
+      waitFor: { for: "appear", elementId: "target", timeout: 1000, timeoutMs: 1000 },
+    }).valid).toBe(false);
+  });
+
   test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
     const toolDefinitions = JSON.parse(readFileSync(
       new URL("../../schemas/tool-definitions.json", import.meta.url),

@@ -164,7 +164,7 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `starts a version-pinned daemon when no socket exists`() {
+  fun `restarts a daemon that becomes reachable before PID state is available`() {
     val commands = FakeDaemonCommandExecutor()
     val lifecycle =
       DesktopDaemonLifecycle(
@@ -180,7 +180,7 @@ class DesktopDaemonLifecycleTest {
     assertIs<DaemonLifecycleResult.Ready>(result)
     assertTrue(result.restarted)
     assertEquals(
-      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start")),
+      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
       commands.commands,
     )
   }

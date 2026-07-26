@@ -18,10 +18,10 @@ import org.junit.Test
 
 /** Ordering + back-pressure coverage for the serialized control-tap dispatcher (issue #3347). */
 @OptIn(ExperimentalCoroutinesApi::class)
-class DeviceControlTapDispatcherTest {
+class DeviceControlInputDispatcherTest {
 
   private fun command(token: Long = 0L, client: AutoMobileClient? = null) =
-    DeviceControlTapCommand(
+    DeviceControlInputCommand.Tap(
       point = DevicePoint(x = 0, y = 0, inBounds = true),
       client = client,
       platform = "android",
@@ -37,7 +37,7 @@ class DeviceControlTapDispatcherTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val processed = mutableListOf<Long>()
     val dispatcher =
-      DeviceControlTapDispatcher(scope) { cmd ->
+      DeviceControlInputDispatcher(scope) { cmd ->
         // Earlier taps (lower token) take LONGER. Independent per-tap coroutines would finish in
         // reverse order; the single-consumer FIFO queue must keep them in click order.
         delay(50 - cmd.token * 10)
@@ -57,7 +57,7 @@ class DeviceControlTapDispatcherTest {
     var inFlight = 0
     var maxConcurrent = 0
     val dispatcher =
-      DeviceControlTapDispatcher(scope) { _ ->
+      DeviceControlInputDispatcher(scope) { _ ->
         inFlight++
         maxConcurrent = maxOf(maxConcurrent, inFlight)
         delay(10)
@@ -75,11 +75,11 @@ class DeviceControlTapDispatcherTest {
   fun `a full queue rejects the newest tap and closes its client`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val stall = CompletableDeferred<Unit>() // never completes: the consumer stays on the first tap
-    val dispatcher = DeviceControlTapDispatcher(scope) { _ -> stall.await() }
+    val dispatcher = DeviceControlInputDispatcher(scope) { _ -> stall.await() }
 
     // One tap is in flight (stalled), the bounded buffer holds the rest, the remainder overflow.
     val clients =
-      (0..DeviceControlTapDispatcher.TAP_QUEUE_CAPACITY + 2).map { FakeAutoMobileClient() }
+      (0..DeviceControlInputDispatcher.INPUT_QUEUE_CAPACITY + 2).map { FakeAutoMobileClient() }
     val accepted = clients.map { dispatcher.enqueue(command(client = it)) }
 
     assertTrue(accepted.any { !it }, "taps past the bounded capacity must be rejected")
@@ -95,7 +95,7 @@ class DeviceControlTapDispatcherTest {
     val stall = CompletableDeferred<Unit>()
     val forwarded = mutableListOf<Long>()
     val dispatcher =
-      DeviceControlTapDispatcher(scope) { cmd ->
+      DeviceControlInputDispatcher(scope) { cmd ->
         if (cmd.token == 0L) stall.await() else forwarded.add(cmd.token)
       }
 
@@ -116,6 +116,43 @@ class DeviceControlTapDispatcherTest {
       "the in-flight tap's client is left to its own finally",
     )
     assertEquals(emptyList(), forwarded, "no pending tap forwards after reset")
+    scope.cancel()
+  }
+
+  @Test
+  fun `taps and swipes share one queue and drain in gesture order`() = runTest {
+    // Issue #3350: a swipe must not get its own queue, or a tap-then-swipe sequence could execute
+    // reversed — the exact race the single-consumer FIFO exists to remove.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val processed = mutableListOf<String>()
+    val dispatcher =
+      DeviceControlInputDispatcher(scope) { cmd ->
+        // Earlier commands take LONGER, so anything but one FIFO consumer reorders them.
+        delay(50 - cmd.token * 10)
+        processed.add(
+          when (cmd) {
+            is DeviceControlInputCommand.Tap -> "tap${cmd.token}"
+            is DeviceControlInputCommand.Swipe -> "swipe${cmd.token}"
+          }
+        )
+      }
+
+    dispatcher.enqueue(command(token = 0L))
+    dispatcher.enqueue(
+      DeviceControlInputCommand.Swipe(
+        start = DevicePoint(x = 10, y = 20, inBounds = true),
+        end = DevicePoint(x = 10, y = 900, inBounds = true),
+        durationMs = 300,
+        client = null,
+        platform = "android",
+        snapshot = testSnapshot(),
+        token = 1L,
+      )
+    )
+    dispatcher.enqueue(command(token = 2L))
+    advanceUntilIdle()
+
+    assertEquals(listOf("tap0", "swipe1", "tap2"), processed)
     scope.cancel()
   }
 }

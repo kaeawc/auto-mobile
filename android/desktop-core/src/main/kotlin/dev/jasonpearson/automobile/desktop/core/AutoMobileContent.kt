@@ -1682,6 +1682,14 @@ fun AutoMobileContent(
               // crashes on failure — the daemon's actionable error surfaces in
               // deviceControlTapError instead.
               onControlTap = { snapshot, point -> deviceControlSession.tap(snapshot, point) },
+              // A control-mode drag (issue #3350) travels the SAME session — the same bounded
+              // ordered queue, the same error claim, the same post-input refresh tracker — so a
+              // tap-then-swipe sequence reaches the device in the order the user made it. The
+              // threshold and out-of-bounds rules live in the session's pure drag policy, not
+              // here.
+              onControlSwipe = { snapshot, start, end ->
+                deviceControlSession.swipe(snapshot, start, end)
+              },
             )
 
             ScreenshotMetadataOverlay(

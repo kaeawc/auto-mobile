@@ -5,6 +5,8 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.PostInputRefreshState
@@ -24,9 +26,10 @@ import kotlinx.coroutines.withContext
  * ordered dispatch queue, a frame-generation guard and a geometry check, each with its own
  * lifecycle call site. Every new input action would have had to re-wire all of it and re-derive its
  * own gates. This type owns them instead, so the Compose layer wires it **once** and later actions
- * — drag/swipe ([#3350](https://github.com/kaeawc/auto-mobile/issues/3350)) and keyboard/text
- * ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) — add a dispatch method here rather
- * than a new gate up there.
+ * add a dispatch method here rather than a new gate up there. Drag/swipe
+ * ([#3350](https://github.com/kaeawc/auto-mobile/issues/3350)) did exactly that — [swipe] joins
+ * [tap] on the one queue, the one error claim and the one refresh tracker — and keyboard/text
+ * ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) follows the same shape.
  *
  * Responsibilities:
  * - **Decide** whether control is available, via the pure [DeviceControlPolicy], and expose the one
@@ -65,7 +68,7 @@ class DeviceControlSession(
   private val publishError: (String?) -> Unit,
   private val uiContext: CoroutineContext = Dispatchers.Main,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-  private val forwarder: DeviceControlTapForwarder = DeviceControlTapForwarder(),
+  private val forwarder: DeviceControlInputForwarder = DeviceControlInputForwarder(),
   private val refreshTracker: PostInputRefreshTracker = PostInputRefreshTracker(),
 ) {
   /**
@@ -76,7 +79,7 @@ class DeviceControlSession(
    */
   private val errorToken = AtomicLong(0L)
 
-  private val dispatcher = DeviceControlTapDispatcher(scope) { command -> execute(command) }
+  private val dispatcher = DeviceControlInputDispatcher(scope) { command -> execute(command) }
 
   /** The post-input refresh state a client should be rendering; see [PostInputRefreshTracker]. */
   val refreshState: PostInputRefreshState
@@ -189,19 +192,68 @@ class DeviceControlSession(
     // "success" that parks the client in AwaitingSnapshot for the full refresh timeout waiting for
     // a device change that was never requested.
     if (!point.inBounds) return false
+    return enqueue { client, platformName, token ->
+      DeviceControlInputCommand.Tap(
+        point = point,
+        client = client,
+        platform = platformName,
+        snapshot = snapshot,
+        token = token,
+      )
+    }
+  }
+
+  /**
+   * Enqueue a drag on [snapshot] as one `input/swipe`, in gesture order on the SAME queue as [tap]
+   * — so a tap-then-swipe sequence executes in the order the user made it.
+   *
+   * [start] and [end] must both have been mapped through [snapshot]; the view captures the frame
+   * once when the drag begins and maps both endpoints through it, so a snapshot swap mid-drag
+   * cannot change the mapping (issue #3350).
+   *
+   * Whether the drag is a swipe at all is decided by the pure [DeviceDragGesturePolicy]: a movement
+   * below its threshold, or one that began off-screen, is **not dispatched** and returns false with
+   * no daemon request, no error banner, and no post-input refresh wait — an ignored drag changed
+   * nothing on the device, so parking the client in AwaitingSnapshot would be a lie. An end that
+   * ran off the frame is clamped by that policy rather than dropped. False is also returned when
+   * the bounded queue is full, in which case an overload error has already been published.
+   */
+  fun swipe(snapshot: DeviceFrameSnapshot, start: DevicePoint, end: DevicePoint): Boolean {
+    val decision =
+      DeviceDragGesturePolicy.evaluate(
+        start = start,
+        end = end,
+        deviceWidth = snapshot.deviceWidth,
+        deviceHeight = snapshot.deviceHeight,
+      )
+    // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
+    // surfaced, and the refresh tracker is left alone.
+    if (decision !is DeviceDragDecision.Swipe) return false
+    return enqueue { client, platformName, token ->
+      DeviceControlInputCommand.Swipe(
+        start = decision.start,
+        end = decision.end,
+        durationMs = decision.durationMs,
+        client = client,
+        platform = platformName,
+        snapshot = snapshot,
+        token = token,
+      )
+    }
+  }
+
+  /**
+   * Claim the newest-attempt error token, clear the banner, and enqueue the command [build] makes
+   * from the routing facts read at this instant. Shared by [tap] and [swipe] so both actions run
+   * through the one error claim and the one bounded queue rather than each re-deriving them.
+   */
+  private inline fun enqueue(
+    build: (client: AutoMobileClient?, platform: String, token: Long) -> DeviceControlInputCommand
+  ): Boolean {
     val token = errorToken.incrementAndGet()
     publishError(null)
-    val accepted =
-      dispatcher.enqueue(
-        DeviceControlTapCommand(
-          point = point,
-          client = clientProvider(),
-          platform = platform(),
-          snapshot = snapshot,
-          token = token,
-        )
-      )
-    if (!accepted) publishError(TAP_OVERLOAD_ERROR)
+    val accepted = dispatcher.enqueue(build(clientProvider(), platform(), token))
+    if (!accepted) publishError(INPUT_OVERLOAD_ERROR)
     return accepted
   }
 
@@ -224,17 +276,33 @@ class DeviceControlSession(
     publishError(null)
   }
 
-  private suspend fun execute(command: DeviceControlTapCommand) {
+  private suspend fun execute(command: DeviceControlInputCommand) {
     var error: String? = null
     try {
       withContext(ioDispatcher) {
-        forwarder.forward(
-          point = command.point,
-          client = command.client,
-          platform = command.platform,
-          deviceId = command.snapshot.deviceId,
-          onError = { message -> error = message },
-        )
+        val onError: (String) -> Unit = { message -> error = message }
+        // The device id comes from the command's own snapshot in BOTH branches, never from a
+        // selection resolved at dispatch time.
+        when (command) {
+          is DeviceControlInputCommand.Tap ->
+            forwarder.forwardTap(
+              point = command.point,
+              client = command.client,
+              platform = command.platform,
+              deviceId = command.snapshot.deviceId,
+              onError = onError,
+            )
+          is DeviceControlInputCommand.Swipe ->
+            forwarder.forwardSwipe(
+              start = command.start,
+              end = command.end,
+              durationMs = command.durationMs,
+              client = command.client,
+              platform = command.platform,
+              deviceId = command.snapshot.deviceId,
+              onError = onError,
+            )
+        }
       }
     } finally {
       command.client?.close()
@@ -257,8 +325,8 @@ class DeviceControlSession(
 
   companion object {
     /**
-     * Shown when the bounded dispatch queue rejects a tap because the daemon is not draining it.
+     * Shown when the bounded dispatch queue rejects an input because the daemon is not draining it.
      */
-    const val TAP_OVERLOAD_ERROR: String = "Tap dropped — device busy"
+    const val INPUT_OVERLOAD_ERROR: String = "Input dropped — device busy"
   }
 }

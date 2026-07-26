@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.HierarchyFrameFacts
 import dev.jasonpearson.automobile.desktop.domain.LiveFrameFacts
@@ -210,6 +211,144 @@ class DeviceControlSessionTest {
     assertFalse(dispatched, "an out-of-bounds point is reported as not dispatched")
     assertTrue(client.inputTapCalls.isEmpty(), "nothing is sent to the daemon")
     assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a drag past the threshold sends one swipe against the snapshot it began on`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val dragged =
+      session.swipe(
+        testSnapshot(deviceId = "emulator-5554", sequence = 5L),
+        DevicePoint(x = 540, y = 1800, inBounds = true),
+        DevicePoint(x = 540, y = 400, inBounds = true),
+      )
+    advanceUntilIdle()
+
+    assertTrue(dragged, "a deliberate drag is dispatched")
+    val call = client.inputSwipeCalls.single()
+    assertEquals(540.0, call.startX)
+    assertEquals(1800.0, call.startY)
+    assertEquals(540.0, call.endX)
+    assertEquals(400.0, call.endY)
+    assertEquals("emulator-5554", call.deviceId, "the snapshot is the authority for the device")
+    assertEquals(DeviceDragGesturePolicy.SWIPE_DURATION_MS, call.durationMs)
+    assertTrue(client.inputTapCalls.isEmpty(), "a swipe must not also fire a tap")
+    // The device changed, so the same #3348 refresh policy the tap path uses applies here.
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a below-threshold drag sends nothing and does not park the client awaiting a refresh`() =
+    runTest {
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client = FakeAutoMobileClient()
+      val published = mutableListOf<String?>()
+      val session = session(scope, client, publishError = { published.add(it) })
+
+      val dragged =
+        session.swipe(
+          testSnapshot(),
+          DevicePoint(x = 540, y = 1800, inBounds = true),
+          DevicePoint(x = 542, y = 1803, inBounds = true),
+        )
+      advanceUntilIdle()
+
+      assertFalse(dragged, "a movement below the threshold is reported as not dispatched")
+      assertTrue(client.inputSwipeCalls.isEmpty(), "nothing is sent to the daemon")
+      assertTrue(client.inputTapCalls.isEmpty(), "and it is NOT promoted to a tap")
+      // An ignored drag changed nothing on the device, so it must neither start a refresh wait nor
+      // touch the error banner (which would clear an error a real attempt just published).
+      assertEquals(PostInputRefreshState.Idle, session.refreshState)
+      assertEquals(emptyList(), published, "an ignored drag publishes nothing at all")
+      scope.cancel()
+    }
+
+  @Test
+  fun `a drag that started off-screen sends nothing`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val dragged =
+      session.swipe(
+        testSnapshot(),
+        DevicePoint(x = -30, y = 1800, inBounds = false),
+        DevicePoint(x = 540, y = 400, inBounds = true),
+      )
+    advanceUntilIdle()
+
+    assertFalse(dragged)
+    assertTrue(client.inputSwipeCalls.isEmpty())
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a drag that ran off the frame is clamped, never sent off-screen`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    session.swipe(
+      testSnapshot(deviceWidth = 1080, deviceHeight = 2340),
+      DevicePoint(x = 540, y = 1800, inBounds = true),
+      DevicePoint(x = 540, y = 9_000, inBounds = false),
+    )
+    advanceUntilIdle()
+
+    val call = client.inputSwipeCalls.single()
+    assertEquals(2339.0, call.endY, "the end pins to the last addressable row")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a tap and a swipe execute in gesture order on the one queue`() = runTest {
+    // The ordering guarantee only holds if both actions travel the SAME queue. A separate swipe
+    // path would reintroduce the click-order race #3347 removed.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val snapshot = testSnapshot()
+
+    session.tap(snapshot, point)
+    session.swipe(
+      snapshot,
+      DevicePoint(x = 540, y = 1800, inBounds = true),
+      DevicePoint(x = 540, y = 400, inBounds = true),
+    )
+    session.tap(snapshot, point)
+    advanceUntilIdle()
+
+    assertEquals(
+      listOf("inputTap", "close", "inputSwipe", "close", "inputTap", "close"),
+      client.calls.filter { it == "inputTap" || it == "inputSwipe" || it == "close" },
+    )
+    scope.cancel()
+  }
+
+  @Test
+  fun `a failed swipe publishes the daemon's error and settles without waiting`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    client.inputSwipeResult =
+      InputActionResult(action = "input/swipe", success = false, error = "device is locked")
+    val published = mutableListOf<String?>()
+    val session = session(scope, client, publishError = { published.add(it) })
+
+    session.swipe(
+      testSnapshot(),
+      DevicePoint(x = 540, y = 1800, inBounds = true),
+      DevicePoint(x = 540, y = 400, inBounds = true),
+    )
+    advanceUntilIdle()
+
+    assertEquals(listOf(null, "device is locked"), published)
+    assertEquals(PostInputRefreshState.Settled, session.refreshState)
     scope.cancel()
   }
 

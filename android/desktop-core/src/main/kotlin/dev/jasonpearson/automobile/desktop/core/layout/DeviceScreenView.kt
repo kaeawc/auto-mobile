@@ -13,8 +13,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -56,11 +59,13 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -138,6 +143,87 @@ private fun PointerEvent.isZoomModifierPressed(): Boolean =
   if (IS_MAC) keyboardModifiers.isMetaPressed else keyboardModifiers.isCtrlPressed
 
 /**
+ * The one pointer-drag gesture for the device screen, which means different things per mode (issue
+ * [#3350](https://github.com/kaeawc/auto-mobile/issues/3350)).
+ *
+ * - **Inspector** — a drag pans the viewport, exactly as before. No daemon input is ever produced
+ *   from this mode, which is what keeps the IDE plugin (inspector-only) unchanged.
+ * - **Control** — a plain drag is a device swipe. Viewport pan stays available on the modifier that
+ *   already gates zoom (Cmd on macOS, Ctrl elsewhere), so control mode loses no navigation
+ *   affordance; the modifier is read once at pointer-down, so releasing it mid-drag cannot turn a
+ *   pan into a swipe.
+ *
+ * Which frame the swipe maps through is decided **once**, at pointer-down, by reading
+ * [controlFrame] a single time: both endpoints are mapped with that geometry, so a snapshot
+ * arriving mid-drag cannot rescale the gesture or split it across two frames. This mirrors what the
+ * tap path does with one read per click.
+ *
+ * A cancelled drag (`drag` returning false — pointer capture lost, window deactivated) emits
+ * nothing. Threshold and out-of-bounds rules are deliberately **not** applied here; they belong to
+ * the pure `DeviceDragGesturePolicy` the caller runs, so a non-Compose client shares them.
+ *
+ * @param controlFrame reads the current snapshot + its mapping geometry; null makes control-mode
+ *   drag inert (the caller is rendering inspector mode anyway).
+ * @param onPan receives each incremental pan delta, in viewport pixels — including the travel past
+ *   touch slop on the move that crossed it, which `awaitTouchSlopOrCancellation` reports separately
+ *   from the drag loop. The sum of the deltas therefore depends only on the pointer's total
+ *   displacement, not on how many move events it arrived in.
+ * @param onSwipe receives the pinned snapshot and the raw mapped start/end. Never called in
+ *   inspector mode, on a pan, or on a cancelled drag.
+ */
+private suspend fun PointerInputScope.deviceScreenDragGestures(
+  controlMode: DeviceScreenControlMode,
+  controlFrame: () -> Pair<DeviceFrameSnapshot, DeviceScreenGeometry>?,
+  onPan: (Offset) -> Unit,
+  onSwipe: (DeviceFrameSnapshot, DevicePoint, DevicePoint) -> Unit,
+) {
+  awaitEachGesture {
+    val down = awaitFirstDown(requireUnconsumed = false)
+    val panning =
+      controlMode != DeviceScreenControlMode.Control || currentEvent.isZoomModifierPressed()
+    // Pin the mapping authority for the WHOLE drag at pointer-down.
+    val frame = if (panning) null else controlFrame() ?: return@awaitEachGesture
+    // The move that CROSSES touch slop carries real travel past the slop threshold, and it is
+    // reported here rather than in the drag loop below. Dropping it would make a
+    // one-move-then-release pan move the viewport by exactly zero, and leave any longer pan
+    // permanently lagging the pointer by that first delta. Applying `overSlop` is what the stock
+    // `detectDragGestures` this replaced already did.
+    var overSlop = Offset.Zero
+    val change =
+      awaitTouchSlopOrCancellation(down.id) { changed, crossed ->
+        changed.consume()
+        overSlop = crossed
+      } ?: return@awaitEachGesture
+    // Pan only: a swipe reports its endpoints from `down.position` and the last drag position, so
+    // it neither needs nor is affected by this delta.
+    if (panning) onPan(overSlop)
+    var lastPosition = change.position
+    val completed =
+      drag(change.id) { dragged ->
+        // Read the delta BEFORE consuming: `positionChange()` reports Offset.Zero once the change
+        // is consumed, so consuming first silently zeroes every pan step.
+        val delta = dragged.positionChange()
+        dragged.consume()
+        if (panning) onPan(delta)
+        lastPosition = dragged.position
+      }
+    if (!completed || frame == null) return@awaitEachGesture
+    val (snapshot, geometry) = frame
+    onSwipe(
+      snapshot,
+      DeviceScreenCoordinateMapper.viewportToDevice(
+        ViewportPoint(down.position.x, down.position.y),
+        geometry,
+      ),
+      DeviceScreenCoordinateMapper.viewportToDevice(
+        ViewportPoint(lastPosition.x, lastPosition.y),
+        geometry,
+      ),
+    )
+  }
+}
+
+/**
  * Device screen view with screenshot display, zoom/pan controls, and element overlays. Supports:
  * - Zoom via scroll wheel (centered on cursor)
  * - Pan via mouse drag
@@ -198,6 +284,20 @@ fun DeviceScreenView(
    * makes control mode inert until a caller wires it. No-op in inspector mode.
    */
   onControlTap: ((DeviceFrameSnapshot, DevicePoint) -> Unit)? = null,
+  /**
+   * Called in [DeviceScreenControlMode.Control] when a pointer drag completes, with the snapshot
+   * the drag began on and the raw mapped start/end device coordinates (issue #3350). Both endpoints
+   * are mapped through that ONE snapshot, pinned at pointer-down, so a snapshot arriving mid-drag
+   * cannot rescale the gesture or map its two ends through different frames.
+   *
+   * The points are raw: whether the drag is long enough to be a swipe, and what to do with an
+   * endpoint that left the screen, are decided by the caller through the Compose-free
+   * [dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy] — so a third-party daemon
+   * client shares the policy rather than reimplementing it. A null default makes control-mode drag
+   * inert until a caller wires it; in inspector mode a drag still pans the viewport and this is
+   * never called.
+   */
+  onControlSwipe: ((DeviceFrameSnapshot, DevicePoint, DevicePoint) -> Unit)? = null,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -206,6 +306,9 @@ fun DeviceScreenView(
   // without
   // restarting the gesture. Matches the rememberUpdatedState pattern used by SplitPane's drag.
   val currentOnControlTap by rememberUpdatedState(onControlTap)
+  // Same reasoning for the drag callback: the gesture coroutine is keyed on controlMode alone, so
+  // it must read the LATEST callback rather than the one captured when the gesture started.
+  val currentOnControlSwipe by rememberUpdatedState(onControlSwipe)
 
   // Leaving inspector mode must drop the inspector affordances already drawn: the Move guard only
   // suppresses future hover updates, and the selection/hover overlays render unconditionally from
@@ -543,13 +646,26 @@ fun DeviceScreenView(
                 false
               }
             }
-            .pointerInput(Unit) {
-              // Allow pan/drag to move the viewport
-              detectDragGestures { change, dragAmount ->
-                change.consume()
-                offsetX += dragAmount.x
-                offsetY += dragAmount.y
-              }
+            // Kept where the pan gesture always was, ahead of the tap detector. A drag consumes
+            // every change once it passes touch slop, and the tap detector's Final-pass consume
+            // check sees that regardless of which modifier is declared first — so one drag yields a
+            // swipe and NO tap either way (`a control-mode drag reports one swipe and no tap`
+            // pins it).
+            .pointerInput(controlMode) {
+              // One drag gesture, two meanings (issue #3350): pan in inspector mode, a device
+              // swipe in control mode (pan moves onto the zoom modifier there). Keyed on
+              // controlMode so a mode change restarts it with the right meaning.
+              deviceScreenDragGestures(
+                controlMode = controlMode,
+                controlFrame = { controlFrame },
+                onPan = { delta ->
+                  offsetX += delta.x
+                  offsetY += delta.y
+                },
+                onSwipe = { snapshot, start, end ->
+                  currentOnControlSwipe?.invoke(snapshot, start, end)
+                },
+              )
             }
             .pointerInput(hierarchy, controlMode) {
               detectTapGestures { offset ->

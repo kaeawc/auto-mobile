@@ -522,6 +522,31 @@ describe("IOSCtrlProxyManager", function() {
       manager.clearCaches();
       expect(await manager.isRunning()).toBe(true);     // cache cleared → re-probe
     });
+
+    test("drops a cached positive availability so a now-down runner is re-probed", async function() {
+      // isAvailable only serves a cache when it is POSITIVE, so this pins the
+      // cachedAvailability clear specifically: deleting `this.cachedAvailability = null`
+      // (or `this.cachedRunning = null`) from clearCaches leaves the stale positive and
+      // reds the final assertion. cachedInstalled has no such test here because for a
+      // simulator device isInstalled is unconditionally true — clearing it is unobservable.
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = true;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          ""
+        )
+      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+
+      expect(await manager.isAvailable()).toBe(true);   // installed(true)+running(true) → cached positive
+      healthy = false;
+      expect(await manager.isAvailable()).toBe(true);   // positive availability cache is served (stale)
+      manager.clearCaches();
+      expect(await manager.isAvailable()).toBe(false);  // caches dropped → re-probes the down runner
+    });
   });
 
   describe("resetSetupState", function() {

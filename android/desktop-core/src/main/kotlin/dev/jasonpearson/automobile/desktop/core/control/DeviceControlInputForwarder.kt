@@ -140,6 +140,12 @@ class DeviceControlInputForwarder {
    * `submit` is deliberately not passed. Submitting is the Enter key's job, which travels this seam
    * as its own `input/key` command; folding it into the text call would make one keystroke's effect
    * depend on what was typed before it.
+   *
+   * `append = true` is NOT optional here. The daemon's default text path is `ACTION_SET_TEXT`,
+   * which REPLACES the focused field's contents — so a client mirroring a keyboard one keystroke at
+   * a time would leave only the last character typed, and would wipe any text already in the field.
+   * Append routes through real key events instead (issue #3351). The keyboard policy has already
+   * refused to produce text for a platform without that mode.
    */
   fun forwardTypeText(
     text: String,
@@ -151,7 +157,12 @@ class DeviceControlInputForwarder {
     if (text.isEmpty()) return
     if (client == null) return
     forward(onError) {
-      client.inputTypeText(text = text, platform = platform, deviceId = deviceId)
+      client.inputTypeText(
+        text = text,
+        platform = platform,
+        deviceId = deviceId,
+        append = true,
+      )
     }
   }
 

@@ -45,6 +45,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -363,6 +364,16 @@ fun DeviceScreenView(
    * control-mode keyboard inert; in inspector mode Escape still deselects and this is never called.
    */
   onControlKey: ((DeviceFrameSnapshot, DeviceKeyStroke) -> Boolean)? = null,
+  /**
+   * Called whenever this view gains or loses keyboard focus (issue #3351).
+   *
+   * A host embedding control mode needs this to know when the device owns the keyboard — the
+   * desktop shell uses it to stand its preview-level navigation shortcuts down, since those would
+   * otherwise consume Tab, the arrows, Enter and Escape before the focused canvas ever saw them.
+   * Reported in every mode; a host that only cares about control mode combines it with its own mode
+   * state.
+   */
+  onControlFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -376,6 +387,7 @@ fun DeviceScreenView(
   val currentOnControlSwipe by rememberUpdatedState(onControlSwipe)
   // Same reasoning again for the key callback (issue #3351).
   val currentOnControlKey by rememberUpdatedState(onControlKey)
+  val currentOnControlFocusChanged by rememberUpdatedState(onControlFocusChanged)
 
   // Leaving inspector mode must drop the inspector affordances already drawn: the Move guard only
   // suppresses future hover updates, and the selection/hover overlays render unconditionally from
@@ -715,6 +727,7 @@ fun DeviceScreenView(
           Modifier.fillMaxSize()
             .clipToBounds()
             .focusRequester(focusRequester)
+            .onFocusChanged { state -> currentOnControlFocusChanged?.invoke(state.isFocused) }
             .focusTarget()
             .onKeyEvent { keyEvent ->
               handleDeviceScreenKeyEvent(
@@ -755,6 +768,13 @@ fun DeviceScreenView(
                   // sends input itself. One read of controlFrame supplies both the mapping bounds
                   // and the reported snapshot, so they cannot disagree.
                   DeviceScreenControlMode.Control -> {
+                    // Clicking the mirrored screen restores keyboard focus (issue #3351). The
+                    // mode-entry effect only fires when controlMode CHANGES, so once anything else
+                    // took focus — the shell's Tab handler moving panes, a side panel — clicking
+                    // the device would otherwise leave every keystroke with the host, with no
+                    // visible reason why. Clicking the thing you want to type into is the
+                    // universal way to focus it.
+                    focusRequester.requestFocus()
                     val frame = controlFrame
                     if (frame != null) {
                       val (snapshot, geometry) = frame

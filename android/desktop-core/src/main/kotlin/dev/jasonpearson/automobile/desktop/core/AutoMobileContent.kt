@@ -731,6 +731,11 @@ fun AutoMobileContent(
   // disconnect, Live Layout open/close). See DeviceControlSession.reset.
   val resetControlTapContext: () -> Unit = { deviceControlSession.reset() }
 
+  // Whether the mirrored device canvas holds the keyboard (issue #3351). Reported by
+  // DeviceScreenView; consumed by the shell so its preview navigation handler stands aside while
+  // the device owns un-chorded keys.
+  var deviceCanvasFocused by remember { mutableStateOf(false) }
+
   val takeScreenshot: () -> Unit =
     remember(clientProvider, screenshotScope) {
       takeScreenshot@{
@@ -1589,6 +1594,13 @@ fun AutoMobileContent(
       onQuickJump = { /* Timestamp jump placeholder */ },
       menuBarActions = menuBarActions,
       vimModeEnabled = vimModeEnabled,
+      // The shell's navigation shortcuts run in a PREVIEW handler, so without this they consume
+      // Tab / arrows / Enter / Escape before the focused device canvas ever sees them — and Escape
+      // is the client's only device-button binding (issue #3351). Read at event time, so it always
+      // reflects the live focus and control state.
+      deviceControlCapturesKeys = {
+        deviceCanvasFocused && deviceControlSession.interactionSnapshot != null
+      },
       centerContent = { mod ->
         if (isLiveLayoutMode) {
           // Live layout mode: center shows device screenshot with element overlays.
@@ -1696,6 +1708,7 @@ fun AutoMobileContent(
               // the policy leaves to the host is not consumed here and still reaches this app's own
               // shortcuts.
               onControlKey = { snapshot, stroke -> deviceControlSession.key(snapshot, stroke) },
+              onControlFocusChanged = { focused -> deviceCanvasFocused = focused },
             )
 
             ScreenshotMetadataOverlay(

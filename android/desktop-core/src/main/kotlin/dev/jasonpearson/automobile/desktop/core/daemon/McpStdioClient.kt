@@ -376,6 +376,7 @@ class McpStdioClient(
     platform: String,
     deviceId: String?,
     submit: Boolean?,
+    append: Boolean,
   ): InputActionResult = unsupportedInputAction(transportName, "input/typeText")
 
   override fun inputKey(

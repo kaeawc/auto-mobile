@@ -342,6 +342,7 @@ class McpDaemonClient(
     platform: String,
     deviceId: String?,
     submit: Boolean?,
+    append: Boolean,
   ): InputActionResult {
     return sendInputRequest(
       "input/typeText",
@@ -350,6 +351,9 @@ class McpDaemonClient(
         putOptionalString("deviceId", deviceId)
         put("text", JsonPrimitive(text))
         putOptionalBoolean("submit", submit)
+        // Omitted entirely when false: the daemon rejects unknown/!append values, and older
+        // daemons reject the param outright.
+        if (append) put("mode", JsonPrimitive("append"))
       },
     )
   }

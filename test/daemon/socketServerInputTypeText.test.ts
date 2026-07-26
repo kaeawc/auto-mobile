@@ -85,6 +85,34 @@ describe("UnixSocketServer input/typeText", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
+  // Issue #3351: requestSetText is ACTION_SET_TEXT, which REPLACES the focused
+  // field. A client mirroring a keyboard one keystroke at a time must never
+  // reach it, or typing "abc" leaves the field saying "c" and anything already
+  // there is destroyed on the first key.
+  test("append mode never reaches the destructive requestSetText path", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "a",
+      mode: "append",
+    }, 1234);
+
+    // The request may or may not succeed here (the append path shells out to
+    // adb, which this harness does not provide), but it must NOT have taken the
+    // replace path. That is the property worth pinning.
+    expect(requestSetText).not.toHaveBeenCalled();
+  });
+
   test("routes iOS text input through existing platform input infrastructure", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
@@ -397,10 +425,17 @@ describe("UnixSocketServer input/typeText", () => {
       text: "hello",
       submit: "true",
     });
+    // `mode` is now a supported param, but only the value "append" (#3351):
+    // the other InputText modes are replace-shaped and have no meaning here.
     const unsupportedMode = await sendRequest(socketPath, "input/typeText", {
       platform: "android",
       text: "hello",
       mode: "eventAll",
+    });
+    const appendOnIos = await sendRequest(socketPath, "input/typeText", {
+      platform: "ios",
+      text: "hello",
+      mode: "append",
     });
     const unsupportedImeAction = await sendRequest(socketPath, "input/typeText", {
       platform: "android",
@@ -422,7 +457,11 @@ describe("UnixSocketServer input/typeText", () => {
     expect(nonBooleanSubmit.success).toBe(false);
     expect(nonBooleanSubmit.error).toBe("input/typeText submit must be a boolean when provided");
     expect(unsupportedMode.success).toBe(false);
-    expect(unsupportedMode.error).toBe("input/typeText unsupported params: mode");
+    expect(unsupportedMode.error).toBe('input/typeText mode must be "append" when provided');
+    // iOS has no append-capable text primitive, so the request is REJECTED rather
+    // than silently downgraded to the destructive replace path.
+    expect(appendOnIos.success).toBe(false);
+    expect(appendOnIos.error).toBe('input/typeText mode "append" is only supported on android');
     expect(unsupportedImeAction.success).toBe(false);
     expect(unsupportedImeAction.error).toBe("input/typeText unsupported params: imeAction");
     expect(unsupportedDismissKeyboard.success).toBe(false);

@@ -157,6 +157,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val platform: String,
     val deviceId: String?,
     val submit: Boolean?,
+    val append: Boolean = false,
   )
 
   data class InputKeyCall(
@@ -332,9 +333,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     platform: String,
     deviceId: String?,
     submit: Boolean?,
+    append: Boolean,
   ): InputActionResult {
     calls.add("inputTypeText")
-    inputTypeTextCalls.add(InputTypeTextCall(text, platform, deviceId, submit))
+    inputTypeTextCalls.add(InputTypeTextCall(text, platform, deviceId, submit, append))
     return inputTypeTextResult
   }
 

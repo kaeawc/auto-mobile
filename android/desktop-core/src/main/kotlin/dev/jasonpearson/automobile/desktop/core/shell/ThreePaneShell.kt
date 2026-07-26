@@ -35,6 +35,8 @@ import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
@@ -113,6 +115,24 @@ fun ThreePaneShell(
   menuBarActions: MenuBarActions? = null,
   // Vim mode
   vimModeEnabled: Boolean = false,
+  /**
+   * Whether a device-control canvas currently holds the keyboard (issue
+   * [#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+   *
+   * This shell's navigation shortcuts live in a **preview** handler, which by design runs before
+   * any focused descendant sees the event. That is right for shell navigation and fatal for
+   * device-control keyboard forwarding: Tab, Shift-Tab, the arrows, Enter and Escape are exactly
+   * the keys a mirrored device needs, and every one of them would be consumed here first — Escape
+   * being the client's only device-button binding.
+   *
+   * While this returns true, the preview handler **declines every un-chorded keystroke** so it
+   * reaches the focused device canvas. Chorded shortcuts (Cmd-0, Cmd-/, Cmd-K …) are unaffected,
+   * which matches the forwarding policy's own rule that modifier-bearing chords belong to the host.
+   * Read at event time, not composition time, so it is always current.
+   *
+   * Defaults to never capturing, so an inspector-only embedder (the IDE plugin) is unchanged.
+   */
+  deviceControlCapturesKeys: () -> Boolean = { false },
   // Pane content slots
   centerContent: @Composable (Modifier) -> Unit,
   leftPaneContent: @Composable () -> Unit,
@@ -177,6 +197,19 @@ fun ThreePaneShell(
           return@onPreviewKeyEvent true
         }
         if (showQuickJump) return@onPreviewKeyEvent false
+
+        // Device control owns the un-chorded keyboard while its canvas is focused. Declining here
+        // (rather than not registering the handler) keeps this one preview handler as the single
+        // place shell navigation is decided, and lets the event fall through to the focused
+        // device canvas. Modal overlays above still win, because they are checked first.
+        if (
+          deviceControlCapturesKeys() &&
+            !event.isMetaPressed &&
+            !event.isCtrlPressed &&
+            !event.isAltPressed
+        ) {
+          return@onPreviewKeyEvent false
+        }
 
         when {
           // Cmd+0 -> toggle left pane

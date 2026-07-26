@@ -100,11 +100,19 @@ interface AutoMobileClient {
     deviceId: String? = null,
   ): InputActionResult
 
+  /**
+   * @param append when true, requests the daemon's non-destructive append mode: the text is added
+   *   to the focused field with real key events instead of REPLACING its contents via
+   *   `ACTION_SET_TEXT`. Required by any client mirroring a keyboard one keystroke at a time, which
+   *   would otherwise leave only the last character typed. Android-only; the daemon rejects it on
+   *   iOS (issue #3351).
+   */
   fun inputTypeText(
     text: String,
     platform: String = "android",
     deviceId: String? = null,
     submit: Boolean? = null,
+    append: Boolean = false,
   ): InputActionResult
 
   fun inputKey(

@@ -228,8 +228,19 @@ Focus is the *only* place a global-capture design would be tempting; do not take
 it. Use the toolkit's own focus routing — the reference client attaches its
 handler to the focusable device-screen node, so a keystroke reaches the policy
 only when that node is on the focus path, and nothing has to be re-checked. The
-view takes focus when it **enters** control mode and releases it like any other
-focusable node.
+view takes focus when it **enters** control mode, **and again when the canvas is
+clicked**; the second is not optional, because once anything else takes focus
+(a pane-navigation shortcut, a side panel) clicking the mirrored screen is the
+only affordance a user has to get it back.
+
+**Beware ancestor preview handlers.** If your host resolves its own navigation
+shortcuts in a *preview*/capture-phase handler — one that runs before the focused
+descendant — it will consume Tab, the arrows, Enter and Escape before the device
+canvas ever sees them, and Escape is the client's only device-button binding. The
+host must stand that handler down while the device canvas holds focus. The
+reference client reports focus changes out of the view and has the shell decline
+every **un-chorded** keystroke while control mode holds the keyboard; chorded
+host shortcuts keep working, which is consistent with the chord rule below.
 
 Control mode is additionally **inert without a frame snapshot**, the same
 fail-closed rule taps and drags follow: with no snapshot there is no frame the
@@ -244,8 +255,20 @@ rule that is correct for every host. Shift is **not** a chord modifier: it is ho
 a capital letter or a shifted symbol is produced, and treating it as one would
 make control mode unable to type half the keyboard.
 
-A client that knows its own host leaves a particular chord unclaimed may opt that
-key in explicitly (`forwardedChordKeys`). The default list is **empty**.
+One documented exception is built in: **AltGr**. On many non-US layouts AltGr is
+how `@`, `€`, `{` and `\` are produced, and AWT-derived toolkits (Compose desktop
+among them) report it as Ctrl **and** Alt together. A Ctrl+Alt keystroke that
+produced a printable character is therefore treated as typing, not as a shortcut.
+A real Ctrl+Alt accelerator produces no printable character, so it still stays
+with the host — which is what keeps the exception from being a hole. Adding Meta
+never qualifies.
+
+A client that knows its own host leaves a particular chord unclaimed may opt it in
+explicitly (`forwardedChords`). The default list is **empty**. Entries match
+either a device key **or a produced character**, case-insensitively — the latter
+matters because the chords a client actually wants to opt in are letter chords
+like Ctrl-S, and an ordinary letter deliberately carries no device key at all, so
+a key-only allowlist could never name one.
 
 The mechanism matters as much as the rule: a declined keystroke must be left
 **unconsumed** so it continues to the host's own shortcut handling. In the
@@ -262,12 +285,27 @@ Applied in this order:
 | Any chord modifier held, key not explicitly opted in | **nothing**; leave unconsumed |
 | `Escape` | one `input/pressButton` with `back` |
 | `Enter`, `Tab`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right` | one `input/key` with `enter`, `tab`, `backspace`, `delete`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right` |
-| A printable character | one `input/typeText` with that single character |
+| A printable character | one `input/typeText` with that single character, in **append** mode |
 | Anything else (function keys, a modifier pressed alone, a dead key) | **nothing**; leave unconsumed |
 
 A key with a device meaning **wins over the character it produced**. Hosts report
 a control character for Enter, Tab and Backspace; typing those as text would put
 a literal newline in a text field instead of pressing the key.
+
+**Text must be appended, never set.** `input/typeText`'s default Android path is
+`ACTION_SET_TEXT`, which *replaces* the focused field's contents. A client sending
+one character per keystroke through it would type `abc` as "a", then "b", then
+"c" — final value `c` — and would wipe any text already in the field on the first
+key. Pass `mode: "append"`, which routes through real key events and adds to the
+field instead. This is a hard requirement, not a tuning knob.
+
+`mode: "append"` is **Android-only**; the daemon rejects it on iOS, whose control
+proxy exposes no non-destructive text primitive. A client targeting iOS must
+therefore **not forward printable text at all** — a disabled typing path is
+strictly better than one that erases the field on every keystroke. Buttons and
+discrete keys are unaffected, so control mode stays useful there. Lifting this
+needs an iOS-side insert primitive, tracked under
+[#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
 
 `Escape` is the only key bound to a device *button*, and deliberately so.
 Escape→back is the mapping Android itself applies to a hardware ESC key, and
@@ -289,6 +327,9 @@ Two different situations, handled differently:
   Android-only; on iOS the daemon answers with an actionable error. Surface it
   through the same error path as any other failed input rather than swallowing
   it.
+- **The platform has no non-destructive text path.** Printable characters are
+  dropped before any request is made (see the append rule above). This is a
+  client-side refusal, not a daemon error.
 
 ### Scope
 
@@ -310,10 +351,13 @@ refresh wait a successful tap does. See
 keystroke the policy ignored is **not** an input: it starts no wait and shows no
 error.
 
-One consequence of sharing the bounded queue: a keystroke the policy *did*
-forward is consumed even if the queue rejected it. The overload error has already
-been surfaced, and letting the key fall through to the host afterwards would type
-into the host's own UI as a consolation prize for a dropped device input.
+One consequence of sharing the bounded queue: **consumption is not the same
+question as "did it reach the device"**. A keystroke the policy accepted is
+consumed even when the queue rejected it — the overload error has already been
+surfaced, and letting the key fall through to the host afterwards would type into
+the host's own UI as a consolation prize for a dropped device input. The boolean a
+client's key handler returns should therefore be read as *"should this event be
+consumed"*, not as *"was this forwarded"*.
 
 ## Fit-to-viewport sizing
 
@@ -380,8 +424,12 @@ nothing.
 
 The keyboard policy is pure too (`DeviceKeyboardInputPolicyTest`), pinning the
 chord rule from **both** sides — every chord modifier must stay with the host,
-and Shift must **not**, or capitals become untypable — plus key-over-character
-precedence, the control-character filter and the explicit chord allowlist.
+and Shift must **not**, or capitals become untypable — plus AltGr from both sides
+(an AltGr-composed character types, a real Ctrl+Alt accelerator does not),
+key-over-character precedence, the control-character filter, the character-keyed
+chord allowlist, and the platform text gate. `InputText.test.ts` pins the daemon
+append mode itself: it issues key events and makes **no** `ACTION_SET_TEXT` call
+and **no** clear, so N single-character calls accumulate.
 `DeviceKeyboardEventTranslatorTest` pins the toolkit-key translation.
 `DeviceControlSessionKeyboardTest` asserts the exact daemon payloads a keystroke
 produces against a fake client, that keyboard shares the one ordered queue with
@@ -389,7 +437,8 @@ taps, and that a successful keystroke starts the same post-input refresh wait.
 View-level routing (`DeviceScreenViewKeyboardTest`) observes **both** what the
 view forwarded and what an ancestor host handler still received, so
 "host shortcuts are not swallowed" is checked rather than assumed, alongside the
-focus and mode gates.
+focus and mode gates, click-to-refocus, and — composed under an ancestor with the
+shell's real preview handler — that Escape/Enter/arrows/Tab actually survive it.
 
 ## Which frame the mapping runs against
 

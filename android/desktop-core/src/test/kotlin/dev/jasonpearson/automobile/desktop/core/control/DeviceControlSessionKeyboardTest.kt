@@ -35,11 +35,12 @@ class DeviceControlSessionKeyboardTest {
     scope: CoroutineScope,
     client: FakeAutoMobileClient,
     publishError: (String?) -> Unit = {},
+    platform: String = "android",
   ) =
     DeviceControlSession(
       scope = scope,
       clientProvider = { client },
-      platform = { "android" },
+      platform = { platform },
       nowMs = { 1_000L },
       publishError = publishError,
       uiContext = UnconfinedTestDispatcher(testScheduler),
@@ -79,9 +80,32 @@ class DeviceControlSessionKeyboardTest {
     assertEquals("a", call.text)
     assertEquals("android", call.platform)
     assertEquals("emulator-5554", call.deviceId)
+    // Non-negotiable: the daemon's DEFAULT text path is ACTION_SET_TEXT, which REPLACES the
+    // focused field. Typing one character at a time through it would leave only the last character
+    // and would wipe whatever was already in the field. Append routes through real key events.
+    assertTrue(call.append, "per-keystroke text must use the daemon's append mode")
     // `submit` is Enter's job, which travels this seam as its own input/key command. Folding it in
     // here would make one keystroke's effect depend on what was typed before it.
     assertEquals(null, call.submit)
+    scope.cancel()
+  }
+
+  @Test
+  fun `printable text is not forwarded on a platform that can only replace the field`() = runTest {
+    // iOS has no append-capable text helper, so forwarding would wipe the focused field on every
+    // keystroke. Disabled beats destructive — and buttons still work, so control mode stays useful.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client, platform = "ios")
+
+    val typed = session.key(testSnapshot(), DeviceKeyStroke(character = 'a'))
+    val escaped = session.key(testSnapshot(), escape())
+    advanceUntilIdle()
+
+    assertFalse(typed, "a keystroke that cannot be forwarded is left to the host")
+    assertTrue(client.inputTypeTextCalls.isEmpty(), "nothing may reach the iOS text helper")
+    assertTrue(escaped, "buttons are unaffected by the text restriction")
+    assertEquals("back", client.inputPressButtonCalls.single().button)
     scope.cancel()
   }
 

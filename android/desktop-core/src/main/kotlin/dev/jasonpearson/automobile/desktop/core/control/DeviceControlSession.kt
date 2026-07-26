@@ -266,7 +266,16 @@ class DeviceControlSession(
    * view received while focused and in control mode.
    */
   fun key(snapshot: DeviceFrameSnapshot, stroke: DeviceKeyStroke): Boolean {
-    when (val decision = DeviceKeyboardInputPolicy.evaluate(stroke)) {
+    // Text forwarding needs a daemon helper that APPENDS. Only Android has one (`mode: "append"`,
+    // real key events); iOS text input can only replace the focused field, which typing one
+    // character at a time would wipe on every keystroke. Buttons and discrete keys are unaffected.
+    val platformName = platform()
+    val decision =
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke = stroke,
+        textSupported = platformName == ANDROID_PLATFORM,
+      )
+    when (decision) {
       is DeviceKeyboardDecision.PressButton ->
         enqueue { client, platformName, token ->
           DeviceControlInputCommand.PressButton(
@@ -288,11 +297,11 @@ class DeviceControlSession(
           )
         }
       is DeviceKeyboardDecision.TypeText ->
-        enqueue { client, platformName, token ->
+        enqueue { client, enqueuePlatform, token ->
           DeviceControlInputCommand.TypeText(
             text = decision.text,
             client = client,
-            platform = platformName,
+            platform = enqueuePlatform,
             snapshot = snapshot,
             token = token,
           )
@@ -416,5 +425,8 @@ class DeviceControlSession(
      * Shown when the bounded dispatch queue rejects an input because the daemon is not draining it.
      */
     const val INPUT_OVERLOAD_ERROR: String = "Input dropped — device busy"
+
+    /** The daemon platform string whose text helper supports non-destructive append. */
+    const val ANDROID_PLATFORM: String = "android"
   }
 }

@@ -460,6 +460,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     platform: String,
     deviceId: String?,
     submit: Boolean?,
+    append: Boolean,
   ) = notImplemented()
 
   override fun inputKey(

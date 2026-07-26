@@ -7,14 +7,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
@@ -26,6 +33,7 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import dev.jasonpearson.automobile.desktop.domain.ElementBounds
 import dev.jasonpearson.automobile.desktop.domain.UIElementInfo
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.junit.Test
 
@@ -77,6 +85,181 @@ class DeviceScreenViewKeyboardTest {
    * between the view, the callback's answer and the host; which strokes the policy accepts is
    * pinned by `DeviceKeyboardInputPolicyTest`.
    */
+  /**
+   * The device view under an ancestor that consumes navigation keys in a **preview** handler,
+   * faithful to `ThreePaneShell`'s real one: same `onPreviewKeyEvent` position, same KeyDown gate,
+   * same key set (Tab, arrows, Enter, Escape), and the same `deviceControlCapturesKeys` stand-down.
+   *
+   * This is the composition shape that matters, and the one the isolated tests above cannot see: a
+   * preview handler runs BEFORE any focused descendant, so without the stand-down every key the
+   * device policy claims is eaten by the shell — including Escape, the only device-button binding.
+   */
+  @Composable
+  private fun shellHostedView(observed: Observed, standDown: Boolean) {
+    Box(
+      Modifier.focusTarget().onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        if (standDown && !event.isMetaPressed && !event.isCtrlPressed && !event.isAltPressed) {
+          return@onPreviewKeyEvent false
+        }
+        when (event.key) {
+          Key.Tab,
+          Key.DirectionUp,
+          Key.DirectionDown,
+          Key.Enter,
+          Key.Escape -> {
+            observed.hostSaw.add(event.key)
+            true
+          }
+          else -> false
+        }
+      }
+    ) {
+      DeviceScreenView(
+        screenshotData = null,
+        screenWidth = 1080,
+        screenHeight = 2340,
+        hierarchy = root,
+        selectedElementId = null,
+        hoveredElementId = null,
+        onElementSelected = {},
+        onElementHovered = {},
+        elementMap = mapOf("root" to root),
+        controlMode = DeviceScreenControlMode.Control,
+        controlSnapshot = snapshot(),
+        onControlTap = { _, _ -> },
+        onControlKey = { _, stroke ->
+          observed.forwarded.add(stroke)
+          true
+        },
+      )
+    }
+  }
+
+  @Test
+  fun `device keys reach the canvas through the shell's preview navigation handler`() =
+    runComposeUiTest {
+      // The production regression (#3351): every key below is one the shell's preview handler
+      // consumes, and Escape is the client's ONLY device-button binding. Testing the view in
+      // isolation cannot see this at all — the handler that eats them is an ancestor.
+      val observed = Observed()
+      setContent { MaterialTheme { shellHostedView(observed, standDown = true) } }
+
+      listOf(Key.Escape, Key.Enter, Key.DirectionUp, Key.DirectionDown, Key.Tab).forEach { key ->
+        onRoot().performKeyInput { pressKey(key) }
+      }
+      waitForIdle()
+
+      assertEquals(
+        listOf(
+          DeviceKeyboardKey.Escape,
+          DeviceKeyboardKey.Enter,
+          DeviceKeyboardKey.ArrowUp,
+          DeviceKeyboardKey.ArrowDown,
+          DeviceKeyboardKey.Tab,
+        ),
+        observed.forwarded.map { it.key },
+        "every device key must reach the canvas, not the shell",
+      )
+      assertTrue(
+        observed.hostSaw.isEmpty(),
+        "the shell must not consume them first (got ${observed.hostSaw})",
+      )
+    }
+
+  @Test
+  fun `the shell keeps its navigation keys when the device canvas is not capturing`() =
+    runComposeUiTest {
+      // The other direction: standing down must be conditional. If the shell gave up these keys
+      // unconditionally, pane navigation would break everywhere else in the app.
+      val observed = Observed()
+      setContent { MaterialTheme { shellHostedView(observed, standDown = false) } }
+
+      onRoot().performKeyInput { pressKey(Key.Tab) }
+      onRoot().performKeyInput { pressKey(Key.Escape) }
+      waitForIdle()
+
+      assertEquals(listOf(Key.Tab, Key.Escape), observed.hostSaw, "the shell still navigates")
+      assertTrue(
+        observed.forwarded.isEmpty(),
+        "and nothing reaches the device (got ${observed.forwarded})",
+      )
+    }
+
+  @Test
+  fun `clicking the control canvas restores keyboard focus`() = runComposeUiTest {
+    // Focus is requested when control mode is ENTERED. Once anything else takes it — the shell's
+    // Tab handler moving panes, a side panel — clicking the mirrored screen must bring it back, or
+    // every keystroke silently stays with the host with no visible reason why.
+    val observed = Observed()
+    val elsewhere = FocusRequester()
+    setContent {
+      MaterialTheme {
+        hostedView(
+          observed,
+          DeviceScreenControlMode.Control,
+          forwardsEverything = true,
+          otherFocus = elsewhere,
+        )
+      }
+    }
+    runOnIdle { elsewhere.requestFocus() }
+    waitForIdle()
+
+    onRoot().performKeyInput { pressKey(Key.Escape) }
+    waitForIdle()
+    assertTrue(observed.forwarded.isEmpty(), "precondition: focus is elsewhere")
+
+    onRoot().performTouchInput { click() }
+    waitForIdle()
+    onRoot().performKeyInput { pressKey(Key.Escape) }
+    waitForIdle()
+
+    assertEquals(
+      listOf(DeviceKeyboardKey.Escape),
+      observed.forwarded.map { it.key },
+      "a click on the canvas restores focus so keys forward again",
+    )
+  }
+
+  @Test
+  fun `focus changes are reported to the host`() = runComposeUiTest {
+    // The signal the shell stands down on. Without it the shell cannot tell whether the device
+    // owns the keyboard, and would have to choose between eating device keys and breaking its own
+    // navigation.
+    val focusStates = mutableListOf<Boolean>()
+    val elsewhere = FocusRequester()
+    setContent {
+      MaterialTheme {
+        Box {
+          Box(Modifier.focusRequester(elsewhere).focusable())
+          DeviceScreenView(
+            screenshotData = null,
+            screenWidth = 1080,
+            screenHeight = 2340,
+            hierarchy = root,
+            selectedElementId = null,
+            hoveredElementId = null,
+            onElementSelected = {},
+            onElementHovered = {},
+            elementMap = mapOf("root" to root),
+            controlMode = DeviceScreenControlMode.Control,
+            controlSnapshot = snapshot(),
+            onControlTap = { _, _ -> },
+            onControlKey = { _, _ -> true },
+            onControlFocusChanged = { focusStates.add(it) },
+          )
+        }
+      }
+    }
+    waitForIdle()
+    assertTrue(focusStates.lastOrNull() == true, "entering control mode reports focus gained")
+
+    runOnIdle { elsewhere.requestFocus() }
+    waitForIdle()
+    assertTrue(focusStates.lastOrNull() == false, "losing focus is reported too")
+  }
+
   @Composable
   private fun hostedView(
     observed: Observed,
@@ -201,9 +384,16 @@ class DeviceScreenViewKeyboardTest {
     waitForIdle()
 
     // Without this the policy could never distinguish Cmd-S from a bare S, and the host-chord rule
-    // would be unenforceable no matter how it is written.
-    val stroke = observed.forwarded.first { it.character == 's' || it.key == null }
-    assertTrue(stroke.modifiers.hasChordModifier, "the held modifier reached the client: $stroke")
+    // would be unenforceable no matter how it is written. Assert against the S keystroke
+    // SPECIFICALLY — the bare Meta press is also forwarded, and matching it instead would let this
+    // pass while S arrived with no modifier at all.
+    val stroke =
+      assertNotNull(
+        observed.forwarded.firstOrNull { it.character == 's' || it.character == 'S' },
+        "the S keystroke should reach the client (got ${observed.forwarded})",
+      )
+    assertTrue(stroke.modifiers.meta, "the held Meta modifier reached the client with S: $stroke")
+    assertTrue(stroke.modifiers.hasChordModifier, "and it reads as a chord: $stroke")
   }
 
   @Test

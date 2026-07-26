@@ -18,7 +18,7 @@ import {
 } from "./asciiKeyEvents";
 import { Keyboard } from "./Keyboard";
 
-export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly";
+export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
 
 interface KeyboardCloser {
   close(): Promise<KeyboardResult>;
@@ -147,6 +147,10 @@ export class InputText extends BaseVisualChange {
 
     if (mode === "eventAll") {
       return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard);
+    }
+
+    if (mode === "append") {
+      return this.executeAndroidAppendTextInput(text, imeAction, dismissKeyboard);
     }
 
     if (mode === "eventOnly") {
@@ -298,6 +302,86 @@ export class InputText extends BaseVisualChange {
       text,
       imeAction,
       method: "eventAll"
+    };
+  }
+
+  /**
+   * Public entry point for the append mode, bypassing the observe round trip
+   * `execute` performs.
+   *
+   * An interactive client mirroring a keyboard sends one call per keystroke, so
+   * a before/after observation per character would dominate the latency of
+   * every key press — and the append path needs no hierarchy at all (it neither
+   * clears nor measures the field). Android only; the caller checks platform.
+   */
+  async appendText(text: string): Promise<SendTextResult & { method?: InputTextMode }> {
+    return this.executeAndroidAppendTextInput(text);
+  }
+
+  /**
+   * Append `text` to the focused field using real key events only.
+   *
+   * Every other Android mode is REPLACE-shaped: `a11y` sends the whole string
+   * through `ACTION_SET_TEXT`, and `eventAll`/`eventOnly` clear the field before
+   * typing. That is right for "make this field say X" automation, but wrong for
+   * an interactive client mirroring one keystroke at a time — there, each
+   * keystroke would wipe the field and leave only the last character
+   * (issue #3351). This mode never clears and never calls setText, so N
+   * single-character calls build up the same text a human would type.
+   *
+   * Unmappable characters FAIL rather than falling back to `a11y`: the fallback
+   * would silently replace the field's contents, which is the exact destruction
+   * this mode exists to avoid. The caller sees an actionable error instead.
+   *
+   * Unlike `eventOnly` this needs no view hierarchy — it neither clears nor
+   * measures the field — which also keeps a per-keystroke call to one round trip.
+   */
+  private async executeAndroidAppendTextInput(
+    text: string,
+    imeAction?: ImeAction,
+    dismissKeyboard: boolean = false
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const keyEventPlans: KeyEventPlan[] = [];
+    for (const char of Array.from(text)) {
+      const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+      if (!keyEventPlan) {
+        return {
+          success: false,
+          text,
+          error: `append cannot type ${JSON.stringify(char)} with Android key events`,
+          method: "append"
+        };
+      }
+      keyEventPlans.push(keyEventPlan);
+    }
+
+    for (const keyEventPlan of keyEventPlans) {
+      await this.executeKeyEventPlan(keyEventPlan);
+    }
+
+    if (dismissKeyboard) {
+      const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
+      if (!keyboardResult.success) {
+        return {
+          success: false,
+          text,
+          error: `append input completed but keyboard dismissal failed: ${
+            keyboardResult.error ?? keyboardResult.message ?? "unknown error"
+          }`,
+          method: "append"
+        };
+      }
+    }
+
+    if (imeAction) {
+      await this.executeImeAction(imeAction);
+    }
+
+    return {
+      success: true,
+      text,
+      imeAction,
+      method: "append"
     };
   }
 

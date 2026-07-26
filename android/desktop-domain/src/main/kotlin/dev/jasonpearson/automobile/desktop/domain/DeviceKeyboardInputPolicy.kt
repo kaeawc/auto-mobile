@@ -42,6 +42,23 @@ public data class DeviceKeyModifiers(
    */
   public val hasChordModifier: Boolean
     get() = ctrl || alt || meta
+
+  /**
+   * Whether this modifier set is the shape AltGr takes on layouts that report it as Ctrl+Alt.
+   *
+   * AltGr is how a great many non-US layouts produce `@`, `€`, `{`, `\` and friends, and several
+   * toolkits (AWT among them, which Compose desktop is built on) surface it as Ctrl **and** Alt
+   * together rather than as a modifier of its own. Rejecting that shape outright — the obvious
+   * reading of "Ctrl/Alt/Meta means host chord" — makes those characters untypable on the layouts
+   * most of the world uses.
+   *
+   * This is only ever consulted together with a printable character (see
+   * [DeviceKeyboardInputPolicy.evaluate]), which is what keeps a *real* Ctrl+Alt accelerator with
+   * the host: a shortcut chord produces no printable character, so it never takes this branch. Meta
+   * is excluded because no layout composes characters with it.
+   */
+  public val isAltGraphShape: Boolean
+    get() = ctrl && alt && !meta
 }
 
 /**
@@ -60,6 +77,25 @@ public data class DeviceKeyStroke(
   val modifiers: DeviceKeyModifiers = DeviceKeyModifiers(),
 )
 
+/**
+ * One entry on the explicit chord forward list — the escape hatch to the host-chord rule.
+ *
+ * Two shapes, because a keystroke has two possible identities and the interesting chords use the
+ * second one: a client wanting to opt Ctrl-S in cannot name it by [DeviceKeyboardKey], since an
+ * ordinary letter deliberately carries no device key at all. Matching on the produced character is
+ * the only way to name it.
+ */
+public sealed interface DeviceChordAllowance {
+  /** Matches a keystroke whose [DeviceKeyStroke.key] is [key]. */
+  public data class OfKey(val key: DeviceKeyboardKey) : DeviceChordAllowance
+
+  /**
+   * Matches a keystroke whose [DeviceKeyStroke.character] is [character], compared
+   * case-insensitively so a client opting in "Ctrl-S" does not have to enumerate Ctrl-Shift-S too.
+   */
+  public data class OfCharacter(val character: Char) : DeviceChordAllowance
+}
+
 /** Why [DeviceKeyboardInputPolicy] declined to forward a keystroke to the device. */
 public enum class DeviceKeyboardRejection {
   /**
@@ -74,6 +110,13 @@ public enum class DeviceKeyboardRejection {
    * the host may still act on it.
    */
   Unsupported,
+
+  /**
+   * A printable character on a platform whose daemon text helper can only REPLACE the focused
+   * field, not append to it. Typing one character at a time there would wipe the field on every
+   * keystroke, so text forwarding is disabled rather than destructive (issue #3351).
+   */
+  TextUnsupported,
 }
 
 /** What [DeviceKeyboardInputPolicy.evaluate] decided one keystroke should send. */
@@ -175,9 +218,10 @@ public object DeviceKeyboardInputPolicy {
    */
   public fun evaluate(
     stroke: DeviceKeyStroke,
-    forwardedChordKeys: Set<DeviceKeyboardKey> = emptySet(),
+    forwardedChords: Set<DeviceChordAllowance> = emptySet(),
+    textSupported: Boolean = true,
   ): DeviceKeyboardDecision {
-    if (stroke.modifiers.hasChordModifier && stroke.key !in forwardedChordKeys) {
+    if (stroke.modifiers.hasChordModifier && !isAllowedChord(stroke, forwardedChords)) {
       return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord)
     }
     val key = stroke.key
@@ -192,10 +236,39 @@ public object DeviceKeyboardInputPolicy {
     }
     val character = stroke.character
     if (character != null && isTypable(character)) {
+      // A platform with no non-destructive text primitive must not receive text at all: replacing
+      // the field's contents on every keystroke is worse than typing nothing.
+      if (!textSupported) {
+        return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.TextUnsupported)
+      }
       return DeviceKeyboardDecision.TypeText(character.toString())
     }
     return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.Unsupported)
   }
+
+  /**
+   * Whether a chord-modified [stroke] is on the caller's explicit forward list, or is AltGr
+   * composing a printable character rather than a shortcut.
+   */
+  private fun isAllowedChord(
+    stroke: DeviceKeyStroke,
+    forwardedChords: Set<DeviceChordAllowance>,
+  ): Boolean {
+    val character = stroke.character
+    // AltGr-as-Ctrl+Alt, and only when it actually produced something typable. A real Ctrl+Alt
+    // accelerator produces no character, so it stays with the host.
+    if (stroke.modifiers.isAltGraphShape && character != null && isTypable(character)) return true
+    return forwardedChords.any { allowance ->
+      when (allowance) {
+        is DeviceChordAllowance.OfKey -> stroke.key != null && stroke.key == allowance.key
+        is DeviceChordAllowance.OfCharacter ->
+          character != null && character.equalsIgnoreCase(allowance.character)
+      }
+    }
+  }
+
+  private fun Char.equalsIgnoreCase(other: Char): Boolean =
+    this == other || lowercaseChar() == other.lowercaseChar()
 
   /**
    * Whether [character] is something a device text field can receive.

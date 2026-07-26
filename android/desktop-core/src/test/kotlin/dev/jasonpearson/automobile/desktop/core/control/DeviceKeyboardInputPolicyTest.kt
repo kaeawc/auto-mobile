@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import dev.jasonpearson.automobile.desktop.domain.DeviceChordAllowance
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyModifiers
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardDecision
@@ -140,7 +141,103 @@ class DeviceKeyboardInputPolicyTest {
             key = DeviceKeyboardKey.Escape,
             modifiers = DeviceKeyModifiers(meta = true),
           ),
-        forwardedChordKeys = setOf(DeviceKeyboardKey.Escape),
+        forwardedChords = setOf(DeviceChordAllowance.OfKey(DeviceKeyboardKey.Escape)),
+      ),
+    )
+  }
+
+  @Test
+  fun `a printable chord can be opted in by its character`() {
+    // The chords a client actually wants to opt in are letter chords like Ctrl-S — and an ordinary
+    // letter deliberately carries no device key, so a key-only allowlist could never name one. It
+    // must match on the character.
+    val ctrlS = DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(ctrl = true))
+    assertEquals(
+      DeviceKeyboardDecision.TypeText("s"),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke = ctrlS,
+        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s')),
+      ),
+    )
+    // Case-insensitive, so opting "Ctrl-S" in does not require enumerating Ctrl-Shift-S too.
+    assertEquals(
+      DeviceKeyboardDecision.TypeText("S"),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke =
+          DeviceKeyStroke(
+            character = 'S',
+            modifiers = DeviceKeyModifiers(ctrl = true, shift = true),
+          ),
+        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s')),
+      ),
+    )
+    // And opting one chord in must not open the gate for every other chord.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke = DeviceKeyStroke(character = 'q', modifiers = DeviceKeyModifiers(ctrl = true)),
+        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s')),
+      ),
+    )
+  }
+
+  @Test
+  fun `AltGr composed characters type instead of being refused as chords`() {
+    // Many non-US layouts produce @, EUR, { via AltGr, which AWT (and so Compose desktop) reports
+    // as Ctrl+Alt. Refusing that shape outright makes those characters untypable on the layouts
+    // most of the world uses.
+    assertEquals(
+      DeviceKeyboardDecision.TypeText("@"),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(
+          character = '@',
+          modifiers = DeviceKeyModifiers(ctrl = true, alt = true),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `a real Ctrl-Alt shortcut still stays with the host`() {
+    // The other direction of the AltGr allowance, and the one that keeps it from being a hole: a
+    // genuine accelerator produces NO printable character, so it must not slip through.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(
+          key = DeviceKeyboardKey.ArrowLeft,
+          modifiers = DeviceKeyModifiers(ctrl = true, alt = true),
+        )
+      ),
+    )
+    // Nor may adding Meta turn a window-manager chord into typing.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(
+          character = '@',
+          modifiers = DeviceKeyModifiers(ctrl = true, alt = true, meta = true),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `text is not forwarded on a platform whose daemon can only replace the field`() {
+    // iOS text input replaces the focused field wholesale, so per-keystroke typing would wipe it on
+    // every character. Disabled beats destructive; buttons and keys are unaffected.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.TextUnsupported),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke = DeviceKeyStroke(character = 'a'),
+        textSupported = false,
+      ),
+    )
+    assertEquals(
+      DeviceKeyboardDecision.PressButton("back"),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke = DeviceKeyStroke(key = DeviceKeyboardKey.Escape),
+        textSupported = false,
       ),
     )
   }

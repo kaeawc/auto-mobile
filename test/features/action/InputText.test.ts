@@ -554,4 +554,86 @@ describe("InputText", () => {
     expect(setTextCalls).toEqual(["next"]);
     expect(inputCommands(factory)).toEqual([]);
   });
+
+  // Issue #3351: an interactive client mirroring a keyboard sends one call per
+  // keystroke. Every other Android mode is replace-shaped (a11y sets the whole
+  // string; eventAll/eventOnly clear first), so per-keystroke typing through
+  // them leaves only the last character and wipes whatever was in the field.
+  test("append types with key events and never clears or sets text", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "ab",
+      undefined,
+      false,
+      "append"
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("append");
+    // The whole point: no ACTION_SET_TEXT at all, so the field's existing
+    // contents survive.
+    expect(setTextCalls).toEqual([]);
+    // And no clear either - unlike eventOnly, which deletes the field first.
+    const commands = inputCommands(factory);
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.some(command => command.includes("KEYCODE_DEL"))).toBe(false);
+  });
+
+  test("append sends one keystroke per call without disturbing earlier ones", async () => {
+    // Three separate single-character calls, as a keyboard-mirroring client
+    // makes them. None may clear, or "abc" would end up as "c".
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    for (const char of ["a", "b", "c"]) {
+      const result = await inputText.appendText(char);
+      expect(result.success).toBe(true);
+    }
+
+    expect(setTextCalls).toEqual([]);
+    expect(inputCommands(factory).some(command => command.includes("KEYCODE_DEL"))).toBe(false);
+  });
+
+  test("append fails rather than falling back to a destructive a11y setText", async () => {
+    // The fallback every other mode performs would REPLACE the field, which is
+    // exactly what append exists to avoid. An actionable error is correct.
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "😊",
+      undefined,
+      false,
+      "append"
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.method).toBe("append");
+    expect(result.error).toContain("append cannot type");
+    expect(setTextCalls).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
 });

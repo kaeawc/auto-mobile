@@ -195,11 +195,14 @@ fun DeviceScreenView(
   // restarting the gesture. Matches the rememberUpdatedState pattern used by SplitPane's drag.
   val currentOnControlTap by rememberUpdatedState(onControlTap)
 
-  // Leaving inspector mode must drop any highlight already drawn — the Move guard only suppresses
-  // future hover updates, not the currently-hovered element.
+  // Leaving inspector mode must drop the inspector affordances already drawn: the Move guard only
+  // suppresses future hover updates, and the selection/hover overlays render unconditionally from
+  // the incoming ids. Clearing both here honors the Control-mode contract ("Selecting and
+  // hover-highlighting are suppressed") so control mode gets an unobstructed screen.
   LaunchedEffect(controlMode) {
     if (controlMode != DeviceScreenControlMode.Inspector) {
       onElementHovered(null)
+      onElementSelected(null)
     }
   }
 

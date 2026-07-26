@@ -145,4 +145,70 @@ describe("DragAndDrop", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("Failed to perform drag and drop: Accessibility service failure");
   });
+
+  test("uses default gesture durations and a 1600ms drag timeout when none are supplied", async () => {
+    await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" }
+    });
+
+    const [dragCall] = fakeA11yService.getDragHistory();
+    expect(dragCall.pressDurationMs).toBe(600);
+    expect(dragCall.dragDurationMs).toBe(300);
+    expect(dragCall.holdDurationMs).toBe(100);
+    // 600 + 300 + 100 + DROP(100) + BUFFER(500) = 1600
+    expect(dragCall.timeoutMs).toBe(1600);
+  });
+
+  test("derives the drag timeout from the supplied gesture durations", async () => {
+    await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+      pressDurationMs: 600,
+      dragDurationMs: 500,
+      holdDurationMs: 200
+    });
+
+    const [dragCall] = fakeA11yService.getDragHistory();
+    // 600 + 500 + 200 + DROP(100) + BUFFER(500) = 1900
+    expect(dragCall.timeoutMs).toBe(1900);
+  });
+
+  describe("validateOptions", () => {
+    test.each<[string, any, string]>([
+      ["missing target", { source: { elementId: "source-id" } }, "requires source and target"],
+      [
+        "source with both selectors",
+        { source: { elementId: "source-id", text: "Source" }, target: { elementId: "target-id" } },
+        "source must specify exactly one of text or elementId"
+      ],
+      [
+        "target with both selectors",
+        { source: { elementId: "source-id" }, target: { elementId: "target-id", text: "Target" } },
+        "target must specify exactly one of text or elementId"
+      ],
+      [
+        "pressDurationMs above the maximum",
+        { source: { elementId: "source-id" }, target: { elementId: "target-id" }, pressDurationMs: 5000 },
+        "pressDurationMs must be between 600ms and 3000ms"
+      ],
+      [
+        "dragDurationMs above the maximum",
+        { source: { elementId: "source-id" }, target: { elementId: "target-id" }, dragDurationMs: 5000 },
+        "dragDurationMs must be between 300ms and 2000ms"
+      ],
+      [
+        "holdDurationMs below the minimum",
+        { source: { elementId: "source-id" }, target: { elementId: "target-id" }, holdDurationMs: 5 },
+        "holdDurationMs must be between 100ms and 3000ms"
+      ],
+    ])("rejects %s without dispatching a drag", async (_name, options, expected) => {
+      const result = await dragAndDrop.execute(options);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(expected);
+      // A rejected request must never reach the accessibility service.
+      expect(fakeA11yService.getDragHistory()).toHaveLength(0);
+    });
+  });
 });

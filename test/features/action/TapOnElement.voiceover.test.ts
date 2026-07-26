@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
@@ -12,7 +12,6 @@ describe("TapOnElement VoiceOver mode", () => {
   let fakeIosClient: FakeIOSCtrlProxy;
   let tapOnElement: TapOnElement;
   let executeiOSTapWithCoordinates: any;
-  let executeIOSTapWithVoiceOver: any;
 
   beforeEach(() => {
     fakeVoiceOverDetector = new FakeIosVoiceOverDetector();
@@ -35,74 +34,78 @@ describe("TapOnElement VoiceOver mode", () => {
       }
     );
 
-    executeiOSTapWithCoordinates = spyOn(
-      tapOnElement as any,
-      "executeiOSTapWithCoordinates"
-    ).mockResolvedValue(undefined);
-
-    executeIOSTapWithVoiceOver = spyOn(
-      tapOnElement as any,
-      "executeIOSTapWithVoiceOver"
-    ).mockResolvedValue(undefined);
+    executeiOSTapWithCoordinates = null;
   });
 
-  describe("when VoiceOver is disabled", () => {
-    beforeEach(() => {
-      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+  // These dispatch-routing tests deliberately do NOT mock the two transport
+  // methods. Instead they let the real transport run against the fake CtrlProxy
+  // and assert the observable artifact each one leaves (a coordinate tap in
+  // tapHistory vs a VoiceOver activation in voiceOverActivateHistory). An earlier
+  // version mocked both targets and only asserted which mock was called, so no
+  // real code ran and the routing could not actually regress the test.
+  describe("dispatch routing (real transport artifacts)", () => {
+    let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+
+    const wireCtrlProxy = async () => {
+      const iosModule = await import("../../../src/features/observe/ios");
+      getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+    };
+
+    afterEach(() => {
+      getInstanceSpy?.mockRestore();
+      getInstanceSpy = null;
     });
 
-    test("dispatches to coordinate-based tap method when VoiceOver disabled", async () => {
-      const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-        "ios-accessibility-label": "Settings",
-      } as any;
+    const element = {
+      "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+      "ios-accessibility-label": "Settings",
+    } as any;
+
+    test("VoiceOver disabled + element records a coordinate tap only", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+      await wireCtrlProxy();
 
       await (tapOnElement as any).executeiOSTap("tap", 50, 50, 50, element, false);
 
-      expect(executeiOSTapWithCoordinates).toHaveBeenCalledTimes(1);
-      expect(executeIOSTapWithVoiceOver).not.toHaveBeenCalled();
+      expect(fakeIosClient.getTapHistory()).toEqual([{ x: 50, y: 50, duration: 50 }]);
+      expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
     });
 
-    test("dispatches to coordinate-based tap when no element provided", async () => {
+    test("VoiceOver disabled + no element records a coordinate tap only", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+      await wireCtrlProxy();
+
       await (tapOnElement as any).executeiOSTap("tap", 50, 50, 50, undefined, false);
 
-      expect(executeiOSTapWithCoordinates).toHaveBeenCalledTimes(1);
-      expect(executeIOSTapWithVoiceOver).not.toHaveBeenCalled();
+      expect(fakeIosClient.getTapHistory()).toHaveLength(1);
+      expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
     });
-  });
 
-  describe("when VoiceOver is enabled", () => {
-    beforeEach(() => {
+    test("VoiceOver enabled + element records a VoiceOver activation only", async () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
-    });
-
-    test("dispatches to VoiceOver tap method when enabled and element provided", async () => {
-      const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-        "ios-accessibility-label": "Settings",
-      } as any;
+      await wireCtrlProxy();
 
       await (tapOnElement as any).executeiOSTap("tap", 50, 50, 50, element, true);
 
-      expect(executeIOSTapWithVoiceOver).toHaveBeenCalledTimes(1);
-      expect(executeiOSTapWithCoordinates).not.toHaveBeenCalled();
+      expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([{ label: "Settings", action: "activate" }]);
+      expect(fakeIosClient.getTapHistory()).toHaveLength(0);
     });
 
-    test("falls back to coordinate tap when element is undefined", async () => {
+    test("VoiceOver enabled + no element falls back to a coordinate tap", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      await wireCtrlProxy();
+
       await (tapOnElement as any).executeiOSTap("tap", 50, 50, 50, undefined, true);
 
-      expect(executeiOSTapWithCoordinates).toHaveBeenCalledTimes(1);
-      expect(executeIOSTapWithVoiceOver).not.toHaveBeenCalled();
+      expect(fakeIosClient.getTapHistory()).toHaveLength(1);
+      expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
     });
   });
 
   describe("executeIOSTapWithVoiceOver", () => {
     beforeEach(() => {
-      // Restore real implementation for direct testing
-      executeiOSTapWithCoordinates.mockRestore();
-      executeIOSTapWithVoiceOver.mockRestore();
-
-      // Mock coordinate fallback
+      // Mock only the coordinate fallback so the real VoiceOver path runs and
+      // records its artifact against the fake CtrlProxy client.
       executeiOSTapWithCoordinates = spyOn(
         tapOnElement as any,
         "executeiOSTapWithCoordinates"

@@ -203,3 +203,86 @@ describe("deriveIosScreenIdentity", () => {
     ]))).toBeUndefined();
   });
 });
+
+/**
+ * PARAM-4: confidence-tier table.
+ *
+ * `confidence()` (IosScreenIdentity.ts:236) tiers signals:
+ *   - high   ← modalClass OR navigationTitle present
+ *   - medium ← selectedTab OR focusedElementId OR keyboardVisible present
+ *   - low    ← a useful signal present but none of the above
+ * and `deriveIosScreenIdentity` returns undefined entirely when NO useful
+ * signal is present.
+ *
+ * The selected-tab fixtures use `class: "XCUIElementTypeButton", role: "tab"` —
+ * `findSelectedTab` (IosScreenIdentity.ts:154-159) recognizes a selected tab by
+ * `role === "tab"` (or a tab-bar-child button class). `XCUIElementTypeTabBarButton`
+ * is NOT one of those classes, so a fixture built on it would silently yield no
+ * `selectedTab` and make the row vacuous.
+ *
+ * The "low" tier is intentionally omitted: it is unreachable through the public
+ * deriver, since the only useful-but-non-high/medium signal is `modalTitle`, and
+ * `findModal` never emits `modalTitle` without also emitting `modalClass` (which
+ * forces "high"). Fabricating a "low" fixture would misrepresent real input.
+ */
+describe("deriveIosScreenIdentity confidence tiers (PARAM-4)", () => {
+  function selectedTabBar(selected: string): ViewHierarchyNode {
+    return node({ class: "UITabBar", text: "Tab Bar" }, [
+      node({ "class": "XCUIElementTypeButton", "role": "tab", "text": selected, "selected": "true" }),
+    ]);
+  }
+
+  function focusedField(): ViewHierarchyNode {
+    return node({
+      "class": "UITextField",
+      "text": "Title",
+      "resource-id": "quick-entry-field",
+      "focused": "true",
+    });
+  }
+
+  function keyboard(): ViewHierarchyNode {
+    return node({ class: "UIKeyboard" }, [
+      node({ class: "UIKeyboardKey", text: "Q", clickable: "true" }),
+    ]);
+  }
+
+  function actionSheet(): ViewHierarchyNode {
+    return node({ class: "UIActionSheet" }, [
+      node({ class: "UIButton", text: "Discard Changes", clickable: "true" }),
+    ]);
+  }
+
+  const rows: Array<{
+    name: string;
+    children: ViewHierarchyNode[];
+    expected: "high" | "medium" | undefined;
+  }> = [
+    { name: "a navigation title alone", children: [navigationBar("Home")], expected: "high" },
+    { name: "a modal class alone", children: [actionSheet()], expected: "high" },
+    {
+      name: "a navigation title plus a selected tab (prefers high over medium)",
+      children: [navigationBar("Home"), selectedTabBar("Search")],
+      expected: "high",
+    },
+    { name: "only a selected tab", children: [selectedTabBar("Search")], expected: "medium" },
+    { name: "only a focused element", children: [focusedField()], expected: "medium" },
+    { name: "only a visible keyboard", children: [keyboard()], expected: "medium" },
+    {
+      name: "no useful signal",
+      children: [node({ class: "XCUIApplication" }), node({ class: "UIView", text: "hello" })],
+      expected: undefined,
+    },
+  ];
+
+  for (const { name, children, expected } of rows) {
+    test(`tiers ${name} as ${expected ?? "no identity"}`, () => {
+      const identity = deriveIosScreenIdentity(hierarchy(children));
+      if (expected === undefined) {
+        expect(identity).toBeUndefined();
+      } else {
+        expect(identity?.confidence).toBe(expected);
+      }
+    });
+  }
+});

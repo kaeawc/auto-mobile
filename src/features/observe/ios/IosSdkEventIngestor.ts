@@ -313,9 +313,14 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
 
   /** Record a layout telemetry event from converted iOS hierarchy (ViewHierarchyResult format) */
   recordLayoutTelemetryEvent(hierarchy: ViewHierarchyResult): void {
+    const recorder = this.telemetryRecorder;
+    // Capture the prior context before the try so it is available in the finally
+    // even if setContext/recordLayoutEvent throws. Without the finally, a recorder
+    // that threw mid-record would leave the shared context pinned to the iOS udid,
+    // permanently mis-attributing subsequent Android telemetry.
+    let prevContext: { deviceId: string | null; sessionId: string | null } | undefined;
     try {
-      const recorder = this.telemetryRecorder;
-      const prevContext = recorder.getContext();
+      prevContext = recorder.getContext();
       recorder.setContext(this.deviceId, null);
       const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy);
       // Use the converted ViewHierarchyResult format — same data as the observation stream
@@ -338,9 +343,15 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         detailsJson: hierarchyJson.length < 200000 ? hierarchyJson : JSON.stringify({ nodeCount, truncated: true }),
         screenName: hierarchy.packageName ?? null,
       });
-      recorder.setContext(prevContext.deviceId, prevContext.sessionId);
     } catch {
       // Non-fatal — telemetry recording should never break observation
+    } finally {
+      // Restore previous context so Android events aren't mis-attributed, even
+      // when the body threw after setContext (getContext throwing leaves
+      // prevContext undefined — nothing to restore).
+      if (prevContext) {
+        recorder.setContext(prevContext.deviceId, prevContext.sessionId);
+      }
     }
   }
 

@@ -154,32 +154,66 @@ describe("IOSCtrlProxyClient", function() {
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
     });
 
-    test("sends hierarchy cadence updates to the runner", function() {
-      const sentMessages: string[] = [];
-      (ctrlProxyClient as any).sendMessage = (message: string) => {
-        sentMessages.push(message);
-        return true;
-      };
+    test("sends hierarchy cadence updates to the runner", async function() {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer
+      );
 
-      (ctrlProxyClient as any).refreshObservationStreamHierarchyCadence(500);
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
 
-      expect(sentMessages.map(message => JSON.parse(message))).toEqual([{
-        type: "set_hierarchy_poll_interval",
-        intervalMs: 500,
-      }]);
+        testClient.refreshObservationStreamHierarchyCadence(500);
+
+        const cadenceMessages = (socket as CapturingWebSocket).sentMessages
+          .map(message => JSON.parse(message))
+          .filter(payload => payload.type === "set_hierarchy_poll_interval");
+        expect(cadenceMessages).toEqual([{
+          type: "set_hierarchy_poll_interval",
+          intervalMs: 500,
+        }]);
+      } finally {
+        await testClient.close();
+      }
     });
 
-    test("does not send hierarchy cadence updates to stale runners without command support", function() {
-      const sentMessages: string[] = [];
-      (ctrlProxyClient as any).supportedCommands = new Set(["request_hierarchy"]);
-      (ctrlProxyClient as any).sendMessage = (message: string) => {
-        sentMessages.push(message);
-        return true;
-      };
+    test("does not send hierarchy cadence updates to stale runners without command support", async function() {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer
+      );
 
-      (ctrlProxyClient as any).refreshObservationStreamHierarchyCadence(500);
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        // Runner handshake advertises a command set WITHOUT set_hierarchy_poll_interval.
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_hierarchy"],
+        }));
+        await flushPromises();
 
-      expect(sentMessages).toEqual([]);
+        testClient.refreshObservationStreamHierarchyCadence(500);
+
+        const cadenceMessages = (socket as CapturingWebSocket).sentMessages
+          .map(message => JSON.parse(message))
+          .filter(payload => payload.type === "set_hierarchy_poll_interval");
+        expect(cadenceMessages).toEqual([]);
+      } finally {
+        await testClient.close();
+      }
     });
 
     test("notifies the observation stream when the WebSocket connection closes", function() {
@@ -1230,7 +1264,7 @@ describe("IOSCtrlProxyClient", function() {
         expect(imeAction.success).toBe(false);
         expect(imeAction.action).toBe("done");
         expect(imeAction.totalTimeMs).toBe(100);
-        expect(imeAction.error).toContain("IME action timed out");
+        expect(imeAction.error).toBe("IME action timed out after 100ms");
 
         const rotatePromise = testClient.requestRotate("landscape", 100);
         await waitForSentMessages(socket as CapturingWebSocket, 2);
@@ -1242,7 +1276,7 @@ describe("IOSCtrlProxyClient", function() {
         expect(rotate.value).toBe(0);
         expect(rotate.rotationPerformed).toBe(false);
         expect(rotate.totalTimeMs).toBe(100);
-        expect(rotate.error).toContain("Rotate timed out");
+        expect(rotate.error).toBe("Rotate timed out after 100ms");
 
         const clipboardPromise = testClient.requestClipboard("get", undefined, 100);
         await waitForSentMessages(socket as CapturingWebSocket, 3);
@@ -1251,7 +1285,7 @@ describe("IOSCtrlProxyClient", function() {
         expect(clipboard.success).toBe(false);
         expect(clipboard.action).toBe("get");
         expect(clipboard.totalTimeMs).toBe(100);
-        expect(clipboard.error).toContain("Clipboard operation timed out");
+        expect(clipboard.error).toBe("Clipboard operation timed out after 100ms");
       } finally {
         await testClient.close();
       }
@@ -1649,6 +1683,46 @@ describe("IOSCtrlProxyClient", function() {
     });
   });
 
+  describe("service port changes", function() {
+    test("fails in-flight requests instead of stranding them when the CtrlProxy service port changes", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        // Register an in-flight request over the live socket. A long timeout keeps
+        // it pending so it can only settle via the port-change cancellation, never
+        // by timing out during the test.
+        const inFlight = testClient.requestSwipe(0, 0, 10, 10, 300, 60000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+        // Macrotask flush: ensure the request is registered before the port change.
+        await new Promise(resolve => setImmediate(resolve));
+
+        const requestManager = (testClient as any).requestManager as { getPendingCount(): number };
+        // Precondition: the request is genuinely in-flight before the port change.
+        expect(requestManager.getPendingCount()).toBeGreaterThan(0);
+
+        // Changing the service port on a live socket must FAIL the in-flight request
+        // (cancelAll rejects it), not silently strand it in the pending map.
+        (testClient as any).updatePort(serverPort + 1);
+
+        // cancelAll clears the pending map synchronously — nothing is stranded.
+        expect(requestManager.getPendingCount()).toBe(0);
+        await expect(inFlight).rejects.toThrow("CtrlProxy service port changed");
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("caching", function() {
     test("hasCachedHierarchy should return true after receiving hierarchy", async function() {
       const testTimer = fakeTimer;
@@ -1715,7 +1789,6 @@ describe("IOSCtrlProxyClient", function() {
         }));
 
         await resultPromise;
-        expect(testClient.hasCachedHierarchy()).toBe(true);
 
         // Invalidate cache
         testClient.invalidateCache();

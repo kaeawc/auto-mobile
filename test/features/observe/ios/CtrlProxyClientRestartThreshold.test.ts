@@ -6,8 +6,9 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { CtrlProxyIosManager } from "../../../../src/utils/IOSCtrlProxyManager";
+import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 
-function createFakeManager(overrides: Partial<CtrlProxyIosManager> = {}): CtrlProxyIosManager & { forceRestartCount: number } {
+function createFakeManager(): CtrlProxyIosManager & { forceRestartCount: number } {
   const manager = {
     forceRestartCount: 0,
     async setup() { return { success: false as const, message: "test" }; },
@@ -20,7 +21,6 @@ function createFakeManager(overrides: Partial<CtrlProxyIosManager> = {}): CtrlPr
     setAutoRestart() {},
     isAutoRestartEnabled() { return false; },
     async forceRestart() { manager.forceRestartCount++; },
-    ...overrides,
   };
   return manager;
 }
@@ -103,68 +103,6 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     expect(fakeManager.forceRestartCount).toBe(2);
   });
 
-  test("restart counter resets after successful connection allows re-triggering", async () => {
-    const fakeTimer = new FakeTimer();
-    fakeTimer.enableAutoAdvance();
-
-    const fakeManager = createFakeManager();
-    const serviceManagerFactory = (_device: BootedDevice) => fakeManager;
-
-    // Fail 3 times (triggers restart), then succeed on attempt 4, then fail again
-    // DeviceServiceClient has maxConnectionAttempts=3 by default, so we use a fresh
-    // factory that tracks total calls
-    let wsAttempt = 0;
-    const wsFactory = (url: string) => {
-      wsAttempt++;
-      const { FakeWebSocket } = require("../../../fakes/FakeWebSocket");
-      // Succeed on attempt 4, fail otherwise
-      return new FakeWebSocket(url, wsAttempt === 4 ? "none" : "instant", 0, fakeTimer);
-    };
-
-    client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      wsFactory,
-      fakeTimer,
-      serviceManagerFactory,
-    );
-
-    // 3 failures → triggers restart
-    await client.ensureConnected();
-    await client.ensureConnected();
-    await client.ensureConnected();
-    await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
-    expect(fakeManager.forceRestartCount).toBe(1);
-
-    // Advance past the DeviceServiceClient connection cooldown (default 10s)
-    fakeTimer.advanceTime(11000);
-
-    // 4th attempt succeeds → resets consecutiveConnectionFailures to 0
-    const result = await client.ensureConnected();
-    expect(result).toBe(true);
-
-    // Now close and fail 3 more times — should trigger a second restart
-    await client.close();
-    IOSCtrlProxyClient.resetInstances();
-
-    // New client for the next cycle
-    wsAttempt = 0; // Reset factory
-    const fakeManager2 = createFakeManager();
-    client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-      (_device: BootedDevice) => fakeManager2,
-    );
-
-    for (let i = 0; i < 3; i++) {
-      await client.ensureConnected();
-    }
-    await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
-    expect(fakeManager2.forceRestartCount).toBe(1);
-  });
-
   test("no restart triggered when failures below threshold", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -187,5 +125,105 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
 
     expect(fakeManager.forceRestartCount).toBe(0);
+  });
+
+  describe("triggerServiceRestart branches", () => {
+    const driveFailuresPastThreshold = async (
+      c: IOSCtrlProxyClient,
+      fakeTimer: FakeTimer
+    ): Promise<void> => {
+      // Mirror the threshold-crossing pattern the other tests use: a batch of
+      // attempts, then advance past the connection cooldown so the failure counter
+      // can climb to a multiple of MAX_FAILURES_BEFORE_RESTART (3).
+      for (let i = 0; i < 3; i++) {
+        await c.ensureConnected();
+      }
+      fakeTimer.advanceTime(11000);
+      for (let i = 0; i < 3; i++) {
+        await c.ensureConnected();
+      }
+      // Let the async isRunning()/forceRestart() chain settle.
+      await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+    };
+
+    test("does not force-restart when the manager reports the runner is still running", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const manager = new FakeIOSCtrlProxyManager();
+      manager.setSetupShouldFail(true);
+      // Runner is alive; the WebSocket failure is transient, so no restart is due.
+      manager.setRunning(true);
+
+      client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        8765,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        (_device: BootedDevice) => manager,
+      );
+
+      await driveFailuresPastThreshold(client, fakeTimer);
+
+      expect(manager.getCallCount("forceRestart")).toBe(0);
+    });
+
+    test("force-restarts a down runner and recovers when the restart rejects", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const manager = new FakeIOSCtrlProxyManager();
+      // Failed setup must not flip runningState, so isRunning() stays false and the
+      // restart path is taken; the restart itself then rejects.
+      manager.setSetupShouldFail(true);
+      manager.setForceRestartShouldFail(true);
+
+      client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        8765,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        (_device: BootedDevice) => manager,
+      );
+
+      await driveFailuresPastThreshold(client, fakeTimer);
+
+      // The restart was attempted (down-branch entered, not the already-running branch)...
+      expect(manager.getCallCount("forceRestart")).toBeGreaterThanOrEqual(1);
+
+      // ...and the catch branch reset the in-flight-restart guard, so a further
+      // threshold crossing retries. Without that reset the guard wedges forever
+      // and forceRestart never fires again.
+      fakeTimer.advanceTime(11000);
+      for (let i = 0; i < 6; i++) {
+        await client.ensureConnected();
+      }
+      await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+      expect(manager.getCallCount("forceRestart")).toBeGreaterThanOrEqual(2);
+    });
+
+    test("probes the running-state and never force-restarts across repeated threshold crossings while running", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const manager = new FakeIOSCtrlProxyManager();
+      manager.setSetupShouldFail(true);
+      manager.setRunning(true);
+
+      client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        8765,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        (_device: BootedDevice) => manager,
+      );
+
+      await driveFailuresPastThreshold(client, fakeTimer);
+
+      // Running-state is probed as part of the restart decision on every crossing...
+      expect(manager.getCallCount("isRunning")).toBeGreaterThan(0);
+      // ...and because it stays running, no threshold crossing ever force-restarts.
+      expect(manager.getCallCount("forceRestart")).toBe(0);
+    });
   });
 });

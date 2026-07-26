@@ -15,6 +15,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
   private shouldStartFail: boolean = false;
   private shouldStopFail: boolean = false;
   private shouldSetupFail: boolean = false;
+  private shouldForceRestartFail: boolean = false;
 
   // MARK: - Configuration Methods
 
@@ -72,6 +73,15 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   setSetupShouldFail(shouldFail: boolean): void {
     this.shouldSetupFail = shouldFail;
+  }
+
+  /**
+   * Configure forceRestart() to reject. Exercises the client's restart-failure
+   * (catch) branch, which must reset its in-flight-restart guard so later
+   * failures can retry.
+   */
+  setForceRestartShouldFail(shouldFail: boolean): void {
+    this.shouldForceRestartFail = shouldFail;
   }
 
   // MARK: - Assertion Methods
@@ -192,6 +202,11 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
 
   async forceRestart(): Promise<void> {
     this.executedOperations.push("forceRestart");
+
+    if (this.shouldForceRestartFail) {
+      throw new Error("Failed to force-restart IOSCtrlProxy");
+    }
+
     this.runningState = true;
   }
 

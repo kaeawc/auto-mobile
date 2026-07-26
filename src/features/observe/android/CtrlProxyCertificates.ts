@@ -24,18 +24,28 @@ import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtoco
 /** Directory on device for pushing certificate files */
 const DEVICE_CERT_DIR = "/sdcard/Download/automobile/ca_certs";
 
+export interface CertificateFileSystem {
+  stat(filePath: string): Promise<{ size: number; isFile(): boolean }>;
+}
+
+const nodeCertificateFileSystem: CertificateFileSystem = {
+  stat: filePath => fs.stat(filePath),
+};
+
 /**
  * Delegate class for handling CA certificate and permission operations.
  */
 export class CtrlProxyCertificates {
   private readonly context: CertificatesDelegateContext;
+  private readonly fileSystem: CertificateFileSystem;
 
   // Legacy pending request state for CA cert removal (still uses manual promise pattern)
   private pendingCaCertRequestId: string | null = null;
   private pendingCaCertResolve: ((result: A11yCaCertResult) => void) | null = null;
 
-  constructor(context: CertificatesDelegateContext) {
+  constructor(context: CertificatesDelegateContext, fileSystem: CertificateFileSystem = nodeCertificateFileSystem) {
     this.context = context;
+    this.fileSystem = fileSystem;
   }
 
   /**
@@ -142,7 +152,7 @@ export class CtrlProxyCertificates {
     }
 
     try {
-      const stats = await fs.stat(resolvedPath);
+      const stats = await this.fileSystem.stat(resolvedPath);
       if (!stats.isFile()) {
         return {
           success: false,

@@ -10,6 +10,7 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -27,7 +28,18 @@ import kotlinx.serialization.serializer
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
   private val json: Json = DaemonJson,
+  private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
 ) : AutoMobileClient {
+  private var daemonLifecycle: DaemonLifecycleEnsurer? =
+    if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
+
+  internal constructor(
+    socketPathValue: String,
+    daemonLifecycle: DaemonLifecycleEnsurer,
+  ) : this(socketPathValue = socketPathValue) {
+    this.daemonLifecycle = daemonLifecycle
+  }
+
   val socketPath: String
     get() = socketPathValue
 
@@ -471,6 +483,7 @@ class McpDaemonClient(
     method: String,
     params: JsonObject = JsonObject(emptyMap()),
   ): DaemonResponse {
+    ensureVersionMatchedDaemon()
     ensureSocketExists()
 
     val address = UnixDomainSocketAddress.of(socketPathValue)
@@ -488,6 +501,7 @@ class McpDaemonClient(
           type = "mcp_request",
           method = method,
           params = params,
+          clientVersion = clientVersion,
         )
 
       writer.write(json.encodeToString(request))
@@ -503,6 +517,14 @@ class McpDaemonClient(
     val path = File(socketPathValue).toPath()
     if (!Files.exists(path)) {
       throw DaemonUnavailableException("Daemon socket not found at $socketPathValue")
+    }
+  }
+
+  private fun ensureVersionMatchedDaemon() {
+    when (val result = daemonLifecycle?.ensureVersionMatchedDaemon()) {
+      is DaemonLifecycleResult.Failure -> throw DaemonUnavailableException(result.message)
+      is DaemonLifecycleResult.Ready,
+      null -> Unit
     }
   }
 
@@ -544,10 +566,66 @@ class McpDaemonClient(
 }
 
 object DaemonSocketPaths {
+  private val ignoredVersions = setOf("latest", "unknown")
+
   fun socketPath(): String {
     val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.sock"
+    return resolveDaemonPath(
+      System.getenv("AUTOMOBILE_DAEMON_SOCKET_PATH")
+        ?: System.getenv("AUTO_MOBILE_DAEMON_SOCKET_PATH"),
+      "/tmp/auto-mobile-daemon-$userId.sock",
+    )
   }
+
+  fun pidFilePath(): String {
+    val userId = getUserId()
+    return resolveDaemonPath(
+      System.getenv("AUTOMOBILE_DAEMON_PID_FILE_PATH")
+        ?: System.getenv("AUTO_MOBILE_DAEMON_PID_FILE_PATH"),
+      "/tmp/auto-mobile-daemon-$userId.pid",
+      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
+    )
+  }
+
+  internal fun resolveDaemonPath(
+    override: String?,
+    defaultPath: String,
+    daemonLaunchCwd: String =
+      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
+  ): String {
+    val configuredPath = override?.trim().takeUnless { it.isNullOrEmpty() } ?: return defaultPath
+    val path = Path.of(configuredPath)
+    return if (path.isAbsolute) configuredPath
+    else Path.of(daemonLaunchCwd, configuredPath).toString()
+  }
+
+  /** Version this desktop client declares to the daemon's version handshake gate. */
+  fun resolveClientVersion(): String? =
+    resolveClientVersion(
+      daemonPackageVersion = System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION"),
+      automobileVersion = System.getenv("AUTOMOBILE_VERSION"),
+      manifestVersion =
+        DaemonSocketPaths::class.java.`package`?.implementationVersion ?: DesktopBuildInfo.VERSION,
+    )
+
+  internal fun resolveClientVersion(
+    daemonPackageVersion: String?,
+    automobileVersion: String?,
+    manifestVersion: String?,
+  ): String? =
+    sequenceOf(daemonPackageVersion, automobileVersion, manifestVersion)
+      .mapNotNull(::normalizeClientVersion)
+      .firstOrNull()
+
+  internal fun normalizeClientVersion(raw: String?): String? {
+    val trimmed = raw?.trim().orEmpty()
+    if (trimmed.isEmpty() || ignoredVersions.contains(trimmed.lowercase())) {
+      return null
+    }
+    return trimmed
+  }
+
+  internal fun releaseVersion(version: String): String = version.substringBefore('+')
 
   private fun getUserId(): String {
     val userName = System.getProperty("user.name", "default").ifBlank { "default" }
@@ -572,11 +650,12 @@ object DaemonSocketPaths {
 }
 
 @Serializable
-private data class DaemonRequest(
+internal data class DaemonRequest(
   val id: String,
   val type: String,
   val method: String,
   val params: JsonObject,
+  val clientVersion: String? = null,
 )
 
 @Serializable

@@ -1,7 +1,18 @@
 import * as os from "os";
 import * as path from "path";
+import type { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 
-export class FakeDeviceSnapshotStore {
+type DeviceSnapshotStoreContract = Pick<
+  DeviceSnapshotStore,
+  | "getBasePath"
+  | "getSnapshotPath"
+  | "generateSnapshotName"
+  | "snapshotDirectoryExists"
+  | "getSnapshotSizeBytes"
+  | "deleteSnapshotData"
+>;
+
+export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
   private basePath: string;
   private sizes = new Map<string, number>();
   private existing = new Set<string>();

@@ -1,9 +1,20 @@
 import type {
+  DeviceSnapshotRepository,
   DeviceSnapshotQuery,
   DeviceSnapshotRecord,
 } from "../../src/db/deviceSnapshotRepository";
 
-export class FakeDeviceSnapshotRepository {
+type DeviceSnapshotRepositoryContract = Pick<
+  DeviceSnapshotRepository,
+  | "insertSnapshot"
+  | "updateSnapshot"
+  | "getSnapshot"
+  | "listSnapshots"
+  | "touchSnapshot"
+  | "deleteSnapshot"
+>;
+
+export class FakeDeviceSnapshotRepository implements DeviceSnapshotRepositoryContract {
   private readonly records = new Map<string, DeviceSnapshotRecord>();
 
   async insertSnapshot(record: DeviceSnapshotRecord): Promise<void> {

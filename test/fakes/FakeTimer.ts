@@ -143,6 +143,30 @@ export class FakeTimer implements Timer {
   }
 
   /**
+   * Advance time like advanceTime(), yielding an event-loop turn after each due
+   * event.
+   *
+   * Use this when callbacks begin asynchronous work that must settle before the
+   * next caught-up interval tick. The synchronous advanceTime() remains useful
+   * for deterministic single-turn tests.
+   */
+  async advanceTimeAsync(ms: number): Promise<void> {
+    const target = this.currentTime + ms;
+
+    for (;;) {
+      const next = this.nextDueEvent(target);
+      if (next === undefined) {
+        break;
+      }
+      this.currentTime = next.dueAt;
+      next.fire();
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
+    this.currentTime = target;
+  }
+
+  /**
    * Find the earliest-due pending sleep/timeout/interval whose due time is at or
    * before `target`, breaking equal-time ties by registration order. Returns a
    * closure that removes-and-fires (sleeps/timeouts) or advances-and-fires

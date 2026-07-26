@@ -1,8 +1,15 @@
+import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+
+type FakeAdbClientContract = Pick<
+  AdbExecutor,
+  "executeCommand" | "getForegroundApp" | "listUsers"
+>;
+
 /**
  * Fake implementation of AdbClient for testing
  * Captures commands executed without actually running ADB
  */
-export class FakeAdbClient {
+export class FakeAdbClient implements FakeAdbClientContract {
   private commandCalls: Array<{
     command: string;
     timeoutMs?: number;

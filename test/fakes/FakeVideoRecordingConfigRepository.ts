@@ -1,6 +1,7 @@
 import type { VideoRecordingConfig } from "../../src/models";
+import type { ConfigRepository } from "../../src/db/keyedJsonConfigRepository";
 
-export class FakeVideoRecordingConfigRepository {
+export class FakeVideoRecordingConfigRepository implements ConfigRepository<VideoRecordingConfig> {
   private config: VideoRecordingConfig | null = null;
 
   async getConfig(): Promise<VideoRecordingConfig | null> {

@@ -38,3 +38,36 @@ describe("FakeTimer auto-advance", function() {
     expect(events).toEqual(["first", "second"]);
   });
 });
+
+describe("FakeTimer async manual advancement", function() {
+  test("yields between caught-up async interval callbacks", async function() {
+    const timer = new FakeTimer();
+    const events: string[] = [];
+    let pending = false;
+
+    timer.setInterval(async () => {
+      if (pending) {
+        events.push(`dropped@${timer.now()}`);
+        return;
+      }
+
+      pending = true;
+      events.push(`start@${timer.now()}`);
+      await Promise.resolve();
+      await Promise.resolve();
+      events.push(`end@${timer.now()}`);
+      pending = false;
+    }, 10);
+
+    await timer.advanceTimeAsync(30);
+
+    expect(events).toEqual([
+      "start@10",
+      "end@10",
+      "start@20",
+      "end@20",
+      "start@30",
+      "end@30",
+    ]);
+  });
+});

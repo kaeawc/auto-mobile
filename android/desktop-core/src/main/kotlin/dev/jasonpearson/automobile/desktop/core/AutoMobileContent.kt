@@ -739,6 +739,18 @@ fun AutoMobileContent(
       }
     }
 
+  // One coherent reset of the tap-dispatch context (issue #3347), run at every point that
+  // invalidates the rendered frame identity (device change, transport/mode change, stream
+  // disconnect, Live Layout open/close). Drops the queued tap backlog (closing captured clients so
+  // a
+  // stalled/aged tap can't fire in the new context), advances the error-ordering gate so a late
+  // failure from a pre-reset tap is no longer "current", and clears any shown banner.
+  val resetControlTapContext: () -> Unit = {
+    deviceControlTapDispatcher.reset()
+    deviceControlTapGate.nextToken()
+    deviceControlTapError = null
+  }
+
   val takeScreenshot: () -> Unit =
     remember(clientProvider, screenshotScope) {
       takeScreenshot@{
@@ -1186,6 +1198,7 @@ fun AutoMobileContent(
           object : AutoMobileDeviceStreamEventSink {
             override fun disconnectLayout() {
               layoutInspectorState.disconnect()
+              resetControlTapContext()
             }
 
             override fun clearPerformanceMetrics() {
@@ -1214,6 +1227,7 @@ fun AutoMobileContent(
         // or debounced hierarchy job still in flight when the stream dropped.
         layoutInspectorState.updateConnectionStatus(ConnectionStatus.Disconnected)
         layoutInspectorState.invalidateRenderedDeviceIdentity()
+        resetControlTapContext()
       }
     }
   }
@@ -1224,10 +1238,15 @@ fun AutoMobileContent(
   // reopening for the same device would otherwise enable Control against a mirror frozen for the
   // whole closed period. Keying on isLiveLayoutMode makes reopen start invalidated; fresh
   // screenshot+hierarchy frames (a newer generation) re-arm it, and the generation guard drops the
-  // replayed stale frame.
-  LaunchedEffect(activeDeviceId, isLiveLayoutMode) {
+  // replayed stale frame. resetControlTapContext() also drops any queued tap backlog and clears a
+  // stale error banner so nothing from the previous context leaks into the new one. Keyed on the
+  // data-source mode and connected process too, so a transport/mode change resets the tap context
+  // as
+  // well.
+  LaunchedEffect(activeDeviceId, isLiveLayoutMode, dataSourceMode, connectedMcpProcess) {
     layoutInspectorState.updateConnectionStatus(ConnectionStatus.Disconnected)
     layoutInspectorState.invalidateRenderedDeviceIdentity()
+    resetControlTapContext()
   }
 
   // Populate telemetry event cache for global search (mirroring TelemetryDashboard's collection)
@@ -1584,6 +1603,16 @@ fun AutoMobileContent(
           // after
           // a device switch can't actuate the wrong device). Otherwise we stay in inspector mode.
           val hierarchyRootBounds = layoutInspectorState.hierarchy?.bounds
+          // Gate geometry against the frame actually displayed and used for mapping:
+          // DeviceScreenView
+          // prefers the live WebRTC frame over the observation screenshot and fits taps to THAT
+          // bitmap's dimensions, so when the video rotates/resizes before the observation
+          // screenshot
+          // catches up, the gate must follow the live frame's dims — else a tap maps through stale
+          // dims. The live frame is device-scoped (rememberLiveVideoFrame keyed on
+          // source+deviceId).
+          val displayedFrameWidth = liveVideoFrame?.width ?: layoutInspectorState.screenWidth
+          val displayedFrameHeight = liveVideoFrame?.height ?: layoutInspectorState.screenHeight
           val deviceControlActive =
             isDeviceControlActive(
               enableDeviceControl = enableDeviceControl,
@@ -1596,8 +1625,8 @@ fun AutoMobileContent(
                 layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
               isRenderedGeometryConsistent =
                 isRenderedGeometryConsistent(
-                  screenshotWidth = layoutInspectorState.screenWidth,
-                  screenshotHeight = layoutInspectorState.screenHeight,
+                  screenshotWidth = displayedFrameWidth,
+                  screenshotHeight = displayedFrameHeight,
                   hierarchyRootWidth = hierarchyRootBounds?.width ?: 0,
                   hierarchyRootHeight = hierarchyRootBounds?.height ?: 0,
                 ),
@@ -1647,15 +1676,22 @@ fun AutoMobileContent(
                       val tapClient = clientProvider?.invoke()
                       val tapToken = deviceControlTapGate.nextToken()
                       deviceControlTapError = null
-                      deviceControlTapDispatcher.enqueue(
-                        DeviceControlTapCommand(
-                          point = point,
-                          client = tapClient,
-                          platform = platformString,
-                          deviceId = tapDeviceId,
-                          token = tapToken,
+                      val accepted =
+                        deviceControlTapDispatcher.enqueue(
+                          DeviceControlTapCommand(
+                            point = point,
+                            client = tapClient,
+                            platform = platformString,
+                            deviceId = tapDeviceId,
+                            token = tapToken,
+                          )
                         )
-                      )
+                      if (!accepted) {
+                        // Bounded queue full: a stalled/slow daemon is holding up the consumer. The
+                        // rejected client was already closed by enqueue; surface an actionable
+                        // overload error (this runs on the UI thread, in click order).
+                        deviceControlTapError = "Tap dropped — device busy"
+                      }
                     }
                   }
                 } else {

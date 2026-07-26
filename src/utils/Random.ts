@@ -17,7 +17,7 @@ export class CryptoRandom implements Random {
 
 export const defaultRandom: Random = new CryptoRandom();
 
-const nextToPick = <T>(next: () => number, items: readonly T[]): T => {
+export const nextToPick = <T>(next: () => number, items: readonly T[]): T => {
   if (items.length === 0) {
     throw new Error("Random.pick cannot pick from an empty array");
   }

@@ -66,6 +66,14 @@ describe("PerceptualHasher", () => {
       const similarity = PerceptualHasher.getPerceptualSimilarity("111", "00000");
       expect(similarity).toBe(0);
     });
+
+    test("returns a deterministic 100 for two empty hashes rather than NaN", () => {
+      // Two failed screenshots both hash to "" — they must compare as identical
+      // (100), not as NaN from the 0/0 division.
+      const similarity = PerceptualHasher.getPerceptualSimilarity("", "");
+      expect(Number.isNaN(similarity)).toBe(false);
+      expect(similarity).toBe(100);
+    });
   });
 
   describe("generatePerceptualHash", () => {

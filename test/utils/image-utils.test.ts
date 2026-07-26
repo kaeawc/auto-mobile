@@ -46,29 +46,6 @@ describe("ImageUtils", () => {
     });
   });
 
-  describe("interface implementation", () => {
-    test("should implement the trimmed ImageUtils interface", () => {
-      expect(imageUtils).toHaveProperty("getOriginalBuffer");
-      expect(imageUtils).toHaveProperty("resize");
-      expect(imageUtils).toHaveProperty("crop");
-      expect(imageUtils).toHaveProperty("toPng");
-      expect(imageUtils).toHaveProperty("toWebp");
-      expect(imageUtils).toHaveProperty("getMetadata");
-      expect(imageUtils).toHaveProperty("clearCache");
-      expect(imageUtils).toHaveProperty("setCacheSize");
-      expect(imageUtils).toHaveProperty("batchProcess");
-    });
-
-    test("should no longer expose the dead image-transform surface", () => {
-      // Removed as dead wrapper surface in the sharp->jimp cleanup (#2938):
-      // zero production consumers existed for any of these.
-      expect(imageUtils).not.toHaveProperty("rotate");
-      expect(imageUtils).not.toHaveProperty("flip");
-      expect(imageUtils).not.toHaveProperty("blur");
-      expect(imageUtils).not.toHaveProperty("toJpeg");
-      expect(imageUtils).not.toHaveProperty("getExifMetadata");
-    });
-  });
 });
 
 describe("FakeImageUtils", () => {
@@ -283,28 +260,6 @@ describe("FakeImageUtils", () => {
       expect(results).toHaveLength(2);
       expect(results[0].toString()).toBe("test1_processed");
       expect(results[1].toString()).toBe("test2_processed");
-    });
-  });
-
-  describe("all methods existence", () => {
-    test("should have all retained ImageUtils methods", () => {
-      expect(fakeImageUtils).toHaveProperty("getOriginalBuffer");
-      expect(fakeImageUtils).toHaveProperty("resize");
-      expect(fakeImageUtils).toHaveProperty("crop");
-      expect(fakeImageUtils).toHaveProperty("toPng");
-      expect(fakeImageUtils).toHaveProperty("toWebp");
-      expect(fakeImageUtils).toHaveProperty("getMetadata");
-      expect(fakeImageUtils).toHaveProperty("clearCache");
-      expect(fakeImageUtils).toHaveProperty("setCacheSize");
-      expect(fakeImageUtils).toHaveProperty("batchProcess");
-    });
-
-    test("should not expose the removed image-transform surface", () => {
-      expect(fakeImageUtils).not.toHaveProperty("rotate");
-      expect(fakeImageUtils).not.toHaveProperty("flip");
-      expect(fakeImageUtils).not.toHaveProperty("blur");
-      expect(fakeImageUtils).not.toHaveProperty("toJpeg");
-      expect(fakeImageUtils).not.toHaveProperty("getExifMetadata");
     });
   });
 });

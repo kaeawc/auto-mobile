@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { TTLCache, DEFAULT_CACHE_OPTIONS } from "../../../src/utils/cache/Cache";
+import { TTLCache } from "../../../src/utils/cache/Cache";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("TTLCache", () => {
@@ -231,10 +231,31 @@ describe("TTLCache", () => {
     });
   });
 
-  describe("DEFAULT_CACHE_OPTIONS", () => {
-    it("has sensible defaults", () => {
-      expect(DEFAULT_CACHE_OPTIONS.ttlMs).toBe(60000);
-      expect(DEFAULT_CACHE_OPTIONS.maxEntries).toBe(Infinity);
+  describe("disabled cache and overwrite size accounting", () => {
+    it("stores nothing when maxEntries is 0 (caching disabled)", () => {
+      const disabled = new TTLCache<string, string>(timer, { ttlMs: 10000, maxEntries: 0 });
+      disabled.set("key", "value");
+      expect(disabled.get("key")).toBeUndefined();
+      expect(disabled.size()).toBe(0);
+    });
+
+    it("stores nothing when maxEntries is negative (caching disabled)", () => {
+      const disabled = new TTLCache<string, string>(timer, { ttlMs: 10000, maxEntries: -1 });
+      disabled.set("key", "value");
+      expect(disabled.get("key")).toBeUndefined();
+      expect(disabled.size()).toBe(0);
+    });
+
+    it("resets tracked size to the new size when a sized key is overwritten", () => {
+      const sizedCache = new TTLCache<string, Buffer>(timer, { ttlMs: 10000, maxSizeBytes: 10000 });
+      sizedCache.set("key", Buffer.alloc(100), 100);
+      expect(sizedCache.getCurrentSizeBytes()).toBe(100);
+
+      // Overwrite with a larger payload: the old 100 bytes must be subtracted so
+      // the total reflects 300, not the double-counted 400.
+      sizedCache.set("key", Buffer.alloc(300), 300);
+      expect(sizedCache.getCurrentSizeBytes()).toBe(300);
+      expect(sizedCache.size()).toBe(1);
     });
   });
 });

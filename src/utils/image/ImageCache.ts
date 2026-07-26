@@ -38,6 +38,14 @@ export class ImageCache {
       return;
     }
 
+    // Overwriting an existing key: subtract the old entry's size first so
+    // currentSize does not double-count and prematurely evict live entries.
+    const existing = this.cache.get(key);
+    if (existing) {
+      this.currentSize -= existing.length;
+      this.cache.delete(key);
+    }
+
     // Make room if needed
     if (this.currentSize + buffer.length > this.maxSize) {
       this.cleanup(buffer.length);

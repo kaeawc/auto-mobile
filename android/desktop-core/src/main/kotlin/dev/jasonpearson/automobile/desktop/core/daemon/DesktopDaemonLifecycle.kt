@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.io.File
+import java.net.UnixDomainSocketAddress
+import java.nio.channels.SocketChannel
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -11,17 +13,24 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 internal interface DaemonSocketChecker {
-  fun exists(): Boolean
+  fun isReady(): Boolean
 }
 
 internal class FileDaemonSocketChecker(
   private val socketPath: String = DaemonSocketPaths.socketPath()
 ) : DaemonSocketChecker {
-  override fun exists(): Boolean = File(socketPath).exists()
+  override fun isReady(): Boolean {
+    if (!File(socketPath).exists()) return false
+    return try {
+      SocketChannel.open(UnixDomainSocketAddress.of(socketPath)).use { true }
+    } catch (_: Exception) {
+      false
+    }
+  }
 }
 
 internal interface DaemonPidFileReader {
-  fun read(): DaemonPidState?
+  fun read(): DaemonPidReadResult
 }
 
 internal data class DaemonPidState(
@@ -29,22 +38,32 @@ internal data class DaemonPidState(
   val launchArguments: List<String> = emptyList(),
 )
 
+internal sealed interface DaemonPidReadResult {
+  data object Absent : DaemonPidReadResult
+
+  data object Unreadable : DaemonPidReadResult
+
+  data class Present(val state: DaemonPidState) : DaemonPidReadResult
+}
+
 internal class JsonDaemonPidFileReader(
   private val pidFilePath: String = DaemonSocketPaths.pidFilePath(),
   private val json: Json = DaemonJson,
 ) : DaemonPidFileReader {
-  override fun read(): DaemonPidState? {
+  override fun read(): DaemonPidReadResult {
+    val pidFile = File(pidFilePath)
+    if (!pidFile.exists()) return DaemonPidReadResult.Absent
     return try {
-      val pidFile = File(pidFilePath)
-      if (!pidFile.exists()) return null
       val pidData = json.parseToJsonElement(pidFile.readText()).jsonObject
-      DaemonPidState(
-        version =
-          pidData["version"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
-        launchArguments = pidData["options"]?.jsonObject?.toLaunchArguments().orEmpty(),
+      DaemonPidReadResult.Present(
+        DaemonPidState(
+          version =
+            pidData["version"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
+          launchArguments = pidData["options"]?.jsonObject?.toLaunchArguments().orEmpty(),
+        )
       )
     } catch (_: Exception) {
-      null
+      DaemonPidReadResult.Unreadable
     }
   }
 
@@ -122,6 +141,7 @@ internal data class DaemonCommandResult(
   val exitCode: Int,
   val output: String,
   val timedOut: Boolean = false,
+  val cancelled: Boolean = false,
 )
 
 internal interface DaemonCommandExecutor {
@@ -141,22 +161,33 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
         isDaemon = true
         start()
       }
-    if (!process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-      process.destroy()
-      if (!process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-        process.destroyForcibly()
-        process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    try {
+      if (!process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+        terminate(process)
+        return DaemonCommandResult(
+          exitCode = TIMEOUT_EXIT_CODE,
+          output = drainOutput(process, outputDrainer, output),
+          timedOut = true,
+        )
       }
       return DaemonCommandResult(
-        exitCode = TIMEOUT_EXIT_CODE,
+        exitCode = process.exitValue(),
         output = drainOutput(process, outputDrainer, output),
-        timedOut = true,
       )
+    } catch (_: InterruptedException) {
+      terminate(process)
+      process.inputStream.close()
+      Thread.currentThread().interrupt()
+      return DaemonCommandResult(exitCode = CANCELLED_EXIT_CODE, output = "", cancelled = true)
     }
-    return DaemonCommandResult(
-      exitCode = process.exitValue(),
-      output = drainOutput(process, outputDrainer, output),
-    )
+  }
+
+  private fun terminate(process: Process) {
+    process.destroy()
+    if (!process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+      process.destroyForcibly()
+      process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    }
   }
 
   private fun drainOutput(
@@ -175,6 +206,7 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
   private const val COMMAND_TIMEOUT_SECONDS = 60L
   private const val TERMINATION_TIMEOUT_SECONDS = 5L
   private const val TIMEOUT_EXIT_CODE = -1
+  private const val CANCELLED_EXIT_CODE = -2
 }
 
 internal interface DaemonRetryTimer {
@@ -218,9 +250,17 @@ internal class DesktopDaemonLifecycle(
             "Cannot verify the AutoMobile daemon version because this desktop build has no version. " +
               "Rebuild or reinstall the desktop application, then try again."
           )
-      val currentDaemon = pidFileReader.read()
+      val currentDaemon =
+        when (val readResult = readPidStateWithRetry()) {
+          is DaemonPidReadResult.Present -> readResult.state
+          DaemonPidReadResult.Absent -> null
+          DaemonPidReadResult.Unreadable ->
+            return DaemonLifecycleResult.Failure(
+              "Could not read the AutoMobile daemon state. Wait a moment for startup to finish, then retry."
+            )
+        }
       val currentVersion = currentDaemon?.version
-      val daemonAvailable = socketChecker.exists()
+      val daemonAvailable = socketChecker.isReady()
       if (daemonAvailable && versionsMatch(currentVersion, expectedVersion)) {
         return DaemonLifecycleResult.Ready(restarted = false)
       }
@@ -244,6 +284,9 @@ internal class DesktopDaemonLifecycle(
               "Install Node.js with npx available, then try again."
           )
         }
+      if (commandResult.cancelled) {
+        return DaemonLifecycleResult.Failure("AutoMobile daemon startup was cancelled.")
+      }
       if (commandResult.exitCode != 0) {
         if (commandResult.timedOut) {
           return DaemonLifecycleResult.Failure(
@@ -261,8 +304,8 @@ internal class DesktopDaemonLifecycle(
 
       var actualVersion: String? = null
       repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
-        actualVersion = pidFileReader.read()?.version
-        if (socketChecker.exists() && versionsMatch(actualVersion, expectedVersion)) {
+        actualVersion = (pidFileReader.read() as? DaemonPidReadResult.Present)?.state?.version
+        if (socketChecker.isReady() && versionsMatch(actualVersion, expectedVersion)) {
           return DaemonLifecycleResult.Ready(restarted = true)
         }
         if (attempt + 1 < verificationAttempts.coerceAtLeast(1)) {
@@ -281,13 +324,25 @@ internal class DesktopDaemonLifecycle(
     action: String,
     existingOptions: List<String>,
   ): List<String> =
-    listOf(
-      npxExecutable(System.getProperty("os.name", "")),
-      "-y",
-      "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
-      "--daemon",
-      action,
-    ) + existingOptions
+    commandForPlatform(
+      listOf(
+        npxExecutable(System.getProperty("os.name", "")),
+        "-y",
+        "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
+        "--daemon",
+        action,
+      ) + existingOptions,
+      System.getProperty("os.name", ""),
+    )
+
+  private fun readPidStateWithRetry(): DaemonPidReadResult {
+    repeat(PID_READ_ATTEMPTS) { attempt ->
+      val result = pidFileReader.read()
+      if (result != DaemonPidReadResult.Unreadable) return result
+      if (attempt + 1 < PID_READ_ATTEMPTS) timer.sleep(PID_READ_RETRY_DELAY_MS)
+    }
+    return DaemonPidReadResult.Unreadable
+  }
 
   private fun versionsMatch(
     actualVersion: String?,
@@ -309,9 +364,24 @@ internal class DesktopDaemonLifecycle(
   internal fun npxExecutable(osName: String): String =
     if (osName.lowercase().contains("win")) "npx.cmd" else "npx"
 
+  internal fun commandForPlatform(command: List<String>, osName: String): List<String> {
+    if (!osName.lowercase().contains("win")) return command
+    val quotedCommand = command.joinToString(" ") { quoteForWindowsCmd(it) }
+    return listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"$quotedCommand\"")
+  }
+
+  private fun quoteForWindowsCmd(value: String): String {
+    require(!value.contains('"') && !value.contains('\n') && !value.contains('\r')) {
+      "AutoMobile daemon arguments cannot contain Windows command-line quotes or newlines"
+    }
+    return "\"${value.replace("%", "%%")}\""
+  }
+
   private companion object {
     val lifecycleLock = Any()
     const val DEFAULT_VERIFICATION_ATTEMPTS = 20
     const val VERIFICATION_RETRY_DELAY_MS = 100L
+    const val PID_READ_ATTEMPTS = 3
+    const val PID_READ_RETRY_DELAY_MS = 100L
   }
 }

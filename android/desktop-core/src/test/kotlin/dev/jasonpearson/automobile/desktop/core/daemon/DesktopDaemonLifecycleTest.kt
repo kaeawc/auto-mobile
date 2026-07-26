@@ -223,6 +223,57 @@ class DesktopDaemonLifecycleTest {
 
     assertEquals("npx.cmd", lifecycle.npxExecutable("Windows 11"))
     assertEquals("npx", lifecycle.npxExecutable("Mac OS X"))
+    assertEquals(
+      listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"\"npx.cmd\" \"-y\"\""),
+      lifecycle.commandForPlatform(listOf("npx.cmd", "-y"), "Windows 11"),
+    )
+  }
+
+  @Test
+  fun `retries a transient PID-file read before deciding to restart`() {
+    val commands = FakeDaemonCommandExecutor()
+    val timer = FakeDaemonRetryTimer()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader =
+          FakeDaemonPidFileReader(
+            results =
+              listOf(
+                DaemonPidReadResult.Unreadable,
+                DaemonPidReadResult.Present(DaemonPidState("0.0.40")),
+              )
+          ),
+        commandExecutor = commands,
+        timer = timer,
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertFalse(result.restarted)
+    assertTrue(commands.commands.isEmpty())
+    assertEquals(listOf(100L), timer.delays)
+  }
+
+  @Test
+  fun `does not restart while the daemon PID-file remains unreadable`() {
+    val commands = FakeDaemonCommandExecutor()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader = FakeDaemonPidFileReader(results = listOf(DaemonPidReadResult.Unreadable)),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertTrue(result.message.contains("Could not read"))
+    assertTrue(commands.commands.isEmpty())
   }
 
   @Test
@@ -236,12 +287,13 @@ class DesktopDaemonLifecycleTest {
     )
 
     try {
-      val state = JsonDaemonPidFileReader(pidFile.absolutePath).read()
+      val result = JsonDaemonPidFileReader(pidFile.absolutePath).read()
+      val state = assertIs<DaemonPidReadResult.Present>(result).state
 
-      assertEquals("0.0.39", state?.version)
+      assertEquals("0.0.39", state.version)
       assertEquals(
         listOf("--video-fps", "30", "--network-mockable", "--event-all-markers", "login,save"),
-        state?.launchArguments,
+        state.launchArguments,
       )
     } finally {
       pidFile.delete()
@@ -251,7 +303,7 @@ class DesktopDaemonLifecycleTest {
   private class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {
     private var reads = 0
 
-    override fun exists(): Boolean {
+    override fun isReady(): Boolean {
       val index = reads.coerceAtMost(states.lastIndex)
       reads++
       return states[index]
@@ -259,17 +311,24 @@ class DesktopDaemonLifecycleTest {
   }
 
   private class FakeDaemonPidFileReader(
-    private val versions: List<String?>,
+    private val versions: List<String?> = emptyList(),
     private val launchArguments: List<String> = emptyList(),
+    private val results: List<DaemonPidReadResult>? = null,
   ) : DaemonPidFileReader {
     private var reads = 0
 
-    override fun read(): DaemonPidState? {
+    override fun read(): DaemonPidReadResult {
+      val suppliedResults = results
+      if (suppliedResults != null) {
+        val index = reads.coerceAtMost(suppliedResults.lastIndex)
+        reads++
+        return suppliedResults[index]
+      }
       val index = reads.coerceAtMost(versions.lastIndex)
       reads++
       return versions[index]?.let {
-        DaemonPidState(version = it, launchArguments = launchArguments)
-      }
+        DaemonPidReadResult.Present(DaemonPidState(it, launchArguments))
+      } ?: DaemonPidReadResult.Absent
     }
   }
 

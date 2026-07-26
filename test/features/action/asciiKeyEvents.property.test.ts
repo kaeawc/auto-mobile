@@ -28,7 +28,7 @@ const shiftedSym = fc.constantFrom(...Object.keys(SHIFTED_CODES));
 const shiftRequiring = fc.oneof(upper, shiftedSym);
 const nonShift = fc.oneof(lower, digit, directSym);
 // Untypeable single code units: control chars and BMP non-ASCII.
-const untypeable = fc.oneof(fromRange(0x00, 0x1f), fc.constant(""), fromRange(0x0080, 0x2fff));
+const untypeable = fc.oneof(fromRange(0x00, 0x1f), fc.constant(""), fromRange(0x0080, 0xffff));
 const anyChar = fc.oneof(nonShift, shiftRequiring, untypeable, fromRange(0, 0xffff));
 
 const eqPlan = (a: KeyEventPlan | null, b: KeyEventPlan | null): boolean => JSON.stringify(a) === JSON.stringify(b);

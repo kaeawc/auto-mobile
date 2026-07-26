@@ -126,16 +126,24 @@ mirror can only serve unverified assets if you deliberately opt out of verificat
 
 The pin is a property of **the daemon's launch environment**, resolved where the download
 happens. AutoMobile runs **one daemon per UID**, shared across worktrees via a single
-socket + PID file, and runners **reuse an already-running daemon** rather than restart it.
-So if a daemon is already up with a different `AUTOMOBILE_VERSION` (or none), a second job
-that exports a new pin will silently be served by the **existing** daemon — the pin is
-ignored until the daemon is restarted.
+socket + PID file.
 
-For hermetic CI, force a clean daemon so the pin actually takes effect:
+The checkout-aware iOS XCTestRunner path above is an exception: when it has a built
+`AUTOMOBILE_REPO_ROOT` (or can identify its source checkout), it reconciles a running daemon
+whose release or checkout build identity differs by restarting it from that checkout. A
+pin-only asset mismatch fails closed with a diagnostic instead of silently reusing the daemon;
+restart the daemon from the runner's environment to reconcile that case.
+
+Other runners reuse an already-running daemon rather than restart it. If a daemon is already
+up with a different `AUTOMOBILE_VERSION` (or none), a second job that exports a new pin will
+silently be served by the **existing** daemon — the pin is ignored until the daemon is restarted.
+
+For hermetic CI runners that do not use the checkout-aware XCTestRunner path, force a clean
+daemon so the pin actually takes effect:
 
 - **Android:** `-Dautomobile.daemon.force.restart=true` (already in the recipe above).
-- **Any platform:** `bunx @kaeawc/auto-mobile@<version> --daemon restart` before the job,
-  then confirm via `ide/status` (below) that `releaseVersion` matches your pin.
+- **Other unreconciled runners:** `bunx @kaeawc/auto-mobile@<version> --daemon restart` before
+  the job, then confirm via `ide/status` (below) that `releaseVersion` matches your pin.
 
 ## Verifying the pin
 

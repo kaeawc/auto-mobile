@@ -478,6 +478,10 @@ export class Explore extends BaseVisualChange {
     timeoutMs: number,
     startTime: number
   ): boolean {
+    if (this.stopReason) {
+      return false;
+    }
+
     const elapsed = this.timer.now() - startTime;
 
     if (this.interactionCount >= maxInteractions) {
@@ -787,7 +791,7 @@ export class Explore extends BaseVisualChange {
       await this.timer.sleep(1000);
     } catch (error) {
       logger.warn(`[Explore] Failed to navigate back: ${error}`);
-      throw error;
+      this.stopReason = `Back-navigation recovery failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
@@ -821,7 +825,7 @@ export class Explore extends BaseVisualChange {
       this.consecutiveBackCount = 0;
     } catch (error) {
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
-      throw error;
+      this.stopReason = `Home-screen recovery failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 

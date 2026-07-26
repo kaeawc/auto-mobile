@@ -18,6 +18,7 @@ import { DefaultUIStateSetup } from "./DefaultUIStateSetup";
 import { ScreenTransitionWaiter } from "./interfaces/ScreenTransitionWaiter";
 import { DefaultScreenTransitionWaiter } from "./DefaultScreenTransitionWaiter";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { PressButton } from "../action/PressButton";
 
 /**
  * Options for the navigateTo tool.
@@ -340,9 +341,20 @@ export class NavigateTo {
    * Press the back button as a fallback navigation action.
    */
   private async pressBack(): Promise<void> {
-    // Keep learned-path recovery platform-aware. The interaction tool selects
-    // CtrlProxy on iOS and retains Android's accessibility/ADB fallback; the
-    // registry call also preserves the internal no-diff contract.
+    if (this.device.platform === "android") {
+      // Keep the caller's injected ADB executor and timer for Android recovery.
+      // PressButton retains the accessibility-service/ADB fallback without
+      // observing, so this internal recovery does not advance any diff baseline.
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+      if (!result.success) {
+        throw new Error(result.error ?? "Android back navigation failed");
+      }
+      logger.debug("[NAVIGATE_TO] Pressed back via Android interaction action");
+      return;
+    }
+
+    // iOS has no injected host transport, so retain its internal tool routing
+    // for the selected device and no-diff behavior.
     const response = await ToolRegistry.callInternal("pressButton", {
       button: "back",
       platform: this.device.platform,

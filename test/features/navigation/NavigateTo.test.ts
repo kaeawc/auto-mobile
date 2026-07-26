@@ -11,6 +11,7 @@ import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManag
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 describe("NavigateTo", () => {
   let navigateTo: NavigateTo;
@@ -349,11 +350,9 @@ describe("NavigateTo", () => {
         backPresses: 1,
         reason: "test recommendation"
       });
-      let pressButtonArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("pressButton", "pressButton", {}, async args => {
-        pressButtonArgs = args;
-        return { success: true };
-      });
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
 
       const screenWaiter: ScreenTransitionWaiter = {
         waitForScreen: async screenName => screenName === "HomeScreen"
@@ -369,24 +368,22 @@ describe("NavigateTo", () => {
         fakeTimer
       );
 
-      const result = await navigateTo.execute({
-        targetScreen: "HomeScreen",
-        platform: "android"
-      });
+      try {
+        const result = await navigateTo.execute({
+          targetScreen: "HomeScreen",
+          platform: "android"
+        });
 
-      expect(shouldUseBackButtonSpy).toHaveBeenCalledWith("DetailScreen", "HomeScreen", 1);
-      expect(result.success).toBe(true);
-      expect(result.message).toBe("Successfully navigated to \"HomeScreen\" using back button");
-      expect(result.stepsExecuted).toBe(1);
-      expect(result.path).toEqual(["pressButton(back)"]);
-      expect(pressButtonArgs).toEqual({
-        button: "back",
-        platform: "android",
-        deviceId: "test-device-123",
-        [INTERNAL_NO_DIFF_PARAM]: true
-      });
-      expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual([]);
-      expect(fakeTimer.getSleepHistory()).toEqual([300]);
+        expect(shouldUseBackButtonSpy).toHaveBeenCalledWith("DetailScreen", "HomeScreen", 1);
+        expect(result.success).toBe(true);
+        expect(result.message).toBe("Successfully navigated to \"HomeScreen\" using back button");
+        expect(result.stepsExecuted).toBe(1);
+        expect(result.path).toEqual(["pressButton(back)"]);
+        expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent 4"]);
+        expect(fakeTimer.getSleepHistory()).toEqual([300]);
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
     });
 
     test("routes iOS smart-back recovery through the internal pressButton tool without ADB", async () => {

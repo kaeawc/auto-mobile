@@ -101,7 +101,7 @@ describe("DefaultUIStateSetup", () => {
       return setup;
     }
 
-    test("uses a content-description selector for a missing content-description-only selection", async () => {
+    test("routes a missing content-description-only selection through tapOn's text selector", async () => {
       let capturedArgs: Record<string, unknown> | undefined;
       ToolRegistry.register("tapOn", "tapOn", {}, async args => {
         capturedArgs = args;
@@ -113,7 +113,7 @@ describe("DefaultUIStateSetup", () => {
         uiState: { selectedElements: [{ contentDesc: "Open settings" }] },
       } as NavigationEdge, "android");
 
-      expect(capturedArgs?.selector).toEqual({ contentDesc: "Open settings" });
+      expect(capturedArgs?.selector).toEqual({ text: "Open settings" });
       expect(actions).toEqual(['tapOn({"contentDesc":"Open settings"})']);
     });
 

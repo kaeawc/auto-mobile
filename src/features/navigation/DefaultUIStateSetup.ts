@@ -295,13 +295,15 @@ export class DefaultUIStateSetup implements UIStateSetup {
       } else if (element.resourceId) {
         args.selector = { elementId: element.resourceId };
       } else if (element.contentDesc) {
-        args.selector = { contentDesc: element.contentDesc };
+        // tapOn exposes accessible labels through its text selector; contentDesc
+        // is not a public selector field on the internal tool contract.
+        args.selector = { text: element.contentDesc };
       }
 
       // Internal setup tap (#3087) via the callInternal seam (#3108): no
       // diff/strip, no baseline advance.
       const response = await ToolRegistry.callInternal(tapTool, args);
-      throwIfInternalToolFailed(response, tapTool, platform);
+      throwIfInternalToolFailed(response, "tapOn", platform);
 
       // Small delay for UI to update
       await this.sleep(100);

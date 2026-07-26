@@ -482,15 +482,54 @@ describe("Explore", () => {
       }
     });
 
-    test("propagates a failed dead-end recovery instead of reporting exploration success", async () => {
+    test("records failed dead-end recovery as a terminal partial-report reason", async () => {
       ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
         success: false,
         error: "Back navigation was rejected"
       }));
       explore = new Explore(device, null, fakeTimer, fakeGraph);
 
-      await expect((explore as any).handleDeadEnd()).rejects.toThrow(
-        "pressButton failed on android: Back navigation was rejected"
+      await (explore as any).handleDeadEnd();
+
+      expect((explore as any).stopReason).toBe(
+        "Back-navigation recovery failed: pressButton failed on android: Back navigation was rejected"
+      );
+    });
+
+    test("records failed home reset as a terminal partial-report reason", async () => {
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async () => ({
+        success: false,
+        error: "Home navigation was rejected"
+      }));
+      explore = new Explore(device, null, fakeTimer, fakeGraph);
+
+      await (explore as any).resetToHome();
+
+      expect((explore as any).stopReason).toBe(
+        "Home-screen recovery failed: homeScreen failed on android: Home navigation was rejected"
+      );
+    });
+
+    test("returns a partial report when dead-end recovery fails", async () => {
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
+        success: false,
+        error: "Back navigation was rejected"
+      }));
+      explore = new Explore(device, null, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = {
+        execute: async () => createMockObservation([], "com.test.app")
+      };
+      (explore as any).selectNextElement = async () => undefined;
+
+      const result = await explore.execute({
+        maxInteractions: 1,
+        timeoutMs: 5000,
+        packageName: "com.test.app"
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.stopReason).toBe(
+        "Back-navigation recovery failed: pressButton failed on android: Back navigation was rejected"
       );
     });
   });

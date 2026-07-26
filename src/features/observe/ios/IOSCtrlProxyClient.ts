@@ -1043,7 +1043,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (this.sdkEventPollInFlight === inFlight) {
         this.sdkEventPollInFlight = null;
       }
-    });
+    }).catch(error => logger.debug(`[IOSCtrlProxy] SDK event poll cleanup failed: ${error}`));
     return promise;
   }
 
@@ -1068,7 +1068,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         bundleId?: string;
         events?: Array<{ eventType: string; payload: string }>;
       }>;
-      return this.processSdkEventBatches(batches, generation, pollGeneration);
+      const pollResult = await this.processSdkEventBatches(batches, generation, pollGeneration);
+      return pollResult;
     } catch (error) {
       // Polling failure is non-fatal (endpoint down, timeout) — trace at debug.
       logger.debug(`[IOSCtrlProxy] SDK event poll failed: ${error}`);
@@ -1092,7 +1093,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (generation !== this.sdkEventPollGeneration) {
         return this.emptySdkEventPollResult();
       }
+      const lifecycleEventHasCurrentPoll = this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration);
       if (this.applySdkScreenIdentityLifecycleEvent(event)) {
+        if (lifecycleEventHasCurrentPoll && event.applicationId) {
+          pollGeneration.applicationGenerations.set(
+            event.applicationId,
+            this.getSdkScreenIdentityGeneration(event.applicationId),
+          );
+        }
         continue;
       }
       if (this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration)

@@ -2512,6 +2512,52 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("accepts navigation after an in-band tracking disable and enable", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encode = (payload: Record<string, unknown>): string => Buffer.from(JSON.stringify(payload)).toString("base64");
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [{
+          bundleId: "com.example.ios",
+          events: [
+            { eventType: "lifecycle", payload: encode({ state: "sdk_tracking_disabled", timestamp: 1, sessionId: "session", sessionEpoch: 1, trackingGeneration: 1 }) },
+            { eventType: "lifecycle", payload: encode({ state: "sdk_tracking_enabled", timestamp: 2, sessionId: "session", sessionEpoch: 1, trackingGeneration: 2 }) },
+            { eventType: "navigation", payload: encode({ destination: "Discover", timestamp: 3, sessionId: "session", sessionEpoch: 1, trackingGeneration: 2 }) },
+          ],
+        }],
+      })) as unknown as typeof fetch;
+
+      try {
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+
+        expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe("Discover");
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
+    test("treats a malformed SDK event batch as a non-fatal empty poll", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [{ bundleId: "com.example.ios", events: {} }],
+      })) as unknown as typeof fetch;
+
+      try {
+        const result = await (testClient as unknown as { pollSdkEvents(): Promise<{ receivedEvents: boolean }> }).pollSdkEvents();
+
+        expect(result.receivedEvents).toBe(false);
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
     test("orders tracking re-enable before an earlier-arriving navigation event", async function() {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);

@@ -103,6 +103,47 @@ describe("InMemoryDbWriteBarrier", () => {
   });
 
   describe("trackExisting (issue #2885)", () => {
+    it("preserves the navigation handler's original-promise continuation ahead of a concurrent hierarchy path (#3506)", async () => {
+      const navWrite = deferred<void>();
+      const resolutionOrder: string[] = [];
+
+      const navigationHandler = (async () => {
+        // This is the ordering-sensitive CtrlProxy idiom. Its caller must await
+        // the original write promise, not the barrier's derived promise.
+        void barrier.trackExisting(navWrite.promise);
+        expect(barrier.inFlightCount()).toBe(1);
+        await navWrite.promise;
+        resolutionOrder.push("navigation");
+      })();
+      const hierarchyPath = navWrite.promise.then(() => {
+        resolutionOrder.push("hierarchy");
+      });
+
+      navWrite.resolve();
+      await Promise.all([navigationHandler, hierarchyPath]);
+
+      expect(resolutionOrder).toEqual(["navigation", "hierarchy"]);
+    });
+
+    it("shows a track wrapper lets the concurrent hierarchy path resume first (#3506)", async () => {
+      const navWrite = deferred<void>();
+      const resolutionOrder: string[] = [];
+
+      const navigationHandler = (async () => {
+        await barrier.track(() => navWrite.promise);
+        resolutionOrder.push("navigation");
+      })();
+      const hierarchyPath = navWrite.promise.then(() => {
+        resolutionOrder.push("hierarchy");
+      });
+
+      navWrite.resolve();
+      await Promise.all([navigationHandler, hierarchyPath]);
+
+      // `track` adds one promise-resolution turn before navigation resumes.
+      expect(resolutionOrder).toEqual(["hierarchy", "navigation"]);
+    });
+
     it("counts an already-started promise and clears on settle (E1)", async () => {
       const d = deferred<number>();
       const started = d.promise; // the write is already in flight

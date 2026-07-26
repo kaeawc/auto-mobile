@@ -146,6 +146,65 @@ describe("AndroidCtrlProxyClient", function() {
     }
   };
 
+  const settleNavigationHierarchyInterleaving = async (timer: FakeTimer): Promise<void> => {
+    // recordNavigationEvent commits its in-memory writes across several async
+    // query hops before assigning currentScreen. Drain setImmediate + microtasks
+    // so the navigation and hierarchy paths settle deterministically (#3063).
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      await timer.advanceTimersByTimeAsync(1);
+    }
+  };
+
+  const startSdkNavigationHierarchyInterleaving = async () => {
+    NavigationGraphManager.resetInstance();
+    const navHarness = await installInMemoryNavManager();
+    const navManager = navHarness.manager;
+    const testTimer = new FakeTimer();
+    testTimer.enableAutoAdvance();
+    const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+    const testClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      factory,
+      testTimer
+    );
+    const resultPromise = testClient.getLatestHierarchy(true, 2000);
+    const socket = await waitForSocket(getSocket);
+    if (!socket) {
+      throw new Error("Expected capturing CtrlProxy socket");
+    }
+    await waitForSocketOpen(socket);
+
+    socket.simulateMessage(JSON.stringify({
+      type: "navigation_event",
+      event: {
+        destination: "SdkHome",
+        source: "SdkStart",
+        arguments: {},
+        metadata: {},
+        timestamp: testTimer.now(),
+        sequenceNumber: 1,
+        applicationId: "com.example.sdk",
+      }
+    }));
+
+    socket.simulateMessage(JSON.stringify({
+      type: "hierarchy_update",
+      timestamp: testTimer.now(),
+      data: {
+        updatedAt: testTimer.now(),
+        packageName: "com.example.sdk",
+        hierarchy: {
+          "text": "SDK Home",
+          "resource-id": "com.example.sdk:id/home",
+        }
+      }
+    }));
+
+    return { navHarness, navManager, resultPromise, testClient, testTimer };
+  };
+
   interface ScreenshotUpdateMessage {
     type: string;
     deviceId?: string;
@@ -970,61 +1029,12 @@ describe("AndroidCtrlProxyClient", function() {
     });
 
     test("should preserve SDK screen names when hierarchy updates follow navigation events", async function() {
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
-      const navManager = navHarness.manager;
-
-      const testTimer = new FakeTimer();
-      testTimer.enableAutoAdvance();
-      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer
-      );
+      const { navHarness, navManager, resultPromise, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
 
       try {
-        const resultPromise = testClient.getLatestHierarchy(true, 2000);
-        const socket = await waitForSocket(getSocket);
-        expect(socket).not.toBeNull();
-        await waitForSocketOpen(socket);
-
-        socket!.simulateMessage(JSON.stringify({
-          type: "navigation_event",
-          event: {
-            destination: "SdkHome",
-            source: "SdkStart",
-            arguments: {},
-            metadata: {},
-            timestamp: testTimer.now(),
-            sequenceNumber: 1,
-            applicationId: "com.example.sdk",
-          }
-        }));
-
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.example.sdk",
-            hierarchy: {
-              "text": "SDK Home",
-              "resource-id": "com.example.sdk:id/home",
-            }
-          }
-        }));
-
         await resultPromise;
-        // recordNavigationEvent (fired from the navigation_event handler) commits its
-        // in-memory writes across several async query hops before assigning
-        // currentScreen. Drain setImmediate + microtasks so those settle
-        // deterministically (issue #3063).
-        for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
-          await testTimer.advanceTimersByTimeAsync(1);
-        }
+        await settleNavigationHierarchyInterleaving(testTimer);
 
         expect(navManager.getCurrentScreen()).toBe("SdkHome");
       } finally {
@@ -1162,65 +1172,20 @@ describe("AndroidCtrlProxyClient", function() {
     });
 
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
-      NavigationGraphManager.resetInstance();
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a
       // spy on the freshly-reset shared barrier observes the nav write's
       // registration. trackExisting (not track) proves the write is drain-covered
-      // without a track() await hop that would perturb the ordering the preceding
-      // test guards.
+      // while #3506's unit guard proves its await continuation stays ahead of the
+      // concurrent hierarchy path.
       const barrier = getDbWriteBarrier();
       const trackExistingSpy = spyOn(barrier, "trackExisting");
-      const navHarness = await installInMemoryNavManager();
-      const navManager = navHarness.manager;
-
-      const testTimer = new FakeTimer();
-      testTimer.enableAutoAdvance();
-      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        factory,
-        testTimer
-      );
+      const { navHarness, navManager, resultPromise, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
 
       try {
-        const resultPromise = testClient.getLatestHierarchy(true, 2000);
-        const socket = await waitForSocket(getSocket);
-        expect(socket).not.toBeNull();
-        await waitForSocketOpen(socket);
-
-        socket!.simulateMessage(JSON.stringify({
-          type: "navigation_event",
-          event: {
-            destination: "SdkHome",
-            source: "SdkStart",
-            arguments: {},
-            metadata: {},
-            timestamp: testTimer.now(),
-            sequenceNumber: 1,
-            applicationId: "com.example.sdk",
-          }
-        }));
-
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.example.sdk",
-            hierarchy: {
-              "text": "SDK Home",
-              "resource-id": "com.example.sdk:id/home",
-            }
-          }
-        }));
-
         await resultPromise;
-        for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
-          await testTimer.advanceTimersByTimeAsync(1);
-        }
+        await settleNavigationHierarchyInterleaving(testTimer);
 
         expect(trackExistingSpy).toHaveBeenCalledTimes(1);
         // Ordering still preserved: the write committed the SDK screen name.

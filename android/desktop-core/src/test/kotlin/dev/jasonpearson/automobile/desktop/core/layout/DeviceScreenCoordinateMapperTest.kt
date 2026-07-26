@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
+import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenGeometry
@@ -207,6 +208,24 @@ class DeviceScreenCoordinateMapperTest {
     val p = mapper.viewportToDevice(ViewportPoint(1000f, 2000f), geometry()).clampedTo(1080, 2340)
     assertEquals(1079, p.x)
     assertEquals(2339, p.y)
+  }
+
+  @Test
+  fun `clampedTo marks the clamped point in bounds`() {
+    // After clamping into a non-empty screen rect the point is, by definition, inside it, so the
+    // stale inBounds=false must flip to true — otherwise a caller clamps then still discards.
+    assertEquals(
+      DevicePoint(99, 99, inBounds = true),
+      DevicePoint(200, 200, false).clampedTo(100, 100),
+    )
+  }
+
+  @Test
+  fun `clampedTo stays out of bounds for a zero-dimension screen`() {
+    // A zero-dimension screen has no addressable pixel, so inBounds stays false. The zero axis
+    // clamps to 0; the non-zero axis is still clamped to its own last pixel.
+    assertEquals(DevicePoint(0, 5, inBounds = false), DevicePoint(5, 5, false).clampedTo(0, 100))
+    assertEquals(DevicePoint(5, 0, inBounds = false), DevicePoint(5, 5, false).clampedTo(100, 0))
   }
 
   // ---- Round trip -----------------------------------------------------------

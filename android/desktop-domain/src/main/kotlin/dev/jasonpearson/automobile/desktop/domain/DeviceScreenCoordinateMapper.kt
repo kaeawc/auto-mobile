@@ -41,12 +41,15 @@ public data class ViewportPoint(val x: Float, val y: Float)
 public data class DevicePoint(val x: Int, val y: Int, val inBounds: Boolean) {
   /**
    * Returns this point clamped to the last addressable pixel of a `width x height` device screen.
-   * Use only when an out-of-bounds gesture must be pinned to the edge rather than dropped.
+   * Use only when an out-of-bounds gesture must be pinned to the edge rather than dropped. The
+   * clamped point is, by definition, inside a non-empty screen rect, so [inBounds] becomes true
+   * whenever `width` and `height` are both positive; a zero-dimension screen has no addressable
+   * pixel, so it stays false.
    */
   public fun clampedTo(width: Int, height: Int): DevicePoint {
     val cx = x.coerceIn(0, (width - 1).coerceAtLeast(0))
     val cy = y.coerceIn(0, (height - 1).coerceAtLeast(0))
-    return DevicePoint(cx, cy, inBounds)
+    return DevicePoint(cx, cy, inBounds = width > 0 && height > 0)
   }
 }
 

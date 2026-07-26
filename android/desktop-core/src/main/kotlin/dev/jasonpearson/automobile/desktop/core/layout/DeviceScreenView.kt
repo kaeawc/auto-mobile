@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -187,6 +188,20 @@ fun DeviceScreenView(
   onControlTap: ((DevicePoint) -> Unit)? = null,
 ) {
   val colors = SharedTheme.globalColors
+
+  // Keep the latest control-tap callback readable from the long-lived tap gesture coroutine, so a
+  // callback that changes (e.g. null -> real once the daemon connection is ready) is honored
+  // without
+  // restarting the gesture. Matches the rememberUpdatedState pattern used by SplitPane's drag.
+  val currentOnControlTap by rememberUpdatedState(onControlTap)
+
+  // Leaving inspector mode must drop any highlight already drawn — the Move guard only suppresses
+  // future hover updates, not the currently-hovered element.
+  LaunchedEffect(controlMode) {
+    if (controlMode != DeviceScreenControlMode.Inspector) {
+      onElementHovered(null)
+    }
+  }
 
   // Zoom and pan state
   var scale by remember { mutableFloatStateOf(1f) }
@@ -502,7 +517,7 @@ fun DeviceScreenView(
                 when (controlMode) {
                   // Control mode: report the mapped device coordinate for a caller to forward to
                   // the daemon input helpers (issue #3347). This view never sends input itself.
-                  DeviceScreenControlMode.Control -> onControlTap?.invoke(point)
+                  DeviceScreenControlMode.Control -> currentOnControlTap?.invoke(point)
                   // Inspector mode: select the deepest element under the click (unchanged
                   // behavior).
                   DeviceScreenControlMode.Inspector ->

@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.control.ControlTapErrorGate
+import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapCommand
+import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapDispatcher
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapForwarder
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
@@ -702,6 +704,41 @@ fun AutoMobileContent(
   // MCP client are cancelled when this composable leaves composition instead of
   // leaking a hung coroutine + client if the daemon is unresponsive (#3603).
   val screenshotScope = rememberCoroutineScope()
+
+  // Serializes control taps so their daemon requests execute in click order (issue #3347). The
+  // click-time snapshot is enqueued in order; a single consumer forwards each tap to completion —
+  // closing its per-tap client in a finally and publishing any error through the token gate on the
+  // UI thread — before the next begins.
+  val deviceControlTapDispatcher =
+    remember(screenshotScope) {
+      DeviceControlTapDispatcher(screenshotScope) { command ->
+        var tapError: String? = null
+        try {
+          withContext(Dispatchers.IO) {
+            deviceControlTapForwarder.forward(
+              point = command.point,
+              client = command.client,
+              platform = command.platform,
+              deviceId = command.deviceId,
+              onError = { message -> tapError = message },
+            )
+          }
+        } finally {
+          command.client?.close()
+        }
+        val message = tapError
+        if (message != null) {
+          // Serialize the token check + banner write with nextToken()/clear on the UI thread so a
+          // superseded tap's stale error can't resurrect a banner a newer tap already cleared.
+          withContext(Dispatchers.Main) {
+            if (deviceControlTapGate.isCurrent(command.token)) {
+              deviceControlTapError = message
+            }
+          }
+        }
+      }
+    }
+
   val takeScreenshot: () -> Unit =
     remember(clientProvider, screenshotScope) {
       takeScreenshot@{
@@ -1181,16 +1218,16 @@ fun AutoMobileContent(
     }
   }
 
-  // Drop the rendered frame's device identity the instant the selected device changes (issue
-  // #3347):
-  // the previous device's screenshot/hierarchy linger until new frames arrive, and control must
-  // stay
-  // off (Inspector) until a fresh, matching frame is applied. The generation bump also drops any
-  // in-flight frame work queued for the previous device.
-  LaunchedEffect(activeDeviceId) {
-    if (isLiveLayoutMode) {
-      layoutInspectorState.invalidateRenderedDeviceIdentity()
-    }
+  // Reset the control gate to an invalidated, not-live state on device change AND whenever Live
+  // Layout opens or closes (issue #3347). While the panel is closed the screenshot/hierarchy
+  // collectors stop, but the previous frame's device identity + Connected status persist — so
+  // reopening for the same device would otherwise enable Control against a mirror frozen for the
+  // whole closed period. Keying on isLiveLayoutMode makes reopen start invalidated; fresh
+  // screenshot+hierarchy frames (a newer generation) re-arm it, and the generation guard drops the
+  // replayed stale frame.
+  LaunchedEffect(activeDeviceId, isLiveLayoutMode) {
+    layoutInspectorState.updateConnectionStatus(ConnectionStatus.Disconnected)
+    layoutInspectorState.invalidateRenderedDeviceIdentity()
   }
 
   // Populate telemetry event cache for global search (mirroring TelemetryDashboard's collection)
@@ -1596,47 +1633,29 @@ fun AutoMobileContent(
                 if (deviceControlActive) {
                   { point: DevicePoint ->
                     // Snapshot the whole tap target atomically on the UI thread: the active device
-                    // can change before the IO coroutine runs, and resolving client/platform/device
+                    // can change before the tap is forwarded, and resolving client/platform/device
                     // late would send this coordinate to the wrong device.
                     val tapDeviceId = activeDeviceId
                     // Refuse a tap with no explicitly selected device: deviceControlActive already
                     // requires a non-null selection, this guards the click-vs-recompose race so the
                     // daemon can never pick a device the user did not choose.
                     if (tapDeviceId != null) {
-                      // clientProvider mints a fresh McpDaemonClient (a new Unix socket) per call,
-                      // so
-                      // close it after the tap or every click leaks a socket. Mirrors the
-                      // take-screenshot path's close-in-finally.
+                      // clientProvider mints a fresh McpDaemonClient (a new Unix socket) per call;
+                      // the dispatcher's consumer closes it after the tap (else every click leaks a
+                      // socket). Enqueue in click order so the daemon requests execute in that
+                      // order.
                       val tapClient = clientProvider?.invoke()
-                      val tapPlatform = platformString
                       val tapToken = deviceControlTapGate.nextToken()
                       deviceControlTapError = null
-                      screenshotScope.launch(Dispatchers.IO) {
-                        var tapError: String? = null
-                        try {
-                          deviceControlTapForwarder.forward(
-                            point = point,
-                            client = tapClient,
-                            platform = tapPlatform,
-                            deviceId = tapDeviceId,
-                            onError = { message -> tapError = message },
-                          )
-                        } finally {
-                          tapClient?.close()
-                        }
-                        // Publish on the UI dispatcher so the token check and the banner write are
-                        // serialized with nextToken()/clear (which also run on the UI thread). Only
-                        // the latest tap may publish; a superseded tap's stale error is dropped and
-                        // can't resurrect a banner a newer tap already cleared.
-                        val message = tapError
-                        if (message != null) {
-                          withContext(Dispatchers.Main) {
-                            if (deviceControlTapGate.isCurrent(tapToken)) {
-                              deviceControlTapError = message
-                            }
-                          }
-                        }
-                      }
+                      deviceControlTapDispatcher.enqueue(
+                        DeviceControlTapCommand(
+                          point = point,
+                          client = tapClient,
+                          platform = platformString,
+                          deviceId = tapDeviceId,
+                          token = tapToken,
+                        )
+                      )
                     }
                   }
                 } else {

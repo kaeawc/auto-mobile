@@ -55,6 +55,14 @@ describe("parseVideoRecordingConfig", () => {
     expect(parseVideoRecordingConfig({ fps: 29.7 }).fps).toBe(30);
   });
 
+  // LIVE DEFECT (characterization): fps is validated as > 0 BEFORE being rounded,
+  // so a positive sub-0.5 fps passes the guard and then rounds to 0 — producing a
+  // 0-fps recording rather than falling back to the default. Pinned so a fix that
+  // clamps this to the default is a deliberate, visible change.
+  test("a positive sub-0.5 fps rounds to a broken 0 fps (known defect)", () => {
+    expect(parseVideoRecordingConfig({ fps: 0.4 }).fps).toBe(0);
+  });
+
   test("accepts valid format", () => {
     expect(parseVideoRecordingConfig({ format: "mp4" }).format).toBe("mp4");
   });
@@ -69,6 +77,17 @@ describe("parseVideoRecordingConfig", () => {
       maxThroughputMbps: 2,
     });
     expect(config.targetBitrateKbps).toBe(2000);
+  });
+
+  // LIVE DEFECT (characterization): the cap is floor(maxThroughputMbps * 1000)
+  // Kbps; a throughput below 0.001 Mbps floors to 0, is treated as "no cap", and
+  // the full requested bitrate ships uncapped. Pinned to make a fix visible.
+  test("a sub-1-Kbps throughput silently disables the cap (known defect)", () => {
+    const config = parseVideoRecordingConfig({
+      targetBitrateKbps: 10000,
+      maxThroughputMbps: 0.0005,
+    });
+    expect(config.targetBitrateKbps).toBe(10000);
   });
 
   test("accepts valid resolution", () => {
@@ -172,6 +191,9 @@ describe("VideoRecorderService", () => {
       expect(metadata.sizeBytes).toBe(12345);
       expect(metadata.codec).toBe("h264");
       expect(metadata.format).toBe("mp4");
+      // The service must hand back the exact handle the backend produced at
+      // start — not a look-alike rebuilt from the recordingId.
+      expect(backend.stopCalls[0]).toBe(backend.startResults[0]);
     });
 
     test("throws for unknown recording id", async () => {

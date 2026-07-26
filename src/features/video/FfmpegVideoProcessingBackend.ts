@@ -295,6 +295,9 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly simctlFactory: (device: BootedDevice) => SimCtl = device => new SimCtlClient(device),
     private readonly ffmpegClient: FfmpegClient = new DefaultFfmpegClient(),
+    // Injectable so hardware-accel detection can be tested for every OS branch on
+    // any CI host, rather than only the branch matching the runner's platform.
+    private readonly platformProvider: () => NodeJS.Platform = platform,
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -714,7 +717,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   }
 
   private async detectHardwareAccel(): Promise<HardwareAccelInfo> {
-    const os = platform();
+    const os = this.platformProvider();
     const cacheKey = os;
 
     if (this.hwAccelCache.has(cacheKey)) {

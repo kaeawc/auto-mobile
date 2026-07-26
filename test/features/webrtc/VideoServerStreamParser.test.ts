@@ -168,4 +168,50 @@ describe("VideoServerStreamParser", () => {
       [VIDEO_SERVER_TRACK_ID_VIDEO, VIDEO_SERVER_CODEC_ID_H264, 20],
     ]);
   });
+
+  test("skips a mux packet for an unknown track yet keeps parsing later packets", () => {
+    // The buffer advances by the packet size BEFORE the unknown-track `continue`.
+    // A refactor that skipped the advance would spin forever on the unknown
+    // packet; here the following known-track packet must still be delivered.
+    const { parser, packets } = collect();
+    parser.push(Buffer.concat([
+      muxHeader(),
+      muxPacket(99, Buffer.from([0xde, 0xad]), 0n, 5),
+      muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 20),
+    ]));
+
+    expect(packets.map(packet => packet.trackId)).toEqual([VIDEO_SERVER_TRACK_ID_VIDEO]);
+    expect(packets[0].ptsUs).toBe(20);
+  });
+
+  test("emits a zero-size video packet without stalling the parser", () => {
+    const { parser, packets } = collect();
+    parser.push(Buffer.concat([
+      streamHeader(100, 200),
+      packet(Buffer.alloc(0), FLAG_CONFIG, 7),
+      packet(Buffer.from([0xaa]), 0n, 8),
+    ]));
+
+    expect(packets).toHaveLength(2);
+    expect(packets[0].data).toHaveLength(0);
+    expect(packets[0].ptsUs).toBe(7);
+    expect(packets[1].ptsUs).toBe(8);
+  });
+
+  test("a mux header declaring zero tracks yields no header and drops later packets", () => {
+    // Zero-track amux header: 12-byte stream header, trackCount 0, no track rows.
+    const zeroTrackHeader = Buffer.alloc(12);
+    zeroTrackHeader.writeUInt32BE(VIDEO_SERVER_CODEC_ID_AMUX, 0);
+    zeroTrackHeader.writeUInt32BE(0, 4);
+    zeroTrackHeader.writeUInt32BE(0, 8); // trackCount = 0
+
+    const { parser, headers, packets } = collect();
+    parser.push(Buffer.concat([
+      zeroTrackHeader,
+      muxPacket(VIDEO_SERVER_TRACK_ID_VIDEO, Buffer.from([0xaa]), 0n, 1),
+    ]));
+
+    expect(headers).toEqual([]);
+    expect(packets).toEqual([]);
+  });
 });

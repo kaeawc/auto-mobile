@@ -238,6 +238,31 @@ describe("packetizeNalUnit", () => {
   test("empty NAL yields no packets", () => {
     expect(packetizeNalUnit(Buffer.alloc(0))).toEqual([]);
   });
+
+  // A non-advancing MTU would make the FU-A fragment loop spin forever on a
+  // NAL larger than the MTU, wedging the daemon (issue #4170). The guard must
+  // reject any MTU that leaves no room for a payload byte past the 2-byte
+  // FU-A header, and any non-finite MTU that would silently truncate the NAL.
+  test.each([
+    [2, "MTU equal to the FU-A header leaves zero payload room"],
+    [1, "MTU below the FU-A header cannot advance"],
+    [0, "zero MTU cannot advance"],
+    [-1, "negative MTU cannot advance"],
+    [Number.NaN, "NaN MTU would truncate the NAL to an empty fragment"],
+  ])(
+    "throws instead of looping when a NAL exceeds a non-advancing mtu %p",
+    (mtu, _why) => {
+      const nal = makeNal(NAL_TYPE_IDR, 40);
+      expect(() => packetizeNalUnit(nal, mtu)).toThrow(/MTU/);
+    }
+  );
+
+  test("an infinite mtu sends the whole NAL as one packet (not a defect)", () => {
+    const nal = makeNal(NAL_TYPE_IDR, 40);
+    const packets = packetizeNalUnit(nal, Number.POSITIVE_INFINITY);
+    expect(packets).toHaveLength(1);
+    expect(packets[0].equals(nal)).toBe(true);
+  });
 });
 
 describe("packetizeAccessUnit", () => {

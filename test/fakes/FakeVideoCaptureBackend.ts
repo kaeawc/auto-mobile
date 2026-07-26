@@ -12,6 +12,8 @@ import type {
 export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   readonly startCalls: VideoCaptureConfig[] = [];
   readonly stopCalls: RecordingHandle[] = [];
+  /** The exact handle objects returned by start(), for identity assertions. */
+  readonly startResults: RecordingHandle[] = [];
   private stopResolvers: Array<(handle: RecordingHandle) => void> = [];
   private stopResultOverrides: Partial<RecordingResult> | null = null;
   private outputPayload: Buffer = Buffer.from("fake-video");
@@ -32,11 +34,13 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
     this.startCalls.push(config);
     // No real file I/O - just return the handle
-    return {
+    const handle: RecordingHandle = {
       recordingId: config.recordingId,
       outputPath: config.outputPath,
       startedAt: config.startedAt,
     };
+    this.startResults.push(handle);
+    return handle;
   }
 
   async stop(handle: RecordingHandle): Promise<RecordingResult> {

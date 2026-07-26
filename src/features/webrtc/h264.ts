@@ -17,6 +17,8 @@
  * assignment (sequence numbers, timestamps, SSRC, marker bit).
  */
 
+import { ActionableError } from "../../models";
+
 /** NAL unit type for an Access Unit Delimiter (RFC / H.264 §7.4.1). */
 export const NAL_TYPE_AUD = 9;
 /** NAL unit type for a Sequence Parameter Set. */
@@ -29,6 +31,8 @@ export const NAL_TYPE_IDR = 5;
 export const NAL_TYPE_SEI = 6;
 /** RFC 6184 FU-A fragmentation unit NAL type. */
 export const FU_A_TYPE = 28;
+/** FU-A per-fragment overhead: 1-byte FU indicator + 1-byte FU header. */
+export const FU_A_HEADER_BYTES = 2;
 
 /**
  * Default RTP payload MTU. 1200 bytes leaves headroom under a 1500-byte
@@ -228,6 +232,19 @@ export function packetizeNalUnit(nal: Buffer, mtu: number = DEFAULT_RTP_MTU): Bu
   }
   if (nal.length <= mtu) {
     return [Buffer.from(nal)];
+  }
+
+  // Fragmentation reserves 2 bytes per packet for the FU indicator + FU header.
+  // An MTU that leaves no room for at least one payload byte would make the
+  // fragment loop below never advance, wedging the daemon (issue #4170). A
+  // non-finite MTU (NaN) would silently truncate the NAL to a single empty
+  // fragment. Reject both so a misconfigured MTU fails loudly instead.
+  // Note: Infinity is handled by the single-packet fast path above and never
+  // reaches here.
+  if (!Number.isFinite(mtu) || mtu <= FU_A_HEADER_BYTES) {
+    throw new ActionableError(
+      `RTP MTU ${mtu} is too small to fragment a ${nal.length}-byte NAL unit; it must exceed the ${FU_A_HEADER_BYTES}-byte FU-A header.`
+    );
   }
 
   const nalHeader = nal[0];

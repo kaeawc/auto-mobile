@@ -51,7 +51,7 @@ interface IosBackendHandle {
 
 type BackendHandle = AndroidBackendHandle | IosBackendHandle;
 
-function clampBitrateKbps(config: VideoCaptureConfig): number {
+export function clampBitrateKbps(config: VideoCaptureConfig): number {
   const maxBitrateKbps = Math.max(0, Math.floor(config.maxThroughputMbps * 1000));
   if (!maxBitrateKbps) {
     return config.targetBitrateKbps;
@@ -126,7 +126,12 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
       await Promise.race([backendHandle.exitPromise, timeoutPromise]);
       if (timeoutId) {
-        clearTimeout(timeoutId);
+        // Disarm through the injected timer, not the global clearTimeout. Once
+        // the host adb has exited the 10 s SIGINT callback is stale; leaving it
+        // armed (as global clearTimeout would, since the handle came from
+        // this.timer.setTimeout) fires a SIGINT after the recording finished
+        // (issue #4170).
+        this.timer.clearTimeout(timeoutId);
       }
 
       if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
@@ -157,35 +162,39 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       logger.info(`[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`);
       const adb = this.adbFactory.create(backendHandle.device);
       const pullArgs = ["pull", backendHandle.deviceTempPath, handle.outputPath];
-      const pullProcess = await adb.spawn(pullArgs);
+      try {
+        const pullProcess = await adb.spawn(pullArgs);
 
-      await new Promise<void>((resolve, reject) => {
-        pullProcess.once("exit", code => {
-          if (code === 0) {
-            logger.info(`[VideoCapture] File pulled successfully`);
+        await new Promise<void>((resolve, reject) => {
+          pullProcess.once("exit", code => {
+            if (code === 0) {
+              logger.info(`[VideoCapture] File pulled successfully`);
+              resolve();
+            } else {
+              reject(new Error(`adb pull failed with exit code ${code}`));
+            }
+          });
+          pullProcess.once("error", err => reject(err));
+        });
+      } finally {
+        // Always clean up the /sdcard temp file, even when the pull failed —
+        // otherwise a failed pull leaks the temp recording on the device on
+        // every stop (issue #4170).
+        logger.info(`[VideoCapture] Cleaning up temp file on device`);
+        const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
+        const rmProcess = await adb.spawn(rmArgs);
+
+        await new Promise<void>(resolve => {
+          rmProcess.once("exit", () => {
+            logger.info(`[VideoCapture] Temp file cleaned up`);
             resolve();
-          } else {
-            reject(new Error(`adb pull failed with exit code ${code}`));
-          }
+          });
+          rmProcess.once("error", err => {
+            logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+            resolve(); // Don't fail the whole operation if cleanup fails
+          });
         });
-        pullProcess.once("error", err => reject(err));
-      });
-
-      // Clean up temp file on device
-      logger.info(`[VideoCapture] Cleaning up temp file on device`);
-      const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
-      const rmProcess = await adb.spawn(rmArgs);
-
-      await new Promise<void>(resolve => {
-        rmProcess.once("exit", () => {
-          logger.info(`[VideoCapture] Temp file cleaned up`);
-          resolve();
-        });
-        rmProcess.once("error", err => {
-          logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-          resolve(); // Don't fail the whole operation if cleanup fails
-        });
-      });
+      }
     } else {
       await this.finalizeIosRecording(backendHandle);
     }

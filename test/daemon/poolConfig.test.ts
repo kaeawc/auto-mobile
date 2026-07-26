@@ -89,13 +89,34 @@ describe("DEVICE_POOL_MATCHING env parsing", () => {
     "AUTO_MOBILE_DEVICE_POOL_MATCHING",
   ] as const;
 
+  // Snapshot the process's inherited values ONCE, before any row mutates them, and
+  // restore to that snapshot after each test. Bun shares process.env across test
+  // files, so deleting a key the caller set would leak the wrong DEVICE_POOL_MATCHING
+  // into a later import of poolConfig — restore, don't blanket-delete.
+  const ORIGINAL_MATCHING_ENV = new Map<(typeof MATCHING_KEYS)[number], string | undefined>(
+    MATCHING_KEYS.map(key => [key, process.env[key]])
+  );
+
+  // Establish a clean baseline at the START of each row so "unset" rows are
+  // deterministic even when the process inherited one of these vars.
   function clearMatchingEnv(): void {
     for (const key of MATCHING_KEYS) {
       delete process.env[key];
     }
   }
 
-  afterEach(clearMatchingEnv);
+  function restoreMatchingEnv(): void {
+    for (const key of MATCHING_KEYS) {
+      const original = ORIGINAL_MATCHING_ENV.get(key);
+      if (original === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = original;
+      }
+    }
+  }
+
+  afterEach(restoreMatchingEnv);
 
   async function importFreshMatching(): Promise<string> {
     const mod = await import(`../../src/daemon/poolConfig.ts?matching-env=${Date.now()}-${Math.random()}`);

@@ -13,13 +13,34 @@ describe("DAEMON_HANDSHAKE_ENABLED env parsing", () => {
     "AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE",
   ] as const;
 
+  // Snapshot the process's inherited values ONCE, before any row mutates them, and
+  // restore to that snapshot after each test. Bun shares process.env across test
+  // files, so deleting a key the caller set would leak the wrong handshake state
+  // into later modules — restore, don't blanket-delete.
+  const ORIGINAL_ENV = new Map<(typeof KEYS)[number], string | undefined>(
+    KEYS.map(key => [key, process.env[key]])
+  );
+
+  // Establish a clean baseline at the START of each row so "unset" rows are
+  // deterministic even when the process inherited one of these vars.
   function clearEnv(): void {
     for (const key of KEYS) {
       delete process.env[key];
     }
   }
 
-  afterEach(clearEnv);
+  function restoreEnv(): void {
+    for (const key of KEYS) {
+      const original = ORIGINAL_ENV.get(key);
+      if (original === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = original;
+      }
+    }
+  }
+
+  afterEach(restoreEnv);
 
   async function importFreshEnabled(): Promise<boolean> {
     const mod = await import(`../../src/daemon/constants.ts?handshake-env=${Date.now()}-${Math.random()}`);

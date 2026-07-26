@@ -4,6 +4,7 @@ import { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 
@@ -445,14 +446,40 @@ describe("Explore", () => {
       expect(calls).toEqual([
         {
           name: "pressButton",
-          args: { button: "back", platform: "ios", [INTERNAL_NO_DIFF_PARAM]: true }
+          args: { button: "back", platform: "ios", deviceId: "ios-simulator-123", [INTERNAL_NO_DIFF_PARAM]: true }
         },
         {
           name: "homeScreen",
-          args: { platform: "ios", [INTERNAL_NO_DIFF_PARAM]: true }
+          args: { platform: "ios", deviceId: "ios-simulator-123", [INTERNAL_NO_DIFF_PARAM]: true }
         }
       ]);
       expect(adbCommands).toEqual([]);
+    });
+
+    test("targets the selected iOS device when another iOS simulator is booted", async () => {
+      const iosA = { deviceId: "ios-simulator-a", name: "iPhone A", platform: "ios" } as BootedDevice;
+      const iosB = { deviceId: "ios-simulator-b", name: "iPhone B", platform: "ios" } as BootedDevice;
+      const sessions = new FakeDeviceSessionManager();
+      sessions.setConnectedDevices([iosA, iosB]);
+      const registry = ToolRegistry as unknown as { deviceSessionManager: unknown };
+      const originalDeviceSessionManager = registry.deviceSessionManager;
+      registry.deviceSessionManager = sessions;
+      const selectedDeviceIds: string[] = [];
+
+      try {
+        ToolRegistry.registerDeviceAware("pressButton", "pressButton", { parse: (args: unknown) => args } as any,
+                                         async selectedDevice => {
+                                           selectedDeviceIds.push(selectedDevice.deviceId);
+                                           return { success: true };
+                                         });
+        explore = new Explore(iosB, null, fakeTimer, fakeGraph);
+
+        await (explore as any).handleDeadEnd();
+
+        expect(selectedDeviceIds).toEqual([iosB.deviceId]);
+      } finally {
+        registry.deviceSessionManager = originalDeviceSessionManager;
+      }
     });
   });
 

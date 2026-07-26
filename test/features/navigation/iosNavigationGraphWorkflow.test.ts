@@ -90,6 +90,7 @@ describe("iOS navigation-event graph workflow", () => {
       text: "Settings",
       action: "tap",
       platform: "ios",
+      deviceId: "ios-simulator-navigation-workflow",
       [INTERNAL_NO_DIFF_PARAM]: true
     });
   });

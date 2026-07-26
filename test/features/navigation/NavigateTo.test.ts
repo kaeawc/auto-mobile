@@ -367,6 +367,7 @@ describe("NavigateTo", () => {
       expect(pressButtonArgs).toEqual({
         button: "back",
         platform: "android",
+        deviceId: "test-device-123",
         [INTERNAL_NO_DIFF_PARAM]: true
       });
       expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual([]);
@@ -419,9 +420,46 @@ describe("NavigateTo", () => {
       expect(pressButtonArgs).toEqual({
         button: "back",
         platform: "ios",
+        deviceId: "ios-simulator-123",
         [INTERNAL_NO_DIFF_PARAM]: true
       });
       expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual([]);
+    });
+
+    test("reports an unsuccessful iOS smart-back recovery instead of claiming navigation succeeded", async () => {
+      const iOSDevice = { ...device, deviceId: "ios-simulator-456", platform: "ios" } as BootedDevice;
+      await fakeGraph.recordNavigationEvent({
+        destination: "DetailScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: 1,
+        sequenceNumber: 0
+      });
+      fakeGraph.addNode({
+        screenName: "DetailScreen",
+        firstSeenAt: 1,
+        lastSeenAt: 1,
+        visitCount: 1,
+        backStackDepth: 1
+      });
+      shouldUseBackButtonSpy = spyOn(SmartNavigationHelper, "shouldUseBackButton").mockResolvedValue({
+        shouldUseBack: true,
+        backPresses: 1,
+        reason: "test recommendation"
+      });
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
+        success: false,
+        error: "back unavailable"
+      }));
+      navigateTo = new NavigateTo(iOSDevice, fakeAdbFactory, null, {
+        waitForScreen: async () => true
+      }, fakeGraph);
+
+      const result = await navigateTo.execute({ targetScreen: "HomeScreen", platform: "ios" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("pressButton failed on ios: back unavailable");
     });
   });
 

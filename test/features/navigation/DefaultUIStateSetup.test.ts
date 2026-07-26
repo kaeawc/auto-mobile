@@ -208,6 +208,11 @@ describe("DefaultUIStateSetup", () => {
       ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
         createStructuredToolResponse({ success: true })
       );
+      let backArgs: Record<string, unknown> | undefined;
+      ToolRegistry.register("pressButton", "pressButton", {}, async (args: Record<string, unknown>) => {
+        backArgs = args;
+        return createStructuredToolResponse({ success: true });
+      });
 
       // Stateful observe provider: the first post-swipe observation still
       // contains the bottomsheet's windowId (swipe did NOT dismiss it), forcing
@@ -235,11 +240,16 @@ describe("DefaultUIStateSetup", () => {
       // The swipe ran but did not dismiss (windowId still present on observe #1),
       // so both post-swipe and post-back observations were consulted.
       expect(observeCalls).toBe(2);
-      // The back-button fallback fired via the ADB keyevent seam — the
-      // AndroidCtrlProxy accessibility path is not connected in a unit context
-      // (requestGlobalAction fast-fails), so pressBack falls through to ADB.
+      // The fallback routes through the platform-aware interaction tool, which
+      // retains the internal no-diff marker and delegates Android fallback to
+      // PressButton itself.
       const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
-      expect(fakeAdb.wasCommandExecuted("shell input keyevent 4")).toBe(true);
+      expect(backArgs).toMatchObject({
+        button: "back",
+        platform: "android",
+        [INTERNAL_NO_DIFF_PARAM]: true,
+      });
+      expect(fakeAdb.getAllCommands()).toEqual([]);
     });
 
     test("does not mistakenly resolve a tool registered under the old name `swipe`", async () => {
@@ -260,6 +270,33 @@ describe("DefaultUIStateSetup", () => {
       ).dismissTopModal(bottomSheet, "android");
 
       expect(legacySwipeCalls).toBe(0);
+    });
+
+    test("uses iOS pressButton recovery without Android shell fallbacks", async () => {
+      const iosDevice: BootedDevice = { ...device, deviceId: "ios-device", platform: "ios" };
+      const fakeAdb = new FakeAdbClient();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const setup = new DefaultUIStateSetup(iosDevice, fakeAdb, nullObserve, timer);
+      let backArgs: Record<string, unknown> | undefined;
+      ToolRegistry.register("pressButton", "pressButton", {}, async (args: Record<string, unknown>) => {
+        backArgs = args;
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const dismissed = await (
+        setup as unknown as {
+          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).dismissTopModal({ type: "popup", layer: 1, windowId: 42 }, "ios");
+
+      expect(dismissed).toBe(true);
+      expect(backArgs).toMatchObject({
+        button: "back",
+        platform: "ios",
+        [INTERNAL_NO_DIFF_PARAM]: true,
+      });
+      expect(fakeAdb.getAllCommands()).toEqual([]);
     });
   });
 });

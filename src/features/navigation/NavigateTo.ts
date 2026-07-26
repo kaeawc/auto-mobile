@@ -4,6 +4,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
+import { throwIfInternalToolFailed } from "../../server/internalToolCall";
 import {
   NavigationGraphManager,
   ToolCallInteraction,
@@ -26,6 +27,8 @@ export interface NavigateToOptions {
   targetScreen: string;
   /** Platform (android/ios) */
   platform: "android" | "ios";
+  /** Session that selected the outer device, retained by internal replays. */
+  sessionUuid?: string;
 }
 
 /**
@@ -40,6 +43,7 @@ export class NavigateTo {
   private screenWaiter: ScreenTransitionWaiter;
   private timer: Timer;
   private pathOptimizer: PathOptimizer | undefined;
+  private sessionUuid?: string;
 
   private static readonly MAX_TIMEOUT_MS = 30000; // 30 seconds
   private static readonly STEP_TIMEOUT_MS = 5000; // 5 seconds per step
@@ -52,16 +56,18 @@ export class NavigateTo {
     screenWaiter: ScreenTransitionWaiter | null = null,
     navigationManager?: NavigationGraphService,
     timer: Timer = defaultTimer,
-    pathOptimizer?: PathOptimizer
+    pathOptimizer?: PathOptimizer,
+    sessionUuid?: string
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.timer = timer;
     this.pathOptimizer = pathOptimizer;
+    this.sessionUuid = sessionUuid;
 
     // Use injected dependencies or create defaults
-    this.uiStateSetup = uiStateSetup || new DefaultUIStateSetup(this.device, this.adb);
+    this.uiStateSetup = uiStateSetup || new DefaultUIStateSetup(this.device, this.adb, undefined, timer, sessionUuid);
     this.screenWaiter = screenWaiter || new DefaultScreenTransitionWaiter(
       this.navigationManager,
       NavigateTo.POLL_INTERVAL_MS
@@ -80,6 +86,7 @@ export class NavigateTo {
 
     const startTime = this.timer.now();
     const { targetScreen } = options;
+    this.sessionUuid ??= options.sessionUuid;
 
     try {
       // Get current screen from navigation graph
@@ -315,10 +322,16 @@ export class NavigateTo {
     // `interaction.args` is never mutated. Under `--actions-diff-observe` this
     // replay neither diffs its observation nor advances the agent-facing diff
     // baseline. Throws ActionableError if the tool is not registered.
-    await ToolRegistry.callInternal(
+    const response = await ToolRegistry.callInternal(
       interaction.toolName,
-      interaction.args as Record<string, unknown>
+      {
+        ...(interaction.args as Record<string, unknown>),
+        platform: this.device.platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+      }
     );
+    throwIfInternalToolFailed(response, interaction.toolName, this.device.platform);
   }
 
   /**
@@ -328,10 +341,13 @@ export class NavigateTo {
     // Keep learned-path recovery platform-aware. The interaction tool selects
     // CtrlProxy on iOS and retains Android's accessibility/ADB fallback; the
     // registry call also preserves the internal no-diff contract.
-    await ToolRegistry.callInternal("pressButton", {
+    const response = await ToolRegistry.callInternal("pressButton", {
       button: "back",
-      platform: this.device.platform
+      platform: this.device.platform,
+      deviceId: this.device.deviceId,
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
     });
+    throwIfInternalToolFailed(response, "pressButton", this.device.platform);
     logger.debug(`[NAVIGATE_TO] Pressed back via ${this.device.platform} interaction tool`);
   }
 

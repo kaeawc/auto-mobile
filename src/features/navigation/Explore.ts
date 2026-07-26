@@ -4,6 +4,7 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
 import { ToolRegistry } from "../../server/toolRegistry";
+import { throwIfInternalToolFailed } from "../../server/internalToolCall";
 import { NavigationGraphManager, type NavigationEdge, type NavigationGraphService } from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { TapOnElement } from "../action/TapOnElement";
@@ -89,6 +90,7 @@ export class Explore extends BaseVisualChange {
   private graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
   private currentElementConfidence: number = 0;
+  private sessionUuid?: string;
 
   // Constants for safety limits
   private static readonly MAX_CONSECUTIVE_BACKS = 5;
@@ -103,12 +105,14 @@ export class Explore extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbClient | null = null,
     timer: Timer = defaultTimer,
-    navigationManager?: NavigationGraphService
+    navigationManager?: NavigationGraphService,
+    sessionUuid?: string
   ) {
     super(device, adb, timer);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.exploredElements = new Map();
     this.elementParser = new DefaultElementParser();
+    this.sessionUuid = sessionUuid;
   }
 
   /**
@@ -770,10 +774,13 @@ export class Explore extends BaseVisualChange {
       // Recovery is an internal interaction, not an Android transport detail.
       // callInternal marks it no-diff so the observation it produces does not
       // advance the caller-visible baseline during exploration.
-      await ToolRegistry.callInternal("pressButton", {
+      const response = await ToolRegistry.callInternal("pressButton", {
         button: "back",
-        platform: this.device.platform
+        platform: this.device.platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
       }, progress);
+      throwIfInternalToolFailed(response, "pressButton", this.device.platform);
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
@@ -799,9 +806,12 @@ export class Explore extends BaseVisualChange {
       // `homeScreen` owns the platform-specific implementation and its
       // actionable failures. Keep the internal recovery call out of the
       // external observation-diff baseline.
-      await ToolRegistry.callInternal("homeScreen", {
-        platform: this.device.platform
+      const response = await ToolRegistry.callInternal("homeScreen", {
+        platform: this.device.platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
       }, progress);
+      throwIfInternalToolFailed(response, "homeScreen", this.device.platform);
 
       // Wait for home screen
       await this.timer.sleep(2000);

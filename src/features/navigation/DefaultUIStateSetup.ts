@@ -2,8 +2,8 @@ import { BootedDevice } from "../../models";
 import { ObserveResult } from "../../models/ObserveResult";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
 import { ToolRegistry } from "../../server/toolRegistry";
+import { throwIfInternalToolFailed } from "../../server/internalToolCall";
 import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
@@ -29,16 +29,19 @@ export class DefaultUIStateSetup implements UIStateSetup {
   private adb: AdbClient;
   private observeScreenProvider: () => ObserveScreenLike;
   private timer: Timer;
+  private sessionUuid?: string;
 
   constructor(
     device: BootedDevice,
     adb: AdbClient,
     observeScreenProvider?: () => ObserveScreenLike,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    sessionUuid?: string
   ) {
     this.device = device;
     this.adb = adb;
     this.timer = timer;
+    this.sessionUuid = sessionUuid;
     // The setup holds a resolved AdbClient (not a factory), so wrap it in a
     // trivial factory to satisfy ObserveScreen's factory-only contract (matches
     // the AndroidCtrlProxyClient.getInstance call below).
@@ -144,6 +147,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
       const swipeOnArgs: any = {
         platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         direction: scrollPosition.direction,
         lookFor
       };
@@ -271,15 +276,17 @@ export class DefaultUIStateSetup implements UIStateSetup {
     logger.info(`[UI_STATE_SETUP] Setting up UI state: tapping "${identifier}"`);
 
     try {
-      const args: Record<string, string> = {
+      const args: Record<string, unknown> = {
         action: "tap",
-        platform
+        platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
       };
 
       if (element.text) {
-        args.text = element.text;
+        args.selector = { text: element.text };
       } else if (element.resourceId) {
-        args.elementId = element.resourceId;
+        args.selector = { elementId: element.resourceId };
       }
 
       // Internal setup tap (#3087) via the callInternal seam (#3108): no
@@ -347,7 +354,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     // Strategy 1: Try back button (works for most dialogs)
     if (modal.type === "dialog") {
       try {
-        await this.pressBack();
+        await this.pressBack(platform);
         await this.sleep(200);
 
         // Verify dismissal
@@ -383,7 +390,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
           await ToolRegistry.callInternal(swipeTool, {
             direction: "down",
             autoTarget: false,
-            platform
+            platform,
+            deviceId: this.device.deviceId,
+            ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
           });
           await this.sleep(200);
 
@@ -397,7 +406,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         }
 
         // Fallback to back button
-        await this.pressBack();
+        await this.pressBack(platform);
         await this.sleep(200);
 
         const currentState = await this.getCurrentUIState(platform);
@@ -434,8 +443,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
     // Strategy 4: Tap outside (for popups and menus)
     if (modal.type === "popup" || modal.type === "menu" || modal.type === "overlay") {
       try {
-        // Tap top-left corner (usually outside modal)
-        await this.adb.executeCommand("shell input tap 50 50");
+        // There is no coordinate-tap interaction tool. Use the platform-aware
+        // back action rather than sending an Android-only shell command; iOS
+        // CtrlProxy maps it to its native modal dismissal behavior.
+        await this.pressBack(platform);
         await this.sleep(200);
 
         // Verify dismissal
@@ -452,7 +463,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
     // Final fallback: back button
     try {
-      await this.pressBack();
+      await this.pressBack(platform);
       await this.sleep(200);
 
       const currentState = await this.getCurrentUIState(platform);
@@ -486,9 +497,11 @@ export class DefaultUIStateSetup implements UIStateSetup {
         // Internal close-button tap (#3087) via the callInternal seam (#3108):
         // no diff/strip, no baseline advance.
         await ToolRegistry.callInternal(tapTool, {
+          selector: { text },
           action: "tap",
-          text,
-          platform
+          platform,
+          deviceId: this.device.deviceId,
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
         });
         logger.debug(`[UI_STATE_SETUP] Tapped close button: "${text}"`);
         return true;
@@ -504,19 +517,15 @@ export class DefaultUIStateSetup implements UIStateSetup {
   /**
    * Press the back button.
    */
-  private async pressBack(): Promise<void> {
-    try {
-      const client = AndroidCtrlProxyClient.getInstance(this.device, { create: () => this.adb });
-      const result = await client.requestGlobalAction("back", 3000);
-      if (result.success) {
-        logger.debug("[UI_STATE_SETUP] Pressed back via accessibility service");
-        return;
-      }
-    } catch {
-      // Fall through to ADB
-    }
-    await this.adb.executeCommand("shell input keyevent 4");
-    logger.debug("[UI_STATE_SETUP] Pressed back via ADB keyevent");
+  private async pressBack(platform: string): Promise<void> {
+    const response = await ToolRegistry.callInternal("pressButton", {
+      button: "back",
+      platform,
+      deviceId: this.device.deviceId,
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+    });
+    throwIfInternalToolFailed(response, "pressButton", platform);
+    logger.debug(`[UI_STATE_SETUP] Pressed back via ${platform} interaction tool`);
   }
 
   /**

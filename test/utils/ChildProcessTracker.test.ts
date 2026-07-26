@@ -201,6 +201,63 @@ describe("ChildProcessTracker", () => {
     });
   });
 
+  describe("createExitTracker stderr + signal attribution", () => {
+    test("accumulates stderr chunks emitted by the tracked process", async () => {
+      const process = new EventEmitter() as TrackedChildProcess;
+      process.exitCode = null;
+      process.signalCode = null;
+      process.killed = false;
+      const stderrEmitter = new EventEmitter();
+      process.stderr = stderrEmitter as unknown as TrackedChildProcess["stderr"];
+      process.kill = () => true;
+
+      const stderr: string[] = [];
+      const { exitPromise } = createExitTracker(process, stderr);
+
+      stderrEmitter.emit("data", Buffer.from("boom "));
+      stderrEmitter.emit("data", "second");
+
+      process.emit("exit", 1, null);
+      await exitPromise;
+
+      // stderr must be captured so a failed capture reports why it died.
+      expect(stderr).toEqual(["boom ", "second"]);
+    });
+
+    test("attributes the terminating signal when the process has already exited", async () => {
+      const process = new EventEmitter() as TrackedChildProcess;
+      process.exitCode = 137;
+      process.signalCode = "SIGKILL";
+      process.killed = true;
+      process.stderr = null;
+      process.kill = () => true;
+
+      const stderr: string[] = [];
+      const { exitState, exitPromise } = createExitTracker(process, stderr);
+      await exitPromise;
+
+      // A process reaped before the tracker attached still records how it died.
+      expect(exitState.exitCode).toBe(137);
+      expect(exitState.signal).toBe("SIGKILL");
+    });
+  });
+
+  describe("waitForExit killed-but-unreaped guard", () => {
+    test("does not re-signal a process that was already killed but not yet reaped", async () => {
+      const timer = new FakeTimer();
+      const process = new FakeStoppableProcess();
+      process.killed = true;
+      process.exitCode = null;
+
+      // A second stop on an already-killed process must await the existing exit,
+      // not send another signal that would truncate the iOS simctl moov atom.
+      await waitForExit(process, Promise.resolve(), { timer });
+
+      expect(process.signals).toEqual([]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+  });
+
   describe("getFileSize", () => {
     test("returns file size or undefined when missing", async () => {
       const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "child-process-tracker-"));

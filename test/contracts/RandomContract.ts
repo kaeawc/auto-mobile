@@ -20,5 +20,10 @@ export const runRandomContract = (
       expect(["a", "b", "c"]).toContain(random.pick(["a", "b", "c"]));
       expect(() => random.pick([])).toThrow(/empty/);
     });
+
+    test("pick returns the sole element of a single-item array", function() {
+      const random = makeRandom();
+      expect(random.pick(["only"])).toBe("only");
+    });
   });
 };

@@ -154,8 +154,11 @@ describe("PlanMigrator", () => {
           steps: [{ tool: "observe", params: {} }],
         });
 
-        expect(plan.metadata.createdAt).toBeDefined();
-        expect(typeof plan.metadata.createdAt).toBe("string");
+        // The default createdAt is stamped as an ISO-8601 UTC timestamp; assert
+        // the exact shape rather than merely that some string is present.
+        expect(plan.metadata.createdAt).toMatch(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+        );
         expect(report.migrated).toBe(true);
       });
 

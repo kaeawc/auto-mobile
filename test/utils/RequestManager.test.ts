@@ -175,15 +175,85 @@ describe("RequestManager", () => {
     expect(pendingIds.length).toBe(2);
   });
 
-  test("should reset counter on reset", () => {
+  test("resolveError uses the request-specific error factory to shape the result", async () => {
+    const id = manager.generateId("ios");
+    const promise = manager.register<{ success: boolean; wireText?: string; totalTimeMs?: number }>(
+      id,
+      "ios",
+      5000,
+      () => ({ success: false }),
+      (error, totalTimeMs) => ({ success: false, wireText: error, totalTimeMs })
+    );
+
+    const handled = manager.resolveError(id, "unknown command: frobnicate", 42);
+    expect(handled).toBe(true);
+
+    const result = await promise;
+    // The iOS unknown-command wire text must survive as its typed field, not be
+    // flattened into the generic envelope's `error`.
+    expect(result.success).toBe(false);
+    expect(result.wireText).toBe("unknown command: frobnicate");
+    expect(result.totalTimeMs).toBe(42);
+  });
+
+  test("resolveError defaults totalTimeMs to 0 and still routes through the factory", async () => {
+    const id = manager.generateId("ios");
+    const promise = manager.register<{ success: boolean; wireText?: string; totalTimeMs?: number }>(
+      id,
+      "ios",
+      5000,
+      () => ({ success: false }),
+      (error, totalTimeMs) => ({ success: false, wireText: error, totalTimeMs })
+    );
+
+    manager.resolveError(id, "late reply");
+
+    const result = await promise;
+    expect(result.wireText).toBe("late reply");
+    expect(result.totalTimeMs).toBe(0);
+  });
+
+  test("resolveError falls back to a generic envelope when no factory is registered", async () => {
+    const id = manager.generateId("swipe");
+    const promise = manager.register<{ success: boolean; error?: string; totalTimeMs?: number }>(
+      id,
+      "swipe",
+      5000,
+      () => ({ success: false })
+    );
+
+    manager.resolveError(id, "device offline", 7);
+
+    const result = await promise;
+    expect(result).toEqual({ success: false, totalTimeMs: 7, error: "device offline" });
+  });
+
+  test("resolveError clears the pending timeout and removes the request", () => {
+    const id = manager.generateId("test");
+    manager.register(id, "test", 5000, () => ({}), (error, totalTimeMs) => ({ error, totalTimeMs }));
+
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+
+    manager.resolveError(id, "boom", 0);
+
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    expect(manager.isPending(id)).toBe(false);
+  });
+
+  test("resolveError returns false for an unknown request id", () => {
+    expect(manager.resolveError("does-not-exist", "boom", 0)).toBe(false);
+  });
+
+  test("resets the counter on reset so the next id restarts from 1", () => {
     manager.generateId("test");
     manager.generateId("test");
     manager.generateId("test");
 
     manager.reset();
 
-    // Counter should be reset - new IDs should start from 1 again
+    // FakeTimer stays at now()=0, so the next id is fully determined: the counter
+    // must restart at 1 rather than continue from 4.
     const newId = manager.generateId("test");
-    expect(newId).toContain("_1");
+    expect(newId).toBe("test_0_1");
   });
 });

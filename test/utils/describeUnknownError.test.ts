@@ -21,4 +21,54 @@ describe("describeUnknownError", () => {
     expect(s).toContain("cause=");
     expect(s).toContain("inner");
   });
+
+  test("preserves a custom Error subclass name", () => {
+    expect(describeUnknownError(new TypeError("bad type"))).toContain("TypeError");
+  });
+
+  test("truncates the stack to the first three frames joined by an arrow", () => {
+    const err = new Error("boom");
+    err.stack = "L1\nL2\nL3\nL4\nL5";
+    expect(describeUnknownError(err)).toBe("Error: boom | L1 ← L2 ← L3");
+  });
+
+  test("falls back to the name when the Error message is empty", () => {
+    const err = new Error("");
+    err.stack = "";
+    expect(describeUnknownError(err)).toBe("Error");
+  });
+
+  test("stringifies null", () => {
+    expect(describeUnknownError(null)).toBe("null");
+  });
+
+  test("stringifies undefined", () => {
+    expect(describeUnknownError(undefined)).toBe("undefined");
+  });
+
+  test("JSON-serializes a plain object with keys", () => {
+    expect(describeUnknownError({ a: 1, b: "x" })).toBe('{"a":1,"b":"x"}');
+  });
+
+  test("serializes a non-empty array", () => {
+    expect(describeUnknownError([1, 2])).toBe("[1,2]");
+  });
+
+  test("survives a circular object without throwing (crash guard)", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(describeUnknownError(circular)).toBe("[object Object]");
+  });
+
+  test("stringifies a string primitive as itself", () => {
+    expect(describeUnknownError("plain")).toBe("plain");
+  });
+
+  test("stringifies a number primitive", () => {
+    expect(describeUnknownError(42)).toBe("42");
+  });
+
+  test("stringifies a boolean primitive", () => {
+    expect(describeUnknownError(false)).toBe("false");
+  });
 });

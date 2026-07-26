@@ -8,6 +8,13 @@ private final class NavEventHolder: @unchecked Sendable {
     func set(_ event: NavigationEvent) { lock.lock(); _event = event; lock.unlock() }
 }
 
+private final class LifecycleStateHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _state: String?
+    var state: String? { lock.lock(); defer { lock.unlock() }; return _state }
+    func set(_ state: String) { lock.lock(); _state = state; lock.unlock() }
+}
+
 final class AutoMobileSDKTests: XCTestCase {
     override func tearDown() {
         AutoMobileSDK.shared.reset()
@@ -100,5 +107,28 @@ final class AutoMobileSDKTests: XCTestCase {
         XCTAssertFalse(AutoMobileSDK.shared.isEnabled)
         AutoMobileSDK.shared.setEnabled(true)
         XCTAssertTrue(AutoMobileSDK.shared.isEnabled)
+    }
+
+    func testSetEnabledBroadcastsTrackingDisabledControlEvent() {
+        let holder = LifecycleStateHolder()
+        let observer = NotificationCenter.default.addObserver(
+            forName: SdkEventBroadcaster.eventBatchNotification,
+            object: nil,
+            queue: nil
+        ) { notification in
+            guard let data = notification.userInfo?[SdkEventBroadcaster.eventBatchUserInfoKey] as? Data,
+                  let batch = try? JSONDecoder().decode(SdkEventBatch.self, from: data),
+                  let event = batch.events.first,
+                  let lifecycle = try? JSONDecoder().decode(SdkLifecycleEvent.self, from: event.payload),
+                  lifecycle.state == "sdk_tracking_disabled"
+            else { return }
+            holder.set(lifecycle.state)
+        }
+
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app")
+        AutoMobileSDK.shared.setEnabled(false)
+
+        NotificationCenter.default.removeObserver(observer)
+        XCTAssertEqual(holder.state, "sdk_tracking_disabled")
     }
 }

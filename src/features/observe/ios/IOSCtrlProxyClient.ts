@@ -327,6 +327,7 @@ type SdkEventPollResult = {
 type SdkScreenIdentityPollGeneration = {
   clearGeneration: number;
   applicationGenerations: Map<string, number>;
+  applicationIdsToDrain: Set<string>;
 };
 
 type DecodedSdkEvent = {
@@ -439,6 +440,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     { timestamp: number; sequenceNumber?: number }
   >();
   private readonly sdkScreenIdentityGenerationsByApplicationId = new Map<string, number>();
+  private readonly sdkScreenIdentityPendingQueueDrains = new Set<string>();
+  private readonly sdkScreenIdentityTrackingDisabledApplicationIds = new Set<string>();
   private sdkScreenIdentityClearGeneration = 0;
   private sdkEventPollGeneration = 0;
   private sdkEventPollAbortController: AbortController | null = null;
@@ -517,16 +520,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /** Remove SDK navigation state after an app process is replaced. */
   public clearSdkScreenIdentity(applicationId?: string): void {
     if (applicationId) {
-      this.sdkScreenIdentityGenerationsByApplicationId.set(
-        applicationId,
-        this.getSdkScreenIdentityGeneration(applicationId) + 1,
-      );
-      this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
-      this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
+      this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
+      this.invalidateSdkScreenIdentity(applicationId);
       return;
     }
     this.sdkScreenIdentityClearGeneration++;
     this.sdkScreenIdentityGenerationsByApplicationId.clear();
+    this.sdkScreenIdentityPendingQueueDrains.clear();
+    this.sdkScreenIdentityTrackingDisabledApplicationIds.clear();
     this.sdkScreenIdentitiesByApplicationId.clear();
     this.sdkScreenIdentityOrdersByApplicationId.clear();
   }
@@ -1043,6 +1044,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const pollGeneration: SdkScreenIdentityPollGeneration = {
       clearGeneration: this.sdkScreenIdentityClearGeneration,
       applicationGenerations: new Map(this.sdkScreenIdentityGenerationsByApplicationId),
+      applicationIdsToDrain: new Set(this.sdkScreenIdentityPendingQueueDrains),
     };
     const host = this.resolveWebSocketHost();
     const url = `http://${host}:${this.port}/sdk-events`;
@@ -1084,7 +1086,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (generation !== this.sdkEventPollGeneration) {
         return this.emptySdkEventPollResult();
       }
-      if (this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration)
+      if (this.applySdkScreenIdentityLifecycleEvent(event)) {
+        continue;
+      }
+      if (!this.shouldDrainSdkScreenIdentityEvent(event.applicationId, pollGeneration)
+        && this.isSdkScreenIdentityPollCurrent(event.applicationId, pollGeneration)
         && this.rememberSdkScreenIdentity(
           event.eventType,
           event.applicationId,
@@ -1095,6 +1101,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         rememberedApplicationIds.add(event.applicationId!);
       }
     }
+    this.completeSdkScreenIdentityQueueDrains(pollGeneration, generation);
     for (const event of events) {
       if (generation !== this.sdkEventPollGeneration) {
         return this.emptySdkEventPollResult();
@@ -1169,7 +1176,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timestamp: number,
     sequenceNumber: number | undefined,
   ): boolean {
-    if (!applicationId) {
+    if (!applicationId || this.sdkScreenIdentityTrackingDisabledApplicationIds.has(applicationId)) {
       return false;
     }
     const identity = deriveIosSdkScreenIdentity(eventType, applicationId, payload);
@@ -1194,6 +1201,54 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private getSdkScreenIdentityGeneration(applicationId: string): number {
     return this.sdkScreenIdentityGenerationsByApplicationId.get(applicationId) ?? 0;
+  }
+
+  private invalidateSdkScreenIdentity(applicationId: string): void {
+    this.sdkScreenIdentityGenerationsByApplicationId.set(
+      applicationId,
+      this.getSdkScreenIdentityGeneration(applicationId) + 1,
+    );
+    this.sdkScreenIdentityPendingQueueDrains.add(applicationId);
+    this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
+    this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
+  }
+
+  private applySdkScreenIdentityLifecycleEvent(event: DecodedSdkEvent): boolean {
+    if (!event.applicationId || event.eventType !== "lifecycle") {
+      return false;
+    }
+    if (event.payload.state === "sdk_tracking_disabled") {
+      this.sdkScreenIdentityTrackingDisabledApplicationIds.add(event.applicationId);
+      this.invalidateSdkScreenIdentity(event.applicationId);
+      return true;
+    }
+    if (event.payload.state === "sdk_tracking_enabled") {
+      this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(event.applicationId);
+      return true;
+    }
+    return false;
+  }
+
+  private shouldDrainSdkScreenIdentityEvent(
+    applicationId: string | undefined,
+    pollGeneration: SdkScreenIdentityPollGeneration,
+  ): boolean {
+    return applicationId !== undefined && pollGeneration.applicationIdsToDrain.has(applicationId);
+  }
+
+  private completeSdkScreenIdentityQueueDrains(
+    pollGeneration: SdkScreenIdentityPollGeneration,
+    generation: number,
+  ): void {
+    if (generation !== this.sdkEventPollGeneration) {
+      return;
+    }
+    for (const applicationId of pollGeneration.applicationIdsToDrain) {
+      if ((pollGeneration.applicationGenerations.get(applicationId) ?? 0)
+        === this.getSdkScreenIdentityGeneration(applicationId)) {
+        this.sdkScreenIdentityPendingQueueDrains.delete(applicationId);
+      }
+    }
   }
 
   private isSdkScreenIdentityPollCurrent(

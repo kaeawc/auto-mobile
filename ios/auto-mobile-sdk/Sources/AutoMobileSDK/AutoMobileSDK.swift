@@ -337,10 +337,12 @@ public final class AutoMobileSDK: @unchecked Sendable {
     /// are paused. When re-enabled, subsystems resume.
     public func setEnabled(_ enabled: Bool) {
         lock.lock()
+        let wasEnabled = _isEnabled
         _isEnabled = enabled
         let buffer = eventBuffer
         let initialized = _isInitialized
         let config = _configuration
+        let bundleId = _bundleId
         lock.unlock()
 
         buffer?.isBufferEnabled = enabled
@@ -348,6 +350,19 @@ public final class AutoMobileSDK: @unchecked Sendable {
             buffer?.start()
         } else {
             buffer?.stop()
+        }
+
+        // Screen identity is control-plane state. Send this transition directly
+        // instead of through the disabled buffer so CtrlProxy can discard an
+        // identity that would otherwise outlive SDK tracking.
+        if initialized && wasEnabled != enabled {
+            SdkEventBroadcaster.shared.broadcastBatch(
+                bundleId: bundleId,
+                events: [SdkLifecycleEvent(
+                    state: enabled ? "sdk_tracking_enabled" : "sdk_tracking_disabled",
+                    bundleId: bundleId
+                )]
+            )
         }
 
         // Propagate to all subsystems (only if initialized). Skip subsystems

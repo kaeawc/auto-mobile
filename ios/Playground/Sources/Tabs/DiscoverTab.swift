@@ -36,6 +36,12 @@ struct DiscoverTab: View {
             .background(theme.background)
             .navigationTitle("Discover")
             .searchable(text: $searchText, prompt: "Search videos")
+            .onAppear {
+                SwiftUINavigationAdapter.shared.trackNavigation(
+                    destination: "discover",
+                    metadata: ["type": "navigation_pop_or_tab_appear"]
+                )
+            }
             .navigationDestination(for: VideoItem.self) { video in
                 VideoDetailView(video: video)
             }

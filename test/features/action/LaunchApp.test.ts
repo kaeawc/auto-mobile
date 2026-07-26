@@ -421,6 +421,25 @@ describe("LaunchApp", () => {
       }
     });
 
+    test("clears a simulator SDK identity before a warm launch", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, cleanup } = createIOSTestHarness({ bundleId: userBundleId, launchSuccess: true });
+      const clearedBundleIds: string[] = [];
+      const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+        clearSdkScreenIdentity: (bundleId: string) => clearedBundleIds.push(bundleId),
+      } as unknown as IOSCtrlProxyClient);
+
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, false);
+
+        expect(result.success).toBe(true);
+        expect(clearedBundleIds).toEqual([userBundleId]);
+      } finally {
+        existingClientSpy.mockRestore();
+        cleanup();
+      }
+    });
+
     test("re-observes until the iOS launch observation hierarchy reports the launched bundle", async () => {
       fakeTimer.enableAutoAdvance();
       const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "44444444-4444-4444-4444-444444444444" };

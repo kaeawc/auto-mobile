@@ -122,6 +122,7 @@ nav:
              - 'Critical Section': design-docs/mcp/daemon/critical-section.md
              - 'Multi-Agent Filesystem Contract': design-docs/mcp/daemon/multi-agent-filesystem-contract.md
              - 'Unix Socket API': design-docs/mcp/daemon/unix-socket-api.md
+             - 'Screen Control Mapping': design-docs/mcp/daemon/screen-control-mapping.md
           - 'Multi-device': design-docs/mcp/multi-device.md
           - 'Navigation Graph':
              - 'Overview': design-docs/mcp/nav/index.md

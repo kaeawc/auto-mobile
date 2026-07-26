@@ -64,7 +64,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
-import kotlin.math.roundToInt
+import dev.jasonpearson.automobile.desktop.domain.DevicePoint
+import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
+import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
+import dev.jasonpearson.automobile.desktop.domain.DeviceScreenGeometry
+import dev.jasonpearson.automobile.desktop.domain.ViewportPoint
 import org.jetbrains.skia.Image
 
 private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCase = true)
@@ -166,6 +170,21 @@ fun DeviceScreenView(
   elementMap: Map<String, UIElementInfo>? = null,
   modifier: Modifier = Modifier,
   refitTrigger: Any? = null, // When this changes, refit the view to center
+  /**
+   * Interaction contract for the view. Defaults to [DeviceScreenControlMode.Inspector] so every
+   * existing call site keeps today's behavior (click selects elements, hover highlights) with no
+   * source change. Pass [DeviceScreenControlMode.Control] to opt into device-control mapping: a
+   * click is converted to a device coordinate via [DeviceScreenCoordinateMapper] and reported to
+   * [onControlTap] instead of selecting. This view never sends daemon input itself; forwarding the
+   * coordinate to the typed daemon input helpers is the caller's job (issue #3347).
+   */
+  controlMode: DeviceScreenControlMode = DeviceScreenControlMode.Inspector,
+  /**
+   * Called in [DeviceScreenControlMode.Control] with the device coordinate a click maps to. The
+   * point carries [DevicePoint.inBounds]; a null default makes control mode inert until a caller
+   * wires it. No-op in inspector mode.
+   */
+  onControlTap: ((DevicePoint) -> Unit)? = null,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -211,20 +230,9 @@ fun DeviceScreenView(
       // (Android accessibility service root nodes typically have (0,0,0,0)).
       val rootW = hierarchy?.bounds?.width?.takeIf { it > 0 } ?: screenWidth
       val rootH = hierarchy?.bounds?.height?.takeIf { it > 0 } ?: screenHeight
-      if (imgW <= 0 || imgH <= 0 || rootW <= 0 || rootH <= 0) return@remember 0
-
-      val imageIsPortrait = imgH > imgW
-      val boundsIsPortrait = rootH > rootW
-
-      if (imageIsPortrait && !boundsIsPortrait) {
-        // Portrait screenshot, landscape bounds → rotate 90° CW to landscape
-        3
-      } else if (!imageIsPortrait && boundsIsPortrait) {
-        // Landscape screenshot, portrait bounds → rotate 270° CW to portrait
-        1
-      } else {
-        0
-      }
+      // Compose-free rotation detection lives in DeviceScreenCoordinateMapper so daemon clients
+      // (and the coordinate-mapping tests) share exactly this rule.
+      DeviceScreenCoordinateMapper.detectScreenshotRotation(imgW, imgH, rootW, rootH)
     }
 
   // Rotate the raw bitmap to align with the hierarchy coordinate system.
@@ -334,25 +342,20 @@ fun DeviceScreenView(
       val effectiveWidth = imageBitmap?.width ?: screenWidth
       val effectiveHeight = imageBitmap?.height ?: screenHeight
 
-      // Calculate device frame size that fits viewport while maintaining aspect ratio
-      val deviceAspectRatio =
-        if (effectiveWidth > 0) effectiveHeight.toFloat() / effectiveWidth.toFloat() else 2.16f
-      val padding = 32f
-      val maxFrameWidth = (viewportWidth - padding * 2).coerceAtLeast(1f)
-      val maxFrameHeight = (viewportHeight - padding * 2).coerceAtLeast(1f)
-
-      // Size to fit within viewport maintaining aspect ratio
-      val frameWidthPx: Float
-      val frameHeightPx: Float
-      if (maxFrameWidth * deviceAspectRatio <= maxFrameHeight) {
-        // Width-constrained
-        frameWidthPx = maxFrameWidth
-        frameHeightPx = maxFrameWidth * deviceAspectRatio
-      } else {
-        // Height-constrained
-        frameHeightPx = maxFrameHeight
-        frameWidthPx = maxFrameHeight / deviceAspectRatio
-      }
+      // Calculate device frame size that fits viewport while maintaining aspect ratio.
+      // The aspect-fit math lives in the Compose-free DeviceScreenCoordinateMapper so it is unit
+      // tested and reusable by daemon clients.
+      val padding = DeviceScreenCoordinateMapper.DEFAULT_PADDING
+      val fittedFrame =
+        DeviceScreenCoordinateMapper.fitToViewport(
+          imageWidth = effectiveWidth,
+          imageHeight = effectiveHeight,
+          viewportWidth = viewportWidth,
+          viewportHeight = viewportHeight,
+          padding = padding,
+        )
+      val frameWidthPx: Float = fittedFrame.widthPx
+      val frameHeightPx: Float = fittedFrame.heightPx
 
       // Scale factor from frame pixels to device pixels (for aspect ratio calculations only)
       val frameToDeviceScale = if (frameWidthPx > 0) effectiveWidth.toFloat() / frameWidthPx else 1f
@@ -370,10 +373,6 @@ fun DeviceScreenView(
           ?: effectiveHeight
       // The "rotated root width" is the root dimension that maps to the frame width
       val rotatedRootWidth = if (isLandscape) rootBoundsHeight else rootBoundsWidth
-
-      // Scale factor from frame pixels to hierarchy bounds coordinates (for hit testing).
-      val frameToHierarchyScale =
-        if (frameWidthPx > 0) rotatedRootWidth.toFloat() / frameWidthPx else 1f
 
       // Reset fit state when refitTrigger changes (e.g., panels toggled)
       LaunchedEffect(refitTrigger) {
@@ -399,16 +398,17 @@ fun DeviceScreenView(
       // Auto-fit on initial load or when refit is triggered
       LaunchedEffect(viewportWidth, viewportHeight, frameWidthPx, frameHeightPx, hasInitialFit) {
         if (!hasInitialFit && viewportWidth > 0 && viewportHeight > 0 && frameWidthPx > 0) {
-          // Calculate scale needed to fit device in viewport
-          // The frame is already sized to fit, so scale 1.0 should fit
-          // But if viewport is very narrow, we may need to scale down further
+          // Calculate scale needed to fit device in viewport (Compose-free, unit-tested).
+          // The frame is already sized to fit, so scale 1.0 should fit; a very narrow viewport may
+          // need to scale down further.
           val fitScale =
-            minOf(
-                viewportWidth / (frameWidthPx + padding * 2),
-                viewportHeight / (frameHeightPx + padding * 2),
-                1f, // Don't scale up beyond 1.0 initially
-              )
-              .coerceIn(0.3f, 1f)
+            DeviceScreenCoordinateMapper.fitScale(
+              frameWidthPx = frameWidthPx,
+              frameHeightPx = frameHeightPx,
+              viewportWidth = viewportWidth,
+              viewportHeight = viewportHeight,
+              padding = padding,
+            )
 
           // Only change scale if it would increase (don't auto-shrink on window resize)
           // This allows expanding when window grows but keeps current zoom when shrinking
@@ -439,42 +439,29 @@ fun DeviceScreenView(
         zoomAroundPoint(newScale, viewportWidth / 2, viewportHeight / 2)
       }
 
-      // Convert screen coordinates to hierarchy bounds coordinates (for hit testing).
-      // Uses the same coordinate system as element.bounds so findElementAt works correctly.
-      // When the screenshot is rotated, we reverse the rotation to get back to
-      // the original hierarchy coordinate system.
-      fun screenToHierarchyCoords(screenX: Float, screenY: Float): Pair<Int, Int> {
-        val frameX = (screenX - offsetX) / scale
-        val frameY = (screenY - offsetY) / scale
-        // frameX/frameY are in the rotated display space — convert back to hierarchy space
-        val hierX: Int
-        val hierY: Int
-        when (boundsRotation) {
-          1 -> {
-            // Reverse of: rotated(x,y) = (origY, rootW - origX)
-            // So: origX = rootW - frameY*scale, origY = frameX*scale
-            val s = frameToHierarchyScale
-            hierX = (rootBoundsWidth - (frameY * s)).roundToInt()
-            hierY = (frameX * s).roundToInt()
-          }
-          2 -> {
-            val s = frameToHierarchyScale
-            hierX = (rootBoundsWidth - (frameX * s)).roundToInt()
-            hierY = (rootBoundsHeight - (frameY * s)).roundToInt()
-          }
-          3 -> {
-            // Reverse of: rotated(x,y) = (rootH - origY, origX)
-            val s = frameToHierarchyScale
-            hierX = (frameY * s).roundToInt()
-            hierY = (rootBoundsHeight - (frameX * s)).roundToInt()
-          }
-          else -> {
-            hierX = (frameX * frameToHierarchyScale).roundToInt()
-            hierY = (frameY * frameToHierarchyScale).roundToInt()
-          }
-        }
-        return hierX to hierY
-      }
+      // Current viewport<->device geometry. scale/offset are mutable pan/zoom state, so this is
+      // rebuilt per call to read live values. deviceWidth/deviceHeight are the hierarchy bounds
+      // coordinate space (== element.bounds), so mapped points feed findElementAt directly.
+      fun deviceGeometry(): DeviceScreenGeometry =
+        DeviceScreenGeometry(
+          frameWidthPx = frameWidthPx,
+          frameHeightPx = frameHeightPx,
+          scale = scale,
+          offsetX = offsetX,
+          offsetY = offsetY,
+          deviceWidth = rotatedRootWidth,
+          deviceHeight = rootBoundsHeight,
+        )
+
+      // Convert a viewport point to device (== hierarchy bounds) coordinates for hit testing and
+      // control-mode tapping. The screenshot is pre-rotated to the hierarchy orientation
+      // (boundsRotation is always 0 here), so this is a plain unscale + unpan with no rotation.
+      // The math lives in the Compose-free DeviceScreenCoordinateMapper so daemon clients share it.
+      fun screenToDevice(screenX: Float, screenY: Float): DevicePoint =
+        DeviceScreenCoordinateMapper.viewportToDevice(
+          ViewportPoint(screenX, screenY),
+          deviceGeometry(),
+        )
 
       // Focus requester for keyboard events
       val focusRequester = remember { FocusRequester() }
@@ -509,21 +496,31 @@ fun DeviceScreenView(
                 offsetY += dragAmount.y
               }
             }
-            .pointerInput(hierarchy) {
+            .pointerInput(hierarchy, controlMode) {
               detectTapGestures { offset ->
-                if (hierarchy != null) {
-                  val (deviceX, deviceY) = screenToHierarchyCoords(offset.x, offset.y)
-                  val element = LayoutInspectorMockData.findElementAt(hierarchy, deviceX, deviceY)
-                  onElementSelected(element?.id)
+                val point = screenToDevice(offset.x, offset.y)
+                when (controlMode) {
+                  // Control mode: report the mapped device coordinate for a caller to forward to
+                  // the daemon input helpers (issue #3347). This view never sends input itself.
+                  DeviceScreenControlMode.Control -> onControlTap?.invoke(point)
+                  // Inspector mode: select the deepest element under the click (unchanged
+                  // behavior).
+                  DeviceScreenControlMode.Inspector ->
+                    if (hierarchy != null) {
+                      val element =
+                        LayoutInspectorMockData.findElementAt(hierarchy, point.x, point.y)
+                      onElementSelected(element?.id)
+                    }
                 }
               }
             }
             .onPointerEvent(PointerEventType.Move) { event ->
-              if (hierarchy != null) {
+              // Hover highlighting is an inspector-only affordance.
+              if (controlMode == DeviceScreenControlMode.Inspector && hierarchy != null) {
                 val pos = event.changes.firstOrNull()?.position
                 if (pos != null) {
-                  val (deviceX, deviceY) = screenToHierarchyCoords(pos.x, pos.y)
-                  val element = LayoutInspectorMockData.findElementAt(hierarchy, deviceX, deviceY)
+                  val point = screenToDevice(pos.x, pos.y)
+                  val element = LayoutInspectorMockData.findElementAt(hierarchy, point.x, point.y)
                   onElementHovered(element?.id)
                 }
               }
@@ -756,14 +753,15 @@ fun DeviceScreenView(
           onZoomIn = { zoomAroundCenter((scale * 1.2f).coerceAtMost(5f)) },
           onZoomOut = { zoomAroundCenter((scale / 1.2f).coerceAtLeast(0.1f)) },
           onFitToScreen = {
-            // Calculate scale to fit and center the frame
+            // Calculate scale to fit and center the frame (shared Compose-free math).
             val fitScale =
-              minOf(
-                  viewportWidth / (frameWidthPx + padding * 2),
-                  viewportHeight / (frameHeightPx + padding * 2),
-                  1f,
-                )
-                .coerceIn(0.3f, 1f)
+              DeviceScreenCoordinateMapper.fitScale(
+                frameWidthPx = frameWidthPx,
+                frameHeightPx = frameHeightPx,
+                viewportWidth = viewportWidth,
+                viewportHeight = viewportHeight,
+                padding = padding,
+              )
             scale = fitScale
             offsetX = (viewportWidth - frameWidthPx * scale) / 2
             offsetY = (viewportHeight - frameHeightPx * scale) / 2

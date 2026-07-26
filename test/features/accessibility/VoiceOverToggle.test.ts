@@ -133,6 +133,27 @@ describe("VoiceOverToggle", () => {
       ).toBe(true);
     });
 
+    test("reports applied:false with the failure reason when the enable kickstart fails", async () => {
+      // On enable, a failing `launchctl kickstart` must NOT be swallowed as an
+      // already-stopped service (that swallow is disable-only). Even when the
+      // error text matches the already-stopped signature, the enable path must
+      // surface it as a typed failure rather than claim success.
+      fakeExec.setCommandHandler("launchctl kickstart", () => {
+        throw new Error("Command failed: launchctl kickstart\nexit code: 3\nstderr:\nNo process to signal.");
+      });
+      // Detection returns off by default; autoAdvance keeps the (mutated) confirm
+      // loop from blocking on real time.
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const result = await toggle.toggle(true);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.reason).toContain("No process to signal.");
+    });
+
     test("always applies even when detection would report already-enabled (CtrlProxy-safe)", async () => {
       // Simulates a CtrlProxy outage: detection always returns false regardless of reality.
       // toggle(false) must still run simctl rather than silently no-op.

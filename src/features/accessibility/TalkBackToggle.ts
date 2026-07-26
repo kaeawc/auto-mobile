@@ -6,7 +6,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
 import { accessibilityDetector } from "../../utils/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
-import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
+import { type SecureSettingsRpc, CtrlProxySecureSettingsRpc } from "./SecureSettingsRpc";
 
 const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
 const TALKBACK_SERVICE_FALLBACK = `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.TalkBackService`;
@@ -15,14 +15,17 @@ const DIALOG_DISMISS_DELAY_MS = 500;
 
 export class TalkBackToggle {
   private readonly adb: AdbExecutor;
+  private readonly secureSettings: SecureSettingsRpc;
 
   constructor(
     private readonly device: BootedDevice,
     adb: AdbExecutor | null = null,
     private readonly detector: AccessibilityDetector = accessibilityDetector,
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
+    secureSettings: SecureSettingsRpc | null = null
   ) {
     this.adb = adb ?? defaultAdbClientFactory.create(device);
+    this.secureSettings = secureSettings ?? new CtrlProxySecureSettingsRpc(device);
   }
 
   async toggle(enabled: boolean): Promise<TalkBackResult> {
@@ -105,8 +108,7 @@ export class TalkBackToggle {
   // because Settings.Secure writes require system-app privileges that the service may lack.
   private async writeSecureSetting(key: string, value: string, valueType: "string" | "int" = "string"): Promise<void> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await a11y.requestSettingsPut("secure", key, value, valueType);
+      const result = await this.secureSettings.put(key, value, valueType);
       if (result.success) {
         return;
       }
@@ -118,8 +120,7 @@ export class TalkBackToggle {
 
   private async deleteSecureSetting(key: string): Promise<void> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await a11y.requestSettingsPut("secure", key, null);
+      const result = await this.secureSettings.put(key, null);
       if (result.success) {
         return;
       }
@@ -131,8 +132,7 @@ export class TalkBackToggle {
 
   private async readSecureSetting(key: string): Promise<string> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await a11y.requestSettingsGet("secure", key);
+      const result = await this.secureSettings.get(key);
       if (result.success) {
         return result.found ? (result.value ?? "") : "";
       }

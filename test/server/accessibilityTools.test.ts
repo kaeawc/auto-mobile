@@ -1,14 +1,26 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAccessibilityTools, accessibilitySchema } from "../../src/server/accessibilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import type { BootedDevice } from "../../src/models";
+
+const ANDROID_DEVICE = { name: "a", deviceId: "emulator-5554", platform: "android" } as BootedDevice;
+const IOS_DEVICE = { name: "i", deviceId: "00008130-001", platform: "ios" } as BootedDevice;
+
+function accessibilityHandler() {
+  const tool = ToolRegistry.getAllTools({ includeUnavailable: true }).find(t => t.name === "accessibility");
+  if (!tool?.deviceAwareHandler) {
+    throw new Error("accessibility tool not registered");
+  }
+  return tool.deviceAwareHandler;
+}
 
 describe("accessibilityTools", () => {
   beforeEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
   });
 
   afterEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
   });
 
   describe("registration", () => {
@@ -16,6 +28,24 @@ describe("accessibilityTools", () => {
       registerAccessibilityTools();
       const names = ToolRegistry.getToolDefinitions().map(t => t.name);
       expect(names).toContain("accessibility");
+    });
+  });
+
+  describe("platform rejection", () => {
+    // Both rows short-circuit before any toggle/client is constructed, so no real
+    // device is touched. Only the two THROW rows are covered (issue #4179).
+    test("rejects voiceover on an Android device", async () => {
+      registerAccessibilityTools();
+      await expect(
+        accessibilityHandler()(ANDROID_DEVICE, { voiceover: true })
+      ).rejects.toThrow("VoiceOver is not supported on Android devices");
+    });
+
+    test("rejects talkback on an iOS device", async () => {
+      registerAccessibilityTools();
+      await expect(
+        accessibilityHandler()(IOS_DEVICE, { talkback: true })
+      ).rejects.toThrow("TalkBack is not supported on iOS devices");
     });
   });
 

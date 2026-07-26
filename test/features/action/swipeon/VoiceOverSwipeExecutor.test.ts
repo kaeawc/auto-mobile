@@ -311,44 +311,36 @@ describe("VoiceOverSwipeExecutor", () => {
       expect(fakeIosClient.getActionHistory()).toHaveLength(0);
     });
 
-    test("does not invoke a configured container action while VoiceOver is active", async () => {
+    // Both a failing container action (result success:false) and a throwing one
+    // must yield the same conservative "not supported" fallback without touching
+    // gestures, multi-finger swipes, or reporting a synthesized scroll. The rows
+    // preserve the original pair's distinctions: swipe direction and whether a
+    // FakeTimer is injected.
+    test.each([
+      {
+        label: "a configured failing container action",
+        direction: "down" as const,
+        arrange: () => fakeIosClient.setActionResult({ success: false, error: "Element not found" }),
+        withTimer: false,
+      },
+      {
+        label: "a throwing container action",
+        direction: "up" as const,
+        arrange: () => fakeIosClient.setFailureMode("action", new Error("Connection lost")),
+        withTimer: true,
+      },
+    ])("does not invoke $label while VoiceOver is active", async ({ direction, arrange, withTimer }) => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
-      fakeIosClient.setActionResult({ success: false, error: "Element not found" });
+      arrange();
       const container = makeContainerElement({ "resource-id": "com.example:id/list" });
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
-        executor,
-        fakeIosClient as any,
-        fakeVoiceOverDetector
-      );
+      const device = { platform: "ios", id: "00001234-ABCD" } as any;
+      const voiceOverExecutor = withTimer
+        ? new VoiceOverSwipeExecutor(device, executor, fakeIosClient as any, fakeVoiceOverDetector, fakeTimer)
+        : new VoiceOverSwipeExecutor(device, executor, fakeIosClient as any, fakeVoiceOverDetector);
 
-      const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "down", container, { duration: 300 }, perf);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("not supported");
-      expect(result.fallbackReason).toContain("do not reach VoiceOver");
-      expect(calls).toHaveLength(0);
-      expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
-      expect(fakeIosClient.getActionHistory()).toHaveLength(0);
-    });
-
-    test("does not invoke a throwing container action while VoiceOver is active", async () => {
-      const { executor, calls } = makeFakeGestureExecutor();
-      fakeVoiceOverDetector.setVoiceOverEnabled(true);
-      fakeIosClient.setFailureMode("action", new Error("Connection lost"));
-      const container = makeContainerElement({ "resource-id": "com.example:id/list" });
-
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
-        executor,
-        fakeIosClient as any,
-        fakeVoiceOverDetector,
-        fakeTimer
-      );
-
-      const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, "up", container, { duration: 300 }, perf);
+      const result = await voiceOverExecutor.executeSwipeGesture(100, 500, 100, 200, direction, container, { duration: 300 }, perf);
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not supported");

@@ -385,4 +385,91 @@ describe("FocusNavigationExecutor", () => {
     expect(driver.getSwipeCount()).toBe(4);
     expect(observed).toEqual([elements[0], elements[0], elements[0], elements[4]]);
   });
+
+  describe("navigation guards", () => {
+    const makeDriverFactory = (driver: FakeFocusNavigationDriver): FocusNavigationDriverFactory => ({
+      createDriver: () => driver
+    });
+
+    test("rejects a path that needs more swipes than the maxSwipes cap", async () => {
+      const driver = new FakeFocusNavigationDriver();
+      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
+      const executor = new FocusNavigationExecutor({
+        timer: new FakeTimer(),
+        driverFactory: makeDriverFactory(driver)
+      });
+
+      await expect(
+        executor.navigateToElement(
+          "device-1",
+          { resourceId: "c" },
+          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 5, direction: "forward" },
+          { maxSwipes: 2, swipeDelay: 0 }
+        )
+      ).rejects.toThrow(/max: 2/);
+      // Bailed before touching the device — no swipes issued.
+      expect(driver.getSwipeCount()).toBe(0);
+    });
+
+    test("rejects focus navigation on a non-Android device", async () => {
+      const driver = new FakeFocusNavigationDriver();
+      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
+      const executor = new FocusNavigationExecutor({
+        timer: new FakeTimer(),
+        driverFactory: makeDriverFactory(driver),
+        deviceResolver: deviceId => ({ name: deviceId, deviceId, platform: "ios" })
+      });
+
+      await expect(
+        executor.navigateToElement(
+          "udid-ios",
+          { resourceId: "c" },
+          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 2, direction: "forward" },
+          { swipeDelay: 0 }
+        )
+      ).rejects.toThrow(/only supported on Android/);
+      expect(driver.getSwipeCount()).toBe(0);
+    });
+
+    test("rejects a zero-sized screen instead of hanging", async () => {
+      const driver = new FakeFocusNavigationDriver();
+      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
+      // A finite-but-non-positive screen size must be rejected, not marched into
+      // the swipe loop (which would wedge to the test timeout).
+      driver.setScreenSize({ width: 0, height: 0 });
+      const executor = new FocusNavigationExecutor({
+        timer: new FakeTimer(),
+        driverFactory: makeDriverFactory(driver)
+      });
+
+      await expect(
+        executor.navigateToElement(
+          "device-1",
+          { resourceId: "c" },
+          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 3, direction: "forward" },
+          { swipeDelay: 0 }
+        )
+      ).rejects.toThrow(/screen size/);
+      expect(driver.getSwipeCount()).toBe(0);
+    });
+
+    test("surfaces a failed swipe as a navigation failure rather than success", async () => {
+      const driver = new FakeFocusNavigationDriver();
+      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
+      driver.setSwipeResult({ success: false, totalTimeMs: 1, error: "proxy swipe rejected" });
+      const executor = new FocusNavigationExecutor({
+        timer: new FakeTimer(),
+        driverFactory: makeDriverFactory(driver)
+      });
+
+      await expect(
+        executor.navigateToElement(
+          "device-1",
+          { resourceId: "c" },
+          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 1, direction: "forward" },
+          { swipeDelay: 0 }
+        )
+      ).rejects.toThrow(/proxy swipe rejected/);
+    });
+  });
 });

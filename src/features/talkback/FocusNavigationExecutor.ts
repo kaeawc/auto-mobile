@@ -139,7 +139,13 @@ export class FocusNavigationExecutor {
 
     const driver = this.driverFactory.createDriver(device);
     const screenSize = await driver.getScreenSize();
-    if (!screenSize || !Number.isFinite(screenSize.width) || !Number.isFinite(screenSize.height)) {
+    if (
+      !screenSize ||
+      !Number.isFinite(screenSize.width) ||
+      !Number.isFinite(screenSize.height) ||
+      screenSize.width <= 0 ||
+      screenSize.height <= 0
+    ) {
       throw new ActionableError("Unable to determine screen size for focus navigation.");
     }
 

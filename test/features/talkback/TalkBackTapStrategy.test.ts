@@ -161,6 +161,30 @@ describe("TalkBackTapStrategy", () => {
       });
     });
 
+    // isFocusTrapError classifies exactly the three navigation-failure messages
+    // the FocusNavigationExecutor can throw; any other error is NOT a focus trap.
+    // Asserted via the observable focusTrapDetected flag on the result.
+    test.each([
+      ["Focus did not move after multiple swipes. Try scrolling the container.", true],
+      ["Focus navigation could not track the TalkBack cursor position. Try narrowing.", true],
+      ["Focus navigation is not converging on the target. Try scrolling.", true],
+      ["Navigation failed for an unrelated reason", false],
+    ])(
+      "maps navigation error %j to focusTrapDetected=%p",
+      async (message, expectedTrap) => {
+        const element = {
+          "resource-id": "test:id/button",
+          "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
+        } as Element;
+        driver.setElements([element], 0);
+        spyOn(mockExecutor, "navigateToElement").mockRejectedValue(new Error(message as string));
+
+        const result = await strategy.executeTap("device-1", element, driver);
+
+        expect(result.screenReaderNavigation?.focusTrapDetected).toBe(expectedTrap as boolean);
+      }
+    );
+
     test("uses ACTION_CLICK fallback if double-tap activation fails", async () => {
       const element = {
         "resource-id": "test:id/button",

@@ -7,6 +7,7 @@ import { getDatabase } from "../../db/database";
 import type { Database } from "../../db/types";
 import type { WcagViolation } from "../../models/AccessibilityAudit";
 import { getCutoffDate, DEFAULT_TTL } from "../shared/MetricsUtils";
+import { logger } from "../../utils/logger";
 
 interface BaselineData {
   screenId: string;
@@ -48,11 +49,34 @@ export class BaselineManager {
       return null;
     }
 
+    const violations = this.parseViolations(result.violations_json, result.screen_id);
+    if (violations === null) {
+      // A corrupt row is treated as "no usable baseline" rather than letting a
+      // raw SyntaxError escape getBaseline (issue #4179).
+      return null;
+    }
+
     return {
       screenId: result.screen_id,
-      violations: JSON.parse(result.violations_json),
+      violations,
       updatedAt: result.updated_at,
     };
+  }
+
+  /**
+   * Parse a stored `violations_json` blob, returning null (and logging) when the
+   * row is corrupt rather than throwing a raw `SyntaxError` at the read boundary.
+   */
+  private parseViolations(violationsJson: string, screenId: string): WcagViolation[] | null {
+    try {
+      return JSON.parse(violationsJson) as WcagViolation[];
+    } catch (error) {
+      logger.warn(
+        `[BaselineManager] Corrupt violations_json for screen "${screenId}"; ignoring baseline row`,
+        error
+      );
+      return null;
+    }
   }
 
   /**
@@ -102,11 +126,21 @@ export class BaselineManager {
       .selectAll()
       .execute();
 
-    return results.map(row => ({
-      screenId: row.screen_id,
-      violations: JSON.parse(row.violations_json),
-      updatedAt: row.updated_at,
-    }));
+    const baselines: BaselineData[] = [];
+    for (const row of results) {
+      const violations = this.parseViolations(row.violations_json, row.screen_id);
+      if (violations === null) {
+        // Skip a corrupt row instead of letting a raw SyntaxError escape
+        // listBaselines (issue #4179).
+        continue;
+      }
+      baselines.push({
+        screenId: row.screen_id,
+        violations,
+        updatedAt: row.updated_at,
+      });
+    }
+    return baselines;
   }
 
   /**

@@ -448,7 +448,11 @@ export async function getDeviceSnapshotConfig(): Promise<DeviceSnapshotConfig> {
   const { configRepository } = await getDeviceSnapshotDependencies();
   const stored = await configRepository.getConfig();
   if (stored) {
-    return stored;
+    // Re-parse on read so configurations persisted by an older parser (which
+    // could round a (0, 0.5) timeout down to a non-positive 0) are normalized
+    // back to the fallback. parseDeviceSnapshotConfig is idempotent for valid
+    // values, so this is a no-op for configs written by the current parser.
+    return parseDeviceSnapshotConfig(stored);
   }
   return parseDeviceSnapshotConfig(serverConfig.getDeviceSnapshotDefaults());
 }

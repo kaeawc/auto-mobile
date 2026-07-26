@@ -5,6 +5,7 @@ import * as os from "os";
 import type { BootedDevice, DeviceSnapshotConfig, DeviceSnapshotManifest } from "../../src/models";
 import {
   captureDeviceSnapshot,
+  getDeviceSnapshotConfig,
   listDeviceSnapshots,
   resetDeviceSnapshotManagerDependencies,
   restoreDeviceSnapshot,
@@ -314,5 +315,28 @@ describe("deviceSnapshotManager", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  test("getDeviceSnapshotConfig normalizes a legacy zero timeout persisted by the old parser", async () => {
+    // Simulate a config written by the pre-fix parser, which could round a
+    // (0, 0.5) timeout down to a non-positive 0.
+    const legacyConfig: DeviceSnapshotConfig = {
+      includeAppData: true,
+      includeSettings: true,
+      useVmSnapshot: true,
+      strictBackupMode: false,
+      backupTimeoutMs: 0,
+      userApps: "current",
+      vmSnapshotTimeoutMs: 0,
+      maxArchiveSizeMb: 100,
+    };
+    await configRepository.setConfig(legacyConfig);
+
+    const config = await getDeviceSnapshotConfig();
+
+    expect(config.backupTimeoutMs).toBeGreaterThan(0);
+    expect(config.vmSnapshotTimeoutMs).toBeGreaterThan(0);
+    expect(config.backupTimeoutMs).toBe(30000);
+    expect(config.vmSnapshotTimeoutMs).toBe(30000);
   });
 });

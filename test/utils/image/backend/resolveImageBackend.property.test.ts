@@ -35,7 +35,9 @@ describe("resolveImageBackend (property-based)", () => {
     fc.assert(
       fc.property(fc.string({ maxLength: 10 }), s => {
         const backend = resolveImageBackend({ platform: s as NodeJS.Platform });
-        return backend !== null && typeof backend === "object";
+        // The property completing without throwing IS the totality check; the
+        // return type is non-nullable, so assert only that it is an object.
+        return typeof backend === "object";
       }),
       RUN_OPTIONS
     );

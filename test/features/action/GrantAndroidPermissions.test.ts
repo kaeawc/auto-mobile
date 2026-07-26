@@ -228,10 +228,12 @@ describe("GrantAndroidPermissions", () => {
   test("aggregates failed step operationIds into the error message", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
-    client.setCommandResult(
+    // Drive the failure through the executeCommand throw path (the action's catch at
+    // GrantAndroidPermissions.ts:122) rather than a stderr-heuristic result, so the
+    // aggregate-message assertion doesn't depend on outputLooksLikeShellFailure.
+    client.setCommandError(
       "shell pm grant --user 0 com.example.app android.permission.SEND_SMS",
-      "",
-      "java.lang.SecurityException: Permission denial"
+      new Error("java.lang.SecurityException: Permission denial")
     );
 
     const action = new GrantAndroidPermissions(androidDevice, factory);

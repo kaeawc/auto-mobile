@@ -22,6 +22,17 @@ enum class McpConnectionType(val label: String, val icon: String) {
   UnixSocket("Unix Socket", "🔌"),
 }
 
+/**
+ * Whether this transport can carry the typed daemon input helpers (`input/tap`, `input/swipe`, …).
+ * Only the Unix-socket daemon ([McpConnectionType.UnixSocket] / `McpDaemonClient`) implements them;
+ * the HTTP and STDIO clients reject them with an "unsupported" error. Device-control (issue #3347)
+ * gates on this so a control-mode click is only offered on a transport that can actually tap — on
+ * an input-incapable transport we stay in inspector mode rather than suppress element selection for
+ * clicks that would always fail.
+ */
+val McpConnectionType.supportsDaemonInput: Boolean
+  get() = this == McpConnectionType.UnixSocket
+
 /** Interface for detecting MCP server processes */
 interface McpProcessDetector {
   fun detectProcesses(): List<McpProcess>

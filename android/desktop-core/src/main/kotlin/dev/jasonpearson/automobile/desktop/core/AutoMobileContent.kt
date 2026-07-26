@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.control.ControlTapErrorGate
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapForwarder
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
@@ -113,6 +114,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.mcp.SystemImage
+import dev.jasonpearson.automobile.desktop.core.mcp.supportsDaemonInput
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationMockData
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
@@ -378,6 +380,10 @@ fun AutoMobileContent(
   // Last device-control tap error (issue #3347). Set from the daemon's actionable error when a
   // control-mode tap fails so the live layout view can surface it; cleared on the next tap attempt.
   var deviceControlTapError by remember { mutableStateOf<String?>(null) }
+  val deviceControlTapForwarder = remember { DeviceControlTapForwarder() }
+  // Orders overlapping taps so only the latest may publish deviceControlTapError; a stale failure
+  // from a superseded tap is ignored (see ControlTapErrorGate).
+  val deviceControlTapGate = remember { ControlTapErrorGate() }
 
   // Command palette & global search state (delegated to MenuBarActions)
   var showCommandPalette by actions::showCommandPalette
@@ -1407,7 +1413,14 @@ fun AutoMobileContent(
       vimModeEnabled = vimModeEnabled,
       centerContent = { mod ->
         if (isLiveLayoutMode) {
-          // Live layout mode: center shows device screenshot with element overlays
+          // Live layout mode: center shows device screenshot with element overlays.
+          // Device control (issue #3347) is only offered when the app opted in AND the connected
+          // transport can actually carry daemon input (Unix socket). On an input-incapable
+          // transport
+          // (HTTP/STDIO) every tap would fail, so staying in inspector mode (element selection) is
+          // strictly better than a control mode whose clicks always error.
+          val deviceControlActive =
+            enableDeviceControl && connectedMcpProcess?.connectionType?.supportsDaemonInput == true
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(
               screenshotData = layoutInspectorState.screenshotData,
@@ -1427,25 +1440,40 @@ fun AutoMobileContent(
               elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
               modifier = Modifier.fillMaxSize(),
               // Device control (issue #3347): the reference desktop app opts in via
-              // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only.
+              // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only. Also
+              // requires an input-capable transport (see deviceControlActive above).
               controlMode =
-                if (enableDeviceControl) DeviceScreenControlMode.Control
+                if (deviceControlActive) DeviceScreenControlMode.Control
                 else DeviceScreenControlMode.Inspector,
               // The view only maps a click to a device coordinate; forwarding it to the daemon
               // input/tap helper is our job. Runs off the UI thread and never crashes on failure —
               // the daemon's actionable error surfaces in deviceControlTapError instead.
               onControlTap =
-                if (enableDeviceControl) {
+                if (deviceControlActive) {
                   { point: DevicePoint ->
+                    // Snapshot the whole tap target atomically on the UI thread: the active device
+                    // can change before the IO coroutine runs, and resolving client/platform/device
+                    // late would send this coordinate to the wrong device.
+                    val tapClient = clientProvider?.invoke()
+                    val tapPlatform = platformString
+                    val tapDeviceId = activeDeviceId
+                    val tapToken = deviceControlTapGate.nextToken()
                     deviceControlTapError = null
                     screenshotScope.launch(Dispatchers.IO) {
-                      DeviceControlTapForwarder(
-                          clientProvider = { clientProvider?.invoke() },
-                          platformProvider = { platformString },
-                          deviceIdProvider = { activeDeviceId },
-                          onError = { message -> deviceControlTapError = message },
-                        )
-                        .forward(point)
+                      deviceControlTapForwarder.forward(
+                        point = point,
+                        client = tapClient,
+                        platform = tapPlatform,
+                        deviceId = tapDeviceId,
+                        onError = { message ->
+                          // Only the latest tap may publish an error; a stale failure from a
+                          // superseded tap is ignored so it can't resurrect a banner a newer tap
+                          // already cleared.
+                          if (deviceControlTapGate.isCurrent(tapToken)) {
+                            deviceControlTapError = message
+                          }
+                        },
+                      )
                     }
                   }
                 } else {

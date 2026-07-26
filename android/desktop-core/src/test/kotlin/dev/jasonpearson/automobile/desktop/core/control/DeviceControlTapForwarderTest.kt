@@ -32,25 +32,26 @@ import org.junit.Test
  */
 class DeviceControlTapForwarderTest {
 
-  private fun forwarder(
+  private val forwarder = DeviceControlTapForwarder()
+
+  private fun forward(
+    point: DevicePoint,
     client: AutoMobileClient?,
     platform: String = "android",
     deviceId: String? = "emulator-5554",
     onError: (String) -> Unit = { error("unexpected error: $it") },
-  ) =
-    DeviceControlTapForwarder(
-      clientProvider = { client },
-      platformProvider = { platform },
-      deviceIdProvider = { deviceId },
-      onError = onError,
-    )
+  ) = forwarder.forward(point, client, platform, deviceId, onError)
 
   @Test
   fun `in-bounds tap forwards mapped device coordinates to inputTap`() {
     val fake = FakeAutoMobileClient()
 
-    forwarder(fake, platform = "android", deviceId = "emulator-5554")
-      .forward(DevicePoint(x = 540, y = 1100, inBounds = true))
+    forward(
+      DevicePoint(x = 540, y = 1100, inBounds = true),
+      client = fake,
+      platform = "android",
+      deviceId = "emulator-5554",
+    )
 
     // Payload-level assertion on the typed helper: coordinates map verbatim (Int device px ->
     // Double)
@@ -74,8 +75,11 @@ class DeviceControlTapForwarderTest {
     val fake = FakeAutoMobileClient()
     var error: String? = null
 
-    forwarder(fake, onError = { error = it })
-      .forward(DevicePoint(x = -3, y = 4000, inBounds = false))
+    forward(
+      DevicePoint(x = -3, y = 4000, inBounds = false),
+      client = fake,
+      onError = { error = it },
+    )
 
     assertTrue(fake.inputTapCalls.isEmpty(), "off-screen tap must not be sent")
     assertTrue("inputTap" !in fake.calls)
@@ -86,8 +90,7 @@ class DeviceControlTapForwarderTest {
   fun `no connected client drops the tap without error`() {
     var error: String? = null
 
-    forwarder(client = null, onError = { error = it })
-      .forward(DevicePoint(x = 10, y = 20, inBounds = true))
+    forward(DevicePoint(x = 10, y = 20, inBounds = true), client = null, onError = { error = it })
 
     assertNull(error)
   }
@@ -105,8 +108,7 @@ class DeviceControlTapForwarderTest {
       }
     var error: String? = null
 
-    forwarder(fake, onError = { error = it })
-      .forward(DevicePoint(x = 100, y = 200, inBounds = true))
+    forward(DevicePoint(x = 100, y = 200, inBounds = true), client = fake, onError = { error = it })
 
     // The surfaced message is the daemon's own, not an invented generic string.
     assertEquals("No active android device to tap", error)
@@ -126,8 +128,7 @@ class DeviceControlTapForwarderTest {
       }
     var error: String? = null
 
-    forwarder(throwing, onError = { error = it })
-      .forward(DevicePoint(x = 5, y = 6, inBounds = true))
+    forward(DevicePoint(x = 5, y = 6, inBounds = true), client = throwing, onError = { error = it })
 
     assertEquals("daemon socket closed", error)
   }
@@ -140,7 +141,7 @@ class DeviceControlTapForwarderTest {
       }
     var error: String? = null
 
-    forwarder(fake, onError = { error = it }).forward(DevicePoint(x = 1, y = 2, inBounds = true))
+    forward(DevicePoint(x = 1, y = 2, inBounds = true), client = fake, onError = { error = it })
 
     assertEquals(DeviceControlTapForwarder.DEFAULT_TAP_ERROR, error)
   }
@@ -152,13 +153,12 @@ class DeviceControlTapForwarderTest {
           """{ "action": "input/tap", "platform": "android", "deviceId": "emulator-5554", "success": true }"""
       )
       .use { server ->
-        DeviceControlTapForwarder(
-            clientProvider = { McpDaemonClient(socketPathValue = server.socketPath.toString()) },
-            platformProvider = { "android" },
-            deviceIdProvider = { "emulator-5554" },
-            onError = { error("unexpected error: $it") },
-          )
-          .forward(DevicePoint(x = 240, y = 640, inBounds = true))
+        forward(
+          DevicePoint(x = 240, y = 640, inBounds = true),
+          client = McpDaemonClient(socketPathValue = server.socketPath.toString()),
+          platform = "android",
+          deviceId = "emulator-5554",
+        )
 
         val request = server.awaitRequest()
         assertEquals("input/tap", request.method)
@@ -180,7 +180,7 @@ class DeviceControlTapForwarderTest {
   private class TestDaemonSocket(private val resultJson: String) : AutoCloseable {
     private val json = Json { ignoreUnknownKeys = true }
     private val tempDir = Files.createTempDirectory(Path.of("/tmp"), "amk-tap-")
-    val socketPath = tempDir.resolve("daemon.sock")
+    val socketPath: Path = tempDir.resolve("daemon.sock")
     private val serverChannel =
       ServerSocketChannel.open(StandardProtocolFamily.UNIX)
         .bind(UnixDomainSocketAddress.of(socketPath))

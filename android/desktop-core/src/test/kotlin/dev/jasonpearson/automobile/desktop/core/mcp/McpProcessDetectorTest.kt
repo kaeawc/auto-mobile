@@ -1,13 +1,24 @@
 package dev.jasonpearson.automobile.desktop.core.mcp
 
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.Test
 
 class McpProcessDetectorTest {
 
   private val timeProvider = FakeTimeProvider(currentTime = 1_700_000_000_000L)
+
+  @Test
+  fun `only the unix-socket transport supports daemon input`() {
+    // Device control (issue #3347) gates on this: the Unix-socket daemon (McpDaemonClient) is the
+    // only transport whose inputTap/inputSwipe reach the device; HTTP and STDIO reject them.
+    assertTrue(McpConnectionType.UnixSocket.supportsDaemonInput)
+    assertFalse(McpConnectionType.StreamableHttp.supportsDaemonInput)
+    assertFalse(McpConnectionType.Stdio.supportsDaemonInput)
+  }
 
   @Test
   fun parseProcessLineExtractsPidAndCommand() {

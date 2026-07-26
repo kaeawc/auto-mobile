@@ -11,53 +11,56 @@ import dev.jasonpearson.automobile.desktop.domain.DevicePoint
  * maps a click to a coordinate and reports it; wiring that coordinate to the daemon is this class's
  * job.
  *
- * The class is deliberately Compose-free and synchronous so it can be unit tested against
+ * The class is deliberately Compose-free and stateless so it can be unit tested against
  * [dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient] (or a real
  * [dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient] over a socket) without
- * rendering a device or opening a real daemon connection. The caller is responsible for running
- * [forward] off the UI thread (e.g. a `Dispatchers.IO` coroutine), matching the existing
- * daemon-action pattern in `McpProcessesPanel`.
+ * rendering a device or opening a real daemon connection.
  *
- * Collaborators are supplied as providers because the connected client, active platform, and active
- * device id can all change between taps in the reference desktop client; each tap resolves the
- * latest value.
- *
- * @param clientProvider resolves the daemon client for the connected process, or null when nothing
- *   is connected (no daemon input is sent in that case).
- * @param platformProvider the daemon platform string for the active device ("android" / "ios").
- * @param deviceIdProvider the active device id, or null to let the daemon pick its active device.
- * @param onError invoked with the daemon's actionable error message (or an exception message) when
- *   a tap fails, so the UI can surface it. Never called for an out-of-bounds point (that is dropped
- *   silently) or a successful tap.
+ * The tap target — client, platform, and device id — is passed in per call rather than resolved
+ * lazily, so the caller can **snapshot** all of {coordinate, client, platform, deviceId} atomically
+ * at click time on the UI thread. This matters because [forward] is expected to run off the UI
+ * thread (e.g. a `Dispatchers.IO` coroutine, matching the existing daemon-action pattern in
+ * `McpProcessesPanel`): if the active device changed between the click and the coroutine running,
+ * resolving the target late would send the clicked coordinate to the wrong device.
  */
-class DeviceControlTapForwarder(
-  private val clientProvider: () -> AutoMobileClient?,
-  private val platformProvider: () -> String,
-  private val deviceIdProvider: () -> String?,
-  private val onError: (String) -> Unit,
-) {
+class DeviceControlTapForwarder {
 
   /**
-   * Send [point] to the daemon as a tap. Out-of-bounds points (see [DevicePoint.inBounds]) are
-   * dropped without contacting the daemon, per the coordinate-mapping contract — a control client
-   * must never tap an off-screen coordinate. A daemon failure or a thrown client exception is
-   * routed to [onError] instead of propagating, so a failed tap can never crash the UI.
+   * Send [point] to [client] as a tap at the given [platform] / [deviceId]. Out-of-bounds points
+   * (see [DevicePoint.inBounds]) are dropped without contacting the daemon, per the
+   * coordinate-mapping contract — a control client must never tap an off-screen coordinate. A null
+   * [client] (nothing connected) is likewise dropped silently. A daemon failure or a thrown client
+   * exception is routed to [onError] instead of propagating, so a failed tap can never crash the
+   * UI.
+   *
+   * @param client the daemon client to tap through, snapshotted at click time; null drops the tap.
+   * @param platform the daemon platform string for the tapped device ("android" / "ios").
+   * @param deviceId the target device id, or null to let the daemon pick its active device.
+   * @param onError invoked with the daemon's actionable error message (or an exception message)
+   *   when the tap fails. Never called for an out-of-bounds point or a successful tap.
    */
-  fun forward(point: DevicePoint) {
+  fun forward(
+    point: DevicePoint,
+    client: AutoMobileClient?,
+    platform: String,
+    deviceId: String?,
+    onError: (String) -> Unit,
+  ) {
     // Out of bounds: the mapping never clamps, so a click outside the device screen produces an
     // off-screen coordinate. Dropping it honors the screen-control-mapping contract (the daemon
     // must not receive an off-screen tap).
     if (!point.inBounds) return
 
-    val client = clientProvider() ?: return
+    // Nothing connected: drop silently rather than surfacing a spurious error.
+    if (client == null) return
 
     val result =
       try {
         client.inputTap(
           x = point.x.toDouble(),
           y = point.y.toDouble(),
-          platform = platformProvider(),
-          deviceId = deviceIdProvider(),
+          platform = platform,
+          deviceId = deviceId,
         )
       } catch (error: Exception) {
         // A transport/client failure must surface, not crash the UI. Reuse the client's own

@@ -26,7 +26,7 @@ describe("TrackedScreenGeometry", () => {
   it("claims provenance once the hierarchy carrying the geometry is forwarded", () => {
     const geometry = new TrackedScreenGeometry();
     geometry.update(1080, 2340);
-    geometry.markForwarded();
+    geometry.markForwarded(7);
     expect(geometry.isForwarded).toBe(true);
   });
 
@@ -35,13 +35,13 @@ describe("TrackedScreenGeometry", () => {
     // screenshot declaring them must not be paired with the previous capture.
     const geometry = new TrackedScreenGeometry();
     geometry.update(1080, 2340);
-    geometry.markForwarded();
+    geometry.markForwarded(7);
 
     geometry.update(720, 1560);
     expect(geometry.width).toBe(720);
     expect(geometry.isForwarded).toBe(false);
 
-    geometry.markForwarded();
+    geometry.markForwarded(7);
     expect(geometry.isForwarded).toBe(true);
   });
 
@@ -50,27 +50,54 @@ describe("TrackedScreenGeometry", () => {
     // not flap the claim off and strand control in a permanent fail-closed state.
     const geometry = new TrackedScreenGeometry();
     geometry.update(1080, 2340);
-    geometry.markForwarded();
+    geometry.markForwarded(7);
     geometry.update(1080, 2340);
     expect(geometry.isForwarded).toBe(true);
   });
 
   it("cannot manufacture provenance for geometry that does not exist", () => {
-    // A push with nothing cached (or a non-positive size) must not leave a vouch behind that a
-    // later fallback-derived dimension could inherit.
+    // A push with nothing cached must not leave a vouch behind that a later fallback-derived
+    // dimension could inherit.
     const geometry = new TrackedScreenGeometry();
-    geometry.markForwarded();
+    geometry.markForwarded(7);
     expect(geometry.isForwarded).toBe(false);
+    expect(geometry.bind()).toBeNull();
+  });
 
-    geometry.update(0, 0);
-    expect(geometry.width).toBeNull();
-    expect(geometry.isForwarded).toBe(false);
+  it("clears tracked state for unusable geometry instead of keeping the previous entry", () => {
+    // Keeping forwarded dimensions across a hierarchy that cannot confirm them would let a later
+    // push vouch for geometry that no longer describes the device.
+    for (const [width, height] of [[0, 0], [-1, 100], [Number.NaN, 100], [100, Number.POSITIVE_INFINITY]]) {
+      const geometry = new TrackedScreenGeometry();
+      geometry.update(1080, 2340);
+      geometry.markForwarded(7);
+
+      geometry.update(width, height);
+      expect(geometry.width).toBeNull();
+      expect(geometry.isForwarded).toBe(false);
+      expect(geometry.bind()).toBeNull();
+    }
+  });
+
+  it("binds the identity and dimensions that are current at request initiation", () => {
+    // The binding is what survives same-resolution navigation: a frame requested under capture 7
+    // must stay labelled 7 even after capture 8 is forwarded at identical dimensions.
+    const geometry = new TrackedScreenGeometry();
+    geometry.update(1080, 2340);
+    geometry.markForwarded(7);
+
+    const binding = geometry.bind();
+    expect(binding).toEqual({ captureSequence: 7, width: 1080, height: 2340 });
+
+    geometry.markForwarded(8);
+    expect(binding).toEqual({ captureSequence: 7, width: 1080, height: 2340 });
+    expect(geometry.bind()?.captureSequence).toBe(8);
   });
 
   it("drops both geometry and provenance when cleared", () => {
     const geometry = new TrackedScreenGeometry();
     geometry.update(1080, 2340);
-    geometry.markForwarded();
+    geometry.markForwarded(7);
     geometry.clear();
     expect(geometry.width).toBeNull();
     expect(geometry.isForwarded).toBe(false);

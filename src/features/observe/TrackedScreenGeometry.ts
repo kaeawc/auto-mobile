@@ -17,8 +17,19 @@
  * Both the Android and iOS clients own one of these, so the rule is identical on both platforms by
  * construction rather than by two parallel implementations agreeing.
  */
+/**
+ * The geometry and capture identity a screenshot request was initiated under. Captured at
+ * request-send time and used when the response is pushed, so an intervening hierarchy cannot
+ * relabel the in-flight frame with a capture it does not belong to.
+ */
+export interface ScreenGeometryBinding {
+  captureSequence: number;
+  width: number;
+  height: number;
+}
+
 export class TrackedScreenGeometry {
-  private current: { width: number; height: number; forwarded: boolean } | null = null;
+  private current: { width: number; height: number; captureSequence: number | null } | null = null;
 
   /** Current width, or null when no hierarchy has produced dimensions yet. */
   get width(): number | null {
@@ -31,12 +42,33 @@ export class TrackedScreenGeometry {
   }
 
   /**
-   * True only when the daemon has been sent a hierarchy carrying the current geometry. Callers pass
-   * this to `pushScreenshotUpdate` as the capture-provenance claim; false means the daemon omits
-   * the capture identity and a control client fails closed, which is always the safe outcome.
+   * True only when the daemon has been sent a hierarchy carrying the current geometry.
    */
   get isForwarded(): boolean {
-    return this.current?.forwarded === true;
+    return this.bind() !== null;
+  }
+
+  /**
+   * The identity and dimensions to bind to a screenshot request being initiated NOW, or null when
+   * the current geometry has no forwarded capture behind it.
+   *
+   * Binding at initiation is what makes ordinary same-resolution navigation safe. A frame captured
+   * on screen A can be pushed after a hierarchy for screen B has already been forwarded; both
+   * screens have identical dimensions, so no measurement can tell them apart, and reading "the
+   * current capture" at push time would label A's pixels with B's identity and let them pair. The
+   * binding is taken before the request goes out, so the frame keeps the identity that was current
+   * when it was requested.
+   */
+  bind(): ScreenGeometryBinding | null {
+    const current = this.current;
+    if (!current || current.captureSequence === null) {
+      return null;
+    }
+    return {
+      captureSequence: current.captureSequence,
+      width: current.width,
+      height: current.height,
+    };
   }
 
   /**
@@ -45,23 +77,28 @@ export class TrackedScreenGeometry {
    * yet seen a hierarchy carrying the new geometry.
    */
   update(width: number, height: number): void {
-    if (width <= 0 || height <= 0) {
+    // Unusable geometry CLEARS rather than leaving the previous entry intact: keeping stale
+    // forwarded dimensions here would let a later hierarchy push vouch for geometry that no longer
+    // describes the device. Non-finite values are rejected for the same reason — they can only come
+    // from a malformed hierarchy, and inventing provenance for them is never safe.
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      this.clear();
       return;
     }
     if (this.current?.width === width && this.current.height === height) {
       return;
     }
-    this.current = { width, height, forwarded: false };
+    this.current = { width, height, captureSequence: null };
   }
 
   /**
-   * Vouch that a hierarchy carrying the current geometry reached the daemon. Call only after a
-   * successful push. A no-op when no geometry has been derived yet, so a push cannot manufacture
-   * provenance for dimensions that do not exist.
+   * Record the identity the daemon assigned to a hierarchy carrying the current geometry. Call only
+   * after a successful push. A no-op when no geometry has been derived yet, so a push cannot
+   * manufacture provenance for dimensions that do not exist.
    */
-  markForwarded(): void {
+  markForwarded(captureSequence: number): void {
     if (this.current) {
-      this.current = { ...this.current, forwarded: true };
+      this.current = { ...this.current, captureSequence };
     }
   }
 

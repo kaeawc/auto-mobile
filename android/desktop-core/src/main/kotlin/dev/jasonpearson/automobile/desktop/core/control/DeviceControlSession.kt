@@ -98,6 +98,25 @@ class DeviceControlSession(
     private set
 
   /**
+   * The snapshot a click must be mapped and dispatched through, or null when control is
+   * unavailable.
+   *
+   * Usually this is the live decision's snapshot. While a post-input refresh is pending it is the
+   * RETAINED one: an ordinary screenshot-only or hierarchy-only update makes the live decision
+   * Blocked (nothing pairs yet) while [renderSnapshot] still holds and displays the coherent
+   * pre-input frame. Deriving interaction from the live decision there would flip the frame the
+   * user is looking at to inspector mode, so a rapid second click would select an element instead
+   * of reaching the device — breaking the promise that the retained snapshot stays clickable until
+   * a paired successor arrives.
+   *
+   * The retention is still bounded by everything that already bounds it: [reset] clears it, and a
+   * wait that times out releases it (see [evaluate]), after which this falls back to the live
+   * decision and drops to inspector mode.
+   */
+  var interactionSnapshot: DeviceFrameSnapshot? = null
+    private set
+
+  /**
    * Evaluate control availability for [inputs] and, on the way, offer the resulting snapshot to the
    * refresh tracker so a pending post-input wait settles on the first superseding snapshot.
    *
@@ -121,6 +140,10 @@ class DeviceControlSession(
     } else if (live != null) {
       renderSnapshot = live
     }
+    // While awaiting, the retained frame is what the user sees, so it is also what a click acts
+    // through. Once settled (or never awaiting) this is just the live decision.
+    interactionSnapshot =
+      if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) renderSnapshot else live
     return decision
   }
 
@@ -170,6 +193,7 @@ class DeviceControlSession(
     errorToken.incrementAndGet()
     refreshTracker.reset()
     renderSnapshot = null
+    interactionSnapshot = null
     publishError(null)
   }
 

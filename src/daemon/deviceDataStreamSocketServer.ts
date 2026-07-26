@@ -121,15 +121,19 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
  */
 interface PushScreenshotOptions {
   /**
-   * True when the caller's `screenWidth`/`screenHeight` were derived from a hierarchy this server
-   * assigned a capture id to — i.e. the CtrlProxy observation paths, whose screen-dimension cache
-   * is populated from the hierarchies they push here.
+   * The capture identity this frame belongs to, bound by the caller when it INITIATED the
+   * screenshot request — not looked up here at delivery time.
    *
-   * Left false by callers whose dimensions have no such provenance (e.g. `TakeScreenshot`, which
-   * reads them out of the PNG it just captured). Those frames never carry a capture identity, so a
-   * control client fails closed instead of pairing them with an unrelated hierarchy.
+   * Delivery-time lookup is unsafe for a reason no measurement can catch: a frame captured on
+   * screen A can be pushed after a hierarchy for screen B has already been forwarded. Ordinary
+   * navigation keeps the resolution identical, so the header check passes and A's pixels would be
+   * stamped with B's identity and pair cleanly, letting a control client tap stale content.
+   *
+   * Omitted by callers with no such provenance (e.g. `TakeScreenshot`, whose dimensions come from
+   * the PNG it just captured). Those frames never carry a capture identity, so a control client
+   * fails closed instead of pairing them with an unrelated hierarchy.
    */
-  geometryFromTrackedCapture?: boolean;
+  captureSequence?: number;
 }
 
 /**
@@ -230,13 +234,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   // starts from a clean baseline instead of diffing against a stale pre-drop tree.
   private previousHierarchyByDevice = new Map<string, ViewHierarchyResult>();
 
-  // Current capture id per device (issue #3348). Bumped on every pushed hierarchy_update from a
-  // counter that is monotonic for the whole process and NEVER reset, so ids cannot be reused after
-  // a reconnect and collide with a pre-drop hierarchy a client still holds.
-  private captureSequenceByDevice = new Map<string, number>();
-
-  // Source of capture ids. Process-wide rather than per device: uniqueness across reconnects is
-  // what matters, and a shared counter gets it without tracking connection epochs.
+  // Source of capture ids (issue #3348). Process-wide and NEVER reset, so an id cannot be reused
+  // after a reconnect and collide with a pre-drop hierarchy a client still holds. The current id
+  // per device is deliberately NOT tracked here: callers bind it when they initiate a screenshot
+  // request and hand it back on push, which is the only way to survive same-resolution navigation.
   private nextCaptureSequence = 1;
 
   constructor(socketPath: string = getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
@@ -286,14 +287,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   /**
    * Push a hierarchy update to all subscribers interested in this device.
    */
-  pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult): void {
+  pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult): number | null {
     // Skip the diff clone+walk when nobody is listening (the layout inspector is
     // usually closed): the frame would reach zero subscribers anyway. Drop the
     // baseline too so a later re-subscribe diffs from a fresh frame, not a tree
     // captured while it was away.
     if (!this.hasSubscriberForDevice(deviceId)) {
       this.previousHierarchyByDevice.delete(deviceId);
-      return;
+      return null;
     }
 
     // Annotate the frame with its per-node diff versus the last frame for this
@@ -305,10 +306,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     const { hierarchy: annotated, summary } = annotateHierarchyDiff(previous, hierarchy);
     this.previousHierarchyByDevice.set(deviceId, hierarchy);
 
-    // Assign this capture's shared identity BEFORE the push. Screenshots that follow carry it only
-    // if their real pixels match the geometry this capture established (see pushScreenshotUpdate).
+    // Assign this capture's shared identity and RETURN it, so the caller can bind it to the
+    // screenshot requests it initiates while this hierarchy is current.
     const captureSequence = this.nextCaptureSequence++;
-    this.captureSequenceByDevice.set(deviceId, captureSequence);
 
     const message: DeviceDataStreamMessage = {
       type: "hierarchy_update",
@@ -326,6 +326,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     if (sentCount > 0) {
       logger.debug(`[DeviceDataStream] Pushed hierarchy_update to ${sentCount} subscribers (device: ${deviceId})`);
     }
+    return captureSequence;
   }
 
   /**
@@ -371,15 +372,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // dimensions for coordinate mapping maps through the pixels it is actually rendering.
       screenWidth: measured?.width ?? screenWidth,
       screenHeight: measured?.height ?? screenHeight,
-      // Stamp the capture identity ONLY when the caller's geometry came from a tracked capture AND
-      // the frame's real pixels match it. A mismatch means the pixels outran the hierarchy that
-      // produced the claim, which is exactly the case that must not pair; an unmeasurable frame is
-      // equally unproven. Either way the field is omitted and the control client fails closed
-      // rather than pairing against stale mapping bounds.
-      captureSequence:
-        options.geometryFromTrackedCapture && claimMatchesPixels
-          ? this.captureSequenceByDevice.get(deviceId)
-          : undefined,
+      // Stamp the identity the caller BOUND at request initiation, and only when the frame's real
+      // pixels also match the geometry that binding carried. The binding is what survives
+      // same-resolution navigation; the pixel check is the backstop that still catches a geometry
+      // change between binding and delivery. An unmeasurable frame is equally unproven. In every
+      // other case the field is omitted and the control client fails closed rather than pairing
+      // against mapping bounds that may not describe these pixels.
+      captureSequence: claimMatchesPixels ? options.captureSequence : undefined,
       screenshotMimeType,
       screenshotFormat,
       screenshotCaptureSource,
@@ -547,10 +546,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // Drop the diff baseline: the next hierarchy after a reconnect is a fresh
     // full frame, not a delta from the tree captured before the connection dropped.
     this.previousHierarchyByDevice.delete(deviceId);
-    // Drop the device's CURRENT capture id so screenshots arriving before the first post-reconnect
-    // hierarchy carry none and a control client fails closed. The id source itself is never reset,
-    // so post-reconnect ids cannot collide with a pre-drop hierarchy a client still holds.
-    this.captureSequenceByDevice.delete(deviceId);
+    // Nothing to reset for capture identity: ids are never reused (the source is monotonic for the
+    // process), and clients drop their own bindings when the connection goes away.
 
     const message: DeviceDataStreamMessage = {
       type: "error",

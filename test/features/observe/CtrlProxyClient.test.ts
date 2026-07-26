@@ -273,10 +273,14 @@ describe("AndroidCtrlProxyClient", function() {
    * client reads it from its own screen-geometry cache, which is exactly the provenance under test.
    */
   const pushScreenshotThroughClient = (base64: string): void => {
-    (accessibilityServiceClient as any).pushScreenshotToObservationStream(base64, {
-      screenshotMimeType: "image/png",
-      screenshotFormat: "png",
-    });
+    // Bind at push time the way the client binds at request time; the binding under test is
+    // whatever the geometry cache currently vouches for.
+    const binding = (accessibilityServiceClient as any).screenGeometry.bind() ?? undefined;
+    (accessibilityServiceClient as any).pushScreenshotToObservationStream(
+      base64,
+      { screenshotMimeType: "image/png", screenshotFormat: "png" },
+      binding
+    );
   };
 
   const setAdbPngScreenshotResponse = (): void => {
@@ -3047,6 +3051,37 @@ describe("AndroidCtrlProxyClient", function() {
       const updates = getScreenshotUpdates(socket);
       expect(updates).toHaveLength(1);
       expect(updates[0].captureSequence).toBeUndefined();
+    });
+
+    test("binds a screenshot to the capture it was REQUESTED under across same-size navigation", async () => {
+      // The variant no measurement can catch (issue #3348). A frame is requested while screen A is
+      // current; screen B's hierarchy — IDENTICAL dimensions — is forwarded before the response
+      // arrives. Labelling the frame with the newest capture would pair A's pixels with B's
+      // hierarchy and let the desktop tap stale content.
+      const socket = await startStreamServerWithScreenshotSubscriber();
+
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      const boundToScreenA = (accessibilityServiceClient as any).screenGeometry.bind();
+      expect(boundToScreenA).not.toBeNull();
+
+      // Screen B arrives and is forwarded while the frame is still in flight. Same resolution, so
+      // the geometry cache is unchanged and the provenance stays valid — only the capture moves.
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      const currentAfterB = (accessibilityServiceClient as any).screenGeometry.bind();
+      expect(currentAfterB.captureSequence).toBeGreaterThan(boundToScreenA.captureSequence);
+      socket.reset();
+
+      // The in-flight frame lands and is pushed with the binding taken at initiation.
+      (accessibilityServiceClient as any).pushScreenshotToObservationStream(
+        pngFrame(1080, 2340),
+        { screenshotMimeType: "image/png", screenshotFormat: "png" },
+        boundToScreenA
+      );
+
+      const updates = getScreenshotUpdates(socket);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].captureSequence).toBe(boundToScreenA.captureSequence);
+      expect(updates[0].captureSequence).not.toBe(currentAfterB.captureSequence);
     });
 
     test("drops provenance again when the device resolution changes", async () => {

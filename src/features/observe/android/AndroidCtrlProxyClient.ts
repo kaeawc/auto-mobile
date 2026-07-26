@@ -42,7 +42,7 @@ import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
-import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
+import { TrackedScreenGeometry, type ScreenGeometryBinding } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import {
   ScreenshotBackoffScheduler,
@@ -922,6 +922,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // observation stream. Scoped per-request so an unrelated in-flight screenshot
   // (e.g. backoff capture or MCP screenshot) cannot consume the suppression.
   private screenshotObservationStreamSuppressions: Set<string> = new Set();
+
+  // Capture identity bound to each in-flight screenshot request, keyed by requestId (issue #3348).
+  // Recorded when the request is SENT and consumed when its response is pushed, so a hierarchy that
+  // arrives while the frame is in flight cannot relabel it. Same-resolution navigation makes this
+  // the only defence: the pixel dimensions are identical, so nothing about the frame reveals that
+  // it belongs to the previous screen.
+  private screenshotCaptureBindings: Map<string, ScreenGeometryBinding> = new Map();
   // Track whether the device supports accessibility service screenshots (API 30+).
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
   // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
@@ -1926,6 +1933,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
+    let requestId: string | undefined;
 
     try {
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
@@ -1934,14 +1942,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         return { success: false, error: "Failed to connect to accessibility service" };
       }
 
-      const requestId = this.requestManager.generateId("screenshot");
+      requestId = this.requestManager.generateId("screenshot");
       if (suppressObservationStreamPush) {
         this.screenshotObservationStreamSuppressions.add(requestId);
         suppressedRequestId = requestId;
+      } else {
+        // Bind the capture identity that is current NOW, before the request goes out.
+        const binding = this.screenGeometry.bind();
+        if (binding) {
+          this.screenshotCaptureBindings.set(requestId, binding);
+        }
       }
 
+      const sentRequestId = requestId;
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
-        requestId, "screenshot", timeoutMs,
+        sentRequestId, "screenshot", timeoutMs,
         (_id, _type, timeout) => ({ success: false, error: `Screenshot timeout after ${timeout}ms` })
       );
 
@@ -1949,9 +1964,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId }));
+        const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }));
         this.ws.send(message);
-        logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${requestId})`);
+        logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${sentRequestId})`);
       });
 
       const result = await perf.track("waitForScreenshot", () => screenshotPromise);
@@ -1975,6 +1990,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // this guards against leaking ids for in-flight requests that never resolve.
       if (suppressedRequestId !== undefined) {
         this.screenshotObservationStreamSuppressions.delete(suppressedRequestId);
+      }
+      // Drop the binding for a request that never resolved, so the map cannot grow without bound.
+      if (requestId !== undefined) {
+        this.screenshotCaptureBindings.delete(requestId);
       }
     }
   }
@@ -2309,10 +2328,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, message.format),
           ...screenshotPerformanceMetadataFrom(message),
         };
+        const binding = this.screenshotCaptureBindings.get(message.requestId);
+        this.screenshotCaptureBindings.delete(message.requestId);
         if (!suppressObservationStreamPush) {
           this.pushScreenshotToObservationStream(
             message.data,
-            metadata
+            metadata,
+            binding
           );
         } else {
           logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
@@ -2889,12 +2911,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     try {
-      server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
-      // The daemon has now assigned a capture identity to this hierarchy, so the dimensions
-      // derived from it are capture-tracked and screenshots may assert that provenance. Only
-      // reached on a successful push: a throw or a missing server leaves the cache untracked, and
-      // the daemon then omits the identity so a control client fails closed.
-      this.screenGeometry.markForwarded();
+      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
+      // Record the identity the daemon assigned, so screenshot requests initiated from here on are
+      // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
+      // geometry untracked, and the daemon then omits the identity so a control client fails closed.
+      if (captureSequence !== null) {
+        this.screenGeometry.markForwarded(captureSequence);
+      }
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to push hierarchy to observation stream: ${error}`);
     }
@@ -2902,27 +2925,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA
+    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
+    binding?: ScreenGeometryBinding
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
     }
 
-    // Fall back to a nominal size when no hierarchy has produced dimensions yet. A fallback has no
-    // capture provenance at all, so it must never be asserted as tracked.
-    const screenWidth = this.screenGeometry.width ?? 1080;
-    const screenHeight = this.screenGeometry.height ?? 2340;
-    const geometryFromTrackedCapture = this.screenGeometry.isForwarded;
+    // Declare the geometry the request was BOUND to, not whatever the cache holds now — the two
+    // differ exactly when a hierarchy arrived while this frame was in flight. Without a binding,
+    // fall back to a nominal size and send no identity, so a control client fails closed.
+    const screenWidth = binding?.width ?? this.screenGeometry.width ?? 1080;
+    const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2340;
 
     try {
-      // Assert capture provenance only when the hierarchy that produced these dimensions actually
-      // reached the daemon. A suppressed hierarchy, a push that threw, or fallback dimensions all
-      // leave this false, and the daemon then omits the capture identity so a control client fails
-      // closed rather than pairing fresh pixels with stale bounds (issue #3348). The daemon still
-      // verifies the claim against the frame's real pixels before stamping it.
+      // The identity travels with the frame from the moment it was requested (issue #3348). The
+      // daemon still verifies these declared dimensions against the frame's real pixels before
+      // stamping it, which catches a geometry change between binding and delivery.
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
-        geometryFromTrackedCapture,
+        captureSequence: binding?.captureSequence,
       });
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
@@ -2932,6 +2954,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private updateCachedScreenDimensions(hierarchy: ViewHierarchyResult): void {
     const windows = hierarchy.windows;
     if (!windows || windows.length === 0) {
+      this.screenGeometry.clear();
       return;
     }
 
@@ -2951,10 +2974,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     if (bestDimensions) {
-      // A change clears the forwarded flag: it becomes capture-tracked only once the hierarchy
-      // carrying it reaches the daemon (see pushHierarchyToObservationStream) — which will NOT
-      // happen when this hierarchy is suppressed, or when there is no stream server.
+      // A change clears the identity: it becomes capture-tracked only once the hierarchy carrying
+      // it reaches the daemon (see pushHierarchyToObservationStream) — which will NOT happen when
+      // this hierarchy is suppressed, or when there is no stream server.
       this.screenGeometry.update(bestDimensions.width, bestDimensions.height);
+    } else {
+      // No usable window bounds in this hierarchy. Clearing (rather than keeping the previous
+      // entry) stops a later push from vouching for dimensions this hierarchy cannot confirm.
+      this.screenGeometry.clear();
     }
   }
 
@@ -2966,7 +2993,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         },
         (result: ScreenshotCaptureResult) => {
           if (result.data) {
-            this.pushScreenshotToObservationStream(result.data, result);
+            this.pushScreenshotToObservationStream(result.data, result, result.captureBinding);
           }
         },
         {
@@ -3008,6 +3035,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     const requestId = this.requestManager.generateId("screenshot-backoff");
     const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId }));
+    // Bind the capture identity current at INITIATION and carry it through the await, so a
+    // hierarchy forwarded while this frame is in flight cannot relabel it.
+    const captureBinding = this.screenGeometry.bind() ?? undefined;
 
     try {
       this.screenshotObservationStreamSuppressions.add(requestId);
@@ -3039,6 +3069,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         success: true,
         data: result.data,
         checksum,
+        captureBinding,
         ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),
         ...screenshotPerformanceMetadataFrom(result),
       };

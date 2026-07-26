@@ -13,7 +13,11 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
-import { stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
+import {
+  startDeviceDataStreamSocketServer,
+  stopDeviceDataStreamSocketServer,
+} from "../../../../src/daemon/deviceDataStreamSocketServer";
+import { FakeSocket } from "../../../fakes/FakeNetServer";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -2715,6 +2719,71 @@ describe("IOSCtrlProxyClient", function() {
         globalThis.fetch = originalFetch;
         await testClient.close();
       }
+    });
+  });
+
+  describe("capture provenance for screenshot geometry (issue #3348)", function() {
+    // The iOS ordering rule: geometry must be derived from a hierarchy BEFORE it is pushed, so the
+    // identity the daemon assigns is recorded against the geometry it actually describes.
+
+    const startStreamServer = async (): Promise<FakeSocket> => {
+      await stopDeviceDataStreamSocketServer();
+      const server = await startDeviceDataStreamSocketServer(fakeTimer);
+      const socket = new FakeSocket();
+      await (server as any).processLine(
+        socket as any,
+        JSON.stringify({
+          id: "subscribe-capture-provenance",
+          command: "subscribe",
+          deviceId: testDevice.deviceId,
+          screenshotIntervalMs: 250,
+        })
+      );
+      socket.reset();
+      return socket;
+    };
+
+    const setCachedHierarchy = (screenWidth: number, screenHeight: number, screenScale: number): void => {
+      (ctrlProxyClient as any).cachedHierarchy = {
+        hierarchy: { screenWidth, screenHeight, screenScale },
+        receivedAt: fakeTimer.now(),
+        fresh: true,
+      };
+    };
+
+    test("trusts new geometry as soon as the hierarchy carrying it is forwarded", async function() {
+      await startStreamServer();
+      const geometry = (ctrlProxyClient as any).screenGeometry;
+
+      // Device is at 1170x2532 points-scaled pixels.
+      setCachedHierarchy(390, 844, 3);
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+      expect(geometry.bind()).toEqual({ captureSequence: expect.any(Number), width: 1170, height: 2532 });
+
+      // Resolution changes. Deriving geometry AFTER the push would vouch for the OLD dimensions and
+      // then clear the flag when the new ones landed, leaving the new geometry untrusted until yet
+      // another hierarchy arrived.
+      setCachedHierarchy(320, 693, 3);
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+
+      const bound = geometry.bind();
+      expect(bound).not.toBeNull();
+      expect(bound.width).toBe(960);
+      expect(bound.height).toBe(2079);
+    });
+
+    test("clears tracked geometry when a hierarchy reports none", async function() {
+      await startStreamServer();
+      const geometry = (ctrlProxyClient as any).screenGeometry;
+
+      setCachedHierarchy(390, 844, 3);
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+      expect(geometry.bind()).not.toBeNull();
+
+      // A hierarchy with no usable screen size must not leave the previous dimensions vouched for.
+      (ctrlProxyClient as any).cachedHierarchy = { hierarchy: {}, receivedAt: fakeTimer.now(), fresh: true };
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any);
+      expect(geometry.bind()).toBeNull();
     });
   });
 });

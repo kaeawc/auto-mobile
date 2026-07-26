@@ -2,6 +2,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import crypto from "crypto";
 import type { ScreenshotMetadata } from "./ScreenshotMetadata";
+import type { ScreenGeometryBinding } from "./TrackedScreenGeometry";
 
 /**
  * Result of a screenshot capture attempt
@@ -11,6 +12,13 @@ export interface ScreenshotCaptureResult extends ScreenshotMetadata {
   data?: string; // base64 encoded
   checksum?: string;
   error?: string;
+  /**
+   * The screen geometry and capture identity that were current when this capture was REQUESTED
+   * (issue #3348). Carried through the capture so the observation-stream push labels the frame
+   * with the capture it belongs to, rather than whichever hierarchy happened to arrive while it
+   * was in flight. Absent when there was no forwarded capture to bind.
+   */
+  captureBinding?: ScreenGeometryBinding;
 }
 
 /**

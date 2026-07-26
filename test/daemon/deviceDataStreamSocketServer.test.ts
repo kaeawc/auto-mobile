@@ -600,13 +600,13 @@ describe("DeviceDataStreamSocketServer", () => {
       // match the geometry the capture client claimed for it.
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      server.pushHierarchyUpdate("device-1", frame("a"));
+      const first = server.pushHierarchyUpdate("device-1", frame("a"));
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
-        geometryFromTrackedCapture: true,
+        captureSequence: first ?? undefined,
       });
-      server.pushHierarchyUpdate("device-1", frame("b"));
+      const second = server.pushHierarchyUpdate("device-1", frame("b"));
       server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 720, 1560, {}, {
-        geometryFromTrackedCapture: true,
+        captureSequence: second ?? undefined,
       });
 
       const [h1, s1, h2, s2] = socket
@@ -628,9 +628,9 @@ describe("DeviceDataStreamSocketServer", () => {
       // exactly, so nothing downstream could detect it.
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      server.pushHierarchyUpdate("device-1", frame("a"));
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
       server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {}, {
-        geometryFromTrackedCapture: true,
+        captureSequence: captureSequence ?? undefined,
       });
 
       const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
@@ -661,9 +661,9 @@ describe("DeviceDataStreamSocketServer", () => {
       const malformed = Buffer.from(pngFrame(1080, 2340), "base64");
       malformed.write("IDAT", 12, "ascii");
 
-      server.pushHierarchyUpdate("device-1", frame("a"));
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
       server.pushScreenshotUpdate("device-1", malformed.toString("base64"), 1080, 2340, {}, {
-        geometryFromTrackedCapture: true,
+        captureSequence: captureSequence ?? undefined,
       });
 
       const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
@@ -673,9 +673,9 @@ describe("DeviceDataStreamSocketServer", () => {
     it("omits the capture identity for a frame whose dimensions cannot be measured", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      server.pushHierarchyUpdate("device-1", frame("a"));
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
       server.pushScreenshotUpdate("device-1", Buffer.from("not-an-image").toString("base64"), 1080, 2340, {}, {
-        geometryFromTrackedCapture: true,
+        captureSequence: captureSequence ?? undefined,
       });
 
       const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
@@ -687,12 +687,31 @@ describe("DeviceDataStreamSocketServer", () => {
     it("omits the capture identity until a hierarchy has been pushed", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
-        geometryFromTrackedCapture: true,
-      });
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
       const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("keeps a screenshot bound to the capture it was REQUESTED under, not the newest one", () => {
+      // Same-resolution navigation, the case no measurement can catch. A frame is requested while
+      // screen A's hierarchy is current; screen B's hierarchy — identical dimensions — is forwarded
+      // before the frame is pushed. Reading "the newest capture" at push time would label A's
+      // pixels with B's identity and let a control client tap stale content.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const screenA = server.pushHierarchyUpdate("device-1", frame("screen-a"));
+      // ... screenshot request goes out here, bound to screenA ...
+      const screenB = server.pushHierarchyUpdate("device-1", frame("screen-b"));
+      expect(screenB).toBeGreaterThan(screenA!);
+      // ... and only now does the in-flight frame arrive and get pushed.
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
+        captureSequence: screenA ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBe(screenA);
+      expect(screenshot.captureSequence).not.toBe(screenB);
     });
 
     it("never reuses a capture identity after a reconnect", () => {
@@ -719,9 +738,8 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushHierarchyUpdate("device-1", frame("a"));
       server.onDeviceConnectionLost("device-1");
-      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
-        geometryFromTrackedCapture: true,
-      });
+      // The client drops its binding when the connection goes away, so nothing is supplied.
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
       const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();

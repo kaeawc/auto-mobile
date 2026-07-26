@@ -1629,7 +1629,10 @@ fun AutoMobileContent(
                   },
               )
             )
-          val controlSnapshot = deviceControlDecision.snapshotOrNull
+          // What a CLICK acts through. While a post-input refresh is pending this is the retained
+          // frame rather than the live decision, so the coherent frame on screen stays clickable
+          // instead of silently flipping to Inspector between a tap and its successor (#3348).
+          val controlSnapshot = deviceControlSession.interactionSnapshot
           // What the inspector RENDERS, which is not always what control may act through: after a
           // successful tap the clicked snapshot is retained until a genuinely superseding one
           // arrives (issue #3348's refresh policy). A screenshot-only update in the meantime does

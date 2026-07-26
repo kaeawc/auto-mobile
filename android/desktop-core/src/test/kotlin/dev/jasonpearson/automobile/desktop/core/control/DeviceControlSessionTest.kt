@@ -357,6 +357,59 @@ class DeviceControlSessionTest {
     assertNull(session.evaluate(unpaired).snapshotOrNull)
     assertEquals(PostInputRefreshState.Settled, session.refreshState)
     assertNull(session.renderSnapshot, "the retained snapshot is released on timeout")
+    assertNull(session.interactionSnapshot, "and it is no longer clickable")
+    scope.cancel()
+  }
+
+  @Test
+  fun `the retained snapshot stays clickable while a refresh is awaiting`() = runTest {
+    // Finding 4: after a successful tap, an ordinary screenshot-only update makes the live decision
+    // Blocked (nothing pairs yet) while the coherent pre-input frame is still displayed. Deriving
+    // interaction from the live decision would flip THAT frame to Inspector, so a rapid second
+    // click would select an element instead of reaching the device.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    assertNotNull(session.evaluate(clicked).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(1, client.inputTapCalls.size)
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // A screenshot-only update lands: no snapshot pairs, so the live decision is Blocked.
+    val unpaired =
+      clicked.copy(screenshot = clicked.screenshot?.copy(sequence = 20L, captureSequence = 8L))
+    assertNull(session.evaluate(unpaired).snapshotOrNull)
+
+    // The frame on screen is still the retained one, and it is still what a click acts through.
+    assertEquals(retained, session.renderSnapshot)
+    val secondClickTarget = assertNotNull(session.interactionSnapshot)
+    assertEquals(retained, secondClickTarget)
+
+    session.tap(secondClickTarget, point)
+    advanceUntilIdle()
+    assertEquals(2, client.inputTapCalls.size, "a second click still reaches the device")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a reset drops the retained frame from interaction immediately`() = runTest {
+    // The retention must stay subject to the existing gates: a reset drops to Inspector at once.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val session = session(scope, FakeAutoMobileClient())
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    session.evaluate(clicked)
+    session.tap(assertNotNull(session.interactionSnapshot), point)
+    advanceUntilIdle()
+
+    session.reset()
+    assertNull(session.interactionSnapshot, "reset drops control to Inspector")
+    assertNull(session.renderSnapshot)
     scope.cancel()
   }
 

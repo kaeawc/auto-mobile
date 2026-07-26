@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
-import { PushSubscriptionSocketServer } from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
+import {
+  PushSubscriptionSocketServer,
+  SubscriptionResponse,
+} from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 
@@ -69,13 +72,13 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
   }
 
   /**
-   * Simulate a pong from a subscriber
+   * Feed a raw wire line through the real processLine dispatch (the same entry
+   * point BaseSocketServer.handleConnection calls for each newline-delimited
+   * line), so handleSubscribe / handlePong / the unknown-command branch actually
+   * run instead of being bypassed by direct map mutation.
    */
-  simulatePong(subscriptionId: string): void {
-    const subscriber = this.subscribers.get(subscriptionId);
-    if (subscriber) {
-      subscriber.lastActivity = (this as any).timer.now();
-    }
+  async simulateLine(socket: FakeSocket, line: string): Promise<void> {
+    await (this as any).processLine(socket as unknown as Socket, line);
   }
 
   /**
@@ -218,25 +221,6 @@ describe("PushSubscriptionSocketServer", () => {
       server.triggerKeepalive();
 
       expect(server.getSubscriberCount()).toBe(0);
-    });
-
-    it("keeps subscribers alive when they respond to pongs", () => {
-      const { subscriptionId } = server.simulateSubscription({});
-      expect(server.getSubscriberCount()).toBe(1);
-
-      // Advance time but not past timeout
-      timer.advanceTimersByTime(15_000);
-
-      // Simulate pong response
-      server.simulatePong(subscriptionId);
-
-      // Advance more time
-      timer.advanceTimersByTime(20_000);
-
-      // Trigger keepalive - subscriber should still be alive
-      server.triggerKeepalive();
-
-      expect(server.getSubscriberCount()).toBe(1);
     });
 
     it("sends pings to subscribers on keepalive", () => {
@@ -396,6 +380,74 @@ describe("PushSubscriptionSocketServer", () => {
       expect(socket.listenerCount("drain")).toBe(1);
       const subscriber = (server as any).subscribers.get(subscriptionId);
       expect(subscriber.drainPending).toBe(true);
+    });
+  });
+
+  describe("wire dispatch (subscribe / pong / unknown command)", () => {
+    it("registers a subscriber and returns subscription_response over the wire", async () => {
+      const socket = new FakeSocket();
+      expect(server.getSubscriberCount()).toBe(0);
+
+      await server.simulateLine(
+        socket,
+        JSON.stringify({ command: "subscribe", id: "req-1", deviceId: "device-1" })
+      );
+
+      expect(server.getSubscriberCount()).toBe(1);
+      const messages = socket.getWrittenMessages<SubscriptionResponse>();
+      expect(messages).toHaveLength(1);
+      // Matches src ~:206-210 exactly.
+      expect(messages[0]).toEqual({
+        id: "req-1",
+        type: "subscription_response",
+        success: true,
+      });
+    });
+
+    it("returns a typed error for an unknown command over the wire", async () => {
+      const socket = new FakeSocket();
+
+      await server.simulateLine(socket, JSON.stringify({ command: "frobnicate", id: "req-9" }));
+
+      expect(server.getSubscriberCount()).toBe(0);
+      const messages = socket.getWrittenMessages<SubscriptionResponse>();
+      expect(messages).toHaveLength(1);
+      // Matches src ~:176-183 exactly.
+      expect(messages[0]).toEqual({
+        id: "req-9",
+        type: "error",
+        success: false,
+        error: "Unknown command: frobnicate",
+      });
+    });
+
+    it("keeps a subscriber alive across a keepalive sweep after a wire pong", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "s1" }));
+      expect(server.getSubscriberCount()).toBe(1);
+
+      // Subscribed at t=0. Move most of the way to the 30s deadline, then pong.
+      timer.advanceTimersByTime(25_000);
+      await server.simulateLine(socket, JSON.stringify({ command: "pong" }));
+
+      // Move well past the ORIGINAL deadline. Only the refreshed lastActivity
+      // (t=25_000, delta 25_000 < 30_000) keeps this subscriber alive.
+      timer.advanceTimersByTime(25_000);
+      server.triggerKeepalive();
+
+      expect(server.getSubscriberCount()).toBe(1);
+    });
+
+    it("reaps a subscriber that never pongs at the 30s deadline", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "s2" }));
+      expect(server.getSubscriberCount()).toBe(1);
+
+      // No pong ever arrives; lastActivity stays at t=0. Past 30s it is reaped.
+      timer.advanceTimersByTime(31_000);
+      server.triggerKeepalive();
+
+      expect(server.getSubscriberCount()).toBe(0);
     });
   });
 });

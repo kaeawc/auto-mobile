@@ -85,6 +85,52 @@ class TestableRequestResponseServer extends RequestResponseSocketServer<TestRequ
   }
 }
 
+/**
+ * Server whose first request blocks on a manually-released gate, recording an
+ * ordered trace of handler entry/exit. Lets a test prove that pendingBySocket
+ * serializes handlers WITHOUT the test itself awaiting the first request.
+ */
+class GatedSequencingServer extends RequestResponseSocketServer<TestRequest, TestResponse> {
+  public readonly order: string[] = [];
+  private readonly gate: Promise<void>;
+  private releaseGate!: () => void;
+
+  constructor(timer: FakeTimer) {
+    super("/fake/path/seq.sock", timer, "Seq");
+    this.gate = new Promise<void>(resolve => {
+      this.releaseGate = resolve;
+    });
+  }
+
+  /** Release the first request's handler so the chain can drain. */
+  release(): void {
+    this.releaseGate();
+  }
+
+  protected async handleRequest(request: TestRequest): Promise<TestResponse> {
+    if (request.id === "1") {
+      this.order.push("req1-start");
+      await this.gate;
+      this.order.push("req1-end");
+    } else {
+      this.order.push("req2-start");
+      this.order.push("req2-end");
+    }
+    return { id: request.id, type: "test_response", success: true };
+  }
+
+  protected createErrorResponse(id: string | undefined, error: string): TestResponse {
+    return { id: id ?? "unknown", type: "test_response", success: false, error };
+  }
+}
+
+/** Drain all currently-scheduled microtasks without advancing real time. */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
+}
+
 describe("RequestResponseSocketServer", () => {
   let server: TestableRequestResponseServer;
   let timer: FakeTimer;
@@ -133,19 +179,32 @@ describe("RequestResponseSocketServer", () => {
     expect(messages[0].error).toBe("Handler failed");
   });
 
-  it("processes multiple requests sequentially", async () => {
-    const request1: TestRequest = { id: "1", action: "double", value: 5 };
-    const request2: TestRequest = { id: "2", action: "echo", value: 42 };
+  it("does not start the second request's handler until the first completes", async () => {
+    const sequencer = new GatedSequencingServer(timer);
+    const seqSocket = new FakeSocket();
 
-    await server.simulateLine(socket, JSON.stringify(request1));
-    await server.simulateLine(socket, JSON.stringify(request2));
+    // Fire both requests WITHOUT awaiting the first. pendingBySocket — not the
+    // test — must be what serializes them. processLine returns immediately after
+    // chaining onto the per-socket promise, so both are queued back-to-back.
+    void (sequencer as any).processLine(
+      seqSocket as unknown as Socket,
+      JSON.stringify({ id: "1", action: "noop" })
+    );
+    void (sequencer as any).processLine(
+      seqSocket as unknown as Socket,
+      JSON.stringify({ id: "2", action: "noop" })
+    );
 
-    const messages = socket.getWrittenMessages<TestResponse>();
-    expect(messages).toHaveLength(2);
-    expect(messages[0].id).toBe("1");
-    expect(messages[0].result).toBe(10);
-    expect(messages[1].id).toBe("2");
-    expect(messages[1].result).toBe(42);
+    // The first handler has started and is now blocked on its gate. If the class
+    // ran handlers concurrently, req2 would already have run here.
+    await flushMicrotasks();
+    expect(sequencer.order).toEqual(["req1-start"]);
+
+    // Releasing the gate lets the first finish, and only then may the second run.
+    sequencer.release();
+    await (sequencer as any).pendingBySocket.get(seqSocket);
+
+    expect(sequencer.order).toEqual(["req1-start", "req1-end", "req2-start", "req2-end"]);
   });
 
   it("stores last request for verification", async () => {

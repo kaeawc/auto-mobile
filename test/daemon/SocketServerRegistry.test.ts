@@ -110,6 +110,22 @@ describe("SocketServerRegistry", () => {
       registry.register("test", { factory: () => new MockSocketServer() });
       await registry.stop("test"); // Should not throw
     });
+
+    it("drops a server that throws on close so it is no longer reported running", async () => {
+      const mockServer = new MockSocketServer();
+      mockServer.close = async () => {
+        throw new Error("boom on close");
+      };
+      registry.register("test", { factory: () => mockServer });
+      await registry.start("test");
+
+      // The close() rejection still propagates to the caller...
+      await expect(registry.stop("test")).rejects.toThrow("boom on close");
+
+      // ...but the server is de-registered, not leaked as a phantom "running" entry.
+      expect(registry.isRunning("test")).toBe(false);
+      expect(registry.getRunningNames()).toEqual([]);
+    });
   });
 
   describe("startAll", () => {
@@ -137,6 +153,31 @@ describe("SocketServerRegistry", () => {
 
       expect(server1.startCallCount).toBe(1);
       expect(server2.startCallCount).toBe(0);
+    });
+
+    it("keeps the other servers running when one throws on start", async () => {
+      const healthyBefore = new MockSocketServer();
+      const healthyAfter = new MockSocketServer();
+
+      registry.register("healthyBefore", { factory: () => healthyBefore });
+      registry.register("broken", {
+        factory: () => {
+          const server = new MockSocketServer();
+          server.start = async () => {
+            throw new Error("boom on start");
+          };
+          return server;
+        },
+      });
+      registry.register("healthyAfter", { factory: () => healthyAfter });
+
+      await registry.startAll();
+
+      // The throwing server is isolated: it is not left in the running set, and
+      // both of its siblings — registered before and after it — start normally.
+      expect(registry.getRunningNames().sort()).toEqual(["healthyAfter", "healthyBefore"]);
+      expect(healthyBefore.startCallCount).toBe(1);
+      expect(healthyAfter.startCallCount).toBe(1);
     });
   });
 

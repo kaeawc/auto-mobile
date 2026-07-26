@@ -201,7 +201,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let inFlight = 0;
     let maxInFlight = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => {
@@ -236,7 +236,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let inFlight = 0;
     let maxInFlight = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => {
@@ -272,7 +272,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let inFlight = 0;
     let maxInFlight = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => {
@@ -310,7 +310,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let inFlight = 0;
     let maxInFlight = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => {
@@ -348,7 +348,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let inFlight = 0;
     let maxInFlight = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => {
@@ -393,7 +393,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const firstSessionCallReleased = new Promise<void>(resolve => { releaseFirstSessionCall = resolve; });
     const sessionBound = new Promise<void>(resolve => { resolveSessionBound = resolve; });
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async request => {
@@ -454,7 +454,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const firstImplicitCallReleased = new Promise<void>(resolve => { releaseFirstImplicitCall = resolve; });
     const autolockReady = new Promise<void>(resolve => { resolveAutolockReady = resolve; });
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async request => {
@@ -509,7 +509,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let inFlight = 0;
     let maxInFlight = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => {
@@ -545,7 +545,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let maxInFlight = 0;
     const forwardedSessionIds: string[] = [];
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async request => {
@@ -582,7 +582,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("forwards the Unix socket session as the implicit autolock key", async () => {
     const forwardedCalls: unknown[] = [];
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async request => {
@@ -618,7 +618,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("uses a stable implicit autolock key for multiple calls on one Unix socket", async () => {
     const forwardedCalls: unknown[] = [];
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async request => {
@@ -646,7 +646,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("adds the Unix socket session autolock key when tool arguments are omitted", async () => {
     let forwardedCall: unknown;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async request => {
@@ -675,7 +675,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let releaseBlockingRequest: () => void = () => {};
     const blockingPromise = new Promise<void>(r => { releaseBlockingRequest = r; });
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => {

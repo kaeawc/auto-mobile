@@ -79,6 +79,31 @@ describe("DeviceCriteriaMatcher", () => {
       const result = matcher.filterDevices(devices, { simulatorType: "iPhone 15 Pro", iosVersion: "17.4" });
       expect(result).toEqual([]);
     });
+
+    // Boundary rows (PARAM-4/5/7). Each is traced against filterDevices +
+    // normalizeValue (trim + lowercase, empty → undefined → "match any").
+    const boundaryRows: Array<{ name: string; criteria: Record<string, unknown>; expected: string[] }> = [
+      { name: "an empty-string iosVersion normalizes away and matches every device", criteria: { iosVersion: "" }, expected: ["android-1", "sim-1", "sim-2"] },
+      { name: "a whitespace-only simulatorType normalizes away and does not filter", criteria: { simulatorType: "   " }, expected: ["android-1", "sim-1", "sim-2"] },
+      { name: "a padded simulatorType is trimmed before matching", criteria: { simulatorType: "  iPhone 15 Pro  " }, expected: ["sim-1"] },
+      { name: "a padded iosVersion is trimmed before the exact compare", criteria: { iosVersion: " 17.4 " }, expected: ["sim-2"] },
+      { name: "a partial version like '17' does not match '17.4'/'17.5' (exact compare)", criteria: { iosVersion: "17" }, expected: [] },
+      { name: "the simulatorType prefix 'iPhone 15' matches only the exact-named device", criteria: { simulatorType: "iPhone 15" }, expected: ["sim-2"] },
+      { name: "an exponent-looking version string is compared literally, not numerically", criteria: { iosVersion: "1e10" }, expected: [] },
+    ];
+
+    for (const row of boundaryRows) {
+      test(`filterDevices: ${row.name}`, () => {
+        const result = matcher.filterDevices(devices, row.criteria as never);
+        expect(result.map(d => d.id).sort()).toEqual([...row.expected].sort());
+      });
+    }
+
+    test("does not deduplicate devices that share an id (filtering is not a pool invariant)", () => {
+      const dup = pooledDevice({ id: "sim-1", platform: "ios", name: "iPhone 15 Pro", iosVersion: "17.5", simulatorType: "iPhone 15 Pro" });
+      const result = matcher.filterDevices([devices[1], dup], { platform: "ios", simulatorType: "iPhone 15 Pro" });
+      expect(result.length).toBe(2);
+    });
   });
 
   describe("deviceImageMatchesCriteria", () => {

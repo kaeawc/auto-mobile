@@ -86,8 +86,14 @@ export class SocketServerRegistry {
       return;
     }
 
-    await server.close();
-    this.servers.delete(name);
+    // Drop the registration even if close() throws: a server that failed to shut
+    // down cleanly must not linger in `servers` where getRunningNames()/isRunning()
+    // would keep reporting it as live.
+    try {
+      await server.close();
+    } finally {
+      this.servers.delete(name);
+    }
     logger.info(`[SocketServerRegistry] Stopped '${name}'`);
   }
 

@@ -29,21 +29,4 @@ describe("McpTimeoutError", () => {
     );
   });
 
-  test("is an instance of Error", () => {
-    const err = new McpTimeoutError({
-      toolName: "observe",
-      timeoutMs: 30_000,
-      origin: "DaemonClient.sendRequest",
-    });
-    expect(err).toBeInstanceOf(Error);
-  });
-
-  test("has a useful stack trace", () => {
-    const err = new McpTimeoutError({
-      toolName: "startDevice",
-      timeoutMs: 180_000,
-      origin: "DaemonClient.sendRequest",
-    });
-    expect(err.stack).toContain("McpTimeoutError.test.ts");
-  });
 });

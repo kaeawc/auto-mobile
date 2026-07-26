@@ -102,6 +102,14 @@ interface SocketFileIdentity {
   ino: number;
 }
 
+/**
+ * Creates the MCP HTTP client the daemon forwards `tools/call` requests through.
+ * Injected so tests can substitute a fake without monkeypatching a private method
+ * by name (a name-based patch silently no-ops if the internal creator is renamed,
+ * leaving forwarding dead but the suite green).
+ */
+export type McpClientFactory = () => Promise<Client>;
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private socketFileIdentity: SocketFileIdentity | null = null;
@@ -123,6 +131,12 @@ export class UnixSocketServer {
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
+  /**
+   * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
+   * Defaults to the real {@link createMcpClient}; tests assign a fake here to
+   * exercise forwarding without a live HTTP endpoint.
+   */
+  mcpClientFactory: McpClientFactory = () => this.createMcpClient();
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -1493,7 +1507,7 @@ export class UnixSocketServer {
       return existingPromise;
     }
 
-    const clientPromise = this.createMcpClient()
+    const clientPromise = this.mcpClientFactory()
       .then(client => {
         this.mcpClients.set(key, client);
         this.mcpClientPromises.delete(key);

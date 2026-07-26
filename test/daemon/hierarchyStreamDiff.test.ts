@@ -105,3 +105,64 @@ describe("annotateHierarchyDiff", () => {
     expect(summary.hasBaseline).toBe(false);
   });
 });
+
+/**
+ * The signature that decides "changed" folds capture-source spelling variants
+ * (class/className, resource-id/resourceId, ...) to one canonical value. If any
+ * alias is dropped, two frames that describe the same node with different
+ * spellings would diverge and every node would be marked `changed` on every
+ * frame. Each row diffs a node against a spelling-variant of itself and asserts
+ * the frame is quiet (`changed === 0`). Run against the alias set in
+ * hierarchyStreamDiff.ts — a failing row is a finding about the stringifier.
+ */
+describe("nodeSignature alias folding", () => {
+  const aliasEquivalentRows: Array<{ name: string; prev: ViewHierarchyNode; cur: ViewHierarchyNode }> = [
+    {
+      name: "class and className are the same field",
+      prev: node({ class: "android.widget.TextView" }),
+      cur: node({ className: "android.widget.TextView" }),
+    },
+    {
+      name: "resource-id and resourceId are the same field",
+      prev: node({ "resource-id": "com.app:id/title" }),
+      cur: node({ resourceId: "com.app:id/title" }),
+    },
+    {
+      name: "content-desc and contentDesc are the same field",
+      prev: node({ "content-desc": "Submit" }),
+      cur: node({ contentDesc: "Submit" }),
+    },
+    {
+      name: "a boolean flag and its string spelling compare equal",
+      prev: node({ clickable: true }),
+      cur: node({ clickable: "true" }),
+    },
+    {
+      name: "an attribute present-but-null equals the same attribute absent",
+      prev: node({ class: "X", text: null }),
+      cur: node({ class: "X" }),
+    },
+    {
+      name: "struct bounds and the string bounds fallback with equal coords fold together",
+      prev: { $: { class: "X" }, bounds: { left: 0, top: 0, right: 10, bottom: 20 } },
+      cur: node({ class: "X", bounds: "0,0,10,20" }),
+    },
+  ];
+
+  for (const row of aliasEquivalentRows) {
+    test(`treats a quiet frame as unchanged: ${row.name}`, () => {
+      const { summary } = annotateHierarchyDiff(hierarchy(row.prev), hierarchy(row.cur));
+      expect(summary).toEqual({ hasBaseline: true, added: 0, changed: 0, removed: 0 });
+    });
+  }
+
+  // Sanity: the field IS compared — a genuine value change under either spelling
+  // must still be seen, so the alias folding is not just ignoring the field.
+  test("a real class change under the className spelling is still marked changed", () => {
+    const { summary } = annotateHierarchyDiff(
+      hierarchy(node({ className: "A" })),
+      hierarchy(node({ className: "B" }))
+    );
+    expect(summary.changed).toBe(1);
+  });
+});

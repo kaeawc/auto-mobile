@@ -114,7 +114,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   test("retries with a fresh client when MCP throws 'Session not found'", async () => {
     let clientsCreated = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       const clientIndex = ++clientsCreated;
       return createFakeMcpClient({
         listTools: async () => {
@@ -138,7 +138,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   test("resets cached client before reconnecting so getMcpClient creates a fresh one", async () => {
     let clientsCreated = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       ++clientsCreated;
       return createFakeMcpClient({
         listTools: async () => {
@@ -160,7 +160,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   test("does not retry on non-session errors and returns failure", async () => {
     let clientsCreated = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       ++clientsCreated;
       return createFakeMcpClient({
         listTools: async () => {
@@ -180,7 +180,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   test("subsequent requests reuse the reconnected client without creating another", async () => {
     let clientsCreated = 0;
 
-    (server as any).createMcpClient = async () => {
+    server.mcpClientFactory = async () => {
       ++clientsCreated;
       const isFailing = clientsCreated === 1;
       return createFakeMcpClient({
@@ -205,7 +205,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
   test("closes idle per-key MCP clients after the idle timeout", async () => {
     let closeCalls = 0;
 
-    (server as any).createMcpClient = async () => createFakeMcpClient({
+    server.mcpClientFactory = async () => createFakeMcpClient({
       listTools: async () => ({ tools: [] }),
       close: async () => {
         closeCalls++;

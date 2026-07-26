@@ -9,15 +9,6 @@ const ARGV_APIS = new Set(["execFile", "execFileSync", "spawn", "spawnSync"]);
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const SHELL_EXECUTABLES = new Set(["sh", "bash", "zsh", "dash", "ksh", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh"]);
 
-/**
- * The Windows daemon inspection uses PowerShell's own `-Command` pipeline for
- * a structured process-table query. It is a diagnostic-only exception; all
- * ordinary host command execution must use argv through HostCommandExecutor.
- */
-const EXCEPTIONS = new Map<string, string>([
-  ["src/daemon/manager.ts", "Diagnostic PowerShell process-table query; the pipeline is a single reviewed -Command argument."],
-]);
-
 export interface Violation {
   readonly file: string;
   readonly line: number;
@@ -105,7 +96,7 @@ export function findViolationsInSource(file: string, source: string): Violation[
       ts.isPropertyAssignment(property) &&
       ((ts.isIdentifier(property.name) && property.name.text === "shell") ||
         (ts.isStringLiteral(property.name) && property.name.text === "shell")) &&
-      property.initializer.kind === ts.SyntaxKind.TrueKeyword
+      property.initializer.kind !== ts.SyntaxKind.FalseKeyword
     ));
 
   const childProcessApiFromMember = (expression: ts.Expression): string | undefined => {
@@ -200,7 +191,6 @@ export function changedSourceFiles(baseRef: string, hasGitDirectory = existsSync
 
 export function findViolations(baseRef = "origin/main"): Violation[] {
   return changedSourceFiles(baseRef)
-    .filter(file => !EXCEPTIONS.has(repositoryPath(file)))
     .flatMap(file => findViolationsInSource(file, readFileSync(file, "utf8")));
 }
 

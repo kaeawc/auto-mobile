@@ -173,32 +173,10 @@ describe("CtrlProxyVoiceOver", function() {
       }
     });
 
-    test("sends correct message type get_voiceover_state", async function() {
-      const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
-
-      try {
-        const resultPromise = client.requestVoiceOverState();
-        const socket = await waitForSocket(getSocket);
-        await waitForSocketOpen(socket);
-        await waitForSentMessages(socket, 1);
-
-        const sentMsg = commandPayloads(socket!)[0];
-        expect(sentMsg.type).toBe("get_voiceover_state");
-
-        // Resolve the pending request to avoid leaking
-        socket!.simulateMessage(JSON.stringify({
-          type: "voiceover_state_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          enabled: false,
-        }));
-
-        await resultPromise;
-      } finally {
-        await client.close();
-      }
-    });
+    // NB: a former "sends correct message type get_voiceover_state" test was
+    // deleted here (issue #4174, item 14) — it asserted only `sentMsg.type`, a
+    // strict subset of "returns enabled=true when VoiceOver is running", which
+    // already asserts the type AND the requestId AND the decoded result.
   });
 
   describe("requestVoiceOverActivate", function() {

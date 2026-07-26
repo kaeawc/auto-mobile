@@ -345,21 +345,16 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect((crashes[0].input as { exceptionType: string }).exceptionType).toBe("SIGABRT");
   });
 
-  test("ingestion never throws even when a recorder rejects", async () => {
-    const throwingRecorder = {
-      getContext: () => ({ deviceId: null, sessionId: null }),
-      setContext: () => {},
-      recordLogEvent: async () => { throw new Error("db down"); },
-    } as unknown as IosTelemetryRecorder;
-    const resilient = new DefaultIosSdkEventIngestor({
-      deviceId: DEVICE_ID,
-      getNavigationGraphManager: () => navSink,
-      captureScreenshot: async () => ({ success: false }),
-      telemetryRecorder: throwingRecorder,
-      failureRecorder,
-      navigationScreenshotsEnabled: () => false,
-    });
-    await expect(resilient.recordSdkEvent(event("log", {}), null)).resolves.toBeUndefined();
+  test("ingestion never throws and still restores context when a recorder rejects", async () => {
+    // R2 rewrite: the old version stubbed `setContext: () => {}`, so it could not
+    // observe the finally-block restore at all — it passed even if the restore
+    // were deleted. Use the CapturingTelemetryRecorder (seeded with a prior
+    // Android context) and make recordLogEvent throw AFTER setContext(iOS) ran.
+    // The observable guarantee: the promise resolves (never throws) AND the prior
+    // context is restored despite the throw.
+    recorder.recordLogEvent = async (): Promise<void> => { throw new Error("db down"); };
+    await expect(ingestor.recordSdkEvent(event("log", {}), null)).resolves.toBeUndefined();
+    expect(recorder.getContext()).toEqual({ deviceId: "prev-device", sessionId: "prev-session" });
   });
 
   describe("recordLayoutTelemetryEvent", () => {
@@ -378,13 +373,59 @@ describe("DefaultIosSdkEventIngestor", () => {
         applicationId: "com.app",
         screenName: "com.app",
       });
-      expect((recorder.layout[0].event as { recompositionCount: number }).recompositionCount).toBeGreaterThan(0);
+      // Fixture is root ({ node: [...] }) + 2 leaves (each has $), so
+      // countViewHierarchyNodes returns 3 (1 for the root's `node`, +1 per leaf `$`).
+      expect((recorder.layout[0].event as { recompositionCount: number }).recompositionCount).toBe(3);
     });
 
     test("uses device context and restores it", () => {
       ingestor.recordLayoutTelemetryEvent(hierarchy());
       expect(recorder.layout[0].contextAtCall).toEqual({ deviceId: DEVICE_ID, sessionId: null });
       expect(recorder.getContext()).toEqual({ deviceId: "prev-device", sessionId: "prev-session" });
+    });
+
+    test("restores the previous context when serialization throws (finally, not fall-through)", () => {
+      // ADD-2 live bug: the restore used to sit after the JSON.stringify+record
+      // inside the try, so a synchronous throw between setContext(iOS) and the
+      // restore skipped it, leaving the shared context pinned to the iOS udid and
+      // permanently mis-attributing later Android telemetry. A BigInt in the
+      // hierarchy makes the internal JSON.stringify throw synchronously — after
+      // setContext(iOS) has already run.
+      const unserializable = {
+        hierarchy: { node: [{ $: { bad: BigInt(1) } }] },
+        packageName: "com.app",
+        windows: [],
+        updatedAt: 1,
+      } as unknown as ViewHierarchyResult;
+      // Must not throw (telemetry is best-effort) ...
+      expect(() => ingestor.recordLayoutTelemetryEvent(unserializable)).not.toThrow();
+      // ... and must have restored the prior context despite the throw.
+      expect(recorder.getContext()).toEqual({ deviceId: "prev-device", sessionId: "prev-session" });
+    });
+
+    test("stays non-fatal when restoring the context itself throws", () => {
+      // The restore runs in the finally, OUTSIDE the catch. If the recorder's
+      // setContext throws while restoring the prior context, the exception must be
+      // swallowed — processMessage calls this and telemetry must never break
+      // observation. Only the restore call (deviceId "prev-device") throws; the
+      // setContext(iOS) at the start still succeeds.
+      class RestoreThrows extends CapturingTelemetryRecorder {
+        setContext(deviceId: string | null, sessionId: string | null): void {
+          if (deviceId === "prev-device") {
+            throw new Error("setContext failed during restore");
+          }
+          super.setContext(deviceId, sessionId);
+        }
+      }
+      const localIngestor = new DefaultIosSdkEventIngestor({
+        deviceId: DEVICE_ID,
+        getNavigationGraphManager: () => navSink,
+        captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
+        telemetryRecorder: new RestoreThrows() as unknown as IosTelemetryRecorder,
+        failureRecorder,
+        navigationScreenshotsEnabled: () => false,
+      });
+      expect(() => localIngestor.recordLayoutTelemetryEvent(hierarchy())).not.toThrow();
     });
   });
 });

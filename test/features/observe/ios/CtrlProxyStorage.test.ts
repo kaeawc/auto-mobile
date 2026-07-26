@@ -388,3 +388,151 @@ describe("CtrlProxyStorage (iOS)", function() {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// PARAM-1 (issue #4174, item 3): delegate-level 6 ops x 4 outcomes.
+//
+// The client-level round-trips above drive a real FakeWebSocket + decode; this
+// block drives the CtrlProxyStorage DELEGATE directly through a real
+// RequestManager + FakeTimer (test/helpers/iosDelegateHarness.ts) so the
+// timeout and not-connected paths — previously untested (grep "timeout after"
+// in this dir returned 0) — get an actionable, asserted failure instead of a
+// silent hang. Time is fully controlled: the timeout rows fire by advancing the
+// fake clock and asserting the message, never by a real 5s hang.
+// ---------------------------------------------------------------------------
+import { createIosDelegateHarness, type IosDelegateHarness } from "../../../helpers/iosDelegateHarness";
+import { CtrlProxyStorage } from "../../../../src/features/observe/ios/CtrlProxyStorage";
+
+describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
+  const flush = (): Promise<void> => new Promise<void>(resolve => setImmediate(resolve));
+  const TIMEOUT = 5000;
+
+  let h: IosDelegateHarness;
+  let storage: CtrlProxyStorage;
+
+  beforeEach(() => {
+    h = createIosDelegateHarness();
+    storage = new CtrlProxyStorage(h.context);
+  });
+
+  interface Op {
+    op: string;
+    wireType: string;
+    timeoutMsg: string;
+    defaultErrorMsg: string;
+    call: () => Promise<unknown>;
+    successPayload: Record<string, unknown>;
+    assertSuccess: (value: unknown) => void;
+  }
+
+  const ops: Op[] = [
+    {
+      op: "listPreferenceFiles",
+      wireType: "list_preference_files",
+      timeoutMsg: `List preference files timeout after ${TIMEOUT}ms`,
+      defaultErrorMsg: "Failed to list preference files",
+      call: () => storage.listPreferenceFiles("com.app", TIMEOUT),
+      successPayload: { success: true, totalTimeMs: 1, files: [{ name: "Standard", path: "Standard", entryCount: 2 }] },
+      assertSuccess: value => {
+        expect(value).toEqual([{ name: "Standard", path: "Standard", entryCount: 2 }]);
+      },
+    },
+    {
+      op: "getPreferenceEntries",
+      wireType: "get_preferences",
+      timeoutMsg: `Get preferences timeout after ${TIMEOUT}ms`,
+      defaultErrorMsg: "Failed to get preference entries",
+      call: () => storage.getPreferenceEntries("com.app", "Standard", TIMEOUT),
+      successPayload: { success: true, totalTimeMs: 1, entries: [{ key: "theme", value: "dark", type: "STRING" }] },
+      assertSuccess: value => {
+        expect(value).toEqual([{ key: "theme", value: "dark", type: "STRING" }]);
+      },
+    },
+    {
+      op: "getPreference",
+      wireType: "get_preference",
+      timeoutMsg: `Get preference timeout after ${TIMEOUT}ms`,
+      defaultErrorMsg: "Failed to get preference",
+      call: () => storage.getPreference("com.app", "Standard", "theme", TIMEOUT),
+      successPayload: { success: true, found: true, totalTimeMs: 1, entry: { key: "theme", value: "dark", type: "STRING" } },
+      assertSuccess: value => {
+        expect(value).toEqual({ key: "theme", value: "dark", type: "STRING" });
+      },
+    },
+    {
+      op: "setPreference",
+      wireType: "set_preference",
+      timeoutMsg: `Set preference timeout after ${TIMEOUT}ms`,
+      defaultErrorMsg: "Failed to set preference",
+      call: () => storage.setPreference("com.app", "Standard", "theme", "dark", "STRING", TIMEOUT),
+      successPayload: { success: true, totalTimeMs: 1 },
+      assertSuccess: value => {
+        expect(value).toBeUndefined();
+      },
+    },
+    {
+      op: "removePreference",
+      wireType: "remove_preference",
+      timeoutMsg: `Remove preference timeout after ${TIMEOUT}ms`,
+      defaultErrorMsg: "Failed to remove preference",
+      call: () => storage.removePreference("com.app", "Standard", "theme", TIMEOUT),
+      successPayload: { success: true, totalTimeMs: 1 },
+      assertSuccess: value => {
+        expect(value).toBeUndefined();
+      },
+    },
+    {
+      op: "clearPreferenceStore",
+      wireType: "clear_preferences",
+      timeoutMsg: `Clear preferences timeout after ${TIMEOUT}ms`,
+      defaultErrorMsg: "Failed to clear preferences",
+      call: () => storage.clearPreferenceStore("com.app", "Standard", TIMEOUT),
+      successPayload: { success: true, totalTimeMs: 1 },
+      assertSuccess: value => {
+        expect(value).toBeUndefined();
+      },
+    },
+  ];
+
+  for (const o of ops) {
+    describe(o.op, () => {
+      test(`sends ${o.wireType} and resolves the mapped value on success`, async () => {
+        const promise = o.call();
+        await flush();
+        expect(h.sentMessages[0]).toMatchObject({ type: o.wireType });
+        expect(typeof h.sentMessages[0].requestId).toBe("string");
+        expect(h.resolveLast(o.successPayload)).toBe(true);
+        o.assertSuccess(await promise);
+      });
+
+      test("throws the runner-supplied error when success is false", async () => {
+        const promise = o.call();
+        await flush();
+        h.resolveLast({ success: false, totalTimeMs: 2, error: "runner said no" });
+        await expect(promise).rejects.toThrow("runner said no");
+      });
+
+      test("throws the default message when a failure carries no error string", async () => {
+        const promise = o.call();
+        await flush();
+        h.resolveLast({ success: false, totalTimeMs: 2 });
+        await expect(promise).rejects.toThrow(o.defaultErrorMsg);
+      });
+
+      test("throws an actionable timeout message after the deadline (no silent hang)", async () => {
+        const promise = o.call();
+        await flush();
+        // Precondition: the request is genuinely registered before the clock moves.
+        expect(h.requestManager.getPendingCount()).toBe(1);
+        h.advanceTime(TIMEOUT);
+        await expect(promise).rejects.toThrow(o.timeoutMsg);
+      });
+
+      test("throws when not connected without sending on the wire", async () => {
+        h.setConnected(false);
+        await expect(o.call()).rejects.toThrow("Failed to connect to CtrlProxy");
+        expect(h.sentMessages).toHaveLength(0);
+      });
+    });
+  }
+});

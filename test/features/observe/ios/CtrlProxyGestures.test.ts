@@ -59,8 +59,8 @@ async function callAndResolve<T>(
 }
 
 describe("iOS CtrlProxyGestures", () => {
-  it("waits for the canonical multi-finger swipe result response type", async () => {
-    const { context, sent, requestManager } = createFakeContext();
+  it("resolves the multi-finger swipe request by matching request id", async () => {
+    const { context, sent } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
     const { sentMsg, result } = await callAndResolve(
@@ -71,7 +71,6 @@ describe("iOS CtrlProxyGestures", () => {
 
     expect(sentMsg.type).toBe("request_multi_finger_swipe");
     expect(sentMsg.fingerCount).toBe(3);
-    expect(requestManager.lastRegisteredType).toBe("multi_finger_swipe_result");
     expect(context.requestManager.getPendingCount()).toBe(0);
     expect(result.success).toBe(true);
   });

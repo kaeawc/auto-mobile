@@ -169,4 +169,20 @@ describe("XcodebuildClient streaming runner", () => {
       "xcodebuild is not available"
     );
   });
+
+  test("startStreaming releases the availability-probe timer handle", async () => {
+    // Covers the SECOND clearTimeout site (isAvailableWithin), independent of
+    // executeCommand's: `-version` failing makes the probe resolve unavailable
+    // before any spawn, and its timeout must be cleared on the INJECTED timer.
+    const timer = new FakeTimer();
+    const client = new XcodebuildClient(async () => {
+      throw new Error("not found");
+    }, timer);
+
+    await expect(
+      client.startStreaming(["test-without-building"], { timeoutMs: 5000 })
+    ).rejects.toThrow("xcodebuild is not available");
+
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
 });

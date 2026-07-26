@@ -16,6 +16,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
   private shouldStopFail: boolean = false;
   private shouldSetupFail: boolean = false;
   private shouldForceRestartFail: boolean = false;
+  private shouldIsRunningFail: boolean = false;
 
   // MARK: - Configuration Methods
 
@@ -84,6 +85,15 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     this.shouldForceRestartFail = shouldFail;
   }
 
+  /**
+   * Configure isRunning() to reject. Exercises the client's status-probe-failure
+   * (outer catch) branch, which must reset its in-flight-restart guard so a later
+   * threshold crossing probes/restarts again rather than being suppressed forever.
+   */
+  setIsRunningShouldFail(shouldFail: boolean): void {
+    this.shouldIsRunningFail = shouldFail;
+  }
+
   // MARK: - Assertion Methods
 
   /**
@@ -123,6 +133,9 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
 
   async isRunning(): Promise<boolean> {
     this.executedOperations.push("isRunning");
+    if (this.shouldIsRunningFail) {
+      throw new Error("FakeIOSCtrlProxyManager: isRunning failure (test seam)");
+    }
     return this.runningState;
   }
 

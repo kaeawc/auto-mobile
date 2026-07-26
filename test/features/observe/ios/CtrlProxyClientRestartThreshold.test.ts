@@ -225,5 +225,42 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       // ...and because it stays running, no threshold crossing ever force-restarts.
       expect(manager.getCallCount("forceRestart")).toBe(0);
     });
+
+    test("recovers when the status probe rejects so a later crossing probes again", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const manager = new FakeIOSCtrlProxyManager();
+      manager.setSetupShouldFail(true);
+      // The status probe itself rejects — the SEPARATE outer catch (distinct from the
+      // forceRestart-failure catch) must reset the in-flight-restart guard, or every
+      // later restart attempt is suppressed forever.
+      manager.setIsRunningShouldFail(true);
+
+      client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        8765,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        (_device: BootedDevice) => manager,
+      );
+
+      await driveFailuresPastThreshold(client, fakeTimer);
+      // The probe rejected before ever reaching forceRestart, so nothing restarted yet.
+      expect(manager.getCallCount("isRunning")).toBeGreaterThan(0);
+      expect(manager.getCallCount("forceRestart")).toBe(0);
+
+      // The probe now succeeds and reports the runner DOWN, so the next crossing is
+      // due to force-restart. That can only happen if the outer catch reset the
+      // in-flight guard; if it wedged the guard, this crossing early-returns and
+      // forceRestart never fires.
+      manager.setIsRunningShouldFail(false);
+      fakeTimer.advanceTime(11000);
+      for (let i = 0; i < 6; i++) {
+        await client.ensureConnected();
+      }
+      await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+      expect(manager.getCallCount("forceRestart")).toBeGreaterThanOrEqual(1);
+    });
   });
 });

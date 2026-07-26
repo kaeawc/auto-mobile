@@ -43,10 +43,10 @@ describe("AppPermissions", () => {
   test("sets Android runtime permissions and Android-specific options through one action", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult("shell pm grant --user 0 com.example.app android.permission.CAMERA", "");
-    client.setCommandResult("shell cmd notification set_enabled com.example.app true", "");
-    client.setCommandResult("shell cmd notification allow_dnd com.example.app", "");
-    client.setCommandResult("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM allow", "");
+    client.setCommandResult("shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'", "");
+    client.setCommandResult("shell cmd notification set_enabled 'com.example.app' true", "");
+    client.setCommandResult("shell cmd notification allow_dnd 'com.example.app'", "");
+    client.setCommandResult("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow", "");
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions("com.example.app", {
@@ -65,18 +65,18 @@ describe("AppPermissions", () => {
       "android_notification_policy_access",
       "android_schedule_exact_alarm_appop",
     ]);
-    expect(client.wasCommandExecuted("shell pm grant --user 0 com.example.app android.permission.CAMERA")).toBe(true);
-    expect(client.wasCommandExecuted("shell cmd notification set_enabled com.example.app true")).toBe(true);
-    expect(client.wasCommandExecuted("shell cmd notification allow_dnd com.example.app")).toBe(true);
-    expect(client.wasCommandExecuted("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM allow")).toBe(true);
+    expect(client.wasCommandExecuted("shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' true")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(true);
+    expect(client.wasCommandExecuted("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow")).toBe(true);
   });
 
   test("aggregates Android revoke and notification command failures", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult("shell pm revoke --user 0 com.example.app android.permission.CAMERA", "");
+    client.setCommandResult("shell pm revoke --user 0 'com.example.app' 'android.permission.CAMERA'", "");
     client.setCommandResult(
-      "shell cmd notification set_enabled com.example.app false",
+      "shell cmd notification set_enabled 'com.example.app' false",
       "",
       "SecurityException: notification access denied"
     );
@@ -117,7 +117,7 @@ describe("AppPermissions", () => {
   test("disables Android notifications independently of runtime permissions", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult("shell cmd notification set_enabled com.example.app false", "");
+    client.setCommandResult("shell cmd notification set_enabled 'com.example.app' false", "");
 
     const permissions = new AppPermissions(androidDevice, { adbFactory });
     const result = await permissions.setPermissions("com.example.app", {
@@ -130,7 +130,23 @@ describe("AppPermissions", () => {
     expect(result.operations.map(operation => operation.operationId)).toEqual([
       "android_notifications_enabled",
     ]);
-    expect(client.wasCommandExecuted("shell cmd notification set_enabled com.example.app false")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification set_enabled 'com.example.app' false")).toBe(true);
+  });
+
+  test("quotes notification package names before passing them to the device shell", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    const appId = "com.example.app; id #";
+    const command = "shell cmd notification set_enabled 'com.example.app; id #' false";
+    client.setCommandResult(command, "");
+
+    const permissions = new AppPermissions(androidDevice, { adbFactory });
+    const result = await permissions.setPermissions(appId, {
+      notificationsEnabled: false,
+    });
+
+    expect(result.success).toBe(true);
+    expect(client.getAllCommands()).toContain(command);
   });
 
   test("rejects a notification-only Android reset before executing either operation", async () => {
@@ -176,6 +192,25 @@ describe("AppPermissions", () => {
       "android_runtime_permissions:reset",
     ]);
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(true);
+  });
+
+  test("rejects a whitespace-padded Android reset sentinel", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    const permissions = new AppPermissions(androidDevice, { adbFactory });
+
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "reset",
+      permissions: [" all "],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.operations[0].result).toMatchObject({
+      results: [{
+        error: "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+      }],
+    });
+    expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
   });
 
   test("queries Android runtime permission state from dumpsys package", async () => {

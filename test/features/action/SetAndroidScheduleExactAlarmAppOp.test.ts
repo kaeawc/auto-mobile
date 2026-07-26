@@ -13,7 +13,7 @@ describe("SetAndroidScheduleExactAlarmAppOp", () => {
   test("allow runs appops allow", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
-    client.setCommandResult("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM allow", "");
+    client.setCommandResult("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow", "");
 
     const action = new SetAndroidScheduleExactAlarmAppOp(androidDevice, factory);
     const result = await action.execute("com.example.app", { mode: "allow" });
@@ -21,8 +21,22 @@ describe("SetAndroidScheduleExactAlarmAppOp", () => {
     expect(result.success).toBe(true);
     expect(result.skipped).toBeUndefined();
     expect(
-      client.wasCommandExecuted("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM allow")
+      client.wasCommandExecuted("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow")
     ).toBe(true);
+  });
+
+  test("quotes package names before passing them to the device shell", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    const packageName = "com.example.app; id #";
+    const command = "shell appops set --uid 'com.example.app; id #' SCHEDULE_EXACT_ALARM allow";
+    client.setCommandResult(command, "");
+
+    const action = new SetAndroidScheduleExactAlarmAppOp(androidDevice, factory);
+    const result = await action.execute(packageName, { mode: "allow" });
+
+    expect(result.success).toBe(true);
+    expect(client.getAllCommands()).toContain(command);
   });
 
   test("deny skipped below API 31", async () => {
@@ -43,7 +57,7 @@ describe("SetAndroidScheduleExactAlarmAppOp", () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult("shell getprop ro.build.version.sdk", "34\n");
-    client.setCommandResult("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM deny", "");
+    client.setCommandResult("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM deny", "");
 
     const action = new SetAndroidScheduleExactAlarmAppOp(androidDevice, factory);
     const result = await action.execute("com.example.app", { mode: "deny" });
@@ -51,7 +65,7 @@ describe("SetAndroidScheduleExactAlarmAppOp", () => {
     expect(result.success).toBe(true);
     expect(result.skipped).toBeUndefined();
     expect(
-      client.wasCommandExecuted("shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM deny")
+      client.wasCommandExecuted("shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM deny")
     ).toBe(true);
   });
 
@@ -59,7 +73,7 @@ describe("SetAndroidScheduleExactAlarmAppOp", () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
-      "shell appops set --uid com.example.app SCHEDULE_EXACT_ALARM allow",
+      "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow",
       "",
       "Error: bad"
     );

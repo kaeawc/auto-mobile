@@ -48,7 +48,7 @@ describe("NotificationPolicy", () => {
   test("sets Android notification policy access through cmd notification", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult("shell cmd notification allow_dnd com.example.app", "");
+    client.setCommandResult("shell cmd notification allow_dnd 'com.example.app'", "");
 
     const notificationPolicy = new NotificationPolicy(androidDevice, { adbFactory });
     const result = await notificationPolicy.setPolicy("com.example.app", {
@@ -61,7 +61,7 @@ describe("NotificationPolicy", () => {
       allowed: true,
       method: "android_cmd_notification",
     });
-    expect(client.wasCommandExecuted("shell cmd notification allow_dnd com.example.app")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(true);
   });
 
   test("reports iOS notification policy as unsupported", async () => {

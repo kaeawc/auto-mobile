@@ -5,6 +5,7 @@ import { BootedDevice, GrantAndroidPermissionItemResult, GrantAndroidPermissions
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { shellQuote } from "../../utils/shellQuote";
 
 
 export type AndroidPermissionChangeAction = "grant" | "revoke" | "reset";
@@ -89,7 +90,7 @@ export class GrantAndroidPermissions {
           continue;
         }
 
-        const cmd = `shell pm ${action} --user ${targetUserId} ${packageName} ${trimmed}`;
+        const cmd = `shell pm ${action} --user ${targetUserId} ${shellQuote(packageName)} ${shellQuote(trimmed)}`;
 
         try {
           await perf.track(`pm${action[0].toUpperCase()}${action.slice(1)}:${trimmed}`, async () => {
@@ -164,7 +165,7 @@ export class GrantAndroidPermissions {
     userId: number | undefined,
     perf: ReturnType<typeof createGlobalPerformanceTracker>
   ): Promise<GrantAndroidPermissionsResult> {
-    const resetPermissions = permissions.map(permission => permission.trim());
+    const resetPermissions = permissions;
     if (userId !== undefined) {
       perf.end();
       return {

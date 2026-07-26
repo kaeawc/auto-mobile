@@ -4,6 +4,7 @@ import { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { shellQuote } from "../../utils/shellQuote";
 
 export interface SetAndroidNotificationsEnabledInput {
   enabled: boolean;
@@ -39,7 +40,7 @@ export class SetAndroidNotificationsEnabled {
       };
     }
 
-    const command = `shell cmd notification set_enabled ${packageName} ${input.enabled}`;
+    const command = `shell cmd notification set_enabled ${shellQuote(packageName)} ${input.enabled}`;
     try {
       await perf.track("setEnabled", async () => {
         const result = await this.adb.executeCommand(command, undefined, undefined, true);

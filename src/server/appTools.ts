@@ -113,17 +113,13 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(withAppIdAliases(a
   args =>
     args.action !== "reset" ||
     args.platform !== "android" ||
-    (args.permissions?.length === 1 && args.permissions[0].trim() === "all"),
+    (args.permissions?.length === 1 && args.permissions[0] === "all"),
   "Android reset requires permissions=['all']"
 ), jsonSchema => {
   const properties = jsonSchema.properties as Record<string, Record<string, unknown>>;
   delete properties.action?.type;
   delete properties.scheduleExactAlarm?.type;
   for (const name of [
-    "action",
-    "permissions",
-    "userId",
-    "notificationsEnabled",
     "notificationPolicyAccess",
     "scheduleExactAlarm",
     "sessionUuid",

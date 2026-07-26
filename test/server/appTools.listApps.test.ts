@@ -167,6 +167,12 @@ describe("app permission tools", () => {
     expect(() => setAppTool!.schema.parse({
       appId: "com.example.app",
       action: "reset",
+      permissions: [" all "],
+      platform: "android",
+    })).toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      action: "reset",
       permissions: ["camera"],
       platform: "ios",
     })).not.toThrow();
@@ -225,5 +231,9 @@ describe("app permission tools", () => {
       permissions: ["camera"],
       platform: "ios",
     })).toBe(true);
+    expect(setAppPermissions!.inputSchema.properties?.action.description).toContain("Android reset");
+    expect(setAppPermissions.inputSchema.properties?.permissions.description).toContain("Android reset");
+    expect(setAppPermissions.inputSchema.properties?.userId.description).toContain("grant/revoke");
+    expect(setAppPermissions.inputSchema.properties?.notificationsEnabled.description).toContain("POST_NOTIFICATIONS");
   });
 });

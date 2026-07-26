@@ -24,11 +24,11 @@ describe("GrantAndroidPermissions", () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
-      "shell pm grant --user 0 com.example.app android.permission.POST_NOTIFICATIONS",
+      "shell pm grant --user 0 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
       ""
     );
     client.setCommandResult(
-      "shell pm grant --user 0 com.example.app android.permission.CAMERA",
+      "shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'",
       ""
     );
 
@@ -48,15 +48,15 @@ describe("GrantAndroidPermissions", () => {
     ]);
 
     const calls = client.getCommandCalls().map(c => c.command);
-    expect(calls).toContain("shell pm grant --user 0 com.example.app android.permission.POST_NOTIFICATIONS");
-    expect(calls).toContain("shell pm grant --user 0 com.example.app android.permission.CAMERA");
+    expect(calls).toContain("shell pm grant --user 0 'com.example.app' 'android.permission.POST_NOTIFICATIONS'");
+    expect(calls).toContain("shell pm grant --user 0 'com.example.app' 'android.permission.CAMERA'");
   });
 
   test("runs pm revoke for each permission with the resolved target user", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
-      "shell pm revoke --user 12 com.example.app android.permission.POST_NOTIFICATIONS",
+      "shell pm revoke --user 12 'com.example.app' 'android.permission.POST_NOTIFICATIONS'",
       ""
     );
 
@@ -79,9 +79,28 @@ describe("GrantAndroidPermissions", () => {
     ]);
     expect(
       client.wasCommandExecuted(
-        "shell pm revoke --user 12 com.example.app android.permission.POST_NOTIFICATIONS"
+        "shell pm revoke --user 12 'com.example.app' 'android.permission.POST_NOTIFICATIONS'"
       )
     ).toBe(true);
+  });
+
+  test("quotes package and permission values before passing them to the device shell", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    const packageName = "com.example.app; id #";
+    const permission = "android.permission.CAMERA; id #";
+    const command = "shell pm revoke --user 0 'com.example.app; id #' 'android.permission.CAMERA; id #'";
+    client.setCommandResult(command, "");
+
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute(packageName, {
+      action: "revoke",
+      permissions: [permission],
+      userId: 0,
+    });
+
+    expect(result.success).toBe(true);
+    expect(client.getAllCommands()).toContain(command);
   });
 
   test("resets all Android runtime permissions through pm reset-permissions", async () => {
@@ -104,6 +123,20 @@ describe("GrantAndroidPermissions", () => {
       },
     ]);
     expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(true);
+  });
+
+  test("rejects a whitespace-padded reset sentinel", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+    const result = await action.execute("com.example.app", {
+      action: "reset",
+      permissions: [" all "],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.results[0].error).toContain("permissions=['all']");
+    expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
   });
 
   test("rejects reset scopes other than permissions=['all']", async () => {
@@ -181,7 +214,7 @@ describe("GrantAndroidPermissions", () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
-      "shell pm grant --user 0 com.example.app android.permission.SEND_SMS",
+      "shell pm grant --user 0 'com.example.app' 'android.permission.SEND_SMS'",
       "",
       "java.lang.SecurityException: Permission denial"
     );

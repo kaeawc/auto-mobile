@@ -37,7 +37,7 @@ export interface DbWriteBarrier {
    *
    * Why not {@link track} here? `await track(() => write())` starts the write at
    * the same time, but adds one promise-resolution turn before the navigation
-   * handler resumes. The #3506 ordering guard proves that lets a concurrent
+   * handler resumes. The #3506 ordering guards prove that lets a concurrent
    * hierarchy path resume first. Keep `trackExisting` for this narrow hot path so
    * the caller can await its original promise with no extra turn. Prefer plain
    * {@link track} everywhere the caller does not already own the started promise

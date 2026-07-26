@@ -139,8 +139,9 @@ class LayoutInspectorStateFrameGenerationTest {
       1L,
       deviceId = device,
       generation = state.frameGeneration,
+      captureSequence = 1L,
     )
-    state.updateHierarchy(rootBounds(), deviceId = device, daemonTimestampMs = 1L)
+    state.updateHierarchy(rootBounds(), deviceId = device, captureSequence = 1L)
     state.updateConnectionStatus(ConnectionStatus.Connected)
     assertTrue(gateFor(state, device), "control was active in the prior session")
 
@@ -157,8 +158,9 @@ class LayoutInspectorStateFrameGenerationTest {
       2L,
       deviceId = device,
       generation = state.frameGeneration,
+      captureSequence = 2L,
     )
-    state.updateHierarchy(rootBounds(), deviceId = device, daemonTimestampMs = 2L)
+    state.updateHierarchy(rootBounds(), deviceId = device, captureSequence = 2L)
     state.updateConnectionStatus(ConnectionStatus.Connected)
     assertTrue(gateFor(state, device), "fresh frames re-arm control")
   }

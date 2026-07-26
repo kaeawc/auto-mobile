@@ -60,7 +60,7 @@ class DeviceControlPolicyTest {
       ScreenshotFrameFacts(
         deviceId = device,
         sequence = 10L,
-        daemonTimestampMs = 5_000L,
+        captureSequence = 7L,
         receivedAtMs = 9_900L,
         width = 1080,
         height = 2340,
@@ -69,7 +69,7 @@ class DeviceControlPolicyTest {
       HierarchyFrameFacts(
         deviceId = device,
         sequence = 11L,
-        daemonTimestampMs = 5_050L,
+        captureSequence = 7L,
         receivedAtMs = 9_950L,
         hierarchy = hierarchyOf(1080, 2340),
         rootWidth = 1080,
@@ -165,7 +165,7 @@ class DeviceControlPolicyTest {
             HierarchyFrameFacts(
               deviceId = "emulator-5556",
               sequence = 11L,
-              daemonTimestampMs = 5_050L,
+              captureSequence = 7L,
               receivedAtMs = 9_950L,
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
@@ -180,11 +180,16 @@ class DeviceControlPolicyTest {
 
   @Test
   fun `an equal-aspect resolution change cannot produce a mis-scaled tap`() {
-    // The reviewer's P1: the device drops 1080x2340 -> 720x1560. A new screenshot arrives; the
-    // hierarchy has not caught up. The aspect ratios are IDENTICAL, so no dimension comparison can
-    // tell them apart — but mapping a center click through the stale hierarchy's absolute bounds
-    // would send (540,1170) instead of (360,780). Provenance catches it: the screenshot's daemon
-    // timestamp advanced while the hierarchy's did not.
+    // The reviewer's P1, reproduced at the timing it ACTUALLY happens at. The device drops
+    // 1080x2340 -> 720x1560. The new screenshot arrives 200 ms after the hierarchy the client is
+    // still rendering — well inside any plausible "same device state" time window — and the two
+    // resolutions share an aspect ratio exactly, so neither an elapsed-time check nor a dimension
+    // comparison can separate them. Mapping a center click through the stale hierarchy's absolute
+    // bounds would send (540,1170) instead of (360,780).
+    //
+    // Shared capture identity separates them at any delta: the daemon stamped the new screenshot
+    // with the id of the hierarchy that produced 720x1560, and the client still holds the previous
+    // capture.
     val decision =
       DeviceControlPolicy.evaluate(
         inputs(
@@ -192,7 +197,7 @@ class DeviceControlPolicyTest {
             ScreenshotFrameFacts(
               deviceId = device,
               sequence = 30L,
-              daemonTimestampMs = 9_000L,
+              captureSequence = 8L, // the capture that reported 720x1560
               receivedAtMs = 9_900L,
               width = 720,
               height = 1560,
@@ -201,8 +206,8 @@ class DeviceControlPolicyTest {
             HierarchyFrameFacts(
               deviceId = device,
               sequence = 11L,
-              daemonTimestampMs = 5_050L, // stale: nearly 4s behind the screenshot
-              receivedAtMs = 9_950L,
+              captureSequence = 7L, // still the previous capture, only 200 ms older
+              receivedAtMs = 9_700L,
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
               rootHeight = 2340,
@@ -218,38 +223,49 @@ class DeviceControlPolicyTest {
   }
 
   @Test
-  fun `an aspect-preserving resolution change is available again once the hierarchy is paired`() {
-    // Same resolution change, but now the hierarchy update for the NEW resolution has arrived: the
-    // pair is coherent, and the snapshot maps through the new bounds.
-    val snapshot =
-      DeviceControlPolicy.evaluate(
-          inputs(
-            screenshot =
-              ScreenshotFrameFacts(
-                deviceId = device,
-                sequence = 30L,
-                daemonTimestampMs = 9_000L,
-                receivedAtMs = 9_900L,
-                width = 720,
-                height = 1560,
-              ),
-            hierarchy =
-              HierarchyFrameFacts(
-                deviceId = device,
-                sequence = 31L,
-                daemonTimestampMs = 9_060L,
-                receivedAtMs = 9_950L,
-                hierarchy = hierarchyOf(720, 1560),
-                rootWidth = 720,
-                rootHeight = 1560,
-              ),
-          ),
-          now,
+  fun `an unpaired hierarchy blocks control even when it is newer than the screenshot`() {
+    // Direction-independent: the hierarchy can also run ahead of the screenshot (the tree updates
+    // on an accessibility event while the next frame is still encoding). Either way the two do not
+    // describe one capture, so nothing may be mapped through them.
+    assertEquals(
+      DeviceControlBlockReason.UnpairedHierarchy,
+      blockedReason(
+        inputs(
+          hierarchy =
+            HierarchyFrameFacts(
+              deviceId = device,
+              sequence = 12L,
+              captureSequence = 9L,
+              receivedAtMs = 9_990L,
+              hierarchy = hierarchyOf(720, 1560),
+              rootWidth = 720,
+              rootHeight = 1560,
+            )
         )
-        .snapshotOrNull
-    assertNotNull(snapshot)
-    assertEquals(720, snapshot.deviceWidth)
-    assertEquals(1560, snapshot.deviceHeight)
+      ),
+    )
+  }
+
+  @Test
+  fun `control fails closed against a daemon that does not stamp capture identity`() {
+    // Without the shared id there is no way to prove the two messages describe one capture, so
+    // control is unavailable rather than guessing from time or dimensions.
+    assertEquals(
+      DeviceControlBlockReason.CaptureIdentityUnavailable,
+      blockedReason(
+        inputs(
+          screenshot =
+            ScreenshotFrameFacts(
+              deviceId = device,
+              sequence = 10L,
+              captureSequence = null,
+              receivedAtMs = 9_900L,
+              width = 1080,
+              height = 2340,
+            )
+        )
+      ),
+    )
   }
 
   @Test
@@ -281,9 +297,10 @@ class DeviceControlPolicyTest {
     val snapshot =
       assertNotNull(DeviceControlPolicy.evaluate(inputs(liveFrame = live), now).snapshotOrNull)
     assertEquals(DeviceFrameSource.LiveVideo, snapshot.source)
-    assertEquals(901L, snapshot.liveFrameSequence)
-    // The live frame is the newest source, so it orders the snapshot.
-    assertEquals(901L, snapshot.sequence)
+    assertEquals(901L, snapshot.liveFrameSequence, "the mirror's provenance is carried separately")
+    // Ordering comes from the OBSERVATION counter alone: the mirror's counter is a different
+    // domain, and folding it in would make the sequence fall back when the mirror clears.
+    assertEquals(11L, snapshot.sequence)
   }
 
   @Test
@@ -292,7 +309,7 @@ class DeviceControlPolicyTest {
       ScreenshotFrameFacts(
         deviceId = device,
         sequence = 10L,
-        daemonTimestampMs = 5_000L,
+        captureSequence = 7L,
         receivedAtMs = now - DeviceControlPolicy.SCREENSHOT_MAX_AGE_MS - 1,
         width = 1080,
         height = 2340,
@@ -358,7 +375,7 @@ class DeviceControlPolicyTest {
                 HierarchyFrameFacts(
                   deviceId = device,
                   sequence = 11L,
-                  daemonTimestampMs = 5_050L,
+                  captureSequence = 7L,
                   receivedAtMs = 9_950L,
                   hierarchy = hierarchyOf(0, 0),
                   rootWidth = 0,

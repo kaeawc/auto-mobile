@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -687,16 +688,29 @@ fun AutoMobileContent(
   // host wires control once instead of assembling a gate per discovered source disagreement.
   // Drag/swipe (#3350) and keyboard/text (#3351) add a dispatch method to the session rather than
   // new wiring here.
+  // The daemon client factory the session mints per-tap clients from, held in state so it can be
+  // SWAPPED behind one long-lived session. Rebuilding the session on every provider change (a
+  // daemon reconnect) would strand the previous session's dispatch consumer inside the stable
+  // screenshotScope: taps queued behind a blocked request would drain through the superseded
+  // client once it unblocked, and that session's independent error claim could publish a banner
+  // into the new context.
+  val controlClientProvider by rememberUpdatedState(clientProvider)
   val deviceControlSession =
-    remember(screenshotScope, clientProvider) {
+    remember(screenshotScope) {
       DeviceControlSession(
         scope = screenshotScope,
-        clientProvider = { clientProvider?.invoke() },
+        clientProvider = { controlClientProvider?.invoke() },
         platform = { controlPlatform.value },
         nowMs = { System.currentTimeMillis() },
         publishError = { message -> deviceControlTapError = message },
       )
     }
+
+  // The provider swaps behind the session via rememberUpdatedState; this drops everything captured
+  // against the PREVIOUS provider — the queued backlog (closing each pending client, so a
+  // superseded dispatcher can never hold unclosed AutoMobileClient instances), the error claim, and
+  // any pending post-input refresh wait.
+  LaunchedEffect(clientProvider) { deviceControlSession.reset() }
 
   // One coherent reset of the control context (issues #3347, #3348), run at every point that
   // invalidates the rendered frame identity (device change, transport/mode change, stream
@@ -902,10 +916,11 @@ fun AutoMobileContent(
             it.second,
             deviceId = update.deviceId,
             generation = generation,
-            // The daemon's capture timestamp is this update's provenance: device control pairs it
-            // against the screenshot update's timestamp so a hierarchy left behind by a resolution
-            // change can never supply the bounds a tap is mapped through (issue #3348).
-            daemonTimestampMs = update.timestamp,
+            // The daemon's shared capture id is this update's provenance: device control pairs it
+            // by EQUALITY against the screenshot update's id, so a hierarchy left behind by a
+            // resolution change can never supply the bounds a tap is mapped through — however few
+            // milliseconds behind it is (issue #3348).
+            captureSequence = update.captureSequence,
           )
         }
       }
@@ -943,6 +958,8 @@ fun AutoMobileContent(
           // active-device filter above, so this equals activeDeviceId at apply time.
           deviceId = update.deviceId,
           generation = generation,
+          // Pairs by equality against the hierarchy's id; see the hierarchy collector above.
+          captureSequence = update.captureSequence,
         )
       }
     }
@@ -1599,6 +1616,12 @@ fun AutoMobileContent(
               )
             )
           val controlSnapshot = deviceControlDecision.snapshotOrNull
+          // What the inspector RENDERS, which is not always what control may act through: after a
+          // successful tap the clicked snapshot is retained until a genuinely superseding one
+          // arrives (issue #3348's refresh policy). A screenshot-only update in the meantime does
+          // not pair with the retained hierarchy, so it produces no snapshot and must not replace
+          // the coherent picture on screen. Falls back to live state before the first snapshot.
+          val renderSnapshot = deviceControlSession.renderSnapshot
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(
               screenshotData = layoutInspectorState.screenshotData,
@@ -1606,7 +1629,7 @@ fun AutoMobileContent(
               screenWidth = layoutInspectorState.screenWidth,
               screenHeight = layoutInspectorState.screenHeight,
               rotation = layoutInspectorState.rotation,
-              hierarchy = layoutInspectorState.hierarchy,
+              hierarchy = renderSnapshot?.hierarchy?.root ?: layoutInspectorState.hierarchy,
               selectedElementId = layoutInspectorState.selectedElementId,
               hoveredElementId = layoutInspectorState.hoveredElementId,
               onElementSelected = { layoutInspectorState.selectElement(it) },
@@ -1615,7 +1638,9 @@ fun AutoMobileContent(
               onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
               connectionStatus = layoutInspectorState.connectionStatus,
               socketExists = true,
-              elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
+              elementMap =
+                (renderSnapshot?.hierarchy?.elementMap ?: layoutInspectorState.currentElementMap)
+                  .takeIf { it.isNotEmpty() },
               modifier = Modifier.fillMaxSize(),
               // Device control (issues #3347, #3348): the reference desktop app opts in via
               // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only.

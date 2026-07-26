@@ -42,6 +42,11 @@ import kotlinx.coroutines.withContext
  *
  * @param scope the coroutine scope the single dispatch consumer runs in (cancelled with the host).
  * @param clientProvider mints a daemon client per action; the consumer closes it after dispatch.
+ *   Read at enqueue time, so a host whose provider changes (a daemon reconnect) can swap it behind
+ *   this lambda and keep ONE session rather than building a replacement — a replacement would
+ *   strand the previous session's dispatch consumer, still running in the host's stable scope with
+ *   taps queued against the old client, and its independent error claim could publish into the new
+ *   context. Call [reset] before swapping so nothing queued against the old provider survives.
  * @param platform the daemon platform string for the target device ("android" / "ios"), read at
  *   dispatch-enqueue time on the UI thread.
  * @param nowMs client wall clock, injected so freshness decisions are deterministic in tests.
@@ -77,6 +82,22 @@ class DeviceControlSession(
     get() = refreshTracker.state
 
   /**
+   * The snapshot the inspector should RENDER, as opposed to the one control may act through.
+   *
+   * These differ only while a post-input refresh is pending. After a successful input the clicked
+   * snapshot is retained here until a snapshot that genuinely *supersedes* it arrives — meaning a
+   * newly-paired screenshot **and** hierarchy, since a snapshot cannot exist without both. A
+   * screenshot-only update in the meantime carries a capture identity the retained hierarchy does
+   * not match, so it produces no snapshot and does not replace this one; the inspector keeps
+   * showing a coherent picture instead of flickering to a half-updated one. The timeout in
+   * [PostInputRefreshTracker] bounds how long that can last.
+   *
+   * Updated by [evaluate]; null before the first snapshot and after [reset].
+   */
+  var renderSnapshot: DeviceFrameSnapshot? = null
+    private set
+
+  /**
    * Evaluate control availability for [inputs] and, on the way, offer the resulting snapshot to the
    * refresh tracker so a pending post-input wait settles on the first superseding snapshot.
    *
@@ -86,8 +107,15 @@ class DeviceControlSession(
   fun evaluate(inputs: DeviceControlInputs): DeviceControlDecision {
     val now = nowMs()
     val decision = DeviceControlPolicy.evaluate(inputs, now)
-    val snapshot = decision.snapshotOrNull
-    if (snapshot != null) refreshTracker.onSnapshot(snapshot, now) else refreshTracker.onTick(now)
+    val live = decision.snapshotOrNull
+    if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
+      // Hold the clicked snapshot on screen until something supersedes it (or the wait times out).
+      val settled =
+        if (live != null) refreshTracker.onSnapshot(live, now) else refreshTracker.onTick(now)
+      if (settled && live != null) renderSnapshot = live
+    } else if (live != null) {
+      renderSnapshot = live
+    }
     return decision
   }
 
@@ -96,10 +124,16 @@ class DeviceControlSession(
    *
    * [snapshot] is the frame the user actually clicked, captured by the view atomically with
    * [point]; the dispatch targets `snapshot.deviceId`, never a device id resolved later. Returns
-   * false when the bounded queue is full (a stalled daemon is holding up the consumer), in which
-   * case an overload error has already been published.
+   * false when the tap was not dispatched: an out-of-bounds point (dropped per the
+   * coordinate-mapping contract — a control client must never tap off-screen), or a full bounded
+   * queue (a stalled daemon is holding up the consumer), in which case an overload error has
+   * already been published.
    */
   fun tap(snapshot: DeviceFrameSnapshot, point: DevicePoint): Boolean {
+    // Nothing reaches the device for an off-screen point, so this must be a no-op — not a
+    // "success" that parks the client in AwaitingSnapshot for the full refresh timeout waiting for
+    // a device change that was never requested.
+    if (!point.inBounds) return false
     val token = errorToken.incrementAndGet()
     publishError(null)
     val accepted =
@@ -130,6 +164,7 @@ class DeviceControlSession(
     dispatcher.reset()
     errorToken.incrementAndGet()
     refreshTracker.reset()
+    renderSnapshot = null
     publishError(null)
   }
 

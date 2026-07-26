@@ -583,6 +583,74 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(hierarchyMessages[hierarchyMessages.length - 1].hierarchyDiff.hasBaseline).toBe(false);
     });
 
+    it("stamps a monotonic capture identity on each hierarchy and echoes it on screenshots", () => {
+      // Issue #3348: a control client pairs a screenshot with the hierarchy its reported
+      // screenWidth/screenHeight were derived from by requiring equal captureSequence. The capture
+      // clients cache those dimensions from a hierarchy and then push that same hierarchy, so the
+      // newest pushed hierarchy is the capture a following screenshot's geometry came from.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", "frame-a", 1080, 2340);
+      server.pushHierarchyUpdate("device-1", frame("b"));
+      server.pushScreenshotUpdate("device-1", "frame-b", 720, 1560);
+
+      const messages = socket.getWrittenMessages<any>();
+      const [h1, s1, h2, s2] = messages.filter(
+        m => m.type === "hierarchy_update" || m.type === "screenshot_update"
+      );
+
+      expect(h1.captureSequence).toBe(1);
+      expect(s1.captureSequence).toBe(1);
+      expect(h2.captureSequence).toBe(2);
+      expect(s2.captureSequence).toBe(2);
+    });
+
+    it("does not pair a screenshot with a hierarchy from a different capture", () => {
+      // The equal-aspect resolution change: the 720x1560 screenshot is stamped with capture 2
+      // while a client still rendering capture 1's 1080x2340 hierarchy would map a tap through the
+      // wrong bounds. The ids differ regardless of how few milliseconds apart they are.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushHierarchyUpdate("device-1", frame("b"));
+      server.pushScreenshotUpdate("device-1", "frame-b", 720, 1560);
+
+      const messages = socket.getWrittenMessages<any>();
+      const hierarchies = messages.filter(m => m.type === "hierarchy_update");
+      const screenshot = messages.find(m => m.type === "screenshot_update");
+
+      expect(screenshot.captureSequence).toBe(2);
+      expect(hierarchies[0].captureSequence).toBe(1);
+      expect(screenshot.captureSequence).not.toBe(hierarchies[0].captureSequence);
+    });
+
+    it("omits the capture identity until a hierarchy has been pushed", () => {
+      // A screenshot that arrives before any hierarchy has no capture to pair with, so a control
+      // client correctly cannot build a snapshot from it.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushScreenshotUpdate("device-1", "frame-a", 1080, 2340);
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("drops the capture identity when the device connection is lost", () => {
+      // A client holding a pre-drop hierarchy must not pair with a post-reconnect screenshot that
+      // happens to reuse the same id.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushHierarchyUpdate("device-1", frame("b"));
+      server.onDeviceConnectionLost("device-1");
+      server.pushHierarchyUpdate("device-1", frame("c"));
+
+      const hierarchies = socket.getWrittenMessages<any>().filter(m => m.type === "hierarchy_update");
+      expect(hierarchies[1].captureSequence).toBe(2);
+      expect(hierarchies[2].captureSequence).toBe(1);
+    });
+
     it("does not mutate the caller's hierarchy when annotating", () => {
       server.simulateSubscription({ deviceId: "device-1" });
 

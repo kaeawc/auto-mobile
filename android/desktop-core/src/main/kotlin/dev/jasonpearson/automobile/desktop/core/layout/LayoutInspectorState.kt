@@ -107,9 +107,10 @@ class LayoutInspectorState(
 
   // Provenance of the applied screenshot / hierarchy (issue #3348). These are the inputs
   // DeviceControlPolicy assembles an atomic DeviceFrameSnapshot from: which update it is
-  // (sequence), which device state it describes (the daemon's capture timestamp, comparable only
-  // against the other source's daemon timestamp), and how old it is on the client clock. Compose
-  // state so a composition that evaluates control availability recomposes when a source updates.
+  // (sequence), which device CAPTURE it describes (the daemon's shared captureSequence, paired by
+  // equality against the other source's), and how old it is on the CLIENT clock (receivedAtMs is
+  // stamped here, by us, never taken from a daemon or device message). Compose state so a
+  // composition that evaluates control availability recomposes when a source updates.
   var screenshotFacts by mutableStateOf<ScreenshotFrameFacts?>(null)
     private set
 
@@ -252,6 +253,7 @@ class LayoutInspectorState(
     captureSource: String? = null,
     deviceId: String? = null,
     generation: Long? = null,
+    captureSequence: Long? = null,
   ) {
     if (generation != null && generation != this.generation) return
     screenshotData = data
@@ -267,7 +269,7 @@ class LayoutInspectorState(
       ScreenshotFrameFacts(
         deviceId = deviceId,
         sequence = nextSourceSequence(),
-        daemonTimestampMs = timestamp,
+        captureSequence = captureSequence,
         receivedAtMs = nowMs(),
         width = width,
         height = height,
@@ -283,7 +285,7 @@ class LayoutInspectorState(
     newHierarchy: UIElementInfo,
     newRotation: Int = 0,
     deviceId: String? = null,
-    daemonTimestampMs: Long = 0L,
+    captureSequence: Long? = null,
   ) {
     // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
     // immediate
@@ -291,7 +293,7 @@ class LayoutInspectorState(
     debounceJob?.cancel()
     val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
     val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
-    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, daemonTimestampMs)
+    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence)
   }
 
   /**
@@ -307,7 +309,7 @@ class LayoutInspectorState(
     changedIds: Set<String>,
     deviceId: String? = null,
     generation: Long? = null,
-    daemonTimestampMs: Long = 0L,
+    captureSequence: Long? = null,
   ) {
     debounceJob?.cancel()
     debounceJob = debounceScope.launch {
@@ -315,7 +317,7 @@ class LayoutInspectorState(
       // Drop a debounced job whose generation was superseded while it waited (device change,
       // invalidation, or disconnect) so it can't restore stale hierarchy identity/bounds.
       if (generation != null && generation != this@LayoutInspectorState.generation) return@launch
-      applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, daemonTimestampMs)
+      applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence)
     }
   }
 
@@ -328,7 +330,7 @@ class LayoutInspectorState(
     parsed: ParsedHierarchy,
     changedIds: Set<String>,
     deviceId: String? = null,
-    daemonTimestampMs: Long = 0L,
+    captureSequence: Long? = null,
   ) {
     changedElementIds = changedIds
     currentParsedHierarchy = parsed
@@ -338,7 +340,7 @@ class LayoutInspectorState(
       HierarchyFrameFacts(
         deviceId = deviceId,
         sequence = nextSourceSequence(),
-        daemonTimestampMs = daemonTimestampMs,
+        captureSequence = captureSequence,
         receivedAtMs = nowMs(),
         hierarchy = parsed,
         // The root commonly reports (0,0,0,0) on Android (accessibility service); 0 tells the

@@ -26,6 +26,7 @@ class PostInputRefreshTrackerTest {
       deviceWidth = 1080,
       deviceHeight = 2340,
       hierarchy = null,
+      captureSequence = sequence,
       screenshotSequence = sequence,
       hierarchySequence = sequence,
       liveFrameSequence = null,

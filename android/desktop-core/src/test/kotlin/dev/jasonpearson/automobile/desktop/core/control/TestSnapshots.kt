@@ -20,6 +20,7 @@ internal fun testSnapshot(
     deviceWidth = deviceWidth,
     deviceHeight = deviceHeight,
     hierarchy = null,
+    captureSequence = sequence,
     screenshotSequence = sequence,
     hierarchySequence = sequence,
     liveFrameSequence = null,

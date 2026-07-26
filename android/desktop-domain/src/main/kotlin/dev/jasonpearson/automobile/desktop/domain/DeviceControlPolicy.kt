@@ -19,11 +19,19 @@ public enum class DeviceControlBlockReason {
   /** A contributing source belongs to a different device than the selection. */
   DeviceMismatch,
   /**
-   * The screenshot and the hierarchy do not describe the same device state: their daemon capture
-   * timestamps are further apart than [DeviceControlPolicy.HIERARCHY_PAIRING_WINDOW_MS]. This is
-   * the check that catches an equal-aspect resolution change, which no dimension comparison can.
+   * The screenshot and the hierarchy do not describe the same device capture: their daemon
+   * [captureSequence][ScreenshotFrameFacts.captureSequence] ids differ. This is the check that
+   * catches an equal-aspect resolution change, which neither a dimension comparison nor an elapsed
+   * time window can.
    */
   UnpairedHierarchy,
+
+  /**
+   * The daemon did not stamp a capture identity on its observation messages, so the screenshot and
+   * hierarchy cannot be proven to describe the same device state. Control fails closed rather than
+   * guessing.
+   */
+  CaptureIdentityUnavailable,
   /** The displayed frame is older than the freshness bound for its source. */
   StaleFrame,
   /**
@@ -82,25 +90,16 @@ public data class DeviceControlInputs(
  * - a **stalled live relay** keeps its socket, its state and its last bitmap, so its dimensions
  *   never change while the user clicks frozen content.
  *
- * Both require knowing *which frame* the pixels came from, so this policy decides on provenance:
- * daemon capture timestamps pair the screenshot with the hierarchy, and a client-clock recency
- * bound retires a frame whose source stopped producing.
+ * Both require knowing *which frame* the pixels came from, so this policy decides on provenance: a
+ * shared daemon **capture identity** pairs the screenshot with the hierarchy whose geometry it
+ * reports, and a client-clock recency bound retires a frame whose source stopped producing. No
+ * comparison here mixes clocks — the only time values used are client-stamped receive instants,
+ * compared against the client's own `nowMs`.
  *
  * Pure and Compose-free: `nowMs` is passed in, so tests drive it deterministically with no real
  * timers.
  */
 public object DeviceControlPolicy {
-
-  /**
-   * How far apart the screenshot's and the hierarchy's *daemon* capture timestamps may be while
-   * still describing the same device state.
-   *
-   * Generous relative to the observation stream's cadence (the hierarchy flow is debounced ~100ms
-   * client-side and both updates are pushed continuously while subscribed), so healthy streaming
-   * never blinks control off; tight enough that a hierarchy left behind by a resolution change,
-   * rotation or app switch stops pairing well before the user can click through it.
-   */
-  public const val HIERARCHY_PAIRING_WINDOW_MS: Long = 1_500L
 
   /**
    * How old the displayed observation screenshot may be, on the client clock. Bounds the "the
@@ -155,13 +154,28 @@ public object DeviceControlPolicy {
       return blocked(DeviceControlBlockReason.DeviceMismatch)
     }
 
-    // Provenance pairing. Both timestamps come from the daemon, so they are comparable to each
-    // other (and to nothing else). This is what an equal-aspect resolution change trips: the new
-    // screenshot advances the daemon timestamp while the stale hierarchy — whose absolute bounds
-    // the tap would be mapped through — does not.
-    if (
-      abs(screenshot.daemonTimestampMs - hierarchy.daemonTimestampMs) > HIERARCHY_PAIRING_WINDOW_MS
-    ) {
+    // Provenance pairing by SHARED CAPTURE IDENTITY, not elapsed time.
+    //
+    // The daemon assigns a monotonic id per device on every hierarchy it pushes, and echoes that
+    // id on every screenshot whose reported screenWidth/screenHeight were derived from that
+    // hierarchy. Equal ids therefore mean "these two messages describe the same captured device
+    // state" — a fact, not an inference.
+    //
+    // Elapsed time cannot do this job. After an aspect-preserving resolution change
+    // (1080x2340 -> 720x1560) the new screenshot and the not-yet-applied older hierarchy are
+    // milliseconds apart and identical in aspect, so any window wide enough for normal streaming
+    // also admits the mis-scaled pair. Neither can a dimension comparison: on iOS the reported
+    // screen size is a uniform scale of the hierarchy's point-space bounds, indistinguishable from
+    // a uniform resolution change.
+    //
+    // The messages' `timestamp` fields are deliberately unused: the hierarchy's originates on the
+    // DEVICE (its own wall clock, forwarded unchanged) while the screenshot's is stamped by the
+    // DAEMON, so their difference is dominated by clock skew rather than by staleness.
+    val captureSequence = screenshot.captureSequence
+    if (captureSequence == null || hierarchy.captureSequence == null) {
+      return blocked(DeviceControlBlockReason.CaptureIdentityUnavailable)
+    }
+    if (captureSequence != hierarchy.captureSequence) {
       return blocked(DeviceControlBlockReason.UnpairedHierarchy)
     }
 
@@ -203,8 +217,13 @@ public object DeviceControlPolicy {
     return DeviceControlDecision.Available(
       DeviceFrameSnapshot(
         deviceId = selected,
-        sequence =
-          maxOf(screenshot.sequence, hierarchy.sequence, liveFrame?.sequence ?: Long.MIN_VALUE),
+        // Ordered by the OBSERVATION-source counter alone. The live frame's sequence comes from a
+        // different counter domain entirely (a per-mirror-connection counter), so folding it in
+        // with maxOf would let the snapshot sequence jump to the mirror's value while a live frame
+        // is present and then go BACKWARDS when it clears — breaking both the monotonicity this
+        // field promises and the refresh policy's "strictly greater sequence" settle condition.
+        // The live frame's provenance is carried separately in liveFrameSequence.
+        sequence = maxOf(screenshot.sequence, hierarchy.sequence),
         capturedAtMs = liveFrame?.receivedAtMs ?: screenshot.receivedAtMs,
         source =
           if (liveFrame != null) DeviceFrameSource.LiveVideo else DeviceFrameSource.Screenshot,
@@ -213,6 +232,7 @@ public object DeviceControlPolicy {
         deviceWidth = deviceWidth,
         deviceHeight = deviceHeight,
         hierarchy = hierarchy.hierarchy,
+        captureSequence = captureSequence,
         screenshotSequence = screenshot.sequence,
         hierarchySequence = hierarchy.sequence,
         liveFrameSequence = liveFrame?.sequence,

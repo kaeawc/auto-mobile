@@ -92,6 +92,21 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
   storageEvent?: StorageChangedEvent;
   /** Per-frame hierarchy diff summary (present on hierarchy_update messages). */
   hierarchyDiff?: HierarchyDiffSummary;
+  /**
+   * Shared capture identity for the device geometry a message describes (issue #3348).
+   *
+   * Monotonic per device, assigned on every `hierarchy_update`. A `screenshot_update` echoes the
+   * id of the hierarchy its `screenWidth`/`screenHeight` were derived from — the CtrlProxy clients
+   * cache those dimensions from a hierarchy and then push that same hierarchy, so "the newest
+   * hierarchy pushed for this device" is exactly the capture the screenshot's geometry came from.
+   *
+   * A control client pairs the two messages by requiring equal ids. Elapsed time cannot do this
+   * job: after an aspect-preserving resolution change (1080x2340 -> 720x1560) a new screenshot and
+   * a not-yet-applied older hierarchy are milliseconds apart and identical in aspect, yet mapping
+   * a click through the old hierarchy's absolute bounds sends the wrong coordinate. Ids differ the
+   * instant the geometry does, at any delta.
+   */
+  captureSequence?: number;
 }
 
 /**
@@ -192,6 +207,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   // starts from a clean baseline instead of diffing against a stale pre-drop tree.
   private previousHierarchyByDevice = new Map<string, ViewHierarchyResult>();
 
+  // Monotonic capture id per device (issue #3348). Bumped on every pushed hierarchy_update and
+  // echoed on every screenshot_update, so a control client can pair a screenshot with the exact
+  // hierarchy its reported geometry came from. Cleared on connection loss with the diff baseline:
+  // a reconnect restarts the sequence, and a client that still holds a pre-drop hierarchy will not
+  // pair with it.
+  private captureSequenceByDevice = new Map<string, number>();
+
   constructor(socketPath: string = getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "DeviceDataStream");
   }
@@ -258,12 +280,21 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     const { hierarchy: annotated, summary } = annotateHierarchyDiff(previous, hierarchy);
     this.previousHierarchyByDevice.set(deviceId, hierarchy);
 
+    // Assign this capture's shared identity BEFORE the push, so the screenshots that follow (whose
+    // cached screen dimensions were derived from this very hierarchy) echo this id.
+    const captureSequence = (this.captureSequenceByDevice.get(deviceId) ?? 0) + 1;
+    this.captureSequenceByDevice.set(deviceId, captureSequence);
+
     const message: DeviceDataStreamMessage = {
       type: "hierarchy_update",
       deviceId,
+      // Device-origin when the hierarchy carries its own capture time, daemon-origin otherwise —
+      // so this field mixes clocks and must NOT be compared against a daemon- or client-stamped
+      // time. Pair on `captureSequence` instead; `timestamp` is for display only.
       timestamp: hierarchy.updatedAt ?? this.timer.now(),
       data: annotated,
       hierarchyDiff: summary,
+      captureSequence,
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
@@ -300,6 +331,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotBase64,
       screenWidth,
       screenHeight,
+      // The newest hierarchy pushed for this device is the one whose bounds produced the
+      // screenWidth/screenHeight above (see captureSequenceByDevice). Absent until the first
+      // hierarchy arrives, which correctly leaves a control client unable to pair.
+      captureSequence: this.captureSequenceByDevice.get(deviceId),
       screenshotMimeType,
       screenshotFormat,
       screenshotCaptureSource,
@@ -467,6 +502,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // Drop the diff baseline: the next hierarchy after a reconnect is a fresh
     // full frame, not a delta from the tree captured before the connection dropped.
     this.previousHierarchyByDevice.delete(deviceId);
+    // Drop the capture identity too, so a pre-drop hierarchy held by a client cannot pair with a
+    // post-reconnect screenshot that happens to reuse the same id.
+    this.captureSequenceByDevice.delete(deviceId);
 
     const message: DeviceDataStreamMessage = {
       type: "error",

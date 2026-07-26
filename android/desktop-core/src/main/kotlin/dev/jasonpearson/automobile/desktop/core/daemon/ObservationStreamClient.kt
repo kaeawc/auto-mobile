@@ -315,6 +315,7 @@ class ObservationStreamClient {
             data = response.data,
             packageName = packageName,
             diff = response.hierarchyDiff,
+            captureSequence = response.captureSequence,
           )
         _hierarchyUpdates.emit(update)
         log.info("Emitted hierarchy update to flow")
@@ -339,6 +340,7 @@ class ObservationStreamClient {
             screenshotEncodeDurationMs = response.screenshotEncodeDurationMs,
             screenshotByteLength = response.screenshotByteLength,
             screenshotBase64Length = response.screenshotBase64Length,
+            captureSequence = response.captureSequence,
           )
         _screenshotUpdates.emit(update)
         log.info("Emitted screenshot update to flow")
@@ -566,6 +568,12 @@ data class StreamResponse(
   val performanceData: PerformanceStreamData? = null,
   val hierarchyDiff: HierarchyDiffSummary? = null,
   val storageEvent: StorageEventData? = null,
+  /**
+   * Shared capture identity for the device geometry this message describes (issue #3348). Monotonic
+   * per device, assigned on each `hierarchy_update` and echoed on each `screenshot_update` that
+   * reports geometry derived from that hierarchy. Null on daemons that predate it.
+   */
+  val captureSequence: Long? = null,
 )
 
 /**
@@ -647,6 +655,8 @@ data class HierarchyStreamUpdate(
   val data: JsonElement?,
   val packageName: String? = null,
   val diff: HierarchyDiffSummary? = null,
+  /** Shared capture identity; see [StreamResponse.captureSequence]. */
+  val captureSequence: Long? = null,
 )
 
 data class ScreenshotStreamUpdate(
@@ -664,6 +674,8 @@ data class ScreenshotStreamUpdate(
   val screenshotEncodeDurationMs: Long? = null,
   val screenshotByteLength: Int? = null,
   val screenshotBase64Length: Int? = null,
+  /** Shared capture identity; see [StreamResponse.captureSequence]. */
+  val captureSequence: Long? = null,
 )
 
 data class NavigationGraphStreamUpdate(

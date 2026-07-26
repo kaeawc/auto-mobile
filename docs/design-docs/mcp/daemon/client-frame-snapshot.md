@@ -19,8 +19,8 @@ several sources that update independently:
 
 | Source | Carries | Updates |
 | --- | --- | --- |
-| observation stream `screenshot_update` | pixels, reported screen size, daemon capture timestamp | continuously while subscribed |
-| observation stream `hierarchy_update` | element tree with `bounds`, daemon capture timestamp | continuously, usually debounced client-side |
+| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence` | continuously while subscribed |
+| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence` | continuously, usually debounced client-side |
 | live mirror relay (optional) | decoded video frames | at the mirror's frame rate |
 | daemon connection state | transport liveness | on connect/disconnect |
 | device selection | which device the user chose | on user action |
@@ -48,14 +48,25 @@ immutable snapshot assembled before the UI layer, and decides on provenance.
 ```text
 DeviceFrameSnapshot(
   deviceId,             // the one device every contributing source agreed on
-  sequence,             // monotonic; orders snapshots against each other
+  sequence,             // monotonic; orders snapshots against each other (see below)
+  captureSequence,      // the daemon capture identity screenshot and hierarchy agreed on
   capturedAtMs,         // client clock, for recency
   source,               // Screenshot | LiveVideo — which pixels are displayed
   frameWidth/Height,    // the displayed frame's dimensions
   deviceWidth/Height,   // the effective device bounds used for mapping
   hierarchy,            // paired in, not independently debounced into view state
+  liveFrameSequence,    // the mirror's own provenance, a SEPARATE counter domain
 )
 ```
+
+`sequence` is derived from the **observation-source counter only** — the newer of
+the screenshot's and hierarchy's sequences, which share one counter domain. It is
+guaranteed monotonic non-decreasing for the lifetime of a session, which is what
+the refresh policy's "strictly greater sequence" condition relies on. The live
+mirror's frames are counted in a *different* domain (per mirror connection), so
+they are deliberately excluded: folding them in with a max would make `sequence`
+jump while a mirror is connected and fall back when it clears. The mirror's
+provenance is carried separately in `liveFrameSequence`.
 
 Contract:
 
@@ -82,24 +93,39 @@ and unit-testable without a device.
 | The observation stream is connected | A dead stream means the on-screen mirror is frozen |
 | A screenshot **and** a hierarchy have been applied | Mapping needs both |
 | Every source's device id equals the selection | After a device switch the previous device's frame lingers |
-| `abs(screenshot.daemonTimestamp - hierarchy.daemonTimestamp) <= 1500 ms` | **Provenance pairing** — this is what catches the equal-aspect resolution change |
+| `screenshot.captureSequence == hierarchy.captureSequence` | **Shared capture identity** — this is what catches the equal-aspect resolution change |
+| Both messages carry a `captureSequence` at all | Older daemons do not stamp one; control fails closed rather than guessing |
 | `now - screenshot.receivedAt <= 5000 ms` | The daemon may stop pushing without disconnecting |
 | `now - liveFrame.receivedAt <= 1000 ms` (when a live frame is displayed) | **Recency** — this is what catches the stalled mirror |
 | Displayed frame and mapping bounds agree in aspect | A cross-check for the live path, which has no daemon timestamp to pair against |
 
-Two clock rules matter for a correct port:
+### Pairing is identity, never elapsed time
 
-- **Daemon timestamps are compared only to each other.** They order the two
-  observation sources relative to one another; they are not comparable to the
-  client's wall clock.
-- **Client receive instants are compared only to the client clock.** They answer
-  "did this source stop producing?".
+The daemon assigns a monotonic `captureSequence` per device on every
+`hierarchy_update` it pushes, and echoes that id on every `screenshot_update`
+whose `screenWidth`/`screenHeight` were derived from that hierarchy. (Both
+platforms' capture clients cache the screen dimensions *from* a hierarchy and then
+push that same hierarchy, so "the newest hierarchy pushed for this device" is
+exactly the capture the screenshot's geometry came from.) Equal ids therefore mean
+"these two messages describe the same captured device state" — a fact, not an
+inference.
 
-Absolute dimensions are deliberately **not** compared between the frame and the
-mapping bounds: a screenshot may be a downscale of the device screen, and iOS
-hierarchy bounds are logical points against pixel screenshots. That is exactly why
-an aspect check alone cannot catch an equal-aspect resolution change, and why
-pairing by provenance does.
+Two things that look like they would work, and do not:
+
+- **An elapsed-time window between the two messages.** After an aspect-preserving
+  resolution change the new screenshot and the not-yet-applied older hierarchy are
+  *milliseconds* apart, so any window wide enough for normal streaming also admits
+  the mis-scaled pair. Worse, the two `timestamp` fields are not even from one
+  clock: a hierarchy's originates on the **device** (its own wall clock, forwarded
+  unchanged) while a screenshot's is stamped by the **daemon**, so their difference
+  is dominated by clock skew. Treat `timestamp` as display-only.
+- **Comparing absolute dimensions.** A screenshot may be a downscale of the device
+  screen, and iOS reports screen size in pixels against hierarchy bounds in logical
+  points — a uniform scale that is indistinguishable from a uniform resolution
+  change.
+
+The only time values this policy compares are **client-stamped receive instants
+against the client's own clock**, for recency. No comparison mixes clocks.
 
 Because staleness is the passage of time rather than an event, a client must
 re-evaluate availability on a timer as well as on source updates. A stalled relay
@@ -118,7 +144,8 @@ Expressed as snapshot transitions:
 
 | Event | Transition | What the client renders |
 | --- | --- | --- |
-| Input forwarded successfully | `Idle -> AwaitingSnapshot`, recording the dispatched `sequence` | The pre-input snapshot, unchanged and still clickable — it is the best available truth |
+| Input forwarded successfully | `Idle -> AwaitingSnapshot`, recording the dispatched `sequence` | The **retained** pre-input snapshot, unchanged and still clickable — it is the best available truth. A screenshot-only update in this interval carries a `captureSequence` the retained hierarchy does not match, so it yields no snapshot and does not replace what is on screen |
+| Input not dispatched (off-screen point, or the bounded queue rejected it) | no transition | Unchanged; nothing reached the device, so there is nothing to wait for |
 | First snapshot with a strictly greater `sequence` | `AwaitingSnapshot -> Settled` | The new snapshot |
 | No superseding snapshot within 3000 ms | `AwaitingSnapshot -> Settled` | Whatever is current; the freshness bound above independently retires the stale frame and drops control |
 | Input failed or was rejected | `-> Settled` immediately | Unchanged state plus the daemon's actionable error |
@@ -148,6 +175,7 @@ Deterministic in every case:
 
 | Concern | Type | Module |
 | --- | --- | --- |
+| Daemon capture identity | `captureSequence` on `hierarchy_update` / `screenshot_update` | `src/daemon/deviceDataStreamSocketServer.ts` |
 | Snapshot + source provenance | `DeviceFrameSnapshot`, `ScreenshotFrameFacts`, `HierarchyFrameFacts`, `LiveFrameFacts` | `desktop-domain` |
 | Availability rules | `DeviceControlPolicy` | `desktop-domain` |
 | Refresh transitions | `PostInputRefreshTracker` | `desktop-domain` |

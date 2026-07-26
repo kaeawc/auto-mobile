@@ -22,18 +22,19 @@ public enum class DeviceFrameSource {
  * @param deviceId the device the frame was captured from.
  * @param sequence client-side monotonic counter, bumped once per applied source update. Identifies
  *   *which* update this is, and orders snapshots.
- * @param daemonTimestampMs the daemon's capture timestamp for this update. Compared only against
- *   *other daemon timestamps* (the hierarchy's), never against the client clock — the two clocks
- *   are unrelated.
- * @param receivedAtMs the client wall-clock instant the update was applied. Compared only against
- *   the client clock, for recency.
+ * @param captureSequence the daemon's shared capture identity for the geometry this frame reports —
+ *   the id of the hierarchy its `screenWidth`/`screenHeight` were derived from. Paired by
+ *   *equality* against [HierarchyFrameFacts.captureSequence]. Null on daemons that predate it,
+ *   which fails control closed.
+ * @param receivedAtMs the client wall-clock instant the update was applied, stamped by the client
+ *   itself. Compared only against the client clock, for recency.
  * @param width reported device screen width for this frame.
  * @param height reported device screen height for this frame.
  */
 public data class ScreenshotFrameFacts(
   val deviceId: String?,
   val sequence: Long,
-  val daemonTimestampMs: Long,
+  val captureSequence: Long?,
   val receivedAtMs: Long,
   val width: Int,
   val height: Int,
@@ -53,7 +54,7 @@ public data class ScreenshotFrameFacts(
 public data class HierarchyFrameFacts(
   val deviceId: String?,
   val sequence: Long,
-  val daemonTimestampMs: Long,
+  val captureSequence: Long?,
   val receivedAtMs: Long,
   val hierarchy: ParsedHierarchy?,
   val rootWidth: Int,
@@ -90,8 +91,12 @@ public data class LiveFrameFacts(
  * contributing source agrees (see that function for the exact rules).
  *
  * @param deviceId the single device every contributing source agreed on.
- * @param sequence monotonic across snapshots for one session; the max of the contributing source
- *   sequences. Used to answer "is this snapshot newer than the one I tapped through?".
+ * @param sequence monotonic and non-decreasing across snapshots for one session. Derived from the
+ *   **observation-source counter only** (the newer of the screenshot's and hierarchy's sequences),
+ *   which share one counter domain. The live frame's counter is deliberately excluded — it is a
+ *   different domain, and mixing it in would make this field jump while a live frame is present and
+ *   fall back when it clears. Used to answer "is this snapshot newer than the one I tapped
+ *   through?"; see [liveFrameSequence] for the live frame's own provenance.
  * @param capturedAtMs client wall-clock instant of the *displayed* frame.
  * @param source which pixels are displayed ([DeviceFrameSource]).
  * @param frameWidth displayed frame width (live frame's, or the screenshot's).
@@ -101,6 +106,7 @@ public data class LiveFrameFacts(
  * @param deviceHeight effective device-coordinate height used for mapping.
  * @param hierarchy the hierarchy paired into this snapshot; may be null only when the update
  *   carried no parsed tree.
+ * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
  * @param screenshotSequence provenance of the observation screenshot this snapshot was built from.
  * @param hierarchySequence provenance of the hierarchy this snapshot was built from.
  * @param liveFrameSequence provenance of the live frame, or null when none is displayed.
@@ -115,6 +121,7 @@ public data class DeviceFrameSnapshot(
   val deviceWidth: Int,
   val deviceHeight: Int,
   val hierarchy: ParsedHierarchy?,
+  val captureSequence: Long,
   val screenshotSequence: Long,
   val hierarchySequence: Long,
   val liveFrameSequence: Long?,

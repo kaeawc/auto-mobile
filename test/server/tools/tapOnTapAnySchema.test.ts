@@ -1,5 +1,30 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { tapOnSchema, tapAnySchema } from "../../../src/server/interactionTools";
+
+// P4 (issue #4181, rank 10): the removed-field rejections used bare
+// `.toThrow()`, which passes even when the schema throws for an UNRELATED
+// reason. Capture the ZodError and assert exactly WHICH key was rejected via
+// the `unrecognized_keys` issue.
+function zodIssues(fn: () => unknown): z.core.$ZodIssue[] {
+  try {
+    fn();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return error.issues;
+    }
+    throw error;
+  }
+  throw new Error("expected the schema to reject the input");
+}
+
+function expectRejectedKey(schema: z.ZodType, input: unknown, key: string): void {
+  const unrecognized = zodIssues(() => schema.parse(input)).find(
+    issue => issue.code === "unrecognized_keys"
+  ) as { keys?: string[] } | undefined;
+  expect(unrecognized, `expected an unrecognized_keys issue for "${key}"`).toBeDefined();
+  expect(unrecognized!.keys).toContain(key);
+}
 
 describe("tapOn schema", () => {
   test("accepts selector with text", () => {
@@ -117,34 +142,16 @@ describe("tapOn schema", () => {
     expect(result.preTapStability).toBe(true);
   });
 
-  test("rejects clickable (moved to tapAny)", () => {
-    expect(() =>
-      tapOnSchema.parse({
-        platform: "android",
-        selector: { text: "Login" },
-        clickable: true,
-      })
-    ).toThrow();
-  });
-
-  test("rejects tapClickableParent (removed)", () => {
-    expect(() =>
-      tapOnSchema.parse({
-        platform: "android",
-        selector: { text: "Login" },
-        tapClickableParent: true,
-      })
-    ).toThrow();
-  });
-
-  test("rejects siblingOfText (replaced by sibling boolean)", () => {
-    expect(() =>
-      tapOnSchema.parse({
-        platform: "android",
-        selector: { text: "Login" },
-        siblingOfText: "Label",
-      })
-    ).toThrow();
+  test.each([
+    ["clickable", "moved to tapAny", true],
+    ["tapClickableParent", "removed", true],
+    ["siblingOfText", "replaced by sibling boolean", "Label"],
+  ])("rejects removed field %s (%s) by name", (key, _reason, value) => {
+    expectRejectedKey(
+      tapOnSchema,
+      { platform: "android", selector: { text: "Login" }, [key]: value },
+      key
+    );
   });
 });
 
@@ -192,48 +199,23 @@ describe("tapAny schema", () => {
     expect(result.scrollableContainer).toBe(true);
   });
 
-  test("rejects focus action (use tapOn instead)", () => {
-    expect(() =>
-      tapAnySchema.parse({
-        platform: "android",
-        action: "focus",
-      })
-    ).toThrow();
+  // The `focus` action is NOT an unrecognized key — it is a recognized field
+  // with an invalid enum value, so it surfaces as an `invalid_value` issue on
+  // path ["action"], not `unrecognized_keys`. Asserted separately.
+  test("rejects the focus action as an invalid value on the action path", () => {
+    const actionIssue = zodIssues(() =>
+      tapAnySchema.parse({ platform: "android", action: "focus" })
+    ).find(issue => issue.path[0] === "action");
+    expect(actionIssue).toBeDefined();
+    expect(actionIssue!.code).toBe("invalid_value");
   });
 
-  test("rejects ensureTap (not supported)", () => {
-    expect(() =>
-      tapAnySchema.parse({
-        platform: "android",
-        ensureTap: true,
-      })
-    ).toThrow();
-  });
-
-  test("rejects text field (use tapOn instead)", () => {
-    expect(() =>
-      tapAnySchema.parse({
-        platform: "android",
-        text: "Login",
-      })
-    ).toThrow();
-  });
-
-  test("rejects elementId field (use tapOn instead)", () => {
-    expect(() =>
-      tapAnySchema.parse({
-        platform: "android",
-        elementId: "com.app:id/btn",
-      })
-    ).toThrow();
-  });
-
-  test("rejects selector field (use tapOn instead)", () => {
-    expect(() =>
-      tapAnySchema.parse({
-        platform: "android",
-        selector: { text: "Login" },
-      })
-    ).toThrow();
+  test.each([
+    ["ensureTap", "not supported", true],
+    ["text", "use tapOn instead", "Login"],
+    ["elementId", "use tapOn instead", "com.app:id/btn"],
+    ["selector", "use tapOn instead", { text: "Login" }],
+  ])("rejects removed field %s (%s) by name", (key, _reason, value) => {
+    expectRejectedKey(tapAnySchema, { platform: "android", [key]: value }, key);
   });
 });

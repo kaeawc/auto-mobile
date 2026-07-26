@@ -12,10 +12,9 @@ describe("TopLevelUnionFlattener module", () => {
     expect(fromRegistry).toBe(flattenTopLevelUnion);
   });
 
-  test("passes through a non-union schema untouched", () => {
-    const schema = { type: "object", properties: { a: { type: "string" } } };
-    expect(flattenTopLevelUnion(schema)).toEqual(schema);
-  });
+  // D7 (issue #4181): the non-union pass-through row lived here AND in
+  // flattenTopLevelUnion.test.ts ("returns non-union schema unchanged"); the
+  // canonical behavioural matrix owns it, so the duplicate is removed.
 
   test("chains multiple branch-only requirements into nested if/then/else", () => {
     const schema = {

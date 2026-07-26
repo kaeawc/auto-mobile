@@ -1,10 +1,36 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { resetDeviceToolsDependencies, setDeviceToolsDependencies } from "../../../src/server/deviceTools";
+import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { DeviceInfo } from "../../../src/models";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
+import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 import { z } from "zod";
+
+// Issue #4181, rank 5 (R1): populate the registry at MODULE scope so a
+// collection-time test.each iterates over real advertised tools. Building the
+// table inside a describe/beforeAll would run the table factory against an
+// EMPTY registry (describe bodies evaluate at collection time, before
+// beforeAll) and silently produce ZERO tests — the refuted remedy.
+createMcpServer();
+const ADVERTISED_TOOLS = ToolRegistry.getToolDefinitions();
+
+describe("MCP Tools inputSchema compiles under Ajv 2020 (issue #4181 rank 5)", () => {
+  test("the advertised roster is non-empty (guards against a zero-test table)", () => {
+    expect(ADVERTISED_TOOLS.length).toBeGreaterThan(0);
+  });
+
+  test.each(ADVERTISED_TOOLS.map(tool => [tool.name, tool.inputSchema] as const))(
+    "%s inputSchema is a valid JSON Schema Ajv 2020 can compile",
+    (_name, inputSchema) => {
+      // A malformed/invalid schema throws here; the old `typeof`/`hasType ||
+      // hasCombinator` loop (with hasCombinator provably always false, #16)
+      // could not detect an Ajv-invalid schema.
+      expect(() => compileJsonSchema(inputSchema)).not.toThrow();
+    }
+  );
+});
 
 describe("MCP Tools Schema", () => {
   let fixture: McpTestFixture;
@@ -31,32 +57,22 @@ describe("MCP Tools Schema", () => {
     resetDeviceToolsDependencies();
   });
 
-  test("should validate tool schema definitions conform to MCP standards", () => {
+  test("every advertised tool carries the required MCP metadata", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
-    // Each tool should conform to MCP protocol requirements
     toolDefinitions.forEach(tool => {
-      // Required MCP tool properties
-      expect(tool).toHaveProperty("name");
-      expect(tool).toHaveProperty("description");
-      expect(tool).toHaveProperty("inputSchema");
-
-      // Type validation
       expect(typeof tool.name).toBe("string");
       expect(typeof tool.description).toBe("string");
       expect(typeof tool.inputSchema).toBe("object");
-
-      // MCP protocol requirements
       expect(tool.name.length).toBeGreaterThan(0);
       expect(tool.description.length).toBeGreaterThan(0);
 
-      // Schema should be a valid JSON Schema-like object
+      // #16 (issue #4181): the previous `hasType || hasCombinator` guard had a
+      // provably-dead second operand — the "should not publish top-level schema
+      // combinators" test below asserts every top-level anyOf/oneOf/allOf is
+      // undefined, so hasCombinator was always false. Assert `type` directly.
       const schema = tool.inputSchema as any;
-      const hasType = Object.prototype.hasOwnProperty.call(schema, "type");
-      const hasCombinator = ["allOf", "anyOf", "oneOf"].some(
-        key => Array.isArray(schema?.[key])
-      );
-      expect(hasType || hasCombinator).toBe(true);
+      expect(Object.prototype.hasOwnProperty.call(schema, "type")).toBe(true);
       if (schema.type === "object") {
         expect(schema).toHaveProperty("properties");
       }
@@ -98,60 +114,34 @@ describe("MCP Tools Schema", () => {
     expect(typeof result).toBe("object");
   });
 
-  test("given a request omits fields that are optional by the schema, should return a valid response", async function() {
+  // D8 (issue #4181): the "omits optional fields" test was byte-identical to
+  // the "matches valid schema" test above (same listDeviceImages call, same
+  // assertion) — removed as a pure duplicate.
 
+  // D9 (issue #4181): the old "contains fields not defined by the schema"
+  // test was unfalsifiable — its try/catch accepted BOTH a success and a
+  // validation error, so it passed on every branch. The proposed replacement
+  // ("strict schemas reject it") was REFUTED: listDeviceImages actually
+  // ACCEPTS unlisted top-level fields. Pin that real, falsifiable behavior —
+  // if listDeviceImages ever became strict this row reds.
+  test("listDeviceImages accepts an unlisted top-level field (its schema is permissive)", async function() {
     const { client } = fixture.getContext();
-
-    const toolResponseSchema = z.object({
-      content: z.array(z.object({
-        type: z.string(),
-        text: z.string().optional()
-      })).optional()
-    }).passthrough();
 
     const result = await client.request({
       method: "tools/call",
       params: {
         name: "listDeviceImages",
         arguments: {
-          platform: "android"
+          platform: "android",
+          unknownField: "ignored, not rejected"
         }
       }
-    }, toolResponseSchema);
+    }, z.object({ content: z.array(z.any()).optional() }).passthrough());
 
     expect(typeof result).toBe("object");
   });
 
-  test("given a request contains fields that are not defined by the schema, should return an error response", async function() {
-
-    const { client } = fixture.getContext();
-
-    try {
-      const result = await client.request({
-        method: "tools/call",
-        params: {
-          name: "listDeviceImages",
-          arguments: {
-            platform: "android",
-            unknownField: "should not be allowed"
-          }
-        }
-      }, z.any());
-
-      // If we reach here without error, the schema allows additional properties
-      // This is actually valid behavior - some schemas are permissive
-      expect(typeof result).toBe("object");
-
-    } catch (error: any) {
-      // If it fails, it should be due to schema validation
-      const msg = error.message;
-      expect(
-        msg.includes("Invalid parameters") || msg.includes("Failed to execute") || msg.includes("Unknown tool")
-      ).toBe(true);
-    }
-  });
-
-  test("given a request contains fields that are defined by the schema but have incorrect types, should return an error response", async function() {
+  test("tapOn rejects a defined field with the wrong type", async function() {
 
     const { client } = fixture.getContext();
 
@@ -200,11 +190,12 @@ describe("MCP Tools Schema", () => {
     expect(result.action).toBe("tap");
   });
 
-  test("given a request contains fields that are defined by the schema but have incorrect values, should return an error response", async function() {
+  test("an unknown tool name is rejected with an Unknown tool error", async function() {
 
     const { client } = fixture.getContext();
 
-    // Test with an invalid tool name to trigger schema validation error
+    // NAME (issue #4181): the old title claimed "fields ... have incorrect
+    // values" but the body calls a nonexistent tool and asserts "Unknown tool".
     try {
       const { z } = await import("zod");
       await client.request({

@@ -445,13 +445,19 @@ describe("occlusionState/occludedBy/occludedByViewId: --no-occlusion (issue occl
   // above) — the APK only computes and sends them at all when occlusionEnabled is true, so the
   // meaningful "present by default, absent when disabled" behavior lives in ServerConfig, which is
   // what actually gets pushed to the device over the set_accessibility_flags message.
-  test("occlusion is enabled by default", () => {
-    const original = serverConfig.getAccessibilityFlagsConfig().occlusionEnabled;
+  // Issue #4181, rank 13 (R3): the previous body was a set-then-assert
+  // tautology (setOcclusionEnabled(true) then expect(true)) — it could never
+  // catch the default at ServerConfig.ts:38 flipping to false. Read the genuine
+  // default from a FRESH, query-suffixed module import so the shared singleton's
+  // possibly-polluted state cannot mask a regression.
+  test("occlusion is enabled by default (read from a pristine ServerConfig instance)", async () => {
+    // Pollute the shared singleton to prove the fresh import is independent.
+    serverConfig.setOcclusionEnabled(false);
     try {
-      serverConfig.setOcclusionEnabled(true);
-      expect(serverConfig.getAccessibilityFlagsConfig().occlusionEnabled).toBe(true);
+      const fresh = await import("../../src/utils/ServerConfig?occlusionDefault");
+      expect(fresh.serverConfig.getAccessibilityFlagsConfig().occlusionEnabled).toBe(true);
     } finally {
-      serverConfig.setOcclusionEnabled(original);
+      serverConfig.setOcclusionEnabled(true);
     }
   });
 

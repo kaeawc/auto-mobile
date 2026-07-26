@@ -93,40 +93,33 @@ describe("MCP Tools Registry", () => {
     });
   });
 
-  test("should register all tool categories", () => {
-    const toolDefinitions = ToolRegistry.getToolDefinitions();
-    const toolNames = toolDefinitions.map(tool => tool.name);
+  // R4 (issue #4181, rank 17): the previous roster referenced FICTIONAL tools
+  // (sendText, changeOrientation, openUrl, exitDialog, checkRunningDevices) and
+  // guarded with `.filter(...).length > 0` plus a magic `> 15` floor, so it
+  // passed even if all but one real name per category vanished. This asserts an
+  // EXACT roster of tools that actually register, each by its real name — a
+  // renamed or dropped tool reds the specific row.
+  test("registers the exact expected tool in each category by real name", () => {
+    const toolNames = new Set(ToolRegistry.getToolDefinitions().map(tool => tool.name));
 
-    // Verify all expected tool categories are registered
-    const expectedCategories = {
-      // Observe tools (screen observation and data collection)
+    const expectedByCategory: Record<string, string[]> = {
       observe: ["observe"],
-
-      // Interaction tools (touch, gestures, input)
-      interaction: ["tapOn", "sendText", "pressButton", "swipeOn"],
-
-      // App management tools (lifecycle management)
-      app: ["launchApp", "terminateApp", "installApp", "listApps"],
-
-      // Utility tools (device state and configuration)
-      utility: ["changeOrientation", "setActiveDevice", "openUrl", "exitDialog"],
-
-      // Emulator tools (AVD management)
-      emulator: ["listDeviceImages", "checkRunningDevices", "startDevice", "killDevice"]
+      interaction: ["tapOn", "inputText", "clearText", "pressButton", "swipeOn", "dragAndDrop", "pinchOn"],
+      app: ["launchApp", "terminateApp", "installApp", "uninstallApp", "listApps"],
+      utility: ["rotate", "setActiveDevice", "openLink", "getDeviceState", "setDeviceState"],
+      device: ["listDeviceImages", "listDevices", "startDevice", "killDevice"],
     };
 
-    // Check that each category has at least one tool registered
-    Object.entries(expectedCategories).forEach(([category, expectedTools]) => {
-      const categoryToolsFound = expectedTools.filter(toolName => toolNames.includes(toolName));
-      expect(categoryToolsFound.length).toBeGreaterThan(0,
-                                                        `No tools found for ${category} category. Expected: ${expectedTools.join(", ")}`);
-    });
+    for (const [category, expected] of Object.entries(expectedByCategory)) {
+      for (const name of expected) {
+        expect(toolNames.has(name), `${category} tool "${name}" should be registered`).toBe(true);
+      }
+    }
+  });
 
-    // Verify specific core tools are present
-    expect(toolNames).toContain("observe", "observe tool should be registered");
-    expect(toolNames).toContain("tapOn", "tapOn tool should be registered");
-
-    // Verify total tool count is reasonable (should have tools from all categories)
-    expect(toolDefinitions.length).toBeGreaterThan(15, "Should have a substantial number of tools registered");
+  // D6 backstop (issue #4181, rank 15): serverSetup.test.ts is deleted; this
+  // is the surviving "did createMcpServer register the core tool" smoke.
+  test("createMcpServer registers the core observe tool", () => {
+    expect(ToolRegistry.getToolDefinitions().map(t => t.name)).toContain("observe");
   });
 });

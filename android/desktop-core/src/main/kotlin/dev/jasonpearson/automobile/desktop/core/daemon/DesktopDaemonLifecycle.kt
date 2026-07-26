@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -120,6 +121,7 @@ internal class JsonDaemonPidFileReader(
 internal data class DaemonCommandResult(
   val exitCode: Int,
   val output: String,
+  val timedOut: Boolean = false,
 )
 
 internal interface DaemonCommandExecutor {
@@ -129,9 +131,22 @@ internal interface DaemonCommandExecutor {
 internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
   override fun execute(command: List<String>): DaemonCommandResult {
     val process = ProcessBuilder(command).redirectErrorStream(true).start()
+    if (!process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+      process.destroy()
+      if (!process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+      }
+      val output = process.inputStream.bufferedReader().use { it.readText() }
+      return DaemonCommandResult(exitCode = TIMEOUT_EXIT_CODE, output = output, timedOut = true)
+    }
     val output = process.inputStream.bufferedReader().use { it.readText() }
-    return DaemonCommandResult(exitCode = process.waitFor(), output = output)
+    return DaemonCommandResult(exitCode = process.exitValue(), output = output)
   }
+
+  private const val COMMAND_TIMEOUT_SECONDS = 60L
+  private const val TERMINATION_TIMEOUT_SECONDS = 5L
+  private const val TIMEOUT_EXIT_CODE = -1
 }
 
 internal interface DaemonRetryTimer {
@@ -202,6 +217,12 @@ internal class DesktopDaemonLifecycle(
           )
         }
       if (commandResult.exitCode != 0) {
+        if (commandResult.timedOut) {
+          return DaemonLifecycleResult.Failure(
+            "Timed out while trying to $action AutoMobile $expectedVersion. " +
+              "Check the daemon logs and retry."
+          )
+        }
         val detail =
           commandResult.output.trim().takeIf { it.isNotEmpty() }
             ?: "Install @kaeawc/auto-mobile@$expectedVersion and try again."

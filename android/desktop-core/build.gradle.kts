@@ -20,8 +20,10 @@ java {
 // Keep the desktop socket client's handshake version aligned with the daemon package it launches.
 // Resolve from this project directory because desktop-core also builds under android/ide-plugin.
 val npmPackageVersion =
-  providers.fileContents(layout.projectDirectory.file("../../package.json")).asText.map { packageJson ->
-    (JsonSlurper().parseText(packageJson) as Map<*, *>)["version"].toString()
+  providers.fileContents(layout.projectDirectory.file("../../package.json")).asText.map {
+    packageJson ->
+    val version = (JsonSlurper().parseText(packageJson) as Map<*, *>)["version"] as? String
+    requireNotNull(version) { "package.json is missing a \"version\" field" }
   }
 
 tasks.named<Jar>("jar") {

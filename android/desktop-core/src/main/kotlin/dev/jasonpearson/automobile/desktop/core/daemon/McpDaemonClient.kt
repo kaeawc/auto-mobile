@@ -578,13 +578,21 @@ object DaemonSocketPaths {
   }
 
   /** Version this desktop client declares to the daemon's version handshake gate. */
-  fun resolveClientVersion(): String? {
-    val raw =
-      System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.takeIf { it.isNotBlank() }
-        ?: System.getenv("AUTOMOBILE_VERSION")?.takeIf { it.isNotBlank() }
-        ?: DaemonSocketPaths::class.java.`package`?.implementationVersion
-    return normalizeClientVersion(raw)
-  }
+  fun resolveClientVersion(): String? =
+    resolveClientVersion(
+      daemonPackageVersion = System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION"),
+      automobileVersion = System.getenv("AUTOMOBILE_VERSION"),
+      manifestVersion = DaemonSocketPaths::class.java.`package`?.implementationVersion,
+    )
+
+  internal fun resolveClientVersion(
+    daemonPackageVersion: String?,
+    automobileVersion: String?,
+    manifestVersion: String?,
+  ): String? =
+    sequenceOf(daemonPackageVersion, automobileVersion, manifestVersion)
+      .mapNotNull(::normalizeClientVersion)
+      .firstOrNull()
 
   internal fun normalizeClientVersion(raw: String?): String? {
     val trimmed = raw?.trim().orEmpty()

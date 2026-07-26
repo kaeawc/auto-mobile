@@ -32,8 +32,8 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.jasonpearson.automobile.desktop.core.daemon.DaemonNotificationClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecycleResult
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonNotificationClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonLifecycle
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
@@ -173,12 +173,19 @@ internal fun McpProcessesPanel(
         process.connectionType == McpConnectionType.UnixSocket &&
           process.socketPath == DaemonSocketPaths.socketPath()
       ) {
-        when (val result = withContext(Dispatchers.IO) {
-          DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
-        }) {
+        devicesLoading = true
+        bootedDevices = emptyList()
+        deviceImages = emptyList()
+        when (
+          val result =
+            withContext(Dispatchers.IO) {
+              DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
+            }
+        ) {
           is DaemonLifecycleResult.Failure -> {
             daemonStartError = result.message
             devicesError = result.message
+            devicesLoading = false
             return@LaunchedEffect
           }
           is DaemonLifecycleResult.Ready -> Unit
@@ -319,9 +326,12 @@ internal fun McpProcessesPanel(
     if (isDaemonStarting) {
       try {
         LOG.debug("[AutoMobile IDE] Starting daemon...")
-        when (val result = withContext(Dispatchers.IO) {
-          DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
-        }) {
+        when (
+          val result =
+            withContext(Dispatchers.IO) {
+              DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
+            }
+        ) {
           is DaemonLifecycleResult.Ready -> {
             LOG.debug("[AutoMobile IDE] Daemon started with a matching version")
             refreshCounter++

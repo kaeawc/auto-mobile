@@ -188,6 +188,23 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `reports an actionable error when the pinned launch command times out`() {
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null)),
+        commandExecutor = FakeDaemonCommandExecutor(exitCode = -1, timedOut = true),
+        timer = FakeDaemonRetryTimer(),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertTrue(result.message.contains("Timed out"))
+  }
+
+  @Test
   fun `uses the Windows npm command shim`() {
     val lifecycle = DesktopDaemonLifecycle()
 
@@ -246,12 +263,13 @@ class DesktopDaemonLifecycleTest {
   private class FakeDaemonCommandExecutor(
     private val exitCode: Int = 0,
     private val output: String = "started",
+    private val timedOut: Boolean = false,
   ) : DaemonCommandExecutor {
     val commands = mutableListOf<List<String>>()
 
     override fun execute(command: List<String>): DaemonCommandResult {
       commands += command
-      return DaemonCommandResult(exitCode = exitCode, output = output)
+      return DaemonCommandResult(exitCode = exitCode, output = output, timedOut = timedOut)
     }
   }
 

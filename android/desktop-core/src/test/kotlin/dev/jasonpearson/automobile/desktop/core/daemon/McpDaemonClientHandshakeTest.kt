@@ -23,6 +23,18 @@ class McpDaemonClientHandshakeTest {
   }
 
   @Test
+  fun `resolveClientVersion falls back after an unpinnable environment alias`() {
+    assertEquals(
+      "0.0.40",
+      DaemonSocketPaths.resolveClientVersion(
+        daemonPackageVersion = "latest",
+        automobileVersion = "unknown",
+        manifestVersion = "0.0.40",
+      ),
+    )
+  }
+
+  @Test
   fun `daemon request serializes clientVersion for the handshake`() {
     val request =
       DaemonRequest(

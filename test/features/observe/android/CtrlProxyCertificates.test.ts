@@ -10,6 +10,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -282,6 +284,11 @@ describe("CtrlProxyCertificates (Android)", function() {
   // ===========================================================================
 
   describe("requestInstallCaCertificateFromFile", function() {
+    const relativeCertificatePath = path.join("fixtures", "certs", "relative ca.crt");
+    const daemonLaunchCwd = path.join(process.cwd(), "tmp", "automobile-launch");
+    const relativeResolvedPath = path.join(daemonLaunchCwd, relativeCertificatePath);
+    const fileUrlResolvedPath = path.join(process.cwd(), "tmp", "automobile ca.crt");
+
     test("rejects an empty path without touching the device", async function() {
       const { client, socket } = await connectClient();
       try {
@@ -336,14 +343,14 @@ describe("CtrlProxyCertificates (Android)", function() {
     test.each([
       {
         name: "a relative path from the daemon launch directory",
-        certificatePath: "fixtures/certs/relative ca.crt",
-        resolvedPath: "/tmp/automobile-launch/fixtures/certs/relative ca.crt",
-        daemonLaunchCwd: "/tmp/automobile-launch",
+        certificatePath: relativeCertificatePath,
+        resolvedPath: relativeResolvedPath,
+        daemonLaunchCwd,
       },
       {
         name: "a file URL",
-        certificatePath: "file:///tmp/automobile%20ca.crt",
-        resolvedPath: "/tmp/automobile ca.crt",
+        certificatePath: pathToFileURL(fileUrlResolvedPath).href,
+        resolvedPath: fileUrlResolvedPath,
         daemonLaunchCwd: undefined,
       },
     ])("pushes $name and resolves the install result over the wire", async function({

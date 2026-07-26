@@ -164,7 +164,10 @@ private fun PointerEvent.isZoomModifierPressed(): Boolean =
  *
  * @param controlFrame reads the current snapshot + its mapping geometry; null makes control-mode
  *   drag inert (the caller is rendering inspector mode anyway).
- * @param onPan receives each incremental pan delta, in viewport pixels.
+ * @param onPan receives each incremental pan delta, in viewport pixels — including the travel past
+ *   touch slop on the move that crossed it, which `awaitTouchSlopOrCancellation` reports separately
+ *   from the drag loop. The sum of the deltas therefore depends only on the pointer's total
+ *   displacement, not on how many move events it arrived in.
  * @param onSwipe receives the pinned snapshot and the raw mapped start/end. Never called in
  *   inspector mode, on a pan, or on a cancelled drag.
  */
@@ -180,14 +183,28 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
       controlMode != DeviceScreenControlMode.Control || currentEvent.isZoomModifierPressed()
     // Pin the mapping authority for the WHOLE drag at pointer-down.
     val frame = if (panning) null else controlFrame() ?: return@awaitEachGesture
+    // The move that CROSSES touch slop carries real travel past the slop threshold, and it is
+    // reported here rather than in the drag loop below. Dropping it would make a
+    // one-move-then-release pan move the viewport by exactly zero, and leave any longer pan
+    // permanently lagging the pointer by that first delta. Applying `overSlop` is what the stock
+    // `detectDragGestures` this replaced already did.
+    var overSlop = Offset.Zero
     val change =
-      awaitTouchSlopOrCancellation(down.id) { changed, _ -> changed.consume() }
-        ?: return@awaitEachGesture
+      awaitTouchSlopOrCancellation(down.id) { changed, crossed ->
+        changed.consume()
+        overSlop = crossed
+      } ?: return@awaitEachGesture
+    // Pan only: a swipe reports its endpoints from `down.position` and the last drag position, so
+    // it neither needs nor is affected by this delta.
+    if (panning) onPan(overSlop)
     var lastPosition = change.position
     val completed =
       drag(change.id) { dragged ->
+        // Read the delta BEFORE consuming: `positionChange()` reports Offset.Zero once the change
+        // is consumed, so consuming first silently zeroes every pan step.
+        val delta = dragged.positionChange()
         dragged.consume()
-        if (panning) onPan(dragged.positionChange())
+        if (panning) onPan(delta)
         lastPosition = dragged.position
       }
     if (!completed || frame == null) return@awaitEachGesture

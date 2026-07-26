@@ -248,6 +248,178 @@ class DeviceScreenViewControlTest {
     )
   }
 
+  /**
+   * Pans the viewport with an INSPECTOR-mode drag made of [moveDeltas] horizontal steps, then flips
+   * the same composition to control mode and clicks the viewport centre, returning the device
+   * coordinate that click mapped to.
+   *
+   * The mapped point is the observable: pan lives in the view's private offset state, but every
+   * viewport->device mapping runs through that offset, so a click at a fixed viewport point moves
+   * in device space by exactly the pan that was applied. An empty [moveDeltas] performs no drag at
+   * all and yields the un-panned baseline.
+   */
+  private fun panThenProbeCentre(moveDeltas: List<Float>): DevicePoint {
+    var probed: DevicePoint? = null
+    runComposeUiTest {
+      var mode by mutableStateOf(DeviceScreenControlMode.Inspector)
+      setContent {
+        MaterialTheme {
+          DeviceScreenView(
+            screenshotData = null,
+            screenWidth = 1080,
+            screenHeight = 2340,
+            hierarchy = root,
+            selectedElementId = null,
+            hoveredElementId = null,
+            onElementSelected = {},
+            onElementHovered = {},
+            elementMap = mapOf("root" to root),
+            controlMode = mode,
+            controlSnapshot = snapshot(1080, 2340),
+            onControlTap = { _, point -> probed = point },
+          )
+        }
+      }
+
+      if (moveDeltas.isNotEmpty()) {
+        onRoot().performTouchInput {
+          down(center)
+          var travelled = 0f
+          moveDeltas.forEach { delta ->
+            travelled += delta
+            // Distinct event times: two moves stamped at the same instant are coalesced by the
+            // pointer pipeline, which would silently make a chunked gesture deliver fewer moves
+            // than it looks like it does.
+            advanceEventTime(16L)
+            moveTo(center + Offset(travelled, 0f))
+          }
+          up()
+        }
+        waitForIdle()
+      }
+
+      // The pan offset is remembered across the mode flip, so the probe click maps through it.
+      mode = DeviceScreenControlMode.Control
+      waitForIdle()
+      onRoot().performTouchInput { click(center) }
+      waitForIdle()
+    }
+    return assertNotNull(probed, "the probe click should report a control tap")
+  }
+
+  @Test
+  fun `a pan that crosses touch slop in a single move still moves the viewport`() {
+    // The move that crosses slop is reported by awaitTouchSlopOrCancellation, NOT by the drag loop.
+    // Dropping it makes a one-move-then-release pan move the viewport by exactly zero.
+    val baseline = panThenProbeCentre(emptyList())
+    val panned = panThenProbeCentre(listOf(120f))
+
+    assertTrue(
+      panned.x != baseline.x,
+      "a 120px pan must move the viewport (baseline ${baseline.x}, after pan ${panned.x})",
+    )
+  }
+
+  @Test
+  fun `a pan depends only on total displacement, not on how the moves were chunked`() {
+    // The complement of the test above, and what catches a viewport that permanently LAGS the
+    // pointer. The same 120px of travel delivered in one, two and three moves must land in the
+    // same place. This fails in BOTH directions of the bug: dropping the slop-crossing delta makes
+    // the one-move gesture pan by zero, and zeroing the per-step delta (reading positionChange
+    // AFTER consuming the change) makes every gesture pan by only its slop-crossing remainder.
+    val single = panThenProbeCentre(listOf(120f))
+    val two = panThenProbeCentre(listOf(60f, 60f))
+    val three = panThenProbeCentre(listOf(40f, 40f, 40f))
+
+    assertTrue(
+      kotlin.math.abs(single.x - two.x) <= 1 && kotlin.math.abs(single.x - three.x) <= 1,
+      "same travel, same pan (1 move -> ${single.x}, 2 -> ${two.x}, 3 -> ${three.x})",
+    )
+  }
+
+  @Test
+  fun `a fine-grained drag pans by every step, not just the slop crossing`() {
+    // A real pointer drag arrives as many small moves. Each step's delta must be read BEFORE the
+    // change is consumed — `positionChange()` reports Offset.Zero on a consumed change, so
+    // consuming first leaves the viewport stuck at wherever the gesture crossed touch slop.
+    val baseline = panThenProbeCentre(emptyList())
+    val oneBigMove = panThenProbeCentre(listOf(120f))
+
+    var fineGrained: DevicePoint? = null
+    runComposeUiTest {
+      var mode by mutableStateOf(DeviceScreenControlMode.Inspector)
+      setContent {
+        MaterialTheme {
+          DeviceScreenView(
+            screenshotData = null,
+            screenWidth = 1080,
+            screenHeight = 2340,
+            hierarchy = root,
+            selectedElementId = null,
+            hoveredElementId = null,
+            onElementSelected = {},
+            onElementHovered = {},
+            elementMap = mapOf("root" to root),
+            controlMode = mode,
+            controlSnapshot = snapshot(1080, 2340),
+            onControlTap = { _, point -> fineGrained = point },
+          )
+        }
+      }
+      // `swipe` injects a dozen ~10px moves, so almost all of the travel arrives through the drag
+      // loop rather than through the slop crossing.
+      onRoot().performTouchInput { swipe(center, center + Offset(120f, 0f), durationMillis = 200L) }
+      waitForIdle()
+      mode = DeviceScreenControlMode.Control
+      waitForIdle()
+      onRoot().performTouchInput { click(center) }
+      waitForIdle()
+    }
+
+    val panned = assertNotNull(fineGrained)
+    assertTrue(panned.x != baseline.x, "a 120px drag must pan the viewport")
+    assertTrue(
+      kotlin.math.abs(panned.x - oneBigMove.x) <= 1,
+      "120px of travel pans the same whether it arrives in one move or twelve " +
+        "(twelve -> ${panned.x}, one -> ${oneBigMove.x})",
+    )
+  }
+
+  /** Clicks [at] in control mode and returns the device coordinate it mapped to. */
+  private fun controlTapAt(
+    at: (androidx.compose.ui.test.TouchInjectionScope) -> Offset
+  ): DevicePoint {
+    var tapped: DevicePoint? = null
+    runComposeUiTest {
+      setContent {
+        MaterialTheme { controlView(onSwipe = { _, _, _ -> }, onTap = { tapped = it }) }
+      }
+      onRoot().performTouchInput { click(at(this)) }
+      waitForIdle()
+    }
+    return assertNotNull(tapped, "the click should report a control tap")
+  }
+
+  @Test
+  fun `the swipe start is the pointer-down position, not where the drag crossed slop`() {
+    // The drag threshold is measured from this point in device coordinates, so if the start ever
+    // slid to the slop-crossing position the threshold would silently shrink by the slop.
+    var start: DevicePoint? = null
+    runComposeUiTest {
+      setContent {
+        MaterialTheme { controlView(onSwipe = { _, a, _ -> start = a }, onTap = {}) }
+      }
+      onRoot().performTouchInput { swipe(center + Offset(0f, 80f), center - Offset(0f, 80f)) }
+      waitForIdle()
+    }
+
+    assertEquals(
+      controlTapAt { it.center + Offset(0f, 80f) },
+      assertNotNull(start),
+      "the swipe start maps the pointer-down position, unshifted by touch slop",
+    )
+  }
+
   @Test
   fun `an inspector-mode drag reports no swipe`() = runComposeUiTest {
     // The IDE plugin never opts into control mode, so drag there must stay viewport pan and

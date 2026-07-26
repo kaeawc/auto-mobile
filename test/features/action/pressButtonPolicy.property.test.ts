@@ -13,8 +13,10 @@ const NAV_BUTTONS = ["back", "home", "recent", "power"] as const;
 const IN_PLACE_BUTTONS = ["menu", "volume_up", "volume_down"] as const;
 const ALL_BUTTONS = [...NAV_BUTTONS, ...IN_PLACE_BUTTONS];
 const KEY_CODES = new Set([3, 4, 82, 26, 24, 25, 187]);
-// Object.prototype members that a naive `{}` map would leak (issue #4187).
-const PROTO_KEYS = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf", "isPrototypeOf"];
+// EVERY Object.prototype member a naive `{}` map could leak (issue #4187) —
+// derived from the runtime so a future normal-object + denylist regression that
+// omits one (e.g. __defineGetter__) can't slip past a hand-picked subset.
+const PROTO_KEYS = Object.getOwnPropertyNames(Object.prototype);
 
 const mixedCase = (word: string): fc.Arbitrary<string> =>
   fc.array(fc.boolean(), { minLength: word.length, maxLength: word.length })
@@ -79,7 +81,7 @@ describe("resolveAndroidKeyCode (property-based)", () => {
 
   test("never leaks an Object.prototype member (issue #4187)", () => {
     fc.assert(
-      fc.property(fc.constantFrom(...PROTO_KEYS).chain(mixedCase), key => resolveAndroidKeyCode(key) === undefined),
+      fc.property(fc.constantFrom(...PROTO_KEYS), key => resolveAndroidKeyCode(key) === undefined),
       RUN_OPTIONS
     );
   });

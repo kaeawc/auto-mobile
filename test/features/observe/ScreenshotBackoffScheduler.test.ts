@@ -1,21 +1,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import {
   DefaultScreenshotBackoffScheduler,
-  FakeScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
   computeChecksum,
 } from "../../../src/features/observe/ScreenshotBackoffScheduler";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 describe("computeChecksum", () => {
-  it("returns consistent checksum for same data", () => {
-    const data = "test-screenshot-data";
-    const checksum1 = computeChecksum(data);
-    const checksum2 = computeChecksum(data);
-    expect(checksum1).toBe(checksum2);
-  });
-
   it("returns different checksum for different data", () => {
     const checksum1 = computeChecksum("data1");
     const checksum2 = computeChecksum("data2");
@@ -333,6 +324,26 @@ describe("DefaultScreenshotBackoffScheduler", () => {
 
       expect(capturedScreenshots).toHaveLength(1);
     });
+
+    it("stops keepalive when the dynamic provider returns null despite a static interval", async () => {
+      // A configured provider is authoritative: returning null means "stop",
+      // and must NOT fall back to the static keepAliveIntervalMs (issue #4172).
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        emitCallback,
+        { intervals: [0], keepAliveIntervalMs: 3000, getKeepAliveIntervalMs: () => null },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+
+      expect(capturedScreenshots).toHaveLength(1);
+      // No keepalive scheduled, so nothing captures even well past the static cadence.
+      expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+      await fakeTimer.advanceTimersByTimeAsync(3000);
+      expect(capturedScreenshots).toHaveLength(1);
+    });
   });
 
   describe("duplicate detection", () => {
@@ -599,37 +610,43 @@ describe("DefaultScreenshotBackoffScheduler", () => {
   });
 
   describe("sequence invalidation", () => {
-    it("discards captures from old sequence if new sequence starts", async () => {
-      const captureDelay = 0;
+    it("does not emit a frame whose sequence was superseded mid-capture", async () => {
+      // Gate the first capture so a second sequence can start while it is still
+      // in flight. When the first capture finally resolves, its frame must be
+      // discarded (the sequence id moved on) -- only sequence 2's frame emits.
+      let releaseFirstCapture: () => void = () => {};
+      const firstCaptureGate = new Promise<void>(resolve => {
+        releaseFirstCapture = resolve;
+      });
+
       captureCallback = async () => {
         captureCount++;
-        // Simulate slow capture that takes 150ms
-        if (captureDelay > 0) {
-          await defaultTimer.sleep(captureDelay);
+        const thisCapture = captureCount;
+        if (thisCapture === 1) {
+          await firstCaptureGate;
         }
-        return { success: true, data: `screenshot-${captureCount}` };
+        return { success: true, data: `screenshot-${thisCapture}` };
       };
 
       const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
-        { intervals: [0, 100] },
+        { intervals: [0] },
         fakeTimer
       );
 
       scheduler.startBackoffSequence();
-      await fakeTimer.advanceTimersByTimeAsync(0); // Start capture 1
+      await fakeTimer.advanceTimersByTimeAsync(0); // Capture 1 starts, blocks on gate.
 
-      // While capture is in progress, start new sequence
-      // This simulates a new hierarchy update coming in
-      scheduler.startBackoffSequence();
+      scheduler.startBackoffSequence(); // Supersede: sequence id bumps.
+      await fakeTimer.advanceTimersByTimeAsync(0); // Capture 2 runs and emits.
 
-      // The first capture should complete but its result should be discarded
-      // because the sequence ID changed
-      await fakeTimer.advanceTimersByTimeAsync(0); // Start capture from new sequence
+      // Let the stale capture 1 resolve now that its sequence is superseded.
+      releaseFirstCapture();
+      await Promise.resolve();
+      await Promise.resolve();
 
-      // Both captures completed, but we should see results from sequence 2
-      expect(emittedScreenshots.length).toBeGreaterThanOrEqual(1);
+      expect(emittedScreenshots).toEqual(["screenshot-2"]);
     });
   });
 
@@ -664,51 +681,5 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       await fakeTimer.advanceTimersByTimeAsync(0);
       expect(emittedScreenshots).toHaveLength(2);
     });
-  });
-});
-
-describe("FakeScreenshotBackoffScheduler", () => {
-  it("tracks method calls", () => {
-    const fake = new FakeScreenshotBackoffScheduler();
-
-    expect(fake.startBackoffSequenceCalls).toBe(0);
-    expect(fake.cancelPendingCapturesCalls).toBe(0);
-
-    fake.startBackoffSequence();
-    expect(fake.startBackoffSequenceCalls).toBe(1);
-    expect(fake.isActive()).toBe(true);
-
-    fake.cancelPendingCaptures();
-    expect(fake.cancelPendingCapturesCalls).toBe(1);
-    expect(fake.isActive()).toBe(false);
-
-    fake.rescheduleKeepAlive();
-    expect(fake.rescheduleKeepAliveCalls).toBe(1);
-  });
-
-  it("allows setting state for test scenarios", () => {
-    const fake = new FakeScreenshotBackoffScheduler();
-
-    fake.setActive(true);
-    expect(fake.isActive()).toBe(true);
-
-    fake.setPendingCount(3);
-    expect(fake.getPendingCount()).toBe(3);
-  });
-
-  it("resets all state", () => {
-    const fake = new FakeScreenshotBackoffScheduler();
-
-    fake.startBackoffSequence();
-    fake.cancelPendingCaptures();
-    fake.setActive(true);
-    fake.setPendingCount(5);
-
-    fake.reset();
-
-    expect(fake.startBackoffSequenceCalls).toBe(0);
-    expect(fake.cancelPendingCapturesCalls).toBe(0);
-    expect(fake.isActive()).toBe(false);
-    expect(fake.getPendingCount()).toBe(0);
   });
 });

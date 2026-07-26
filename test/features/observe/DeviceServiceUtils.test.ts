@@ -342,6 +342,36 @@ describe("DeviceServiceUtils", () => {
       expect(callCount).toBe(3);
     });
 
+    test("falls back to DEFAULT_CONNECTION_OPTIONS when no options are passed", async () => {
+      // Exercises the defaults behaviorally (issue #4172 D7): with options
+      // omitted, it must attempt exactly maxAttempts (3) times and schedule the
+      // inter-attempt wait at delayMs (1000). This keeps the defaults covered
+      // through behavior, not only the static-value assertion above.
+      const fakeTimer = new FakeTimer();
+      let callCount = 0;
+
+      const promise = waitWithRetry(
+        () => {
+          callCount++;
+          return false;
+        },
+        undefined,
+        fakeTimer
+      );
+
+      // After the first failing attempt, the default 1000ms delay is scheduled.
+      await Promise.resolve();
+      expect(fakeTimer.getPendingTimeouts()).toEqual([1000]);
+
+      for (let i = 0; i < 4; i++) {
+        fakeTimer.advanceTime(1000);
+        await new Promise(r => setImmediate(r));
+      }
+
+      expect(await promise).toBe(false);
+      expect(callCount).toBe(3);
+    });
+
     test("supports async condition function", async () => {
       const fakeTimer = new FakeTimer();
       let callCount = 0;

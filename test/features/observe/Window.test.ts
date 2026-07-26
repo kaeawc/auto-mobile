@@ -12,7 +12,7 @@ describe("Window", () => {
   let fakeAdb: FakeAdbExecutor;
   let mockDevice: BootedDevice;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockDevice = {
       deviceId: "test-device",
       name: "Test Device",
@@ -20,34 +20,17 @@ describe("Window", () => {
     };
     fakeAdb = new FakeAdbExecutor();
     window = new Window(mockDevice, new FakeAdbClientFactory(fakeAdb));
-    // Clear cache before each test to prevent stale results
-    window.clearCache();
+    // Clear cache before each test to prevent stale results. clearCache() is
+    // async (it removes the on-disk cache); awaiting it prevents a floated
+    // promise from leaking a stale cache into the next test (issue #4172 A9).
+    await window.clearCache();
   });
 
-  describe("constructor", () => {
-    test("should create instance with provided deviceId and adb", () => {
-      const mockDevice: BootedDevice = {
-        deviceId: "test-device",
-        name: "Test Device",
-        platform: "android"
-      };
-      const customAdb = new FakeAdbExecutor();
-      const windowInstance = new Window(mockDevice, new FakeAdbClientFactory(customAdb));
-      expect(windowInstance).toBeInstanceOf(Window);
-    });
-
-    test("should create instance with default values when no parameters provided", () => {
-      const mockDevice: BootedDevice = {
-        deviceId: "default-device",
-        name: "Default Device",
-        platform: "android"
-      };
-      // Pass FakeAdbExecutor to avoid creating real AdbClient
-      const defaultFakeAdb = new FakeAdbExecutor();
-      const windowInstance = new Window(mockDevice, new FakeAdbClientFactory(defaultFakeAdb));
-      expect(windowInstance).toBeInstanceOf(Window);
-    });
-  });
+  // The two former constructor tests only asserted `new Window(...) instanceof
+  // Window`, which the type system already guarantees; they were removed
+  // (issue #4172 D4/D5). The getActive cache-layer tests remain deferred until
+  // Window takes an injected FileSystem seam, so they can be exercised without
+  // real disk I/O.
 
   describe("getActive", () => {
     test("should parse package name and activity name correctly", async () => {

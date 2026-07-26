@@ -190,6 +190,34 @@ describe("IdentifyMediaViews", () => {
     expect(result).toHaveLength(0);
   });
 
+  describe("platform isolation", () => {
+    // Pins which class names cross the platform boundary. Android-only patterns
+    // (android.widget.*, ShimmerFrameLayout) do NOT match on iOS, and most
+    // iOS-only patterns do NOT match on Android. The one deliberate exception is
+    // "UIImageView": it is matched on Android too (the audit's proposed
+    // `android + UIImageView -> null` row was refuted -- it resolves to "image").
+    const cases: Array<{ className: string; platform: "android" | "ios"; expected: string | null }> = [
+      { className: "UIImageView", platform: "android", expected: "image" },
+      { className: "UIActivityIndicatorView", platform: "android", expected: null },
+      { className: "WKWebView", platform: "android", expected: null },
+      { className: "android.widget.ImageView", platform: "ios", expected: null },
+      { className: "android.widget.VideoView", platform: "ios", expected: null },
+      { className: "com.facebook.shimmer.ShimmerFrameLayout", platform: "ios", expected: null }
+    ];
+
+    cases.forEach(({ className, platform, expected }) => {
+      test(`${className} on ${platform} -> ${expected ?? "not matched"}`, () => {
+        const result = classifier.classify(buildHierarchy([{ className, bounds: defaultBounds }]), platform);
+        if (expected === null) {
+          expect(result).toHaveLength(0);
+        } else {
+          expect(result).toHaveLength(1);
+          expect(result[0].mediaType).toBe(expected);
+        }
+      });
+    });
+  });
+
   test("classifies media from pre-flattened entries without flattening hierarchy", () => {
     class NoFlattenParser extends FakeElementParser {
       override flattenViewHierarchy(): Array<{ element: Element; index: number; depth: number; text?: string }> {

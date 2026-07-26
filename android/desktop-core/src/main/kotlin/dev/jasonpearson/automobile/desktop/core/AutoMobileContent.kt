@@ -188,10 +188,12 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
  *   selection while keeping the socket and last frame, and a null selection must not let the daemon
  *   pick a device the user never chose,
  * - the connected transport can carry daemon input ([McpConnectionType.supportsDaemonInput]), and
- * - the currently rendered frame belongs to that same selected device ([renderedDeviceId] ==
- *   [activeDeviceId]) — after a device switch the previous frame lingers until a new one arrives,
- *   and a click on that stale mirror would be mapped against the old device yet sent to the new
- *   one.
+ * - BOTH the rendered screenshot ([renderedDeviceId]) AND the hit-tested hierarchy
+ *   ([renderedHierarchyDeviceId]) belong to that same selected device — after a device switch the
+ *   previous frame lingers until a new one arrives, and the screenshot and hierarchy streams update
+ *   independently (the hierarchy is debounced), so a click could otherwise be mapped against one
+ *   device's dimensions yet sent to another. When the observation stream disconnects both ids are
+ *   invalidated, which also drops control on a frozen mirror.
  *
  * When any condition fails the view falls back to inspector mode, so the user is never tapping
  * blind.
@@ -202,12 +204,14 @@ internal fun isDeviceControlActive(
   activeDeviceId: String?,
   connectionType: McpConnectionType?,
   renderedDeviceId: String?,
+  renderedHierarchyDeviceId: String?,
 ): Boolean {
   return enableDeviceControl &&
     isRealDeviceMode &&
     activeDeviceId != null &&
     connectionType?.supportsDaemonInput == true &&
-    renderedDeviceId == activeDeviceId
+    renderedDeviceId == activeDeviceId &&
+    renderedHierarchyDeviceId == activeDeviceId
 }
 
 /**
@@ -833,7 +837,10 @@ fun AutoMobileContent(
           }
         result?.let {
           layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
-          layoutInspectorState.applyHierarchyUpdate(it.first, it.second)
+          // Tag the hierarchy with its source device so the device-control gate can require the
+          // hit-tested hierarchy (not just the screenshot) to match the selected device (issue
+          // #3347). The frame already passed the active-device filter above.
+          layoutInspectorState.applyHierarchyUpdate(it.first, it.second, deviceId = update.deviceId)
         }
       }
     }
@@ -1100,6 +1107,10 @@ fun AutoMobileContent(
     client.connectionState.collect { connectionState ->
       if (connectionState is ConnectionState.Disconnected) {
         clearPerformanceMetrics()
+        // The observation stream is dead, so the on-screen mirror is frozen/stale even if the input
+        // socket still works. Invalidate the rendered frame's device identity so device control
+        // deactivates (issue #3347) — a click on a frozen mirror must not actuate the real device.
+        layoutInspectorState.invalidateRenderedDeviceIdentity()
       }
     }
   }
@@ -1464,6 +1475,7 @@ fun AutoMobileContent(
               activeDeviceId = activeDeviceId,
               connectionType = connectedMcpProcess?.connectionType,
               renderedDeviceId = layoutInspectorState.renderedDeviceId,
+              renderedHierarchyDeviceId = layoutInspectorState.renderedHierarchyDeviceId,
             )
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(
@@ -1503,25 +1515,39 @@ fun AutoMobileContent(
                     // requires a non-null selection, this guards the click-vs-recompose race so the
                     // daemon can never pick a device the user did not choose.
                     if (tapDeviceId != null) {
+                      // clientProvider mints a fresh McpDaemonClient (a new Unix socket) per call,
+                      // so
+                      // close it after the tap or every click leaks a socket. Mirrors the
+                      // take-screenshot path's close-in-finally.
                       val tapClient = clientProvider?.invoke()
                       val tapPlatform = platformString
                       val tapToken = deviceControlTapGate.nextToken()
                       deviceControlTapError = null
                       screenshotScope.launch(Dispatchers.IO) {
-                        deviceControlTapForwarder.forward(
-                          point = point,
-                          client = tapClient,
-                          platform = tapPlatform,
-                          deviceId = tapDeviceId,
-                          onError = { message ->
-                            // Only the latest tap may publish an error; a stale failure from a
-                            // superseded tap is ignored so it can't resurrect a banner a newer tap
-                            // already cleared.
+                        var tapError: String? = null
+                        try {
+                          deviceControlTapForwarder.forward(
+                            point = point,
+                            client = tapClient,
+                            platform = tapPlatform,
+                            deviceId = tapDeviceId,
+                            onError = { message -> tapError = message },
+                          )
+                        } finally {
+                          tapClient?.close()
+                        }
+                        // Publish on the UI dispatcher so the token check and the banner write are
+                        // serialized with nextToken()/clear (which also run on the UI thread). Only
+                        // the latest tap may publish; a superseded tap's stale error is dropped and
+                        // can't resurrect a banner a newer tap already cleared.
+                        val message = tapError
+                        if (message != null) {
+                          withContext(Dispatchers.Main) {
                             if (deviceControlTapGate.isCurrent(tapToken)) {
                               deviceControlTapError = message
                             }
-                          },
-                        )
+                          }
+                        }
                       }
                     }
                   }

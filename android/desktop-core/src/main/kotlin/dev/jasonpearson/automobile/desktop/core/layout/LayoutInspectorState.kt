@@ -64,6 +64,15 @@ class LayoutInspectorState {
   var renderedDeviceId by mutableStateOf<String?>(null)
     private set
 
+  // Device id the currently applied hierarchy came from (issue #3347). Distinct from
+  // [renderedDeviceId] because clicks are mapped using the hierarchy root bounds, and the hierarchy
+  // stream is debounced (~100ms) independently of the screenshot: right after a device switch the
+  // new device's screenshot can arrive while the hierarchy is still the previous device's. Device
+  // control requires BOTH ids to match the selection so a click is never mapped with one device's
+  // dimensions and sent to another. Null until the first hierarchy is applied.
+  var renderedHierarchyDeviceId by mutableStateOf<String?>(null)
+    private set
+
   // Screenshot capture metadata (from the observation stream's screenshot_update message). Absent
   // (null/false) when the daemon predates this metadata or a field wasn't reported.
   var screenshotFallback by mutableStateOf(false)
@@ -201,10 +210,10 @@ class LayoutInspectorState {
    * internally. For the streaming path, prefer [applyHierarchyUpdate] with a pre-computed
    * [ParsedHierarchy].
    */
-  fun updateHierarchy(newHierarchy: UIElementInfo, newRotation: Int = 0) {
+  fun updateHierarchy(newHierarchy: UIElementInfo, newRotation: Int = 0, deviceId: String? = null) {
     val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
     val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
-    applyHierarchyUpdateImmediate(parsed, changedIds)
+    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId)
   }
 
   /**
@@ -215,22 +224,32 @@ class LayoutInspectorState {
    * prevents excessive recompositions during rapid streaming. Use [applyHierarchyUpdateImmediate]
    * to bypass debouncing.
    */
-  fun applyHierarchyUpdate(parsed: ParsedHierarchy, changedIds: Set<String>) {
+  fun applyHierarchyUpdate(
+    parsed: ParsedHierarchy,
+    changedIds: Set<String>,
+    deviceId: String? = null,
+  ) {
     debounceJob?.cancel()
     debounceJob = debounceScope.launch {
       delay(HIERARCHY_DEBOUNCE_MS)
-      applyHierarchyUpdateImmediate(parsed, changedIds)
+      applyHierarchyUpdateImmediate(parsed, changedIds, deviceId)
     }
   }
 
   /**
    * Apply a hierarchy update immediately without debouncing. Used for programmatic updates (e.g.
-   * initial load, refresh) that should be visible right away.
+   * initial load, refresh) that should be visible right away. [deviceId] tags the hierarchy with
+   * its source device for the device-control gate (issue #3347).
    */
-  fun applyHierarchyUpdateImmediate(parsed: ParsedHierarchy, changedIds: Set<String>) {
+  fun applyHierarchyUpdateImmediate(
+    parsed: ParsedHierarchy,
+    changedIds: Set<String>,
+    deviceId: String? = null,
+  ) {
     changedElementIds = changedIds
     currentParsedHierarchy = parsed
     rotation = parsed.rotation
+    renderedHierarchyDeviceId = deviceId
 
     // Clear selection if the selected element no longer exists — O(1) map check
     val currentSelectedId = selectedElementId
@@ -248,6 +267,19 @@ class LayoutInspectorState {
   /** Clear the changed elements set. Called after flash animation completes. */
   fun clearChangedElements() {
     changedElementIds = emptySet()
+  }
+
+  /**
+   * Invalidate the rendered frame's device identity (issue #3347) without discarding the frame.
+   * Call when the observation stream disconnects but the input socket may still be usable: the
+   * on-screen mirror is now frozen/stale, so device control must deactivate (its gate requires both
+   * ids to match the selection) even though the frame stays visible for inspection. Unlike
+   * [disconnect] this keeps the screenshot and hierarchy so the user can still inspect the last
+   * frame.
+   */
+  fun invalidateRenderedDeviceIdentity() {
+    renderedDeviceId = null
+    renderedHierarchyDeviceId = null
   }
 
   /**
@@ -312,6 +344,7 @@ class LayoutInspectorState {
     screenshotFormat = null
     screenshotCaptureSource = null
     renderedDeviceId = null
+    renderedHierarchyDeviceId = null
     currentParsedHierarchy = null
     rotation = 0
     selectedElementId = null

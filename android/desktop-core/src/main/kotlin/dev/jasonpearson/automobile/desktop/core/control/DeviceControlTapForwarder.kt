@@ -22,6 +22,11 @@ import dev.jasonpearson.automobile.desktop.domain.DevicePoint
  * thread (e.g. a `Dispatchers.IO` coroutine, matching the existing daemon-action pattern in
  * `McpProcessesPanel`): if the active device changed between the click and the coroutine running,
  * resolving the target late would send the clicked coordinate to the wrong device.
+ *
+ * Its only consumer is `AutoMobileContent`; it is a deliberate testability seam extracted from that
+ * Compose host so this logic is Compose-free and unit-testable per the repo's fakes/fast-tests
+ * rule. Do not inline it — the unit tests below would be impossible to write against the
+ * composable.
  */
 class DeviceControlTapForwarder {
 

@@ -12,8 +12,13 @@ import java.util.concurrent.atomic.AtomicLong
  * claims a monotonically increasing token at click time via [nextToken] (on the UI thread) and,
  * when it completes on the IO dispatcher, publishes its error only while [isCurrent] still holds.
  *
- * Backed by an [AtomicLong] so the UI-thread claim and the IO-thread check are safe without extra
- * synchronization.
+ * Backed by an [AtomicLong] so the claim and the check are memory-safe across threads; correctness
+ * against the check-then-publish race additionally relies on the caller marshaling both
+ * [nextToken]/clear and the [isCurrent]-then-publish onto the same (UI) dispatcher.
+ *
+ * Its only consumer is `AutoMobileContent`; it is a deliberate testability seam extracted from that
+ * Compose host so the ordering logic is Compose-free and unit-testable per the repo's
+ * fakes/fast-tests rule. Do not inline it.
  */
 class ControlTapErrorGate {
   private val latest = AtomicLong(0L)

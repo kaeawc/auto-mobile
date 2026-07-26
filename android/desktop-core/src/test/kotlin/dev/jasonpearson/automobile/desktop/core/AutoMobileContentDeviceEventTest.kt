@@ -96,43 +96,37 @@ class AutoMobileContentDeviceEventTest {
 
   // ---- Device-control activation gate (issue #3347) -------------------------
 
-  @Test
-  fun `device control active when opted-in real device selected socket transport and frame matches`() {
-    assertTrue(
-      isDeviceControlActive(
-        enableDeviceControl = true,
-        isRealDeviceMode = true,
-        activeDeviceId = "emulator-5554",
-        connectionType = McpConnectionType.UnixSocket,
-        renderedDeviceId = "emulator-5554",
-      )
+  /** All conditions satisfied by default; each test flips exactly one to prove it gates. */
+  private fun controlActive(
+    enableDeviceControl: Boolean = true,
+    isRealDeviceMode: Boolean = true,
+    activeDeviceId: String? = "emulator-5554",
+    connectionType: McpConnectionType? = McpConnectionType.UnixSocket,
+    renderedDeviceId: String? = "emulator-5554",
+    renderedHierarchyDeviceId: String? = "emulator-5554",
+  ) =
+    isDeviceControlActive(
+      enableDeviceControl = enableDeviceControl,
+      isRealDeviceMode = isRealDeviceMode,
+      activeDeviceId = activeDeviceId,
+      connectionType = connectionType,
+      renderedDeviceId = renderedDeviceId,
+      renderedHierarchyDeviceId = renderedHierarchyDeviceId,
     )
+
+  @Test
+  fun `device control active when everything matches the selected device`() {
+    assertTrue(controlActive())
   }
 
   @Test
   fun `device control inactive when not opted in`() {
-    assertFalse(
-      isDeviceControlActive(
-        enableDeviceControl = false,
-        isRealDeviceMode = true,
-        activeDeviceId = "emulator-5554",
-        connectionType = McpConnectionType.UnixSocket,
-        renderedDeviceId = "emulator-5554",
-      )
-    )
+    assertFalse(controlActive(enableDeviceControl = false))
   }
 
   @Test
   fun `device control inactive in fake mode`() {
-    assertFalse(
-      isDeviceControlActive(
-        enableDeviceControl = true,
-        isRealDeviceMode = false,
-        activeDeviceId = "emulator-5554",
-        connectionType = McpConnectionType.UnixSocket,
-        renderedDeviceId = "emulator-5554",
-      )
-    )
+    assertFalse(controlActive(isRealDeviceMode = false))
   }
 
   @Test
@@ -140,52 +134,45 @@ class AutoMobileContentDeviceEventTest {
     // Switching Fake->Real keeps the socket and last frame but clears activeDeviceId; a tap then
     // would send deviceId=null and the daemon would pick a device the user never chose.
     assertFalse(
-      isDeviceControlActive(
-        enableDeviceControl = true,
-        isRealDeviceMode = true,
+      controlActive(
         activeDeviceId = null,
-        connectionType = McpConnectionType.UnixSocket,
         renderedDeviceId = null,
+        renderedHierarchyDeviceId = null,
       )
     )
   }
 
   @Test
   fun `device control inactive on an input-incapable transport`() {
+    assertFalse(controlActive(connectionType = McpConnectionType.StreamableHttp))
+    assertFalse(controlActive(connectionType = null))
+  }
+
+  @Test
+  fun `device control inactive while the rendered screenshot belongs to a different device`() {
+    // Device just switched to B; the previous screenshot (A) still renders. A tap would be mapped
+    // against A's screen yet sent to B — control must be inactive until B's frame arrives.
+    assertFalse(controlActive(activeDeviceId = "emulator-5556"))
+  }
+
+  @Test
+  fun `device control inactive while the hierarchy still belongs to a different device`() {
+    // Screenshot for B has arrived but the hierarchy is still A's (streams update independently and
+    // the hierarchy is debounced). A click would be hit-tested against A's bounds yet sent to B.
     assertFalse(
-      isDeviceControlActive(
-        enableDeviceControl = true,
-        isRealDeviceMode = true,
-        activeDeviceId = "emulator-5554",
-        connectionType = McpConnectionType.StreamableHttp,
-        renderedDeviceId = "emulator-5554",
-      )
-    )
-    assertFalse(
-      isDeviceControlActive(
-        enableDeviceControl = true,
-        isRealDeviceMode = true,
-        activeDeviceId = "emulator-5554",
-        connectionType = null,
-        renderedDeviceId = "emulator-5554",
+      controlActive(
+        activeDeviceId = "emulator-5556",
+        renderedDeviceId = "emulator-5556",
+        renderedHierarchyDeviceId = "emulator-5554",
       )
     )
   }
 
   @Test
-  fun `device control inactive while the rendered frame belongs to a different device`() {
-    // Device just switched to B; the previous frame (A) still renders. A tap would be mapped
-    // against
-    // A's screen yet sent to B — control must be inactive until B's frame arrives.
-    assertFalse(
-      isDeviceControlActive(
-        enableDeviceControl = true,
-        isRealDeviceMode = true,
-        activeDeviceId = "emulator-5556",
-        connectionType = McpConnectionType.UnixSocket,
-        renderedDeviceId = "emulator-5554",
-      )
-    )
+  fun `device control inactive once the rendered device identity is invalidated (stream disconnect)`() {
+    // On observation-stream disconnect both ids are cleared; the frozen mirror must not be
+    // tappable.
+    assertFalse(controlActive(renderedDeviceId = null, renderedHierarchyDeviceId = null))
   }
 
   private fun deviceConnectionLostEvent(deviceId: String): DeviceStreamEvent.DeviceConnectionLost =

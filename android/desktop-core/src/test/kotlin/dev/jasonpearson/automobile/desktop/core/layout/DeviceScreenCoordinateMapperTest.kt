@@ -236,9 +236,11 @@ class DeviceScreenCoordinateMapperTest {
     val original = ViewportPoint(321f, 654f)
     val device = mapper.viewportToDevice(original, g)
     val back = mapper.deviceToViewport(device.x, device.y, g)
-    // Within one device-pixel of viewport error (rounding).
-    assertTrue(abs(back.x - original.x) <= g.scale * (g.deviceWidth / g.frameWidthPx))
-    assertTrue(abs(back.y - original.y) <= g.scale * (g.deviceWidth / g.frameWidthPx))
+    // Within one device-pixel of viewport error (rounding). One device pixel spans
+    // frameWidthPx/deviceWidth frame pixels, i.e. scale * frameWidthPx/deviceWidth viewport pixels.
+    val oneDevicePixelInViewport = g.scale * (g.frameWidthPx / g.deviceWidth)
+    assertTrue(abs(back.x - original.x) <= oneDevicePixelInViewport)
+    assertTrue(abs(back.y - original.y) <= oneDevicePixelInViewport)
   }
 
   // ---- Inspector selection regression --------------------------------------

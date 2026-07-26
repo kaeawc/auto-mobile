@@ -454,18 +454,26 @@ fun DeviceScreenView(
         zoomAroundPoint(newScale, viewportWidth / 2, viewportHeight / 2)
       }
 
-      // Current viewport<->device geometry. scale/offset are mutable pan/zoom state, so this is
-      // rebuilt per call to read live values. deviceWidth/deviceHeight are the hierarchy bounds
+      // Current viewport<->device geometry. deviceWidth/deviceHeight are the hierarchy bounds
       // coordinate space (== element.bounds), so mapped points feed findElementAt directly.
-      fun deviceGeometry(): DeviceScreenGeometry =
-        DeviceScreenGeometry(
-          frameWidthPx = frameWidthPx,
-          frameHeightPx = frameHeightPx,
-          scale = scale,
-          offsetX = offsetX,
-          offsetY = offsetY,
-          deviceWidth = rotatedRootWidth,
-          deviceHeight = rootBoundsHeight,
+      // The tap/hover pointer coroutines below are retained across recomposition (keyed only on
+      // hierarchy/controlMode), so they must read the LATEST geometry rather than the frame size
+      // captured when the gesture started — otherwise a viewport or screenshot resize would map
+      // clicks through a stale frame and report wrong device coordinates. rememberUpdatedState
+      // republishes the snapshot on every recomposition (scale/offset are mutableState and the
+      // frame dims are plain vals that only change on recomposition), and the gesture reads .value
+      // live. Matches the onControlTap fix.
+      val currentGeometry by
+        rememberUpdatedState(
+          DeviceScreenGeometry(
+            frameWidthPx = frameWidthPx,
+            frameHeightPx = frameHeightPx,
+            scale = scale,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            deviceWidth = rotatedRootWidth,
+            deviceHeight = rootBoundsHeight,
+          )
         )
 
       // Convert a viewport point to device (== hierarchy bounds) coordinates for hit testing and
@@ -475,7 +483,7 @@ fun DeviceScreenView(
       fun screenToDevice(screenX: Float, screenY: Float): DevicePoint =
         DeviceScreenCoordinateMapper.viewportToDevice(
           ViewportPoint(screenX, screenY),
-          deviceGeometry(),
+          currentGeometry,
         )
 
       // Focus requester for keyboard events

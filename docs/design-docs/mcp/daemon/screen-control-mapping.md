@@ -74,7 +74,7 @@ A client builds a geometry snapshot once per rendered frame:
 
 ## Viewport → device mapping
 
-```
+```text
 frameX = (viewportX - offsetX) / scale
 frameY = (viewportY - offsetY) / scale
 
@@ -98,13 +98,17 @@ Notes and rules a client must reproduce:
   screen produces an out-of-range coordinate that matches no element, clearing
   the selection. A **control** client must not tap an out-of-bounds point — drop
   it, or clamp it to the last addressable pixel `(deviceWidth - 1,
-  deviceHeight - 1)` if pinning to the edge is desired.
+  deviceHeight - 1)` if pinning to the edge is desired. Clamping is only valid
+  when **both** device dimensions are positive: with a zero dimension
+  `(deviceWidth - 1, deviceHeight - 1)` is negative and addresses no pixel, so a
+  client must **drop** the point instead. The reference `DevicePoint.clampedTo`
+  mirrors this — it reports `inBounds = false` for a zero-dimension screen.
 
 ### Device → viewport (inverse)
 
 For placing overlays or touch-feedback markers, the inverse is:
 
-```
+```text
 deviceToFrame = frameWidthPx / deviceWidth          // guard: 1.0 if deviceWidth <= 0
 viewportX = deviceX * deviceToFrame * scale + offsetX
 viewportY = deviceY * deviceToFrame * scale + offsetY
@@ -117,7 +121,7 @@ Modulo integer rounding, `deviceToViewport` and `viewportToDevice` round-trip.
 Given the rotation-aligned image size (`imageWidth`, `imageHeight`), the viewport
 size, and a per-side `padding` (default `32`):
 
-```
+```text
 aspect = imageHeight / imageWidth                   // fallback 2.16 if imageWidth <= 0
 maxW = max(viewportWidth  - padding*2, 1)
 maxH = max(viewportHeight - padding*2, 1)
@@ -133,7 +137,7 @@ if (maxW * aspect <= maxH) {                         // width-constrained
 
 The initial "fit to screen" zoom scale is:
 
-```
+```text
 fitScale = clamp( min( viewportWidth  / (frameWidthPx  + padding*2),
                        viewportHeight / (frameHeightPx + padding*2),
                        1.0 ),

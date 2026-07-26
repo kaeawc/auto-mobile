@@ -399,6 +399,151 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
+  describe("a11y screenshot support latch", function() {
+    // Drives AndroidCtrlProxyClient.captureScreenshotForObservationStream() through the real socket:
+    // each failed a11y screenshot increments a consecutive-failure counter; on the
+    // A11Y_SCREENSHOT_MAX_FAILURES-th (=3) it latches a11yScreenshotSupported=false so every future
+    // capture goes straight to ADB (no wasted a11y round-trips), and any success resets the counter.
+    // Flip the constant 3->1 and two of the three tests below go red — the latch threshold is pinned,
+    // not merely "eventually latches".
+    const setupConnectedCapturingClient = async (): Promise<{
+      client: AndroidCtrlProxyClient;
+      socket: CapturingWebSocket;
+    }> => {
+      await accessibilityServiceClient.close();
+      AndroidCtrlProxyClient.resetInstances();
+      // Manual (non-auto-advance) timer: the per-request 3s screenshot timeout must NOT auto-fire and
+      // preempt the wire frame we emit — we resolve each capture by socket, exactly as the backoff
+      // stream tests above do.
+      const localTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        localTimer
+      );
+      accessibilityServiceClient.invalidateCache();
+      // ADB PNG fallback used whenever an a11y capture fails or the latch is set.
+      setAdbPngScreenshotResponse();
+
+      await accessibilityServiceClient.ensureConnected();
+      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+      await waitForSocketOpen(socket);
+      if (!socket) {
+        throw new Error("Expected capturing CtrlProxy socket");
+      }
+      return { client: accessibilityServiceClient, socket };
+    };
+
+    const countScreenshotRequests = (socket: CapturingWebSocket): number =>
+      socket.sentMessages.filter(raw => {
+        try {
+          return JSON.parse(raw).type === "request_screenshot";
+        } catch {
+          return false;
+        }
+      }).length;
+
+    const driveA11yScreenshot = async (
+      client: AndroidCtrlProxyClient,
+      socket: CapturingWebSocket,
+      resolveWith: { kind: "error" } | { kind: "success" }
+    ): Promise<any> => {
+      const before = countScreenshotRequests(socket);
+      const capturePromise = (client as any).captureScreenshotForObservationStream() as Promise<any>;
+      await waitForSentMessages(socket, socket.sentMessages.length + 1);
+      const request = findSentMessage(socket, "request_screenshot");
+      expect(countScreenshotRequests(socket)).toBe(before + 1);
+      const frame = resolveWith.kind === "error"
+        ? { type: "screenshot_error", requestId: request.requestId, error: "Runner failed to capture screenshot" }
+        : { type: "screenshot", requestId: request.requestId, data: "jpeg-base64", format: "jpeg", timestamp: 1 };
+      socket.emit("message", JSON.stringify(frame));
+      await flushPromises();
+      return capturePromise;
+    };
+
+    const findSentMessage = (socket: CapturingWebSocket, type: string): any => {
+      for (let i = socket.sentMessages.length - 1; i >= 0; i--) {
+        try {
+          const parsed = JSON.parse(socket.sentMessages[i]);
+          if (parsed.type === type) { return parsed; }
+        } catch {
+          // skip non-JSON control frames
+        }
+      }
+      throw new Error(`No message of type ${type} in: ${socket.sentMessages.join(", ")}`);
+    };
+
+    // Threshold-agnostic failure driver used only by the "eventually latches" test: it fails the
+    // a11y capture when one is attempted, but tolerates a capture that already short-circuited to
+    // ADB (so this test stays green whether the threshold is 3 or lower — the too-low case is what
+    // the other two tests catch).
+    const driveFailureTolerant = async (
+      client: AndroidCtrlProxyClient,
+      socket: CapturingWebSocket
+    ): Promise<void> => {
+      const before = countScreenshotRequests(socket);
+      const capturePromise = (client as any).captureScreenshotForObservationStream() as Promise<any>;
+      await flushPromises();
+      if (countScreenshotRequests(socket) > before) {
+        const request = findSentMessage(socket, "request_screenshot");
+        socket.emit("message", JSON.stringify({
+          type: "screenshot_error", requestId: request.requestId, error: "Runner failed to capture screenshot",
+        }));
+        await flushPromises();
+      }
+      await capturePromise;
+    };
+
+    test("latches to permanent ADB fallback after three consecutive a11y screenshot failures", async function() {
+      const { client, socket } = await setupConnectedCapturingClient();
+
+      await driveFailureTolerant(client, socket);
+      await driveFailureTolerant(client, socket);
+      await driveFailureTolerant(client, socket);
+
+      expect((client as any).a11yScreenshotSupported).toBe(false);
+
+      // Once latched, a further capture must NOT send another a11y request — it goes straight to ADB.
+      const requestsBefore = countScreenshotRequests(socket);
+      const result = await (client as any).captureScreenshotForObservationStream() as any;
+      await flushPromises();
+      expect(countScreenshotRequests(socket)).toBe(requestsBefore);
+      expect(result.screenshotCaptureSource).toBe("android_adb_screencap");
+    });
+
+    test("keeps attempting a11y screenshots after only two consecutive failures", async function() {
+      const { client, socket } = await setupConnectedCapturingClient();
+
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+
+      // Two failures is below the threshold: the latch must NOT be set yet...
+      expect((client as any).a11yScreenshotSupported).not.toBe(false);
+      // ...and the next capture must still ATTEMPT an a11y screenshot over the socket.
+      const requestsBefore = countScreenshotRequests(socket);
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+      expect(countScreenshotRequests(socket)).toBe(requestsBefore + 1);
+    });
+
+    test("resets the failure counter after a successful a11y screenshot", async function() {
+      const { client, socket } = await setupConnectedCapturingClient();
+
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+      // A success (a wire "screenshot" frame the client actually handles) clears the counter.
+      const success = await driveA11yScreenshot(client, socket, { kind: "success" });
+      expect(success.success).toBe(true);
+      expect((client as any).a11yScreenshotSupported).toBe(true);
+
+      // Because the counter reset, two more failures still do not reach the latch threshold.
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+      expect((client as any).a11yScreenshotSupported).not.toBe(false);
+    });
+  });
+
   test("allocates an Android forwarding port while skipping the iOS SDK hierarchy server port", async function() {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
@@ -1137,8 +1282,6 @@ describe("AndroidCtrlProxyClient", function() {
 
       const result = accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
-      expect(result).toBeDefined();
-      expect(result.hierarchy).toBeDefined();
       expect(result.hierarchy.text).toBe("6:43 AM");
       expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
       expect(result.hierarchy.class).toBe("android.widget.TextClock");
@@ -1210,8 +1353,6 @@ describe("AndroidCtrlProxyClient", function() {
 
       const result = accessibilityServiceClient.convertToViewHierarchyResult(problematicHierarchy);
 
-      expect(result).toBeDefined();
-      expect(result.hierarchy).toBeDefined();
       expect(result.hierarchy.error).toContain("Accessibility hierarchy missing from accessibility service");
     });
 
@@ -1325,37 +1466,52 @@ describe("AndroidCtrlProxyClient", function() {
 
     // WebSocket-based hierarchy retrieval is tested through integration tests
 
-    test("should return null when hierarchy retrieval fails", async function() {
-      // Configure service as available but WebSocket connection will fail
-      fakeAdb.setCommandResponse("pm list packages", {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: ""
-      });
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: ""
-      });
+    test("fresh-hierarchy wait fails fast — well under the timeout budget — when the screen is off", async function() {
       fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
 
-      // Set screen to off - this triggers fast-fail in waitForFreshData after ~1 second
+      // Screen off: the connection succeeds (so the fresh-data wait is actually entered), but no
+      // hierarchy is ever pushed, so waitForFreshData can only exit via the periodic screen check
+      // firing settleResolve(null) (CtrlProxyHierarchy.ts:737-740) or by burning the whole timeout.
       fakeAdb.setScreenState(false);
 
-      // Use delayed mode with 1ms for faster test execution
-
-      // Create a new client with FakeWebSocket that fails instantly and FakeTimer
-      const failingClient = AndroidCtrlProxyClient.createForTesting(
+      // A manual (non-auto-advance) timer: waitForFreshData polls on a repeating setInterval, which
+      // auto-advance models as a one-shot, so we drive virtual time explicitly and step past the
+      // ~1s screen-check cadence ourselves.
+      const manualTimer = new FakeTimer();
+      const asleepClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer
+        createSuccessWebSocketFactory(manualTimer),
+        manualTimer
       );
 
+      // A generous wait budget so the fast-fail signal is unmistakable: the screen-off exit lands
+      // near the ~1s screen-check cadence, an order of magnitude below this ceiling. Asserting the
+      // VIRTUAL time at resolution proves the fast fail BY ASSERTION — deleting the screen-off
+      // settleResolve(null) makes the wait run to the full budget and the toBeLessThan below FAILS,
+      // rather than the old test which only "passed" by never fast-failing and hanging to bun's real
+      // timeout. waitForFresh=true with no pushed hierarchy forces the wait; a fresh client has no
+      // recent-timeout cooldown, so shouldSkipWebSocketWait() does not short-circuit it.
+      const budgetMs = 8000;
       try {
-        const result = await failingClient.getAccessibilityHierarchy();
-        expect(result).toBeNull();
+        let response: { hierarchy: unknown; fresh: boolean } | undefined;
+        void asleepClient.getLatestHierarchy(true, budgetMs).then(r => { response = r; });
+
+        // Let ensureConnected + the interval registration settle before advancing time.
+        await flushPromises();
+
+        for (let stepped = 0; stepped <= budgetMs + 500 && response === undefined; stepped += 250) {
+          await manualTimer.advanceTimersByTimeAsync(250);
+          await flushPromises();
+        }
+        const resolvedAtMs = manualTimer.now();
+
+        expect(response).toBeDefined();
+        expect(response!.hierarchy).toBeNull();
+        expect(response!.fresh).toBe(false);
+        expect(resolvedAtMs).toBeLessThan(budgetMs / 2);
       } finally {
-        // Clean up the test client
-        await failingClient.close();
+        await asleepClient.close();
       }
     });
   });
@@ -2819,48 +2975,6 @@ describe("AndroidCtrlProxyClient", function() {
   describe("bindSession", function() {
     afterEach(function() {
       NavigationGraphManager.resetInstance();
-    });
-
-    test("should use session-scoped NavigationGraphManager after binding", function() {
-      // This test asserts only on instance ROUTING/identity, not on per-instance
-      // navigation state, so it deliberately does not call setCurrentApp: that
-      // would resolve the real getDatabase() (session instances have no in-memory
-      // injection seam) and trip the unit-test DB guard (issue #3067).
-      const globalNav = NavigationGraphManager.getInstance();
-      const sessionNav = NavigationGraphManager.getInstanceForSession("test-session-123");
-
-      // Before binding: client uses global instance
-      // After binding: client should use session instance
-      accessibilityServiceClient.bindSession("test-session-123");
-
-      // Verify the client is now bound to this session
-      // We can't directly call getNavigationGraphManager() since it's private,
-      // but we can verify the binding was stored by binding again and checking
-      // that the session is overwritten
-      accessibilityServiceClient.bindSession("other-session");
-
-      // The client should now be bound to "other-session"
-      // This validates bindSession is a simple setter that changes routing
-      const otherNav = NavigationGraphManager.getInstanceForSession("other-session");
-      expect(otherNav).not.toBe(sessionNav);
-      expect(otherNav).not.toBe(globalNav);
-    });
-
-    test("should use global NavigationGraphManager when no session bound", function() {
-      // Without calling bindSession, client should use the global singleton
-      // We verify by checking that no session instances are created
-      NavigationGraphManager.resetInstance();
-
-      const client = AndroidCtrlProxyClient.createForTesting(
-        testDevice,
-        fakeAdb,
-        createSuccessWebSocketFactory(),
-        fakeTimer
-      );
-
-      // No session bound — global singleton should be used
-      // Simply verify the client was created without error
-      expect(client).toBeDefined();
     });
 
     // Pins the session-isolation invariants a per-device client relies on. A

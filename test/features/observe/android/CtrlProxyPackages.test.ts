@@ -88,6 +88,34 @@ describe("CtrlProxyPackages (Android)", function() {
     }
   };
 
+  const flushPromises = async (iterations = 5): Promise<void> => {
+    for (let i = 0; i < iterations; i++) {
+      await new Promise(r => setImmediate(r));
+    }
+  };
+
+  const waitForCondition = async (predicate: () => boolean, iterations = 20): Promise<void> => {
+    for (let i = 0; i < iterations; i++) {
+      if (predicate()) {return;}
+      await new Promise(r => setImmediate(r));
+    }
+  };
+
+  /**
+   * Emit the runner's `connected` handshake frame so the client populates `supportedCommands`
+   * from the wire (the real capability-negotiation path), instead of a test poking the private
+   * field. The handshake also triggers an immediate cadence refresh, so callers clear
+   * `sentMessages` afterward to isolate the message under assertion.
+   */
+  const emitConnectedFrame = async (
+    socket: CapturingWebSocket,
+    supportedCommands: string[]
+  ): Promise<void> => {
+    socket.simulateMessage(JSON.stringify({ type: "connected", supportedCommands }));
+    await flushPromises();
+    socket.sentMessages = [];
+  };
+
   /**
    * Find the most recent message of a given type. The client sends control messages
    * on connect (e.g. set_network_mock_rules) that interleave with test sends.
@@ -105,15 +133,26 @@ describe("CtrlProxyPackages (Android)", function() {
   };
 
   describe("connection lifecycle", function() {
-    test("cancels screenshot backoff when the connection closes", function() {
-      const { factory } = createCapturingFactory(fakeTimer);
+    test("cancels screenshot backoff when the underlying socket closes", async function() {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
       const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
       const scheduler = new FakeScreenshotBackoffScheduler();
+      try {
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        (client as any).screenshotBackoffScheduler = scheduler;
 
-      (client as any).screenshotBackoffScheduler = scheduler;
-      (client as any).onConnectionClosed();
+        // A genuine WebSocket "close" must run the client's close handler, which cancels pending
+        // screenshot captures. The old test poked (client as any).onConnectionClosed() directly, so
+        // it stayed green even if the ws.on("close") -> onConnectionClosed() wiring was severed.
+        socket!.close();
+        await waitForCondition(() => scheduler.cancelPendingCapturesCalls >= 1);
 
-      expect(scheduler.cancelPendingCapturesCalls).toBe(1);
+        expect(scheduler.cancelPendingCapturesCalls).toBe(1);
+      } finally {
+        await client.close();
+      }
     });
 
     test("refreshes screenshot cadence by rescheduling keepalive", function() {
@@ -135,8 +174,7 @@ describe("CtrlProxyPackages (Android)", function() {
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       expect(connected).toBe(true);
-      (client as any).supportedCommands = new Set(["set_hierarchy_interval"]);
-      socket!.sentMessages = [];
+      await emitConnectedFrame(socket!, ["set_hierarchy_interval"]);
 
       client.refreshObservationStreamHierarchyCadence(500);
 
@@ -152,8 +190,7 @@ describe("CtrlProxyPackages (Android)", function() {
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       expect(connected).toBe(true);
-      (client as any).supportedCommands = new Set();
-      socket!.sentMessages = [];
+      await emitConnectedFrame(socket!, []);
 
       client.refreshObservationStreamHierarchyCadence(500);
 
@@ -178,8 +215,7 @@ describe("CtrlProxyPackages (Android)", function() {
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       expect(connected).toBe(true);
-      (client as any).supportedCommands = new Set(["set_hierarchy_interval"]);
-      socket!.sentMessages = [];
+      await emitConnectedFrame(socket!, ["set_hierarchy_interval"]);
 
       client.refreshObservationStreamHierarchyCadence();
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DefaultUIStateSetup, type ObserveScreenLike } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -11,6 +11,7 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 import type { ModalState, ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 const device: BootedDevice = {
   deviceId: "test-device",
@@ -251,10 +252,8 @@ describe("DefaultUIStateSetup", () => {
       ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
         createStructuredToolResponse({ success: true })
       );
-      let backArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("pressButton", "pressButton", {}, async (args: Record<string, unknown>) => {
-        backArgs = args;
-        return createStructuredToolResponse({ success: true });
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => {
+        throw new Error("Android modal recovery must not use the global tool registry");
       });
 
       // Stateful observe provider: the first post-swipe observation still
@@ -272,27 +271,29 @@ describe("DefaultUIStateSetup", () => {
         },
       });
 
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
       const setup = makeSetup(statefulObserve);
-      const dismissed = await (
-        setup as unknown as {
-          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
-        }
-      ).dismissTopModal(bottomSheet, "android");
+      let dismissed: boolean;
+      try {
+        dismissed = await (
+          setup as unknown as {
+            dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+          }
+        ).dismissTopModal(bottomSheet, "android");
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
 
       expect(dismissed).toBe(true);
       // The swipe ran but did not dismiss (windowId still present on observe #1),
       // so both post-swipe and post-back observations were consulted.
       expect(observeCalls).toBe(2);
-      // The fallback routes through the platform-aware interaction tool, which
-      // retains the internal no-diff marker and delegates Android fallback to
-      // PressButton itself.
+      // Android recovery uses the setup instance's injected dependencies rather
+      // than the global interaction registry.
       const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
-      expect(backArgs).toMatchObject({
-        button: "back",
-        platform: "android",
-        [INTERNAL_NO_DIFF_PARAM]: true,
-      });
-      expect(fakeAdb.getAllCommands()).toEqual([]);
+      expect(fakeAdb.getAllCommands()).toEqual(["shell input keyevent 4"]);
     });
 
     test("does not mistakenly resolve a tool registered under the old name `swipe`", async () => {

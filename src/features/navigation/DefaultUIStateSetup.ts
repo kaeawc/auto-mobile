@@ -8,6 +8,7 @@ import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { UIStateExtractor } from "./UIStateExtractor";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { PressButton } from "../action/PressButton";
 import { getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
@@ -538,6 +539,18 @@ export class DefaultUIStateSetup implements UIStateSetup {
    * Press the back button.
    */
   private async pressBack(platform: string): Promise<void> {
+    if (platform === "android") {
+      // Modal recovery belongs to this instance's injected ADB/timer boundary.
+      // Calling press() avoids a nested observed interaction while preserving
+      // the accessibility-service then ADB fallback behavior.
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+      if (!result.success) {
+        throw new Error(result.error ?? "Android back navigation failed");
+      }
+      logger.debug("[UI_STATE_SETUP] Pressed back via Android action dependencies");
+      return;
+    }
+
     const response = await ToolRegistry.callInternal("pressButton", {
       button: "back",
       platform,

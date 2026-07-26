@@ -218,6 +218,7 @@ describe("AndroidCtrlProxyClient", function() {
     screenshotEncodeDurationMs?: number;
     screenshotByteLength?: number;
     screenshotBase64Length?: number;
+    captureSequence?: number;
   }
 
   const startStreamServerWithScreenshotSubscriber = async (): Promise<FakeSocket> => {
@@ -247,6 +248,35 @@ describe("AndroidCtrlProxyClient", function() {
     expected: Partial<ScreenshotUpdateMessage>
   ): void => {
     expect(getScreenshotUpdates(socket)).toEqual([expect.objectContaining(expected)]);
+  };
+
+  /** A minimal PNG whose IHDR declares the given pixel size, base64-encoded as CtrlProxy sends it. */
+  const pngFrame = (width: number, height: number): string => {
+    const buffer = Buffer.alloc(24);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
+    buffer.writeUInt32BE(13, 8);
+    buffer.write("IHDR", 12, "ascii");
+    buffer.writeUInt32BE(width, 16);
+    buffer.writeUInt32BE(height, 20);
+    return buffer.toString("base64");
+  };
+
+  /** A hierarchy whose single window declares the given device screen size. */
+  const hierarchyWithScreenSize = (width: number, height: number): any => ({
+    packageName: "com.example.app",
+    windows: [{ bounds: { left: 0, top: 0, right: width, bottom: height } }],
+    hierarchy: { node: { $: { class: "Root" } } },
+  });
+
+  /**
+   * Push a frame the way the client does. The declared geometry is NOT passed here: the Android
+   * client reads it from its own screen-geometry cache, which is exactly the provenance under test.
+   */
+  const pushScreenshotThroughClient = (base64: string): void => {
+    (accessibilityServiceClient as any).pushScreenshotToObservationStream(base64, {
+      screenshotMimeType: "image/png",
+      screenshotFormat: "png",
+    });
   };
 
   const setAdbPngScreenshotResponse = (): void => {
@@ -2966,6 +2996,78 @@ describe("AndroidCtrlProxyClient", function() {
       accessibilityServiceClient.bindSession("session-A");
       accessibilityServiceClient.bindSession("session-A");
       expect(accessibilityServiceClient.getBoundSessionIdForTesting()).toBe("session-A");
+    });
+  });
+
+  describe("capture provenance for screenshot geometry (issue #3348)", () => {
+    // A screenshot may only claim capture-tracked geometry when the daemon actually received a
+    // hierarchy carrying it. Claiming it otherwise lets the daemon stamp an older capture's
+    // identity onto fresh pixels, and a control client would map a tap through stale bounds.
+
+    test("claims provenance after a hierarchy is forwarded to the observation stream", async () => {
+      const socket = await startStreamServerWithScreenshotSubscriber();
+
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      pushScreenshotThroughClient(pngFrame(1080, 2340));
+
+      const updates = getScreenshotUpdates(socket);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].captureSequence).toBeGreaterThan(0);
+    });
+
+    test("claims no provenance when the hierarchy carrying new geometry was suppressed", async () => {
+      const socket = await startStreamServerWithScreenshotSubscriber();
+
+      // Establish a real capture first, so an unconditional claim would have an id to attach.
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      socket.reset();
+
+      // The device changes resolution and that hierarchy's push is suppressed (explicit
+      // initial-frame request). The screen-dimension cache still updates, so without the forwarded
+      // flag the screenshot would vouch for geometry the daemon has never seen — and the daemon
+      // would stamp the PREVIOUS capture's id onto these fresh pixels, which is exactly the
+      // mis-pairing the identity exists to prevent.
+      (accessibilityServiceClient as any).hierarchyObservationStreamSuppressions.add({
+        timeoutHandle: fakeTimer.setTimeout(() => {}, 10_000),
+      });
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(720, 1560));
+      pushScreenshotThroughClient(pngFrame(720, 1560));
+
+      const updates = getScreenshotUpdates(socket);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].captureSequence).toBeUndefined();
+    });
+
+    test("claims no provenance for fallback dimensions before any hierarchy arrives", async () => {
+      const socket = await startStreamServerWithScreenshotSubscriber();
+
+      // No hierarchy yet, so the client falls back to nominal dimensions with no provenance at all.
+      pushScreenshotThroughClient(pngFrame(1080, 2340));
+
+      const updates = getScreenshotUpdates(socket);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].captureSequence).toBeUndefined();
+    });
+
+    test("drops provenance again when the device resolution changes", async () => {
+      const socket = await startStreamServerWithScreenshotSubscriber();
+
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      pushScreenshotThroughClient(pngFrame(1080, 2340));
+      expect(getScreenshotUpdates(socket)[0].captureSequence).toBeGreaterThan(0);
+      socket.reset();
+
+      // Resolution changes; the hierarchy carrying the new geometry is suppressed, so the fresh
+      // pixels must not be paired with the previous capture.
+      (accessibilityServiceClient as any).hierarchyObservationStreamSuppressions.add({
+        timeoutHandle: fakeTimer.setTimeout(() => {}, 10_000),
+      });
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(720, 1560));
+      pushScreenshotThroughClient(pngFrame(720, 1560));
+
+      const updates = getScreenshotUpdates(socket);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].captureSequence).toBeUndefined();
     });
   });
 });

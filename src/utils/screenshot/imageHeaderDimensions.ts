@@ -19,9 +19,15 @@ export interface ImagePixelDimensions {
 /** PNG signature: the 8-byte magic that opens every PNG. */
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/** Offset of the IHDR chunk's declared length (immediately after the 8-byte signature). */
+const PNG_IHDR_LENGTH_OFFSET = 8;
+/** Offset of the IHDR chunk type. */
+const PNG_IHDR_TYPE_OFFSET = 12;
 /** Offset of the IHDR width field (8-byte signature + 4-byte length + 4-byte "IHDR"). */
 const PNG_IHDR_WIDTH_OFFSET = 16;
 const PNG_IHDR_HEADER_LENGTH = 24;
+/** The IHDR chunk's data length is fixed by the PNG spec. */
+const PNG_IHDR_DATA_LENGTH = 13;
 
 /**
  * JPEG start-of-frame markers. Each SOFn (except the DHT/DAC/DNL/RSTn holes below) carries the
@@ -44,10 +50,22 @@ function readPngDimensions(buffer: Buffer): ImagePixelDimensions | null {
   if (!buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
     return null;
   }
+  // The signature alone proves nothing about what follows. IHDR is required by the spec to be the
+  // first chunk and to carry exactly 13 bytes; anything else means these are not the dimensions we
+  // think they are, and this reader exists precisely so callers do not have to trust a guess.
+  if (buffer.toString("ascii", PNG_IHDR_TYPE_OFFSET, PNG_IHDR_TYPE_OFFSET + 4) !== "IHDR") {
+    return null;
+  }
+  if (buffer.readUInt32BE(PNG_IHDR_LENGTH_OFFSET) !== PNG_IHDR_DATA_LENGTH) {
+    return null;
+  }
   const width = buffer.readUInt32BE(PNG_IHDR_WIDTH_OFFSET);
   const height = buffer.readUInt32BE(PNG_IHDR_WIDTH_OFFSET + 4);
   return width > 0 && height > 0 ? { width, height } : null;
 }
+
+/** Smallest SOFn segment length that can hold precision, height, width and a component count. */
+const SOF_MINIMUM_SEGMENT_LENGTH = 8;
 
 /** Markers that stand alone: SOI, TEM and the restart markers carry no length-prefixed payload. */
 function isStandaloneMarker(marker: number): boolean {
@@ -56,6 +74,12 @@ function isStandaloneMarker(marker: number): boolean {
 
 /** Read width/height out of an SOFn segment starting at [markerOffset], or null if truncated. */
 function readFrameDimensions(buffer: Buffer, markerOffset: number): ImagePixelDimensions | null {
+  // An SOFn segment is length(2) + precision(1) + height(2) + width(2) + component count(1) at a
+  // minimum, so a declared length below 8 cannot contain the fields we are about to read. Reject
+  // rather than reading whatever bytes happen to follow.
+  if (buffer.readUInt16BE(markerOffset + 2) < SOF_MINIMUM_SEGMENT_LENGTH) {
+    return null;
+  }
   // marker(2) + length(2) + precision(1), then height(2), width(2).
   const heightOffset = markerOffset + 5;
   if (heightOffset + 3 >= buffer.length) {

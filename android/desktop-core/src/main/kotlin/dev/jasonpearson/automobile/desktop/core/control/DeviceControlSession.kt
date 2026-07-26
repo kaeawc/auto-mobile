@@ -112,7 +112,12 @@ class DeviceControlSession(
       // Hold the clicked snapshot on screen until something supersedes it (or the wait times out).
       val settled =
         if (live != null) refreshTracker.onSnapshot(live, now) else refreshTracker.onTick(now)
-      if (settled && live != null) renderSnapshot = live
+      // On settle, adopt whatever is live — INCLUDING null. A wait can time out with no live
+      // snapshot at all (screenshots keep arriving but hierarchy updates stall, so nothing pairs),
+      // and holding the pre-input frame in that case would pin the view to it indefinitely,
+      // defeating the retention timeout. Releasing it lets the view fall back to current inspector
+      // state and lets control re-evaluate from scratch.
+      if (settled) renderSnapshot = live
     } else if (live != null) {
       renderSnapshot = live
     }

@@ -42,6 +42,7 @@ import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
+import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import {
   ScreenshotBackoffScheduler,
@@ -913,7 +914,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Screenshot backoff scheduler
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
-  private cachedScreenDimensions: { width: number; height: number } | null = null;
+  // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
+  // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
+  private readonly screenGeometry = new TrackedScreenGeometry();
   private hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
   // Request ids whose screenshot responses must not be auto-pushed to the
   // observation stream. Scoped per-request so an unrelated in-flight screenshot
@@ -2887,6 +2890,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     try {
       server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
+      // The daemon has now assigned a capture identity to this hierarchy, so the dimensions
+      // derived from it are capture-tracked and screenshots may assert that provenance. Only
+      // reached on a successful push: a throw or a missing server leaves the cache untracked, and
+      // the daemon then omits the identity so a control client fails closed.
+      this.screenGeometry.markForwarded();
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to push hierarchy to observation stream: ${error}`);
     }
@@ -2901,16 +2909,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return;
     }
 
-    const screenWidth = this.cachedScreenDimensions?.width ?? 1080;
-    const screenHeight = this.cachedScreenDimensions?.height ?? 2340;
+    // Fall back to a nominal size when no hierarchy has produced dimensions yet. A fallback has no
+    // capture provenance at all, so it must never be asserted as tracked.
+    const screenWidth = this.screenGeometry.width ?? 1080;
+    const screenHeight = this.screenGeometry.height ?? 2340;
+    const geometryFromTrackedCapture = this.screenGeometry.isForwarded;
 
     try {
-      // The dimensions above come from cachedScreenDimensions, which updateCachedScreenDimensions
-      // derives from the hierarchies pushed through this same server — so they have a tracked
-      // capture identity. The server still verifies them against the frame's real pixels before
-      // stamping it (issue #3348).
+      // Assert capture provenance only when the hierarchy that produced these dimensions actually
+      // reached the daemon. A suppressed hierarchy, a push that threw, or fallback dimensions all
+      // leave this false, and the daemon then omits the capture identity so a control client fails
+      // closed rather than pairing fresh pixels with stale bounds (issue #3348). The daemon still
+      // verifies the claim against the frame's real pixels before stamping it.
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
-        geometryFromTrackedCapture: true,
+        geometryFromTrackedCapture,
       });
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
@@ -2938,9 +2950,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
     }
 
-    if (bestDimensions && (bestDimensions.width !== this.cachedScreenDimensions?.width ||
-        bestDimensions.height !== this.cachedScreenDimensions?.height)) {
-      this.cachedScreenDimensions = bestDimensions;
+    if (bestDimensions) {
+      // A change clears the forwarded flag: it becomes capture-tracked only once the hierarchy
+      // carrying it reaches the daemon (see pushHierarchyToObservationStream) — which will NOT
+      // happen when this hierarchy is suppressed, or when there is no stream server.
+      this.screenGeometry.update(bestDimensions.width, bestDimensions.height);
     }
   }
 

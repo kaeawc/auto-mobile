@@ -5,6 +5,7 @@ import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeade
 function png(width: number, height: number): Buffer {
   const buffer = Buffer.alloc(24);
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
+  buffer.writeUInt32BE(13, 8); // IHDR data length, fixed by the PNG spec
   buffer.write("IHDR", 12, "ascii");
   buffer.writeUInt32BE(width, 16);
   buffer.writeUInt32BE(height, 20);
@@ -44,6 +45,27 @@ describe("readImageHeaderDimensions", () => {
   it("does not mistake a DHT segment for a frame header", () => {
     // 0xC4 sits inside the SOFn marker range but is a Huffman table, not a frame.
     const buffer = jpeg(720, 1560, 0xc4);
+    expect(readImageHeaderDimensions(buffer)).toBeNull();
+  });
+
+  it("rejects a PNG signature that is not followed by a valid IHDR chunk", () => {
+    // The signature alone proves nothing: without validating the chunk type and its spec-mandated
+    // length, whatever bytes sit at offset 16 would be handed back as dimensions.
+    const wrongChunkType = png(1080, 2340);
+    wrongChunkType.write("IDAT", 12, "ascii");
+    expect(readImageHeaderDimensions(wrongChunkType)).toBeNull();
+
+    const wrongChunkLength = png(1080, 2340);
+    wrongChunkLength.writeUInt32BE(9, 8);
+    expect(readImageHeaderDimensions(wrongChunkLength)).toBeNull();
+  });
+
+  it("rejects a JPEG start-of-frame whose declared segment length is too short", () => {
+    // A segment shorter than precision + height + width + component count cannot contain the
+    // fields, so reading them would return whatever bytes follow.
+    const buffer = jpeg(1080, 2340);
+    const sofLengthOffset = buffer.indexOf(Buffer.from([0xff, 0xc0])) + 2;
+    buffer.writeUInt16BE(6, sofLengthOffset);
     expect(readImageHeaderDimensions(buffer)).toBeNull();
   });
 

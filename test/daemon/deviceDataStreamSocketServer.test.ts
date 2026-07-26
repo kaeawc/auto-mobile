@@ -547,6 +547,7 @@ describe("DeviceDataStreamSocketServer", () => {
     const pngFrame = (width: number, height: number): string => {
       const buffer = Buffer.alloc(24);
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
+      buffer.writeUInt32BE(13, 8); // IHDR data length, fixed by the PNG spec
       buffer.write("IHDR", 12, "ascii");
       buffer.writeUInt32BE(width, 16);
       buffer.writeUInt32BE(height, 20);
@@ -647,6 +648,23 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushHierarchyUpdate("device-1", frame("a"));
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("omits the capture identity for a frame with a malformed header", () => {
+      // A PNG signature with a bad IHDR chunk must read as unmeasurable, not as whatever bytes sit
+      // at the width offset — otherwise the "measure, don't trust the claim" guarantee is silently
+      // defeated and a bogus measurement could match the claim and get stamped.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      const malformed = Buffer.from(pngFrame(1080, 2340), "base64");
+      malformed.write("IDAT", 12, "ascii");
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", malformed.toString("base64"), 1080, 2340, {}, {
+        geometryFromTrackedCapture: true,
+      });
 
       const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
       expect(screenshot.captureSequence).toBeUndefined();

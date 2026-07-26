@@ -172,7 +172,7 @@ Expressed as snapshot transitions:
 | Input forwarded successfully | `Idle -> AwaitingSnapshot`, recording the dispatched `captureSequence` | The **retained** pre-input snapshot, unchanged and still clickable — it is the best available truth. A screenshot-only update in this interval carries a `captureSequence` the retained hierarchy does not match, so it yields no snapshot and does not replace what is on screen |
 | Input not dispatched (off-screen point, or the bounded queue rejected it) | no transition | Unchanged; nothing reached the device, so there is nothing to wait for |
 | First snapshot from a strictly greater **capture** | `AwaitingSnapshot -> Settled` | The new snapshot |
-| No superseding snapshot within 3000 ms | `AwaitingSnapshot -> Settled` | Whatever is current; the freshness bound above independently retires the stale frame and drops control |
+| No superseding snapshot within 3000 ms | `AwaitingSnapshot -> Settled` | The retained snapshot is **released** and the view falls back to current state. Retention is bounded: if screenshots keep arriving but hierarchy updates stall, nothing ever pairs, and holding the pre-input frame past this point would pin the view to it indefinitely. The freshness bound above independently retires the stale frame and drops control |
 | Input failed or was rejected | `-> Settled` immediately | Unchanged state plus the daemon's actionable error |
 | Device switch, stream disconnect, mode change | `-> Idle` | A pending wait is dropped; an input from the previous context never settles one in the new context |
 

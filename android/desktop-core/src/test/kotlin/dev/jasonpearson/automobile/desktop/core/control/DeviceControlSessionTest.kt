@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.HierarchyFrameFacts
 import dev.jasonpearson.automobile.desktop.domain.LiveFrameFacts
 import dev.jasonpearson.automobile.desktop.domain.PostInputRefreshState
+import dev.jasonpearson.automobile.desktop.domain.PostInputRefreshTracker
 import dev.jasonpearson.automobile.desktop.domain.ScreenshotFrameFacts
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -311,6 +312,51 @@ class DeviceControlSessionTest {
     assertEquals(next, session.renderSnapshot)
     assertEquals(720, session.renderSnapshot?.deviceWidth)
     assertSame(newPixels, session.renderSnapshot?.screenshotData, "pixels advance only now")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a refresh wait that times out releases the retained snapshot`() = runTest {
+    // Finding 3: after a successful tap, if screenshot updates keep arriving but hierarchy updates
+    // stall, nothing ever pairs and no live snapshot exists. The wait settles on the timeout — and
+    // if the retained snapshot were kept, the view would pin the pre-tap pixels and hierarchy
+    // INDEFINITELY, the opposite of a 3s retention bound.
+    var now = 1_000L
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { FakeAutoMobileClient() },
+        platform = { "android" },
+        nowMs = { now },
+        publishError = {},
+        uiContext = UnconfinedTestDispatcher(testScheduler),
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      )
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L, data = byteArrayOf(1))
+    assertNotNull(session.evaluate(clicked).snapshotOrNull)
+    val retained = assertNotNull(session.renderSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // Screenshots keep arriving with new capture ids, but the hierarchy is stuck on capture 7, so
+    // nothing pairs and every evaluation is Blocked.
+    val unpaired =
+      clicked.copy(screenshot = clicked.screenshot?.copy(sequence = 20L, captureSequence = 8L))
+    now += 1_000L
+    assertNull(session.evaluate(unpaired).snapshotOrNull)
+    assertEquals(retained, session.renderSnapshot, "still retained inside the timeout")
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // Past the retention timeout the wait settles even with nothing to settle ON, and the retained
+    // frame must be released so the view falls back to current inspector state.
+    now += PostInputRefreshTracker.REFRESH_TIMEOUT_MS
+    assertNull(session.evaluate(unpaired).snapshotOrNull)
+    assertEquals(PostInputRefreshState.Settled, session.refreshState)
+    assertNull(session.renderSnapshot, "the retained snapshot is released on timeout")
     scope.cancel()
   }
 

@@ -125,9 +125,17 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    await expect(state.executeQuery(INSERT, Symbol("owner"))).rejects.toThrow();
+    const error = await state.executeQuery(INSERT, Symbol("owner")).then(
+      () => { throw new Error("expected the constraint error to surface"); },
+      (e: unknown) => e
+    );
     expect(invocations()).toBe(1); // no retry
     expect(timer.getSleepHistory().length).toBe(0);
+    // The original SqliteError is preserved by identity via `.cause` (#2793 /
+    // bunSqliteDialect.ts:406), not reconstructed from the message text.
+    const cause = (error as { cause?: unknown }).cause;
+    expect(cause).toBeInstanceOf(FakeSqliteError);
+    expect((cause as FakeSqliteError).code).toBe("SQLITE_CONSTRAINT_UNIQUE");
   });
 
   it("relies on err.cause.code by identity, not message text", async () => {

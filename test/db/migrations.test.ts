@@ -164,9 +164,15 @@ describe("2026_03_15_000_telemetry_events migration", () => {
     expect(await tableExists(db, "os_events")).toBe(true);
   });
 
-  test("up is idempotent (safe to call twice)", async () => {
+  test("up is idempotent: a second up() preserves existing rows (not a destructive drop+create)", async () => {
     await telemetryMigration.up(db);
+    await sql`INSERT INTO log_events (timestamp, level, tag, message, filter_name) VALUES (1000, 3, 'TAG', 'hello', 'flt')`.execute(db);
+
     await expect(telemetryMigration.up(db)).resolves.toBeUndefined();
+
+    // A drop+create "idempotent" rewrite would not throw but would wipe the row.
+    const count = await sql<{ c: number }>`SELECT count(*) AS c FROM log_events`.execute(db);
+    expect(Number(count.rows[0].c)).toBe(1);
   });
 
   test("down drops all four tables", async () => {
@@ -329,9 +335,15 @@ describe("2026_03_19_002_storage_events_previous_value migration", () => {
     expect(await columnExists(db, "storage_events", "previous_value")).toBe(true);
   });
 
-  test("up is idempotent (safe to call twice)", async () => {
+  test("up is idempotent: a second up() preserves existing rows and keeps the column", async () => {
     await storageEventsPreviousValueMigration.up(db);
+    await sql`INSERT INTO storage_events (timestamp, file_name, change_type) VALUES (1000, 'prefs.xml', 'modify')`.execute(db);
+
     await expect(storageEventsPreviousValueMigration.up(db)).resolves.toBeUndefined();
+
+    const count = await sql<{ c: number }>`SELECT count(*) AS c FROM storage_events`.execute(db);
+    expect(Number(count.rows[0].c)).toBe(1);
+    expect(await columnExists(db, "storage_events", "previous_value")).toBe(true);
   });
 
   test("previous_value is nullable", async () => {
@@ -366,9 +378,15 @@ describe("2026_03_19_003_layout_events_screen_name migration", () => {
     expect(await columnExists(db, "layout_events", "screen_name")).toBe(true);
   });
 
-  test("up is idempotent (safe to call twice)", async () => {
+  test("up is idempotent: a second up() preserves existing rows and keeps the column", async () => {
     await layoutEventsScreenNameMigration.up(db);
+    await sql`INSERT INTO layout_events (timestamp, sub_type) VALUES (1000, 'recomposition')`.execute(db);
+
     await expect(layoutEventsScreenNameMigration.up(db)).resolves.toBeUndefined();
+
+    const count = await sql<{ c: number }>`SELECT count(*) AS c FROM layout_events`.execute(db);
+    expect(Number(count.rows[0].c)).toBe(1);
+    expect(await columnExists(db, "layout_events", "screen_name")).toBe(true);
   });
 
   test("screen_name is nullable", async () => {
@@ -409,9 +427,15 @@ describe("2026_03_20_000_network_event_details migration", () => {
     }
   });
 
-  test("up is idempotent (safe to call twice)", async () => {
+  test("up is idempotent: a second up() preserves existing rows and keeps the columns", async () => {
     await networkEventDetailsMigration.up(db);
+    await sql`INSERT INTO network_events (timestamp, url, method) VALUES (1000, 'https://example.com', 'GET')`.execute(db);
+
     await expect(networkEventDetailsMigration.up(db)).resolves.toBeUndefined();
+
+    const count = await sql<{ c: number }>`SELECT count(*) AS c FROM network_events`.execute(db);
+    expect(Number(count.rows[0].c)).toBe(1);
+    expect(await columnExists(db, "network_events", "content_type")).toBe(true);
   });
 
   test("all new columns are nullable", async () => {

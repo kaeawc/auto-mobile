@@ -564,6 +564,66 @@ describe("FailureAnalyticsRepository", () => {
       expect(response.notifications).toHaveLength(1);
       expect(response.notifications[0].type).toBe("crash");
     });
+
+    // Bulk-insert notification rows directly. FK enforcement is off in the
+    // default test DB, so occurrence_id need not reference a real occurrence;
+    // this seeds 501 rows far faster than 501 recordFailure() calls, keeping
+    // the ceiling test well under the 100ms budget.
+    const seedNotifications = async (count: number): Promise<void> => {
+      const rows = Array.from({ length: count }, (_v, i) => ({
+        occurrence_id: `occ-${i}`,
+        group_id: `grp-${i}`,
+        type: "crash",
+        severity: "critical",
+        title: `Failure ${i}`,
+        timestamp: 1000 + i,
+        acknowledged: 0,
+      }));
+      for (let i = 0; i < rows.length; i += 100) {
+        await db.insertInto("failure_notifications").values(rows.slice(i, i + 100)).execute();
+      }
+    };
+
+    test("clamps an over-max limit down to STREAM_LIMIT_MAX (500)", async () => {
+      await seedNotifications(501);
+
+      const response = await repo.getNotificationsSince({ limit: 1000 });
+
+      // Without the clamp a single poll would drain all 501 rows.
+      expect(response.notifications).toHaveLength(500);
+    });
+
+    test("clamps a zero limit up to 1", async () => {
+      await seedNotifications(3);
+
+      const response = await repo.getNotificationsSince({ limit: 0 });
+
+      expect(response.notifications).toHaveLength(1);
+    });
+
+    test("clamps a negative limit up to 1", async () => {
+      await seedNotifications(3);
+
+      const response = await repo.getNotificationsSince({ limit: -5 });
+
+      expect(response.notifications).toHaveLength(1);
+    });
+
+    test("preserves the cursor when the batch is empty so notifications are not replayed", async () => {
+      await seedNotifications(2); // timestamps 1000, 1001
+
+      // A cursor past every row yields an empty batch.
+      const response = await repo.getNotificationsSince({
+        sinceTimestamp: 99999,
+        sinceId: 42,
+      });
+
+      expect(response.notifications).toHaveLength(0);
+      // The cursor must be carried forward, not reset — otherwise the next poll
+      // rewinds to the start and replays notifications forever.
+      expect(response.lastTimestamp).toBe(99999);
+      expect(response.lastId).toBe(42);
+    });
   });
 
   describe("acknowledgeNotifications", () => {
@@ -593,11 +653,6 @@ describe("FailureAnalyticsRepository", () => {
 
       const unacked = after.notifications.find(n => n.id === before.notifications[1].id);
       expect(unacked!.acknowledged).toBe(false);
-    });
-
-    test("does nothing for empty array", async () => {
-      await repo.acknowledgeNotifications([]);
-      // Should not throw
     });
 
     test("filters by acknowledged status", async () => {

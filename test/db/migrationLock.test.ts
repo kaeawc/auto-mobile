@@ -381,13 +381,16 @@ describe("isInMemoryDatabaseOptInEnabled", () => {
   });
 
   test("recognizes the truthy opt-in values (case/whitespace-insensitive)", () => {
-    for (const value of ["1", "true", "TRUE", "yes", "  Yes  "]) {
+    // Only 1/true/yes are accepted, after trim().toLowerCase().
+    for (const value of ["1", "true", "TRUE", "yes", "  Yes  ", "\t1\n"]) {
       expect(isInMemoryDatabaseOptInEnabled({ [IN_MEMORY_DB_OPT_IN_ENV]: value })).toBe(true);
     }
   });
 
   test("treats empty/false-ish values as disabled (fail-safe: no silent opt-in)", () => {
-    for (const value of ["", "0", "false", "no", "off", "nope"]) {
+    // "on"/"On" is NOT an accepted token (only 1/true/yes), so it stays disabled;
+    // whitespace-only and arbitrary strings are disabled too.
+    for (const value of ["", "0", "false", "no", "off", "nope", "on", "On", "maybe", "   "]) {
       expect(isInMemoryDatabaseOptInEnabled({ [IN_MEMORY_DB_OPT_IN_ENV]: value })).toBe(false);
     }
   });

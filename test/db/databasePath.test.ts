@@ -128,4 +128,64 @@ describe("database path resolution", () => {
       ).toBe(dbPath);
     });
   });
+
+  describe("environment variable precedence", () => {
+    const defaultDir = path.resolve("/default/dir");
+    const explicitPath = path.resolve("/explicit/custom.db");
+    const explicitDir = path.resolve("/explicit/dir");
+
+    test("AUTOMOBILE_DB_PATH wins over AUTOMOBILE_DB_DIR when both are set", () => {
+      const resolved = resolveDatabasePathFromEnvironment(
+        { AUTOMOBILE_DB_PATH: explicitPath, AUTOMOBILE_DB_DIR: explicitDir },
+        defaultDir
+      );
+      expect(resolved).toBe(explicitPath);
+    });
+
+    test("AUTOMOBILE_DB_DIR is used only when AUTOMOBILE_DB_PATH is absent", () => {
+      const resolved = resolveDatabasePathFromEnvironment(
+        { AUTOMOBILE_DB_DIR: explicitDir },
+        defaultDir
+      );
+      expect(resolved).toBe(path.join(explicitDir, "auto-mobile.db"));
+    });
+
+    test("an empty-string AUTOMOBILE_DB_PATH is not treated as set and falls through to AUTOMOBILE_DB_DIR", () => {
+      const resolved = resolveDatabasePathFromEnvironment(
+        { AUTOMOBILE_DB_PATH: "", AUTOMOBILE_DB_DIR: explicitDir },
+        defaultDir
+      );
+      expect(resolved).toBe(path.join(explicitDir, "auto-mobile.db"));
+    });
+
+    test("an empty-string AUTOMOBILE_DB_DIR is not treated as set and falls through to the default dir", () => {
+      const resolved = resolveDatabasePathFromEnvironment(
+        { AUTOMOBILE_DB_DIR: "" },
+        defaultDir
+      );
+      expect(resolved).toBe(path.join(defaultDir, "auto-mobile.db"));
+    });
+
+    test("falls back to the default dir when neither variable is set", () => {
+      const resolved = resolveDatabasePathFromEnvironment({}, defaultDir);
+      expect(resolved).toBe(path.join(defaultDir, "auto-mobile.db"));
+    });
+
+    test("the canonical AUTOMOBILE_DB_PATH wins over the legacy AUTO_MOBILE_DB_PATH alias", () => {
+      const legacyPath = path.resolve("/legacy/old.db");
+      const resolved = resolveDatabasePathFromEnvironment(
+        { AUTOMOBILE_DB_PATH: explicitPath, AUTO_MOBILE_DB_PATH: legacyPath },
+        defaultDir
+      );
+      expect(resolved).toBe(explicitPath);
+    });
+
+    test("the legacy AUTO_MOBILE_DB_DIR alias is honored when the canonical vars are absent", () => {
+      const resolved = resolveDatabasePathFromEnvironment(
+        { AUTO_MOBILE_DB_DIR: explicitDir },
+        defaultDir
+      );
+      expect(resolved).toBe(path.join(explicitDir, "auto-mobile.db"));
+    });
+  });
 });

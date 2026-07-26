@@ -167,11 +167,10 @@ describe("createFileBackedDbHarness (issue #3046)", () => {
 
     // The whole point of the harness: the detached migration connection is armed
     // (getDatabase) and then awaited (ensureMigrations) before any close, so a
-    // close-time WAL checkpoint can't contend on Windows.
-    const getIdx = fake.calls.indexOf("getDatabase");
-    const ensureIdx = fake.calls.indexOf("ensureMigrations");
-    expect(getIdx).toBeGreaterThanOrEqual(0);
-    expect(ensureIdx).toBeGreaterThan(getIdx);
+    // close-time WAL checkpoint can't contend on Windows. Pin the exact call
+    // sequence — getDatabase before ensureMigrations, then getDatabasePath —
+    // rather than a loose ordering check that a reordered harness could satisfy.
+    expect(fake.calls).toEqual(["getDatabase", "ensureMigrations", "getDatabasePath"]);
   });
 
   test("openLifecycleTestDb close() closes the DB and removes+untracks its dir (no double-remove)", async () => {

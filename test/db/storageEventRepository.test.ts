@@ -250,4 +250,40 @@ describe("StorageEventRepository", () => {
     expect(events).toHaveLength(1);
     expect(events[0].key).toBe("k2");
   });
+
+  // The auto-lookup path opens its own transaction ONLY when the executor is not
+  // already a transaction (storageEventRepository.ts:87-91). A batched caller
+  // that passes a `trx` handle must run the body directly — opening a nested
+  // BEGIN throws "cannot start a transaction within a transaction". These two
+  // tests both die if the `!d.isTransaction` guard is dropped.
+  test("recordStorageEvent auto-lookup succeeds when the executor is already a transaction", async () => {
+    await db.transaction().execute(async trx => {
+      await recordStorageEvent({
+        deviceId: "d1", timestamp: 1000, applicationId: "com.example", sessionId: "s1",
+        fileName: "prefs.xml", key: "theme", value: "light", valueType: "STRING", changeType: "add",
+      }, trx);
+    });
+
+    const events = await getStorageEvents({ deviceId: "d1" }, db);
+    expect(events).toHaveLength(1);
+    expect(events[0].value).toBe("light");
+  });
+
+  test("recordStorageEvent resolves the previous value inside a caller transaction", async () => {
+    await recordStorageEvent({
+      deviceId: "d1", timestamp: 1000, applicationId: "com.example", sessionId: "s1",
+      fileName: "prefs.xml", key: "theme", value: "light", valueType: "STRING", changeType: "add",
+    }, db);
+
+    await db.transaction().execute(async trx => {
+      await recordStorageEvent({
+        deviceId: "d1", timestamp: 2000, applicationId: "com.example", sessionId: "s1",
+        fileName: "prefs.xml", key: "theme", value: "dark", valueType: "STRING", changeType: "modify",
+      }, trx);
+    });
+
+    const events = await getStorageEvents({ deviceId: "d1" }, db);
+    // Most recent first; the auto-lookup ran inside the caller transaction.
+    expect(events[0].previousValue).toBe("light");
+  });
 });

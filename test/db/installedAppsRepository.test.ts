@@ -205,4 +205,35 @@ describe("InstalledAppsRepository", () => {
     expect(device1Apps).toHaveLength(1);
     expect(device2Apps).toHaveLength(0);
   });
+
+  test("setSessionTracking claims only unowned rows and never rebinds another daemon's rows", async () => {
+    // Row already owned by daemon-A, and a second unowned row on the same device.
+    await db
+      .insertInto("installed_apps")
+      .values({
+        device_id: "device-1", user_id: 0, package_name: "com.owned",
+        is_system: 0, installed_at: 1000, last_verified_at: 1000,
+        daemon_session_id: "daemon-A", device_session_start: 500,
+      })
+      .execute();
+    await db
+      .insertInto("installed_apps")
+      .values({
+        device_id: "device-1", user_id: 0, package_name: "com.unowned",
+        is_system: 0, installed_at: 1000, last_verified_at: 1000,
+      })
+      .execute();
+
+    await repo.setSessionTracking("daemon-B", "device-1", 999);
+
+    const rows = await repo.listInstalledApps("device-1");
+    const owned = rows.find(r => r.package_name === "com.owned");
+    const unowned = rows.find(r => r.package_name === "com.unowned");
+
+    // daemon-A's row must be left untouched; only the unowned row is claimed.
+    expect(owned!.daemon_session_id).toBe("daemon-A");
+    expect(owned!.device_session_start).toBe(500);
+    expect(unowned!.daemon_session_id).toBe("daemon-B");
+    expect(unowned!.device_session_start).toBe(999);
+  });
 });

@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
-import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
+import type { VideoRecordingRecord, VideoRecordingQuery } from "../../src/db/videoRecordingRepository";
 import { createTestDatabase } from "./testDbHelper";
 import type { VideoRecordingConfig } from "../../src/models";
 
@@ -269,6 +269,23 @@ describe("VideoRecordingRepository", () => {
 
     const results = await repo.listRecordings({ limit: 2 });
     expect(results).toHaveLength(2);
+  });
+
+  // Degenerate filter values are unspecified-until-pinned. These lock the
+  // current behavior: an empty status array matches nothing (`status IN ()`),
+  // and a non-positive limit is ignored (`query.limit && query.limit > 0`).
+  test.each<[string, VideoRecordingQuery, number]>([
+    ["an empty status array matches no rows", { status: [] }, 0],
+    ["a zero limit is ignored and returns all rows", { limit: 0 }, 3],
+    ["a negative limit is ignored and returns all rows", { limit: -1 }, 3],
+  ])("listRecordings with %s", async (_label, query, expectedCount) => {
+    await repo.insertRecording(makeRecord({ recordingId: "rec-1" }));
+    await repo.insertRecording(makeRecord({ recordingId: "rec-2" }));
+    await repo.insertRecording(makeRecord({ recordingId: "rec-3" }));
+
+    const results = await repo.listRecordings(query);
+
+    expect(results).toHaveLength(expectedCount);
   });
 
   test("updateRecording changes status", async () => {

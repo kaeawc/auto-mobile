@@ -192,7 +192,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
 
     await expect(
       seedGroup({ id: "C", signature: "sig-x", firstOccurrence: 300, totalCount: 1, uniqueSessions: 1 })
-    ).rejects.toThrow();
+    ).rejects.toThrow(/UNIQUE constraint failed/);
   });
 
   test("is a no-op safe on an empty database and idempotent when re-run", async () => {
@@ -205,7 +205,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     await seedGroup({ id: "A", signature: "sig-only", firstOccurrence: 1, totalCount: 1, uniqueSessions: 1 });
     await expect(
       seedGroup({ id: "B", signature: "sig-only", firstOccurrence: 2, totalCount: 1, uniqueSessions: 1 })
-    ).rejects.toThrow();
+    ).rejects.toThrow(/UNIQUE constraint failed/);
   });
 
   test("down() restores the non-unique index so duplicate signatures are allowed again", async () => {

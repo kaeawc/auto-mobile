@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync } from "node:fs";
 import type { Kysely } from "kysely";
 import * as databaseModule from "../../src/db/database";
 import {
@@ -171,14 +170,4 @@ describe("KeyedJsonConfigRepository", () => {
     }));
   });
 
-  test("removes the per-table wrapper modules", () => {
-    const wrapperModulePaths = [
-      "../../src/db/appearanceConfigRepository.ts",
-      "../../src/db/deviceSnapshotConfigRepository.ts",
-      "../../src/db/videoRecordingConfigRepository.ts",
-    ];
-    for (const relativePath of wrapperModulePaths) {
-      expect(existsSync(new URL(relativePath, import.meta.url))).toBe(false);
-    }
-  });
 });

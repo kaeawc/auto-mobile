@@ -142,6 +142,12 @@ protocol DaemonRuntime {
 }
 
 public enum DaemonManager {
+    private struct PackageMetadata: Decodable {
+        let name: String?
+    }
+
+    private static let packageName = "@kaeawc/auto-mobile"
+
     /// Outcome of launching an `auto-mobile --daemon <subcommand>` process, distinguishing a
     /// missing executable from a launched-but-failed process so callers can report the real cause.
     enum DaemonSubcommandOutcome: Equatable {
@@ -365,10 +371,11 @@ public enum DaemonManager {
     }
 
     /// When a caller supplies a repo root with a built entrypoint, whether the running daemon was
-    /// started from a *different* build (#2744). Prefers comparing the entry-script content hash
-    /// against the daemon's recorded `buildId` — this catches the same repoRoot path rebuilt or
-    /// checked out to another commit — and falls back to comparing entry-script paths when a hash is
-    /// unavailable. No-op without a repoRoot build or when neither signal is available.
+    /// started from a *different* build (#2744). The daemon must identify both the expected
+    /// entry-script path and its content hash: the path keeps separately copied runtime artifacts
+    /// (such as `dist/schemas/`) scoped to this checkout, while the hash catches an in-place rebuild.
+    /// Falls back to the entry-script path when a hash is unavailable. No-op without a repoRoot
+    /// build or when neither signal is available.
     static func requiresRepoRootBuildSkew(
         daemonBuildId: String?,
         daemonEntryScript: String?,
@@ -381,15 +388,14 @@ public enum DaemonManager {
         }
         let expectedHash = computeBuildId(expectedEntry)
         let daemonHash = daemonBuildId?.trimmingCharacters(in: .whitespaces)
-        if let expectedHash = expectedHash,
-           let daemonHash = daemonHash, !daemonHash.isEmpty, daemonHash != "unknown"
-        {
-            return daemonHash != expectedHash
+        let daemonEntry = daemonEntryScript?.trimmingCharacters(in: .whitespaces)
+        let hasExpectedEntry = daemonEntry == expectedEntry
+        guard let expectedHash = expectedHash,
+              let daemonHash = daemonHash, !daemonHash.isEmpty, daemonHash != "unknown"
+        else {
+            return daemonEntry.map { !$0.isEmpty && !hasExpectedEntry } ?? false
         }
-        guard let daemonEntry = daemonEntryScript?.trimmingCharacters(in: .whitespaces), !daemonEntry.isEmpty else {
-            return false
-        }
-        return daemonEntry != expectedEntry
+        return daemonHash != expectedHash || !hasExpectedEntry
     }
 
     /// The release portion of a version string — everything before the `+g<sha>` dev stamp.
@@ -595,10 +601,15 @@ public enum DaemonManager {
 
     /// Finds the owning AutoMobile checkout for a runner source path. The caller still verifies the
     /// built entrypoint before using it, so package consumers without `dist/` retain PATH behavior.
+    /// A package file alone is not enough: XCTestRunner may be vendored in a host JavaScript project.
     static func findRepoRoot(startingAt sourcePath: String) -> String? {
         var directory = URL(fileURLWithPath: sourcePath).deletingLastPathComponent()
         while directory.path != "/" {
-            if FileManager.default.fileExists(atPath: directory.appendingPathComponent("package.json").path) {
+            let packageURL = directory.appendingPathComponent("package.json")
+            if let data = try? Data(contentsOf: packageURL),
+               let package = try? JSONDecoder().decode(PackageMetadata.self, from: data),
+               package.name == packageName
+            {
                 return directory.path
             }
             directory.deleteLastPathComponent()

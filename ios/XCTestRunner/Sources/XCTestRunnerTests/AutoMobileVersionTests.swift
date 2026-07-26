@@ -150,7 +150,7 @@ final class AutoMobileVersionTests: XCTestCase {
             .appendingPathComponent("automobile-root-discovery-\(UUID().uuidString)")
         let sourceDirectory = repoRoot.appendingPathComponent("ios/XCTestRunner/Sources/XCTestRunner")
         try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
-        try "{}".write(
+        try #"{"name": "@kaeawc/auto-mobile"}"#.write(
             to: repoRoot.appendingPathComponent("package.json"),
             atomically: true,
             encoding: .utf8
@@ -161,6 +161,26 @@ final class AutoMobileVersionTests: XCTestCase {
             DaemonManager.findRepoRoot(startingAt: sourceDirectory.appendingPathComponent("Runner.swift").path),
             repoRoot.path
         )
+    }
+
+    func testFindRepoRootSkipsHostPackageWithBuiltEntryScript() throws {
+        let hostRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-host-\(UUID().uuidString)")
+        let runnerSourceDirectory = hostRoot.appendingPathComponent("vendor/XCTestRunner/Sources/XCTestRunner")
+        try FileManager.default.createDirectory(at: runnerSourceDirectory, withIntermediateDirectories: true)
+        try #"{"name": "host-project"}"#.write(
+            to: hostRoot.appendingPathComponent("package.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let hostEntry = hostRoot.appendingPathComponent("dist/src/index.js")
+        try FileManager.default.createDirectory(at: hostEntry.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "// unrelated host entry".write(to: hostEntry, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: hostRoot) }
+
+        XCTAssertNil(DaemonManager.findRepoRoot(
+            startingAt: runnerSourceDirectory.appendingPathComponent("Runner.swift").path
+        ))
     }
 
     func testRequiresRepoRootBuildSkew() throws {
@@ -184,9 +204,14 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertTrue(DaemonManager.requiresRepoRootBuildSkew(
             daemonBuildId: "deadbeefdeadbeef", daemonEntryScript: entry.path, repoRoot: repoRoot.path
         ))
-        // Matching build id -> no skew.
+        // Matching build id and entry path -> no skew.
         XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
             daemonBuildId: matchingHash, daemonEntryScript: entry.path, repoRoot: repoRoot.path
+        ))
+        // The entry-file hash can match across checkouts while copied runtime assets differ, so
+        // the daemon must still come from this checkout's expected entry path.
+        XCTAssertTrue(DaemonManager.requiresRepoRootBuildSkew(
+            daemonBuildId: matchingHash, daemonEntryScript: "/other/dist/src/index.js", repoRoot: repoRoot.path
         ))
         // No build id -> fall back to entry-script path: different path is a skew.
         XCTAssertTrue(DaemonManager.requiresRepoRootBuildSkew(
@@ -239,7 +264,7 @@ private final class FakeDaemonRuntime: DaemonRuntime {
 
     private let daemonVersion: String?
     private var daemonBuildId: String?
-    private let daemonEntryScript: String?
+    private var daemonEntryScript: String?
     private let buildIdAfterRestart: String
     private(set) var subcommands: [Invocation] = []
 
@@ -283,6 +308,10 @@ private final class FakeDaemonRuntime: DaemonRuntime {
     {
         subcommands.append(.init(name: subcommand, repoRoot: repoRoot))
         daemonBuildId = buildIdAfterRestart
+        if let repoRoot = repoRoot {
+            daemonEntryScript = URL(fileURLWithPath: repoRoot)
+                .appendingPathComponent("dist/src/index.js").path
+        }
         return .launched
     }
 

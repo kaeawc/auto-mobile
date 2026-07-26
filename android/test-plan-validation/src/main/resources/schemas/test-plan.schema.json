@@ -438,7 +438,7 @@
               },
               "permissions": {
                 "type": "array",
-                "description": "Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'",
+                "description": "Runtime permissions or simulator privacy services to change; Android reset accepts only 'all'; physical iOS accepts it too",
                 "minItems": 1,
                 "items": {
                   "type": "string",
@@ -535,10 +535,41 @@
                   ]
                 },
                 "then": {
+                  "required": [
+                    "permissions"
+                  ],
                   "not": {
                     "required": [
                       "userId"
                     ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "action": {
+                      "const": "reset"
+                    },
+                    "platform": {
+                      "const": "android"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "platform"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "permissions": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 1,
+                      "items": {
+                        "const": "all"
+                      }
+                    }
                   }
                 }
               }
@@ -810,7 +841,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'"
+          "description": "Runtime permissions or simulator privacy services to change; Android reset accepts only 'all'; physical iOS accepts it too"
         },
         "userId": {
           "type": "integer",
@@ -893,10 +924,41 @@
             ]
           },
           "then": {
+            "required": [
+              "permissions"
+            ],
             "not": {
               "required": [
                 "userId"
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "reset"
+              },
+              "platform": {
+                "const": "android"
+              }
+            },
+            "required": [
+              "action",
+              "platform"
+            ]
+          },
+          "then": {
+            "properties": {
+              "permissions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                  "const": "all"
+                }
+              }
             }
           }
         }

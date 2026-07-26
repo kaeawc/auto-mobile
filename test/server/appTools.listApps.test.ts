@@ -1,3 +1,4 @@
+import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAppTools, resetListAppsToolDependencies, setListAppsToolDependencies } from "../../src/server/appTools";
 import { APP_RESOURCE_TEMPLATES, APPS_RESOURCE_URIS } from "../../src/server/appResources";
@@ -152,7 +153,24 @@ describe("app permission tools", () => {
       permissions: ["all"],
       userId: 10,
     })).toThrow();
-    expect(setAppTool?.description).toContain("notification state");
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      action: "reset",
+      notificationsEnabled: false,
+    })).toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      action: "reset",
+      permissions: ["camera"],
+      platform: "android",
+    })).toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      action: "reset",
+      permissions: ["camera"],
+      platform: "ios",
+    })).not.toThrow();
+    expect(setAppTool?.description).toContain("POST_NOTIFICATIONS");
 
     expect(getAppTool).toBeDefined();
     expect(getAppTool?.requiresDevice).toBe(true);
@@ -172,5 +190,40 @@ describe("app permission tools", () => {
     expect(ToolRegistry.getTool("grantIosSimulatorPermissions")).toBeUndefined();
     expect(ToolRegistry.getTool("setIosSimulatorPermissions")).toBeUndefined();
     expect(ToolRegistry.getTool("getIosSimulatorPermissions")).toBeUndefined();
+  });
+
+  test("advertises reset's required permission and device-wide user scope", () => {
+    const setAppPermissions = ToolRegistry.getToolDefinitions({ includeUnavailable: true })
+      .find(tool => tool.name === "setAppPermissions");
+    const validate = new Ajv2020({ strict: false }).compile(setAppPermissions!.inputSchema);
+
+    expect(validate({
+      appId: "com.example.app",
+      action: "reset",
+      permissions: ["all"],
+    })).toBe(true);
+    expect(validate({
+      appId: "com.example.app",
+      action: "reset",
+      permissions: ["all"],
+      userId: 10,
+    })).toBe(false);
+    expect(validate({
+      appId: "com.example.app",
+      action: "reset",
+      notificationsEnabled: false,
+    })).toBe(false);
+    expect(validate({
+      appId: "com.example.app",
+      action: "reset",
+      permissions: ["camera"],
+      platform: "android",
+    })).toBe(false);
+    expect(validate({
+      appId: "com.example.app",
+      action: "reset",
+      permissions: ["camera"],
+      platform: "ios",
+    })).toBe(true);
   });
 });

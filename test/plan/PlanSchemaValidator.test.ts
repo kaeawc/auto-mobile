@@ -440,6 +440,64 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should reject inline reset without permissions", () => {
+      const yaml = `
+name: invalid-inline-reset-without-permissions
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    action: reset
+    notificationsEnabled: false
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject nested reset without permissions", () => {
+      const yaml = `
+name: invalid-nested-reset-without-permissions
+steps:
+  - tool: setAppPermissions
+    params:
+      appId: com.example.app
+      action: reset
+      notificationsEnabled: false
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject inline Android reset without permissions=['all']", () => {
+      const yaml = `
+name: invalid-inline-android-reset-scope
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    action: reset
+    platform: android
+    permissions:
+      - camera
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject nested Android reset without permissions=['all']", () => {
+      const yaml = `
+name: invalid-nested-android-reset-scope
+steps:
+  - tool: setAppPermissions
+    params:
+      appId: com.example.app
+      action: reset
+      platform: android
+      permissions:
+        - camera
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should reject setDeviceState with no state", () => {
       const yaml = `
 name: bad-set-device-state

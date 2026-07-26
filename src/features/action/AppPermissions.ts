@@ -267,8 +267,11 @@ export class AppPermissions {
   ): Promise<SetAppPermissionsResult> {
     const permissions = normalizePermissions(input.permissions);
     const operations: AppPermissionOperationResult[] = [];
+    const invalidResetRequest =
+      action === "reset" &&
+      (input.userId !== undefined || permissions.length !== 1 || permissions[0] !== "all");
 
-    if (permissions.length > 0) {
+    if (permissions.length > 0 || invalidResetRequest) {
       const permissionResult = await new GrantAndroidPermissions(this.device, this.adbFactory).execute(appId, {
         action,
         permissions,
@@ -286,7 +289,7 @@ export class AppPermissions {
       });
     }
 
-    if (input.notificationsEnabled !== undefined) {
+    if (!invalidResetRequest && input.notificationsEnabled !== undefined) {
       const result = await new SetAndroidNotificationsEnabled(this.device, this.adbFactory).execute(appId, {
         enabled: input.notificationsEnabled,
       });
@@ -300,7 +303,7 @@ export class AppPermissions {
       });
     }
 
-    if (input.notificationPolicyAccess !== undefined) {
+    if (!invalidResetRequest && input.notificationPolicyAccess !== undefined) {
       const result = await new SetAndroidNotificationPolicyAccess(this.device, this.adbFactory).execute(appId, {
         allowed: input.notificationPolicyAccess,
       });
@@ -314,7 +317,7 @@ export class AppPermissions {
       });
     }
 
-    if (input.scheduleExactAlarm !== undefined) {
+    if (!invalidResetRequest && input.scheduleExactAlarm !== undefined) {
       const result = await new SetAndroidScheduleExactAlarmAppOp(this.device, this.adbFactory).execute(appId, {
         mode: input.scheduleExactAlarm,
       });

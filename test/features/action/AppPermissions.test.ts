@@ -133,6 +133,31 @@ describe("AppPermissions", () => {
     expect(client.wasCommandExecuted("shell cmd notification set_enabled com.example.app false")).toBe(true);
   });
 
+  test("rejects a notification-only Android reset before executing either operation", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    const permissions = new AppPermissions(androidDevice, { adbFactory });
+
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "reset",
+      notificationsEnabled: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.changedCount).toBe(0);
+    expect(result.failedCount).toBe(1);
+    expect(result.operations.map(operation => operation.operationId)).toEqual([
+      "android_runtime_permissions:reset",
+    ]);
+    expect(result.operations[0].result).toMatchObject({
+      results: [{
+        error: "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+      }],
+    });
+    expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
+    expect(client.wasCommandExecuted("shell cmd notification set_enabled com.example.app false")).toBe(false);
+  });
+
   test("reports Android reset as one standard operation", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();

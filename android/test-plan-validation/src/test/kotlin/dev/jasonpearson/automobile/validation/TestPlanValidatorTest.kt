@@ -582,6 +582,46 @@ class TestPlanValidatorTest {
   }
 
   @Test
+  fun `rejects reset without permissions`() {
+    val yaml =
+      """
+      name: invalid-reset-without-permissions
+      steps:
+        - tool: setAppPermissions
+          params:
+            appId: com.example.app
+            action: reset
+            notificationsEnabled: false
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+
+    assertFalse(result.valid, "Reset must require permissions: ${result.errors}")
+  }
+
+  @Test
+  fun `rejects Android reset without all permissions`() {
+    val yaml =
+      """
+      name: invalid-android-reset-scope
+      steps:
+        - tool: setAppPermissions
+          params:
+            appId: com.example.app
+            action: reset
+            platform: android
+            permissions:
+              - camera
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+
+    assertFalse(result.valid, "Android reset must require permissions=['all']: ${result.errors}")
+  }
+
+  @Test
   fun `accepts accessibilityFocus tool published in generated definitions`() {
     val yaml =
       """

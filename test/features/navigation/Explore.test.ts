@@ -1,9 +1,12 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { Explore } from "../../../src/features/navigation/Explore";
 import { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 
 // Import extracted functions for testing
 import {
@@ -27,6 +30,7 @@ import {
 } from "../../../src/features/navigation/ExploreValidateMode";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 describe("Explore", () => {
   let explore: Explore;
@@ -99,7 +103,7 @@ describe("Explore", () => {
   });
 
   afterEach(() => {
-    // No cleanup needed since we're using injected fakes
+    ToolRegistry.clearTools();
   });
 
   function createMockViewHierarchyNode(overrides: any = {}): any {
@@ -408,6 +412,183 @@ describe("Explore", () => {
 
       expect(result.stopReason).toContain("com.test.app");
       expect(backPresses.length).toBe(outOfAppLimit);
+    });
+  });
+
+  describe("platform-aware recovery", () => {
+    test("routes iOS dead-end and home recovery through internal interaction tools without ADB", async () => {
+      const iOSDevice = {
+        deviceId: "ios-simulator-123",
+        platform: "ios",
+        source: "local"
+      } as BootedDevice;
+      const adbCommands: string[] = [];
+      const adb = {
+        executeCommand: async (command: string) => {
+          adbCommands.push(command);
+          return "";
+        }
+      } as AdbClient;
+      const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+      ToolRegistry.register("pressButton", "pressButton", {}, async args => {
+        calls.push({ name: "pressButton", args });
+        return { success: true };
+      });
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async args => {
+        calls.push({ name: "homeScreen", args });
+        return { success: true };
+      });
+
+      explore = new Explore(iOSDevice, adb, fakeTimer, fakeGraph);
+      await (explore as any).handleDeadEnd();
+      await (explore as any).resetToHome();
+
+      expect(calls).toEqual([
+        {
+          name: "pressButton",
+          args: { button: "back", platform: "ios", deviceId: "ios-simulator-123", [INTERNAL_NO_DIFF_PARAM]: true }
+        },
+        {
+          name: "homeScreen",
+          args: { platform: "ios", deviceId: "ios-simulator-123", [INTERNAL_NO_DIFF_PARAM]: true }
+        }
+      ]);
+      expect(adbCommands).toEqual([]);
+    });
+
+    test("targets the selected iOS device when another iOS simulator is booted", async () => {
+      const iosA = { deviceId: "ios-simulator-a", name: "iPhone A", platform: "ios" } as BootedDevice;
+      const iosB = { deviceId: "ios-simulator-b", name: "iPhone B", platform: "ios" } as BootedDevice;
+      const sessions = new FakeDeviceSessionManager();
+      sessions.setConnectedDevices([iosA, iosB]);
+      const registry = ToolRegistry as unknown as { deviceSessionManager: unknown };
+      const originalDeviceSessionManager = registry.deviceSessionManager;
+      registry.deviceSessionManager = sessions;
+      const selectedDeviceIds: string[] = [];
+
+      try {
+        ToolRegistry.registerDeviceAware("pressButton", "pressButton", { parse: (args: unknown) => args } as any,
+                                         async selectedDevice => {
+                                           selectedDeviceIds.push(selectedDevice.deviceId);
+                                           return { success: true };
+                                         });
+        explore = new Explore(iosB, null, fakeTimer, fakeGraph);
+
+        await (explore as any).handleDeadEnd();
+
+        expect(selectedDeviceIds).toEqual([iosB.deviceId]);
+      } finally {
+        registry.deviceSessionManager = originalDeviceSessionManager;
+      }
+    });
+
+    test("uses injected Android recovery dependencies without nested progress", async () => {
+      const commands: string[] = [];
+      const adb = {
+        executeCommand: async (command: string) => {
+          commands.push(command);
+          return "";
+        }
+      } as AdbClient;
+      const progressUpdates: Array<{ current: number; total?: number; message?: string }> = [];
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => {
+        throw new Error("Android recovery must not use the global tool registry");
+      });
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async () => {
+        throw new Error("Android recovery must not use the global tool registry");
+      });
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).handleDeadEnd(async (current: number, total?: number, message?: string) => {
+          progressUpdates.push({ current, total, message });
+        });
+        await (explore as any).resetToHome(async (current: number, total?: number, message?: string) => {
+          progressUpdates.push({ current, total, message });
+        });
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect(commands).toEqual(["shell input keyevent 4", "shell input keyevent 3"]);
+      expect(progressUpdates).toEqual([
+        { current: 0, total: 1, message: "Dead end detected, navigating back..." },
+        { current: 0, total: 1, message: "Resetting to home screen..." }
+      ]);
+    });
+
+    test("records failed dead-end recovery as a terminal partial-report reason", async () => {
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      const adb = {
+        executeCommand: async () => { throw new Error("Back navigation was rejected"); }
+      } as AdbClient;
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).handleDeadEnd();
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect((explore as any).stopReason).toBe(
+        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
+      );
+    });
+
+    test("records failed home reset as a terminal partial-report reason", async () => {
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      const adb = {
+        executeCommand: async () => { throw new Error("Home navigation was rejected"); }
+      } as AdbClient;
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).resetToHome();
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect((explore as any).stopReason).toBe(
+        "Home-screen recovery failed: Failed to press button: Home navigation was rejected"
+      );
+    });
+
+    test("returns a partial report when dead-end recovery fails", async () => {
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      const adb = {
+        executeCommand: async () => { throw new Error("Back navigation was rejected"); }
+      } as AdbClient;
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = {
+        execute: async () => createMockObservation([], "com.test.app")
+      };
+      (explore as any).selectNextElement = async () => undefined;
+
+      let result;
+      try {
+        result = await explore.execute({
+          maxInteractions: 1,
+          timeoutMs: 5000,
+          packageName: "com.test.app"
+        });
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect(result.success).toBe(true);
+      expect(result.stopReason).toBe(
+        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
+      );
     });
   });
 

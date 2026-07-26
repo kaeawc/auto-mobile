@@ -1,4 +1,4 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -7,10 +7,15 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
+import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
 export class PressButton extends BaseVisualChange {
-  constructor(device: BootedDevice, adb: AdbClient | null = null) {
-    super(device, adb);
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer
+  ) {
+    super(device, adb, timer);
     this.device = device;
   }
 

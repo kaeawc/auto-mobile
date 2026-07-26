@@ -72,11 +72,13 @@ export function registerNavigationTools() {
         null,
         navigationManager,
         undefined,
-        new DefaultPathOptimizer(navigationManager)
+        new DefaultPathOptimizer(navigationManager),
+        args.sessionUuid
       );
       const options: NavigateToOptions = {
         targetScreen: args.targetScreen,
-        platform: args.platform || "android"
+        platform: args.platform || "android",
+        sessionUuid: args.sessionUuid
       };
       const result = await navigateTo.execute(options, progress);
 
@@ -145,7 +147,13 @@ export function registerNavigationTools() {
     signal?: AbortSignal
   ) => {
     try {
-      const explore = new Explore(device, null, undefined, getNavigationManager(args.sessionUuid));
+      const explore = new Explore(
+        device,
+        null,
+        undefined,
+        getNavigationManager(args.sessionUuid),
+        args.sessionUuid
+      );
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
         timeoutMs: args.timeoutMs,

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DefaultUIStateSetup, type ObserveScreenLike } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -11,6 +11,7 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 import type { ModalState, ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 const device: BootedDevice = {
   deviceId: "test-device",
@@ -86,6 +87,49 @@ describe("DefaultUIStateSetup", () => {
 
     expect(actions).toEqual([]);
     expect(calls).toBe(0);
+  });
+
+  describe("selected-element setup", () => {
+    afterEach(() => {
+      ToolRegistry.clearTools();
+    });
+
+    function setupWithNoSelections(): DefaultUIStateSetup {
+      const setup = makeSetup();
+      (setup as unknown as {
+        getCurrentUIState: () => Promise<{ modalStack: ModalState[]; selectedElements: [] }>;
+      }).getCurrentUIState = async () => ({ modalStack: [], selectedElements: [] });
+      return setup;
+    }
+
+    test("routes a missing content-description-only selection through tapOn's text selector", async () => {
+      let capturedArgs: Record<string, unknown> | undefined;
+      ToolRegistry.register("tapOn", "tapOn", {}, async args => {
+        capturedArgs = args;
+        return createStructuredToolResponse({ success: true });
+      });
+      const setup = setupWithNoSelections();
+
+      const actions = await setup.setupUIState({
+        uiState: { selectedElements: [{ contentDesc: "Open settings" }] },
+      } as NavigationEdge, "android");
+
+      expect(capturedArgs?.selector).toEqual({ text: "Open settings" });
+      expect(actions).toEqual(['tapOn({"contentDesc":"Open settings"})']);
+    });
+
+    test("does not report a selected-element tap when its internal tool response fails", async () => {
+      ToolRegistry.register("tapOn", "tapOn", {}, async () =>
+        createStructuredToolResponse({ success: false, error: "element is disabled" })
+      );
+      const setup = setupWithNoSelections();
+
+      const actions = await setup.setupUIState({
+        uiState: { selectedElements: [{ text: "Settings" }] },
+      } as NavigationEdge, "android");
+
+      expect(actions).toEqual([]);
+    });
   });
 
   // Regression for issue #2897 (sibling of the toolRegistry scroll-position fix):
@@ -208,6 +252,9 @@ describe("DefaultUIStateSetup", () => {
       ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
         createStructuredToolResponse({ success: true })
       );
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => {
+        throw new Error("Android modal recovery must not use the global tool registry");
+      });
 
       // Stateful observe provider: the first post-swipe observation still
       // contains the bottomsheet's windowId (swipe did NOT dismiss it), forcing
@@ -224,22 +271,29 @@ describe("DefaultUIStateSetup", () => {
         },
       });
 
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
       const setup = makeSetup(statefulObserve);
-      const dismissed = await (
-        setup as unknown as {
-          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
-        }
-      ).dismissTopModal(bottomSheet, "android");
+      let dismissed: boolean;
+      try {
+        dismissed = await (
+          setup as unknown as {
+            dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+          }
+        ).dismissTopModal(bottomSheet, "android");
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
 
       expect(dismissed).toBe(true);
       // The swipe ran but did not dismiss (windowId still present on observe #1),
       // so both post-swipe and post-back observations were consulted.
       expect(observeCalls).toBe(2);
-      // The back-button fallback fired via the ADB keyevent seam — the
-      // AndroidCtrlProxy accessibility path is not connected in a unit context
-      // (requestGlobalAction fast-fails), so pressBack falls through to ADB.
+      // Android recovery uses the setup instance's injected dependencies rather
+      // than the global interaction registry.
       const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
-      expect(fakeAdb.wasCommandExecuted("shell input keyevent 4")).toBe(true);
+      expect(fakeAdb.getAllCommands()).toEqual(["shell input keyevent 4"]);
     });
 
     test("does not mistakenly resolve a tool registered under the old name `swipe`", async () => {
@@ -260,6 +314,47 @@ describe("DefaultUIStateSetup", () => {
       ).dismissTopModal(bottomSheet, "android");
 
       expect(legacySwipeCalls).toBe(0);
+    });
+
+    test("uses iOS pressButton recovery without Android shell fallbacks", async () => {
+      const iosDevice: BootedDevice = { ...device, deviceId: "ios-device", platform: "ios" };
+      const fakeAdb = new FakeAdbClient();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const setup = new DefaultUIStateSetup(iosDevice, fakeAdb, nullObserve, timer);
+      let backArgs: Record<string, unknown> | undefined;
+      ToolRegistry.register("pressButton", "pressButton", {}, async (args: Record<string, unknown>) => {
+        backArgs = args;
+        return createStructuredToolResponse({ success: true });
+      });
+
+      const dismissed = await (
+        setup as unknown as {
+          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).dismissTopModal({ type: "popup", layer: 1, windowId: 42 }, "ios");
+
+      expect(dismissed).toBe(true);
+      expect(backArgs).toMatchObject({
+        button: "back",
+        platform: "ios",
+        [INTERNAL_NO_DIFF_PARAM]: true,
+      });
+      expect(fakeAdb.getAllCommands()).toEqual([]);
+    });
+
+    test("preserves Android's coordinate outside-tap recovery for popups", async () => {
+      const setup = makeSetup(nullObserve);
+
+      const dismissed = await (
+        setup as unknown as {
+          dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
+        }
+      ).dismissTopModal({ type: "popup", layer: 1, windowId: 42 }, "android");
+
+      expect(dismissed).toBe(true);
+      const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
+      expect(fakeAdb.wasCommandExecuted("shell input tap 50 50")).toBe(true);
     });
   });
 });

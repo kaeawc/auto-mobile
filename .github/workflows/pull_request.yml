@@ -316,6 +316,10 @@ jobs:
               - 'src/daemon/**'
               - 'src/features/observe/**'
               - 'src/features/action/**'
+              # Navigation replays share the iOS CtrlProxy interaction path, so
+              # these changes need the Simulator workflow rather than only fast
+              # TypeScript validation.
+              - 'src/features/navigation/**'
               - 'src/features/**/ios/**'
               - 'src/utils/IOSCtrlProxy*'
               - 'src/utils/Ios*'
@@ -339,6 +343,8 @@ jobs:
               # would land unvalidated and only surface on nightly / the next
               # native_integration PR.
               - '.github/actions/ios-simulator-bring-up/**'
+              # This workflow owns the Simulator workflow's command and gating.
+              - '.github/workflows/pull_request.yml'
               # This job runs a bun-side integration test (iosVideoRecordingStartStop),
               # so the bun test config and any test-setup preload affect it. bunfig.toml
               # wires a [test].preload that runs before EVERY bun test the job invokes,
@@ -348,6 +354,7 @@ jobs:
               - 'bunfig.toml'
               - 'test/setup/**'
               - 'test/integration/iosVideoRecordingStartStop.integration.test.ts'
+              - 'test/features/navigation/iosNavigationGraphWorkflow.test.ts'
               - 'package.json'
               - 'bun.lock'
 
@@ -1727,6 +1734,8 @@ jobs:
       # by `bun add -g .`) is thereby on PATH for the swift-test step.
       - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        env:
+          AUTOMOBILE_DAEMON_DEBUG: "1"
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
@@ -1738,6 +1747,12 @@ jobs:
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      - name: "Run iOS navigation graph Simulator workflow"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
 
       # Compile the XCTest bundle BEFORE the target-app warm-up. Otherwise `swift test`
       # in the timed Reminders step spends tens of seconds compiling first, letting the

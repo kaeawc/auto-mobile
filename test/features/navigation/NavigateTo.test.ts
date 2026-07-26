@@ -10,6 +10,8 @@ import { z } from "zod";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 describe("NavigateTo", () => {
   let navigateTo: NavigateTo;
@@ -81,6 +83,21 @@ describe("NavigateTo", () => {
   });
 
   describe("execute", () => {
+    test("creates the default UI-state setup after resolving an options session", async () => {
+      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+
+      await navigateTo.execute({
+        targetScreen: "HomeScreen",
+        platform: "android",
+        sessionUuid: "options-session"
+      });
+
+      const uiStateSetup = (navigateTo as unknown as {
+        uiStateSetup: { sessionUuid?: string } | null;
+      }).uiStateSetup;
+      expect(uiStateSetup?.sessionUuid).toBe("options-session");
+    });
+
     test("should return error when no current screen", async () => {
       // Inject fakeGraph via constructor
       navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
@@ -333,6 +350,9 @@ describe("NavigateTo", () => {
         backPresses: 1,
         reason: "test recommendation"
       });
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
 
       const screenWaiter: ScreenTransitionWaiter = {
         waitForScreen: async screenName => screenName === "HomeScreen"
@@ -348,18 +368,110 @@ describe("NavigateTo", () => {
         fakeTimer
       );
 
-      const result = await navigateTo.execute({
-        targetScreen: "HomeScreen",
-        platform: "android"
+      try {
+        const result = await navigateTo.execute({
+          targetScreen: "HomeScreen",
+          platform: "android"
+        });
+
+        expect(shouldUseBackButtonSpy).toHaveBeenCalledWith("DetailScreen", "HomeScreen", 1);
+        expect(result.success).toBe(true);
+        expect(result.message).toBe("Successfully navigated to \"HomeScreen\" using back button");
+        expect(result.stepsExecuted).toBe(1);
+        expect(result.path).toEqual(["pressButton(back)"]);
+        expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent 4"]);
+        expect(fakeTimer.getSleepHistory()).toEqual([300]);
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
+    });
+
+    test("routes iOS smart-back recovery through the internal pressButton tool without ADB", async () => {
+      const now = 1;
+      const iOSDevice = {
+        deviceId: "ios-simulator-123",
+        platform: "ios",
+        source: "local"
+      } as BootedDevice;
+      await fakeGraph.recordNavigationEvent({
+        destination: "DetailScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: now,
+        sequenceNumber: 0
+      });
+      fakeGraph.addNode({
+        screenName: "DetailScreen",
+        firstSeenAt: now,
+        lastSeenAt: now,
+        visitCount: 1,
+        backStackDepth: 1
+      });
+      shouldUseBackButtonSpy = spyOn(SmartNavigationHelper, "shouldUseBackButton").mockResolvedValue({
+        shouldUseBack: true,
+        backPresses: 1,
+        reason: "test recommendation"
       });
 
-      expect(shouldUseBackButtonSpy).toHaveBeenCalledWith("DetailScreen", "HomeScreen", 1);
+      let pressButtonArgs: Record<string, unknown> | undefined;
+      ToolRegistry.register("pressButton", "pressButton", {}, async args => {
+        pressButtonArgs = args;
+        return { success: true };
+      });
+      const screenWaiter: ScreenTransitionWaiter = {
+        waitForScreen: async screenName => screenName === "HomeScreen"
+      };
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      navigateTo = new NavigateTo(iOSDevice, fakeAdbFactory, null, screenWaiter, fakeGraph, fakeTimer);
+
+      const result = await navigateTo.execute({ targetScreen: "HomeScreen", platform: "ios" });
+
       expect(result.success).toBe(true);
-      expect(result.message).toBe("Successfully navigated to \"HomeScreen\" using back button");
-      expect(result.stepsExecuted).toBe(1);
-      expect(result.path).toEqual(["pressButton(back)"]);
-      expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent 4"]);
-      expect(fakeTimer.getSleepHistory()).toEqual([300]);
+      expect(pressButtonArgs).toEqual({
+        button: "back",
+        platform: "ios",
+        deviceId: "ios-simulator-123",
+        [INTERNAL_NO_DIFF_PARAM]: true
+      });
+      expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual([]);
+    });
+
+    test("reports an unsuccessful iOS smart-back recovery instead of claiming navigation succeeded", async () => {
+      const iOSDevice = { ...device, deviceId: "ios-simulator-456", platform: "ios" } as BootedDevice;
+      await fakeGraph.recordNavigationEvent({
+        destination: "DetailScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: 1,
+        sequenceNumber: 0
+      });
+      fakeGraph.addNode({
+        screenName: "DetailScreen",
+        firstSeenAt: 1,
+        lastSeenAt: 1,
+        visitCount: 1,
+        backStackDepth: 1
+      });
+      shouldUseBackButtonSpy = spyOn(SmartNavigationHelper, "shouldUseBackButton").mockResolvedValue({
+        shouldUseBack: true,
+        backPresses: 1,
+        reason: "test recommendation"
+      });
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
+        success: false,
+        error: "back unavailable"
+      }));
+      navigateTo = new NavigateTo(iOSDevice, fakeAdbFactory, null, {
+        waitForScreen: async () => true
+      }, fakeGraph);
+
+      const result = await navigateTo.execute({ targetScreen: "HomeScreen", platform: "ios" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("pressButton failed on ios: back unavailable");
     });
   });
 
@@ -501,6 +613,7 @@ describe("NavigateTo", () => {
       };
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
+      ToolRegistry.register("pressButton", "Fake back tool", {}, async () => ({ success: true }));
       navigateTo = new NavigateTo(
         device,
         fakeAdbFactory,

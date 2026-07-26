@@ -2,9 +2,9 @@ import { BootedDevice, NavigateToResult } from "../../models";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
+import { throwIfInternalToolFailed } from "../../server/internalToolCall";
 import {
   NavigationGraphManager,
   ToolCallInteraction,
@@ -18,6 +18,7 @@ import { DefaultUIStateSetup } from "./DefaultUIStateSetup";
 import { ScreenTransitionWaiter } from "./interfaces/ScreenTransitionWaiter";
 import { DefaultScreenTransitionWaiter } from "./DefaultScreenTransitionWaiter";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { PressButton } from "../action/PressButton";
 
 /**
  * Options for the navigateTo tool.
@@ -27,6 +28,8 @@ export interface NavigateToOptions {
   targetScreen: string;
   /** Platform (android/ios) */
   platform: "android" | "ios";
+  /** Session that selected the outer device, retained by internal replays. */
+  sessionUuid?: string;
 }
 
 /**
@@ -36,12 +39,12 @@ export interface NavigateToOptions {
 export class NavigateTo {
   private device: BootedDevice;
   private adb: AdbExecutor;
-  private adbFactory: AdbClientFactory;
   private navigationManager: NavigationGraphService;
-  private uiStateSetup: UIStateSetup;
+  private uiStateSetup: UIStateSetup | null;
   private screenWaiter: ScreenTransitionWaiter;
   private timer: Timer;
   private pathOptimizer: PathOptimizer | undefined;
+  private sessionUuid?: string;
 
   private static readonly MAX_TIMEOUT_MS = 30000; // 30 seconds
   private static readonly STEP_TIMEOUT_MS = 5000; // 5 seconds per step
@@ -54,17 +57,17 @@ export class NavigateTo {
     screenWaiter: ScreenTransitionWaiter | null = null,
     navigationManager?: NavigationGraphService,
     timer: Timer = defaultTimer,
-    pathOptimizer?: PathOptimizer
+    pathOptimizer?: PathOptimizer,
+    sessionUuid?: string
   ) {
     this.device = device;
-    this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.timer = timer;
     this.pathOptimizer = pathOptimizer;
+    this.sessionUuid = sessionUuid;
 
-    // Use injected dependencies or create defaults
-    this.uiStateSetup = uiStateSetup || new DefaultUIStateSetup(this.device, this.adb);
+    this.uiStateSetup = uiStateSetup;
     this.screenWaiter = screenWaiter || new DefaultScreenTransitionWaiter(
       this.navigationManager,
       NavigateTo.POLL_INTERVAL_MS
@@ -83,6 +86,10 @@ export class NavigateTo {
 
     const startTime = this.timer.now();
     const { targetScreen } = options;
+    this.sessionUuid ??= options.sessionUuid;
+    const uiStateSetup = this.uiStateSetup
+      ?? new DefaultUIStateSetup(this.device, this.adb, undefined, this.timer, this.sessionUuid);
+    this.uiStateSetup = uiStateSetup;
 
     try {
       // Get current screen from navigation graph
@@ -231,14 +238,14 @@ export class NavigateTo {
           if (edge.interaction) {
             // Set up scroll position if required (must happen before UI state setup)
             if (edge.uiState?.scrollPosition) {
-              const scrollAction = await this.uiStateSetup.setupScrollPosition(edge.uiState.scrollPosition, options.platform);
+              const scrollAction = await uiStateSetup.setupScrollPosition(edge.uiState.scrollPosition, options.platform);
               if (scrollAction) {
                 executedPath.push(scrollAction);
               }
             }
 
             // Set up required UI state before executing the tool call
-            const setupActions = await this.uiStateSetup.setupUIState(edge, options.platform);
+            const setupActions = await uiStateSetup.setupUIState(edge, options.platform);
             if (setupActions.length > 0) {
               executedPath.push(...setupActions);
             }
@@ -318,29 +325,44 @@ export class NavigateTo {
     // `interaction.args` is never mutated. Under `--actions-diff-observe` this
     // replay neither diffs its observation nor advances the agent-facing diff
     // baseline. Throws ActionableError if the tool is not registered.
-    await ToolRegistry.callInternal(
+    const response = await ToolRegistry.callInternal(
       interaction.toolName,
-      interaction.args as Record<string, unknown>
+      {
+        ...(interaction.args as Record<string, unknown>),
+        platform: this.device.platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+      }
     );
+    throwIfInternalToolFailed(response, interaction.toolName, this.device.platform);
   }
 
   /**
    * Press the back button as a fallback navigation action.
    */
   private async pressBack(): Promise<void> {
-    // Try accessibility service global action first, fall back to ADB
-    try {
-      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-      const result = await client.requestGlobalAction("back", 3000);
-      if (result.success) {
-        logger.debug("[NAVIGATE_TO] Pressed back via accessibility service");
-        return;
+    if (this.device.platform === "android") {
+      // Keep the caller's injected ADB executor and timer for Android recovery.
+      // PressButton retains the accessibility-service/ADB fallback without
+      // observing, so this internal recovery does not advance any diff baseline.
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+      if (!result.success) {
+        throw new Error(result.error ?? "Android back navigation failed");
       }
-    } catch {
-      // Fall through to ADB
+      logger.debug("[NAVIGATE_TO] Pressed back via Android interaction action");
+      return;
     }
-    await this.adb.executeCommand("shell input keyevent 4");
-    logger.debug("[NAVIGATE_TO] Pressed back via ADB keyevent");
+
+    // iOS has no injected host transport, so retain its internal tool routing
+    // for the selected device and no-diff behavior.
+    const response = await ToolRegistry.callInternal("pressButton", {
+      button: "back",
+      platform: this.device.platform,
+      deviceId: this.device.deviceId,
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+    });
+    throwIfInternalToolFailed(response, "pressButton", this.device.platform);
+    logger.debug(`[NAVIGATE_TO] Pressed back via ${this.device.platform} interaction tool`);
   }
 
   /**

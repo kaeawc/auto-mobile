@@ -526,6 +526,8 @@ class WebSocketConnection: WebSocketResponding {
     /// can detect a runner/client port mismatch (issue #2735).
     private let boundPort: UInt16
     private var isWebSocketUpgraded = false
+    private var pendingHTTPRequest = Data()
+    private static let maximumHTTPRequestLength = 1_000_000
 
     init(
         id: Int,
@@ -578,7 +580,7 @@ class WebSocketConnection: WebSocketResponding {
     // MARK: - WebSocket Handshake
 
     private func receiveHTTPUpgrade() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_000_000) { [weak self] data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: Self.maximumHTTPRequestLength) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -592,8 +594,27 @@ class WebSocketConnection: WebSocketResponding {
                 return
             }
 
-            guard let data = data, let request = String(data: data, encoding: .utf8) else {
+            guard let data = data else {
                 self.receiveHTTPUpgrade()
+                return
+            }
+
+            self.pendingHTTPRequest.append(data)
+            guard self.pendingHTTPRequest.count <= Self.maximumHTTPRequestLength else {
+                print("[WebSocketConnection] HTTP request exceeds maximum length")
+                self.connection.cancel()
+                return
+            }
+
+            guard let requestLength = Self.completeHTTPRequestLength(in: self.pendingHTTPRequest) else {
+                self.receiveHTTPUpgrade()
+                return
+            }
+
+            let requestData = Data(self.pendingHTTPRequest.prefix(requestLength))
+            self.pendingHTTPRequest.removeFirst(requestLength)
+            guard let request = String(data: requestData, encoding: .utf8) else {
+                self.connection.cancel()
                 return
             }
 
@@ -610,6 +631,45 @@ class WebSocketConnection: WebSocketResponding {
                 self.receiveHTTPUpgrade()
             }
         }
+    }
+
+    /// Returns the byte count of one complete HTTP request, including its body,
+    /// or `nil` until another network read supplies the missing bytes.
+    static func completeHTTPRequestLength(in data: Data) -> Int? {
+        let separator = Data("\r\n\r\n".utf8)
+        guard let headerRange = data.range(of: separator) else {
+            return nil
+        }
+
+        let headerLength = headerRange.upperBound
+        guard let header = String(data: data.prefix(headerLength), encoding: .utf8) else {
+            return nil
+        }
+
+        let contentLength = header
+            .components(separatedBy: "\r\n")
+            .compactMap { line -> Int? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard let delimiter = trimmed.firstIndex(of: ":") else {
+                    return nil
+                }
+                let name = String(trimmed[..<delimiter])
+                guard name.caseInsensitiveCompare("Content-Length") == .orderedSame
+                else {
+                    return nil
+                }
+                let value = String(trimmed[trimmed.index(after: delimiter)...].trimmingCharacters(in: .whitespaces))
+                return Int(value)
+            }
+            .first ?? 0
+        guard contentLength >= 0,
+              headerLength <= Self.maximumHTTPRequestLength - contentLength
+        else {
+            return nil
+        }
+
+        let requestLength = headerLength + contentLength
+        return data.count >= requestLength ? requestLength : nil
     }
 
     private func handleHealthCheck() {

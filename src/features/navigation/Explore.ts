@@ -3,11 +3,13 @@ import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { ToolRegistry } from "../../server/toolRegistry";
+import { throwIfInternalToolFailed } from "../../server/internalToolCall";
 import { NavigationGraphManager, type NavigationEdge, type NavigationGraphService } from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { TapOnElement } from "../action/TapOnElement";
 import { SwipeOnElement } from "../action/SwipeOnElement";
+import { PressButton } from "../action/PressButton";
 import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -89,6 +91,7 @@ export class Explore extends BaseVisualChange {
   private graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
   private currentElementConfidence: number = 0;
+  private sessionUuid?: string;
 
   // Constants for safety limits
   private static readonly MAX_CONSECUTIVE_BACKS = 5;
@@ -103,12 +106,14 @@ export class Explore extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbClient | null = null,
     timer: Timer = defaultTimer,
-    navigationManager?: NavigationGraphService
+    navigationManager?: NavigationGraphService,
+    sessionUuid?: string
   ) {
     super(device, adb, timer);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.exploredElements = new Map();
     this.elementParser = new DefaultElementParser();
+    this.sessionUuid = sessionUuid;
   }
 
   /**
@@ -474,6 +479,10 @@ export class Explore extends BaseVisualChange {
     timeoutMs: number,
     startTime: number
   ): boolean {
+    if (this.stopReason) {
+      return false;
+    }
+
     const elapsed = this.timer.now() - startTime;
 
     if (this.interactionCount >= maxInteractions) {
@@ -767,17 +776,24 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Press back button via accessibility service, fall back to ADB
-      let backSuccess = false;
-      try {
-        const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-        const result = await client.requestGlobalAction("back", 3000);
-        backSuccess = result.success;
-      } catch {
-        // Fall through to ADB
-      }
-      if (!backSuccess) {
-        await this.adb.executeCommand("shell input keyevent KEYCODE_BACK");
+      if (this.device.platform === "android") {
+        // Preserve the Explore instance's injected transport and timer. Calling
+        // press() avoids nested observed-interaction progress on this operation.
+        const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+        if (!result.success) {
+          throw new Error(result.error ?? "Android back navigation failed");
+        }
+      } else {
+        // iOS recovery must route through the selected device/session tool.
+        // Do not forward the outer progress callback: the nested action has a
+        // different scale and would make exploration progress jump backward.
+        const response = await ToolRegistry.callInternal("pressButton", {
+          button: "back",
+          platform: this.device.platform,
+          deviceId: this.device.deviceId,
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+        });
+        throwIfInternalToolFailed(response, "pressButton", this.device.platform);
       }
       this.consecutiveBackCount++;
 
@@ -785,6 +801,7 @@ export class Explore extends BaseVisualChange {
       await this.timer.sleep(1000);
     } catch (error) {
       logger.warn(`[Explore] Failed to navigate back: ${error}`);
+      this.stopReason = `Back-navigation recovery failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
@@ -801,17 +818,21 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Press home button via accessibility service, fall back to ADB
-      let homeSuccess = false;
-      try {
-        const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-        const result = await client.requestGlobalAction("home", 3000);
-        homeSuccess = result.success;
-      } catch {
-        // Fall through to ADB
-      }
-      if (!homeSuccess) {
-        await this.adb.executeCommand("shell input keyevent KEYCODE_HOME");
+      if (this.device.platform === "android") {
+        // PressButton's Android home path retains the injected ADB/timer and
+        // performs the same accessibility-service then ADB fallback.
+        const result = await new PressButton(this.device, this.adb, this.timer).press("home");
+        if (!result.success) {
+          throw new Error(result.error ?? "Android home navigation failed");
+        }
+      } else {
+        // Keep iOS recovery session/device-aware without nested progress.
+        const response = await ToolRegistry.callInternal("homeScreen", {
+          platform: this.device.platform,
+          deviceId: this.device.deviceId,
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+        });
+        throwIfInternalToolFailed(response, "homeScreen", this.device.platform);
       }
 
       // Wait for home screen
@@ -821,6 +842,7 @@ export class Explore extends BaseVisualChange {
       this.consecutiveBackCount = 0;
     } catch (error) {
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
+      this.stopReason = `Home-screen recovery failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 

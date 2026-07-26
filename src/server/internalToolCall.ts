@@ -1,3 +1,6 @@
+import { ActionableError } from "../models";
+import { logger } from "../utils/logger";
+
 /**
  * Shared marker for internal tool-to-tool calls (issues #3053 / #3087).
  *
@@ -32,4 +35,49 @@ export function markInternalToolCall<T extends Record<string, unknown>>(
   args: T
 ): T & { [INTERNAL_NO_DIFF_PARAM]: true } {
   return { ...args, [INTERNAL_NO_DIFF_PARAM]: true };
+}
+
+/**
+ * Surface a failed internal interaction instead of treating its MCP envelope as
+ * a successful recovery. Most interaction tools return JSON content rather
+ * than throw for an unsuccessful device action.
+ */
+export function throwIfInternalToolFailed(
+  response: unknown,
+  toolName: string,
+  platform: string
+): void {
+  if (!response || typeof response !== "object") {
+    return;
+  }
+
+  const envelope = response as {
+    success?: unknown;
+    error?: unknown;
+    structuredContent?: unknown;
+    content?: Array<{ type?: unknown; text?: unknown }>;
+  };
+  const payload = envelope.structuredContent && typeof envelope.structuredContent === "object"
+    ? envelope.structuredContent as { success?: unknown; error?: unknown }
+    : (() => {
+      const textPart = envelope.content?.find(item => item.type === "text");
+      if (typeof textPart?.text !== "string") {
+        return undefined;
+      }
+      try {
+        const parsed = JSON.parse(textPart.text);
+        return parsed && typeof parsed === "object"
+          ? parsed as { success?: unknown; error?: unknown }
+          : undefined;
+      } catch (error) {
+        // Plain-text tool output has no structured failure signal to propagate.
+        logger.debug(`[internalToolCall] Could not parse ${toolName} response: ${error}`);
+        return undefined;
+      }
+    })();
+
+  if (payload?.success === false || envelope.success === false) {
+    const error = payload?.error ?? envelope.error ?? "unknown failure";
+    throw new ActionableError(`${toolName} failed on ${platform}: ${String(error)}`);
+  }
 }

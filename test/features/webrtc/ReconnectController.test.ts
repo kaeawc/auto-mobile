@@ -196,6 +196,35 @@ describe("ReconnectController", () => {
 
     expect(controller.getState()).toBe("stopped");
   });
+
+  test("the default reconnect backoff climbs 1s→2s→4s… and caps at 30s", async () => {
+    // No injected backoff: exercise the constructor default (exponential
+    // 1s→30s, ×2). Drive the ladder through notifyConnectionLost() since start()
+    // deliberately does not enter the retry loop.
+    const timer = new FakeTimer();
+    const controller = new ReconnectController({
+      attempt: async () => {
+        throw new Error("still down");
+      },
+      timer,
+    });
+
+    const rungs: number[] = [];
+    controller.notifyConnectionLost();
+    await drain();
+    rungs.push(timer.getPendingTimeouts()[0]);
+
+    // Each failed attempt schedules the next rung; walk seven rungs to see the
+    // 30s ceiling engage (attempt 6 would be 32s uncapped).
+    for (let i = 0; i < 6; i++) {
+      const delay = timer.getPendingTimeouts()[0];
+      timer.advanceTime(delay);
+      await drain();
+      rungs.push(timer.getPendingTimeouts()[0]);
+    }
+
+    expect(rungs).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000]);
+  });
 });
 
 /** Let queued microtasks (async attempt bodies) settle after advancing time. */

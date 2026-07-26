@@ -147,6 +147,36 @@ describe("WhipClient.publish", () => {
     await Promise.resolve();
   });
 
+  test("omits the Authorization header entirely when no bearer token is configured", async () => {
+    // Without a token the header must be absent — not `Bearer undefined`, which
+    // an unauthenticated ingest would reject or, worse, log.
+    const { fetchImpl, calls } = fakeFetch(() => ({ status: 201, body: "answer", location: "/r/1" }));
+    const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
+
+    await client.publish("offer");
+
+    expect("Authorization" in calls[0].headers).toBe(false);
+  });
+
+  test("still surfaces the status when the error response body cannot be read", async () => {
+    // safeText swallows a failed body read and returns "" so the actionable
+    // error still carries the status code instead of propagating the read error.
+    const client = new WhipClient({
+      endpoint: "https://coord.example.com/whip",
+      fetchImpl: async () => ({
+        status: 503,
+        ok: false,
+        headers: { get: () => null },
+        text: async () => {
+          throw new Error("stream broken");
+        },
+      }),
+    });
+
+    await expect(client.publish("offer")).rejects.toThrow(/got 503/);
+    await expect(client.publish("offer")).rejects.not.toThrow(/stream broken/);
+  });
+
   test("preserves an already-aborted caller signal", async () => {
     let receivedAbortedSignal = false;
     const client = new WhipClient({

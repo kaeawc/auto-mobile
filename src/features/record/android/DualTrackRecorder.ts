@@ -326,7 +326,7 @@ function buildElementKey(event: ReceivedInteraction): string | null {
   return `${resourceId}|${contentDesc}|${className}`;
 }
 
-function resolveSwipeDirection(
+export function resolveSwipeDirection(
   scrollDeltaX?: number,
   scrollDeltaY?: number
 ): "up" | "down" | "left" | "right" | null {

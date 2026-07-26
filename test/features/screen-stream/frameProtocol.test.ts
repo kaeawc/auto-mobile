@@ -109,6 +109,23 @@ describe("FrameDecoder", () => {
     const decoder = new FrameDecoder();
     expect(decoder.push(Buffer.alloc(0))).toHaveLength(0);
   });
+
+  test("emitted pixels are copied out of the input chunk, not aliased into it", () => {
+    // The decoded frame outlives its stdout chunk. If a "just subarray it"
+    // optimization replaced the detaching copy, the emitted pixels would pin —
+    // and be corrupted by reuse of — the whole socket buffer. Mutating the
+    // input after push() must not change the decoded pixels.
+    const decoder = new FrameDecoder();
+    const frame = makeFrameBytes(2, 2, 8, 100, 0xab);
+    const out = decoder.push(frame);
+    expect(out).toHaveLength(1);
+    expect(out[0].pixels[0]).toBe(0xab);
+
+    frame.fill(0x00);
+
+    expect(out[0].pixels[0]).toBe(0xab);
+    expect(out[0].pixels.every(byte => byte === 0xab)).toBe(true);
+  });
 });
 
 describe("FrameDecoder marker-based resynchronization", () => {

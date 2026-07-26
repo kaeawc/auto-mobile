@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
-import { PlatformVideoCaptureBackend } from "../../../src/features/video/PlatformVideoCaptureBackend";
+import { PlatformVideoCaptureBackend, clampBitrateKbps } from "../../../src/features/video/PlatformVideoCaptureBackend";
 import type {
   RecordingHandle,
   VideoCaptureConfig,
@@ -205,9 +205,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
-      // stop() will throw at the adb pull step (FakeAdbClient has no
-      // getBaseCommandParts) — but pkill must run first regardless.
-      await expect(backend.stop(handle)).rejects.toThrow();
+      await backend.stop(handle);
 
       const commands = fakeClient.getAllCommands();
       expect(commands[0]).toBe("shell pkill -2 screenrecord");
@@ -225,9 +223,46 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
-      await expect(backend.stop(handle)).rejects.toThrow();
+      await backend.stop(handle);
 
       expect(killSignals).toEqual([]);
+    });
+
+    test("disarms its graceful-exit timeout through the injected timer once host adb has exited", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      // Observe the arm/disarm pair on the *injected* timer. The bug used the
+      // global clearTimeout, so the 10 s SIGINT callback armed via
+      // this.timer.setTimeout was never cancelled and could fire after the
+      // recording finished (issue #4170).
+      const armedHandles: NodeJS.Timeout[] = [];
+      const clearedHandles: NodeJS.Timeout[] = [];
+      const originalSetTimeout = fakeTimer.setTimeout.bind(fakeTimer);
+      const originalClearTimeout = fakeTimer.clearTimeout.bind(fakeTimer);
+      fakeTimer.setTimeout = (callback: () => void, ms: number) => {
+        const handle = originalSetTimeout(callback, ms);
+        if (ms === 10000) {
+          armedHandles.push(handle);
+        }
+        return handle;
+      };
+      fakeTimer.clearTimeout = (handle: NodeJS.Timeout) => {
+        clearedHandles.push(handle);
+        originalClearTimeout(handle);
+      };
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0; // host adb already exited
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+
+      // stop() rejects later at the adb pull step; the disarm happens first.
+      await backend.stop(handle).catch(() => undefined);
+
+      expect(armedHandles).toHaveLength(1);
+      expect(clearedHandles).toContain(armedHandles[0]);
     });
 
     test("falls back to host SIGINT when device-side pkill fails and host adb is still running", async () => {
@@ -262,258 +297,114 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       (handle.backendHandle as any).exitPromise = exitPromise;
       (handle.backendHandle as any).exitState.exitCode = null;
 
-      await expect(backend.stop(handle)).rejects.toThrow();
+      await backend.stop(handle);
 
       expect(killSignals).toContain("SIGINT");
       expect(fakeClient.wasCommandExecuted("shell pkill -2 screenrecord")).toBe(true);
     });
-  });
 
-  describe("Bitrate Clamping Logic", () => {
-    test("clamps bitrate based on maxThroughputMbps", () => {
-      // Test the clamping logic by accessing the private method
-      const config = {
-        targetBitrateKbps: 5000,
-        maxThroughputMbps: 2, // 2 Mbps = 2000 Kbps
-      };
+    test("pulls the recording, cleans up the /sdcard temp, and reports the pulled file size", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
 
-      // Access private method via any cast
-      const clampedBitrate = (backend as any).clampBitrateKbps?.(config) ??
-        Math.min(config.targetBitrateKbps, config.maxThroughputMbps * 1000);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
 
-      expect(clampedBitrate).toBeLessThanOrEqual(2000);
+      // Simulate the pulled artifact so getFileSize returns a real byte count.
+      const outputPath = path.join(tempDir, "out.mp4");
+      await fsPromises.writeFile(outputPath, Buffer.alloc(4096, 1));
+      const handle = buildAndroidStopHandle(outputPath, fakeProcess);
+
+      const result = await backend.stop(handle);
+
+      // The pull targets the device temp path → the host output path.
+      expect(fakeClient.getSpawnCalls()[0]).toEqual([
+        "pull",
+        "/sdcard/auto-mobile-test.mp4",
+        outputPath,
+      ]);
+      // The /sdcard temp file is removed afterwards.
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
+      expect(result.sizeBytes).toBe(4096);
+      expect(result.recordingId).toBe("test-stop-sequence");
     });
 
-    test("does not clamp when maxThroughputMbps is higher", () => {
-      const config = {
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 10, // 10 Mbps = 10000 Kbps
-      };
+    test("still removes the /sdcard temp file when the pull itself fails", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      fakeClient.setSpawnExit("pull", 1); // adb pull fails
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
 
-      const clampedBitrate = (backend as any).clampBitrateKbps?.(config) ??
-        Math.min(config.targetBitrateKbps, config.maxThroughputMbps * 1000);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
-      expect(clampedBitrate).toBe(1000);
-    });
+      await expect(backend.stop(handle)).rejects.toThrow(/adb pull failed/);
 
-    test("handles zero maxThroughputMbps", () => {
-      const config = {
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 0,
-      };
-
-      const clampedBitrate = (backend as any).clampBitrateKbps?.(config) ??
-        config.targetBitrateKbps;
-
-      expect(clampedBitrate).toBe(1000);
+      // The finally block runs the cleanup even though the pull rejected.
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
     });
   });
 
-  describe("Android Time Limit Logic", () => {
-    test("respects 180 second maximum", () => {
-      // Test the time limit resolution logic
-      const resolveTimeLimit = (backend as any).resolveAndroidTimeLimit?.bind(backend) ??
-        ((maxDuration?: number) => {
-          const ANDROID_SCREENRECORD_MAX_SECONDS = 180;
-          if (maxDuration && maxDuration > 0) {
-            return Math.min(maxDuration, ANDROID_SCREENRECORD_MAX_SECONDS);
-          }
-          return ANDROID_SCREENRECORD_MAX_SECONDS;
-        });
-
-      expect(resolveTimeLimit(300)).toBe(180);
-      expect(resolveTimeLimit(60)).toBe(60);
-      expect(resolveTimeLimit(180)).toBe(180);
-    });
-
-    test("defaults to 180 seconds when not specified", () => {
-      const resolveTimeLimit = (backend as any).resolveAndroidTimeLimit?.bind(backend) ??
-        ((maxDuration?: number) => {
-          const ANDROID_SCREENRECORD_MAX_SECONDS = 180;
-          if (maxDuration && maxDuration > 0) {
-            return Math.min(maxDuration, ANDROID_SCREENRECORD_MAX_SECONDS);
-          }
-          return ANDROID_SCREENRECORD_MAX_SECONDS;
-        });
-
-      expect(resolveTimeLimit(undefined)).toBe(180);
-      expect(resolveTimeLimit(0)).toBe(180);
-    });
-  });
-});
-
-describe("PlatformVideoCaptureBackend - Integration Tests", () => {
-  let tempDir: string;
-  let androidDevice: BootedDevice;
-  let iosDevice: BootedDevice;
-
-  beforeEach(async () => {
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-integration-"));
-
-    androidDevice = {
-      platform: "android",
-      deviceId: "test-emulator",
-      name: "Test Android Emulator",
-    };
-
-    iosDevice = {
-      platform: "ios",
-      deviceId: "test-simulator",
-      name: "Test iOS Simulator",
-    };
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
-  });
-
-  describe("Configuration Structure", () => {
-    test("Android config includes required fields", () => {
-      const config: VideoCaptureConfig = {
-        recordingId: "test-android",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "android.mp4"),
-        fileName: "android.mp4",
+  describe("clampBitrateKbps", () => {
+    function cfg(targetBitrateKbps: number, maxThroughputMbps: number): VideoCaptureConfig {
+      return {
+        recordingId: "clamp",
+        outputDirectory: "/tmp",
+        outputPath: "/tmp/clamp.mp4",
+        fileName: "clamp.mp4",
         startedAt: new Date().toISOString(),
         qualityPreset: "low",
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 5,
+        targetBitrateKbps,
+        maxThroughputMbps,
         fps: 15,
         maxArchiveSizeMb: 2048,
         format: "mp4",
-        device: androidDevice,
       };
+    }
 
-      expect(config.device?.platform).toBe("android");
-      expect(config.targetBitrateKbps).toBe(1000);
-      expect(config.format).toBe("mp4");
-    });
-
-    test("iOS config includes required fields", () => {
-      const config: VideoCaptureConfig = {
-        recordingId: "test-ios",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "ios.mp4"),
-        fileName: "ios.mp4",
-        startedAt: new Date().toISOString(),
-        qualityPreset: "low",
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 5,
-        fps: 15,
-        maxArchiveSizeMb: 2048,
-        format: "mp4",
-        device: iosDevice,
-      };
-
-      expect(config.device?.platform).toBe("ios");
-      expect(config.outputPath).toContain("ios.mp4");
-    });
-
-    test("Config with resolution override", () => {
-      const config: VideoCaptureConfig = {
-        recordingId: "test-resolution",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "video.mp4"),
-        fileName: "video.mp4",
-        startedAt: new Date().toISOString(),
-        qualityPreset: "low",
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 5,
-        fps: 15,
-        maxArchiveSizeMb: 2048,
-        format: "mp4",
-        device: androidDevice,
-        resolution: { width: 1280, height: 720 },
-      };
-
-      expect(config.resolution).toBeDefined();
-      expect(config.resolution?.width).toBe(1280);
-      expect(config.resolution?.height).toBe(720);
-    });
-
-    test("Config with maxDurationSeconds", () => {
-      const config: VideoCaptureConfig = {
-        recordingId: "test-duration",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "video.mp4"),
-        fileName: "video.mp4",
-        startedAt: new Date().toISOString(),
-        qualityPreset: "low",
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 5,
-        fps: 15,
-        maxArchiveSizeMb: 2048,
-        format: "mp4",
-        device: androidDevice,
-        maxDurationSeconds: 60,
-      };
-
-      expect(config.maxDurationSeconds).toBe(60);
-    });
+    // The throughput cap is `floor(maxThroughputMbps * 1000)` Kbps; a zero cap is
+    // treated as "no cap" and the target passes through untouched.
+    test.each([
+      [5000, 2, 2000, "caps the target to the lower throughput ceiling"],
+      [1000, 10, 1000, "leaves the target alone when the ceiling is higher"],
+      [1000, 0, 1000, "treats a zero throughput as no cap"],
+      [1000, -5, 1000, "treats a negative throughput as no cap"],
+      [5000, 1, 1000, "caps at an exact 1 Mbps ceiling"],
+      // LIVE DEFECT: floor(0.0005 * 1000) = 0 ⇒ falsy ⇒ cap silently disabled,
+      // so the full 10000 Kbps target ships despite a 0.5 Kbps throughput budget.
+      [10000, 0.0005, 10000, "sub-1-Kbps throughput floors to 0 and disables the cap"],
+    ])(
+      "maps target=%p / maxMbps=%p to %p (%s)",
+      (targetBitrateKbps, maxThroughputMbps, expected, _why) => {
+        expect(clampBitrateKbps(cfg(targetBitrateKbps, maxThroughputMbps))).toBe(expected);
+      }
+    );
   });
 
-  describe("Quality Presets", () => {
-    test("low quality preset", () => {
-      const config: VideoCaptureConfig = {
-        recordingId: "test-low",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "low.mp4"),
-        fileName: "low.mp4",
-        startedAt: new Date().toISOString(),
-        qualityPreset: "low",
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 5,
-        fps: 15,
-        maxArchiveSizeMb: 2048,
-        format: "mp4",
-        device: androidDevice,
-      };
+  describe("resolveAndroidTimeLimit", () => {
+    // Bind the real private method directly: if it is renamed the bind throws,
+    // rather than a self-healing `?? reimplementation` fallback keeping the test
+    // green against a method that no longer exists.
+    function resolve(backendInstance: PlatformVideoCaptureBackend, maxDuration?: number): number {
+      return (backendInstance as unknown as {
+        resolveAndroidTimeLimit(maxDuration?: number): number;
+      }).resolveAndroidTimeLimit(maxDuration);
+    }
 
-      expect(config.qualityPreset).toBe("low");
-      expect(config.targetBitrateKbps).toBe(1000);
-      expect(config.fps).toBe(15);
-    });
-
-    test("medium quality preset", () => {
-      const config: VideoCaptureConfig = {
-        recordingId: "test-medium",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "medium.mp4"),
-        fileName: "medium.mp4",
-        startedAt: new Date().toISOString(),
-        qualityPreset: "medium",
-        targetBitrateKbps: 2500,
-        maxThroughputMbps: 10,
-        fps: 30,
-        maxArchiveSizeMb: 2048,
-        format: "mp4",
-        device: androidDevice,
-      };
-
-      expect(config.qualityPreset).toBe("medium");
-      expect(config.targetBitrateKbps).toBe(2500);
-      expect(config.fps).toBe(30);
-    });
-
-    test("high quality preset", () => {
-      const config: VideoCaptureConfig = {
-        recordingId: "test-high",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "high.mp4"),
-        fileName: "high.mp4",
-        startedAt: new Date().toISOString(),
-        qualityPreset: "high",
-        targetBitrateKbps: 5000,
-        maxThroughputMbps: 20,
-        fps: 60,
-        maxArchiveSizeMb: 2048,
-        format: "mp4",
-        device: androidDevice,
-      };
-
-      expect(config.qualityPreset).toBe("high");
-      expect(config.targetBitrateKbps).toBe(5000);
-      expect(config.fps).toBe(60);
+    test.each([
+      [300, 180, "caps above the 180s screenrecord maximum"],
+      [60, 60, "passes a sub-maximum duration through"],
+      [180, 180, "keeps the exact maximum"],
+      [undefined, 180, "defaults to the maximum when unspecified"],
+      [0, 180, "treats zero as unspecified"],
+    ])("resolves %p to %p seconds (%s)", (input, expected, _why) => {
+      expect(resolve(backend, input)).toBe(expected);
     });
   });
 });

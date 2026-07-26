@@ -1,9 +1,22 @@
-import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type {
+  AdbExecuteOptions,
+  AdbExecutor,
+  AdbProcess,
+  AdbSpawnOptions,
+} from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { ExecResult } from "../../src/models";
+import { FakeAdbProcess } from "./FakeAdbProcess";
 
 type FakeAdbClientContract = Pick<
   AdbExecutor,
-  "executeCommand" | "getForegroundApp" | "listUsers"
+  "execute" | "executeCommand" | "getForegroundApp" | "listUsers" | "spawn"
 >;
+
+/** How a spawned command should terminate, keyed by a substring of its argv. */
+interface SpawnBehavior {
+  match: string;
+  outcome: { kind: "exit"; code: number } | { kind: "error"; error: Error };
+}
 
 /**
  * Fake implementation of AdbClient for testing
@@ -25,6 +38,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private foregroundAppError: Error | null = null;
   private hangingCommandPatterns: string[] = [];
   private users: Array<{ userId: number; name: string; flags?: number; running?: boolean }> = [];
+  private spawnCalls: string[][] = [];
+  private spawnBehaviors: SpawnBehavior[] = [];
 
   /**
    * Record a command execution
@@ -71,6 +86,64 @@ export class FakeAdbClient implements FakeAdbClientContract {
       trim: () => result.stdout.trim(),
       includes: (search: string) => result.stdout.includes(search)
     };
+  }
+
+  /**
+   * Execute argv directly. Mirrors {@link executeCommand} but takes the argv
+   * array + {@link AdbExecuteOptions} shape of {@link AdbExecutor.execute} and
+   * returns an {@link ExecResult}. The joined argv is used as the lookup key so
+   * a test can configure a result via {@link setCommandResult}.
+   */
+  async execute(args: string[], options?: AdbExecuteOptions): Promise<ExecResult> {
+    const command = args.join(" ");
+    return this.executeCommand(
+      command,
+      options?.timeoutMs,
+      options?.maxBuffer,
+      options?.noRetry,
+      options?.signal
+    );
+  }
+
+  /**
+   * Spawn a long-lived ADB command. Records the argv and returns a
+   * {@link FakeAdbProcess} that terminates per the configured behavior (default:
+   * a clean exit code 0). The exit/error event fires after the caller attaches
+   * its listeners, matching the real spawn's async lifecycle.
+   */
+  async spawn(args: string[], _options?: AdbSpawnOptions): Promise<AdbProcess> {
+    this.spawnCalls.push([...args]);
+    const proc = new FakeAdbProcess();
+    const joined = args.join(" ");
+    const behavior = this.spawnBehaviors.find(b => joined.includes(b.match));
+    if (behavior?.outcome.kind === "error") {
+      proc.scheduleError(behavior.outcome.error);
+    } else {
+      proc.scheduleExit(behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0);
+    }
+    return proc;
+  }
+
+  /**
+   * Configure how a spawned command whose argv contains `match` terminates.
+   * Without a match a spawned command exits cleanly with code 0.
+   */
+  setSpawnExit(match: string, code: number): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "exit", code } });
+  }
+
+  setSpawnError(match: string, error: Error): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "error", error } });
+  }
+
+  /** All recorded spawn argv arrays, in order. */
+  getSpawnCalls(): string[][] {
+    return this.spawnCalls.map(call => [...call]);
+  }
+
+  /** True if any spawned command's argv contained `match`. */
+  wasSpawned(match: string): boolean {
+    return this.spawnCalls.some(call => call.join(" ").includes(match));
   }
 
   /**
@@ -208,6 +281,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.commandSequenceCursor.clear();
     this.foregroundAppError = null;
     this.hangingCommandPatterns = [];
+    this.spawnCalls = [];
+    this.spawnBehaviors = [];
   }
 
   /**

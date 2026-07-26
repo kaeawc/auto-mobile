@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { DualTrackRecorder, MERGE_WINDOW_MS } from "../../../../src/features/record/android/DualTrackRecorder";
+import { DualTrackRecorder, MERGE_WINDOW_MS, resolveSwipeDirection } from "../../../../src/features/record/android/DualTrackRecorder";
 import type { GestureEmitter, GestureEvent, A11ySource } from "../../../../src/features/record/android/types";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -320,5 +320,25 @@ describe("DualTrackRecorder", () => {
     expect(steps[0].tool).toBe("tapOn");
     expect(steps[0].params.text).toBe("Sign in");
     expect(steps[0].params.elementId).toBeUndefined();
+  });
+});
+
+describe("resolveSwipeDirection (scroll-delta axis mapping)", () => {
+  // These deltas are accessibility SCROLL deltas (content movement), so the
+  // mapping is deliberately inverted relative to GestureClassifier's finger
+  // displacement: a positive scrollDeltaX (content moved right) is the user
+  // swiping LEFT, and a positive scrollDeltaY (content moved down) is swiping UP.
+  test.each([
+    [0, 0, null, "no movement"],
+    [10, 0, "left", "positive X delta inverts to left"],
+    [-10, 0, "right", "negative X delta inverts to right"],
+    [0, 10, "up", "positive Y delta inverts to up"],
+    [0, -10, "down", "negative Y delta inverts to down"],
+    [10, 5, "left", "dominant X axis wins"],
+    [5, 10, "up", "dominant Y axis wins"],
+    [10, 10, "left", "an axis tie resolves on the X branch"],
+    [undefined, undefined, null, "absent deltas mean no direction"],
+  ])("resolveSwipeDirection(%p, %p) → %p (%s)", (dx, dy, expected, _why) => {
+    expect(resolveSwipeDirection(dx, dy)).toBe(expected);
   });
 });

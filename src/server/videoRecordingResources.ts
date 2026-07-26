@@ -9,6 +9,25 @@ import { logger } from "../utils/logger";
 import * as fs from "fs/promises";
 import type { VideoRecordingMetadata } from "../models";
 
+/**
+ * The data-store surface the resource handlers depend on. Injecting it keeps the
+ * handlers unit-testable without resolving the real file-backed video-recording
+ * database (issue #3067) or touching the real filesystem.
+ */
+export interface VideoRecordingResourceStore {
+  getLatest(): Promise<VideoRecordingMetadata | null>;
+  getById(recordingId: string, options?: { touch?: boolean }): Promise<VideoRecordingMetadata | null>;
+  list(): Promise<VideoRecordingMetadata[]>;
+  readFile(filePath: string): Promise<Buffer>;
+}
+
+const defaultVideoRecordingResourceStore: VideoRecordingResourceStore = {
+  getLatest: getLatestVideoRecordingMetadata,
+  getById: getVideoRecordingMetadata,
+  list: listVideoRecordings,
+  readFile: fs.readFile,
+};
+
 function getVideoMimeType(metadata: VideoRecordingMetadata): string {
   if (metadata.format === "mp4") {
     return "video/mp4";
@@ -16,9 +35,10 @@ function getVideoMimeType(metadata: VideoRecordingMetadata): string {
   return "application/octet-stream";
 }
 
-async function buildVideoResourceContent(
+export async function buildVideoResourceContent(
   metadata: VideoRecordingMetadata,
-  uri: string
+  uri: string,
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
 ): Promise<ResourceContent> {
   if (!metadata.filePath) {
     return {
@@ -32,7 +52,7 @@ async function buildVideoResourceContent(
   }
 
   try {
-    const fileBuffer = await fs.readFile(metadata.filePath);
+    const fileBuffer = await store.readFile(metadata.filePath);
     const blob = fileBuffer.toString("base64");
     return {
       uri,
@@ -53,9 +73,11 @@ async function buildVideoResourceContent(
   }
 }
 
-async function getLatestVideoRecording(): Promise<ResourceContent> {
+export async function getLatestVideoRecording(
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
+): Promise<ResourceContent> {
   try {
-    const latest = await getLatestVideoRecordingMetadata();
+    const latest = await store.getLatest();
     if (!latest) {
       return {
         uri: VIDEO_RESOURCE_URIS.LATEST,
@@ -66,8 +88,8 @@ async function getLatestVideoRecording(): Promise<ResourceContent> {
       };
     }
 
-    const metadata = await getVideoRecordingMetadata(latest.recordingId, { touch: true }) ?? latest;
-    return buildVideoResourceContent(metadata, VIDEO_RESOURCE_URIS.LATEST);
+    const metadata = await store.getById(latest.recordingId, { touch: true }) ?? latest;
+    return buildVideoResourceContent(metadata, VIDEO_RESOURCE_URIS.LATEST, store);
   } catch (error) {
     logger.error(`[VideoRecordingResources] Failed to get latest recording: ${error}`);
     return {
@@ -80,9 +102,11 @@ async function getLatestVideoRecording(): Promise<ResourceContent> {
   }
 }
 
-async function getVideoArchiveList(): Promise<ResourceContent> {
+export async function getVideoArchiveList(
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
+): Promise<ResourceContent> {
   try {
-    const recordings = await listVideoRecordings();
+    const recordings = await store.list();
     return {
       uri: VIDEO_RESOURCE_URIS.ARCHIVE,
       mimeType: "application/json",
@@ -103,7 +127,10 @@ async function getVideoArchiveList(): Promise<ResourceContent> {
   }
 }
 
-async function getVideoArchiveItem(params: Record<string, string>): Promise<ResourceContent> {
+export async function getVideoArchiveItem(
+  params: Record<string, string>,
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
+): Promise<ResourceContent> {
   try {
     const recordingId = params.recordingId;
     if (!recordingId) {
@@ -114,7 +141,7 @@ async function getVideoArchiveItem(params: Record<string, string>): Promise<Reso
       };
     }
 
-    const metadata = await getVideoRecordingMetadata(recordingId, { touch: true });
+    const metadata = await store.getById(recordingId, { touch: true });
     if (!metadata) {
       return {
         uri: buildVideoArchiveItemUri(recordingId),
@@ -125,7 +152,7 @@ async function getVideoArchiveItem(params: Record<string, string>): Promise<Reso
       };
     }
 
-    return buildVideoResourceContent(metadata, buildVideoArchiveItemUri(recordingId));
+    return buildVideoResourceContent(metadata, buildVideoArchiveItemUri(recordingId), store);
   } catch (error) {
     logger.error(`[VideoRecordingResources] Failed to read recording: ${error}`);
     return {

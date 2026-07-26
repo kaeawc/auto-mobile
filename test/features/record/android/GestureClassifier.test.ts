@@ -244,6 +244,23 @@ describe("GestureClassifier", () => {
     expect(result).toBeNull();
   });
 
+  test("two fingers starting at the same point emit no pinch (no divide-by-zero scale)", () => {
+    // initialDist === 0 would make scale = finalDist / 0 = Infinity. The guard
+    // must suppress the pinch entirely rather than emit a non-finite scale that
+    // would corrupt a recorded plan.
+    c.feedFrame(makeFrame(0, [
+      { slotId: 0, trackingId: 1, x: 500, y: 500 },
+      { slotId: 1, trackingId: 2, x: 500, y: 500 },
+    ]));
+    c.feedFrame(makeFrame(100, [
+      { slotId: 0, trackingId: 1, x: 300, y: 500 },
+      { slotId: 1, trackingId: 2, x: 700, y: 500 },
+    ]));
+
+    const result = c.feedFrame(makeFrame(200, [], [0, 1]));
+    expect(result).toBeNull();
+  });
+
   // -------------------------------------------------------------------------
   // Edge cases
   // -------------------------------------------------------------------------

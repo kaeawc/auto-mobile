@@ -118,6 +118,9 @@ class ToolRegistrationValidator {
     "mockNetwork",
     "clearMockNetwork",
     "getNetworkGraph",
+    "explore",
+    "getNavigationGraph",
+    "navigateTo",
 
     // Feature-flag controlled tools
     "criticalSection",

@@ -35,14 +35,23 @@ export const exploreSchema = addDeviceTargetingToSchema(z.object({
 export interface NavigateToArgs {
   targetScreen: string;
   platform: Platform;
+  sessionUuid?: string;
 }
 
 export interface GetNavigationGraphArgs {
   platform: Platform;
+  sessionUuid?: string;
 }
 
 export interface ExploreArgs extends ExploreOptions {
   platform: Platform;
+  sessionUuid?: string;
+}
+
+function getNavigationManager(sessionUuid?: string): NavigationGraphManager {
+  return sessionUuid
+    ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+    : NavigationGraphManager.getInstance();
 }
 
 // Register navigation tools
@@ -54,7 +63,13 @@ export function registerNavigationTools() {
     progress?: ProgressCallback
   ) => {
     try {
-      const navigateTo = new NavigateTo(device);
+      const navigateTo = new NavigateTo(
+        device,
+        undefined,
+        null,
+        null,
+        getNavigationManager(args.sessionUuid)
+      );
       const options: NavigateToOptions = {
         targetScreen: args.targetScreen,
         platform: args.platform || "android"
@@ -83,9 +98,7 @@ export function registerNavigationTools() {
     args: GetNavigationGraphArgs
   ) => {
     try {
-      const manager = args.sessionUuid
-        ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
-        : NavigationGraphManager.getInstance();
+      const manager = getNavigationManager(args.sessionUuid);
       const stats = await manager.getStats();
       const graph = await manager.exportGraph();
 
@@ -116,9 +129,9 @@ export function registerNavigationTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware("navigateTo", "Navigate to screen using navigation graph", navigateToSchema, navigateToHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware("navigateTo", "Navigate to screen using navigation graph", navigateToSchema, navigateToHandler, { supportsProgress: true, debugOnly: true });
 
-  ToolRegistry.registerDeviceAware("getNavigationGraph", "Get navigation graph", getNavigationGraphSchema, getNavigationGraphHandler);
+  ToolRegistry.registerDeviceAware("getNavigationGraph", "Get navigation graph for debugging", getNavigationGraphSchema, getNavigationGraphHandler, { debugOnly: true });
 
   // Explore handler
   const exploreHandler = async (
@@ -128,7 +141,7 @@ export function registerNavigationTools() {
     signal?: AbortSignal
   ) => {
     try {
-      const explore = new Explore(device);
+      const explore = new Explore(device, null, undefined, getNavigationManager(args.sessionUuid));
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
         timeoutMs: args.timeoutMs,
@@ -157,5 +170,5 @@ export function registerNavigationTools() {
     }
   };
 
-  ToolRegistry.registerDeviceAware("explore", "Automatically explore app to build navigation graph", exploreSchema, exploreHandler, { supportsProgress: true });
+  ToolRegistry.registerDeviceAware("explore", "Automatically explore app to build navigation graph", exploreSchema, exploreHandler, { supportsProgress: true, debugOnly: true });
 }

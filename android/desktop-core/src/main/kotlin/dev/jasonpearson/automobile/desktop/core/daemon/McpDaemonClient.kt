@@ -10,6 +10,7 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -574,7 +575,23 @@ object DaemonSocketPaths {
 
   fun pidFilePath(): String {
     val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.pid"
+    return resolvePidFilePath(
+      System.getenv("AUTOMOBILE_DAEMON_PID_FILE_PATH")
+        ?: System.getenv("AUTO_MOBILE_DAEMON_PID_FILE_PATH"),
+      "/tmp/auto-mobile-daemon-$userId.pid",
+      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
+    )
+  }
+
+  internal fun resolvePidFilePath(
+    override: String?,
+    defaultPath: String,
+    daemonLaunchCwd: String,
+  ): String {
+    val configuredPath = override?.trim().takeUnless { it.isNullOrEmpty() } ?: return defaultPath
+    val path = Path.of(configuredPath)
+    return if (path.isAbsolute) configuredPath
+    else Path.of(daemonLaunchCwd, configuredPath).toString()
   }
 
   /** Version this desktop client declares to the daemon's version handshake gate. */

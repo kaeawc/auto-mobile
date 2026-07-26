@@ -31,17 +31,18 @@ class DesktopDaemonLifecycleTest {
   @Test
   fun `starts when a matching pid file remains after the daemon socket disappears`() {
     val commands = FakeDaemonCommandExecutor()
+    val timer = FakeDaemonRetryTimer()
     val lifecycle =
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(listOf(false, true)),
+        socketChecker = FakeDaemonSocketChecker(listOf(false, false, false, true)),
         pidFileReader =
           FakeDaemonPidFileReader(
             versions = listOf("0.0.40", "0.0.40"),
             launchArguments = listOf("--network-mockable"),
           ),
         commandExecutor = commands,
-        timer = FakeDaemonRetryTimer(),
+        timer = timer,
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -61,6 +62,47 @@ class DesktopDaemonLifecycleTest {
       ),
       commands.commands,
     )
+    assertEquals(listOf(150L, 150L), timer.delays)
+  }
+
+  @Test
+  fun `retries a transient socket refusal before replacing a matching daemon`() {
+    val commands = FakeDaemonCommandExecutor()
+    val timer = FakeDaemonRetryTimer()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
+        commandExecutor = commands,
+        timer = timer,
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertFalse(result.restarted)
+    assertTrue(commands.commands.isEmpty())
+    assertEquals(listOf(150L), timer.delays)
+  }
+
+  @Test
+  fun `rejects a newer daemon without restarting it`() {
+    val commands = FakeDaemonCommandExecutor()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.41")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertTrue(result.message.contains("newer"))
+    assertTrue(commands.commands.isEmpty())
   }
 
   @Test
@@ -298,6 +340,22 @@ class DesktopDaemonLifecycleTest {
     } finally {
       pidFile.delete()
     }
+  }
+
+  @Test
+  fun `resolves PID-file overrides using the daemon launch directory`() {
+    assertEquals(
+      "/tmp/automobile/daemon.pid",
+      DaemonSocketPaths.resolvePidFilePath("daemon.pid", "/tmp/default.pid", "/tmp/automobile"),
+    )
+    assertEquals(
+      "/var/run/automobile.pid",
+      DaemonSocketPaths.resolvePidFilePath(
+        "/var/run/automobile.pid",
+        "/tmp/default.pid",
+        "/tmp/automobile",
+      ),
+    )
   }
 
   private class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {

@@ -260,9 +260,16 @@ internal class DesktopDaemonLifecycle(
             )
         }
       val currentVersion = currentDaemon?.version
-      val daemonAvailable = socketChecker.isReady()
+      val daemonAvailable = socketIsReady(currentVersion, expectedVersion)
       if (daemonAvailable && versionsMatch(currentVersion, expectedVersion)) {
         return DaemonLifecycleResult.Ready(restarted = false)
+      }
+
+      if (daemonAvailable && daemonIsNewer(currentVersion, expectedVersion)) {
+        return DaemonLifecycleResult.Failure(
+          "AutoMobile daemon $currentVersion is newer than desktop $expectedVersion. " +
+            "Update the desktop application before connecting."
+        )
       }
 
       if (declaresFullVersion(expectedVersion)) {
@@ -344,6 +351,35 @@ internal class DesktopDaemonLifecycle(
     return DaemonPidReadResult.Unreadable
   }
 
+  private fun socketIsReady(
+    currentVersion: String?,
+    expectedVersion: String,
+  ): Boolean {
+    if (!versionsMatch(currentVersion, expectedVersion)) return socketChecker.isReady()
+    repeat(SOCKET_PROBE_ATTEMPTS) { attempt ->
+      if (socketChecker.isReady()) return true
+      if (attempt + 1 < SOCKET_PROBE_ATTEMPTS) timer.sleep(SOCKET_PROBE_RETRY_DELAY_MS)
+    }
+    return false
+  }
+
+  private fun daemonIsNewer(
+    currentVersion: String?,
+    expectedVersion: String,
+  ): Boolean {
+    val currentRelease = currentVersion?.let(DaemonSocketPaths::releaseVersion).orEmpty()
+    val expectedRelease = DaemonSocketPaths.releaseVersion(expectedVersion)
+    val currentParts = currentRelease.split('.').map { it.toIntOrNull() ?: return false }
+    val expectedParts = expectedRelease.split('.').map { it.toIntOrNull() ?: return false }
+    val length = maxOf(currentParts.size, expectedParts.size)
+    for (index in 0 until length) {
+      val difference =
+        (currentParts.getOrElse(index) { 0 }).compareTo(expectedParts.getOrElse(index) { 0 })
+      if (difference != 0) return difference > 0
+    }
+    return false
+  }
+
   private fun versionsMatch(
     actualVersion: String?,
     expectedVersion: String,
@@ -383,5 +419,7 @@ internal class DesktopDaemonLifecycle(
     const val VERIFICATION_RETRY_DELAY_MS = 100L
     const val PID_READ_ATTEMPTS = 3
     const val PID_READ_RETRY_DELAY_MS = 100L
+    const val SOCKET_PROBE_ATTEMPTS = 3
+    const val SOCKET_PROBE_RETRY_DELAY_MS = 150L
   }
 }

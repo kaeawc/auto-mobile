@@ -43,7 +43,11 @@ function parsePositiveNumber(
     return fallback;
   }
 
-  return allowFloat ? parsed : Math.round(parsed);
+  // Apply rounding before the final positivity check: a positive input in
+  // (0, 0.5) rounds to 0 for integer fields, which would violate the
+  // positive-number contract and break idempotence (parse(parse(x)) !== parse(x)).
+  const result = allowFloat ? parsed : Math.round(parsed);
+  return result > 0 ? result : fallback;
 }
 
 function parseUserApps(value: string | undefined, fallback: "current" | "all"): "current" | "all" {

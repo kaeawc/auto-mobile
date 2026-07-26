@@ -32,13 +32,25 @@ function presentation(metadata: StringMap): string | undefined {
   return firstNonEmpty(metadata.presentation, metadata.modal, metadata.sheet);
 }
 
-function makeKey(bundleId: string, route: string, tab?: string, presentationRoute?: string): string {
+function makeKey(
+  bundleId: string,
+  route: string,
+  arguments_: StringMap,
+  tab?: string,
+  presentationRoute?: string,
+): string {
   const parts: string[][] = [["bundle", bundleId], ["route", route]];
   if (tab) {
     parts.push(["tab", tab]);
   }
   if (presentationRoute) {
     parts.push(["presentation", presentationRoute]);
+  }
+  for (const [name, value] of Object.entries(arguments_)
+    .map(([name, value]) => [stringValue(name), stringValue(value)] as const)
+    .filter((entry): entry is readonly [string, string] => entry[0] !== undefined && entry[1] !== undefined && entry[0] !== "tab")
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
+    parts.push(["argument", name, value]);
   }
   return JSON.stringify(parts);
 }
@@ -60,13 +72,14 @@ export function deriveIosSdkScreenIdentity(
     return undefined;
   }
 
-  const tab = selectedTab(stringMap(payload.arguments), stringMap(payload.metadata), route);
+  const arguments_ = stringMap(payload.arguments);
+  const tab = selectedTab(arguments_, stringMap(payload.metadata), route);
   const presentationRoute = presentation(stringMap(payload.metadata));
   return {
     platform: "ios",
     source: "sdk",
     confidence: "high",
-    key: makeKey(applicationId, route, tab, presentationRoute),
+    key: makeKey(applicationId, route, arguments_, tab, presentationRoute),
     components: {
       bundleId: applicationId,
       navigationRoute: route,

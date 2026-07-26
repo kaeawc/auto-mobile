@@ -41,6 +41,25 @@ describe("deriveIosSdkScreenIdentity", () => {
     expect(deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, routes[2])!.key).toBe(keys[2]);
   });
 
+  test("distinguishes destination instances by canonical navigation arguments", () => {
+    const first = deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, {
+      destination: "VideoDetail",
+      arguments: { title: "First video", videoId: "video-1" },
+    })!;
+    const second = deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, {
+      destination: "VideoDetail",
+      arguments: { videoId: "video-2", title: "Second video" },
+    })!;
+    const reordered = deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, {
+      destination: "VideoDetail",
+      arguments: { videoId: "video-1", title: "First video" },
+    })!;
+
+    expect(first.key).not.toBe(second.key);
+    expect(first.key).toBe(reordered.key);
+    expect(first.key).toContain(JSON.stringify(["argument", "videoId", "video-1"]));
+  });
+
   test("omits identity without a bundle or destination", () => {
     expect(deriveIosSdkScreenIdentity("navigation", undefined, { destination: "Settings" })).toBeUndefined();
     expect(deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, { destination: "  " })).toBeUndefined();

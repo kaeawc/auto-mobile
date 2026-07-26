@@ -91,11 +91,12 @@ public enum SdkEventType: String, Codable, Sendable
 public struct SdkNavigationEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .navigation
   public let timestamp: Int64
+  public let sequenceNumber: Int64?
   public let destination: String
   public let source: NavigationSourceType
   public let arguments: [String: String]
   public let metadata: [String: String]
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), destination: String, source: NavigationSourceType, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), sequenceNumber: Int64? = nil, destination: String, source: NavigationSourceType, arguments: [String: String] = [:], metadata: [String: String] = [:] )
 public struct SdkHandledExceptionEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .handledException
   public let timestamp: Int64

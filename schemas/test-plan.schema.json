@@ -467,11 +467,11 @@
               "userId": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "Android user id for runtime permission grants and revokes"
+                "description": "Android user ID for grant/revoke, not reset"
               },
               "notificationsEnabled": {
                 "type": "boolean",
-                "description": "Android only: enable or disable app notifications independently of POST_NOTIFICATIONS"
+                "description": "Android notification state, independent of POST_NOTIFICATIONS"
               },
               "notificationPolicyAccess": {
                 "type": "boolean",
@@ -539,6 +539,27 @@
                 "required": [
                   "params"
                 ]
+              }
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "action": {
+                      "const": "reset"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "required": [
+                      "userId"
+                    ]
+                  }
+                }
               }
             ]
           }
@@ -1197,11 +1218,11 @@
         "userId": {
           "type": "integer",
           "minimum": 0,
-          "description": "Android user id for runtime permission grants and revokes"
+          "description": "Android user ID for grant/revoke, not reset"
         },
         "notificationsEnabled": {
           "type": "boolean",
-          "description": "Android only: enable or disable app notifications independently of POST_NOTIFICATIONS"
+          "description": "Android notification state, independent of POST_NOTIFICATIONS"
         },
         "notificationPolicyAccess": {
           "type": "boolean",
@@ -1260,6 +1281,27 @@
           "required": [
             "scheduleExactAlarm"
           ]
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "reset"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "userId"
+              ]
+            }
+          }
         }
       ],
       "description": "Parameters for setAppPermissions"

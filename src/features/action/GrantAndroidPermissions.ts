@@ -165,12 +165,28 @@ export class GrantAndroidPermissions {
     perf: ReturnType<typeof createGlobalPerformanceTracker>
   ): Promise<GrantAndroidPermissionsResult> {
     const resetPermissions = permissions.map(permission => permission.trim());
+    if (userId !== undefined) {
+      perf.end();
+      return {
+        success: false,
+        appId: packageName,
+        userId: 0,
+        results: [{
+          operationId: "pm_reset_permissions",
+          success: false,
+          countsTowardSuccess: true,
+          error: "Android reset is device-wide and does not support userId",
+        }],
+        error: "Failed step(s): pm_reset_permissions",
+      };
+    }
+
     if (resetPermissions.length !== 1 || resetPermissions[0] !== "all") {
       perf.end();
       return {
         success: false,
         appId: packageName,
-        userId: userId ?? 0,
+        userId: 0,
         results: [{
           operationId: "pm_reset_permissions",
           success: false,
@@ -194,7 +210,7 @@ export class GrantAndroidPermissions {
       return {
         success: true,
         appId: packageName,
-        userId: userId ?? 0,
+        userId: 0,
         results: [{
           operationId: "pm_reset_permissions",
           success: true,
@@ -207,7 +223,7 @@ export class GrantAndroidPermissions {
       return {
         success: false,
         appId: packageName,
-        userId: userId ?? 0,
+        userId: 0,
         results: [{
           operationId: "pm_reset_permissions",
           success: false,

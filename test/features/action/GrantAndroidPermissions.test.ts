@@ -126,6 +126,30 @@ describe("GrantAndroidPermissions", () => {
     expect(result.error).toContain("pm_reset_permissions");
   });
 
+  test("rejects reset with a target user because it is device-wide", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    const action = new GrantAndroidPermissions(androidDevice, factory);
+
+    const result = await action.execute("com.example.app", {
+      action: "reset",
+      permissions: ["all"],
+      userId: 10,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.userId).toBe(0);
+    expect(result.results).toEqual([
+      {
+        operationId: "pm_reset_permissions",
+        success: false,
+        countsTowardSuccess: true,
+        error: "Android reset is device-wide and does not support userId",
+      },
+    ]);
+    expect(client.wasCommandExecuted("shell pm reset-permissions")).toBe(false);
+  });
+
   test("reports a pm reset-permissions failure as a required operation failure", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();

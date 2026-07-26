@@ -544,6 +544,10 @@ class TestPlanValidatorTest {
             action: revoke
             permissions:
               - camera
+        - tool: setAppPermissions
+          params:
+            appId: com.example.app
+            notificationsEnabled: true
         - tool: getAppPermissions
           params:
             appId: com.example.app
@@ -554,6 +558,27 @@ class TestPlanValidatorTest {
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertTrue(result.valid, "YAML with valid tools should pass validation: ${result.errors}")
+  }
+
+  @Test
+  fun `rejects reset with userId`() {
+    val yaml =
+      """
+      name: invalid-reset-user
+      steps:
+        - tool: setAppPermissions
+          params:
+            appId: com.example.app
+            action: reset
+            permissions:
+              - all
+            userId: 10
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+
+    assertFalse(result.valid, "Android reset must reject userId: ${result.errors}")
   }
 
   @Test

@@ -70,24 +70,23 @@ export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSche
     action: appPermissionActionSchema
       .optional()
       .describe(
-        "Permission action; defaults to grant. Android supports grant/revoke/reset; iOS simulators " +
-        "support grant/revoke/reset; Android reset requires permissions=['all'] and resets runtime permissions " +
-        "device-wide. iOS physical devices support reset only, including permissions=['all']."
+        "Action (default grant). Android reset requires permissions=['all'] device-wide; " +
+        "iOS physical devices support reset only."
       ),
     permissions: z
       .array(z.string().min(1))
       .optional()
-      .describe("Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'"),
+      .describe("Permissions; Android and physical iOS reset accepts only 'all'"),
     userId: z
       .number()
       .int()
       .nonnegative()
       .optional()
-      .describe("Android user id"),
+      .describe("Android user ID for grant/revoke, not reset"),
     notificationsEnabled: z
       .boolean()
       .optional()
-      .describe("Android: enable or disable app notifications independently of POST_NOTIFICATIONS"),
+      .describe("Android notification state, independent of POST_NOTIFICATIONS"),
     notificationPolicyAccess: z
       .boolean()
       .optional()
@@ -104,6 +103,9 @@ export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSche
     args.notificationPolicyAccess !== undefined ||
     args.scheduleExactAlarm !== undefined,
   "Provide at least one permission or platform-specific permission option"
+).refine(
+  args => args.action !== "reset" || args.userId === undefined,
+  "Android reset is device-wide and does not support userId"
 );
 
 export const getAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSchema(

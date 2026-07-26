@@ -409,6 +409,37 @@ steps:
       expect(result.valid).toBe(false);
     });
 
+    it("should reject inline Android reset with a userId", () => {
+      const yaml = `
+name: invalid-inline-reset-user
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    action: reset
+    permissions:
+      - all
+    userId: 10
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject nested Android reset with a userId", () => {
+      const yaml = `
+name: invalid-nested-reset-user
+steps:
+  - tool: setAppPermissions
+    params:
+      appId: com.example.app
+      action: reset
+      permissions:
+        - all
+      userId: 10
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
     it("should reject setDeviceState with no state", () => {
       const yaml = `
 name: bad-set-device-state

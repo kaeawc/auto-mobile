@@ -405,6 +405,145 @@
               }
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setAppPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setAppPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "grant",
+                  "revoke",
+                  "reset"
+                ],
+                "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
+              },
+              "permissions": {
+                "type": "array",
+                "description": "Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "userId": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Android user ID for grant/revoke, not reset"
+              },
+              "notificationsEnabled": {
+                "type": "boolean",
+                "description": "Android notification state, independent of POST_NOTIFICATIONS"
+              },
+              "notificationPolicyAccess": {
+                "type": "boolean",
+                "description": "Android only: set notification policy / DND access"
+              },
+              "scheduleExactAlarm": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny"
+                ],
+                "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId",
+                  "permissions"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "notificationsEnabled"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "notificationPolicyAccess"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "scheduleExactAlarm"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "action": {
+                      "const": "reset"
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "required": [
+                      "userId"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
         }
       ]
     },
@@ -642,6 +781,127 @@
       },
       "additionalProperties": true,
       "description": "Parameters for highlight"
+    },
+    "setAppPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ],
+          "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Runtime permissions or simulator privacy services to change; Android and iOS physical reset accept only 'all'"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Android user ID for grant/revoke, not reset"
+        },
+        "notificationsEnabled": {
+          "type": "boolean",
+          "description": "Android notification state, independent of POST_NOTIFICATIONS"
+        },
+        "notificationPolicyAccess": {
+          "type": "boolean",
+          "description": "Android only: set notification policy / DND access"
+        },
+        "scheduleExactAlarm": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "notificationsEnabled"
+          ]
+        },
+        {
+          "required": [
+            "permissions"
+          ]
+        },
+        {
+          "required": [
+            "notificationPolicyAccess"
+          ]
+        },
+        {
+          "required": [
+            "scheduleExactAlarm"
+          ]
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "reset"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "userId"
+              ]
+            }
+          }
+        }
+      ],
+      "description": "Parameters for setAppPermissions"
     },
     "expectation": {
       "type": "object",

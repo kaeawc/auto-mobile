@@ -22,7 +22,10 @@ export interface GrantAndroidPermissionItemResult {
 export interface GrantAndroidPermissionsResult {
   success: boolean;
   appId: string;
-  /** User id used with `pm grant` or `pm revoke` (0 = primary, 10+ = work profile when inferred). */
+  /**
+   * User id used with `pm grant` or `pm revoke` (0 = primary, 10+ = work profile when inferred).
+   * Device-wide `pm reset-permissions` does not target a user and returns 0.
+   */
   userId: number;
   results: GrantAndroidPermissionItemResult[];
   error?: string;

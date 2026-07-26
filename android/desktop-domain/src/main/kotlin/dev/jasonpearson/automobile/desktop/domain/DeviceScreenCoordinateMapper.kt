@@ -18,10 +18,12 @@ public enum class DeviceScreenControlMode {
   Inspector,
 
   /**
-   * A click (and, in later work, a drag) maps to a device coordinate that a caller can forward to
-   * the typed daemon input helpers as a tap/swipe. Selecting and hover-highlighting are suppressed.
-   * Wiring the coordinate to the daemon is the caller's responsibility; this module never sends
-   * input.
+   * A click maps to a device coordinate a caller can forward to the typed daemon input helpers as a
+   * tap, and a drag maps to a start/end pair a caller can forward as a swipe (see
+   * [DeviceDragGesturePolicy] for when a drag counts as one). Selecting and hover-highlighting are
+   * suppressed, and viewport pan moves onto the zoom modifier so a plain drag is free to mean a
+   * device swipe. Wiring the coordinates to the daemon is the caller's responsibility; this module
+   * never sends input.
    */
   Control,
 }

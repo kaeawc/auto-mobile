@@ -15,9 +15,9 @@ import org.junit.Test
  * `input/tap` request is covered separately by `McpDaemonClientInputTest`; here the payload-level
  * assertion runs against [FakeAutoMobileClient]'s recorded call.
  */
-class DeviceControlTapForwarderTest {
+class DeviceControlInputForwarderTest {
 
-  private val forwarder = DeviceControlTapForwarder()
+  private val forwarder = DeviceControlInputForwarder()
 
   private fun forward(
     point: DevicePoint,
@@ -25,7 +25,7 @@ class DeviceControlTapForwarderTest {
     platform: String = "android",
     deviceId: String? = "emulator-5554",
     onError: (String) -> Unit = { error("unexpected error: $it") },
-  ) = forwarder.forward(point, client, platform, deviceId, onError)
+  ) = forwarder.forwardTap(point, client, platform, deviceId, onError)
 
   @Test
   fun `in-bounds tap forwards mapped device coordinates to inputTap`() {
@@ -128,6 +128,138 @@ class DeviceControlTapForwarderTest {
 
     forward(DevicePoint(x = 1, y = 2, inBounds = true), client = fake, onError = { error = it })
 
-    assertEquals(DeviceControlTapForwarder.DEFAULT_TAP_ERROR, error)
+    assertEquals(DeviceControlInputForwarder.DEFAULT_INPUT_ERROR, error)
+  }
+
+  @Test
+  fun `in-bounds swipe forwards both endpoints and the duration to inputSwipe`() {
+    val fake = FakeAutoMobileClient()
+
+    forwarder.forwardSwipe(
+      start = DevicePoint(x = 540, y = 1800, inBounds = true),
+      end = DevicePoint(x = 540, y = 400, inBounds = true),
+      durationMs = 300,
+      client = fake,
+      platform = "ios",
+      deviceId = "sim-udid",
+      onError = { error("unexpected error: $it") },
+    )
+
+    assertEquals(
+      listOf(
+        FakeAutoMobileClient.InputSwipeCall(
+          startX = 540.0,
+          startY = 1800.0,
+          endX = 540.0,
+          endY = 400.0,
+          platform = "ios",
+          deviceId = "sim-udid",
+          durationMs = 300,
+        )
+      ),
+      fake.inputSwipeCalls,
+    )
+  }
+
+  @Test
+  fun `a swipe with an off-screen endpoint never reaches the daemon`() {
+    // The daemon interpolates between the endpoints, so a bad END is as damaging as a bad start.
+    val fake = FakeAutoMobileClient()
+    var error: String? = null
+
+    forwarder.forwardSwipe(
+      start = DevicePoint(x = 540, y = 1800, inBounds = true),
+      end = DevicePoint(x = 540, y = 9_000, inBounds = false),
+      durationMs = 300,
+      client = fake,
+      platform = "android",
+      deviceId = "emulator-5554",
+      onError = { error = it },
+    )
+    forwarder.forwardSwipe(
+      start = DevicePoint(x = -4, y = 10, inBounds = false),
+      end = DevicePoint(x = 540, y = 400, inBounds = true),
+      durationMs = 300,
+      client = fake,
+      platform = "android",
+      deviceId = "emulator-5554",
+      onError = { error = it },
+    )
+
+    assertTrue(fake.inputSwipeCalls.isEmpty(), "an off-screen endpoint must not be sent")
+    assertTrue("inputSwipe" !in fake.calls)
+    assertNull(error, "dropping a malformed swipe is silent, not an error")
+  }
+
+  @Test
+  fun `a failed swipe surfaces the daemon's actionable error`() {
+    val fake =
+      FakeAutoMobileClient().apply {
+        inputSwipeResult =
+          InputActionResult(
+            action = "input/swipe",
+            success = false,
+            error = "No active android device to swipe",
+          )
+      }
+    var error: String? = null
+
+    forwarder.forwardSwipe(
+      start = DevicePoint(x = 1, y = 2, inBounds = true),
+      end = DevicePoint(x = 3, y = 400, inBounds = true),
+      durationMs = 300,
+      client = fake,
+      platform = "android",
+      deviceId = null,
+      onError = { error = it },
+    )
+
+    assertEquals("No active android device to swipe", error)
+  }
+
+  @Test
+  fun `a thrown client exception during a swipe surfaces its message`() {
+    val throwing =
+      object : AutoMobileClient by FakeAutoMobileClient() {
+        override fun inputSwipe(
+          startX: Double,
+          startY: Double,
+          endX: Double,
+          endY: Double,
+          platform: String,
+          deviceId: String?,
+          durationMs: Int?,
+        ): InputActionResult = throw IllegalStateException("daemon socket closed")
+      }
+    var error: String? = null
+
+    forwarder.forwardSwipe(
+      start = DevicePoint(x = 1, y = 2, inBounds = true),
+      end = DevicePoint(x = 3, y = 400, inBounds = true),
+      durationMs = 300,
+      client = throwing,
+      platform = "android",
+      deviceId = null,
+      onError = { error = it },
+    )
+
+    assertEquals("daemon socket closed", error)
+  }
+
+  @Test
+  fun `no connected client drops the swipe without error`() {
+    var error: String? = null
+
+    forwarder.forwardSwipe(
+      start = DevicePoint(x = 1, y = 2, inBounds = true),
+      end = DevicePoint(x = 3, y = 400, inBounds = true),
+      durationMs = 300,
+      client = null,
+      platform = "android",
+      deviceId = null,
+      onError = { error = it },
+    )
+
+    assertNull(error)
   }
 }

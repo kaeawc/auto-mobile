@@ -1,11 +1,20 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.down
+import androidx.compose.ui.test.moveTo
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.up
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSource
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
@@ -119,6 +128,172 @@ class DeviceScreenViewControlTest {
       )
       assertEquals("root", selections.last())
     }
+
+  @Test
+  fun `a control-mode drag reports one swipe and no tap`() = runComposeUiTest {
+    val swipes = mutableListOf<Triple<DeviceFrameSnapshot, DevicePoint, DevicePoint>>()
+    val controlTaps = mutableListOf<DevicePoint>()
+
+    setContent {
+      MaterialTheme {
+        controlView(
+          onSwipe = { s, a, b -> swipes.add(Triple(s, a, b)) },
+          onTap = { controlTaps.add(it) },
+        )
+      }
+    }
+
+    // Stay well inside the fitted device frame: the viewport is larger than the frame, so a
+    // full-height swipe would start and end off the device screen.
+    onRoot().performTouchInput { swipe(center + Offset(0f, 80f), center - Offset(0f, 80f)) }
+    waitForIdle()
+
+    val (snapshot, start, end) = swipes.single()
+    assertEquals(42L, snapshot.sequence, "both ends map through the drag's own snapshot")
+    assertTrue(start.inBounds && end.inBounds)
+    assertTrue(start.y > end.y, "a swipe up ends above where it started (${start.y} -> ${end.y})")
+    // A drag must not ALSO fire the click-to-tap path — that would send two inputs for one gesture.
+    assertTrue(controlTaps.isEmpty(), "a drag must not also report a tap (got $controlTaps)")
+  }
+
+  @Test
+  fun `a movement too small to be a drag still reports a tap and no swipe`() = runComposeUiTest {
+    // The threshold must not accidentally suppress click-to-tap, and must not fire both.
+    val swipes = mutableListOf<Triple<DeviceFrameSnapshot, DevicePoint, DevicePoint>>()
+    val controlTaps = mutableListOf<DevicePoint>()
+
+    setContent {
+      MaterialTheme {
+        controlView(
+          onSwipe = { s, a, b -> swipes.add(Triple(s, a, b)) },
+          onTap = { controlTaps.add(it) },
+        )
+      }
+    }
+
+    onRoot().performTouchInput {
+      down(center)
+      moveTo(center + Offset(2f, 3f))
+      up()
+    }
+    waitForIdle()
+
+    assertTrue(swipes.isEmpty(), "a movement below the drag threshold sends no swipe")
+    assertEquals(1, controlTaps.size, "and it still reports exactly one tap")
+  }
+
+  /**
+   * Drags from below-center to above-center, optionally swapping in a DIFFERENT snapshot halfway
+   * through, and returns what the view reported.
+   */
+  private fun dragReporting(
+    swapMidDrag: Boolean
+  ): Triple<DeviceFrameSnapshot, DevicePoint, DevicePoint> {
+    var reported: Triple<DeviceFrameSnapshot, DevicePoint, DevicePoint>? = null
+    runComposeUiTest {
+      var current by mutableStateOf(snapshot(1080, 2340, sequence = 42L))
+      setContent {
+        MaterialTheme {
+          DeviceScreenView(
+            screenshotData = null,
+            screenWidth = 1080,
+            screenHeight = 2340,
+            hierarchy = root,
+            selectedElementId = null,
+            hoveredElementId = null,
+            onElementSelected = {},
+            onElementHovered = {},
+            elementMap = mapOf("root" to root),
+            controlMode = DeviceScreenControlMode.Control,
+            controlSnapshot = current,
+            onControlTap = { _, _ -> },
+            onControlSwipe = { s, a, b -> reported = Triple(s, a, b) },
+          )
+        }
+      }
+
+      onRoot().performTouchInput {
+        down(center + Offset(0f, 80f))
+        moveTo(center)
+      }
+      waitForIdle()
+      if (swapMidDrag) {
+        // An equal-aspect resolution change lands while the finger is still down. Re-reading the
+        // frame here would rescale the second half of the gesture.
+        current = snapshot(540, 1170, sequence = 99L)
+        waitForIdle()
+      }
+      onRoot().performTouchInput {
+        moveTo(center - Offset(0f, 80f))
+        up()
+      }
+      waitForIdle()
+    }
+    return assertNotNull(reported, "the drag should report a swipe")
+  }
+
+  @Test
+  fun `a snapshot arriving mid-drag cannot change the mapping`() {
+    // The whole gesture maps through the frame it STARTED on (issue #3350 on top of #3348's
+    // snapshot contract). Both runs make the identical gesture; only the mid-drag swap differs.
+    val undisturbed = dragReporting(swapMidDrag = false)
+    val swapped = dragReporting(swapMidDrag = true)
+
+    assertEquals(42L, swapped.first.sequence, "the reported snapshot is the one the drag began on")
+    assertEquals(undisturbed.second, swapped.second, "start is unaffected by the swap")
+    assertEquals(
+      undisturbed.third,
+      swapped.third,
+      "end maps through the ORIGINAL frame, not the one that arrived mid-drag",
+    )
+  }
+
+  @Test
+  fun `an inspector-mode drag reports no swipe`() = runComposeUiTest {
+    // The IDE plugin never opts into control mode, so drag there must stay viewport pan and
+    // produce no daemon input at all.
+    val swipes = mutableListOf<Triple<DeviceFrameSnapshot, DevicePoint, DevicePoint>>()
+
+    setContent {
+      MaterialTheme {
+        controlView(
+          mode = DeviceScreenControlMode.Inspector,
+          onSwipe = { s, a, b -> swipes.add(Triple(s, a, b)) },
+          onTap = {},
+        )
+      }
+    }
+
+    // Stay well inside the fitted device frame: the viewport is larger than the frame, so a
+    // full-height swipe would start and end off the device screen.
+    onRoot().performTouchInput { swipe(center + Offset(0f, 80f), center - Offset(0f, 80f)) }
+    waitForIdle()
+
+    assertTrue(swipes.isEmpty(), "inspector mode must never report a control swipe")
+  }
+
+  @Composable
+  private fun controlView(
+    mode: DeviceScreenControlMode = DeviceScreenControlMode.Control,
+    onSwipe: (DeviceFrameSnapshot, DevicePoint, DevicePoint) -> Unit,
+    onTap: (DevicePoint) -> Unit,
+  ) {
+    DeviceScreenView(
+      screenshotData = null,
+      screenWidth = 1080,
+      screenHeight = 2340,
+      hierarchy = root,
+      selectedElementId = null,
+      hoveredElementId = null,
+      onElementSelected = {},
+      onElementHovered = {},
+      elementMap = mapOf("root" to root),
+      controlMode = mode,
+      controlSnapshot = snapshot(1080, 2340, sequence = 42L),
+      onControlTap = { _, point -> onTap(point) },
+      onControlSwipe = onSwipe,
+    )
+  }
 
   private fun snapshot(deviceWidth: Int, deviceHeight: Int, sequence: Long = 1L) =
     DeviceFrameSnapshot(

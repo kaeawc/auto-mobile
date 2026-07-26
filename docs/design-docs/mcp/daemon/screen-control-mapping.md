@@ -24,14 +24,15 @@ A device-screen view honors one of two modes (`DeviceScreenControlMode`):
   behavior. It is the default so existing consumers (including the Android IDE
   plugin, which shares `desktop-core`) are unaffected with no source change.
 - **Control** — a click maps to a device coordinate that the client forwards to
-  the daemon input helpers as a tap (drag-to-swipe follows in
-  [#3350](https://github.com/kaeawc/auto-mobile/issues/3350)). Element selection
-  and hover highlighting are suppressed.
+  the daemon input helpers as a tap, and a drag maps to a start/end pair the
+  client forwards as a swipe (see [Drag-to-swipe policy](#drag-to-swipe-policy)).
+  Element selection and hover highlighting are suppressed.
 
 Control mode is strictly opt-in. The view itself never sends daemon input; it
 only reports the mapped coordinate to a caller-supplied callback. Wiring the
 coordinate to `inputTap`/`inputSwipe` is the client's responsibility
-([#3347](https://github.com/kaeawc/auto-mobile/issues/3347)).
+([#3347](https://github.com/kaeawc/auto-mobile/issues/3347),
+[#3350](https://github.com/kaeawc/auto-mobile/issues/3350)).
 
 ## Coordinate spaces
 
@@ -104,6 +105,83 @@ Notes and rules a client must reproduce:
   client must **drop** the point instead. The reference `DevicePoint.clampedTo`
   mirrors this — it reports `inBounds = false` for a zero-dimension screen.
 
+## Drag-to-swipe policy
+
+A pointer drag in **Control** mode becomes exactly one `input/swipe`. Everything
+below is **client-side policy**: the daemon faithfully executes whatever
+endpoints and duration it is handed, so it can neither reject an accidental
+one-pixel swipe nor repair an off-screen one. Clients should converge on these
+rules rather than each inventing their own. The reference implementation is the
+Compose-free `DeviceDragGesturePolicy` in the `desktop-domain` module
+([#3350](https://github.com/kaeawc/auto-mobile/issues/3350)).
+
+### One frame for the whole drag
+
+Both endpoints are mapped through the **same** frame snapshot, pinned when the
+drag begins — the one the drag *started* on. A snapshot arriving mid-drag must
+not rescale the gesture or map its two ends through different frames. This is
+the drag-shaped case of the rule in
+[Client Frame Snapshot](client-frame-snapshot.md).
+
+### Threshold
+
+| Rule | Value |
+| --- | --- |
+| Minimum travelled distance | **24 device coordinates**, straight-line (Euclidean), measured **after** the end is clamped |
+| Below the threshold | send **nothing** — not a swipe, and **not** a tap either |
+| Duration sent | **300 ms**, a fixed client value |
+
+The threshold is measured in **device** coordinates, not viewport pixels, so it
+means the same thing regardless of the client's zoom level: a viewport-space
+threshold would send a swipe for one hand movement at one zoom and not at
+another, and would let a few pixels of pointer jitter become a large device
+gesture when zoomed out. `24` sits just above the platforms' own touch slop
+(Android's 8dp is ~24px at the ~3x density of a 1080p-class phone; iOS's is ~10
+logical points), so any forwarded swipe is one the device itself reads as a drag
+rather than as a tap.
+
+A below-threshold drag is **not** promoted to a tap. Actuating an input the user
+did not ask for is worse than ignoring an ambiguous one, and a click that barely
+moved is already covered by the client's own tap detection. Note the consequence:
+between the UI toolkit's touch slop (where the client starts treating the gesture
+as a drag and stops treating it as a click) and this threshold there is a **dead
+band** in which a gesture sends no input at all. That is deliberate.
+
+The duration is a fixed policy value, not a measurement of the pointer gesture.
+Reproducing pointer velocity would make the same on-screen gesture behave
+differently depending on how fast the user's hand moved over a mirror whose frame
+rate is unrelated to the device's. `300` is inside the daemon's accepted
+`[1, 60000]` range for `durationMs`.
+
+### Cancellation and out-of-bounds
+
+| Situation | Behavior |
+| --- | --- |
+| Drag **cancelled** (pointer capture lost, window deactivated) | send nothing |
+| Drag **started** outside the device screen | send nothing — clamping would invent a start the user never touched |
+| Drag **ended** outside the device screen | **clamp** the end to the last addressable pixel and send |
+| Device screen has a non-positive dimension | send nothing (no addressable pixel to clamp to) |
+| Drag outside Control mode | send nothing; a drag means viewport pan |
+
+Dragging *past* an edge is the ordinary way to scroll to the end of a list, so an
+out-of-bounds end is clamped rather than dropped — this is the clamping option
+the [out-of-bounds rule](#viewport--device-mapping) already sanctions, and it
+yields well-formed input. Clamping happens **before** the distance check, so the
+threshold is applied to what would actually be sent.
+
+Nothing here is a failure: an ignored drag surfaces no error, and it must not
+start the post-input refresh wait described in
+[Client Frame Snapshot](client-frame-snapshot.md) — the device did not change.
+
+### Viewport pan in Control mode
+
+A plain drag means a device swipe in Control mode, so viewport pan moves onto the
+modifier that already gates zoom (Cmd on macOS, Ctrl elsewhere): **modifier +
+drag pans, plain drag swipes**. The modifier is read once at pointer-down, so
+releasing it mid-drag cannot turn a pan into a swipe. In **Inspector** mode a
+plain drag still pans and never produces daemon input, which is why the IDE
+plugin — inspector-only — is unaffected.
+
 ### Device → viewport (inverse)
 
 For placing overlays or touch-feedback markers, the inverse is:
@@ -169,6 +247,15 @@ The mapper is pure Kotlin with no Compose or daemon dependency, so it is unit
 tested directly (`DeviceScreenCoordinateMapperTest`) without rendering a device
 or opening a socket: scale, pan, aspect fit, rotation detection, rounding,
 out-of-bounds, round-trip, and the inspector selection/deselection path.
+
+The drag policy is likewise pure and unit tested directly
+(`DeviceDragGesturePolicyTest`), pinning the threshold from **both** sides — one
+coordinate below it must not swipe and exactly at it must — plus end-clamping,
+the off-screen start, and the degenerate-screen case. View-level routing
+(`DeviceScreenViewControlTest`) renders the real view with fakes and covers a
+control-mode drag reporting exactly one swipe and **no** tap, a sub-threshold
+movement still reporting a tap and no swipe, and an inspector-mode drag reporting
+nothing.
 
 ## Which frame the mapping runs against
 

@@ -191,9 +191,16 @@ a real capture identity needs WebRTC-side plumbing, tracked under
 
 ## Post-input refresh policy
 
-The daemon's input responses (`input/tap` and its siblings) return the action
-result only. They do **not** carry a fresh observation and do **not** implicitly
-trigger one, so the client decides when its picture is current again.
+The daemon's input responses (`input/tap`, `input/swipe` and their siblings)
+return the action result only. They do **not** carry a fresh observation and do
+**not** implicitly trigger one, so the client decides when its picture is current
+again. This applies identically to every forwarded input: a successful swipe
+starts the same wait, on the same tracker, as a successful tap.
+
+All forwarded inputs also share **one** ordered, bounded dispatch queue, so a
+tap-then-swipe sequence reaches the device in the order the user made it. A
+per-action queue would reintroduce the ordering race the single queue exists to
+remove.
 
 **Consume the next superseding snapshot from the observation stream you are
 already subscribed to. Do not poll, and do not issue a separate `observe` call.**
@@ -203,7 +210,7 @@ Expressed as snapshot transitions:
 | Event | Transition | What the client renders |
 | --- | --- | --- |
 | Input forwarded successfully | `Idle -> AwaitingSnapshot`, recording the dispatched `captureSequence` | The **retained** pre-input snapshot, unchanged and still clickable — it is the best available truth. A screenshot-only update in this interval carries a `captureSequence` the retained hierarchy does not match, so it yields no snapshot and does not replace what is on screen |
-| Input not dispatched (off-screen point, or the bounded queue rejected it) | no transition | Unchanged; nothing reached the device, so there is nothing to wait for |
+| Input not dispatched (off-screen point, a drag below the [swipe threshold](screen-control-mapping.md#drag-to-swipe-policy), or the bounded queue rejected it) | no transition | Unchanged; nothing reached the device, so there is nothing to wait for |
 | First snapshot from a strictly greater **capture** | `AwaitingSnapshot -> Settled` | The new snapshot |
 | No superseding snapshot within 3000 ms | `AwaitingSnapshot -> Settled` | The retained snapshot is **released** and the view falls back to current state. Retention is bounded: if screenshots keep arriving but hierarchy updates stall, nothing ever pairs, and holding the pre-input frame past this point would pin the view to it indefinitely. The freshness bound above independently retires the stale frame and drops control |
 | Input failed or was rejected | `-> Settled` immediately | Unchanged state plus the daemon's actionable error |

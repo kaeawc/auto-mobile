@@ -449,6 +449,24 @@ class ObservationStreamClient {
   }
 
   /**
+   * Drop the buffered replay of the layout streams (screenshot + hierarchy) so a subscriber that
+   * (re)subscribes afterward does not immediately receive the last pre-existing frame
+   * (issue #3347).
+   *
+   * `screenshotUpdates`/`hierarchyUpdates` are `replay = 1` SharedFlows, so on Live Layout reopen
+   * the restarted collectors would otherwise replay the stale pre-close frame and re-arm client
+   * device control from it. Clearing the replay right before resubscribing means only genuinely
+   * post-open frames arm control. Active collectors are unaffected — this only clears what a new
+   * subscriber would replay — so it is safe to call at every (re)subscribe. Mirrors the reset
+   * already done on a device-connection-lost event.
+   */
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  fun resetLayoutReplayCache() {
+    _screenshotUpdates.resetReplayCache()
+    _hierarchyUpdates.resetReplayCache()
+  }
+
+  /**
    * Request the current navigation graph from the server. The response arrives through the existing
    * navigation_update flow.
    *

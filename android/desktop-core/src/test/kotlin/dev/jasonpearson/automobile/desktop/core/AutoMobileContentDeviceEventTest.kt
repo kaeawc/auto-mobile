@@ -233,6 +233,49 @@ class AutoMobileContentDeviceEventTest {
   }
 
   @Test
+  fun `live-frame geometry is strict about orientation`() {
+    // Zero-bound Android path: the mapper uses the observation stream's screenWidth/screenHeight as
+    // device bounds; the wiring feeds those effective bounds (never zero). A live video frame is
+    // display-oriented, so a video whose orientation disagrees with those bounds is a stale frame
+    // ->
+    // control inactive.
+    assertFalse(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 2340, // live video: landscape
+        screenshotHeight = 1080,
+        hierarchyRootWidth = 1080, // effective device bounds (screenWidth/Height): portrait
+        hierarchyRootHeight = 2340,
+        allowRotation = false,
+      )
+    )
+    // Same orientation -> consistent.
+    assertTrue(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 2340,
+        screenshotHeight = 1080,
+        hierarchyRootWidth = 2340,
+        hierarchyRootHeight = 1080,
+        allowRotation = false,
+      )
+    )
+  }
+
+  @Test
+  fun `screenshot geometry tolerates the mappers rotation (iOS native orientation)`() {
+    // A polled screenshot can arrive portrait-pixels while the device is landscape; the mapper
+    // rotates it. That orientation difference must NOT disable control (allowRotation defaults
+    // true).
+    assertTrue(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 1080, // screenshot: portrait pixels
+        screenshotHeight = 2340,
+        hierarchyRootWidth = 2340, // device bounds: landscape
+        hierarchyRootHeight = 1080,
+      )
+    )
+  }
+
+  @Test
   fun `geometry inconsistent with no screenshot but consistent when hierarchy has no bounds`() {
     // No frame yet -> inconsistent (control stays off).
     assertFalse(

@@ -228,27 +228,36 @@ internal fun isDeviceControlActive(
 private const val GEOMETRY_ASPECT_TOLERANCE = 0.05f
 
 /**
- * Whether the rendered screenshot and the hit-tested hierarchy describe a geometrically-consistent
- * view of the same screen (issue #3347). `DeviceScreenView` maps a click through the hierarchy-root
- * dimensions while fitting the screenshot by its own aspect ratio, so if the two disagree in aspect
- * a tap is mapped through the wrong scale. This requires their aspect ratios to agree up to a 90°
- * rotation (the mapper aligns screenshot orientation to the hierarchy) within
- * [GEOMETRY_ASPECT_TOLERANCE].
+ * Whether the frame actually displayed and the effective device bounds used for mapping describe a
+ * geometrically-consistent view of the same screen (issue #3347). `DeviceScreenView` maps a click
+ * through the effective device bounds while fitting the displayed frame by its own aspect ratio, so
+ * if the two disagree in aspect a tap is mapped through the wrong scale. Aspect ratios must agree
+ * within [GEOMETRY_ASPECT_TOLERANCE].
  *
- * A non-positive screenshot dimension (no frame yet) is inconsistent. Non-positive hierarchy-root
- * dimensions mean the hierarchy carries no explicit bounds, in which case the mapper falls back to
- * the screenshot dimensions and the two are consistent by construction.
+ * [allowRotation] selects how strict the orientation match is:
+ * - true (a polled **screenshot** is displayed): agreement is checked up to a 90° rotation, because
+ *   a screenshot can arrive in native pixel orientation (portrait) even when the device is
+ *   landscape — the mapper rotates it to align, so an orientation difference is expected (notably
+ *   on iOS).
+ * - false (a live **video** frame is displayed): the video is always in display orientation, so an
+ *   orientation difference means the frame and the mapping bounds are out of sync (a rotate/resize
+ *   the observation stream hasn't caught up to). Agreement is required in the SAME orientation, so
+ *   control drops until they realign.
  *
- * Note: this catches resolution/aspect mismatches, not a same-device, same-aspect rotation while
- * the hierarchy is still debounced — that transient is indistinguishable from a normal iOS
- * native-orientation screenshot without a per-frame device-orientation signal (tracked as a
- * follow-up).
+ * A non-positive displayed dimension (no frame yet) is inconsistent. Non-positive device dimensions
+ * mean neither the hierarchy nor the observation stream reported a size, so the mapper falls back
+ * to the displayed frame itself and the two are consistent by construction.
+ *
+ * The caller passes the SAME effective device bounds the mapper uses (hierarchy-root bounds when
+ * present, else the observation stream's screen size), so the check is not bypassed on the common
+ * Android path where the accessibility root has no explicit bounds.
  */
 internal fun isRenderedGeometryConsistent(
   screenshotWidth: Int,
   screenshotHeight: Int,
   hierarchyRootWidth: Int,
   hierarchyRootHeight: Int,
+  allowRotation: Boolean = true,
 ): Boolean {
   if (screenshotWidth <= 0 || screenshotHeight <= 0) return false
   if (hierarchyRootWidth <= 0 || hierarchyRootHeight <= 0) return true
@@ -257,6 +266,7 @@ internal fun isRenderedGeometryConsistent(
   val matchesDirect =
     kotlin.math.abs(screenshotAspect - hierarchyAspect) <=
       GEOMETRY_ASPECT_TOLERANCE * hierarchyAspect
+  if (!allowRotation) return matchesDirect
   val rotatedHierarchyAspect = 1f / hierarchyAspect
   val matchesRotated =
     kotlin.math.abs(screenshotAspect - rotatedHierarchyAspect) <=
@@ -919,6 +929,11 @@ fun AutoMobileContent(
   val liveStreamClient = observationStreamClient
   LaunchedEffect(liveStreamClient, isLiveLayoutMode, activeDeviceId) {
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
+    // Drop any buffered pre-(re)subscribe frame so a Live Layout reopen doesn't replay the stale
+    // pre-close frame and re-arm control from it (issue #3347). Only genuinely post-subscribe
+    // frames
+    // arm control.
+    liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.hierarchyUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
       // Capture the generation before the async parse so a frame decoded across an invalidation
@@ -952,6 +967,9 @@ fun AutoMobileContent(
   }
   LaunchedEffect(liveStreamClient, isLiveLayoutMode, activeDeviceId) {
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
+    // See the hierarchy collector: drop the buffered replay before resubscribing so a reopen can't
+    // re-arm control from a stale pre-close screenshot (issue #3347).
+    liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.screenshotUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
       // Capture the generation before the async decode so a screenshot decoded across an
@@ -1611,8 +1629,18 @@ fun AutoMobileContent(
           // catches up, the gate must follow the live frame's dims — else a tap maps through stale
           // dims. The live frame is device-scoped (rememberLiveVideoFrame keyed on
           // source+deviceId).
+          val hasLiveFrame = liveVideoFrame != null
           val displayedFrameWidth = liveVideoFrame?.width ?: layoutInspectorState.screenWidth
           val displayedFrameHeight = liveVideoFrame?.height ?: layoutInspectorState.screenHeight
+          // The SAME effective device bounds DeviceScreenView maps through: hierarchy-root bounds
+          // when present, else the observation stream's screen size (the common Android path where
+          // the accessibility root is (0,0,0,0)). Feeding these — not zero — keeps the geometry
+          // gate
+          // from no-op'ing on that path.
+          val effectiveDeviceWidth =
+            hierarchyRootBounds?.width?.takeIf { it > 0 } ?: layoutInspectorState.screenWidth
+          val effectiveDeviceHeight =
+            hierarchyRootBounds?.height?.takeIf { it > 0 } ?: layoutInspectorState.screenHeight
           val deviceControlActive =
             isDeviceControlActive(
               enableDeviceControl = enableDeviceControl,
@@ -1627,8 +1655,11 @@ fun AutoMobileContent(
                 isRenderedGeometryConsistent(
                   screenshotWidth = displayedFrameWidth,
                   screenshotHeight = displayedFrameHeight,
-                  hierarchyRootWidth = hierarchyRootBounds?.width ?: 0,
-                  hierarchyRootHeight = hierarchyRootBounds?.height ?: 0,
+                  hierarchyRootWidth = effectiveDeviceWidth,
+                  hierarchyRootHeight = effectiveDeviceHeight,
+                  // A live video frame is display-oriented, so an orientation mismatch is a stale
+                  // frame (strict); a polled screenshot may be native-oriented (rotation-tolerant).
+                  allowRotation = !hasLiveFrame,
                 ),
             )
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {

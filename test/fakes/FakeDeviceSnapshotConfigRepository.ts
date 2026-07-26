@@ -1,6 +1,7 @@
 import type { DeviceSnapshotConfig } from "../../src/models";
+import type { ConfigRepository } from "../../src/db/keyedJsonConfigRepository";
 
-export class FakeDeviceSnapshotConfigRepository {
+export class FakeDeviceSnapshotConfigRepository implements ConfigRepository<DeviceSnapshotConfig> {
   private config: DeviceSnapshotConfig | null = null;
 
   async getConfig(): Promise<DeviceSnapshotConfig | null> {

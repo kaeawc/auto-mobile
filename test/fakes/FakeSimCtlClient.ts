@@ -1,5 +1,10 @@
 import type { ExecResult } from "../../src/models";
-import type { AppleDevice, AppleDeviceRuntime, AppleDeviceType } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type {
+  AppleDevice,
+  AppleDeviceRuntime,
+  AppleDeviceType,
+  SimCtl,
+} from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 
 const buildExecResult = (stdout: string): ExecResult => ({
   stdout,
@@ -9,7 +14,20 @@ const buildExecResult = (stdout: string): ExecResult => ({
   includes: (value: string) => stdout.includes(value),
 });
 
-export class FakeSimCtlClient {
+type FakeSimCtlClientContract = Pick<
+  SimCtl,
+  | "executeCommand"
+  | "executeCommandArgs"
+  | "getDeviceInfo"
+  | "getDeviceTypes"
+  | "getRuntimes"
+  | "listApps"
+  | "terminateApp"
+  | "openSimulatorApp"
+  | "pushNotification"
+>;
+
+export class FakeSimCtlClient implements FakeSimCtlClientContract {
   private deviceInfo = new Map<string, AppleDevice | null>();
   private runtimes: AppleDeviceRuntime[] = [];
   private installedApps: any[] = [];

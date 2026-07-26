@@ -1,9 +1,21 @@
 import type {
+  VideoRecordingRepository,
   VideoRecordingQuery,
   VideoRecordingRecord,
 } from "../../src/db/videoRecordingRepository";
 
-export class FakeVideoRecordingRepository {
+type VideoRecordingRepositoryContract = Pick<
+  VideoRecordingRepository,
+  | "insertRecording"
+  | "updateRecording"
+  | "getRecording"
+  | "listRecordings"
+  | "getLatestRecording"
+  | "touchRecording"
+  | "deleteRecording"
+>;
+
+export class FakeVideoRecordingRepository implements VideoRecordingRepositoryContract {
   private readonly records = new Map<string, VideoRecordingRecord>();
 
   async insertRecording(record: VideoRecordingRecord): Promise<void> {

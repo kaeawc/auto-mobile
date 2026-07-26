@@ -1,14 +1,23 @@
 import type { Element } from "../../src/models/Element";
 import type {
   TalkBackTapResult,
-  TalkBackFallbackAction
+  TalkBackFallbackAction,
+  TalkBackTapStrategy,
 } from "../../src/features/talkback/TalkBackTapStrategy";
 import type { TalkBackNavigationDriver } from "../../src/features/talkback/TalkBackNavigationDriver";
+
+type TalkBackTapStrategyContract = Pick<
+  TalkBackTapStrategy,
+  | "executeTap"
+  | "executeDirectActivation"
+  | "executeCoordinateFallback"
+  | "executeLongPress"
+>;
 
 /**
  * Fake implementation of TalkBackTapStrategy for testing TapOnElement delegation.
  */
-export class FakeTalkBackTapStrategy {
+export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
   tapResult: TalkBackTapResult = { success: true, method: "focus-navigation" };
   fallbackResult: TalkBackTapResult = { success: true, method: "coordinate-fallback" };
   longPressResult: TalkBackTapResult = { success: true, method: "accessibility-action" };

@@ -16,7 +16,7 @@ export enum WebSocketState {
  * Fake WebSocket implementation for testing
  * Allows simulating instant connection failures without waiting for timeout
  */
-export class FakeWebSocket extends EventEmitter {
+export class FakeWebSocket extends EventEmitter implements Pick<WebSocket, "readyState" | "send" | "close"> {
   public readyState: WebSocketState = WebSocketState.CONNECTING;
   private failureMode: "instant" | "timeout" | "none" = "none";
   private connectTimeoutMs: number = 0;

@@ -1,7 +1,10 @@
 import type { HighlightOperationResult, HighlightShape } from "../../src/models";
-import type { HighlightOptions } from "../../src/features/debug/VisualHighlight";
+import type {
+  HighlightOptions,
+  VisualHighlightClient,
+} from "../../src/features/debug/VisualHighlight";
 
-export class FakeHighlightClient {
+export class FakeHighlightClient implements Pick<VisualHighlightClient, "addHighlight"> {
   readonly addCalls: Array<{ id: string; shape: HighlightShape; options: HighlightOptions }> = [];
 
   async addHighlight(

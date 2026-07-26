@@ -311,7 +311,17 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
 /**
  * Fake FieldTypeDetector for testing
  */
-export class FakeFieldTypeDetector {
+type FieldTypeDetectorContract = Pick<
+  FieldTypeDetector,
+  | "detect"
+  | "isChecked"
+  | "getTextValue"
+  | "isIOSElement"
+  | "isPasswordField"
+  | "shouldSkipVerification"
+>;
+
+export class FakeFieldTypeDetector implements FieldTypeDetectorContract {
   private typeOverrides: Map<string, FieldType> = new Map();
   private checkedOverrides: Map<string, boolean> = new Map();
   private textOverrides: Map<string, string> = new Map();

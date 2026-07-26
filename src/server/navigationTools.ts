@@ -3,6 +3,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { Explore, ExploreOptions } from "../features/navigation/Explore";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
@@ -63,12 +64,15 @@ export function registerNavigationTools() {
     progress?: ProgressCallback
   ) => {
     try {
+      const navigationManager = getNavigationManager(args.sessionUuid);
       const navigateTo = new NavigateTo(
         device,
         undefined,
         null,
         null,
-        getNavigationManager(args.sessionUuid)
+        navigationManager,
+        undefined,
+        new DefaultPathOptimizer(navigationManager)
       );
       const options: NavigateToOptions = {
         targetScreen: args.targetScreen,

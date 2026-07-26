@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { BootedDevice } from "../../src/models";
 import { Explore } from "../../src/features/navigation/Explore";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { DefaultPathOptimizer } from "../../src/features/navigation/DefaultPathOptimizer";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import { createMcpServer } from "../../src/server/index";
@@ -81,6 +82,7 @@ describe("Android navigation graph workflow (#4459)", () => {
       sequenceNumber: 1,
       applicationId: appId,
     });
+    await sessionManager.recordBackStack({ depth: 0, currentTaskId: 1 });
 
     let replayedArgs: Record<string, unknown> | undefined;
     ToolRegistry.register(
@@ -161,6 +163,13 @@ describe("Android navigation graph workflow (#4459)", () => {
       to: "Settings",
       tool: "tapOn",
     }));
+    await sessionManager.recordBackStack({ depth: 1, currentTaskId: 1 });
+    const backRecommendation = await new DefaultPathOptimizer(sessionManager).shouldUseBackButton(
+      "Settings",
+      "Home",
+      1
+    );
+    expect(backRecommendation).toMatchObject({ shouldUseBack: true, backPresses: 1 });
 
     await sessionManager.recordNavigationEvent({
       destination: "Home",

@@ -284,8 +284,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId);
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
-        args.sessionUuid = implicitSessionUuid;
         logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
+      }
+      if (sessionUuid) {
+        // Handlers must use the resolved label or implicit session, not the
+        // caller's base session, so session-scoped state stays on the device
+        // that ToolRegistry selected.
+        args.sessionUuid = sessionUuid;
       }
       await this.enforceSessionUuidForMultipleIos(platform, sessionUuid, providedDeviceId, deviceSessionManager);
       await this.enforceSessionUuidForAutolock(platform, sessionUuid, providedDeviceId, deviceSessionManager);

@@ -12,6 +12,7 @@ import {
 } from "./NavigationGraphManager";
 import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
+import type { PathOptimizer } from "./interfaces/PathOptimizer";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { DefaultUIStateSetup } from "./DefaultUIStateSetup";
 import { ScreenTransitionWaiter } from "./interfaces/ScreenTransitionWaiter";
@@ -40,6 +41,7 @@ export class NavigateTo {
   private uiStateSetup: UIStateSetup;
   private screenWaiter: ScreenTransitionWaiter;
   private timer: Timer;
+  private pathOptimizer: PathOptimizer | undefined;
 
   private static readonly MAX_TIMEOUT_MS = 30000; // 30 seconds
   private static readonly STEP_TIMEOUT_MS = 5000; // 5 seconds per step
@@ -51,13 +53,15 @@ export class NavigateTo {
     uiStateSetup: UIStateSetup | null = null,
     screenWaiter: ScreenTransitionWaiter | null = null,
     navigationManager?: NavigationGraphService,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    pathOptimizer?: PathOptimizer
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.timer = timer;
+    this.pathOptimizer = pathOptimizer;
 
     // Use injected dependencies or create defaults
     this.uiStateSetup = uiStateSetup || new DefaultUIStateSetup(this.device, this.adb);
@@ -114,7 +118,7 @@ export class NavigateTo {
       const currentBackStackDepth = currentNode?.backStackDepth ?? 0;
 
       if (currentBackStackDepth > 0) {
-        const backNavResult = await SmartNavigationHelper.shouldUseBackButton(
+        const backNavResult = await (this.pathOptimizer ?? SmartNavigationHelper).shouldUseBackButton(
           currentScreen,
           targetScreen,
           currentBackStackDepth

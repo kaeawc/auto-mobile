@@ -25,6 +25,19 @@ class McpDaemonClientInputTest {
   private val json = Json { ignoreUnknownKeys = true }
 
   @Test
+  fun `socket requests declare the desktop client version`() {
+    TestDaemonSocket(resultJson = "{}", error = null).use { server ->
+      McpDaemonClient(
+          socketPathValue = server.socketPath.toString(),
+          clientVersion = "0.0.40",
+        )
+        .ping()
+
+      assertEquals("0.0.40", server.awaitRequest().clientVersion)
+    }
+  }
+
+  @Test
   fun `inputTap serializes to input tap socket request`() {
     val responseResult =
       """
@@ -256,6 +269,7 @@ class McpDaemonClientInputTest {
             CapturedDaemonRequest(
               method = request.getValue("method").jsonPrimitive.content,
               params = request.getValue("params").jsonObject,
+              clientVersion = request["clientVersion"]?.jsonPrimitive?.content,
             )
           writer.write(responseLine(request.getValue("id").jsonPrimitive.content))
           writer.newLine()
@@ -310,4 +324,5 @@ private data class CapturedInputCall(
 private data class CapturedDaemonRequest(
   val method: String,
   val params: JsonObject,
+  val clientVersion: String?,
 )

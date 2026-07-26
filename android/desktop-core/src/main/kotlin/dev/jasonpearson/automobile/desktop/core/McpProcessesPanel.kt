@@ -33,6 +33,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonNotificationClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecycleResult
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonLifecycle
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
@@ -45,6 +48,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Test result state
 data class TestResult(
@@ -165,6 +169,21 @@ internal fun McpProcessesPanel(
   LaunchedEffect(connectedProcess) {
     val process = connectedProcess
     if (process != null) {
+      if (
+        process.connectionType == McpConnectionType.UnixSocket &&
+          process.socketPath == DaemonSocketPaths.socketPath()
+      ) {
+        when (val result = withContext(Dispatchers.IO) {
+          DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
+        }) {
+          is DaemonLifecycleResult.Failure -> {
+            daemonStartError = result.message
+            devicesError = result.message
+            return@LaunchedEffect
+          }
+          is DaemonLifecycleResult.Ready -> Unit
+        }
+      }
       devicesLoading = true
       devicesError = null
       try {
@@ -300,22 +319,17 @@ internal fun McpProcessesPanel(
     if (isDaemonStarting) {
       try {
         LOG.debug("[AutoMobile IDE] Starting daemon...")
-        val processBuilder = ProcessBuilder("auto-mobile", "--daemon", "start")
-        processBuilder.redirectErrorStream(true)
-        val process = processBuilder.start()
-
-        // Read output
-        val output = process.inputStream.bufferedReader().readText()
-        val exitCode = process.waitFor()
-
-        if (exitCode == 0) {
-          LOG.debug("[AutoMobile IDE] Daemon started successfully")
-          // Wait a bit for daemon to initialize, then refresh
-          kotlinx.coroutines.delay(2000)
-          refreshCounter++
-        } else {
-          LOG.debug("[AutoMobile IDE] Daemon start failed with exit code $exitCode: $output")
-          daemonStartError = "Failed to start daemon (exit code $exitCode)"
+        when (val result = withContext(Dispatchers.IO) {
+          DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
+        }) {
+          is DaemonLifecycleResult.Ready -> {
+            LOG.debug("[AutoMobile IDE] Daemon started with a matching version")
+            refreshCounter++
+          }
+          is DaemonLifecycleResult.Failure -> {
+            LOG.debug("[AutoMobile IDE] Daemon start failed: ${result.message}")
+            daemonStartError = result.message
+          }
         }
       } catch (e: Exception) {
         LOG.debug("[AutoMobile IDE] Exception starting daemon: ${e.message}")

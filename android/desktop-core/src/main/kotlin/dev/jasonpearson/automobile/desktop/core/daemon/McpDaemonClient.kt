@@ -27,6 +27,7 @@ import kotlinx.serialization.serializer
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
   private val json: Json = DaemonJson,
+  private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
 ) : AutoMobileClient {
   val socketPath: String
     get() = socketPathValue
@@ -488,6 +489,7 @@ class McpDaemonClient(
           type = "mcp_request",
           method = method,
           params = params,
+          clientVersion = clientVersion,
         )
 
       writer.write(json.encodeToString(request))
@@ -544,10 +546,36 @@ class McpDaemonClient(
 }
 
 object DaemonSocketPaths {
+  private val ignoredVersions = setOf("latest", "unknown")
+
   fun socketPath(): String {
     val userId = getUserId()
     return "/tmp/auto-mobile-daemon-$userId.sock"
   }
+
+  fun pidFilePath(): String {
+    val userId = getUserId()
+    return "/tmp/auto-mobile-daemon-$userId.pid"
+  }
+
+  /** Version this desktop client declares to the daemon's version handshake gate. */
+  fun resolveClientVersion(): String? {
+    val raw =
+      System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.takeIf { it.isNotBlank() }
+        ?: System.getenv("AUTOMOBILE_VERSION")?.takeIf { it.isNotBlank() }
+        ?: DaemonSocketPaths::class.java.`package`?.implementationVersion
+    return normalizeClientVersion(raw)
+  }
+
+  internal fun normalizeClientVersion(raw: String?): String? {
+    val trimmed = raw?.trim().orEmpty()
+    if (trimmed.isEmpty() || ignoredVersions.contains(trimmed.lowercase())) {
+      return null
+    }
+    return trimmed
+  }
+
+  internal fun releaseVersion(version: String): String = version.substringBefore('+')
 
   private fun getUserId(): String {
     val userName = System.getProperty("user.name", "default").ifBlank { "default" }
@@ -572,11 +600,12 @@ object DaemonSocketPaths {
 }
 
 @Serializable
-private data class DaemonRequest(
+internal data class DaemonRequest(
   val id: String,
   val type: String,
   val method: String,
   val params: JsonObject,
+  val clientVersion: String? = null,
 )
 
 @Serializable

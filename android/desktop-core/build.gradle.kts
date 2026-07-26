@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 plugins {
   kotlin("jvm")
   alias(libs.plugins.kotlin.serialization)
@@ -13,6 +15,17 @@ repositories {
 
 java {
   toolchain { languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get())) }
+}
+
+// Keep the desktop socket client's handshake version aligned with the daemon package it launches.
+// Resolve from this project directory because desktop-core also builds under android/ide-plugin.
+val npmPackageVersion =
+  providers.fileContents(layout.projectDirectory.file("../../package.json")).asText.map { packageJson ->
+    (JsonSlurper().parseText(packageJson) as Map<*, *>)["version"].toString()
+  }
+
+tasks.named<Jar>("jar") {
+  manifest { attributes("Implementation-Version" to npmPackageVersion.get()) }
 }
 
 sourceSets {

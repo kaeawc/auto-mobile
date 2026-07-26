@@ -35,6 +35,8 @@ public struct SdkNavigationEvent: SdkEvent {
     public let sequenceNumber: Int64?
     /// Per-process SDK identity used to reject navigation from replaced app processes.
     public let sessionId: String?
+    /// Persistent process order used to reject delayed events from an older SDK session.
+    public let sessionEpoch: Int64?
     /// Monotonic SDK tracking state used to order enable/disable control events.
     public let trackingGeneration: Int64?
     public let destination: String
@@ -46,6 +48,7 @@ public struct SdkNavigationEvent: SdkEvent {
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         sequenceNumber: Int64? = nil,
         sessionId: String? = nil,
+        sessionEpoch: Int64? = nil,
         trackingGeneration: Int64? = nil,
         destination: String,
         source: NavigationSourceType,
@@ -55,6 +58,7 @@ public struct SdkNavigationEvent: SdkEvent {
         self.timestamp = timestamp
         self.sequenceNumber = sequenceNumber
         self.sessionId = sessionId
+        self.sessionEpoch = sessionEpoch
         self.trackingGeneration = trackingGeneration
         self.destination = destination
         self.source = source
@@ -289,6 +293,7 @@ public struct SdkLifecycleEvent: SdkEvent {
     public let bundleId: String?
     public let details: [String: String]
     public let sessionId: String?
+    public let sessionEpoch: Int64?
     public let trackingGeneration: Int64?
 
     public init(
@@ -297,6 +302,7 @@ public struct SdkLifecycleEvent: SdkEvent {
         bundleId: String? = nil,
         details: [String: String] = [:],
         sessionId: String? = nil,
+        sessionEpoch: Int64? = nil,
         trackingGeneration: Int64? = nil
     ) {
         self.timestamp = timestamp
@@ -304,6 +310,7 @@ public struct SdkLifecycleEvent: SdkEvent {
         self.bundleId = bundleId
         self.details = details
         self.sessionId = sessionId
+        self.sessionEpoch = sessionEpoch
         self.trackingGeneration = trackingGeneration
     }
 }

@@ -2403,10 +2403,10 @@ describe("IOSCtrlProxyClient", function() {
     test("rejects late navigation from a process replaced by a session announcement", async function() {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
-      const encode = (destination: string, timestamp: number, sessionId: string): string => Buffer.from(JSON.stringify({ destination, timestamp, sessionId })).toString("base64");
-      const oldEvent = { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode("OldProcess", 1, "old-session") }] };
-      const newSessionEvent = { bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: Buffer.from(JSON.stringify({ state: "sdk_session_started", timestamp: 2, sessionId: "new-session" })).toString("base64") }] };
-      const newEvent = { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode("NewProcess", 2, "new-session") }] };
+      const encode = (destination: string, timestamp: number, sessionId: string, sessionEpoch: number): string => Buffer.from(JSON.stringify({ destination, timestamp, sessionId, sessionEpoch })).toString("base64");
+      const oldEvent = { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode("OldProcess", 1, "old-session", 1) }] };
+      const newSessionEvent = { bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: Buffer.from(JSON.stringify({ state: "sdk_session_started", timestamp: 2, sessionId: "new-session", sessionEpoch: 2, trackingGeneration: 0 })).toString("base64") }] };
+      const newEvent = { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode("NewProcess", 3, "new-session", 2) }] };
       let polls = 0;
       const originalFetch = globalThis.fetch;
       globalThis.fetch = (async () => {
@@ -2426,6 +2426,61 @@ describe("IOSCtrlProxyClient", function() {
 
         await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
         expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe("NewProcess");
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
+    test("resets tracking fences when a newer SDK session starts", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encode = (payload: Record<string, unknown>): string => Buffer.from(JSON.stringify(payload)).toString("base64");
+      const batches = [
+        [{ bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode({ destination: "Old", timestamp: 1, sessionId: "old-session", sessionEpoch: 1, trackingGeneration: 0 }) }] }],
+        [{ bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: encode({ state: "sdk_tracking_disabled", timestamp: 2, sessionId: "old-session", sessionEpoch: 1, trackingGeneration: 1 }) }] }],
+        [{ bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: encode({ state: "sdk_session_started", timestamp: 3, sessionId: "new-session", sessionEpoch: 2, trackingGeneration: 0 }) }] }],
+        [{ bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode({ destination: "New", timestamp: 4, sessionId: "new-session", sessionEpoch: 2, trackingGeneration: 0 }) }] }],
+      ];
+      let polls = 0;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({ ok: true, json: async () => batches[polls++] })) as unknown as typeof fetch;
+
+      try {
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe("Old");
+
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        expect(testClient.getSdkScreenIdentity("com.example.ios")).toBeUndefined();
+
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe("New");
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
+    test("ignores a delayed session announcement from an older epoch", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encode = (payload: Record<string, unknown>): string => Buffer.from(JSON.stringify(payload)).toString("base64");
+      const batches = [
+        [{ bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: encode({ state: "sdk_session_started", timestamp: 2, sessionId: "current-session", sessionEpoch: 2, trackingGeneration: 0 }) }] }],
+        [{ bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: encode({ state: "sdk_session_started", timestamp: 1, sessionId: "persisted-session", sessionEpoch: 1, trackingGeneration: 0 }) }] }],
+        [{ bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode({ destination: "Current", timestamp: 3, sessionId: "current-session", sessionEpoch: 2, trackingGeneration: 0 }) }] }],
+      ];
+      let polls = 0;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({ ok: true, json: async () => batches[polls++] })) as unknown as typeof fetch;
+
+      try {
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+
+        expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe("Current");
       } finally {
         globalThis.fetch = originalFetch;
         await testClient.close();

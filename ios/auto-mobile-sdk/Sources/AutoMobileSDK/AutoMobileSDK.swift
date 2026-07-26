@@ -8,6 +8,7 @@ import UIKit
 /// crash detection, and more.
 public final class AutoMobileSDK: @unchecked Sendable {
     public static let shared = AutoMobileSDK()
+    private static let sessionEpochDefaultsKey = "com.kaeawc.auto-mobile.sdk.session-epoch"
 
     private let lock = NSLock()
     private var listeners: [NavigationListener] = []
@@ -19,6 +20,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var eventBuffer: SdkEventBuffer?
     private var navigationSequenceNumber: Int64 = 0
     private var sdkSessionId: String?
+    private var sdkSessionEpoch: Int64?
     private var trackingGeneration: Int64 = 0
     private var _dropCounter: DefaultDropCounter?
     private var eventPersistence: (any EventPersisting)?
@@ -53,7 +55,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let resolvedBundleId = bundleId ?? Bundle.main.bundleIdentifier
         _bundleId = resolvedBundleId
         let newSessionId = UUID().uuidString
+        let newSessionEpoch = Self.nextSessionEpoch()
         sdkSessionId = newSessionId
+        sdkSessionEpoch = newSessionEpoch
         trackingGeneration = 0
         _configuration = configuration
 
@@ -93,7 +97,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         buffer.start()
         SdkEventBroadcaster.shared.broadcastBatch(
             bundleId: resolvedBundleId,
-            events: [SdkLifecycleEvent(state: "sdk_session_started", bundleId: resolvedBundleId, sessionId: newSessionId, trackingGeneration: 0)]
+            events: [SdkLifecycleEvent(state: "sdk_session_started", bundleId: resolvedBundleId, sessionId: newSessionId, sessionEpoch: newSessionEpoch, trackingGeneration: 0)]
         )
 
         // Replay any pending batches from previous sessions and clean up old ones
@@ -201,6 +205,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         navigationSequenceNumber += 1
         let sequenceNumber = navigationSequenceNumber
         let currentSessionId = sdkSessionId
+        let currentSessionEpoch = sdkSessionEpoch
         let currentTrackingGeneration = trackingGeneration
         lock.unlock()
 
@@ -213,6 +218,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
             timestamp: event.timestamp,
             sequenceNumber: sequenceNumber,
             sessionId: currentSessionId,
+            sessionEpoch: currentSessionEpoch,
             trackingGeneration: currentTrackingGeneration,
             destination: event.destination,
             source: NavigationSourceType(rawValue: event.source.rawValue) ?? .custom,
@@ -331,6 +337,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _configuration = nil
         navigationSequenceNumber = 0
         sdkSessionId = nil
+        sdkSessionEpoch = nil
         trackingGeneration = 0
         lock.unlock()
 
@@ -362,6 +369,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let config = _configuration
         let bundleId = _bundleId
         let currentSessionId = sdkSessionId
+        let currentSessionEpoch = sdkSessionEpoch
         let currentTrackingGeneration = trackingGeneration
         lock.unlock()
 
@@ -382,6 +390,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
                     state: enabled ? "sdk_tracking_enabled" : "sdk_tracking_disabled",
                     bundleId: bundleId,
                     sessionId: currentSessionId,
+                    sessionEpoch: currentSessionEpoch,
                     trackingGeneration: currentTrackingGeneration
                 )]
             )
@@ -403,6 +412,15 @@ public final class AutoMobileSDK: @unchecked Sendable {
         }
         // Crashes: signal handlers can't be safely uninstalled; the exception handler
         // already checks AutoMobileSDK.shared.isEnabled before posting events.
+    }
+
+    private static func nextSessionEpoch() -> Int64 {
+        let defaults = UserDefaults.standard
+        let previousEpoch = Int64(defaults.integer(forKey: sessionEpochDefaultsKey))
+        let currentMilliseconds = Int64(Date().timeIntervalSince1970 * 1000)
+        let nextEpoch = previousEpoch == Int64.max ? currentMilliseconds : max(previousEpoch + 1, currentMilliseconds)
+        defaults.set(nextEpoch, forKey: sessionEpochDefaultsKey)
+        return nextEpoch
     }
 
     /// Whether the SDK has been initialized.

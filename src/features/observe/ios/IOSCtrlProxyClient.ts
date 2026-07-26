@@ -441,6 +441,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private readonly sdkScreenIdentityGenerationsByApplicationId = new Map<string, number>();
   private readonly sdkScreenIdentitySessionsByApplicationId = new Map<string, string>();
   private readonly sdkScreenIdentityStartedSessionsByApplicationId = new Map<string, string>();
+  private readonly sdkScreenIdentitySessionEpochsByApplicationId = new Map<string, number>();
   private readonly sdkScreenIdentityRetiredSessionsByApplicationId = new Map<string, Set<string>>();
   private readonly sdkScreenIdentityTrackingGenerationsByApplicationId = new Map<string, number>();
   private readonly sdkScreenIdentityTrackingDisabledApplicationIds = new Set<string>();
@@ -531,6 +532,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.sdkScreenIdentityTrackingDisabledApplicationIds.clear();
     this.sdkScreenIdentitySessionsByApplicationId.clear();
     this.sdkScreenIdentityStartedSessionsByApplicationId.clear();
+    this.sdkScreenIdentitySessionEpochsByApplicationId.clear();
     this.sdkScreenIdentityRetiredSessionsByApplicationId.clear();
     this.sdkScreenIdentityTrackingGenerationsByApplicationId.clear();
     this.sdkScreenIdentitiesByApplicationId.clear();
@@ -1218,6 +1220,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
     if (retireSession) {
       this.sdkScreenIdentityStartedSessionsByApplicationId.delete(applicationId);
+      this.sdkScreenIdentitySessionEpochsByApplicationId.delete(applicationId);
     }
     this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
     this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
@@ -1260,34 +1263,49 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (this.sdkScreenIdentityRetiredSessionsByApplicationId.get(applicationId)?.has(sessionId)) {
       return false;
     }
-    const startedSessionId = this.sdkScreenIdentityStartedSessionsByApplicationId.get(applicationId);
-    if (startedSessionId && startedSessionId !== sessionId) {
+    const sessionEpoch = this.getSdkScreenIdentitySessionEpoch(payload);
+    const currentEpoch = this.sdkScreenIdentitySessionEpochsByApplicationId.get(applicationId);
+    const currentSessionId = this.sdkScreenIdentitySessionsByApplicationId.get(applicationId);
+    if (sessionEpoch !== undefined && currentEpoch !== undefined
+      && (sessionEpoch < currentEpoch || (sessionEpoch === currentEpoch && currentSessionId && currentSessionId !== sessionId))) {
       return false;
     }
-    const currentSessionId = this.sdkScreenIdentitySessionsByApplicationId.get(applicationId);
+    const startedSessionId = this.sdkScreenIdentityStartedSessionsByApplicationId.get(applicationId);
+    if (startedSessionId && startedSessionId !== sessionId
+      && (sessionEpoch === undefined || currentEpoch === undefined || sessionEpoch <= currentEpoch)) {
+      return false;
+    }
     if (currentSessionId && currentSessionId !== sessionId) {
       this.retireSdkScreenIdentitySession(applicationId, currentSessionId);
       this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
       this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
+      this.resetSdkScreenIdentityTrackingState(applicationId, payload);
+      this.sdkScreenIdentityStartedSessionsByApplicationId.set(applicationId, sessionId);
     }
     this.sdkScreenIdentitySessionsByApplicationId.set(applicationId, sessionId);
+    if (sessionEpoch !== undefined) {
+      this.sdkScreenIdentitySessionEpochsByApplicationId.set(applicationId, sessionEpoch);
+    }
     return true;
   }
 
   private startSdkScreenIdentitySession(applicationId: string, payload: Record<string, unknown>): boolean {
     const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
-    if (!sessionId || this.sdkScreenIdentityRetiredSessionsByApplicationId.get(applicationId)?.has(sessionId)) {
+    if (!sessionId || !this.activateSdkScreenIdentitySession(applicationId, payload)) {
       return false;
     }
-    const currentSessionId = this.sdkScreenIdentitySessionsByApplicationId.get(applicationId);
-    if (currentSessionId && currentSessionId !== sessionId) {
-      this.retireSdkScreenIdentitySession(applicationId, currentSessionId);
-      this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
-      this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
-    }
-    this.sdkScreenIdentitySessionsByApplicationId.set(applicationId, sessionId);
     this.sdkScreenIdentityStartedSessionsByApplicationId.set(applicationId, sessionId);
     return true;
+  }
+
+  private resetSdkScreenIdentityTrackingState(applicationId: string, payload: Record<string, unknown>): void {
+    this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
+    const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(payload);
+    if (trackingGeneration === undefined) {
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.delete(applicationId);
+    } else {
+      this.sdkScreenIdentityTrackingGenerationsByApplicationId.set(applicationId, trackingGeneration);
+    }
   }
 
   private retireSdkScreenIdentitySession(applicationId: string, sessionId: string): void {
@@ -1317,6 +1335,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private getSdkScreenIdentityTrackingGeneration(payload: Record<string, unknown>): number | undefined {
     return typeof payload.trackingGeneration === "number" && Number.isSafeInteger(payload.trackingGeneration)
       ? payload.trackingGeneration
+      : undefined;
+  }
+
+  private getSdkScreenIdentitySessionEpoch(payload: Record<string, unknown>): number | undefined {
+    return typeof payload.sessionEpoch === "number" && Number.isSafeInteger(payload.sessionEpoch)
+      ? payload.sessionEpoch
       : undefined;
   }
 

@@ -77,6 +77,21 @@ describe("InputKey", () => {
     ]);
   });
 
+  test("wraps an ADB keyevent failure in a stable error envelope", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setCommandError("KEYCODE_TAB", new Error("device offline"));
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+
+    const result = await inputKey.press("tab", 500);
+
+    expect(result).toEqual({
+      success: false,
+      key: "tab",
+      keyCode: "KEYCODE_TAB",
+      error: 'Failed to press key "tab": device offline',
+    });
+  });
+
   test("returns an explicit unsupported-platform result for iOS", async () => {
     const fakeAdb = new FakeAdbExecutor();
     const inputKey = new InputKey(iosDevice, createAdbFactory(fakeAdb));

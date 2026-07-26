@@ -18,6 +18,8 @@ export class FakeElementSelector implements ElementSelector {
   textCalls: string[] = [];
   lastResourceId?: string;
   lastTestTag?: string;
+  lastScrollableContainer?: boolean;
+  lastContainer?: { elementId?: string; text?: string } | null;
   nextElement: Element | null;
   nextIndexInMatches?: number;
   nextTotalMatches?: number;
@@ -131,6 +133,8 @@ export class FakeElementSelector implements ElementSelector {
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
+    this.lastScrollableContainer = options?.scrollableContainer;
+    this.lastContainer = options?.container ?? undefined;
     return this.buildSelectionResult(options?.strategy);
   }
 

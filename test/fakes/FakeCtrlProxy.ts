@@ -97,6 +97,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   private actionResult: A11yActionResult | null = null;
   private twoFingerSwipeResult: A11ySwipeResult | null = null;
+  private swipeResult: A11ySwipeResult | null = null;
+  private clearTextResult: A11ySetTextResult | null = null;
 
   private setTextHistory: Array<{
     text: string;
@@ -217,6 +219,27 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
    */
   setTwoFingerSwipeResult(result: A11ySwipeResult | null): void {
     this.twoFingerSwipeResult = result;
+  }
+
+  /**
+   * Configure the result returned by requestSwipe. Unlike setFailureMode("swipe"),
+   * which makes requestSwipe throw, this returns a structured non-throwing result
+   * so tests can exercise the a11y-swipe-failed-but-did-not-throw fallback branch.
+   * @param result - The swipe result to return (or null for the default success)
+   */
+  setSwipeResult(result: A11ySwipeResult | null): void {
+    this.swipeResult = result;
+  }
+
+  /**
+   * Configure the result returned by requestClearText. The a11y clear-text path
+   * treats a `{ success: false }` return (not a throw) as the trigger for the ADB
+   * delete-key fallback; setFailureMode("clearText") throws instead, which the
+   * production code does not catch. This seam is required to reach that fallback.
+   * @param result - The clear-text result to return (or null for the default success)
+   */
+  setClearTextResult(result: A11ySetTextResult | null): void {
+    this.clearTextResult = result;
   }
 
   // Assertion methods
@@ -462,6 +485,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
     this.swipeHistory.push({ x1, y1, x2, y2, duration });
 
+    if (this.swipeResult) {
+      return this.swipeResult;
+    }
+
     return {
       success: true,
       totalTimeMs: duration,
@@ -577,6 +604,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
     // Clear text is essentially setText with empty string
     this.setTextHistory.push({ text: "", resourceId });
+
+    if (this.clearTextResult) {
+      return this.clearTextResult;
+    }
 
     return {
       success: true,

@@ -7,6 +7,7 @@ interface PendingSleep {
   ms: number;
   resolve: () => void;
   timestamp: number;
+  seq: number;
 }
 
 /**
@@ -17,6 +18,7 @@ interface PendingTimeout {
   callback: () => void;
   ms: number;
   timestamp: number;
+  seq: number;
 }
 
 /**
@@ -28,6 +30,7 @@ interface PendingInterval {
   ms: number;
   timestamp: number;
   lastFiredAt: number;
+  seq: number;
 }
 
 /**
@@ -66,6 +69,9 @@ export class FakeTimer implements Timer {
   private pendingAutoAdvanceTasks: PendingAutoAdvanceTask[] = [];
   private nextAutoAdvanceTaskOrder: number = 1;
   private autoAdvanceDispatchScheduled: boolean = false;
+  // Monotonic registration counter so manual advanceTime() can break equal
+  // due-time ties by FIFO registration order across sleeps/timeouts/intervals.
+  private nextEventSeq: number = 1;
   // Track cancelled timeout IDs for autoAdvance mode.
   private cancelledTimeoutIds: Set<number> = new Set();
   // Track cancelled interval IDs for autoAdvance mode.
@@ -95,52 +101,91 @@ export class FakeTimer implements Timer {
       this.pendingSleeps.push({
         ms,
         resolve,
-        timestamp: this.currentTime
+        timestamp: this.currentTime,
+        seq: this.nextEventSeq++
       });
     });
   }
 
   /**
    * Advance time and resolve all pending sleeps, fire timeouts, and intervals that have elapsed.
+   *
+   * Caution: catch-up fires all due interval ticks SYNCHRONOUSLY within one call —
+   * no microtask boundary runs between them. A concurrency guard that drops a tick
+   * while a prior async tick is still pending (e.g. a `pending` latch) will therefore
+   * observe only the first of a caught-up burst, unlike a real event loop that yields
+   * between turns. Drive such a monitor by advancing one interval period at a time and
+   * draining microtasks between steps (see PerformanceMonitor.test.ts), not one large
+   * advance. For the same reason, avoid advancing by a huge multiple of a tiny interval
+   * (e.g. advanceTime(1_000_000) against a 1ms interval) — it spins that many synchronous
+   * callbacks.
    * @param ms - Milliseconds to advance
    */
   advanceTime(ms: number): void {
-    this.currentTime += ms;
+    const target = this.currentTime + ms;
 
-    // Handle pending sleeps
-    const toResolve = this.pendingSleeps.filter(
-      sleep => this.currentTime - sleep.timestamp >= sleep.ms
-    );
-
-    this.pendingSleeps = this.pendingSleeps.filter(
-      sleep => this.currentTime - sleep.timestamp < sleep.ms
-    );
-
-    toResolve.forEach(sleep => sleep.resolve());
-
-    // Handle pending timeouts
-    const toFireTimeouts = this.pendingTimeouts.filter(
-      timeout => this.currentTime - timeout.timestamp >= timeout.ms
-    );
-
-    this.pendingTimeouts = this.pendingTimeouts.filter(
-      timeout => this.currentTime - timeout.timestamp < timeout.ms
-    );
-
-    toFireTimeouts.forEach(timeout => timeout.callback());
-
-    // Handle pending intervals
-    const toFireIntervals: PendingInterval[] = [];
-    this.pendingIntervals = this.pendingIntervals.map(interval => {
-      const timeSinceLastFire = this.currentTime - interval.lastFiredAt;
-      if (timeSinceLastFire >= interval.ms) {
-        toFireIntervals.push(interval);
-        return { ...interval, lastFiredAt: this.currentTime };
+    // Fire every due sleep, timeout, and interval in due-time order (FIFO
+    // registration order breaks equal-time ties). As each fires, the clock is
+    // advanced to that event's OWN due time, so a callback observes its
+    // scheduled time via now() (schedule-time clock) rather than the fully
+    // advanced end-of-window time. Intervals catch up: an interval of period p
+    // fires floor(elapsed / p) times across a single advance, not just once.
+    for (;;) {
+      const next = this.nextDueEvent(target);
+      if (next === undefined) {
+        break;
       }
-      return interval;
-    });
+      this.currentTime = next.dueAt;
+      next.fire();
+    }
 
-    toFireIntervals.forEach(interval => interval.callback());
+    this.currentTime = target;
+  }
+
+  /**
+   * Find the earliest-due pending sleep/timeout/interval whose due time is at or
+   * before `target`, breaking equal-time ties by registration order. Returns a
+   * closure that removes-and-fires (sleeps/timeouts) or advances-and-fires
+   * (intervals). Recomputed each loop turn in advanceTime so interval catch-up
+   * and callbacks that schedule new work are handled correctly.
+   */
+  private nextDueEvent(target: number): { dueAt: number; fire: () => void } | undefined {
+    let best: { dueAt: number; seq: number; fire: () => void } | undefined;
+    const consider = (dueAt: number, seq: number, fire: () => void): void => {
+      if (dueAt > target) {
+        return;
+      }
+      if (!best || dueAt < best.dueAt || (dueAt === best.dueAt && seq < best.seq)) {
+        best = { dueAt, seq, fire };
+      }
+    };
+
+    for (const sleep of this.pendingSleeps) {
+      consider(sleep.timestamp + sleep.ms, sleep.seq, () => {
+        this.pendingSleeps = this.pendingSleeps.filter(candidate => candidate !== sleep);
+        sleep.resolve();
+      });
+    }
+
+    for (const timeout of this.pendingTimeouts) {
+      consider(timeout.timestamp + timeout.ms, timeout.seq, () => {
+        this.pendingTimeouts = this.pendingTimeouts.filter(candidate => candidate !== timeout);
+        timeout.callback();
+      });
+    }
+
+    for (const interval of this.pendingIntervals) {
+      // A non-positive period would loop forever; clamp to one tick (matching
+      // the real clock's setInterval(0) behaviour) and fire at most once per
+      // advance by jumping lastFiredAt to the window end.
+      const period = interval.ms > 0 ? interval.ms : 1;
+      consider(interval.lastFiredAt + period, interval.seq, () => {
+        interval.lastFiredAt = interval.ms > 0 ? interval.lastFiredAt + interval.ms : target;
+        interval.callback();
+      });
+    }
+
+    return best;
   }
 
   /**
@@ -249,6 +294,7 @@ export class FakeTimer implements Timer {
     }
     this.pendingAutoAdvanceTasks = [];
     this.nextAutoAdvanceTaskOrder = 1;
+    this.nextEventSeq = 1;
     this.nextTimeoutId = 1;
     this.nextIntervalId = 1000000;
     this.cancelledTimeoutIds.clear();
@@ -284,7 +330,8 @@ export class FakeTimer implements Timer {
       id,
       callback,
       ms,
-      timestamp: this.currentTime
+      timestamp: this.currentTime,
+      seq: this.nextEventSeq++
     });
     return id;
   }
@@ -321,7 +368,8 @@ export class FakeTimer implements Timer {
       callback,
       ms,
       timestamp: this.currentTime,
-      lastFiredAt: this.currentTime
+      lastFiredAt: this.currentTime,
+      seq: this.nextEventSeq++
     });
     return id;
   }

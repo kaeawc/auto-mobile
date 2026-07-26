@@ -6,7 +6,9 @@ import { DefaultChecksumCalculator } from "../../src/utils/ChecksumCalculator";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { DefaultProcessExecutor } from "../../src/utils/ProcessExecutor";
+import { CountingIdGenerator, NodeIdGenerator } from "../../src/utils/IdGenerator";
 import { CryptoRandom } from "../../src/utils/Random";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { SystemTimer } from "../../src/utils/SystemTimer";
 import { DefaultFileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
@@ -23,8 +25,13 @@ import {
 } from "./CommandExecutorContract";
 import { runFileDownloaderContract } from "./FileDownloaderContract";
 import { runFileSystemContract } from "./FileSystemContract";
+import { runIdGeneratorContract } from "./IdGeneratorContract";
 import { runRandomContract } from "./RandomContract";
 import { runTimerContract } from "./TimerContract";
+
+runIdGeneratorContract("NodeIdGenerator", () => new NodeIdGenerator());
+runIdGeneratorContract("CountingIdGenerator", () => new CountingIdGenerator());
+runIdGeneratorContract("FakeIdGenerator", () => new FakeIdGenerator());
 
 runRandomContract("CryptoRandom", () => new CryptoRandom());
 runRandomContract("SeededRandom", () => new SeededRandom(42));
@@ -34,6 +41,11 @@ runTimerContract("FakeTimer auto-advance", () => {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   return timer;
+});
+runTimerContract("FakeTimer manual advance", () => new FakeTimer(), {
+  advance: async (timer, ms) => {
+    (timer as FakeTimer).advanceTime(ms);
+  }
 });
 
 const realFileSystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "automobile-fs-contract-"));

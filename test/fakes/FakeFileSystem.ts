@@ -14,13 +14,42 @@ export class FakeFileSystem implements FileSystem {
     return value.replace(/\\/g, "/");
   }
 
+  private parentDir(normalizedPath: string): string {
+    const idx = normalizedPath.lastIndexOf("/");
+    return idx <= 0 ? "/" : normalizedPath.substring(0, idx);
+  }
+
+  private dirExists(normalizedDir: string): boolean {
+    return normalizedDir === "" || normalizedDir === "/" || this.directories.has(normalizedDir);
+  }
+
+  private registerDirAndAncestors(normalizedDir: string): void {
+    let current = normalizedDir;
+    while (current && current !== "/" && !this.directories.has(current)) {
+      this.directories.add(current);
+      current = this.parentDir(current);
+    }
+  }
+
+  private enoent(normalizedPath: string): NodeJS.ErrnoException {
+    const error = new Error(
+      `ENOENT: no such file or directory, '${normalizedPath}'`
+    ) as NodeJS.ErrnoException;
+    error.code = "ENOENT";
+    return error;
+  }
+
   /**
-   * Set up a file to be read
+   * Set up a file to be read. Registers the containing directory (and ancestors)
+   * so `readdir` of the parent lists this file — mirroring a real tree where a
+   * file cannot exist without its directory.
    * @param filePath - Path to the file
    * @param content - Content of the file
    */
   setFile(filePath: string, content: string): void {
-    this.files.set(this.normalizePath(filePath), content);
+    const normalizedPath = this.normalizePath(filePath);
+    this.files.set(normalizedPath, content);
+    this.registerDirAndAncestors(this.parentDir(normalizedPath));
   }
 
   /**
@@ -63,9 +92,11 @@ export class FakeFileSystem implements FileSystem {
    * @param mtimeMs - Optional modification time in ms
    */
   setBinaryFile(filePath: string, data: Buffer, mtimeMs?: number): void {
-    this.binaryFiles.set(this.normalizePath(filePath), data);
+    const normalizedPath = this.normalizePath(filePath);
+    this.binaryFiles.set(normalizedPath, data);
+    this.registerDirAndAncestors(this.parentDir(normalizedPath));
     if (mtimeMs !== undefined) {
-      this.fileMtimes.set(this.normalizePath(filePath), mtimeMs);
+      this.fileMtimes.set(normalizedPath, mtimeMs);
     }
   }
 
@@ -94,18 +125,32 @@ export class FakeFileSystem implements FileSystem {
   }
 
   async readdir(dirPath: string): Promise<string[]> {
-    // Return files that are under this directory
     const normalizedDirPath = this.normalizePath(dirPath);
-    const files: string[] = [];
-    this.files.forEach((_, filePath) => {
-      if (filePath.startsWith(normalizedDirPath)) {
-        const relativePath = filePath.substring(normalizedDirPath.length + 1).split("/")[0];
-        if (relativePath && !files.includes(relativePath)) {
-          files.push(relativePath);
-        }
+    if (!this.dirExists(normalizedDirPath)) {
+      // A real readdir rejects a missing directory with ENOENT rather than
+      // returning an empty list, so a caller cannot silently treat "absent" as
+      // "empty".
+      throw this.enoent(normalizedDirPath);
+    }
+
+    // Match on the directory BOUNDARY (`dir/`), not a raw substring, so
+    // readdir("/a/str") never leaks the direct children of "/a/strings". Only
+    // direct children (first path segment) are returned.
+    const prefix = normalizedDirPath === "/" ? "/" : `${normalizedDirPath}/`;
+    const names = new Set<string>();
+    const collect = (candidate: string): void => {
+      if (candidate.length <= prefix.length || !candidate.startsWith(prefix)) {
+        return;
       }
-    });
-    return files;
+      const firstSegment = candidate.substring(prefix.length).split("/")[0];
+      if (firstSegment) {
+        names.add(firstSegment);
+      }
+    };
+    this.files.forEach((_, filePath) => collect(filePath));
+    this.binaryFiles.forEach((_, filePath) => collect(filePath));
+    this.directories.forEach(directory => collect(directory));
+    return [...names];
   }
 
   existsSync(filePath: string): boolean {
@@ -127,7 +172,13 @@ export class FakeFileSystem implements FileSystem {
     const normalizedPath = this.normalizePath(filePath);
     const content = this.files.get(normalizedPath);
     if (content !== undefined) {
-      return { size: content.length, mtimeMs: this.fileMtimes.get(normalizedPath) ?? 0 };
+      // A real stat reports byte length; a string's `.length` counts UTF-16
+      // units, so multibyte content (e.g. accented characters) would under- or
+      // mis-report. Measure bytes.
+      return {
+        size: Buffer.byteLength(content, "utf8"),
+        mtimeMs: this.fileMtimes.get(normalizedPath) ?? 0,
+      };
     }
     const binaryContent = this.binaryFiles.get(normalizedPath);
     if (binaryContent !== undefined) {
@@ -150,15 +201,27 @@ export class FakeFileSystem implements FileSystem {
   }
 
   async writeFile(filePath: string, content: string, encoding: string = "utf8"): Promise<void> {
-    this.files.set(this.normalizePath(filePath), content);
+    const normalizedPath = this.normalizePath(filePath);
+    const parent = this.parentDir(normalizedPath);
+    if (!this.dirExists(parent)) {
+      // A real writeFile rejects when the target directory does not exist; the
+      // fake must not silently materialize the file (and its missing parent).
+      throw this.enoent(normalizedPath);
+    }
+    this.files.set(normalizedPath, content);
   }
 
   async writeFileBuffer(filePath: string, data: Buffer): Promise<void> {
-    this.binaryFiles.set(this.normalizePath(filePath), data);
+    const normalizedPath = this.normalizePath(filePath);
+    const parent = this.parentDir(normalizedPath);
+    if (!this.dirExists(parent)) {
+      throw this.enoent(normalizedPath);
+    }
+    this.binaryFiles.set(normalizedPath, data);
   }
 
   async ensureDir(dirPath: string): Promise<void> {
-    this.directories.add(this.normalizePath(dirPath));
+    this.registerDirAndAncestors(this.normalizePath(dirPath));
   }
 
   async unlink(filePath: string): Promise<void> {
@@ -169,9 +232,21 @@ export class FakeFileSystem implements FileSystem {
 
   async remove(filePath: string): Promise<void> {
     const normalizedPath = this.normalizePath(filePath);
-    this.files.delete(normalizedPath);
-    this.binaryFiles.delete(normalizedPath);
-    this.directories.delete(normalizedPath);
+    const childPrefix = `${normalizedPath}/`;
+    // Recursive remove: drop the path itself AND every descendant file/dir, so
+    // remove(dir) never orphans children the way `delete(dir)` alone did.
+    for (const map of [this.files, this.binaryFiles]) {
+      for (const key of [...map.keys()]) {
+        if (key === normalizedPath || key.startsWith(childPrefix)) {
+          map.delete(key);
+        }
+      }
+    }
+    for (const directory of [...this.directories]) {
+      if (directory === normalizedPath || directory.startsWith(childPrefix)) {
+        this.directories.delete(directory);
+      }
+    }
   }
 
   async rename(oldPath: string, newPath: string): Promise<void> {

@@ -82,7 +82,9 @@ export class FakeImageBackend implements ImageBackend {
     if (this.shouldThrowOnExecute) {
       throw new Error("Simulated error in execute");
     }
-    return this.executeResult;
+    // Return a defensive copy, mirroring rawPixels(): a consumer that mutates the
+    // returned buffer must not corrupt the canned result for the next call.
+    return Buffer.from(this.executeResult);
   }
 
   async metadata(source: Buffer): Promise<ImageMetadata> {

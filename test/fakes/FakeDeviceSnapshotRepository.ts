@@ -48,20 +48,36 @@ export class FakeDeviceSnapshotRepository {
     if (query.snapshotType) {
       results = results.filter(record => record.snapshotType === query.snapshotType);
     }
+    // Mirror the real SQL, which emits the ORDER BY clauses in the same order the
+    // repository adds them: last_accessed_at FIRST (primary), created_at SECOND
+    // (tie-break). Applying two SEPARATE stable sorts inverts that precedence —
+    // the last sort wins — so a single combined comparator is required (#4186).
+    // Compare the STORED timestamp strings lexically, not their parsed instants.
+    // The columns are TEXT and the real query orders them with SQLite's default
+    // BINARY collation, so offset-bearing or mixed-precision strings (e.g.
+    // "2024-01-01T00:00:00+02:00" vs "2023-12-31T23:00:00Z") sort by bytes, which
+    // can differ from Date.parse() instant order. Byte order on ASCII timestamp
+    // strings equals JS string comparison. This also sidesteps NaN from an
+    // unparseable date producing an unstable comparator.
+    const comparators: Array<(left: DeviceSnapshotRecord, right: DeviceSnapshotRecord) => number> = [];
+    const compareText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
     if (query.orderByLastAccessed) {
-      results.sort((left, right) => {
-        const leftTime = Date.parse(left.lastAccessedAt);
-        const rightTime = Date.parse(right.lastAccessedAt);
-        const delta = leftTime - rightTime;
-        return query.orderByLastAccessed === "asc" ? delta : -delta;
-      });
+      const sign = query.orderByLastAccessed === "asc" ? 1 : -1;
+      comparators.push((left, right) => compareText(left.lastAccessedAt, right.lastAccessedAt) * sign);
     }
     if (query.orderByCreatedAt) {
+      const sign = query.orderByCreatedAt === "asc" ? 1 : -1;
+      comparators.push((left, right) => compareText(left.createdAt, right.createdAt) * sign);
+    }
+    if (comparators.length > 0) {
       results.sort((left, right) => {
-        const leftTime = Date.parse(left.createdAt);
-        const rightTime = Date.parse(right.createdAt);
-        const delta = leftTime - rightTime;
-        return query.orderByCreatedAt === "asc" ? delta : -delta;
+        for (const comparator of comparators) {
+          const delta = comparator(left, right);
+          if (delta !== 0) {
+            return delta;
+          }
+        }
+        return 0;
       });
     }
     if (query.limit && query.limit > 0) {

@@ -41,6 +41,19 @@ describe("FakeImageBackend", () => {
       expect(second.data).not.toBe(first.data);
       expect(second.data[0]).toBe(255);
     });
+
+    test("execute returns a defensive copy of the canned buffer", async () => {
+      backend.setExecuteResult(Buffer.from([10, 20, 30]));
+      const first = await backend.execute(source, pipeline);
+      first[0] = 99;
+
+      const second = await backend.execute(source, pipeline);
+
+      // Mutating a returned buffer must not corrupt the stored result — the same
+      // reference-vs-copy asymmetry rawPixels already guards against.
+      expect(second).not.toBe(first);
+      expect([...second]).toEqual([10, 20, 30]);
+    });
   });
 
   describe("configuration", () => {
@@ -78,19 +91,41 @@ describe("FakeImageBackend", () => {
   });
 
   describe("error injection", () => {
-    test("execute throws when configured", async () => {
-      backend.setShouldThrowOnExecute(true);
-      await expect(backend.execute(source, pipeline)).rejects.toThrow("Simulated error in execute");
+    type Method = "execute" | "metadata" | "rawPixels";
+    const invoke = (b: FakeImageBackend, method: Method): Promise<unknown> =>
+      method === "execute" ? b.execute(source, pipeline) : b[method](source);
+    const arm = (b: FakeImageBackend, method: Method, on: boolean): void => {
+      if (method === "execute") {
+        b.setShouldThrowOnExecute(on);
+      } else if (method === "metadata") {
+        b.setShouldThrowOnMetadata(on);
+      } else {
+        b.setShouldThrowOnRawPixels(on);
+      }
+    };
+    const methods: Method[] = ["execute", "metadata", "rawPixels"];
+
+    test.each(methods)("%s throws only when its own injection is armed", async method => {
+      arm(backend, method, true);
+      await expect(invoke(backend, method)).rejects.toThrow(`Simulated error in ${method}`);
     });
 
-    test("metadata throws when configured", async () => {
-      backend.setShouldThrowOnMetadata(true);
-      await expect(backend.metadata(source)).rejects.toThrow("Simulated error in metadata");
+    test.each(methods)("%s stops throwing once its injection is disarmed", async method => {
+      arm(backend, method, true);
+      arm(backend, method, false);
+      await expect(invoke(backend, method)).resolves.toBeDefined();
     });
 
-    test("rawPixels throws when configured", async () => {
-      backend.setShouldThrowOnRawPixels(true);
-      await expect(backend.rawPixels(source)).rejects.toThrow("Simulated error in rawPixels");
-    });
+    test.each([
+      ["execute", "metadata"],
+      ["execute", "rawPixels"],
+      ["metadata", "rawPixels"],
+    ] as Array<[Method, Method]>)(
+      "arming %s does not make %s throw",
+      async (armed, other) => {
+        arm(backend, armed, true);
+        await expect(invoke(backend, other)).resolves.toBeDefined();
+      }
+    );
   });
 });

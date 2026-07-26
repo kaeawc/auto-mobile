@@ -41,14 +41,18 @@ describe("FakeIdGenerator", function() {
     expect(generator.next()).toBe("fake-1");
   });
 
-  test("setScripted replaces queued ids and resets the fallback counter", function() {
+  test("does not re-issue an already-emitted auto id after setScripted swaps the script", function() {
     const generator = new FakeIdGenerator();
 
-    generator.next();
+    const firstAuto = generator.next();
     generator.setScripted(["x"]);
 
     expect(generator.next()).toBe("x");
-    expect(generator.next()).toBe("fake-1");
+    // Once the new script drains, the fallback must continue past the id it
+    // already emitted rather than restart at fake-1 and collide with it.
+    const secondAuto = generator.next();
+    expect(secondAuto).not.toBe(firstAuto);
+    expect(secondAuto).toBe("fake-2");
   });
 });
 

@@ -113,29 +113,59 @@ describe("FakeAdbClientFactory", () => {
   });
 });
 
-describe("FakeAdbClientFactory integration", () => {
-  it("can be used to test code that creates ADB clients", async () => {
-    // Example: Testing code that needs ADB functionality
+describe("FakeAdbClientFactory routing and reset outcomes", () => {
+  const deviceA: BootedDevice = { deviceId: "emulator-5554", name: "A", platform: "android" };
+  const deviceB: BootedDevice = { deviceId: "emulator-5556", name: "B", platform: "android" };
+
+  it("routes commands to the same shared client regardless of device in shared mode", async () => {
     const factory = new FakeAdbClientFactory();
-    const fakeClient = factory.getFakeClient();
+    factory.getFakeClient().setCommandResult("shell echo hi", "hi-from-shared");
 
-    // Configure the fake to return expected results
-    fakeClient.setCommandResult(
-      "shell dumpsys meminfo com.example",
-      "Java Heap: 50000\nNative Heap: 30000\nTOTAL: 100000"
-    );
+    const fromA = await factory.create(deviceA).executeCommand("shell echo hi");
+    const fromB = await factory.create(deviceB).executeCommand("shell echo hi");
 
-    // Create a client through the factory
-    const client = factory.create({
-      deviceId: "test-device",
-      name: "Test Device",
-      platform: "android",
-    });
+    // Both devices resolve to the one shared client, so the configured result
+    // is observed for either device.
+    expect(fromA.stdout).toBe("hi-from-shared");
+    expect(fromB.stdout).toBe("hi-from-shared");
+  });
 
-    // Execute command through the client
-    const result = await client.executeCommand("shell dumpsys meminfo com.example");
+  it("routes each device to its own client in per-device mode", () => {
+    const factory = new FakeAdbClientFactory();
+    factory.useSeparateClientsPerDevice();
 
-    expect(result.stdout).toContain("Java Heap");
-    expect(factory.getCallCount()).toBe(1);
+    const clientA = factory.create(deviceA);
+    const clientB = factory.create(deviceB);
+
+    expect(clientA).not.toBe(clientB);
+    expect(factory.getClientForDevice("emulator-5554")).toBe(clientA);
+    expect(factory.getClientForDevice("emulator-5556")).toBe(clientB);
+  });
+
+  it("reset() swaps in a fresh shared client, discarding prior configuration", async () => {
+    const factory = new FakeAdbClientFactory();
+    const original = factory.getFakeClient();
+    original.setCommandResult("shell echo hi", "configured");
+
+    factory.reset();
+
+    const replacement = factory.getFakeClient();
+    // The observable outcome of reset: a brand-new client, so a command
+    // configured on the old one no longer resolves (this is the #108-113 swap
+    // that was previously unasserted).
+    expect(replacement).not.toBe(original);
+    const result = await factory.create(deviceA).executeCommand("shell echo hi");
+    expect(result.stdout).not.toBe("configured");
+  });
+
+  it("reset() reverts per-device routing back to shared mode", () => {
+    const factory = new FakeAdbClientFactory();
+    factory.useSeparateClientsPerDevice();
+    factory.create(deviceA);
+
+    factory.reset();
+
+    // After reset the factory is back in shared mode: both devices get one client.
+    expect(factory.create(deviceA)).toBe(factory.create(deviceB));
   });
 });

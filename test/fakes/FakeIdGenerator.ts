@@ -9,8 +9,11 @@ export class FakeIdGenerator implements IdGenerator {
   }
 
   setScripted(scripted: readonly string[]): void {
+    // Replace the queued scripted ids but DO NOT reset the fallback counter:
+    // resetting it re-emits `fake-1` after the new script drains, colliding with
+    // an id this generator already handed out earlier in the test. The generator
+    // must stay unique across its whole lifetime (issue #4186).
     this.scripted = [...scripted];
-    this.counter = 0;
   }
 
   enqueue(id: string): void {

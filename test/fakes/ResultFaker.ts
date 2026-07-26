@@ -38,11 +38,17 @@ export class ResultFaker {
    * Generate fake ElementBounds
    */
   static elementBounds(overrides: Partial<ElementBounds> = {}): ElementBounds {
+    // Draw left/top FIRST, then constrain right/bottom to be >= the drawn
+    // left/top. The old code seeded `right`'s range from `overrides.left` (0 when
+    // no override), so a randomly-drawn `left` larger than the drawn `right`
+    // produced an inverted rect ~65% of the time (#4186).
+    const left = overrides.left ?? faker.number.int({ min: 0, max: 1000 });
+    const top = overrides.top ?? faker.number.int({ min: 0, max: 1600 });
     return {
-      left: overrides.left ?? faker.number.int({ min: 0, max: 1000 }),
-      top: overrides.top ?? faker.number.int({ min: 0, max: 1600 }),
-      right: overrides.right ?? faker.number.int({ min: overrides.left ?? 0, max: 1080 }),
-      bottom: overrides.bottom ?? faker.number.int({ min: overrides.top ?? 0, max: 1920 })
+      left,
+      top,
+      right: overrides.right ?? faker.number.int({ min: left, max: Math.max(left, 1080) }),
+      bottom: overrides.bottom ?? faker.number.int({ min: top, max: Math.max(top, 1920) })
     };
   }
 

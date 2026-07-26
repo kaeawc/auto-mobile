@@ -261,6 +261,92 @@ describe("ObserveScreen", function() {
         resetObserveCacheStore();
       }
     });
+
+    test("falls back to a hierarchy identity when SDK identity refresh rejects", async function() {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        packageName: "com.apple.reminders",
+        screenWidth: 402,
+        screenHeight: 874,
+        hierarchy: {
+          node: {
+            $: { class: "XCUIApplication" },
+            node: [{ $: { class: "UINavigationBar", text: "New Reminder" } }],
+          },
+        },
+      } as any);
+      viewHierarchy.getScreenIdentity = async () => {
+        throw new Error("SDK refresh unavailable");
+      };
+
+      try {
+        const screen = new RealObserveScreen(
+          { deviceId: "ios-test-device", name: "iPhone", platform: "ios" },
+          new FakeAdbClientFactory(fakeAdb),
+          {
+            viewHierarchy,
+            cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+            performanceAuditor: { run: async () => undefined } as any,
+            accessibilityAuditor: { run: async () => undefined } as any,
+            accessibilityStateDetector: { run: async () => undefined } as any,
+          }
+        );
+
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(result.screenIdentity).toMatchObject({
+          source: "heuristic",
+          components: { bundleId: "com.apple.reminders", navigationTitle: "New Reminder" },
+        });
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
+    test("does not return an SDK identity for a different observed bundle", async function() {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        packageName: "com.apple.reminders",
+        screenWidth: 402,
+        screenHeight: 874,
+        hierarchy: {
+          node: {
+            $: { class: "XCUIApplication" },
+            node: [{ $: { class: "UINavigationBar", text: "New Reminder" } }],
+          },
+        },
+      } as any);
+      viewHierarchy.configureScreenIdentity({
+        platform: "ios",
+        source: "sdk",
+        confidence: "high",
+        key: '[["bundle","com.example.other"]]',
+        components: { bundleId: "com.example.other" },
+      });
+
+      try {
+        const screen = new RealObserveScreen(
+          { deviceId: "ios-test-device", name: "iPhone", platform: "ios" },
+          new FakeAdbClientFactory(fakeAdb),
+          {
+            viewHierarchy,
+            cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+            performanceAuditor: { run: async () => undefined } as any,
+            accessibilityAuditor: { run: async () => undefined } as any,
+            accessibilityStateDetector: { run: async () => undefined } as any,
+          }
+        );
+
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(result.screenIdentity).toMatchObject({
+          source: "heuristic",
+          components: { bundleId: "com.apple.reminders", navigationTitle: "New Reminder" },
+        });
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
   });
 
   describe("Unit Tests for Focused Element Functionality", function() {

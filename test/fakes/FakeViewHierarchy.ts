@@ -39,8 +39,16 @@ export class FakeViewHierarchy implements ViewHierarchy {
     // No-op for testing
   }
 
-  getScreenIdentity(_applicationId?: string): ScreenIdentity | undefined {
-    return this.configuredScreenIdentity;
+  getScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
+    const identity = this.configuredScreenIdentity;
+    if (
+      applicationId
+      && identity?.components.bundleId
+      && identity.components.bundleId !== applicationId
+    ) {
+      return undefined;
+    }
+    return identity;
   }
 
   /**

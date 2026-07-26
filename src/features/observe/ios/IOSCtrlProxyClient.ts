@@ -1143,7 +1143,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         payload,
         timestamp: typeof payload.timestamp === "number" && Number.isFinite(payload.timestamp)
           ? payload.timestamp
-          : Date.now(),
+          : this.timer.now(),
         sequenceNumber: typeof payload.sequenceNumber === "number" && Number.isSafeInteger(payload.sequenceNumber)
           ? payload.sequenceNumber
           : undefined,
@@ -1177,9 +1177,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const isNewer = currentOrder === undefined
       || timestamp > currentOrder.timestamp
       || (timestamp === currentOrder.timestamp
-        && sequenceNumber !== undefined
-        && currentOrder.sequenceNumber !== undefined
-        && sequenceNumber > currentOrder.sequenceNumber);
+        && (sequenceNumber === undefined
+          || currentOrder.sequenceNumber === undefined
+          || sequenceNumber > currentOrder.sequenceNumber));
     if (identity && isNewer) {
       this.sdkScreenIdentitiesByApplicationId.set(applicationId, identity);
       this.sdkScreenIdentityOrdersByApplicationId.set(applicationId, { timestamp, sequenceNumber });

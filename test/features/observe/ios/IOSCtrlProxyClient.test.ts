@@ -2244,6 +2244,32 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("keeps the last navigation event when same-millisecond events lack a sequence", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encode = (destination: string): string => Buffer.from(JSON.stringify({ destination, timestamp: 100 })).toString("base64");
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [{
+          bundleId: "com.example.ios",
+          events: [
+            { eventType: "navigation", payload: encode("OldScreen") },
+            { eventType: "navigation", payload: encode("NewScreen") },
+          ],
+        }],
+      })) as unknown as typeof fetch;
+
+      try {
+        const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
+
+        expect(identity?.components.navigationRoute).toBe("NewScreen");
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
     test("retries an empty SDK-event drain within the identity refresh budget", async function() {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
@@ -2438,7 +2464,7 @@ describe("IOSCtrlProxyClient", function() {
               eventType: "navigation",
               payload: encode(polls === 1
                 ? { destination: "Poisoned", timestamp: "not-a-number" }
-                : { destination: "Fresh", timestamp: Date.now() + 1_000 }),
+                : { destination: "Fresh", timestamp: fakeTimer.now() + 1_000 }),
             }],
           }],
         };

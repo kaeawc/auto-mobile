@@ -229,14 +229,83 @@ describe("HierarchyNavigationDetector", () => {
   });
 
   describe("dispose", () => {
-    test("should clear timers", () => {
+    test("stops a pending fingerprint from ever stabilizing after dispose", () => {
       const hierarchy = createHierarchy("Screen A");
       detector.onHierarchyUpdate(hierarchy);
+      expect(detector.hasPendingFingerprint()).toBe(true);
 
       detector.dispose();
 
-      // Advancing time after dispose should not crash
-      fakeTimer.advanceTime(100);
+      // dispose() cancels the debounce and stability timers, so advancing well
+      // past both deadlines must NOT stabilize the pending fingerprint or record
+      // a navigation. A no-op dispose() would let the debounce fire and promote
+      // the fingerprint, so getCurrentFingerprint would become non-null.
+      fakeTimer.advanceTime(10_000);
+
+      expect(detector.getCurrentFingerprint()).toBeNull();
+      expect(detector.getPreviousFingerprint()).toBeNull();
+      // dispose() only tears down timers; it does not reset accumulated state,
+      // so the pending fingerprint is still parked (distinct from reset()).
+      expect(detector.hasPendingFingerprint()).toBe(true);
+    });
+  });
+
+  describe("navigation callback", () => {
+    interface CallbackInfo {
+      packageName: string | null;
+      screenFingerprint: string;
+      timestamp: number;
+    }
+
+    test("invokes the navigation callback once per detected navigation", () => {
+      const seen: CallbackInfo[] = [];
+      detector.setNavigationCallback(info => seen.push(info));
+
+      // The very first stabilization (initial -> Screen A) is itself a recorded
+      // navigation, so the callback fires here too — not only on the A -> B hop.
+      detector.onHierarchyUpdate(createHierarchy("Screen A"));
+      fakeTimer.advanceTime(60);
+
+      detector.onHierarchyUpdate(createHierarchy("Screen B"));
+      fakeTimer.advanceTime(60);
+
+      expect(seen).toHaveLength(2);
+      expect(seen.at(-1)!.packageName).toBe("com.test.app");
+      expect(seen.at(-1)!.screenFingerprint).toBe(detector.getCurrentFingerprint()!.hash);
+    });
+
+    test("keeps detecting navigation when the callback throws", () => {
+      detector.setNavigationCallback(() => {
+        throw new Error("screenshot capture blew up");
+      });
+
+      // A throwing callback must be swallowed: advancing the debounce timer (which
+      // fires the callback synchronously) must not propagate, and fingerprint
+      // state must still advance. Dropping the try/catch would let this throw out
+      // of advanceTime and fail the test.
+      detector.onHierarchyUpdate(createHierarchy("Screen A"));
+      fakeTimer.advanceTime(60);
+      detector.onHierarchyUpdate(createHierarchy("Screen B"));
+      fakeTimer.advanceTime(60);
+
+      const current = detector.getCurrentFingerprint();
+      const previous = detector.getPreviousFingerprint();
+      expect(current).not.toBeNull();
+      expect(previous).not.toBeNull();
+      expect(current!.hash).not.toBe(previous!.hash);
+    });
+
+    test("stops invoking the callback after it is cleared", () => {
+      const seen: CallbackInfo[] = [];
+      detector.setNavigationCallback(info => seen.push(info));
+      detector.setNavigationCallback(null);
+
+      detector.onHierarchyUpdate(createHierarchy("Screen A"));
+      fakeTimer.advanceTime(60);
+      detector.onHierarchyUpdate(createHierarchy("Screen B"));
+      fakeTimer.advanceTime(60);
+
+      expect(seen).toHaveLength(0);
     });
   });
 

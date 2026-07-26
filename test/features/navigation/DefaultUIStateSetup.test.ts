@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { DefaultUIStateSetup, type ObserveScreenLike } from "../../../src/features/navigation/DefaultUIStateSetup";
+import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
@@ -34,13 +35,22 @@ describe("DefaultUIStateSetup", () => {
   // resolved AdbClient. After ObserveScreen became factory-only, that call would
   // throw `adbFactory.create is not a function` inside the constructor, get
   // swallowed by getCurrentUIState's catch, and silently skip required UI setup.
-  test("default observe provider constructs from a resolved AdbClient without throwing", () => {
-    const setup = makeSetup();
+  test("default observe provider builds a RealObserveScreen bound to the injected device and adb", () => {
+    const fakeAdb = new FakeAdbClient() as unknown as AdbClient;
+    const timer = new FakeTimer();
+    const setup = new DefaultUIStateSetup(device, fakeAdb, undefined, timer);
     const provider = (setup as unknown as { observeScreenProvider: () => ObserveScreenLike }).observeScreenProvider;
 
     let observeScreen: ObserveScreenLike | undefined;
     expect(() => { observeScreen = provider(); }).not.toThrow();
-    expect(typeof observeScreen!.execute).toBe("function");
+
+    // Assert the concrete type and its binding rather than merely "has an execute
+    // method" (a bare stub would pass that). The default provider must wire the
+    // injected device and the resolved AdbClient into the real observe path.
+    expect(observeScreen).toBeInstanceOf(RealObserveScreen);
+    const internals = observeScreen as unknown as { device: BootedDevice; adb: AdbClient };
+    expect(internals.device).toBe(device);
+    expect(internals.adb).toBe(fakeAdb);
   });
 
   test("setupUIState consults the observe provider when the edge requires UI state", async () => {

@@ -181,14 +181,12 @@ describe("SmartNavigationHelper", function() {
         2 // Current depth
       );
 
-      // This may be true or false depending on whether the path is found
-      // The key is that if shouldUseBack is true, backPresses should equal 2
-      if (result.shouldUseBack) {
-        expect(result.backPresses).toBe(2);
-      } else {
-        // If back button is not recommended, it should be for a valid reason
-        expect(result.reason).toBeDefined();
-      }
+      // findPath(target="ScreenA") searches outward from ScreenA, but the only
+      // recorded edges point forward (A->B->C), so no path back to ScreenA is
+      // found and a depth-2 gap cannot be safely closed with the back button.
+      expect(result.shouldUseBack).toBe(false);
+      expect(result.backPresses).toBe(0);
+      expect(result.reason).toBe("No known navigation path to verify safety");
     });
   });
 

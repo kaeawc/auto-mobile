@@ -321,22 +321,11 @@ describe("NavigationGraphManager", () => {
 
       expect(result.found).toBe(true);
       expect(result.path).toHaveLength(40);
-      expect(fromScreenReadCount).toBeLessThanOrEqual(edges.length * 3);
-    });
-
-    test("should keep BFS queue and path tracking linear in source", () => {
-      const managerSource = readFileSync(
-        join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
-        "utf8"
-      );
-      const findPathBody = extractMethodBody(managerSource, "public async findPath");
-
-      expect(findPathBody).toContain("const edgesBySource = new Map");
-      expect(findPathBody).toContain("let queueHead = 0");
-      expect(findPathBody).not.toContain(".shift(");
-      expect(findPathBody).toContain("const predecessor = new Map");
-      expect(findPathBody).not.toContain("[...path");
-      expect(findPathBody).toContain("this.reconstructPath(");
+      // from_screen is read exactly three times per edge: once building the
+      // edgesBySource index, once during the BFS neighbour scan, and once during
+      // path reconstruction. An exact bound (not <=) also kills a `* 2` regression
+      // that would drop one of those linear passes.
+      expect(fromScreenReadCount).toBe(edges.length * 3);
     });
 
     test("should prefer a shorter path over an earlier longer path", async () => {
@@ -534,6 +523,86 @@ describe("NavigationGraphManager", () => {
       ]);
       expect(history.nodes.every(node => node.id !== null)).toBe(true);
     });
+
+    // N navigation events produce N-1 edges, so 5 events == 4 edges. Requesting a
+    // page smaller than the edge count is what sets hasMore/nextCursor; an
+    // off-by-one seed (edges <= limit) can never reach that boundary.
+    async function seedLinearEdges(edgeCount: number): Promise<void> {
+      for (let i = 0; i <= edgeCount; i++) {
+        await manager.recordNavigationEvent(createEvent(`Screen${i}`, 1000 + i));
+      }
+    }
+
+    interface LimitRow {
+      name: string;
+      limit?: number;
+      expectedEdgeCount: number;
+      expectNextCursor: boolean;
+    }
+
+    const limitRows: LimitRow[] = [
+      { name: "returns every edge and no cursor when no limit is given", limit: undefined, expectedEdgeCount: 4, expectNextCursor: false },
+      { name: "caps the page and emits a cursor when the limit is below the edge count", limit: 2, expectedEdgeCount: 2, expectNextCursor: true },
+      { name: "treats a zero limit as the default page size", limit: 0, expectedEdgeCount: 4, expectNextCursor: false },
+      { name: "treats a negative limit as the default page size", limit: -5, expectedEdgeCount: 4, expectNextCursor: false },
+      { name: "floors a fractional limit toward zero", limit: 2.9, expectedEdgeCount: 2, expectNextCursor: true },
+      { name: "returns every edge when the limit exceeds the edge count", limit: 1000, expectedEdgeCount: 4, expectNextCursor: false },
+    ];
+
+    test.each(limitRows)("$name", async ({ limit, expectedEdgeCount, expectNextCursor }) => {
+      await seedLinearEdges(4);
+
+      const page = await manager.exportGraphHistory({ limit });
+
+      expect(page.edges).toHaveLength(expectedEdgeCount);
+      if (expectNextCursor) {
+        expect(page.nextCursor).not.toBeNull();
+      } else {
+        expect(page.nextCursor).toBeNull();
+      }
+    });
+
+    test("walks the full history across pages using the returned cursor", async () => {
+      await seedLinearEdges(4);
+
+      const firstPage = await manager.exportGraphHistory({ limit: 2 });
+      expect(firstPage.edges).toHaveLength(2);
+      expect(firstPage.nextCursor).not.toBeNull();
+
+      const secondPage = await manager.exportGraphHistory({
+        limit: 2,
+        cursor: firstPage.nextCursor!,
+      });
+      expect(secondPage.edges).toHaveLength(2);
+      expect(secondPage.nextCursor).toBeNull();
+
+      // No edge is dropped or repeated across the two pages.
+      const seenIds = [
+        ...firstPage.edges.map(edge => edge.id),
+        ...secondPage.edges.map(edge => edge.id),
+      ];
+      expect(new Set(seenIds).size).toBe(4);
+    });
+
+    test("returns an empty envelope with the echoed cursor when no app is active", async () => {
+      const freshManager = makeFreshManager();
+
+      const page = await freshManager.exportGraphHistory({ cursor: "123:4" });
+
+      expect(page.appId).toBeNull();
+      expect(page.edges).toEqual([]);
+      expect(page.nodes).toEqual([]);
+      expect(page.cursor).toBe("123:4");
+      expect(page.nextCursor).toBeNull();
+    });
+
+    test("rejects a malformed cursor rather than silently returning the first page", async () => {
+      await seedLinearEdges(2);
+
+      await expect(
+        manager.exportGraphHistory({ cursor: "not-a-cursor" })
+      ).rejects.toThrow(/Invalid history cursor/);
+    });
   });
 
   describe("clearCurrentGraph", () => {
@@ -636,31 +705,6 @@ function createCountingDBEdge(
   });
 
   return edge;
-}
-
-function extractMethodBody(source: string, signature: string): string {
-  const signatureIndex = source.indexOf(signature);
-  if (signatureIndex < 0) {
-    throw new Error(`Could not find method signature: ${signature}`);
-  }
-
-  const openingBrace = source.indexOf("{", signatureIndex);
-  if (openingBrace < 0) {
-    throw new Error(`Could not find method body: ${signature}`);
-  }
-
-  let depth = 1;
-  let index = openingBrace + 1;
-  for (; index < source.length && depth > 0; index++) {
-    const char = source[index];
-    if (char === "{") {
-      depth++;
-    } else if (char === "}") {
-      depth--;
-    }
-  }
-
-  return source.slice(openingBrace + 1, index - 1);
 }
 
 describe("NavigationGraphManager - Scroll Position", () => {
@@ -1327,6 +1371,43 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     expect(await countEdges()).toBe(1);
     const otherNode = await otherRepo.getNode("com.test.other", "OtherScreen");
     expect(otherNode).toBeDefined();
+  });
+
+  describe("graph-update listener isolation (#4171)", () => {
+    test("still notifies later listeners after an earlier listener throws", async () => {
+      const manager = makeManager(new TestCoverageRepository(defaultTimer, db));
+      await manager.setCurrentApp(APP_ID);
+
+      const calls: string[] = [];
+      manager.setGraphUpdateListener(() => {
+        calls.push("first");
+        throw new Error("listener boom");
+      });
+      manager.setGraphUpdateListener(() => {
+        calls.push("second");
+      });
+
+      // Switching the app fires notifyGraphUpdated once. A per-listener try/catch
+      // must isolate the first listener's throw so the second still runs; without
+      // it, the throw would propagate out of setCurrentApp and starve later
+      // listeners.
+      await manager.setCurrentApp("com.test.other");
+
+      expect(calls).toEqual(["first", "second"]);
+    });
+
+    test("stops notifying every listener once they are cleared with null", async () => {
+      const manager = makeManager(new TestCoverageRepository(defaultTimer, db));
+      await manager.setCurrentApp(APP_ID);
+
+      const calls: number[] = [];
+      manager.setGraphUpdateListener(() => calls.push(1));
+      manager.setGraphUpdateListener(null);
+
+      await manager.setCurrentApp("com.test.other");
+
+      expect(calls).toEqual([]);
+    });
   });
 });
 

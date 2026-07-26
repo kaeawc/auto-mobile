@@ -79,8 +79,21 @@ describe("SelectionStateDetector", () => {
 
     expect(selected).toHaveLength(1);
     expect(selected[0].text).toBe("Tab1");
+    // Exact envelope: similarity 90 -> diff 10.00%; confidence = min(1, 10/scale=5) = 1;
+    // reason pins the diff string and the minDifferencePercent=1 threshold.
     expect(selected[0].selectedState?.method).toBe("visual");
-    expect(selected[0].selectedState?.confidence).toBeGreaterThan(0);
-    expect(imageUtils.wasMethodCalled("crop")).toBe(true);
+    expect(selected[0].selectedState?.confidence).toBe(1);
+    expect(selected[0].selectedState?.reason).toBe("visual diff 10.00% >= 1%");
+
+    // Both the before and after regions are cropped to the element's exact 50x50
+    // bounds at the origin (guards the crop rect that drives the visual diff).
+    const cropCalls = imageUtils.getMethodCalls("crop");
+    expect(cropCalls).toHaveLength(2);
+    for (const call of cropCalls) {
+      expect(call.width).toBe(50);
+      expect(call.height).toBe(50);
+      expect(call.x).toBe(0);
+      expect(call.y).toBe(0);
+    }
   });
 });

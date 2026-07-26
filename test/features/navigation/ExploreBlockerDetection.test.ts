@@ -1,9 +1,12 @@
 import { expect, describe, test } from "bun:test";
 import { Element } from "../../../src/models";
+import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import {
   isPermissionDialog,
   isLoginScreen,
-  isRatingDialog
+  isRatingDialog,
+  detectAndHandleBlockers
 } from "../../../src/features/navigation/ExploreBlockerDetection";
 
 describe("ExploreBlockerDetection", () => {
@@ -294,6 +297,135 @@ describe("ExploreBlockerDetection", () => {
       expect(isPermissionDialog(elements)).toBe(false);
       expect(isLoginScreen(elements)).toBe(false);
       expect(isRatingDialog(elements)).toBe(false);
+    });
+  });
+
+  describe("detectAndHandleBlockers", () => {
+    // A fake ElementParser whose flattenViewHierarchy returns the configured
+    // elements. detectAndHandleBlockers -> extractAllElements only touches
+    // flattenViewHierarchy, so this is the entire seam. Tracks call count so we
+    // can prove the error/missing-hierarchy guards bail out *before* extraction.
+    function makeParser(elements: Element[]): { parser: ElementParser; extractionCount: () => number } {
+      let calls = 0;
+      const parser = {
+        flattenViewHierarchy: () => {
+          calls += 1;
+          return elements.map((element, index) => ({ element, index, depth: 0 }));
+        },
+      } as unknown as ElementParser;
+      return { parser, extractionCount: () => calls };
+    }
+
+    function observationWith(hierarchy: { error?: string }, packageName = "com.test"): ObserveResult {
+      return {
+        viewHierarchy: { hierarchy, packageName },
+      } as unknown as ObserveResult;
+    }
+
+    const device = {} as unknown as BootedDevice;
+
+    // A non-clickable element trips the classifier predicates but makes both
+    // handlePermissionDialog and dismissDialog no-op (they skip non-clickable
+    // nodes and never construct a TapOnElement), so no real device call fires.
+    const permissionAndLoginElements: Element[] = [
+      { "text": "Allow access", "clickable": false } as Element,
+      { "text": "password", "class": "android.widget.EditText", "clickable": false } as Element,
+    ];
+    const loginElements: Element[] = [
+      { "text": "Sign in", "clickable": false } as Element,
+      { "text": "", "class": "android.widget.EditText", "clickable": false } as Element,
+    ];
+
+    test("handles a permission-and-login screen as a permission dialog, not a login dead-end", async () => {
+      // Permission is checked before login, so handleDeadEnd (the login handler)
+      // must never fire. Kills the `false && isPermissionDialog(...)` mutant,
+      // which would fall through to the login branch and invoke handleDeadEnd.
+      let deadEndCalls = 0;
+      const { parser } = makeParser(permissionAndLoginElements);
+
+      const result = await detectAndHandleBlockers(
+        observationWith({}),
+        device,
+        null,
+        parser,
+        async () => { deadEndCalls += 1; }
+      );
+
+      expect(deadEndCalls).toBe(0);
+      // No clickable permission button -> handlePermissionDialog returns false.
+      expect(result).toBe(false);
+    });
+
+    test("routes a login screen to the dead-end handler and reports it handled", async () => {
+      let deadEndCalls = 0;
+      const { parser } = makeParser(loginElements);
+
+      const result = await detectAndHandleBlockers(
+        observationWith({}),
+        device,
+        null,
+        parser,
+        async () => { deadEndCalls += 1; }
+      );
+
+      expect(deadEndCalls).toBe(1);
+      expect(result).toBe(true);
+    });
+
+    test("returns false and never handles blockers on a regular screen", async () => {
+      let deadEndCalls = 0;
+      const { parser } = makeParser([
+        { "text": "Home", "clickable": true } as Element,
+        { "text": "Settings", "clickable": true } as Element,
+      ]);
+
+      const result = await detectAndHandleBlockers(
+        observationWith({}),
+        device,
+        null,
+        parser,
+        async () => { deadEndCalls += 1; }
+      );
+
+      expect(result).toBe(false);
+      expect(deadEndCalls).toBe(0);
+    });
+
+    test("bails out without extracting elements when the hierarchy carries an error", async () => {
+      // The errored hierarchy still resolves to login elements, so dropping the
+      // `|| viewHierarchy.hierarchy.error` guard would extract them and invoke
+      // handleDeadEnd. With the guard, extraction never runs.
+      let deadEndCalls = 0;
+      const { parser, extractionCount } = makeParser(loginElements);
+
+      const result = await detectAndHandleBlockers(
+        observationWith({ error: "accessibility service unavailable" }),
+        device,
+        null,
+        parser,
+        async () => { deadEndCalls += 1; }
+      );
+
+      expect(result).toBe(false);
+      expect(deadEndCalls).toBe(0);
+      expect(extractionCount()).toBe(0);
+    });
+
+    test("returns false when the observation has no view hierarchy", async () => {
+      let deadEndCalls = 0;
+      const { parser, extractionCount } = makeParser(loginElements);
+
+      const result = await detectAndHandleBlockers(
+        { viewHierarchy: undefined } as unknown as ObserveResult,
+        device,
+        null,
+        parser,
+        async () => { deadEndCalls += 1; }
+      );
+
+      expect(result).toBe(false);
+      expect(deadEndCalls).toBe(0);
+      expect(extractionCount()).toBe(0);
     });
   });
 });

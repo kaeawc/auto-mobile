@@ -152,7 +152,7 @@ export class ScreenFingerprint {
       options?.cachedNavigationId &&
       options?.cachedNavigationIdTimestamp
     ) {
-      const cacheTTL = options.cacheTTL || DEFAULT_CACHE_TTL;
+      const cacheTTL = options.cacheTTL ?? DEFAULT_CACHE_TTL;
       const cacheAge = hierarchy.updatedAt - options.cachedNavigationIdTimestamp;
 
       if (cacheAge < cacheTTL) {

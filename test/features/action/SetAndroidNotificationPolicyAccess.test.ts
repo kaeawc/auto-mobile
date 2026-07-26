@@ -13,20 +13,34 @@ describe("SetAndroidNotificationPolicyAccess", () => {
   test("allow_dnd on success", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
-    client.setCommandResult("shell cmd notification allow_dnd com.example.app", "");
+    client.setCommandResult("shell cmd notification allow_dnd 'com.example.app'", "");
 
     const action = new SetAndroidNotificationPolicyAccess(androidDevice, factory);
     const result = await action.execute("com.example.app", { allowed: true });
 
     expect(result.success).toBe(true);
-    expect(client.wasCommandExecuted("shell cmd notification allow_dnd com.example.app")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(true);
+  });
+
+  test("quotes package names before passing them to the device shell", async () => {
+    const factory = new FakeAdbClientFactory();
+    const client = factory.getFakeClient();
+    const packageName = "com.example.app; id #";
+    const command = "shell cmd notification allow_dnd 'com.example.app; id #'";
+    client.setCommandResult(command, "");
+
+    const action = new SetAndroidNotificationPolicyAccess(androidDevice, factory);
+    const result = await action.execute(packageName, { allowed: true });
+
+    expect(result.success).toBe(true);
+    expect(client.getAllCommands()).toContain(command);
   });
 
   test("allow_dnd fails on SecurityException output", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
-      "shell cmd notification allow_dnd com.example.app",
+      "shell cmd notification allow_dnd 'com.example.app'",
       "",
       "java.lang.SecurityException: nope"
     );
@@ -42,7 +56,7 @@ describe("SetAndroidNotificationPolicyAccess", () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
-      "shell cmd notification disallow_dnd com.example.app",
+      "shell cmd notification disallow_dnd 'com.example.app'",
       "",
       "java.lang.SecurityException: ignored"
     );

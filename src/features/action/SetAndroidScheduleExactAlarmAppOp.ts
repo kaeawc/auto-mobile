@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { shellQuote } from "../../utils/shellQuote";
 
 
 const API_LEVEL_SCHEDULE_EXACT_ALARM = 31;
@@ -64,7 +65,7 @@ export class SetAndroidScheduleExactAlarmAppOp {
       }
     }
 
-    const cmd = `shell appops set --uid ${packageName} SCHEDULE_EXACT_ALARM ${input.mode}`;
+    const cmd = `shell appops set --uid ${shellQuote(packageName)} SCHEDULE_EXACT_ALARM ${input.mode}`;
 
     try {
       await perf.track(`appops.${input.mode}`, async () => {

@@ -4,6 +4,7 @@ import { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { shellQuote } from "../../utils/shellQuote";
 
 
 export interface SetAndroidNotificationPolicyAccessInput {
@@ -43,7 +44,7 @@ export class SetAndroidNotificationPolicyAccess {
     }
 
     const sub = input.allowed ? "allow_dnd" : "disallow_dnd";
-    const cmd = `shell cmd notification ${sub} ${packageName}`;
+    const cmd = `shell cmd notification ${sub} ${shellQuote(packageName)}`;
 
     try {
       await perf.track(sub, async () => {

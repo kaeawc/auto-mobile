@@ -6900,7 +6900,7 @@
   },
   {
     "name": "setAppPermissions",
-    "description": "Set permissions; notification state excludes POST_NOTIFICATIONS.",
+    "description": "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -6992,6 +6992,7 @@
         "then": {
           "properties": {
             "permissions": {
+              "minItems": 1,
               "maxItems": 1,
               "items": {
                 "const": "all"

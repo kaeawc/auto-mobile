@@ -266,15 +266,16 @@ export class AppPermissions {
     input: SetAppPermissionsInput
   ): Promise<SetAppPermissionsResult> {
     const permissions = normalizePermissions(input.permissions);
+    const requestedPermissions = input.permissions ?? [];
     const operations: AppPermissionOperationResult[] = [];
     const invalidResetRequest =
       action === "reset" &&
-      (input.userId !== undefined || permissions.length !== 1 || permissions[0] !== "all");
+      (input.userId !== undefined || requestedPermissions.length !== 1 || requestedPermissions[0] !== "all");
 
     if (permissions.length > 0 || invalidResetRequest) {
       const permissionResult = await new GrantAndroidPermissions(this.device, this.adbFactory).execute(appId, {
         action,
-        permissions,
+        permissions: action === "reset" ? requestedPermissions : permissions,
         userId: input.userId,
       });
       const changedCount = permissionResult.results.filter(result => result.success && !result.skipped).length;

@@ -1406,9 +1406,12 @@ export class SimCtlClient implements SimCtl {
    * Determine whether the current host can launch the Simulator GUI.
    *
    * Resolution order:
-   *  1. `AUTOMOBILE_IOS_HEADLESS` env override (`true`/`1` => headless,
+   *  1. Non-darwin platforms are always headless (Simulator.app is macOS-only).
+   *     This gate comes BEFORE the env override so `AUTOMOBILE_IOS_HEADLESS=false`
+   *     (or `""`) can never make `openSimulatorApp` shell `open -a Simulator` on
+   *     Linux/Windows, where that binary does not exist (issue #4177).
+   *  2. `AUTOMOBILE_IOS_HEADLESS` env override (`true`/`1` => headless,
    *     `false`/`0` => force GUI launch).
-   *  2. Non-darwin platforms are always headless (Simulator.app is macOS-only).
    *  3. Auto-detect via `launchctl managername`: an `Aqua` manager means a GUI
    *     login session; anything else (`System`/`Background`) is a daemon/SSH
    *     context with no GUI domain.
@@ -1417,13 +1420,13 @@ export class SimCtlClient implements SimCtl {
    * behavior. The result is cached so launchctl is probed at most once.
    */
   private async isHeadlessSession(): Promise<boolean> {
+    if (this.platform !== "darwin") {
+      return true;
+    }
+
     const override = process.env.AUTOMOBILE_IOS_HEADLESS;
     if (override !== undefined) {
       return override === "true" || override === "1";
-    }
-
-    if (this.platform !== "darwin") {
-      return true;
     }
 
     if (this.headlessSessionCache === null) {

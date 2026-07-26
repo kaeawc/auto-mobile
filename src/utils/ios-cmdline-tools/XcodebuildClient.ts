@@ -105,7 +105,7 @@ export class XcodebuildClient implements Xcodebuild {
         logger.warn(`[iOS] Command failed after ${duration}ms: ${fullCommand} - ${(error as Error).message}`);
         throw controller.signal.aborted ? timeoutError : error;
       } finally {
-        clearTimeout(timeoutId!);
+        this.timer.clearTimeout(timeoutId!);
       }
     }
 
@@ -161,7 +161,7 @@ export class XcodebuildClient implements Xcodebuild {
     try {
       return await Promise.race([this.isLocalXcodebuildAvailable(controller.signal), timeout]);
     } finally {
-      clearTimeout(timeoutId!);
+      this.timer.clearTimeout(timeoutId!);
     }
   }
 

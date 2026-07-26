@@ -140,6 +140,55 @@ describe("simctl argv integrity (#4196)", () => {
     }
   });
 
+  // ADD-1 (#4177 item 1): a round-trip table proving `executeCommandArgs` — the
+  // argv seam every command method now routes through — delivers each
+  // device-controlled value to `xcrun simctl` byte-for-byte, with NO positional
+  // shift. The empty value is the dangerous one: dropping it turns
+  // `defaults write <domain> <key> ""` into the shorter `defaults read`. The
+  // legacy string `executeCommand` still mangles the unquoted `newline`/`tab`
+  // rows (it re-splits on whitespace); those callers were migrated to
+  // `executeCommandArgs`, which is why the table drives the argv path.
+  describe("executeCommandArgs delivers every value to xcrun simctl unchanged", () => {
+    for (const { label, value } of TRICKY_VALUES) {
+      test(`round-trips ${label} into argv`, async () => {
+        const seen: string[][] = [];
+        const client = new Simctl(null, async (_file, args) => {
+          if (args.join(" ") !== "simctl --version") {
+            seen.push(args);
+          }
+          return createExecResult("", "");
+        });
+
+        await client.executeCommandArgs([
+          "spawn", UDID, "defaults", "write", "domain", "key", value
+        ]);
+
+        expect(seen).toEqual([[
+          "simctl", "spawn", UDID, "defaults", "write", "domain", "key", value
+        ]]);
+      });
+    }
+
+    test("an empty value keeps the argv length and does not shift later positions", async () => {
+      const seen: string[][] = [];
+      const client = new Simctl(null, async (_file, args) => {
+        if (args.join(" ") !== "simctl --version") {
+          seen.push(args);
+        }
+        return createExecResult("", "");
+      });
+
+      await client.executeCommandArgs([
+        "spawn", UDID, "defaults", "write", "domain", "key", ""
+      ]);
+
+      // 1 (simctl) + 7 caller args = 8 entries; `write` stays the verb.
+      expect(seen[0]).toHaveLength(8);
+      expect(seen[0][4]).toBe("write");
+      expect(seen[0][7]).toBe("");
+    });
+  });
+
   describe("legacy string command path no longer drops empty quoted arguments", () => {
     test("an empty quoted token is preserved as an empty argv entry", async () => {
       const seen: string[][] = [];

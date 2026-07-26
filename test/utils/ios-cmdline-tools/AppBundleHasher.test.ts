@@ -43,14 +43,22 @@ const bundle = (root: string, files: Record<string, string>, options: BundleOpti
     return options.reverseReaddir ? sorted.reverse() : sorted;
   };
 
+  // The hasher builds the paths it passes here with node's `join` (see
+  // AppBundleHasher.ts), so on Windows they arrive back-slash-separated while our
+  // keys are forward-slash. Normalize on lookup so the in-memory seam matches on
+  // every platform (the hasher already normalizes separators for the hash itself).
+  const norm = (p: string): string => p.replace(/\\/g, "/");
   return {
-    readDir: async (path: string): Promise<string[]> => childrenOf(path),
-    stat: async (path: string) => ({
-      isDirectory: () => dirs.has(path),
-      isFile: () => fileContents.has(path),
-    }),
+    readDir: async (path: string): Promise<string[]> => childrenOf(norm(path)),
+    stat: async (path: string) => {
+      const key = norm(path);
+      return {
+        isDirectory: () => dirs.has(key),
+        isFile: () => fileContents.has(key),
+      };
+    },
     readFile: async (path: string): Promise<Buffer> =>
-      Buffer.from(fileContents.get(path) ?? "", "utf-8"),
+      Buffer.from(fileContents.get(norm(path)) ?? "", "utf-8"),
   };
 };
 

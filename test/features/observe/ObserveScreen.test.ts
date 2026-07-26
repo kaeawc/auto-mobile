@@ -262,6 +262,55 @@ describe("ObserveScreen", function() {
       }
     });
 
+    test("prefers a live iOS modal boundary over a cached SDK route", async function() {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        packageName: "dev.jasonpearson.automobile.Playground",
+        screenScale: 3,
+        screenWidth: 402,
+        screenHeight: 874,
+        hierarchy: {
+          node: {
+            $: { class: "XCUIApplication" },
+            node: [{
+              $: { class: "XCUIElementTypeAlert" },
+              node: [{ $: { class: "XCUIElementTypeStaticText", text: "Allow Notifications?" } }],
+            }],
+          },
+        },
+      } as any);
+      viewHierarchy.configureScreenIdentity({
+        platform: "ios",
+        source: "sdk",
+        confidence: "high",
+        key: '["route","SettingsTab"]',
+        components: { navigationRoute: "SettingsTab" },
+      });
+
+      try {
+        const screen = new RealObserveScreen(
+          { deviceId: "ios-test-device", name: "iPhone", platform: "ios" },
+          new FakeAdbClientFactory(fakeAdb),
+          {
+            viewHierarchy,
+            cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+            performanceAuditor: { run: async () => undefined } as any,
+            accessibilityAuditor: { run: async () => undefined } as any,
+            accessibilityStateDetector: { run: async () => undefined } as any,
+          }
+        );
+
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(result.screenIdentity).toMatchObject({
+          source: "heuristic",
+          components: { modalClass: "XCUIElementTypeAlert", modalTitle: "Allow Notifications?" },
+        });
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
     test("falls back to a hierarchy identity when SDK identity refresh rejects", async function() {
       const viewHierarchy = new FakeViewHierarchy();
       viewHierarchy.configureHierarchy({

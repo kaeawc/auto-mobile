@@ -1234,6 +1234,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.startSdkScreenIdentitySession(event.applicationId, event.payload);
       return true;
     }
+    if (!this.activateSdkScreenIdentitySession(event.applicationId, event.payload)) {
+      return true;
+    }
     const trackingGeneration = this.getSdkScreenIdentityTrackingGeneration(event.payload);
     const currentGeneration = this.sdkScreenIdentityTrackingGenerationsByApplicationId.get(event.applicationId);
     if (trackingGeneration === undefined || currentGeneration === undefined || trackingGeneration >= currentGeneration) {

@@ -158,7 +158,7 @@ AutoMobileSDK.shared.initialize(
 
 Events flow through a three-stage pipeline:
 
-1. **Buffer** -- `SdkEventBuffer` collects events from all subsystems. Flushes when capacity is reached or on a periodic timer. When the buffer is disabled or a flush fails, the `DropCounter` records the loss reason.
+1. **Buffer** -- `SdkEventBuffer` collects events from all subsystems. Most events flush when capacity is reached or on a periodic timer. `notifyNavigationEvent(_:)` also flushes immediately: navigation routes and their arguments are the SDK-backed screen identity used by `observe` and action diffs, so they must be available before the next observation. When the buffer is disabled or a flush fails, the `DropCounter` records the loss reason.
 
 2. **Persist** -- `SdkEventBroadcaster` writes each batch to disk via `FileEventPersistence` before attempting delivery. On next app launch, `replayPending()` retries any unsent batches.
 

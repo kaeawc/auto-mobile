@@ -2487,6 +2487,31 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("ignores a delayed tracking control from an older session", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encode = (payload: Record<string, unknown>): string => Buffer.from(JSON.stringify(payload)).toString("base64");
+      const batches = [
+        [{ bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: encode({ state: "sdk_session_started", timestamp: 2, sessionId: "current-session", sessionEpoch: 2, trackingGeneration: 0 }) }] }],
+        [{ bundleId: "com.example.ios", events: [{ eventType: "lifecycle", payload: encode({ state: "sdk_tracking_disabled", timestamp: 1, sessionId: "persisted-session", sessionEpoch: 1, trackingGeneration: 5 }) }] }],
+        [{ bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encode({ destination: "Current", timestamp: 3, sessionId: "current-session", sessionEpoch: 2, trackingGeneration: 0 }) }] }],
+      ];
+      let polls = 0;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({ ok: true, json: async () => batches[polls++] })) as unknown as typeof fetch;
+
+      try {
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+
+        expect(testClient.getSdkScreenIdentity("com.example.ios")?.components.navigationRoute).toBe("Current");
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
     test("orders tracking re-enable before an earlier-arriving navigation event", async function() {
       const { factory } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);

@@ -764,4 +764,82 @@ describe("AppPreferences", () => {
       key: "onboardingComplete",
     })).rejects.toThrow("iOS physical devices");
   });
+
+  describe("validateScope guards", () => {
+    // Each guard must fire BEFORE any device command runs — a wrong scope on the
+    // wrong platform must never silently run `adb getprop` on an iOS device, and a
+    // missing appId must never write to `undefined_preferences.xml`.
+    test("rejects userDefaults scope on an Android device without touching adb", async () => {
+      const adb = new FakeAdbExecutor();
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      await expect(preferences.getPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "onboardingComplete",
+      })).rejects.toThrow("userDefaults scope is only supported on iOS devices.");
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test("rejects systemProperty scope on an iOS device without spawning defaults", async () => {
+      const simctl = new FakeSimCtlClient();
+      const preferences = new AppPreferences(iosSimulator, { simctl });
+
+      await expect(preferences.getPreference({
+        scope: "systemProperty",
+        key: "debug.example.enabled",
+      })).rejects.toThrow("systemProperty scope is only supported on Android devices.");
+      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+    });
+
+    test("rejects sharedPreferences scope on an iOS device without spawning defaults", async () => {
+      const simctl = new FakeSimCtlClient();
+      const preferences = new AppPreferences(iosSimulator, { simctl });
+
+      await expect(preferences.getPreference({
+        scope: "sharedPreferences",
+        appId: "com.example.app",
+        suite: "settings",
+        key: "host",
+      })).rejects.toThrow("sharedPreferences scope is only supported on Android devices.");
+      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+    });
+
+    test("rejects Android sharedPreferences without an appId instead of writing undefined_preferences.xml", async () => {
+      const adb = new FakeAdbExecutor();
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      await expect(preferences.getPreference({
+        scope: "sharedPreferences",
+        suite: "settings",
+        key: "host",
+      })).rejects.toThrow("appId is required for sharedPreferences.");
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test("rejects iOS userDefaults without an appId before spawning defaults", async () => {
+      const simctl = new FakeSimCtlClient();
+      const preferences = new AppPreferences(iosSimulator, { simctl });
+
+      await expect(preferences.getPreference({
+        scope: "userDefaults",
+        key: "onboardingComplete",
+      })).rejects.toThrow("appId is required for userDefaults.");
+      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+    });
+
+    test("guards setPreference on the same rules, not only getPreference", async () => {
+      const adb = new FakeAdbExecutor();
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      await expect(preferences.setPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "onboardingComplete",
+        value: true,
+        type: "bool",
+      })).rejects.toThrow("userDefaults scope is only supported on iOS devices.");
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+  });
 });

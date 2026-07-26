@@ -5,6 +5,7 @@ import { BootedDevice, ScreenSize } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Idle } from "../observe/Idle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { calculateMedian } from "../shared/MetricsUtils";
 
 /**
  * Result of a touch latency measurement
@@ -200,11 +201,8 @@ export class TouchLatencyTracker {
         };
       }
 
-      // Calculate median latency (more robust than average)
-      measurements.sort((a, b) => a - b);
-      const medianLatency = measurements.length % 2 === 0
-        ? (measurements[measurements.length / 2 - 1] + measurements[measurements.length / 2]) / 2
-        : measurements[Math.floor(measurements.length / 2)];
+      // Median latency (more robust than average). The empty case is handled above.
+      const medianLatency = calculateMedian(measurements) ?? 0;
 
       logger.info(`[TouchLatency] Measured latency: ${medianLatency}ms (from ${measurements.length} samples)`);
 

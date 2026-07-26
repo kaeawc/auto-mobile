@@ -5,12 +5,11 @@ import {
   calculateWeightedAverages,
   exponentialMovingAverage,
   calculateMode,
+  calculateMedian,
   safeDivide,
   getCutoffDate,
-  WEIGHT_BOUNDS,
-  DEFAULT_TTL,
-  DEFAULT_EMA_ALPHA,
 } from "../../../src/features/shared/MetricsUtils";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("MetricsUtils", () => {
   describe("adjustWeight", () => {
@@ -175,13 +174,38 @@ describe("MetricsUtils", () => {
       expect(calculateMode([60])).toBe(60);
     });
 
-    it("returns first mode when tied", () => {
-      const mode = calculateMode([60, 90, 60, 90]);
-      expect([60, 90]).toContain(mode);
+    it("returns the value that first reaches the max count on a tie", () => {
+      // Tie-break is deterministic: 60 reaches count 2 before 90 does.
+      expect(calculateMode([60, 90, 60, 90])).toBe(60);
+    });
+
+    it("returns the other tied value when it reaches the max count first", () => {
+      expect(calculateMode([90, 60, 90, 60])).toBe(90);
     });
 
     it("returns undefined for empty array", () => {
       expect(calculateMode([])).toBeUndefined();
+    });
+  });
+
+  describe("calculateMedian", () => {
+    const cases: Array<[string, number[], number | undefined]> = [
+      ["returns the middle value for an odd-length sample", [30, 10, 20], 20],
+      ["averages the two central values for an even-length sample", [10, 20, 30, 40], 25],
+      ["returns the single value for a one-element sample", [42], 42],
+      ["returns undefined for an empty sample", [], undefined],
+      ["handles an unsorted even sample", [40, 10, 30, 20], 25],
+      ["handles duplicate values", [5, 5, 5, 5], 5],
+      ["handles negative values", [-10, -30, -20], -20],
+    ];
+    it.each(cases)("%s", (_name, values, expected) => {
+      expect(calculateMedian(values)).toBe(expected);
+    });
+
+    it("does not mutate the caller's array", () => {
+      const values = [30, 10, 20];
+      calculateMedian(values);
+      expect(values).toEqual([30, 10, 20]);
     });
   });
 
@@ -198,39 +222,61 @@ describe("MetricsUtils", () => {
     it("returns 1.0 when both are 0", () => {
       expect(safeDivide(0, 0)).toBe(1.0);
     });
+
+    const boundaryCases: Array<[string, number, number, number]> = [
+      ["negative current over zero baseline collapses to 1.0", -5, 0, 1.0],
+      ["negative-zero baseline is treated as zero", 5, -0, Infinity],
+      ["zero current over zero baseline is 1.0", 0, 0, 1.0],
+      ["negative over negative is a positive ratio", -10, -2, 5],
+      ["negative over positive is a negative ratio", -10, 2, -5],
+    ];
+    it.each(boundaryCases)("%s", (_name, current, baseline, expected) => {
+      expect(safeDivide(current, baseline)).toBe(expected);
+    });
+
+    it("propagates NaN through a normal division", () => {
+      expect(safeDivide(NaN, 5)).toBeNaN();
+    });
   });
 
   describe("getCutoffDate", () => {
-    it("returns date N days in the past", () => {
-      const cutoff = getCutoffDate(7);
-      const expected = new Date();
-      expected.setDate(expected.getDate() - 7);
+    // Pin the clock through a FakeTimer so the function and its expectation read
+    // the SAME instant — the real-clock version flakes when the two Date() reads
+    // straddle midnight. A fixed mid-day UTC anchor keeps the day arithmetic
+    // unambiguous regardless of the host timezone.
+    const anchorMs = Date.UTC(2026, 5, 15, 12, 0, 0); // 2026-06-15T12:00:00Z
 
-      // Compare date portion only (ignore time differences)
-      expect(cutoff.slice(0, 10)).toBe(expected.toISOString().slice(0, 10));
+    const cases: Array<[string, number, string]> = [
+      ["zero days is the anchor day", 0, "2026-06-15"],
+      ["one day back", 1, "2026-06-14"],
+      ["seven days back", 7, "2026-06-08"],
+      ["thirty days back crosses the month boundary", 30, "2026-05-16"],
+      ["a full year back crosses the year boundary", 365, "2025-06-15"],
+    ];
+
+    it.each(cases)("%s", (_name, daysOld, expectedDate) => {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(anchorMs);
+      const cutoff = getCutoffDate(daysOld, timer.now());
+      expect(cutoff.slice(0, 10)).toBe(expectedDate);
     });
 
-    it("returns ISO string format", () => {
+    it("returns a full ISO-8601 timestamp preserving the injected time of day", () => {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(anchorMs);
+      const cutoff = getCutoffDate(1, timer.now());
+      expect(cutoff).toBe("2026-06-14T12:00:00.000Z");
+    });
+
+    it("defaults to the real clock when no time is injected", () => {
       const cutoff = getCutoffDate(1);
       expect(cutoff).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     });
   });
 
-  describe("constants", () => {
-    it("WEIGHT_BOUNDS has expected values", () => {
-      expect(WEIGHT_BOUNDS.min).toBe(0.1);
-      expect(WEIGHT_BOUNDS.max).toBe(2.0);
-      expect(WEIGHT_BOUNDS.successMultiplier).toBe(1.1);
-      expect(WEIGHT_BOUNDS.failureMultiplier).toBe(0.9);
-    });
-
-    it("DEFAULT_TTL has expected values", () => {
-      expect(DEFAULT_TTL.thresholdHours).toBe(24);
-      expect(DEFAULT_TTL.baselineDays).toBe(30);
-    });
-
-    it("DEFAULT_EMA_ALPHA is 0.3", () => {
-      expect(DEFAULT_EMA_ALPHA).toBe(0.3);
-    });
-  });
+  // (Deleted the "constants" block: WEIGHT_BOUNDS / DEFAULT_TTL / DEFAULT_EMA_ALPHA
+  // were lockstep restatements of the source values. Each constant's *effect* is
+  // covered behaviorally instead: WEIGHT_BOUNDS by adjustWeight, DEFAULT_TTL by
+  // cleanupStaleBaselines' default, and DEFAULT_EMA_ALPHA by the default-alpha
+  // updateBaseline test in MemoryBaselineManager.test.ts.)
 });

@@ -194,6 +194,10 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
  *   independently (the hierarchy is debounced), so a click could otherwise be mapped against one
  *   device's dimensions yet sent to another. When the observation stream disconnects both ids are
  *   invalidated, which also drops control on a frozen mirror.
+ * - the observation stream is live ([isObservationStreamConnected]) — a stale frame must not
+ *   re-enable control while the stream is down, and
+ * - the rendered screenshot and hierarchy geometry agree ([isRenderedGeometryConsistent], see
+ *   [isRenderedGeometryConsistent]) so a click is not mapped through a mismatched scale.
  *
  * When any condition fails the view falls back to inspector mode, so the user is never tapping
  * blind.
@@ -205,13 +209,57 @@ internal fun isDeviceControlActive(
   connectionType: McpConnectionType?,
   renderedDeviceId: String?,
   renderedHierarchyDeviceId: String?,
+  isObservationStreamConnected: Boolean,
+  isRenderedGeometryConsistent: Boolean,
 ): Boolean {
   return enableDeviceControl &&
     isRealDeviceMode &&
     activeDeviceId != null &&
     connectionType?.supportsDaemonInput == true &&
+    isObservationStreamConnected &&
+    isRenderedGeometryConsistent &&
     renderedDeviceId == activeDeviceId &&
     renderedHierarchyDeviceId == activeDeviceId
+}
+
+/** Relative aspect-ratio tolerance for [isRenderedGeometryConsistent]. */
+private const val GEOMETRY_ASPECT_TOLERANCE = 0.05f
+
+/**
+ * Whether the rendered screenshot and the hit-tested hierarchy describe a geometrically-consistent
+ * view of the same screen (issue #3347). `DeviceScreenView` maps a click through the hierarchy-root
+ * dimensions while fitting the screenshot by its own aspect ratio, so if the two disagree in aspect
+ * a tap is mapped through the wrong scale. This requires their aspect ratios to agree up to a 90°
+ * rotation (the mapper aligns screenshot orientation to the hierarchy) within
+ * [GEOMETRY_ASPECT_TOLERANCE].
+ *
+ * A non-positive screenshot dimension (no frame yet) is inconsistent. Non-positive hierarchy-root
+ * dimensions mean the hierarchy carries no explicit bounds, in which case the mapper falls back to
+ * the screenshot dimensions and the two are consistent by construction.
+ *
+ * Note: this catches resolution/aspect mismatches, not a same-device, same-aspect rotation while
+ * the hierarchy is still debounced — that transient is indistinguishable from a normal iOS
+ * native-orientation screenshot without a per-frame device-orientation signal (tracked as a
+ * follow-up).
+ */
+internal fun isRenderedGeometryConsistent(
+  screenshotWidth: Int,
+  screenshotHeight: Int,
+  hierarchyRootWidth: Int,
+  hierarchyRootHeight: Int,
+): Boolean {
+  if (screenshotWidth <= 0 || screenshotHeight <= 0) return false
+  if (hierarchyRootWidth <= 0 || hierarchyRootHeight <= 0) return true
+  val screenshotAspect = screenshotWidth.toFloat() / screenshotHeight.toFloat()
+  val hierarchyAspect = hierarchyRootWidth.toFloat() / hierarchyRootHeight.toFloat()
+  val matchesDirect =
+    kotlin.math.abs(screenshotAspect - hierarchyAspect) <=
+      GEOMETRY_ASPECT_TOLERANCE * hierarchyAspect
+  val rotatedHierarchyAspect = 1f / hierarchyAspect
+  val matchesRotated =
+    kotlin.math.abs(screenshotAspect - rotatedHierarchyAspect) <=
+      GEOMETRY_ASPECT_TOLERANCE * rotatedHierarchyAspect
+  return matchesDirect || matchesRotated
 }
 
 /**
@@ -824,6 +872,9 @@ fun AutoMobileContent(
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
     liveStreamClient.hierarchyUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      // Capture the generation before the async parse so a frame decoded across an invalidation
+      // (device change / stream disconnect) is dropped instead of restoring stale bounds (#3347).
+      val generation = layoutInspectorState.frameGeneration
       update.data?.let { hierarchyJson ->
         val result =
           kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -840,7 +891,12 @@ fun AutoMobileContent(
           // Tag the hierarchy with its source device so the device-control gate can require the
           // hit-tested hierarchy (not just the screenshot) to match the selected device (issue
           // #3347). The frame already passed the active-device filter above.
-          layoutInspectorState.applyHierarchyUpdate(it.first, it.second, deviceId = update.deviceId)
+          layoutInspectorState.applyHierarchyUpdate(
+            it.first,
+            it.second,
+            deviceId = update.deviceId,
+            generation = generation,
+          )
         }
       }
     }
@@ -849,6 +905,10 @@ fun AutoMobileContent(
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
     liveStreamClient.screenshotUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      // Capture the generation before the async decode so a screenshot decoded across an
+      // invalidation (device change / stream disconnect) is dropped rather than restoring a stale
+      // frame that would silently re-enable device control (#3347).
+      val generation = layoutInspectorState.frameGeneration
       update.screenshotBase64?.let { base64 ->
         val screenshotData =
           kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -865,10 +925,11 @@ fun AutoMobileContent(
           format = update.screenshotFormat,
           captureSource = update.screenshotCaptureSource,
           // Tag the rendered frame with its source device so device control can require the
-          // on-screen
-          // frame to match the selected device (issue #3347). The frame already passed the
+          // on-screen frame to match the selected device (issue #3347). The frame already passed
+          // the
           // active-device filter above, so this equals activeDeviceId at apply time.
           deviceId = update.deviceId,
+          generation = generation,
         )
       }
     }
@@ -1108,10 +1169,27 @@ fun AutoMobileContent(
       if (connectionState is ConnectionState.Disconnected) {
         clearPerformanceMetrics()
         // The observation stream is dead, so the on-screen mirror is frozen/stale even if the input
-        // socket still works. Invalidate the rendered frame's device identity so device control
-        // deactivates (issue #3347) — a click on a frozen mirror must not actuate the real device.
+        // socket still works. Mark it disconnected AND invalidate the rendered frame's device
+        // identity so device control deactivates (issue #3347) — a click on a frozen mirror must
+        // not
+        // actuate the real device. The generation bump inside the invalidation also drops any
+        // decode
+        // or debounced hierarchy job still in flight when the stream dropped.
+        layoutInspectorState.updateConnectionStatus(ConnectionStatus.Disconnected)
         layoutInspectorState.invalidateRenderedDeviceIdentity()
       }
+    }
+  }
+
+  // Drop the rendered frame's device identity the instant the selected device changes (issue
+  // #3347):
+  // the previous device's screenshot/hierarchy linger until new frames arrive, and control must
+  // stay
+  // off (Inspector) until a fresh, matching frame is applied. The generation bump also drops any
+  // in-flight frame work queued for the previous device.
+  LaunchedEffect(activeDeviceId) {
+    if (isLiveLayoutMode) {
+      layoutInspectorState.invalidateRenderedDeviceIdentity()
     }
   }
 
@@ -1468,6 +1546,7 @@ fun AutoMobileContent(
           // a rendered frame that belongs to that selected device (so a click on a stale mirror
           // after
           // a device switch can't actuate the wrong device). Otherwise we stay in inspector mode.
+          val hierarchyRootBounds = layoutInspectorState.hierarchy?.bounds
           val deviceControlActive =
             isDeviceControlActive(
               enableDeviceControl = enableDeviceControl,
@@ -1476,6 +1555,15 @@ fun AutoMobileContent(
               connectionType = connectedMcpProcess?.connectionType,
               renderedDeviceId = layoutInspectorState.renderedDeviceId,
               renderedHierarchyDeviceId = layoutInspectorState.renderedHierarchyDeviceId,
+              isObservationStreamConnected =
+                layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
+              isRenderedGeometryConsistent =
+                isRenderedGeometryConsistent(
+                  screenshotWidth = layoutInspectorState.screenWidth,
+                  screenshotHeight = layoutInspectorState.screenHeight,
+                  hierarchyRootWidth = hierarchyRootBounds?.width ?: 0,
+                  hierarchyRootHeight = hierarchyRootBounds?.height ?: 0,
+                ),
             )
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(

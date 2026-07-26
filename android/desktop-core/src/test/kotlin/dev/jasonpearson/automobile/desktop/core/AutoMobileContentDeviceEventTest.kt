@@ -104,6 +104,8 @@ class AutoMobileContentDeviceEventTest {
     connectionType: McpConnectionType? = McpConnectionType.UnixSocket,
     renderedDeviceId: String? = "emulator-5554",
     renderedHierarchyDeviceId: String? = "emulator-5554",
+    isObservationStreamConnected: Boolean = true,
+    isRenderedGeometryConsistent: Boolean = true,
   ) =
     isDeviceControlActive(
       enableDeviceControl = enableDeviceControl,
@@ -112,6 +114,8 @@ class AutoMobileContentDeviceEventTest {
       connectionType = connectionType,
       renderedDeviceId = renderedDeviceId,
       renderedHierarchyDeviceId = renderedHierarchyDeviceId,
+      isObservationStreamConnected = isObservationStreamConnected,
+      isRenderedGeometryConsistent = isRenderedGeometryConsistent,
     )
 
   @Test
@@ -173,6 +177,81 @@ class AutoMobileContentDeviceEventTest {
     // On observation-stream disconnect both ids are cleared; the frozen mirror must not be
     // tappable.
     assertFalse(controlActive(renderedDeviceId = null, renderedHierarchyDeviceId = null))
+  }
+
+  @Test
+  fun `device control inactive while the observation stream is not connected`() {
+    // Even if a stale frame's ids still match, a dead stream must keep control off.
+    assertFalse(controlActive(isObservationStreamConnected = false))
+  }
+
+  @Test
+  fun `device control inactive while screenshot and hierarchy geometry disagree`() {
+    // e.g. a same-device rotation where the new screenshot and still-debounced old hierarchy
+    // describe different orientations — a tap would map through the wrong scale.
+    assertFalse(controlActive(isRenderedGeometryConsistent = false))
+  }
+
+  // ---- Rendered geometry consistency (issue #3347, part D) ------------------
+
+  @Test
+  fun `geometry consistent for matching portrait dimensions`() {
+    assertTrue(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 1080,
+        screenshotHeight = 2340,
+        hierarchyRootWidth = 1080,
+        hierarchyRootHeight = 2340,
+      )
+    )
+  }
+
+  @Test
+  fun `geometry consistent up to rotation and scale (iOS points vs pixels)`() {
+    // Screenshot in device pixels, hierarchy in logical points at a 3x scale, rotated 90 degrees.
+    assertTrue(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 2340,
+        screenshotHeight = 1080,
+        hierarchyRootWidth = 360,
+        hierarchyRootHeight = 780,
+      )
+    )
+  }
+
+  @Test
+  fun `geometry inconsistent when aspect ratios disagree beyond rotation`() {
+    // A 16:9 screenshot cannot be a rotation of a 4:3 hierarchy — a genuinely mismatched frame.
+    assertFalse(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 1920,
+        screenshotHeight = 1080,
+        hierarchyRootWidth = 1024,
+        hierarchyRootHeight = 768,
+      )
+    )
+  }
+
+  @Test
+  fun `geometry inconsistent with no screenshot but consistent when hierarchy has no bounds`() {
+    // No frame yet -> inconsistent (control stays off).
+    assertFalse(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 0,
+        screenshotHeight = 0,
+        hierarchyRootWidth = 1080,
+        hierarchyRootHeight = 2340,
+      )
+    )
+    // Hierarchy root without explicit bounds -> mapper falls back to screenshot dims -> consistent.
+    assertTrue(
+      isRenderedGeometryConsistent(
+        screenshotWidth = 1080,
+        screenshotHeight = 2340,
+        hierarchyRootWidth = 0,
+        hierarchyRootHeight = 0,
+      )
+    )
   }
 
   private fun deviceConnectionLostEvent(deviceId: String): DeviceStreamEvent.DeviceConnectionLost =

@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,16 +21,39 @@ import kotlinx.coroutines.launch
  * - Changed element tracking for visual feedback
  *
  * Phase 1: Uses mock data Phase 2: Will add WebSocket connection for live data
+ *
+ * @param debounceContext coroutine context for the hierarchy-update debounce. Defaults to the UI
+ *   dispatcher in production; tests inject a `TestDispatcher` to drive the debounce
+ *   deterministically with virtual time (no real timers).
  */
-class LayoutInspectorState {
+class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main) {
   /** Debounce window for rapid hierarchy updates from the stream. */
   companion object {
     const val HIERARCHY_DEBOUNCE_MS = 100L
   }
 
   // Coroutine scope for debouncing hierarchy updates
-  private val debounceScope = CoroutineScope(Dispatchers.Main)
+  private val debounceScope = CoroutineScope(debounceContext)
   private var debounceJob: Job? = null
+
+  // Monotonic frame generation (issue #3347). Bumps whenever the rendered frame's device identity
+  // is
+  // invalidated (device change, observation-stream disconnect, explicit invalidation). Any
+  // in-flight
+  // screenshot decode or debounced hierarchy job captures the generation it was queued under and is
+  // DROPPED if the generation advanced by the time it completes — so a late frame from a superseded
+  // context can never restore stale identity/bounds and silently re-enable device control.
+  private var generation: Long = 0L
+
+  /**
+   * The current frame generation; capture before async frame work and pass it back to the setter.
+   */
+  val frameGeneration: Long
+    get() = generation
+
+  private fun advanceGeneration() {
+    generation++
+  }
 
   // Connection state
   var connectionStatus by mutableStateOf(ConnectionStatus.Disconnected)
@@ -182,7 +206,12 @@ class LayoutInspectorState {
     lastScreenshotTimestamp = System.currentTimeMillis()
   }
 
-  /** Update screenshot data. Called when receiving screenshot frames from device. */
+  /**
+   * Update screenshot data. Called when receiving screenshot frames from device. [generation], when
+   * provided, is the [frameGeneration] captured before the (async) decode; the update is dropped if
+   * the generation has advanced since — a late decode from a superseded context must not restore a
+   * stale frame.
+   */
   fun updateScreenshot(
     data: ByteArray,
     width: Int,
@@ -193,7 +222,9 @@ class LayoutInspectorState {
     format: String? = null,
     captureSource: String? = null,
     deviceId: String? = null,
+    generation: Long? = null,
   ) {
+    if (generation != null && generation != this.generation) return
     screenshotData = data
     screenWidth = width
     screenHeight = height
@@ -211,6 +242,10 @@ class LayoutInspectorState {
    * [ParsedHierarchy].
    */
   fun updateHierarchy(newHierarchy: UIElementInfo, newRotation: Int = 0, deviceId: String? = null) {
+    // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
+    // immediate
+    // one (or restore stale hierarchy identity/bounds).
+    debounceJob?.cancel()
     val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
     val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
     applyHierarchyUpdateImmediate(parsed, changedIds, deviceId)
@@ -228,10 +263,14 @@ class LayoutInspectorState {
     parsed: ParsedHierarchy,
     changedIds: Set<String>,
     deviceId: String? = null,
+    generation: Long? = null,
   ) {
     debounceJob?.cancel()
     debounceJob = debounceScope.launch {
       delay(HIERARCHY_DEBOUNCE_MS)
+      // Drop a debounced job whose generation was superseded while it waited (device change,
+      // invalidation, or disconnect) so it can't restore stale hierarchy identity/bounds.
+      if (generation != null && generation != this@LayoutInspectorState.generation) return@launch
       applyHierarchyUpdateImmediate(parsed, changedIds, deviceId)
     }
   }
@@ -276,8 +315,14 @@ class LayoutInspectorState {
    * ids to match the selection) even though the frame stays visible for inspection. Unlike
    * [disconnect] this keeps the screenshot and hierarchy so the user can still inspect the last
    * frame.
+   *
+   * Cancels any pending debounced hierarchy update and advances the frame generation, so a late
+   * decode or debounced job queued before the invalidation cannot restore the identity we just
+   * cleared.
    */
   fun invalidateRenderedDeviceIdentity() {
+    debounceJob?.cancel()
+    advanceGeneration()
     renderedDeviceId = null
     renderedHierarchyDeviceId = null
   }
@@ -336,6 +381,9 @@ class LayoutInspectorState {
   /** Disconnect from device. Clears all device-specific stale data. */
   fun disconnect() {
     debounceJob?.cancel()
+    // Advance the generation so any in-flight decode/debounced job from before the disconnect is
+    // dropped instead of repopulating stale state.
+    advanceGeneration()
     connectionStatus = ConnectionStatus.Disconnected
     streamingMode = StreamingMode.Paused
     screenshotData = null

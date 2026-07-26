@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findViolationsInSource, resolveBaseRef } from "../../scripts/check-host-shell-boundary";
+import { changedSourceFiles, findViolationsInSource, resolveBaseRef } from "../../scripts/check-host-shell-boundary";
 
 describe("host shell execution boundary (issue #4068)", () => {
   test("rejects direct child_process shell APIs while allowing argv-first execution", () => {
@@ -8,10 +8,19 @@ describe("host shell execution boundary (issue #4068)", () => {
     expect(findViolationsInSource("fixture.ts", 'import * as childProcess from "node:child_process"; childProcess.exec("curl $HOST");')).toHaveLength(1);
     expect(findViolationsInSource("fixture.ts", 'import * as childProcess from "node:child_process"; const run = childProcess.exec; run("curl $HOST");')).toHaveLength(1);
     expect(findViolationsInSource("fixture.ts", 'const { exec } = require("node:child_process"); exec("curl $HOST");')).toHaveLength(1);
+    expect(findViolationsInSource("fixture.ts", 'require("node:child_process").exec("curl $HOST");')).toHaveLength(1);
+    expect(findViolationsInSource("fixture.ts", 'const exec = require("node:child_process").exec; exec("curl $HOST");')).toHaveLength(1);
+    expect(findViolationsInSource("fixture.ts", '(await import("node:child_process")).exec("curl $HOST");')).toHaveLength(1);
+    expect(findViolationsInSource("fixture.ts", 'import * as childProcess from "node:child_process"; childProcess["exec"]("curl $HOST");')).toHaveLength(1);
     expect(findViolationsInSource("fixture.ts", 'import { spawn } from "node:child_process"; spawn("/bin/sh", ["-c", command]);')).toHaveLength(1);
     expect(findViolationsInSource("fixture.ts", 'import { spawn } from "node:child_process"; const shell = "/bin/sh"; spawn(shell, ["-c", command]);')).toHaveLength(1);
     expect(findViolationsInSource("fixture.ts", 'import { spawn } from "node:child_process"; spawn("powershell.exe", ["-Command", command]);')).toHaveLength(1);
+    expect(findViolationsInSource("fixture.ts", 'import { spawn } from "node:child_process"; spawn("curl", [url], { shell: true });')).toHaveLength(1);
     expect(findViolationsInSource("fixture.ts", 'import { execFile } from "node:child_process"; execFile("curl", [url]);')).toEqual([]);
+  });
+
+  test("fails closed outside a Git worktree", () => {
+    expect(() => changedSourceFiles("origin/main", false)).toThrow("not a Git worktree");
   });
 
   test("fetches the pull request base in shallow GitHub checkouts", () => {

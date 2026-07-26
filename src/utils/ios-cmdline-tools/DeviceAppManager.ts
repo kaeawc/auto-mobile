@@ -12,9 +12,7 @@ import type { Logger } from "../logger";
 
 interface DeviceAppManagerDependencies {
   platform: () => NodeJS.Platform;
-  execute?: (file: string, args: string[]) => Promise<ExecResult>;
-  /** @deprecated Test compatibility for the former shell-string dependency. */
-  exec?: (command: string) => Promise<ExecResult>;
+  execute: (file: string, args: string[]) => Promise<ExecResult>;
   readFile: (path: string) => Promise<string>;
   mkdtemp: (prefix: string) => Promise<string>;
   rm: (path: string) => Promise<void>;
@@ -378,9 +376,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   }
 
   private execute(file: string, args: string[]): Promise<ExecResult> {
-    if (this.deps.execute) {return this.deps.execute(file, args);}
-    if (this.deps.exec) {return this.deps.exec([file, ...args].join(" "));}
-    throw new Error("DeviceAppManager requires an argv command executor");
+    return this.deps.execute(file, args);
   }
 
   private getLaunchPrecondition(): LaunchPreconditionResult {

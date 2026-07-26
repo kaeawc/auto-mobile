@@ -80,6 +80,15 @@ export function findViolationsInSource(file: string, source: string): Violation[
   const isChildProcessLoader = (expression: ts.Expression): boolean =>
     isDynamicChildProcessImport(expression) || isChildProcessRequire(expression);
 
+  const unwrapExpression = (expression: ts.Expression): ts.Expression =>
+    ts.isParenthesizedExpression(expression) ? unwrapExpression(expression.expression) : expression;
+
+  const isChildProcessLoaderExpression = (expression: ts.Expression): boolean => {
+    const unwrapped = unwrapExpression(expression);
+    return (ts.isAwaitExpression(unwrapped) && isChildProcessLoader(unwrapped.expression)) ||
+      isChildProcessRequire(unwrapped);
+  };
+
   const recordImportedApi = (imported: string, local: string): void => {
     if (SHELL_APIS.has(imported)) {importedShellApis.add(local);}
     if (ARGV_APIS.has(imported)) {importedArgvApis.add(local);}
@@ -89,6 +98,28 @@ export function findViolationsInSource(file: string, source: string): Violation[
     const executable = node.arguments[0];
     return (ts.isStringLiteral(executable) && SHELL_EXECUTABLES.has(executable.text.replace(/^.*\//, "").toLowerCase())) ||
       (ts.isIdentifier(executable) && shellExecutableVariables.has(executable.text));
+  };
+
+  const hasShellOption = (node: ts.CallExpression): boolean =>
+    node.arguments.some(argument => ts.isObjectLiteralExpression(argument) && argument.properties.some(property =>
+      ts.isPropertyAssignment(property) &&
+      ((ts.isIdentifier(property.name) && property.name.text === "shell") ||
+        (ts.isStringLiteral(property.name) && property.name.text === "shell")) &&
+      property.initializer.kind === ts.SyntaxKind.TrueKeyword
+    ));
+
+  const childProcessApiFromMember = (expression: ts.Expression): string | undefined => {
+    const receiver = ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)
+      ? unwrapExpression(expression.expression)
+      : undefined;
+    const isChildProcessReceiver = receiver &&
+      ((ts.isIdentifier(receiver) && childProcessNamespaces.has(receiver.text)) ||
+        isChildProcessLoaderExpression(receiver));
+    if (!isChildProcessReceiver) {return undefined;}
+    if (ts.isPropertyAccessExpression(expression)) {return expression.name.text;}
+    return ts.isElementAccessExpression(expression) && ts.isStringLiteral(expression.argumentExpression)
+      ? expression.argumentExpression.text
+      : undefined;
   };
 
   const record = (node: ts.Node): void => {
@@ -111,8 +142,7 @@ export function findViolationsInSource(file: string, source: string): Violation[
       ts.isVariableDeclaration(node) &&
       ts.isObjectBindingPattern(node.name) &&
       node.initializer &&
-      ((ts.isAwaitExpression(node.initializer) && isChildProcessLoader(node.initializer.expression)) ||
-        isChildProcessRequire(node.initializer))
+      isChildProcessLoaderExpression(node.initializer)
     ) {
       for (const element of node.name.elements) {
         const imported = element.propertyName?.getText(sourceFile) ?? element.name.getText(sourceFile);
@@ -125,8 +155,7 @@ export function findViolationsInSource(file: string, source: string): Violation[
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
-      ((ts.isAwaitExpression(node.initializer) && isChildProcessLoader(node.initializer.expression)) ||
-        isChildProcessRequire(node.initializer))
+      isChildProcessLoaderExpression(node.initializer)
     ) {childProcessNamespaces.add(node.name.text);}
     if (
       ts.isVariableDeclaration(node) &&
@@ -139,24 +168,18 @@ export function findViolationsInSource(file: string, source: string): Violation[
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
-      ts.isPropertyAccessExpression(node.initializer) &&
-      ts.isIdentifier(node.initializer.expression) &&
-      childProcessNamespaces.has(node.initializer.expression.text)
-    ) {recordImportedApi(node.initializer.name.text, node.name.text);}
+      childProcessApiFromMember(node.initializer)
+    ) {recordImportedApi(childProcessApiFromMember(node.initializer)!, node.name.text);}
     if (ts.isCallExpression(node)) {
       const localApi = ts.isIdentifier(node.expression) ? node.expression.text : undefined;
-      const namespaceApi = ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        childProcessNamespaces.has(node.expression.expression.text)
-        ? node.expression.name.text
-        : undefined;
+      const namespaceApi = childProcessApiFromMember(node.expression);
       const api = localApi ?? namespaceApi;
       if ((localApi !== undefined && importedShellApis.has(localApi)) ||
         (namespaceApi !== undefined && SHELL_APIS.has(namespaceApi)) ||
         (api !== undefined &&
           ((localApi !== undefined && importedArgvApis.has(localApi)) ||
             (namespaceApi !== undefined && ARGV_APIS.has(namespaceApi))) &&
-          isShellWrapper(node))) {
+          (isShellWrapper(node) || hasShellOption(node)))) {
         record(node);
       }
     }
@@ -167,8 +190,8 @@ export function findViolationsInSource(file: string, source: string): Violation[
   return violations;
 }
 
-function changedSourceFiles(baseRef: string): string[] {
-  if (!existsSync(".git")) {return [];}
+export function changedSourceFiles(baseRef: string, hasGitDirectory = existsSync(".git")): string[] {
+  if (!hasGitDirectory) {throw new Error("Cannot check new host shell execution: this directory is not a Git worktree.");}
   const resolvedBaseRef = resolveBaseRef(baseRef);
   return execFileSync("git", ["diff", "--name-only", resolvedBaseRef, "--", SOURCE_ROOT], { encoding: "utf8" })
     .split("\n")

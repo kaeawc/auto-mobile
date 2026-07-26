@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.desktop.core.control
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
+import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.HierarchyFrameFacts
@@ -413,6 +415,50 @@ class DeviceControlSessionTest {
     scope.cancel()
   }
 
+  @Test
+  fun `retention does not outlive freshness`() = runTest {
+    // Finding 1: tap a frame that is already near the freshness bound, then evaluate 200ms later.
+    // The live decision correctly rejects it as stale, but the 3s refresh wait is still running —
+    // and since every successful tap restarts that wait, keeping the frame clickable here would let
+    // stale content stay actionable indefinitely.
+    var now = 100_000L
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { now },
+        publishError = {},
+        uiContext = UnconfinedTestDispatcher(testScheduler),
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      )
+
+    // A frame received 4.9s ago: still inside the 5s screenshot bound, so control is available.
+    val receivedAtMs = now - 4_900L
+    val nearlyStale =
+      paired(captureSequence = 7L, sourceSequence = 10L, receivedAtMs = receivedAtMs)
+    assertNotNull(session.evaluate(nearlyStale).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // 200ms later nothing new has arrived, so the frame is now 5.1s old. The refresh wait has 2.8s
+    // left to run, but the frame must stop being clickable the moment it stops being fresh.
+    now += 200L
+    val decision = session.evaluate(nearlyStale)
+    assertEquals(
+      DeviceControlBlockReason.StaleFrame,
+      (decision as DeviceControlDecision.Blocked).reason,
+    )
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+    assertNull(session.interactionSnapshot, "a stale retained frame must drop to Inspector")
+    scope.cancel()
+  }
+
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
   private fun paired(
     captureSequence: Long,
@@ -420,6 +466,7 @@ class DeviceControlSessionTest {
     width: Int = 1080,
     height: Int = 2340,
     data: ByteArray? = null,
+    receivedAtMs: Long = 1_000L,
   ) =
     DeviceControlInputs(
       enabled = true,
@@ -432,7 +479,7 @@ class DeviceControlSessionTest {
           deviceId = "emulator-5554",
           sequence = sourceSequence,
           captureSequence = captureSequence,
-          receivedAtMs = 1_000L,
+          receivedAtMs = receivedAtMs,
           width = width,
           height = height,
           data = data,
@@ -442,7 +489,7 @@ class DeviceControlSessionTest {
           deviceId = "emulator-5554",
           sequence = sourceSequence,
           captureSequence = captureSequence,
-          receivedAtMs = 1_000L,
+          receivedAtMs = receivedAtMs,
           hierarchy = null,
           rootWidth = width,
           rootHeight = height,

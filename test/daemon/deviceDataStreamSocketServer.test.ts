@@ -653,6 +653,51 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(screenshot.captureSequence).toBeUndefined();
     });
 
+    it("accepts a landscape claim against a native-portrait frame (orientation swap)", () => {
+      // iOS landscape: hierarchy geometry is display-oriented (2532x1170) while the screenshot
+      // arrives in native portrait pixel orientation (1170x2532) - the rotation the renderer
+      // already corrects for. Rejecting this would strip the identity from every landscape frame
+      // and make device control impossible in that orientation.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(1170, 2532), 2532, 1170, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBe(captureSequence);
+      // The MEASURED dimensions are still what gets published, so a client maps through the pixels
+      // it actually renders rather than the claim.
+      expect(screenshot.screenWidth).toBe(1170);
+      expect(screenshot.screenHeight).toBe(2532);
+    });
+
+    it("still rejects a scale change that happens to preserve aspect", () => {
+      // The swap accepts exactly ONE alternative. A uniform scale is not it.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("still rejects dimensions unrelated to the claim", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(800, 600), 1080, 2340, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
     it("omits the capture identity for a frame with a malformed header", () => {
       // A PNG signature with a bad IHDR chunk must read as unmeasurable, not as whatever bytes sit
       // at the width offset — otherwise the "measure, don't trust the claim" guarantee is silently

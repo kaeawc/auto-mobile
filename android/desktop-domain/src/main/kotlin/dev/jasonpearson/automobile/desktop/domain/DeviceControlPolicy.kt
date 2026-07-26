@@ -261,6 +261,23 @@ public object DeviceControlPolicy {
   }
 
   /**
+   * Whether [snapshot] is still inside the freshness bound for the source it was displayed from.
+   *
+   * Exposed so a caller that RETAINS a snapshot (see the post-input refresh policy) can apply the
+   * same bound to what it retains. Retention must never outlive freshness: a frame held for the
+   * refresh wait is still a frame the user can click, so it has to age out exactly as the live
+   * decision would age it out.
+   */
+  public fun isSnapshotFresh(snapshot: DeviceFrameSnapshot, nowMs: Long): Boolean {
+    val maxAgeMs =
+      when (snapshot.source) {
+        DeviceFrameSource.LiveVideo -> LIVE_FRAME_MAX_AGE_MS
+        DeviceFrameSource.Screenshot -> SCREENSHOT_MAX_AGE_MS
+      }
+    return nowMs - snapshot.capturedAtMs <= maxAgeMs
+  }
+
+  /**
    * Whether the displayed frame and the effective device bounds used for mapping describe a
    * geometrically-consistent view of the same screen. A renderer fits the displayed frame by its
    * own aspect ratio while mapping clicks through the device bounds, so disagreeing aspect ratios

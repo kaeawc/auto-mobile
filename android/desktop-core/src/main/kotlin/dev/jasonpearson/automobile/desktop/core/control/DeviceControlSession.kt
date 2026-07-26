@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy
@@ -141,10 +142,36 @@ class DeviceControlSession(
       renderSnapshot = live
     }
     // While awaiting, the retained frame is what the user sees, so it is also what a click acts
-    // through. Once settled (or never awaiting) this is just the live decision.
+    // through — but ONLY while it is still fresh. Retention must never outlive freshness: a frame
+    // held for the refresh wait is still clickable, so it has to age out exactly as the live
+    // decision ages it out. Without this, tapping a frame near the freshness bound would keep the
+    // view in Control for the rest of the 3s wait, and each successful tap restarts that wait, so
+    // stale content could stay actionable indefinitely.
     interactionSnapshot =
-      if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) renderSnapshot else live
+      if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
+        retainedIfStillFresh(decision, now)
+      } else {
+        live
+      }
     return decision
+  }
+
+  /**
+   * The retained frame, or null once it is no longer fresh enough to act on.
+   *
+   * Two independent signals retire it, because either alone can be the first to notice: the live
+   * decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped producing), and
+   * the retained frame's own age (nothing new has arrived to make the live decision say anything).
+   */
+  private fun retainedIfStillFresh(
+    decision: DeviceControlDecision,
+    nowMs: Long,
+  ): DeviceFrameSnapshot? {
+    val retained = renderSnapshot ?: return null
+    val blockedForStaleness =
+      (decision as? DeviceControlDecision.Blocked)?.reason == DeviceControlBlockReason.StaleFrame
+    if (blockedForStaleness) return null
+    return retained.takeIf { DeviceControlPolicy.isSnapshotFresh(it, nowMs) }
   }
 
   /**

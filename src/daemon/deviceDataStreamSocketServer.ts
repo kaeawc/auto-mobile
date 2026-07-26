@@ -117,6 +117,36 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
 }
 
 /**
+ * Whether a frame's MEASURED pixel dimensions are consistent with the geometry its capture client
+ * claimed for it (issue #3348).
+ *
+ * Either orientation is accepted. Hierarchy geometry is display-oriented while screenshots can
+ * arrive in native portrait pixel orientation — the rotation the renderer already corrects for — so
+ * a 2532x1170 landscape claim legitimately accompanies a 1170x2532 PNG. Rejecting that would strip
+ * the capture identity from every landscape frame on iOS and make device control impossible in that
+ * orientation.
+ *
+ * A swap is still a strong check: it admits exactly one alternative, so a genuine scale change
+ * (720x1560 pixels against a 1080x2340 claim) and any unrelated size are both still rejected. An
+ * unmeasurable frame is never a match.
+ *
+ * This is the DAEMON-side pairing check only. A client's LIVE-mirror geometry check stays strict —
+ * a mirror frame is always display-oriented, so a swap there means the sources are out of sync.
+ */
+function pixelsMatchClaimedGeometry(
+  measured: { width: number; height: number } | null,
+  claimedWidth: number,
+  claimedHeight: number
+): boolean {
+  if (measured === null) {
+    return false;
+  }
+  const sameOrientation = measured.width === claimedWidth && measured.height === claimedHeight;
+  const swappedOrientation = measured.width === claimedHeight && measured.height === claimedWidth;
+  return sameOrientation || swappedOrientation;
+}
+
+/**
  * Per-push options for {@link DeviceDataStreamSocketServer.pushScreenshotUpdate}.
  */
 interface PushScreenshotOptions {
@@ -360,8 +390,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // compresses at fixed quality, iOS returns the native-scale PNG), so the header dimensions are
     // the frame's true geometry.
     const measured = readImageHeaderDimensions(Buffer.from(screenshotBase64, "base64"));
-    const claimMatchesPixels =
-      measured !== null && measured.width === screenWidth && measured.height === screenHeight;
+    const claimMatchesPixels = pixelsMatchClaimedGeometry(measured, screenWidth, screenHeight);
 
     const message: DeviceDataStreamMessage = {
       type: "screenshot_update",

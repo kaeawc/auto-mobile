@@ -42,11 +42,14 @@ describe("parseOutputReductionFlags (property-based)", () => {
     );
   });
 
-  test("an env var enables its flag only on the exact string \"1\"", () => {
+  test("an env var enables only its own flag, and only on the exact string \"1\"", () => {
     fc.assert(
       fc.property(spec, fc.oneof(fc.constant("1"), fc.string({ maxLength: 4 })), (s, value) => {
         const flags = parseOutputReductionFlags([], { [s.env]: value });
-        return flags[s.field] === (value === "1");
+        // Check EVERY field, not just s.field: a spec that reused another spec's
+        // env name would flip a second field here and be caught (cross-talk).
+        const enabled = value === "1";
+        return OUTPUT_REDUCTION_FLAG_SPECS.every(other => flags[other.field] === (other.field === s.field && enabled));
       }),
       RUN_OPTIONS
     );

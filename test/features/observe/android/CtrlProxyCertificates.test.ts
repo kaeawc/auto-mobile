@@ -376,7 +376,7 @@ describe("CtrlProxyCertificates (Android)", function() {
           expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
 
           const push = fakeAdb.getExecutedCommands().find(command => command.startsWith("push "));
-          expect(push).toContain(`"${resolvedPath}"`);
+          expect(push?.replace(/\\\\/g, "\\")).toContain(`"${resolvedPath}"`);
           expect(push).toEndWith(`"${sent.devicePath}"`);
 
           socket.simulateMessage(JSON.stringify({

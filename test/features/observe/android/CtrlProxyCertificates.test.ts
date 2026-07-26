@@ -10,7 +10,6 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import path from "node:path";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -20,6 +19,7 @@ import { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState, createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { PortManager } from "../../../../src/utils/PortManager";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../../src/utils/workingDirectory";
 
 describe("CtrlProxyCertificates (Android)", function() {
   let fakeAdb: FakeAdbExecutor;
@@ -335,48 +335,67 @@ describe("CtrlProxyCertificates (Android)", function() {
 
     test.each([
       {
-        name: "a relative path",
+        name: "a relative path from the daemon launch directory",
         certificatePath: "fixtures/certs/relative ca.crt",
-        resolvedPath: path.resolve("fixtures/certs/relative ca.crt"),
+        resolvedPath: "/tmp/automobile-launch/fixtures/certs/relative ca.crt",
+        daemonLaunchCwd: "/tmp/automobile-launch",
       },
       {
         name: "a file URL",
         certificatePath: "file:///tmp/automobile%20ca.crt",
         resolvedPath: "/tmp/automobile ca.crt",
+        daemonLaunchCwd: undefined,
       },
-    ])("pushes $name and resolves the install result over the wire", async function({ certificatePath, resolvedPath }) {
-      const fakeFileSystem = new FakeCertificateFileSystem();
-      fakeFileSystem.setFile(resolvedPath, 128);
-      const { client, socket } = await connectClient(fakeFileSystem);
+    ])("pushes $name and resolves the install result over the wire", async function({
+      certificatePath,
+      resolvedPath,
+      daemonLaunchCwd,
+    }) {
+      const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+      if (daemonLaunchCwd !== undefined) {
+        process.env[DAEMON_LAUNCH_CWD_ENV] = daemonLaunchCwd;
+      }
+
       try {
-        const baseCount = socket.sentMessages.length;
-        const resultPromise = client.requestInstallCaCertificateFromFile(certificatePath);
-        await waitForSentMessages(socket, baseCount + 1);
+        const fakeFileSystem = new FakeCertificateFileSystem();
+        fakeFileSystem.setFile(resolvedPath, 128);
+        const { client, socket } = await connectClient(fakeFileSystem);
+        try {
+          const baseCount = socket.sentMessages.length;
+          const resultPromise = client.requestInstallCaCertificateFromFile(certificatePath);
+          await waitForSentMessages(socket, baseCount + 1);
 
-        const sent = findSentMessage(socket, "install_ca_cert_from_path");
-        expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
+          const sent = findSentMessage(socket, "install_ca_cert_from_path");
+          expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
 
-        const push = fakeAdb.getExecutedCommands().find(command => command.startsWith("push "));
-        expect(push).toContain(`"${resolvedPath}"`);
-        expect(push).toEndWith(`"${sent.devicePath}"`);
+          const push = fakeAdb.getExecutedCommands().find(command => command.startsWith("push "));
+          expect(push).toContain(`"${resolvedPath}"`);
+          expect(push).toEndWith(`"${sent.devicePath}"`);
 
-        socket.simulateMessage(JSON.stringify({
-          type: "ca_cert_result",
-          requestId: sent.requestId,
-          success: true,
-          action: "install",
-          alias: "user-ca-cert",
-          totalTimeMs: 3,
-        }));
+          socket.simulateMessage(JSON.stringify({
+            type: "ca_cert_result",
+            requestId: sent.requestId,
+            success: true,
+            action: "install",
+            alias: "user-ca-cert",
+            totalTimeMs: 3,
+          }));
 
-        const result = await resultPromise;
-        expect(result).toMatchObject({
-          success: true,
-          action: "install",
-          alias: "user-ca-cert",
-        });
+          const result = await resultPromise;
+          expect(result).toMatchObject({
+            success: true,
+            action: "install",
+            alias: "user-ca-cert",
+          });
+        } finally {
+          await client.close();
+        }
       } finally {
-        await client.close();
+        if (previousLaunchCwd === undefined) {
+          delete process.env[DAEMON_LAUNCH_CWD_ENV];
+        } else {
+          process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
+        }
       }
     });
 

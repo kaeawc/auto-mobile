@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../../utils/workingDirectory";
 import type {
   CertificatesDelegateContext,
   A11yCaCertResult,
@@ -528,7 +529,7 @@ export class CtrlProxyCertificates {
       return null;
     }
 
-    return path.resolve(trimmedPath);
+    return resolvePathFromDaemonLaunchWorkingDirectory(trimmedPath);
   }
 
   /**

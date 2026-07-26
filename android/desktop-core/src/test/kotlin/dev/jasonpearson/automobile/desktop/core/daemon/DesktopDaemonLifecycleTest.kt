@@ -35,7 +35,11 @@ class DesktopDaemonLifecycleTest {
       DesktopDaemonLifecycle(
         expectedVersionProvider = { "0.0.40" },
         socketChecker = FakeDaemonSocketChecker(listOf(false, true)),
-        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40", "0.0.40")),
+        pidFileReader =
+          FakeDaemonPidFileReader(
+            versions = listOf("0.0.40", "0.0.40"),
+            launchArguments = listOf("--network-mockable"),
+          ),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
       )
@@ -45,7 +49,16 @@ class DesktopDaemonLifecycleTest {
     assertIs<DaemonLifecycleResult.Ready>(result)
     assertTrue(result.restarted)
     assertEquals(
-      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start")),
+      listOf(
+        listOf(
+          "npx",
+          "-y",
+          "@kaeawc/auto-mobile@0.0.40",
+          "--daemon",
+          "start",
+          "--network-mockable",
+        )
+      ),
       commands.commands,
     )
   }

@@ -131,17 +131,45 @@ internal interface DaemonCommandExecutor {
 internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
   override fun execute(command: List<String>): DaemonCommandResult {
     val process = ProcessBuilder(command).redirectErrorStream(true).start()
+    val output = StringBuffer()
+    val outputDrainer = Thread {
+      process.inputStream.bufferedReader().useLines { lines ->
+        lines.forEach { line -> output.appendLine(line) }
+      }
+    }
+      .apply {
+        isDaemon = true
+        start()
+      }
     if (!process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
       process.destroy()
       if (!process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
         process.destroyForcibly()
         process.waitFor(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
       }
-      val output = process.inputStream.bufferedReader().use { it.readText() }
-      return DaemonCommandResult(exitCode = TIMEOUT_EXIT_CODE, output = output, timedOut = true)
+      return DaemonCommandResult(
+        exitCode = TIMEOUT_EXIT_CODE,
+        output = drainOutput(process, outputDrainer, output),
+        timedOut = true,
+      )
     }
-    val output = process.inputStream.bufferedReader().use { it.readText() }
-    return DaemonCommandResult(exitCode = process.exitValue(), output = output)
+    return DaemonCommandResult(
+      exitCode = process.exitValue(),
+      output = drainOutput(process, outputDrainer, output),
+    )
+  }
+
+  private fun drainOutput(
+    process: Process,
+    outputDrainer: Thread,
+    output: StringBuffer,
+  ): String {
+    outputDrainer.join(TERMINATION_TIMEOUT_SECONDS * 1_000)
+    if (outputDrainer.isAlive) {
+      process.inputStream.close()
+      outputDrainer.join(TERMINATION_TIMEOUT_SECONDS * 1_000)
+    }
+    return output.toString()
   }
 
   private const val COMMAND_TIMEOUT_SECONDS = 60L
@@ -259,7 +287,7 @@ internal class DesktopDaemonLifecycle(
       "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
       "--daemon",
       action,
-    ) + if (action == "restart") existingOptions else emptyList()
+    ) + existingOptions
 
   private fun versionsMatch(
     actualVersion: String?,

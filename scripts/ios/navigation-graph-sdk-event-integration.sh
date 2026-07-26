@@ -25,7 +25,28 @@ require_command jq
 require_command xcrun
 
 xcrun simctl getenv "${device_id}" HOME >/dev/null
-curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8765/health >/dev/null
+
+# CtrlProxy allocates a per-device host port; 8765 is only its preferred default
+# and may already belong to another local service. Ask the daemon that warmed the
+# runner for the selected simulator's reported port instead of probing a stale
+# default. `doctor` can exit non-zero for unrelated diagnostics, but still emits
+# the JSON report that contains this ready runner's round-trip result.
+doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
+ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
+  .ios.checks[]
+  | select(.name == "iOS Observe Round Trip")
+  | .message
+  | split(" | ")
+  | map(select(contains("device=" + $device_id + ";")))
+  | .[0]
+  | capture("runnerPort=(?<port>[0-9]+)")
+  | .port
+' <<<"${doctor_report}")" || {
+  echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2
+  exit 1
+}
+
+curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
 
 event_payload() {
   local destination="$1"
@@ -48,7 +69,7 @@ curl --fail --silent --show-error --max-time 5 \
   --request POST \
   --header 'Content-Type: application/json' \
   --data "${batch}" \
-  http://127.0.0.1:8765/sdk-events >/dev/null
+  "http://127.0.0.1:${ctrl_proxy_port}/sdk-events" >/dev/null
 
 # CtrlProxy polls its SDK endpoint every two seconds after the warm-up observe.
 # Query through the public, daemon-backed tool until the batched events appear.

@@ -616,6 +616,7 @@ describe("NavigateTo", () => {
       };
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
+      ToolRegistry.register("pressButton", "Fake back tool", {}, async () => ({ success: true }));
       navigateTo = new NavigateTo(
         device,
         fakeAdbFactory,

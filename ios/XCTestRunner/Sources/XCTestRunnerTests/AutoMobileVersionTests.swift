@@ -145,6 +145,24 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertEqual(DaemonManager.resolveRepoRootDaemonEntryScript(repoRoot.path), entry.path)
     }
 
+    func testFindRepoRootFindsNearestPackageJsonAncestor() throws {
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-root-discovery-\(UUID().uuidString)")
+        let sourceDirectory = repoRoot.appendingPathComponent("ios/XCTestRunner/Sources/XCTestRunner")
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try "{}".write(
+            to: repoRoot.appendingPathComponent("package.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        XCTAssertEqual(
+            DaemonManager.findRepoRoot(startingAt: sourceDirectory.appendingPathComponent("Runner.swift").path),
+            repoRoot.path
+        )
+    }
+
     func testRequiresRepoRootBuildSkew() throws {
         // No repoRoot build -> never a skew, regardless of the daemon's identity.
         XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
@@ -182,5 +200,92 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertFalse(DaemonManager.requiresRepoRootBuildSkew(
             daemonBuildId: nil, daemonEntryScript: nil, repoRoot: repoRoot.path
         ))
+    }
+
+    func testEnsureDaemonRunningRestartsSameReleaseDaemonFromDifferentCheckout() throws {
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-activation-\(UUID().uuidString)")
+        let distDir = repoRoot.appendingPathComponent("dist/src")
+        try FileManager.default.createDirectory(at: distDir, withIntermediateDirectories: true)
+        let entry = distDir.appendingPathComponent("index.js")
+        try "// current checkout".write(to: entry, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let currentBuildId = try XCTUnwrap(DaemonManager.computeBuildId(entry.path))
+        let runtime = FakeDaemonRuntime(
+            daemonVersion: AutoMobileVersion.current,
+            daemonBuildId: "different-checkout",
+            daemonEntryScript: "/other-checkout/dist/src/index.js",
+            buildIdAfterRestart: currentBuildId
+        )
+
+        let result = DaemonManager.ensureDaemonRunningResult(
+            repoRoot: repoRoot.path,
+            timeoutSeconds: 0,
+            runtime: runtime
+        )
+
+        XCTAssertEqual(result, .ready)
+        XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot.path)])
+    }
+}
+
+private final class FakeDaemonRuntime: DaemonRuntime {
+    struct Invocation: Equatable {
+        let name: String
+        let repoRoot: String?
+    }
+
+    private let daemonVersion: String?
+    private var daemonBuildId: String?
+    private let daemonEntryScript: String?
+    private let buildIdAfterRestart: String
+    private(set) var subcommands: [Invocation] = []
+
+    init(
+        daemonVersion: String?,
+        daemonBuildId: String?,
+        daemonEntryScript: String?,
+        buildIdAfterRestart: String
+    ) {
+        self.daemonVersion = daemonVersion
+        self.daemonBuildId = daemonBuildId
+        self.daemonEntryScript = daemonEntryScript
+        self.buildIdAfterRestart = buildIdAfterRestart
+    }
+
+    func isDaemonRunning() -> Bool {
+        true
+    }
+
+    func readDaemonVersion() -> String? {
+        daemonVersion
+    }
+
+    func readDaemonAssetVersion() -> String? {
+        nil
+    }
+
+    func readDaemonEntryScript() -> String? {
+        daemonEntryScript
+    }
+
+    func readDaemonBuildId() -> String? {
+        daemonBuildId
+    }
+
+    func runDaemonSubcommand(
+        _ subcommand: String,
+        repoRoot: String?
+    )
+        -> DaemonManager.DaemonSubcommandOutcome
+    {
+        subcommands.append(.init(name: subcommand, repoRoot: repoRoot))
+        daemonBuildId = buildIdAfterRestart
+        return .launched
+    }
+
+    func waitForDaemon(timeoutSeconds _: TimeInterval) -> Bool {
+        true
     }
 }

@@ -129,6 +129,18 @@ public enum DaemonStartupResult: Equatable {
     }
 }
 
+/// Injectable process and PID-file boundary for daemon lifecycle decisions. Tests use a fake so
+/// build-skew restarts are verified without touching the caller's shared daemon.
+protocol DaemonRuntime {
+    func isDaemonRunning() -> Bool
+    func readDaemonVersion() -> String?
+    func readDaemonAssetVersion() -> String?
+    func readDaemonEntryScript() -> String?
+    func readDaemonBuildId() -> String?
+    func runDaemonSubcommand(_ subcommand: String, repoRoot: String?) -> DaemonManager.DaemonSubcommandOutcome
+    func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool
+}
+
 public enum DaemonManager {
     /// Outcome of launching an `auto-mobile --daemon <subcommand>` process, distinguishing a
     /// missing executable from a launched-but-failed process so callers can report the real cause.
@@ -136,6 +148,36 @@ public enum DaemonManager {
         case launched
         case executableNotFound
         case failed
+    }
+
+    private struct SystemDaemonRuntime: DaemonRuntime {
+        func isDaemonRunning() -> Bool {
+            DaemonManager.isDaemonRunning()
+        }
+
+        func readDaemonVersion() -> String? {
+            DaemonManager.readDaemonVersionFromPidFile()
+        }
+
+        func readDaemonAssetVersion() -> String? {
+            DaemonManager.readDaemonAssetVersionFromPidFile()
+        }
+
+        func readDaemonEntryScript() -> String? {
+            DaemonManager.readDaemonEntryScriptFromPidFile()
+        }
+
+        func readDaemonBuildId() -> String? {
+            DaemonManager.readDaemonBuildIdFromPidFile()
+        }
+
+        func runDaemonSubcommand(_ subcommand: String, repoRoot: String?) -> DaemonSubcommandOutcome {
+            DaemonManager.runDaemonSubcommand(subcommand, repoRoot: repoRoot)
+        }
+
+        func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool {
+            DaemonManager.waitForDaemon(timeoutSeconds: timeoutSeconds)
+        }
     }
 
     public struct PidFileData: Decodable {
@@ -210,7 +252,7 @@ public enum DaemonManager {
         return runDaemonSubcommand("restart", repoRoot: repoRoot) == .launched
     }
 
-    private static func runDaemonSubcommand(_ subcommand: String, repoRoot: String? = nil) -> DaemonSubcommandOutcome {
+    static func runDaemonSubcommand(_ subcommand: String, repoRoot: String? = nil) -> DaemonSubcommandOutcome {
         // When a repo root with a built entrypoint is provided, launch *that* checkout's daemon
         // (`<repoRoot>/dist/src/index.js`) rather than whatever `auto-mobile` is on PATH — so a
         // caller that knows its source build gets a version/build-matched daemon (#2744) instead of
@@ -418,24 +460,40 @@ public enum DaemonManager {
     public static func ensureDaemonRunningResult(
         repoRoot: String? = nil,
         timeoutSeconds: TimeInterval = 15
-    ) -> DaemonStartupResult {
+    )
+        -> DaemonStartupResult
+    {
+        return ensureDaemonRunningResult(
+            repoRoot: repoRoot,
+            timeoutSeconds: timeoutSeconds,
+            runtime: SystemDaemonRuntime()
+        )
+    }
+
+    static func ensureDaemonRunningResult(
+        repoRoot: String?,
+        timeoutSeconds: TimeInterval,
+        runtime: DaemonRuntime
+    )
+        -> DaemonStartupResult
+    {
         PerfTimer.log("ensureDaemonRunning: checking isDaemonRunning")
-        if isDaemonRunning() {
+        if runtime.isDaemonRunning() {
             // A stale different-build daemon on the shared socket would reject this runner's
             // version handshake (#2744). Restart it before reuse so we self-heal instead of
             // failing, mirroring the Android/TS version-skew restart. When a repoRoot is supplied,
             // also restart a same-release daemon started from a different checkout's entry script.
             let versionSkew = requiresVersionSkewRestart(
-                daemonVersion: readDaemonVersionFromPidFile(),
+                daemonVersion: runtime.readDaemonVersion(),
                 clientVersion: AutoMobileVersion.current
             )
             let buildSkew = requiresRepoRootBuildSkew(
-                daemonBuildId: readDaemonBuildIdFromPidFile(),
-                daemonEntryScript: readDaemonEntryScriptFromPidFile(),
+                daemonBuildId: runtime.readDaemonBuildId(),
+                daemonEntryScript: runtime.readDaemonEntryScript(),
                 repoRoot: repoRoot
             )
             let assetVersionSkew = requiresAssetVersionPinFailure(
-                daemonAssetVersion: readDaemonAssetVersionFromPidFile(),
+                daemonAssetVersion: runtime.readDaemonAssetVersion(),
                 callerPinnedVersion: resolveCallerAssetVersionPin()
             )
             if requiresImmediateAssetVersionPinFailure(
@@ -448,23 +506,23 @@ public enum DaemonManager {
             }
             if versionSkew || buildSkew || assetVersionSkew {
                 PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
-                if let failure = startupFailure(for: runDaemonSubcommand("restart", repoRoot: repoRoot)) {
+                if let failure = startupFailure(for: runtime.runDaemonSubcommand("restart", repoRoot: repoRoot)) {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed - \(failure)")
                     return failure
                 }
-                return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
+                return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds, runtime: runtime)
             }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
             return .ready
         }
 
         PerfTimer.log("ensureDaemonRunning: starting daemon")
-        if let failure = startupFailure(for: startDaemonOutcome(repoRoot: repoRoot)) {
+        if let failure = startupFailure(for: runtime.runDaemonSubcommand("start", repoRoot: repoRoot)) {
             PerfTimer.log("ensureDaemonRunning: startDaemon failed - \(failure)")
             return failure
         }
 
-        return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds)
+        return waitForVersionMatchedDaemon(repoRoot: repoRoot, timeoutSeconds: timeoutSeconds, runtime: runtime)
     }
 
     /// Wait for the daemon to become ready and confirm its recorded version matches this runner's.
@@ -475,26 +533,29 @@ public enum DaemonManager {
     /// accepted (a skew cannot be proven), matching the gate's lenient stance.
     private static func waitForVersionMatchedDaemon(
         repoRoot: String?,
-        timeoutSeconds: TimeInterval
-    ) -> DaemonStartupResult {
+        timeoutSeconds: TimeInterval,
+        runtime: DaemonRuntime
+    )
+        -> DaemonStartupResult
+    {
         PerfTimer.log("ensureDaemonRunning: waiting for daemon")
-        guard waitForDaemon(timeoutSeconds: timeoutSeconds) else {
+        guard runtime.waitForDaemon(timeoutSeconds: timeoutSeconds) else {
             return .readinessTimeout
         }
         if requiresVersionSkewRestart(
-            daemonVersion: readDaemonVersionFromPidFile(),
+            daemonVersion: runtime.readDaemonVersion(),
             clientVersion: AutoMobileVersion.current
         ) || requiresRepoRootBuildSkew(
-            daemonBuildId: readDaemonBuildIdFromPidFile(),
-            daemonEntryScript: readDaemonEntryScriptFromPidFile(),
+            daemonBuildId: runtime.readDaemonBuildId(),
+            daemonEntryScript: runtime.readDaemonEntryScript(),
             repoRoot: repoRoot
         ) || requiresAssetVersionPinFailure(
-            daemonAssetVersion: readDaemonAssetVersionFromPidFile(),
+            daemonAssetVersion: runtime.readDaemonAssetVersion(),
             callerPinnedVersion: resolveCallerAssetVersionPin()
         ) {
             PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
             if requiresAssetVersionPinFailure(
-                daemonAssetVersion: readDaemonAssetVersionFromPidFile(),
+                daemonAssetVersion: runtime.readDaemonAssetVersion(),
                 callerPinnedVersion: resolveCallerAssetVersionPin()
             ) {
                 return .assetVersionSkew
@@ -518,6 +579,19 @@ public enum DaemonManager {
         }
         PerfTimer.log("waitForDaemon: TIMEOUT after \(pollCount) polls")
         return false
+    }
+
+    /// Finds the owning AutoMobile checkout for a runner source path. The caller still verifies the
+    /// built entrypoint before using it, so package consumers without `dist/` retain PATH behavior.
+    static func findRepoRoot(startingAt sourcePath: String) -> String? {
+        var directory = URL(fileURLWithPath: sourcePath).deletingLastPathComponent()
+        while directory.path != "/" {
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent("package.json").path) {
+                return directory.path
+            }
+            directory.deleteLastPathComponent()
+        }
+        return nil
     }
 
     /// Resolve the built daemon entrypoint under a caller-provided repo root, or nil when no root

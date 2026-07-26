@@ -83,6 +83,16 @@ open class AutoMobileTestCase: XCTestCase {
         ]) ?? AutoMobileDaemonSocket.defaultPath
     }
 
+    /// The source checkout whose built daemon should own the default shared socket. Override this
+    /// for an embedding project, or set `AUTOMOBILE_REPO_ROOT`; without a built entrypoint the
+    /// daemon manager safely falls back to the PATH-launched CLI.
+    open var daemonRepoRoot: String? {
+        if let configuredRoot = environment.firstNonEmpty(["AUTOMOBILE_REPO_ROOT"]) {
+            return configuredRoot
+        }
+        return DaemonManager.findRepoRoot(startingAt: #filePath)
+    }
+
     open var retryCount: Int {
         return environment.intValue(["AUTOMOBILE_TEST_RETRY_COUNT", "RETRY_COUNT"]) ?? 0
     }
@@ -202,6 +212,7 @@ open class AutoMobileTestCase: XCTestCase {
         return AutoMobilePlanExecutor.Configuration(
             transport: transport,
             planPath: planPath,
+            daemonRepoRoot: daemonRepoRoot,
             retryCount: retryCount,
             timeoutSeconds: timeoutSeconds,
             retryDelaySeconds: retryDelaySeconds,
@@ -405,7 +416,7 @@ open class AutoMobileTestCase: XCTestCase {
     /// (#2744) would keep rejecting the retry. Route through the version-matched ensure path, which
     /// restarts a version-skewed daemon and confirms the running version matches this runner.
     private func recoverDaemonForRetry() throws {
-        guard DaemonManager.ensureDaemonRunning() else {
+        guard DaemonManager.ensureDaemonRunning(repoRoot: daemonRepoRoot) else {
             throw AutoMobileTestCaseError.devicePoolUnavailable(
                 "AutoMobile daemon is unavailable or a different build than this runner on the "
                     + "shared socket; restart it from the same @kaeawc/auto-mobile version."

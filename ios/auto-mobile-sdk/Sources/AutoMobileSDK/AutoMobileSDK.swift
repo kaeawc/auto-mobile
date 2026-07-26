@@ -18,6 +18,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _configuration: AutoMobileConfiguration?
     private var eventBuffer: SdkEventBuffer?
     private var navigationSequenceNumber: Int64 = 0
+    private var sdkSessionId: String?
+    private var trackingGeneration: Int64 = 0
     private var _dropCounter: DefaultDropCounter?
     private var eventPersistence: (any EventPersisting)?
     private var sessionTracker: SessionTracker?
@@ -50,6 +52,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         let resolvedBundleId = bundleId ?? Bundle.main.bundleIdentifier
         _bundleId = resolvedBundleId
+        let newSessionId = UUID().uuidString
+        sdkSessionId = newSessionId
+        trackingGeneration = 0
         _configuration = configuration
 
         let counter = DefaultDropCounter()
@@ -86,6 +91,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
         lock.unlock()
 
         buffer.start()
+        SdkEventBroadcaster.shared.broadcastBatch(
+            bundleId: resolvedBundleId,
+            events: [SdkLifecycleEvent(state: "sdk_session_started", bundleId: resolvedBundleId, sessionId: newSessionId, trackingGeneration: 0)]
+        )
 
         // Replay any pending batches from previous sessions and clean up old ones
         persistence.cleanup(maxAgeDays: 7)
@@ -191,6 +200,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let currentListeners = listeners
         navigationSequenceNumber += 1
         let sequenceNumber = navigationSequenceNumber
+        let currentSessionId = sdkSessionId
+        let currentTrackingGeneration = trackingGeneration
         lock.unlock()
 
         for listener in currentListeners {
@@ -201,6 +212,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let sdkEvent = SdkNavigationEvent(
             timestamp: event.timestamp,
             sequenceNumber: sequenceNumber,
+            sessionId: currentSessionId,
+            trackingGeneration: currentTrackingGeneration,
             destination: event.destination,
             source: NavigationSourceType(rawValue: event.source.rawValue) ?? .custom,
             arguments: event.arguments,
@@ -317,6 +330,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _bundleId = nil
         _configuration = nil
         navigationSequenceNumber = 0
+        sdkSessionId = nil
+        trackingGeneration = 0
         lock.unlock()
 
         bufferToShutdown?.shutdown()
@@ -338,11 +353,16 @@ public final class AutoMobileSDK: @unchecked Sendable {
     public func setEnabled(_ enabled: Bool) {
         lock.lock()
         let wasEnabled = _isEnabled
+        if wasEnabled != enabled {
+            trackingGeneration += 1
+        }
         _isEnabled = enabled
         let buffer = eventBuffer
         let initialized = _isInitialized
         let config = _configuration
         let bundleId = _bundleId
+        let currentSessionId = sdkSessionId
+        let currentTrackingGeneration = trackingGeneration
         lock.unlock()
 
         buffer?.isBufferEnabled = enabled
@@ -360,7 +380,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
                 bundleId: bundleId,
                 events: [SdkLifecycleEvent(
                     state: enabled ? "sdk_tracking_enabled" : "sdk_tracking_disabled",
-                    bundleId: bundleId
+                    bundleId: bundleId,
+                    sessionId: currentSessionId,
+                    trackingGeneration: currentTrackingGeneration
                 )]
             )
         }

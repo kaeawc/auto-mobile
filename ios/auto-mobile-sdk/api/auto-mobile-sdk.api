@@ -92,11 +92,13 @@ public struct SdkNavigationEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .navigation
   public let timestamp: Int64
   public let sequenceNumber: Int64?
+  public let sessionId: String?
+  public let trackingGeneration: Int64?
   public let destination: String
   public let source: NavigationSourceType
   public let arguments: [String: String]
   public let metadata: [String: String]
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), sequenceNumber: Int64? = nil, destination: String, source: NavigationSourceType, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), sequenceNumber: Int64? = nil, sessionId: String? = nil, trackingGeneration: Int64? = nil, destination: String, source: NavigationSourceType, arguments: [String: String] = [:], metadata: [String: String] = [:] )
 public struct SdkHandledExceptionEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .handledException
   public let timestamp: Int64
@@ -170,7 +172,9 @@ public struct SdkLifecycleEvent: SdkEvent
   public let state: String
   public let bundleId: String?
   public let details: [String: String]
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), state: String, bundleId: String? = nil, details: [String: String] = [:] )
+  public let sessionId: String?
+  public let trackingGeneration: Int64?
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), state: String, bundleId: String? = nil, details: [String: String] = [:], sessionId: String? = nil, trackingGeneration: Int64? = nil )
 public struct SdkNotificationActionEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .notificationAction
   public let timestamp: Int64

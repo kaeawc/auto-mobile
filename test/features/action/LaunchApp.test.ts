@@ -421,7 +421,7 @@ describe("LaunchApp", () => {
       }
     });
 
-    test("clears a simulator SDK identity before a warm launch", async () => {
+    test("preserves a simulator SDK identity when a warm launch only foregrounds", async () => {
       fakeTimer.enableAutoAdvance();
       const { iosLaunchApp, cleanup } = createIOSTestHarness({ bundleId: userBundleId, launchSuccess: true });
       const clearedBundleIds: string[] = [];
@@ -433,7 +433,7 @@ describe("LaunchApp", () => {
         const result = await iosLaunchApp.execute(userBundleId, false, false);
 
         expect(result.success).toBe(true);
-        expect(clearedBundleIds).toEqual([userBundleId]);
+        expect(clearedBundleIds).toEqual([]);
       } finally {
         existingClientSpy.mockRestore();
         cleanup();

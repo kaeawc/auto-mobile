@@ -367,10 +367,6 @@ export class LaunchApp extends BaseVisualChange {
           // Warm launch. Simulator: simctl launch foregrounds a backgrounded app
           // and is faster than the CtrlProxy WebSocket round-trip (~4-5s). Device:
           // devicectl has no foreground verb, so relaunch via --terminate-existing.
-          // simctl launch can either foreground a backgrounded process or start
-          // a replacement process after an external crash. Clear conservatively:
-          // the next identity refresh drains any queued pre-launch SDK events.
-          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
           launchResult = await perf.track("launch", () =>
             simulator
               ? this.simctl.launchApp(bundleId)

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../../src/db/dbWriteBarrier";
 import {
   DefaultIosSdkEventIngestor,
   type IosTelemetryRecorder,
@@ -286,6 +287,21 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(navSink.recorded).toHaveLength(1);
     expect(navSink.recorded[0]).toMatchObject({ applicationId: "com.app", destination: "Home", source: "Login" });
     expect(recorder.navigation[0].event).toMatchObject({ destination: "Home", source: "Login", applicationId: "com.app" });
+  });
+
+  test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#3506)", async () => {
+    resetDbWriteBarrier();
+    const barrier = getDbWriteBarrier();
+    const trackExistingSpy = spyOn(barrier, "trackExisting");
+
+    try {
+      await ingestor.recordSdkEvent(event("navigation", { destination: "Home" }), "com.app");
+
+      expect(trackExistingSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      trackExistingSpy.mockRestore();
+      resetDbWriteBarrier();
+    }
   });
 
   test("navigation without applicationId still records telemetry but not the nav graph", async () => {

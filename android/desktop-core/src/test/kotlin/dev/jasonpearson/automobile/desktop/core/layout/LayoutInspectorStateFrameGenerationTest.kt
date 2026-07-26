@@ -1,9 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
-import dev.jasonpearson.automobile.desktop.core.isDeviceControlActive
-import dev.jasonpearson.automobile.desktop.core.isRenderedGeometryConsistent
-import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.domain.ConnectionStatus
+import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
+import dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy
 import dev.jasonpearson.automobile.desktop.domain.ElementBounds
 import dev.jasonpearson.automobile.desktop.domain.UIElementInfo
 import kotlin.test.assertEquals
@@ -107,27 +106,29 @@ class LayoutInspectorStateFrameGenerationTest {
       children = emptyList(),
     )
 
+  /**
+   * The #3348 control decision, fed from this state's recorded frame provenance. `nowMs` is the
+   * fixed clock the state is constructed with, so nothing here is stale by age.
+   */
   private fun gateFor(state: LayoutInspectorState, device: String) =
-    isDeviceControlActive(
-      enableDeviceControl = true,
-      isRealDeviceMode = true,
-      activeDeviceId = device,
-      connectionType = McpConnectionType.UnixSocket,
-      renderedDeviceId = state.renderedDeviceId,
-      renderedHierarchyDeviceId = state.renderedHierarchyDeviceId,
-      isObservationStreamConnected = state.connectionStatus == ConnectionStatus.Connected,
-      isRenderedGeometryConsistent =
-        isRenderedGeometryConsistent(
-          screenshotWidth = state.screenWidth,
-          screenshotHeight = state.screenHeight,
-          hierarchyRootWidth = state.hierarchy?.bounds?.width ?: 0,
-          hierarchyRootHeight = state.hierarchy?.bounds?.height ?: 0,
+    DeviceControlPolicy.evaluate(
+        DeviceControlInputs(
+          enabled = true,
+          realDeviceMode = true,
+          selectedDeviceId = device,
+          transportSupportsInput = true,
+          observationStreamConnected = state.connectionStatus == ConnectionStatus.Connected,
+          screenshot = state.screenshotFacts,
+          hierarchy = state.hierarchyFacts,
+          liveFrame = null,
         ),
-    )
+        nowMs = TEST_NOW_MS,
+      )
+      .isAvailable
 
   @Test
   fun `reopening live layout for the same device stays inactive until fresh frames arrive`() {
-    val state = LayoutInspectorState()
+    val state = LayoutInspectorState(nowMs = { TEST_NOW_MS })
     val device = "emulator-5554"
 
     // A prior Live Layout session rendered a live frame for this device.
@@ -139,7 +140,7 @@ class LayoutInspectorStateFrameGenerationTest {
       deviceId = device,
       generation = state.frameGeneration,
     )
-    state.updateHierarchy(rootBounds(), deviceId = device)
+    state.updateHierarchy(rootBounds(), deviceId = device, daemonTimestampMs = 1L)
     state.updateConnectionStatus(ConnectionStatus.Connected)
     assertTrue(gateFor(state, device), "control was active in the prior session")
 
@@ -157,8 +158,13 @@ class LayoutInspectorStateFrameGenerationTest {
       deviceId = device,
       generation = state.frameGeneration,
     )
-    state.updateHierarchy(rootBounds(), deviceId = device)
+    state.updateHierarchy(rootBounds(), deviceId = device, daemonTimestampMs = 2L)
     state.updateConnectionStatus(ConnectionStatus.Connected)
     assertTrue(gateFor(state, device), "fresh frames re-arm control")
+  }
+
+  private companion object {
+    /** Fixed client clock: these tests exercise identity/generation, never age. */
+    const val TEST_NOW_MS: Long = 1_000L
   }
 }

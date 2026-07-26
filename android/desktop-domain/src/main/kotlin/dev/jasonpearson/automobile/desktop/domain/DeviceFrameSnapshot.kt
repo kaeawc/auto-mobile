@@ -1,0 +1,129 @@
+package dev.jasonpearson.automobile.desktop.domain
+
+/**
+ * Which pixels a [DeviceFrameSnapshot] was rendered from.
+ *
+ * The two sources carry different provenance guarantees, which is why the snapshot records it:
+ * - [Screenshot] frames come from the daemon's observation stream and carry the daemon's own
+ *   capture timestamp, so they can be paired against a hierarchy update from the same stream.
+ * - [LiveVideo] frames come from the WebRTC/relay mirror. They carry no daemon timestamp, so their
+ *   provenance is a client-side monotonic sequence plus the wall-clock instant the client received
+ *   them — which is exactly what makes a stalled relay detectable.
+ */
+public enum class DeviceFrameSource {
+  Screenshot,
+  LiveVideo,
+}
+
+/**
+ * One observation-stream screenshot update, with the provenance needed to pair it with a hierarchy
+ * and to decide whether it is still fresh (issue #3348).
+ *
+ * @param deviceId the device the frame was captured from.
+ * @param sequence client-side monotonic counter, bumped once per applied source update. Identifies
+ *   *which* update this is, and orders snapshots.
+ * @param daemonTimestampMs the daemon's capture timestamp for this update. Compared only against
+ *   *other daemon timestamps* (the hierarchy's), never against the client clock — the two clocks
+ *   are unrelated.
+ * @param receivedAtMs the client wall-clock instant the update was applied. Compared only against
+ *   the client clock, for recency.
+ * @param width reported device screen width for this frame.
+ * @param height reported device screen height for this frame.
+ */
+public data class ScreenshotFrameFacts(
+  val deviceId: String?,
+  val sequence: Long,
+  val daemonTimestampMs: Long,
+  val receivedAtMs: Long,
+  val width: Int,
+  val height: Int,
+)
+
+/**
+ * One observation-stream hierarchy update, with the provenance needed to pair it with a screenshot
+ * (issue #3348). Field semantics match [ScreenshotFrameFacts].
+ *
+ * @param hierarchy the parsed hierarchy actually applied for this update. Paired into the snapshot
+ *   so a tap maps through the same tree the click was hit-tested against, instead of whatever the
+ *   independently-debounced view state holds at dispatch time.
+ * @param rootWidth hierarchy root bounds width, or 0 when the root has no explicit bounds (the
+ *   common Android accessibility-service case).
+ * @param rootHeight hierarchy root bounds height, or 0 as above.
+ */
+public data class HierarchyFrameFacts(
+  val deviceId: String?,
+  val sequence: Long,
+  val daemonTimestampMs: Long,
+  val receivedAtMs: Long,
+  val hierarchy: ParsedHierarchy?,
+  val rootWidth: Int,
+  val rootHeight: Int,
+)
+
+/**
+ * One decoded live-mirror frame (issue #3348).
+ *
+ * There is no daemon timestamp here, so [receivedAtMs] is the *only* liveness signal: when the
+ * relay stalls with its socket open the client keeps its last bitmap and unchanged dimensions, and
+ * nothing about the pixels reveals that they are frozen. A recency bound on [receivedAtMs] does.
+ */
+public data class LiveFrameFacts(
+  val deviceId: String?,
+  val sequence: Long,
+  val receivedAtMs: Long,
+  val width: Int,
+  val height: Int,
+)
+
+/**
+ * An immutable, internally-consistent picture of one device frame, assembled *before* the UI layer
+ * (issue #3348).
+ *
+ * This is the unit device control acts on. A click maps through exactly the snapshot it was
+ * delivered with, and that snapshot travels with the tap all the way to the daemon request — so a
+ * snapshot swap between click and dispatch cannot change the mapping, and no amount of racing
+ * between the screenshot flow, the debounced hierarchy flow, the live-video frame, the connection
+ * state and the device selection can produce a tap mapped through one source and sent against
+ * another.
+ *
+ * Produced only by [DeviceControlPolicy.evaluate], which refuses to build one unless every
+ * contributing source agrees (see that function for the exact rules).
+ *
+ * @param deviceId the single device every contributing source agreed on.
+ * @param sequence monotonic across snapshots for one session; the max of the contributing source
+ *   sequences. Used to answer "is this snapshot newer than the one I tapped through?".
+ * @param capturedAtMs client wall-clock instant of the *displayed* frame.
+ * @param source which pixels are displayed ([DeviceFrameSource]).
+ * @param frameWidth displayed frame width (live frame's, or the screenshot's).
+ * @param frameHeight displayed frame height.
+ * @param deviceWidth effective device-coordinate width used for mapping — hierarchy root bounds
+ *   when present, else the observation stream's reported screen width.
+ * @param deviceHeight effective device-coordinate height used for mapping.
+ * @param hierarchy the hierarchy paired into this snapshot; may be null only when the update
+ *   carried no parsed tree.
+ * @param screenshotSequence provenance of the observation screenshot this snapshot was built from.
+ * @param hierarchySequence provenance of the hierarchy this snapshot was built from.
+ * @param liveFrameSequence provenance of the live frame, or null when none is displayed.
+ */
+public data class DeviceFrameSnapshot(
+  val deviceId: String,
+  val sequence: Long,
+  val capturedAtMs: Long,
+  val source: DeviceFrameSource,
+  val frameWidth: Int,
+  val frameHeight: Int,
+  val deviceWidth: Int,
+  val deviceHeight: Int,
+  val hierarchy: ParsedHierarchy?,
+  val screenshotSequence: Long,
+  val hierarchySequence: Long,
+  val liveFrameSequence: Long?,
+) {
+  /**
+   * The device-coordinate bounds a click through this snapshot must be mapped with. Callers build
+   * their [DeviceScreenGeometry] from these rather than from live view state, which is what makes
+   * an equal-aspect resolution change unable to mis-scale a tap.
+   */
+  public val mappingBounds: Pair<Int, Int>
+    get() = deviceWidth to deviceHeight
+}

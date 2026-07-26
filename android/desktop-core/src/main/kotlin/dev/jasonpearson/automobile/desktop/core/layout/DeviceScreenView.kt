@@ -65,6 +65,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
@@ -181,11 +182,22 @@ fun DeviceScreenView(
    */
   controlMode: DeviceScreenControlMode = DeviceScreenControlMode.Inspector,
   /**
-   * Called in [DeviceScreenControlMode.Control] with the device coordinate a click maps to. The
-   * point carries [DevicePoint.inBounds]; a null default makes control mode inert until a caller
-   * wires it. No-op in inspector mode.
+   * The atomic frame snapshot control clicks are mapped through (issue #3348). Required for control
+   * mode to do anything: the device-coordinate bounds come from
+   * [DeviceFrameSnapshot.deviceWidth]/[DeviceFrameSnapshot.deviceHeight] rather than from this
+   * view's own (independently updating) [hierarchy] and [screenWidth]/[screenHeight] params, so a
+   * resolution change the hierarchy has not caught up to cannot mis-scale a tap — even when the old
+   * and new resolutions share an aspect ratio, which no dimension comparison can detect.
    */
-  onControlTap: ((DevicePoint) -> Unit)? = null,
+  controlSnapshot: DeviceFrameSnapshot? = null,
+  /**
+   * Called in [DeviceScreenControlMode.Control] with the snapshot a click was mapped through and
+   * the resulting device coordinate. Both are read from a single value, so they are inherently the
+   * same frame: a snapshot swap between the click and the caller's dispatch cannot change the
+   * mapping this point was produced with. The point carries [DevicePoint.inBounds]; a null default
+   * makes control mode inert until a caller wires it. No-op in inspector mode.
+   */
+  onControlTap: ((DeviceFrameSnapshot, DevicePoint) -> Unit)? = null,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -489,6 +501,23 @@ fun DeviceScreenView(
           currentGeometry,
         )
 
+      // The control-mode mapping authority (issue #3348): the snapshot plus the geometry derived
+      // from ITS device bounds, published as ONE value. The tap gesture reads it once, so the
+      // point it produces and the snapshot it reports are always the same frame — there is no
+      // window in which the snapshot could advance between the two reads. Null whenever no
+      // snapshot is available, which makes control mode inert (the caller is already rendering
+      // inspector mode in that case).
+      val controlFrame by
+        rememberUpdatedState(
+          controlSnapshot?.let { snapshot ->
+            snapshot to
+              currentGeometry.copy(
+                deviceWidth = snapshot.deviceWidth,
+                deviceHeight = snapshot.deviceHeight,
+              )
+          }
+        )
+
       // Focus requester for keyboard events
       val focusRequester = remember { FocusRequester() }
 
@@ -524,15 +553,28 @@ fun DeviceScreenView(
             }
             .pointerInput(hierarchy, controlMode) {
               detectTapGestures { offset ->
-                val point = screenToDevice(offset.x, offset.y)
                 when (controlMode) {
-                  // Control mode: report the mapped device coordinate for a caller to forward to
-                  // the daemon input helpers (issue #3347). This view never sends input itself.
-                  DeviceScreenControlMode.Control -> currentOnControlTap?.invoke(point)
+                  // Control mode: map through the clicked snapshot and report both, for a caller
+                  // to forward to the daemon input helpers (issues #3347, #3348). This view never
+                  // sends input itself. One read of controlFrame supplies both the mapping bounds
+                  // and the reported snapshot, so they cannot disagree.
+                  DeviceScreenControlMode.Control -> {
+                    val frame = controlFrame
+                    if (frame != null) {
+                      val (snapshot, geometry) = frame
+                      val point =
+                        DeviceScreenCoordinateMapper.viewportToDevice(
+                          ViewportPoint(offset.x, offset.y),
+                          geometry,
+                        )
+                      currentOnControlTap?.invoke(snapshot, point)
+                    }
+                  }
                   // Inspector mode: select the deepest element under the click (unchanged
                   // behavior).
                   DeviceScreenControlMode.Inspector ->
                     if (hierarchy != null) {
+                      val point = screenToDevice(offset.x, offset.y)
                       val element =
                         LayoutInspectorMockData.findElementAt(hierarchy, point.x, point.y)
                       onElementSelected(element?.id)

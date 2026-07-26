@@ -1,0 +1,259 @@
+package dev.jasonpearson.automobile.desktop.domain
+
+import kotlin.math.abs
+
+/** Why device control is not available for the current sources. */
+public enum class DeviceControlBlockReason {
+  /** The host did not opt in (the IDE plugin never does — it stays inspector-only). */
+  NotEnabled,
+  /** Mock/fake data is being rendered; there is no real device to actuate. */
+  NotRealDeviceMode,
+  /** No device is explicitly selected, so the daemon would be free to pick one the user did not. */
+  NoDeviceSelected,
+  /** The connected transport cannot carry daemon input. */
+  TransportCannotCarryInput,
+  /** The observation stream is down, so whatever is on screen is a frozen mirror. */
+  ObservationStreamDisconnected,
+  /** No screenshot and/or hierarchy has been applied yet. */
+  NoFrame,
+  /** A contributing source belongs to a different device than the selection. */
+  DeviceMismatch,
+  /**
+   * The screenshot and the hierarchy do not describe the same device state: their daemon capture
+   * timestamps are further apart than [DeviceControlPolicy.HIERARCHY_PAIRING_WINDOW_MS]. This is
+   * the check that catches an equal-aspect resolution change, which no dimension comparison can.
+   */
+  UnpairedHierarchy,
+  /** The displayed frame is older than the freshness bound for its source. */
+  StaleFrame,
+  /**
+   * The displayed frame and the mapping bounds disagree geometrically. Retained specifically for
+   * the live-video path, which carries no daemon timestamp to pair against the hierarchy.
+   */
+  GeometryMismatch,
+}
+
+/** The outcome of [DeviceControlPolicy.evaluate]. */
+public sealed interface DeviceControlDecision {
+  /**
+   * Control is available, and every click must be mapped and dispatched through [snapshot] — not
+   * through whatever view state wins the race by dispatch time.
+   */
+  public data class Available(val snapshot: DeviceFrameSnapshot) : DeviceControlDecision
+
+  /** Control is unavailable; the view must fall back to inspector mode. */
+  public data class Blocked(val reason: DeviceControlBlockReason) : DeviceControlDecision
+
+  /** The snapshot when control is available, else null. */
+  public val snapshotOrNull: DeviceFrameSnapshot?
+    get() = (this as? Available)?.snapshot
+
+  /** True when a click may be forwarded to the device. */
+  public val isAvailable: Boolean
+    get() = this is Available
+}
+
+/**
+ * The host/transport facts device control depends on, alongside the frame sources. Everything the
+ * decision needs, so the decision itself is a pure function of its inputs.
+ */
+public data class DeviceControlInputs(
+  val enabled: Boolean,
+  val realDeviceMode: Boolean,
+  val selectedDeviceId: String?,
+  val transportSupportsInput: Boolean,
+  val observationStreamConnected: Boolean,
+  val screenshot: ScreenshotFrameFacts?,
+  val hierarchy: HierarchyFrameFacts?,
+  val liveFrame: LiveFrameFacts?,
+)
+
+/**
+ * Decides whether client device control may act on the current sources, and if so assembles the one
+ * [DeviceFrameSnapshot] every click must map and dispatch through (issue #3348).
+ *
+ * This replaces the growing set of point-gates [#3347](https://github.com/kaeawc/auto-mobile)
+ * shipped with: device-id equality (screenshot **and** hierarchy), stream liveness, frame
+ * generation and aspect-ratio consistency were each added in response to one discovered
+ * disagreement between unsynchronized sources. Two disagreements are undetectable by comparing
+ * dimensions at all:
+ * - an **equal-aspect resolution change** (1080x2340 -> 720x1560) passes any aspect comparison
+ *   while the mapping still runs through the stale hierarchy's absolute bounds, and
+ * - a **stalled live relay** keeps its socket, its state and its last bitmap, so its dimensions
+ *   never change while the user clicks frozen content.
+ *
+ * Both require knowing *which frame* the pixels came from, so this policy decides on provenance:
+ * daemon capture timestamps pair the screenshot with the hierarchy, and a client-clock recency
+ * bound retires a frame whose source stopped producing.
+ *
+ * Pure and Compose-free: `nowMs` is passed in, so tests drive it deterministically with no real
+ * timers.
+ */
+public object DeviceControlPolicy {
+
+  /**
+   * How far apart the screenshot's and the hierarchy's *daemon* capture timestamps may be while
+   * still describing the same device state.
+   *
+   * Generous relative to the observation stream's cadence (the hierarchy flow is debounced ~100ms
+   * client-side and both updates are pushed continuously while subscribed), so healthy streaming
+   * never blinks control off; tight enough that a hierarchy left behind by a resolution change,
+   * rotation or app switch stops pairing well before the user can click through it.
+   */
+  public const val HIERARCHY_PAIRING_WINDOW_MS: Long = 1_500L
+
+  /**
+   * How old the displayed observation screenshot may be, on the client clock. Bounds the "the
+   * daemon stopped pushing but never disconnected" case that stream liveness alone does not cover.
+   */
+  public const val SCREENSHOT_MAX_AGE_MS: Long = 5_000L
+
+  /**
+   * How old the displayed live-mirror frame may be, on the client clock. A relay stalled in a
+   * blocking read keeps [DeviceFrameSource.LiveVideo] pixels on screen indefinitely with unchanged
+   * dimensions; this bound is the only thing that retires them. Well above a frame interval at any
+   * plausible mirror frame rate, so an ordinary hiccup does not drop control.
+   */
+  public const val LIVE_FRAME_MAX_AGE_MS: Long = 1_000L
+
+  /** Relative aspect-ratio tolerance for [isGeometryConsistent]. */
+  private const val GEOMETRY_ASPECT_TOLERANCE = 0.05f
+
+  /**
+   * Evaluate control availability for [inputs] at client wall-clock [nowMs].
+   *
+   * Checks run cheapest-and-most-decisive first; the first failure short-circuits with its reason,
+   * so the caller can surface *why* control is unavailable rather than only that it is. Every path
+   * that is not [DeviceControlDecision.Available] must fall back to inspector mode — control fails
+   * closed in every condition.
+   */
+  public fun evaluate(inputs: DeviceControlInputs, nowMs: Long): DeviceControlDecision {
+    if (!inputs.enabled) return blocked(DeviceControlBlockReason.NotEnabled)
+    if (!inputs.realDeviceMode) return blocked(DeviceControlBlockReason.NotRealDeviceMode)
+    val selected =
+      inputs.selectedDeviceId ?: return blocked(DeviceControlBlockReason.NoDeviceSelected)
+    if (!inputs.transportSupportsInput) {
+      return blocked(DeviceControlBlockReason.TransportCannotCarryInput)
+    }
+    if (!inputs.observationStreamConnected) {
+      return blocked(DeviceControlBlockReason.ObservationStreamDisconnected)
+    }
+
+    val screenshot = inputs.screenshot ?: return blocked(DeviceControlBlockReason.NoFrame)
+    val hierarchy = inputs.hierarchy ?: return blocked(DeviceControlBlockReason.NoFrame)
+    if (screenshot.width <= 0 || screenshot.height <= 0) {
+      return blocked(DeviceControlBlockReason.NoFrame)
+    }
+
+    // Every contributing source must belong to the selected device. The live frame is included
+    // because it is what the user actually clicks when present.
+    if (screenshot.deviceId != selected || hierarchy.deviceId != selected) {
+      return blocked(DeviceControlBlockReason.DeviceMismatch)
+    }
+    val liveFrame = inputs.liveFrame?.takeIf { it.width > 0 && it.height > 0 }
+    if (liveFrame != null && liveFrame.deviceId != selected) {
+      return blocked(DeviceControlBlockReason.DeviceMismatch)
+    }
+
+    // Provenance pairing. Both timestamps come from the daemon, so they are comparable to each
+    // other (and to nothing else). This is what an equal-aspect resolution change trips: the new
+    // screenshot advances the daemon timestamp while the stale hierarchy — whose absolute bounds
+    // the tap would be mapped through — does not.
+    if (
+      abs(screenshot.daemonTimestampMs - hierarchy.daemonTimestampMs) > HIERARCHY_PAIRING_WINDOW_MS
+    ) {
+      return blocked(DeviceControlBlockReason.UnpairedHierarchy)
+    }
+
+    // Effective mapping bounds: the SAME rule the renderer uses — hierarchy root bounds when the
+    // root reports any, else the observation stream's reported screen size (Android accessibility
+    // roots are commonly (0,0,0,0)).
+    val deviceWidth = hierarchy.rootWidth.takeIf { it > 0 } ?: screenshot.width
+    val deviceHeight = hierarchy.rootHeight.takeIf { it > 0 } ?: screenshot.height
+
+    if (nowMs - screenshot.receivedAtMs > SCREENSHOT_MAX_AGE_MS) {
+      return blocked(DeviceControlBlockReason.StaleFrame)
+    }
+    if (liveFrame != null && nowMs - liveFrame.receivedAtMs > LIVE_FRAME_MAX_AGE_MS) {
+      // The relay is stalled: same socket, same state, same bitmap, same dimensions. Only recency
+      // reveals it.
+      return blocked(DeviceControlBlockReason.StaleFrame)
+    }
+
+    val frameWidth = liveFrame?.width ?: screenshot.width
+    val frameHeight = liveFrame?.height ?: screenshot.height
+    // Geometry cross-check. Provenance already covers the observation path; this remains the only
+    // available cross-check for the live frame, which carries no daemon timestamp to pair — a
+    // rotation the mirror has applied but the hierarchy has not (or vice versa) shows up here.
+    if (
+      !isGeometryConsistent(
+        frameWidth = frameWidth,
+        frameHeight = frameHeight,
+        deviceWidth = deviceWidth,
+        deviceHeight = deviceHeight,
+        // A live frame is always in display orientation, so an orientation difference means the
+        // sources are out of sync. A polled screenshot may arrive in native pixel orientation
+        // (notably iOS) and the renderer rotates it, so a difference there is expected.
+        allowRotation = liveFrame == null,
+      )
+    ) {
+      return blocked(DeviceControlBlockReason.GeometryMismatch)
+    }
+
+    return DeviceControlDecision.Available(
+      DeviceFrameSnapshot(
+        deviceId = selected,
+        sequence =
+          maxOf(screenshot.sequence, hierarchy.sequence, liveFrame?.sequence ?: Long.MIN_VALUE),
+        capturedAtMs = liveFrame?.receivedAtMs ?: screenshot.receivedAtMs,
+        source =
+          if (liveFrame != null) DeviceFrameSource.LiveVideo else DeviceFrameSource.Screenshot,
+        frameWidth = frameWidth,
+        frameHeight = frameHeight,
+        deviceWidth = deviceWidth,
+        deviceHeight = deviceHeight,
+        hierarchy = hierarchy.hierarchy,
+        screenshotSequence = screenshot.sequence,
+        hierarchySequence = hierarchy.sequence,
+        liveFrameSequence = liveFrame?.sequence,
+      )
+    )
+  }
+
+  /**
+   * Whether the displayed frame and the effective device bounds used for mapping describe a
+   * geometrically-consistent view of the same screen. A renderer fits the displayed frame by its
+   * own aspect ratio while mapping clicks through the device bounds, so disagreeing aspect ratios
+   * mean a tap is scaled wrong. Aspect ratios must agree within [GEOMETRY_ASPECT_TOLERANCE].
+   *
+   * Absolute dimensions are deliberately *not* compared: a screenshot may be a downscale of the
+   * device screen, and iOS hierarchy bounds are logical points against pixel screenshots. That is
+   * precisely why this check alone cannot catch an equal-aspect resolution change — provenance
+   * pairing does that.
+   *
+   * A non-positive displayed dimension (no frame yet) is inconsistent. Non-positive device
+   * dimensions mean neither source reported a size, in which case the renderer falls back to the
+   * displayed frame itself and the two are consistent by construction.
+   */
+  public fun isGeometryConsistent(
+    frameWidth: Int,
+    frameHeight: Int,
+    deviceWidth: Int,
+    deviceHeight: Int,
+    allowRotation: Boolean = true,
+  ): Boolean {
+    if (frameWidth <= 0 || frameHeight <= 0) return false
+    if (deviceWidth <= 0 || deviceHeight <= 0) return true
+    val frameAspect = frameWidth.toFloat() / frameHeight.toFloat()
+    val deviceAspect = deviceWidth.toFloat() / deviceHeight.toFloat()
+    val matchesDirect = abs(frameAspect - deviceAspect) <= GEOMETRY_ASPECT_TOLERANCE * deviceAspect
+    if (!allowRotation) return matchesDirect
+    val rotatedAspect = 1f / deviceAspect
+    val matchesRotated =
+      abs(frameAspect - rotatedAspect) <= GEOMETRY_ASPECT_TOLERANCE * rotatedAspect
+    return matchesDirect || matchesRotated
+  }
+
+  private fun blocked(reason: DeviceControlBlockReason): DeviceControlDecision =
+    DeviceControlDecision.Blocked(reason)
+}

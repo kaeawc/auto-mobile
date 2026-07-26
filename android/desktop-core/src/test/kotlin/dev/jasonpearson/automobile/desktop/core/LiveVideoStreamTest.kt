@@ -35,7 +35,7 @@ class LiveVideoStreamTest {
 
     setContent {
       val liveFrame = rememberLiveVideoFrame(source, "emulator-5554")
-      SideEffect { observedFrame = liveFrame }
+      SideEffect { observedFrame = liveFrame?.bitmap }
     }
 
     source.emitFrame(width = 1, height = 1)
@@ -63,7 +63,7 @@ class LiveVideoStreamTest {
           allowDecodingToFinish.await()
           frame.toImageBitmap()
         }
-      SideEffect { observedFrame = liveFrame }
+      SideEffect { observedFrame = liveFrame?.bitmap }
     }
 
     source.emitFrame(width = 1, height = 1)

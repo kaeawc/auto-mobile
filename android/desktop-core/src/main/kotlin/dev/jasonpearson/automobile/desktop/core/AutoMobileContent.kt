@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,10 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
-import dev.jasonpearson.automobile.desktop.core.control.ControlTapErrorGate
-import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapCommand
-import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapDispatcher
-import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapForwarder
+import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -151,12 +149,14 @@ import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCategory
 import dev.jasonpearson.automobile.desktop.core.timeline.activeLanes
 import dev.jasonpearson.automobile.desktop.core.timeline.buildTimelineSpans
 import dev.jasonpearson.automobile.desktop.core.timeline.rememberTimelineState
+import dev.jasonpearson.automobile.desktop.core.video.LiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
-import dev.jasonpearson.automobile.desktop.domain.DevicePoint
+import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
+import dev.jasonpearson.automobile.desktop.domain.LiveFrameFacts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
@@ -182,97 +182,13 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
 }
 
 /**
- * Whether client device control (issue #3347) may be active for the live layout view. Control taps
- * actuate a real device, so this gate is deliberately strict: it is true only when
- * - the app opted in ([enableDeviceControl]),
- * - we are in Real device mode (not Fake mock data),
- * - a device is explicitly selected ([activeDeviceId] non-null) — switching Fake→Real clears the
- *   selection while keeping the socket and last frame, and a null selection must not let the daemon
- *   pick a device the user never chose,
- * - the connected transport can carry daemon input ([McpConnectionType.supportsDaemonInput]), and
- * - BOTH the rendered screenshot ([renderedDeviceId]) AND the hit-tested hierarchy
- *   ([renderedHierarchyDeviceId]) belong to that same selected device — after a device switch the
- *   previous frame lingers until a new one arrives, and the screenshot and hierarchy streams update
- *   independently (the hierarchy is debounced), so a click could otherwise be mapped against one
- *   device's dimensions yet sent to another. When the observation stream disconnects both ids are
- *   invalidated, which also drops control on a frozen mirror.
- * - the observation stream is live ([isObservationStreamConnected]) — a stale frame must not
- *   re-enable control while the stream is down, and
- * - the rendered screenshot and hierarchy geometry agree ([isRenderedGeometryConsistent], see
- *   [isRenderedGeometryConsistent]) so a click is not mapped through a mismatched scale.
- *
- * When any condition fails the view falls back to inspector mode, so the user is never tapping
- * blind.
+ * Device control availability and the atomic frame snapshot a click maps through now live in the
+ * Compose-free [dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy] and are wired here
+ * through the single [dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession] seam
+ * (issue #3348). The point-gates this host used to assemble inline — device-id equality for the
+ * screenshot and the hierarchy, stream liveness, and an aspect-ratio geometry check — collapsed
+ * into that policy, which decides on frame *provenance* rather than on dimensions.
  */
-internal fun isDeviceControlActive(
-  enableDeviceControl: Boolean,
-  isRealDeviceMode: Boolean,
-  activeDeviceId: String?,
-  connectionType: McpConnectionType?,
-  renderedDeviceId: String?,
-  renderedHierarchyDeviceId: String?,
-  isObservationStreamConnected: Boolean,
-  isRenderedGeometryConsistent: Boolean,
-): Boolean {
-  return enableDeviceControl &&
-    isRealDeviceMode &&
-    activeDeviceId != null &&
-    connectionType?.supportsDaemonInput == true &&
-    isObservationStreamConnected &&
-    isRenderedGeometryConsistent &&
-    renderedDeviceId == activeDeviceId &&
-    renderedHierarchyDeviceId == activeDeviceId
-}
-
-/** Relative aspect-ratio tolerance for [isRenderedGeometryConsistent]. */
-private const val GEOMETRY_ASPECT_TOLERANCE = 0.05f
-
-/**
- * Whether the frame actually displayed and the effective device bounds used for mapping describe a
- * geometrically-consistent view of the same screen (issue #3347). `DeviceScreenView` maps a click
- * through the effective device bounds while fitting the displayed frame by its own aspect ratio, so
- * if the two disagree in aspect a tap is mapped through the wrong scale. Aspect ratios must agree
- * within [GEOMETRY_ASPECT_TOLERANCE].
- *
- * [allowRotation] selects how strict the orientation match is:
- * - true (a polled **screenshot** is displayed): agreement is checked up to a 90° rotation, because
- *   a screenshot can arrive in native pixel orientation (portrait) even when the device is
- *   landscape — the mapper rotates it to align, so an orientation difference is expected (notably
- *   on iOS).
- * - false (a live **video** frame is displayed): the video is always in display orientation, so an
- *   orientation difference means the frame and the mapping bounds are out of sync (a rotate/resize
- *   the observation stream hasn't caught up to). Agreement is required in the SAME orientation, so
- *   control drops until they realign.
- *
- * A non-positive displayed dimension (no frame yet) is inconsistent. Non-positive device dimensions
- * mean neither the hierarchy nor the observation stream reported a size, so the mapper falls back
- * to the displayed frame itself and the two are consistent by construction.
- *
- * The caller passes the SAME effective device bounds the mapper uses (hierarchy-root bounds when
- * present, else the observation stream's screen size), so the check is not bypassed on the common
- * Android path where the accessibility root has no explicit bounds.
- */
-internal fun isRenderedGeometryConsistent(
-  screenshotWidth: Int,
-  screenshotHeight: Int,
-  hierarchyRootWidth: Int,
-  hierarchyRootHeight: Int,
-  allowRotation: Boolean = true,
-): Boolean {
-  if (screenshotWidth <= 0 || screenshotHeight <= 0) return false
-  if (hierarchyRootWidth <= 0 || hierarchyRootHeight <= 0) return true
-  val screenshotAspect = screenshotWidth.toFloat() / screenshotHeight.toFloat()
-  val hierarchyAspect = hierarchyRootWidth.toFloat() / hierarchyRootHeight.toFloat()
-  val matchesDirect =
-    kotlin.math.abs(screenshotAspect - hierarchyAspect) <=
-      GEOMETRY_ASPECT_TOLERANCE * hierarchyAspect
-  if (!allowRotation) return matchesDirect
-  val rotatedHierarchyAspect = 1f / hierarchyAspect
-  val matchesRotated =
-    kotlin.math.abs(screenshotAspect - rotatedHierarchyAspect) <=
-      GEOMETRY_ASPECT_TOLERANCE * rotatedHierarchyAspect
-  return matchesDirect || matchesRotated
-}
 
 /**
  * Connects a live-mirroring source for this composition and exposes only its newest decoded frame.
@@ -285,6 +201,7 @@ internal fun isRenderedGeometryConsistent(
 internal fun rememberLiveVideoFrame(
   source: VideoStreamSource?,
   deviceId: String?,
+  nowMs: () -> Long = { System.currentTimeMillis() },
   frameConverter:
     suspend (
       dev.jasonpearson.automobile.desktop.core.video.DecodedFrame
@@ -292,9 +209,12 @@ internal fun rememberLiveVideoFrame(
     { frame ->
       withContext(Dispatchers.Default) { frame.toImageBitmap() }
     },
-): androidx.compose.ui.graphics.ImageBitmap? {
-  var liveFrame by
-    remember(source, deviceId) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+): LiveVideoFrame? {
+  var liveFrame by remember(source, deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
+  // Monotonic per (source, deviceId): identifies which decoded frame is on screen so a stalled
+  // relay — which keeps its socket, its Streaming state and its last bitmap — is distinguishable
+  // from a live one (issue #3348).
+  val frameSequence = remember(source, deviceId) { java.util.concurrent.atomic.AtomicLong(0L) }
 
   DisposableEffect(source, deviceId) {
     if (source != null && deviceId != null) source.connect(deviceId)
@@ -308,7 +228,14 @@ internal fun rememberLiveVideoFrame(
     source?.frames?.conflate()?.collect { frame ->
       if (source.state.value is VideoStreamState.Streaming) {
         val decodedFrame = frameConverter(frame)
-        if (source.state.value is VideoStreamState.Streaming) liveFrame = decodedFrame
+        if (source.state.value is VideoStreamState.Streaming) {
+          liveFrame =
+            LiveVideoFrame(
+              bitmap = decodedFrame,
+              sequence = frameSequence.incrementAndGet(),
+              receivedAtMs = nowMs(),
+            )
+        }
       }
     }
   }
@@ -321,6 +248,39 @@ internal fun rememberLiveVideoFrame(
 
   return liveFrame
 }
+
+/**
+ * A counter that advances every [periodMs] while [enabled], used to re-run the device-control
+ * availability decision on a timer (issue #3348).
+ *
+ * Every other input to that decision is Compose state, so a change in any of them recomposes. Frame
+ * *staleness* is the exception: a stalled live relay or a daemon that stopped pushing produces no
+ * state change at all, and the only thing that changes is the clock. Reading this value inside the
+ * decision makes the passage of time an input like any other.
+ *
+ * The period is short relative to
+ * [dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy .LIVE_FRAME_MAX_AGE_MS], so a
+ * frozen mirror is retired promptly, and long enough to be negligible: one recomposition of the
+ * live layout center per period.
+ */
+@Composable
+internal fun rememberControlFreshnessTick(
+  enabled: Boolean,
+  periodMs: Long = CONTROL_FRESHNESS_TICK_MS,
+): Long {
+  var tick by remember { mutableStateOf(0L) }
+  LaunchedEffect(enabled, periodMs) {
+    if (!enabled) return@LaunchedEffect
+    while (true) {
+      kotlinx.coroutines.delay(periodMs)
+      tick++
+    }
+  }
+  return tick
+}
+
+/** Re-evaluation period for control freshness; see [rememberControlFreshnessTick]. */
+internal const val CONTROL_FRESHNESS_TICK_MS: Long = 250L
 
 internal interface AutoMobileDeviceStreamEventSink {
   fun disconnectLayout()
@@ -472,13 +432,10 @@ fun AutoMobileContent(
   var isLiveLayoutMode by remember { mutableStateOf(false) }
   val layoutInspectorState = rememberLayoutInspectorState()
 
-  // Last device-control tap error (issue #3347). Set from the daemon's actionable error when a
-  // control-mode tap fails so the live layout view can surface it; cleared on the next tap attempt.
+  // Last device-control input error (issues #3347, #3348). Published by DeviceControlSession from
+  // the daemon's actionable error when a control-mode input fails, so the live layout view can
+  // surface it; cleared on the next attempt and on every control-context reset.
   var deviceControlTapError by remember { mutableStateOf<String?>(null) }
-  val deviceControlTapForwarder = remember { DeviceControlTapForwarder() }
-  // Orders overlapping taps so only the latest may publish deviceControlTapError; a stale failure
-  // from a superseded tap is ignored (see ControlTapErrorGate).
-  val deviceControlTapGate = remember { ControlTapErrorGate() }
 
   // Command palette & global search state (delegated to MenuBarActions)
   var showCommandPalette by actions::showCommandPalette
@@ -576,6 +533,11 @@ fun AutoMobileContent(
       }
     }
   val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId)
+  // Forces the control-availability decision to be re-evaluated on a timer, not only when a source
+  // produces an update (issue #3348). A stalled relay produces nothing at all — its staleness is
+  // visible only as time passing — so without this a frozen mirror would stay clickable until some
+  // unrelated recomposition happened to run.
+  val controlFreshnessTick = rememberControlFreshnessTick(enableDeviceControl && isLiveLayoutMode)
 
   // Pending failure ID for deep linking from notifications
   var pendingFailureId by remember { mutableStateOf<String?>(null) }
@@ -715,51 +677,31 @@ fun AutoMobileContent(
   // leaking a hung coroutine + client if the daemon is unresponsive (#3603).
   val screenshotScope = rememberCoroutineScope()
 
-  // Serializes control taps so their daemon requests execute in click order (issue #3347). The
-  // click-time snapshot is enqueued in order; a single consumer forwards each tap to completion —
-  // closing its per-tap client in a finally and publishing any error through the token gate on the
-  // UI thread — before the next begins.
-  val deviceControlTapDispatcher =
-    remember(screenshotScope) {
-      DeviceControlTapDispatcher(screenshotScope) { command ->
-        var tapError: String? = null
-        try {
-          withContext(Dispatchers.IO) {
-            deviceControlTapForwarder.forward(
-              point = command.point,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.deviceId,
-              onError = { message -> tapError = message },
-            )
-          }
-        } finally {
-          command.client?.close()
-        }
-        val message = tapError
-        if (message != null) {
-          // Serialize the token check + banner write with nextToken()/clear on the UI thread so a
-          // superseded tap's stale error can't resurrect a banner a newer tap already cleared.
-          withContext(Dispatchers.Main) {
-            if (deviceControlTapGate.isCurrent(command.token)) {
-              deviceControlTapError = message
-            }
-          }
-        }
-      }
+  // The daemon platform string for the selected device. Held in state because the device list (and
+  // therefore the platform) resolves later in this composable than the control session, which must
+  // exist before the stream effects that reset it.
+  val controlPlatform = remember { mutableStateOf("android") }
+
+  // The ONE device-control seam (issue #3348). It owns the ordered bounded dispatch queue, the
+  // error-ordering claim, the availability decision and the post-input refresh tracker, so this
+  // host wires control once instead of assembling a gate per discovered source disagreement.
+  // Drag/swipe (#3350) and keyboard/text (#3351) add a dispatch method to the session rather than
+  // new wiring here.
+  val deviceControlSession =
+    remember(screenshotScope, clientProvider) {
+      DeviceControlSession(
+        scope = screenshotScope,
+        clientProvider = { clientProvider?.invoke() },
+        platform = { controlPlatform.value },
+        nowMs = { System.currentTimeMillis() },
+        publishError = { message -> deviceControlTapError = message },
+      )
     }
 
-  // One coherent reset of the tap-dispatch context (issue #3347), run at every point that
+  // One coherent reset of the control context (issues #3347, #3348), run at every point that
   // invalidates the rendered frame identity (device change, transport/mode change, stream
-  // disconnect, Live Layout open/close). Drops the queued tap backlog (closing captured clients so
-  // a
-  // stalled/aged tap can't fire in the new context), advances the error-ordering gate so a late
-  // failure from a pre-reset tap is no longer "current", and clears any shown banner.
-  val resetControlTapContext: () -> Unit = {
-    deviceControlTapDispatcher.reset()
-    deviceControlTapGate.nextToken()
-    deviceControlTapError = null
-  }
+  // disconnect, Live Layout open/close). See DeviceControlSession.reset.
+  val resetControlTapContext: () -> Unit = { deviceControlSession.reset() }
 
   val takeScreenshot: () -> Unit =
     remember(clientProvider, screenshotScope) {
@@ -960,6 +902,10 @@ fun AutoMobileContent(
             it.second,
             deviceId = update.deviceId,
             generation = generation,
+            // The daemon's capture timestamp is this update's provenance: device control pairs it
+            // against the screenshot update's timestamp so a hierarchy left behind by a resolution
+            // change can never supply the bounds a tap is mapped through (issue #3348).
+            daemonTimestampMs = update.timestamp,
           )
         }
       }
@@ -1359,6 +1305,8 @@ fun AutoMobileContent(
   val isIOSDevice =
     realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
   val platformString = if (isIOSDevice) "ios" else "android"
+  // Publish it to the control session, which was created before the device list resolved.
+  SideEffect { controlPlatform.value = platformString }
   val storagePlatform = if (isIOSDevice) StoragePlatform.iOS else StoragePlatform.Android
 
   val availableEmulators = remember {
@@ -1613,59 +1561,48 @@ fun AutoMobileContent(
       centerContent = { mod ->
         if (isLiveLayoutMode) {
           // Live layout mode: center shows device screenshot with element overlays.
-          // Device control (issue #3347) is strict about which device a tap can actuate: it
-          // requires
-          // the app opt-in, Real mode, an explicitly selected device, an input-capable transport,
-          // and
-          // a rendered frame that belongs to that selected device (so a click on a stale mirror
-          // after
-          // a device switch can't actuate the wrong device). Otherwise we stay in inspector mode.
-          val hierarchyRootBounds = layoutInspectorState.hierarchy?.bounds
-          // Gate geometry against the frame actually displayed and used for mapping:
-          // DeviceScreenView
-          // prefers the live WebRTC frame over the observation screenshot and fits taps to THAT
-          // bitmap's dimensions, so when the video rotates/resizes before the observation
-          // screenshot
-          // catches up, the gate must follow the live frame's dims — else a tap maps through stale
-          // dims. The live frame is device-scoped (rememberLiveVideoFrame keyed on
-          // source+deviceId).
-          val hasLiveFrame = liveVideoFrame != null
-          val displayedFrameWidth = liveVideoFrame?.width ?: layoutInspectorState.screenWidth
-          val displayedFrameHeight = liveVideoFrame?.height ?: layoutInspectorState.screenHeight
-          // The SAME effective device bounds DeviceScreenView maps through: hierarchy-root bounds
-          // when present, else the observation stream's screen size (the common Android path where
-          // the accessibility root is (0,0,0,0)). Feeding these — not zero — keeps the geometry
-          // gate
-          // from no-op'ing on that path.
-          val effectiveDeviceWidth =
-            hierarchyRootBounds?.width?.takeIf { it > 0 } ?: layoutInspectorState.screenWidth
-          val effectiveDeviceHeight =
-            hierarchyRootBounds?.height?.takeIf { it > 0 } ?: layoutInspectorState.screenHeight
-          val deviceControlActive =
-            isDeviceControlActive(
-              enableDeviceControl = enableDeviceControl,
-              isRealDeviceMode = dataSourceMode == DataSourceMode.Real,
-              activeDeviceId = activeDeviceId,
-              connectionType = connectedMcpProcess?.connectionType,
-              renderedDeviceId = layoutInspectorState.renderedDeviceId,
-              renderedHierarchyDeviceId = layoutInspectorState.renderedHierarchyDeviceId,
-              isObservationStreamConnected =
-                layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
-              isRenderedGeometryConsistent =
-                isRenderedGeometryConsistent(
-                  screenshotWidth = displayedFrameWidth,
-                  screenshotHeight = displayedFrameHeight,
-                  hierarchyRootWidth = effectiveDeviceWidth,
-                  hierarchyRootHeight = effectiveDeviceHeight,
-                  // A live video frame is display-oriented, so an orientation mismatch is a stale
-                  // frame (strict); a polled screenshot may be native-oriented (rotation-tolerant).
-                  allowRotation = !hasLiveFrame,
-                ),
+          //
+          // Device control resolves to exactly one atomic snapshot (issue #3348). Every condition
+          // #3347 gated inline here — opt-in, Real mode, an explicit selection, an input-capable
+          // transport, stream liveness, screenshot AND hierarchy device identity, and geometry —
+          // is now a rule inside the Compose-free DeviceControlPolicy, which additionally pairs
+          // the screenshot and hierarchy by daemon *provenance* and bounds how old the displayed
+          // frame may be. Control is available only when that policy can build a snapshot; the
+          // view then maps clicks through that snapshot and hands it back with each tap, so a
+          // snapshot swap between click and dispatch cannot change what the daemon receives.
+          //
+          // Re-evaluated on a slow ticker as well as on source updates, because a stalled live
+          // relay produces no updates at all — its staleness is only visible as time passing.
+          controlFreshnessTick
+          val deviceControlDecision =
+            deviceControlSession.evaluate(
+              DeviceControlInputs(
+                enabled = enableDeviceControl,
+                realDeviceMode = dataSourceMode == DataSourceMode.Real,
+                selectedDeviceId = activeDeviceId,
+                transportSupportsInput =
+                  connectedMcpProcess?.connectionType?.supportsDaemonInput == true,
+                observationStreamConnected =
+                  layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
+                screenshot = layoutInspectorState.screenshotFacts,
+                hierarchy = layoutInspectorState.hierarchyFacts,
+                liveFrame =
+                  liveVideoFrame?.let { frame ->
+                    LiveFrameFacts(
+                      deviceId = activeDeviceId,
+                      sequence = frame.sequence,
+                      receivedAtMs = frame.receivedAtMs,
+                      width = frame.bitmap.width,
+                      height = frame.bitmap.height,
+                    )
+                  },
+              )
             )
+          val controlSnapshot = deviceControlDecision.snapshotOrNull
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(
               screenshotData = layoutInspectorState.screenshotData,
-              liveFrame = liveVideoFrame,
+              liveFrame = liveVideoFrame?.bitmap,
               screenWidth = layoutInspectorState.screenWidth,
               screenHeight = layoutInspectorState.screenHeight,
               rotation = layoutInspectorState.rotation,
@@ -1680,54 +1617,22 @@ fun AutoMobileContent(
               socketExists = true,
               elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
               modifier = Modifier.fillMaxSize(),
-              // Device control (issue #3347): the reference desktop app opts in via
-              // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only. Also
-              // requires an input-capable transport (see deviceControlActive above).
+              // Device control (issues #3347, #3348): the reference desktop app opts in via
+              // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only.
+              // Every other condition is decided by DeviceControlPolicy above — control mode is on
+              // exactly when it produced a snapshot, and off (inspector) otherwise.
               controlMode =
-                if (deviceControlActive) DeviceScreenControlMode.Control
+                if (controlSnapshot != null) DeviceScreenControlMode.Control
                 else DeviceScreenControlMode.Inspector,
-              // The view only maps a click to a device coordinate; forwarding it to the daemon
-              // input/tap helper is our job. Runs off the UI thread and never crashes on failure —
-              // the daemon's actionable error surfaces in deviceControlTapError instead.
-              onControlTap =
-                if (deviceControlActive) {
-                  { point: DevicePoint ->
-                    // Snapshot the whole tap target atomically on the UI thread: the active device
-                    // can change before the tap is forwarded, and resolving client/platform/device
-                    // late would send this coordinate to the wrong device.
-                    val tapDeviceId = activeDeviceId
-                    // Refuse a tap with no explicitly selected device: deviceControlActive already
-                    // requires a non-null selection, this guards the click-vs-recompose race so the
-                    // daemon can never pick a device the user did not choose.
-                    if (tapDeviceId != null) {
-                      // clientProvider mints a fresh McpDaemonClient (a new Unix socket) per call;
-                      // the dispatcher's consumer closes it after the tap (else every click leaks a
-                      // socket). Enqueue in click order so the daemon requests execute in that
-                      // order.
-                      val tapClient = clientProvider?.invoke()
-                      val tapToken = deviceControlTapGate.nextToken()
-                      deviceControlTapError = null
-                      val accepted =
-                        deviceControlTapDispatcher.enqueue(
-                          DeviceControlTapCommand(
-                            point = point,
-                            client = tapClient,
-                            platform = platformString,
-                            deviceId = tapDeviceId,
-                            token = tapToken,
-                          )
-                        )
-                      if (!accepted) {
-                        // Bounded queue full: a stalled/slow daemon is holding up the consumer. The
-                        // rejected client was already closed by enqueue; surface an actionable
-                        // overload error (this runs on the UI thread, in click order).
-                        deviceControlTapError = "Tap dropped — device busy"
-                      }
-                    }
-                  }
-                } else {
-                  null
-                },
+              // The snapshot the view maps clicks through. Passing it here — rather than letting
+              // the view derive bounds from whatever live state it last recomposed with — is what
+              // makes an equal-aspect resolution change unable to mis-scale a tap.
+              controlSnapshot = controlSnapshot,
+              // The view maps a click through `snapshot` and hands both back atomically; the
+              // session forwards it to the daemon input/tap helper off the UI thread and never
+              // crashes on failure — the daemon's actionable error surfaces in
+              // deviceControlTapError instead.
+              onControlTap = { snapshot, point -> deviceControlSession.tap(snapshot, point) },
             )
 
             ScreenshotMetadataOverlay(

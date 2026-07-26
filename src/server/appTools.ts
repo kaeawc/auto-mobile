@@ -66,7 +66,7 @@ const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
 
 export const setAppPermissionsSchema = withJsonSchemaOverride(withAppIdAliases(addDeviceTargetingToSchema(
   z.object({
-    appId: z.string(),
+    appId: z.string().trim().min(1),
     action: appPermissionActionSchema
       .optional()
       .describe(
@@ -117,6 +117,7 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(withAppIdAliases(a
   "Android reset requires permissions=['all']"
 ), jsonSchema => {
   const properties = jsonSchema.properties as Record<string, Record<string, unknown>>;
+  delete properties.appId?.minLength;
   delete properties.action?.type;
   delete properties.scheduleExactAlarm?.type;
   for (const name of [
@@ -145,6 +146,7 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(withAppIdAliases(a
     then: {
       properties: {
         permissions: {
+          minItems: 1,
           maxItems: 1,
           items: { const: "all" },
         },
@@ -387,7 +389,7 @@ export function registerAppTools(
 
   ToolRegistry.registerDeviceAware(
     "setAppPermissions",
-    "Set permissions; Android grant/revoke use userId, reset is device-wide ['all'], notifications exclude POST_NOTIFICATIONS.",
+    "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler
   );

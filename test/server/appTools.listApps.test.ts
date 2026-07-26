@@ -147,6 +147,14 @@ describe("app permission tools", () => {
       permissions: ["android.permission.POST_NOTIFICATIONS"],
       userId: 10,
     })).not.toThrow();
+    expect(setAppTool!.schema.parse({
+      appId: " com.example.app ",
+      notificationsEnabled: false,
+    }).appId).toBe("com.example.app");
+    expect(() => setAppTool!.schema.parse({
+      appId: " ",
+      notificationsEnabled: false,
+    })).toThrow();
     expect(() => setAppTool!.schema.parse({
       appId: "com.example.app",
       action: "reset",
@@ -228,11 +236,17 @@ describe("app permission tools", () => {
     expect(validate({
       appId: "com.example.app",
       action: "reset",
+      permissions: [],
+      platform: "android",
+    })).toBe(false);
+    expect(validate({
+      appId: "com.example.app",
+      action: "reset",
       permissions: ["camera"],
       platform: "ios",
     })).toBe(true);
-    expect(setAppPermissions!.description).toContain("grant/revoke use userId");
-    expect(setAppPermissions.description).toContain("reset is device-wide ['all']");
-    expect(setAppPermissions.description).toContain("exclude POST_NOTIFICATIONS");
+    expect(setAppPermissions!.description).toContain("userId grant/revoke");
+    expect(setAppPermissions.description).toContain("device-wide reset ['all']");
+    expect(setAppPermissions.description).toContain("no POST_NOTIFICATIONS");
   });
 });

@@ -6,10 +6,6 @@ import {
 } from "../../src/utils/ExecSeam";
 import { createExecResult } from "../../src/utils/execResult";
 import {
-  DefaultProcessExecutor,
-  type ExecAsync,
-} from "../../src/utils/ProcessExecutor";
-import {
   DefaultHostCommandExecutor,
   type ExecFileAsync,
 } from "../../src/utils/HostCommandExecutor";
@@ -78,31 +74,10 @@ describe("runExecSeam", function() {
   }, FAST_TEST_TIMEOUT_MS);
 });
 
-describe("shared exec-seam type", function() {
-  // These type aliases must be exported so test helpers can type the injected fake
-  // for both sibling executors (resolves the ExecAsync/ExecFileAsync export asymmetry).
-  test("ExecAsync and ExecFileAsync are both usable/exported", async function() {
-    const shellSeam: ExecAsync = async () => ({ stdout: "shell", stderr: "" });
+describe("argv exec seam", function() {
+  test("ExecFileAsync is usable by the argv-first owner", async function() {
     const argvSeam: ExecFileAsync = async () => ({ stdout: "argv", stderr: "" });
-
-    const processResult = await new DefaultProcessExecutor(shellSeam).exec("echo shell");
-    const hostResult = await new DefaultHostCommandExecutor(argvSeam).executeCommand("echo", ["argv"]);
-
-    expect(processResult.stdout).toBe("shell");
-    expect(hostResult.stdout).toBe("argv");
-  }, FAST_TEST_TIMEOUT_MS);
-
-  test("both executors produce the identical ExecResult shape from the shared factory", async function() {
-    const processResult = await new DefaultProcessExecutor(
-      async () => ({ stdout: Buffer.from("same\n"), stderr: "" })
-    ).exec("cmd");
-    const hostResult = await new DefaultHostCommandExecutor(
-      async () => ({ stdout: Buffer.from("same\n"), stderr: "" })
-    ).executeCommand("cmd");
-
-    expect(processResult.stdout).toBe(hostResult.stdout);
-    expect(processResult.trim()).toBe(hostResult.trim());
-    expect(processResult.includes("same")).toBe(hostResult.includes("same"));
-    expect(Object.keys(processResult).sort()).toEqual(Object.keys(hostResult).sort());
+    const result = await new DefaultHostCommandExecutor(argvSeam).executeCommand("echo", ["argv"]);
+    expect(result.stdout).toBe("argv");
   }, FAST_TEST_TIMEOUT_MS);
 });

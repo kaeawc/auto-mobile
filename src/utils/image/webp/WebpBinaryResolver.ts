@@ -6,9 +6,8 @@ import process from "node:process";
 import { ActionableError } from "../../../models/ActionableError";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../ChecksumCalculator";
 import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader";
-import { DefaultProcessExecutor, type ProcessExecutor } from "../../ProcessExecutor";
+import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../HostCommandExecutor";
 import { logger } from "../../logger";
-import { shellQuote } from "../../shellQuote";
 
 const LIBWEBP_VERSION = "1.6.0";
 const WEBP_DOWNLOAD_BASE_URL = "https://storage.googleapis.com/downloads.webmproject.org/releases/webp";
@@ -29,7 +28,7 @@ export interface WebpBinaryResolverOptions {
   arch?: NodeJS.Architecture;
   env?: NodeJS.ProcessEnv;
   fileDownloader?: FileDownloader;
-  processExecutor?: ProcessExecutor;
+  processExecutor?: HostCommandExecutor;
   checksumCalculator?: ChecksumCalculator;
 }
 
@@ -50,7 +49,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly arch: NodeJS.Architecture;
   private readonly env: NodeJS.ProcessEnv;
   private readonly fileDownloader: FileDownloader;
-  private readonly processExecutor: ProcessExecutor;
+  private readonly processExecutor: HostCommandExecutor;
   private readonly checksumCalculator: ChecksumCalculator;
 
   constructor(options: WebpBinaryResolverOptions = {}) {
@@ -60,7 +59,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     this.arch = options.arch ?? process.arch;
     this.env = options.env ?? process.env;
     this.fileDownloader = options.fileDownloader ?? new DefaultFileDownloader();
-    this.processExecutor = options.processExecutor ?? new DefaultProcessExecutor();
+    this.processExecutor = options.processExecutor ?? new DefaultHostCommandExecutor();
     this.checksumCalculator = options.checksumCalculator ?? new DefaultChecksumCalculator();
   }
 
@@ -176,7 +175,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     const archivePath = path.join(this.cacheDir, archive.archiveName);
     await this.fileDownloader.download(`${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`, archivePath);
     await this.verifyArchiveChecksum(archive, archivePath);
-    await this.processExecutor.exec(`tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(this.cacheDir)}`);
+    await this.processExecutor.executeCommand("tar", ["-xzf", archivePath, "-C", this.cacheDir]);
   }
 
   private async verifyArchiveChecksum(archive: WebpArchiveInfo, archivePath: string): Promise<void> {

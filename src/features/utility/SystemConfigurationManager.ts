@@ -1,12 +1,11 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { ProcessExecutor } from "../../utils/ProcessExecutor";
-import { DefaultProcessExecutor } from "../../utils/ProcessExecutor";
+import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "./system-configuration/createSystemConfigurationAdapter";
-import { buildAppleLanguages, iosSpawnCommand, isIosSimulator } from "./system-configuration/iosHelpers";
+import { buildAppleLanguages, isIosSimulator } from "./system-configuration/iosHelpers";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -30,14 +29,14 @@ export interface ApplyLiveChangesResult {
 
 export class SystemConfigurationManager {
   private device: BootedDevice;
-  private processExecutor: ProcessExecutor;
+  private processExecutor: HostCommandExecutor;
   private timer: Timer;
   private readonly adapter: SystemConfigurationAdapter;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
+    processExecutor: HostCommandExecutor = new DefaultHostCommandExecutor(),
     timer: Timer = defaultTimer
   ) {
     this.device = device;
@@ -119,9 +118,9 @@ export class SystemConfigurationManager {
     }
 
     try {
-      await this.processExecutor.exec(
-        iosSpawnCommand(this.device.deviceId, "launchctl stop com.apple.SpringBoard")
-      );
+      await this.processExecutor.executeCommand("xcrun", [
+        "simctl", "spawn", this.device.deviceId, "launchctl", "stop", "com.apple.SpringBoard"
+      ]);
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to stop SpringBoard: ${error}`);
       return false;
@@ -130,9 +129,9 @@ export class SystemConfigurationManager {
     for (let i = 0; i < SPRINGBOARD_MAX_RETRIES; i++) {
       await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
       try {
-        const result = await this.processExecutor.exec(
-          iosSpawnCommand(this.device.deviceId, "launchctl list com.apple.SpringBoard")
-        );
+        const result = await this.processExecutor.executeCommand("xcrun", [
+          "simctl", "spawn", this.device.deviceId, "launchctl", "list", "com.apple.SpringBoard"
+        ]);
         if (result.stdout && result.stdout.includes("SpringBoard")) {
           return true;
         }
@@ -151,9 +150,9 @@ export class SystemConfigurationManager {
     }
 
     try {
-      await this.processExecutor.exec(
-        iosSpawnCommand(this.device.deviceId, "notifyutil -p com.apple.language.changed")
-      );
+      await this.processExecutor.executeCommand("xcrun", [
+        "simctl", "spawn", this.device.deviceId, "notifyutil", "-p", "com.apple.language.changed"
+      ]);
       return true;
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to post locale notification: ${error}`);
@@ -180,13 +179,9 @@ export class SystemConfigurationManager {
         result.appRestarted = false;
       } else {
         try {
-          await this.processExecutor.exec(
-            `xcrun simctl terminate ${this.device.deviceId} ${restartAppBundleId}`
-          );
+          await this.processExecutor.executeCommand("xcrun", ["simctl", "terminate", this.device.deviceId, restartAppBundleId]);
           await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
-          await this.processExecutor.exec(
-            `xcrun simctl launch ${this.device.deviceId} ${restartAppBundleId}`
-          );
+          await this.processExecutor.executeCommand("xcrun", ["simctl", "launch", this.device.deviceId, restartAppBundleId]);
           result.appRestarted = true;
         } catch (error) {
           logger.warn(`[SystemConfigurationManager] Failed to restart app ${restartAppBundleId}: ${error}`);

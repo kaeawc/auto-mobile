@@ -68,7 +68,7 @@ describe("SystemConfigurationManager", () => {
       ).toBe(true);
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${IOS_SIMULATOR.deviceId} defaults write .GlobalPreferences AppleLanguages -array "ja-JP" "ja"`
+          `xcrun simctl spawn ${IOS_SIMULATOR.deviceId} defaults write .GlobalPreferences AppleLanguages -array ja-JP ja`
         )
       ).toBe(true);
     });

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import {
   decodeCtrlProxyMessage,
   rewriteUnknownCommandError,
@@ -330,6 +332,221 @@ describe("decodeCtrlProxyMessage", () => {
     const decoded = decodeCtrlProxyMessage(message);
     expect(decoded?.errorMessage).toBeUndefined();
     expect(decoded?.result).toBe(message);
+  });
+});
+
+/**
+ * Parse every `case` rawValue from the Swift `ResponseType: String` enum.
+ *
+ * Swift String-enum semantics: a case without an explicit `= "..."` uses the
+ * case name itself as its rawValue (e.g. `case screenshot` → "screenshot"), so
+ * we fall back to the identifier when no string literal is present.
+ */
+function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
+  const lines = swiftSource.split("\n");
+  const startIdx = lines.findIndex(line => /enum\s+ResponseType\s*:\s*String\s*\{/.test(line));
+  if (startIdx < 0) {
+    throw new Error("Could not locate `enum ResponseType: String` in Models.swift");
+  }
+  const rawValues: string[] = [];
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "}") {
+      break; // end of the (brace-flat) enum body
+    }
+    const match = line.match(/^\s*case\s+([A-Za-z0-9_]+)(?:\s*=\s*"([^"]+)")?/);
+    if (match) {
+      rawValues.push(match[2] ?? match[1]);
+    }
+  }
+  return rawValues;
+}
+
+/**
+ * A rawValue is "explicitly decoded" when the switch has a dedicated case that
+ * reshapes it into a fresh result object. The default branch, by contrast,
+ * resolves the message verbatim (`result === message` by identity), so identity
+ * equality is a precise, source-parsing-free probe for the default fall-through.
+ */
+function isExplicitlyDecoded(rawValue: string): boolean {
+  const message = { type: rawValue, requestId: REQ } as WebSocketMessage;
+  const decoded = decodeCtrlProxyMessage(message);
+  return decoded !== null && decoded.result !== message;
+}
+
+describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
+  const swiftSource = readFileSync(
+    join(import.meta.dir, "../../../../ios/control-proxy/Sources/CtrlProxy/Models.swift"),
+    "utf8"
+  );
+  const rawValues = parseSwiftResponseTypeRawValues(swiftSource);
+
+  // Response types the daemon deliberately does NOT reshape: they reach the
+  // decoder's default verbatim-resolve branch on purpose because no client
+  // await path consumes them (fire-and-forget push/ack replies). Documented
+  // here — per the spec we do not assert on their absence from the switch,
+  // only subtract them so the genuinely-unhandled residue is isolated.
+  //   1. set_hierarchy_poll_interval_result — poll-interval ack
+  //   2. screenshot_error                   — error push, handled client-side
+  //   3. current_focus_result               — focus push, no awaiter
+  //   4. traversal_order_result             — traversal push, no awaiter
+  //   5. connected                          — connection handshake push
+  //   6. set_network_mock_rules_result      — mock-rules ack
+  const FIRE_AND_FORGET_EXCUSES = [
+    "set_hierarchy_poll_interval_result",
+    "screenshot_error",
+    "current_focus_result",
+    "traversal_order_result",
+    "connected",
+    "set_network_mock_rules_result",
+  ];
+
+  test("Swift ResponseType declares exactly 42 rawValues", () => {
+    expect(rawValues.length).toBe(42);
+  });
+
+  test("rawValues are unique (no accidental duplicate)", () => {
+    expect(new Set(rawValues).size).toBe(rawValues.length);
+  });
+
+  test("every fire-and-forget excuse is a real Swift rawValue", () => {
+    for (const excuse of FIRE_AND_FORGET_EXCUSES) {
+      expect(rawValues).toContain(excuse);
+    }
+  });
+
+  test("the decoder explicitly reshapes exactly 35 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(35);
+  });
+
+  test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
+    const unhandled = rawValues
+      .filter(rawValue => !isExplicitlyDecoded(rawValue))
+      .filter(rawValue => !FIRE_AND_FORGET_EXCUSES.includes(rawValue))
+      .sort();
+    expect(unhandled).toEqual(["shake_result"]);
+  });
+});
+
+/**
+ * PARAM-5 / item 11: per-type `success` defaulting.
+ *
+ * The decoder defaults `success` differently per response type: base-timing and
+ * gesture results default to `true` (a reply that arrived without an explicit
+ * failure flag is treated as success), while storage/database/highlight results
+ * default to `false` (absence of an explicit success is treated as failure).
+ * `screenshot` hardcodes `true`, and `hierarchy_update` carries no `success`.
+ */
+describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
+  // One row per decoded response type → the value of `success` when the wire
+  // message omits it. 35 rows = the 35 explicitly-decoded ResponseTypes.
+  const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
+    { type: "hierarchy_update", expected: undefined },
+    { type: "screenshot", expected: true },
+    { type: "pinch_result", expected: true },
+    { type: "tap_coordinates_result", expected: true },
+    { type: "swipe_result", expected: true },
+    { type: "drag_result", expected: true },
+    { type: "set_text_result", expected: true },
+    { type: "clear_text_result", expected: true },
+    { type: "select_all_result", expected: true },
+    { type: "press_button_result", expected: true },
+    { type: "press_home_result", expected: true },
+    { type: "press_back_result", expected: true },
+    { type: "recent_apps_result", expected: true },
+    { type: "launch_app_result", expected: true },
+    { type: "reset_permissions_result", expected: true },
+    { type: "keyboard_result", expected: true },
+    { type: "rotate_result", expected: true },
+    { type: "ime_action_result", expected: true },
+    { type: "action_result", expected: true },
+    { type: "voiceover_state_result", expected: true },
+    { type: "multi_finger_swipe_result", expected: true },
+    { type: "clipboard_result", expected: true },
+    { type: "highlight_response", expected: false },
+    { type: "preference_files", expected: false },
+    { type: "preferences", expected: false },
+    { type: "get_preference_result", expected: false },
+    { type: "set_preference_result", expected: false },
+    { type: "remove_preference_result", expected: false },
+    { type: "clear_preferences_result", expected: false },
+    { type: "set_network_error_simulation_result", expected: false },
+    { type: "execute_sql_result", expected: false },
+    { type: "list_databases_result", expected: false },
+    { type: "list_tables_result", expected: false },
+    { type: "table_data_result", expected: false },
+    { type: "table_structure_result", expected: false },
+  ];
+
+  test("the default table covers all 35 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(35);
+  });
+
+  for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
+    test(`${type} defaults success to ${String(expected)} when the wire omits it`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type }));
+      expect((decoded?.result as { success?: boolean }).success).toBe(expected);
+    });
+  }
+
+  // Every type that reads `message.success` (all decoded types except the
+  // no-success hierarchy_update and the hardcoded-true screenshot) must pass an
+  // explicit success flag straight through, both true and false.
+  const READS_MESSAGE_SUCCESS = DEFAULT_WHEN_ABSENT
+    .filter(row => row.type !== "hierarchy_update" && row.type !== "screenshot")
+    .map(row => row.type);
+
+  test("the passthrough set is the 33 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(33);
+  });
+
+  for (const type of READS_MESSAGE_SUCCESS) {
+    test(`${type} passes an explicit success=true through`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type, success: true }));
+      expect((decoded?.result as { success?: boolean }).success).toBe(true);
+    });
+    test(`${type} passes an explicit success=false through`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type, success: false }));
+      expect((decoded?.result as { success?: boolean }).success).toBe(false);
+    });
+  }
+
+  test("screenshot hardcodes success=true even when the wire says false", () => {
+    const decoded = decodeCtrlProxyMessage(msg({ type: "screenshot", success: false }));
+    expect((decoded?.result as { success?: boolean }).success).toBe(true);
+  });
+
+  // The four `success ?? ok ?? false` types read the `ok` alias when `success`
+  // is absent (Android wire-protocol carryover), but `success` still wins when
+  // both are present.
+  const OK_ALIAS_TYPES = [
+    "set_preference_result",
+    "remove_preference_result",
+    "clear_preferences_result",
+    "set_network_error_simulation_result",
+  ];
+
+  for (const type of OK_ALIAS_TYPES) {
+    test(`${type} falls back to ok=true when success is absent`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type, ok: true }));
+      expect((decoded?.result as { success?: boolean }).success).toBe(true);
+    });
+    test(`${type} defaults to false when both success and ok are absent`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type }));
+      expect((decoded?.result as { success?: boolean }).success).toBe(false);
+    });
+    test(`${type} lets explicit success=false win over ok=true`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type, success: false, ok: true }));
+      expect((decoded?.result as { success?: boolean }).success).toBe(false);
+    });
+  }
+
+  test("a message with a missing requestId decodes to null", () => {
+    expect(decodeCtrlProxyMessage({ type: "swipe_result", success: false })).toBeNull();
+  });
+
+  test("a message with an empty-string requestId decodes to null", () => {
+    expect(decodeCtrlProxyMessage({ type: "swipe_result", requestId: "", success: false })).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import type { ProcessExecutor } from "../ProcessExecutor";
+import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
 import type { Timer } from "../SystemTimer";
 import { logger } from "../logger";
 
@@ -29,14 +29,14 @@ export interface CtrlProxyHealthContext {
  *
  * Extracted from {@link IOSCtrlProxyManager} (issue #3218) so runner-readiness /
  * health-poll decisions live in one focused, injectable collaborator. Behavior is
- * unchanged: local probes go through `curl` on the injected {@link ProcessExecutor}
+ * unchanged: local probes go through `curl` on the injected {@link HostCommandExecutor}
  * and remote probes use `fetch` with a timer-driven abort, exactly as before.
  */
 export class IOSCtrlProxyHealthClient {
   private static readonly FETCH_TIMEOUT_MS = 2000;
 
   public constructor(
-    private readonly processExecutor: ProcessExecutor,
+    private readonly processExecutor: HostCommandExecutor = new DefaultHostCommandExecutor(),
     private readonly timer: Timer,
     private readonly context: CtrlProxyHealthContext
   ) {}
@@ -123,8 +123,10 @@ export class IOSCtrlProxyHealthClient {
       }
 
       // Use curl to check the health endpoint locally
-      const { stdout } = await this.processExecutor.exec(
-        `curl -s --max-time 2 http://${host}:${port}/health`
+      const { stdout } = await this.processExecutor.executeCommand(
+        "curl",
+        ["-s", "--max-time", "2", `http://${host}:${port}/health`],
+        { timeoutMs: IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS }
       );
       return stdout;
     } catch (error) {

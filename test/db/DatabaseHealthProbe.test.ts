@@ -46,7 +46,7 @@ describe("DefaultDatabaseHealthProbe", () => {
     expect(selectCalls).toBe(0);
   });
 
-  test("issues a worker-backed lightweight SELECT 1 against a read-only sqlite file", async () => {
+  test("resolves after a worker-backed SELECT 1 against a real read-only sqlite file", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-health-probe-"));
     tempDirs.push(tempDir);
     const dbPath = join(tempDir, "auto-mobile.db");
@@ -56,7 +56,23 @@ describe("DefaultDatabaseHealthProbe", () => {
       getDatabasePath: () => dbPath,
     });
 
-    await probe.check();
+    // A healthy DB makes the worker post `{ ok: true }`; check() resolves.
+    await expect(probe.check()).resolves.toBeUndefined();
+  });
+
+  test("rejects with the worker's error envelope when the sqlite file cannot be opened", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-health-probe-"));
+    tempDirs.push(tempDir);
+    // A path under a non-existent directory: the readonly/create:false worker
+    // connection cannot open it, so the worker posts `{ ok: false, message }`
+    // and check() must reject with that message (the ok:false envelope).
+    const missingPath = join(tempDir, "missing-subdir", "auto-mobile.db");
+    const probe = new DefaultDatabaseHealthProbe({
+      getMigrationsError: () => null,
+      getDatabasePath: () => missingPath,
+    });
+
+    await expect(probe.check()).rejects.toThrow(/unable to open database file/);
   });
 
   test("bounds a wedged SELECT 1 probe", async () => {

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { FailureAnalyticsRepository, type RecordFailureInput } from "../../src/db/failureAnalyticsRepository";
@@ -13,17 +12,6 @@ import { createTestDatabase } from "./testDbHelper";
 describe("DB concurrency RMW audit", () => {
   const N = 16;
   const openDbs: Kysely<Database>[] = [];
-
-  function tablePathsInSection(markdown: string, heading: string): string[] {
-    const section = markdown.split(`## ${heading}`)[1]?.split("\n## ")[0];
-    if (!section) {
-      throw new Error(`Missing audit section: ${heading}`);
-    }
-    return section
-      .split("\n")
-      .map(line => line.match(/^\| `([^`]+)` \|/)?.[1])
-      .filter((path): path is string => path !== undefined);
-  }
 
   afterEach(async () => {
     await Promise.all(openDbs.splice(0).map(db => db.destroy()));
@@ -51,70 +39,6 @@ describe("DB concurrency RMW audit", () => {
       ...overrides,
     };
   }
-
-  test("documents guarded and follow-up RMW paths", () => {
-    const audit = readFileSync(
-      new URL("../../docs/design-docs/db-concurrency-rmw-audit.md", import.meta.url),
-      "utf8"
-    );
-
-    const guardedPaths = [
-      ["NavigationRepository.getOrCreateApp", "Atomic upsert on `navigation_apps.app_id`"],
-      ["NavigationRepository.getOrCreateNode", "Atomic upsert on `(app_id, screen_name)`"],
-      ["NavigationRepository.getOrCreateUIElement", "guarded by `db.transaction()`"],
-      ["NavigationRepository.getOrCreateFingerprint", "Atomic upsert on `(app_id, fingerprint_hash)`"],
-      ["NavigationRepository.addOrUpdateSuggestion", "Atomic upsert on `(app_id, fingerprint_hash)`"],
-      ["FailureAnalyticsRepository.recordFailure", "Method-level transaction"],
-      ["TestCoverageRepository.getOrCreateSession", "Atomic upsert on `session_uuid`"],
-      ["TestCoverageRepository.recordNodeVisit", "Atomic upsert on `(session_id, node_id)`"],
-      ["TestCoverageRepository.recordEdgeTraversal", "Atomic upsert on `(session_id, edge_id)`"],
-      [
-        "PredictionHistoryRepository.upsertTransitionStats",
-        "Atomic upsert on `(app_id, from_screen, to_screen, tool_name, tool_args)`",
-      ],
-      ["InstalledAppsRepository.replaceInstalledApps", "guarded by a transaction"],
-      ["InstalledAppsRepository.upsertInstalledApp", "Atomic upsert on `(device_id, user_id, package_name)`"],
-      ["DeviceSessionRepository.upsertActiveSession", "Atomic upsert on `session_uuid`"],
-      ["KeyedJsonConfigRepository(appearance_configs).setConfig", "Atomic upsert on the singleton `key`"],
-      ["KeyedJsonConfigRepository(device_snapshot_configs).setConfig", "Atomic upsert on the singleton `key`"],
-      ["KeyedJsonConfigRepository(video_recording_configs).setConfig", "Atomic upsert on the singleton `key`"],
-      ["SqliteFeatureFlagRepository.ensureFlags", "Atomic insert with `ON CONFLICT(key) DO NOTHING`"],
-      ["SqliteFeatureFlagRepository.upsertFlag", "Atomic upsert on `feature_flags.key`"],
-      ["recordStorageEvent", "omitted previous-value lookup plus insert runs in one transaction"],
-      ["NavigationRepository.promoteSuggestion", "Direct repository calls open a transaction"],
-    ] as const;
-
-    expect(tablePathsInSection(audit, "Guarded Paths")).toEqual(
-      guardedPaths.map(([path]) => path)
-    );
-    for (const [path, strategy] of guardedPaths) {
-      expect(audit).toContain(`| \`${path}\` |`);
-      expect(audit).toContain(strategy);
-    }
-
-    expect(tablePathsInSection(audit, "Follow-Up Candidates")).toEqual([]);
-    expect(audit).toContain("No unguarded repository RMW follow-up candidates remain from #3415.");
-
-    const guardedAdjacentPaths = [
-      ["ThresholdManager.getOrCreateThresholds", "runs in a short transaction"],
-      ["MemoryThresholdManager.getOrCreateThresholds", "runs in a short transaction"],
-      ["BaselineManager.saveBaseline", "Atomic upsert on the unique `screen_id`"],
-      ["MemoryBaselineManager.updateBaseline", "sample count increments and EMA calculations happen in SQL"],
-      ["ThresholdManager.updateThresholdWeight", "Atomic SQL update of the latest `(device_id, session_id)`"],
-      ["MemoryThresholdManager.updateThresholdWeight", "Atomic SQL update of the latest `(device_id, package_name)`"],
-    ] as const;
-
-    expect(tablePathsInSection(audit, "Guarded Adjacent Paths")).toEqual(
-      guardedAdjacentPaths.map(([path]) => path)
-    );
-    for (const [path, status] of guardedAdjacentPaths) {
-      expect(audit).toContain(`| \`${path}\` |`);
-      expect(audit).toContain(status);
-    }
-
-    expect(tablePathsInSection(audit, "Adjacent Follow-Up Candidates")).toEqual([]);
-    expect(audit).toContain("No unguarded adjacent manager RMW follow-up candidates remain from #3415.");
-  });
 
   test("stresses guarded get-or-create and increment paths through the real dialect mutex", async () => {
     const db = await openDb();

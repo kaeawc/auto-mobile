@@ -10,7 +10,8 @@ describe("NavigationRepository", () => {
   let repo: NavigationRepository;
 
   beforeEach(async () => {
-    db = await createTestDatabase();
+    // foreignKeys ON so clearApp's cascade deletes fire, matching production.
+    db = await createTestDatabase({ foreignKeys: true });
     repo = new NavigationRepository(db);
   });
 
@@ -254,18 +255,36 @@ describe("NavigationRepository", () => {
   });
 
   describe("clearApp", () => {
-    test("deletes the app record", async () => {
+    test("cascade-deletes the entire graph, not just the app record", async () => {
+      // Seed every child table so a missing cascade would leave orphans behind.
       await repo.getOrCreateApp("com.example.app");
+      await repo.getOrCreateNode("com.example.app", "Home", 1000);
+      await repo.getOrCreateNode("com.example.app", "Settings", 1000);
+      await repo.createEdge("com.example.app", "Home", "Settings", "tapOn", null, 2000);
+      await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Login", resourceId: "btn_login" },
+        1000
+      );
+      await repo.addOrUpdateSuggestion("com.example.app", "hash-abc", "{}", 1000);
 
       await repo.clearApp("com.example.app");
 
-      // App record should be deleted
-      const app = await db
-        .selectFrom("navigation_apps")
-        .selectAll()
-        .where("app_id", "=", "com.example.app")
-        .executeTakeFirst();
-      expect(app).toBeUndefined();
+      const countIn = async (table: "navigation_apps" | "navigation_nodes" | "navigation_edges" | "ui_elements" | "navigation_suggestions"): Promise<number> => {
+        const rows = await db
+          .selectFrom(table)
+          .selectAll()
+          .where("app_id", "=", "com.example.app")
+          .execute();
+        return rows.length;
+      };
+
+      // The app row and every FK-dependent row are gone; nothing leaks back.
+      expect(await countIn("navigation_apps")).toBe(0);
+      expect(await countIn("navigation_nodes")).toBe(0);
+      expect(await countIn("navigation_edges")).toBe(0);
+      expect(await countIn("ui_elements")).toBe(0);
+      expect(await countIn("navigation_suggestions")).toBe(0);
     });
   });
 
@@ -390,20 +409,35 @@ describe("NavigationRepository", () => {
   });
 
   describe("clearAppGraph", () => {
-    test("clears graph data but keeps app record", async () => {
+    test("clears all four graph tables but keeps the app record", async () => {
+      // Seed nodes, edges, ui_elements and navigation_suggestions so that a
+      // dropped delete on any of the four tables leaves rows behind.
       await repo.getOrCreateApp("com.example.app");
       await repo.getOrCreateNode("com.example.app", "Home", 1000);
       await repo.createEdge("com.example.app", "Home", "Settings", "tapOn", null, 2000);
+      await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Login", resourceId: "btn_login" },
+        1000
+      );
+      await repo.addOrUpdateSuggestion("com.example.app", "hash-abc", "{}", 1000);
 
       await repo.clearAppGraph("com.example.app");
 
-      const nodes = await repo.getNodes("com.example.app");
-      expect(nodes).toHaveLength(0);
+      expect(await repo.getNodes("com.example.app")).toHaveLength(0);
+      expect(await repo.getEdges("com.example.app")).toHaveLength(0);
 
-      const edges = await repo.getEdges("com.example.app");
-      expect(edges).toHaveLength(0);
+      const uiElements = await db
+        .selectFrom("ui_elements")
+        .selectAll()
+        .where("app_id", "=", "com.example.app")
+        .execute();
+      expect(uiElements).toHaveLength(0);
 
-      // App record is preserved
+      const suggestions = await repo.getSuggestions("com.example.app");
+      expect(suggestions).toHaveLength(0);
+
+      // App record is preserved.
       const app = await db
         .selectFrom("navigation_apps")
         .selectAll()
@@ -432,9 +466,81 @@ describe("NavigationRepository", () => {
       });
     });
 
-    test("withExecutor rebinds the resolved connection", () => {
-      const bound = repo.withExecutor(db);
-      expect(bound.resolveConnection()).toBe(db);
+    test("withExecutor rebinds the resolved connection to a different executor", async () => {
+      // Rebinding to the *same* db would pass even if withExecutor were a no-op.
+      // Rebind to a genuinely different connection to prove the swap happens.
+      const other = await createTestDatabase();
+      try {
+        const bound = repo.withExecutor(other);
+        expect(bound.resolveConnection()).toBe(other);
+        expect(bound.resolveConnection()).not.toBe(db);
+        // The original repo is left untouched.
+        expect(repo.resolveConnection()).toBe(db);
+      } finally {
+        await other.destroy();
+      }
+    });
+  });
+
+  describe("getEdgesPage", () => {
+    const seedEdges = async (timestamps: number[]): Promise<void> => {
+      await repo.getOrCreateApp("com.example.app");
+      for (const ts of timestamps) {
+        await repo.createEdge("com.example.app", "A", "B", "tapOn", null, ts);
+      }
+    };
+
+    test("returns an empty page with hasMore false when there are no edges", async () => {
+      await repo.getOrCreateApp("com.example.app");
+
+      const page = await repo.getEdgesPage("com.example.app", { limit: 10 });
+
+      expect(page.edges).toHaveLength(0);
+      expect(page.hasMore).toBe(false);
+    });
+
+    test("returns the first page and signals hasMore when more rows remain", async () => {
+      await seedEdges([1000, 2000, 3000]);
+
+      const page = await repo.getEdgesPage("com.example.app", { limit: 2 });
+
+      expect(page.edges.map(e => e.timestamp)).toEqual([1000, 2000]);
+      expect(page.hasMore).toBe(true);
+    });
+
+    test("signals hasMore false on the final page", async () => {
+      await seedEdges([1000, 2000]);
+
+      const page = await repo.getEdgesPage("com.example.app", { limit: 2 });
+
+      expect(page.edges).toHaveLength(2);
+      expect(page.hasMore).toBe(false);
+    });
+
+    test("walks every edge exactly once when timestamps are shared across a page boundary", async () => {
+      // Four edges at the SAME timestamp: paging by timestamp alone would either
+      // skip the tail or loop forever. The (timestamp, id) keyset cursor must
+      // step past each edge deterministically.
+      await seedEdges([1000, 1000, 1000, 1000]);
+
+      const seenIds: number[] = [];
+      let cursor: { timestamp: number; id: number } | null = null;
+      // Bound the loop so a broken cursor predicate cannot hang the test.
+      for (let guard = 0; guard < 10; guard++) {
+        const page = await repo.getEdgesPage("com.example.app", { cursor, limit: 2 });
+        for (const edge of page.edges) {
+          seenIds.push(edge.id);
+        }
+        if (!page.hasMore || page.edges.length === 0) {
+          break;
+        }
+        const last = page.edges[page.edges.length - 1];
+        cursor = { timestamp: last.timestamp, id: last.id };
+      }
+
+      // All four edges visited, each exactly once, no duplicates, no skips.
+      expect(seenIds).toHaveLength(4);
+      expect(new Set(seenIds).size).toBe(4);
     });
   });
 });

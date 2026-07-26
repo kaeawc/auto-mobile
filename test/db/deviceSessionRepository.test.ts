@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -269,6 +270,52 @@ describe("DeviceSessionRepository", () => {
 
     await expect(
       repo.markStaleActiveSessionsExpired("current-daemon", 5000, "daemon-restart")
-    ).rejects.toThrow();
+    ).rejects.toThrow(/no such table/);
+  });
+
+  test("upsertActiveSession defaults status to active when the record omits it", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "session-default",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    const row = await repo.getSession("session-default");
+    expect(row).toBeDefined();
+    expect(row!.status).toBe("active");
+  });
+
+  test("upsertActiveSession is best-effort: a write failure is logged and swallowed, not propagated", async () => {
+    // A session-persist throw must NOT take down the daemon hot path
+    // (deviceSessionRepository.ts:91-93). Destroy the connection so the write
+    // throws, then assert the call still resolves and logs a warning.
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      await db.schema.dropTable("device_sessions").execute(); // force the insert to throw
+      await expect(
+        repo.upsertActiveSession({
+          sessionUuid: "session-fail",
+          deviceId: "emulator-5554",
+          platform: "android",
+          createdAtMs: 1000,
+          lastUsedAtMs: 1000,
+          expiresAtMs: 61_000,
+          sessionTimeoutMs: 60_000,
+          heartbeatTimeoutMs: 60_000,
+          hasReceivedHeartbeat: false,
+        })
+      ).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalled();
+      const logged = warnSpy.mock.calls.map(c => String(c[0])).join("\n");
+      expect(logged).toContain("session-fail");
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

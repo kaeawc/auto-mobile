@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.io.File
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -17,27 +20,100 @@ internal class FileDaemonSocketChecker(
 }
 
 internal interface DaemonPidFileReader {
-  fun readVersion(): String?
+  fun read(): DaemonPidState?
 }
+
+internal data class DaemonPidState(
+  val version: String?,
+  val launchArguments: List<String> = emptyList(),
+)
 
 internal class JsonDaemonPidFileReader(
   private val pidFilePath: String = DaemonSocketPaths.pidFilePath(),
   private val json: Json = DaemonJson,
 ) : DaemonPidFileReader {
-  override fun readVersion(): String? {
+  override fun read(): DaemonPidState? {
     return try {
       val pidFile = File(pidFilePath)
       if (!pidFile.exists()) return null
-      json
-        .parseToJsonElement(pidFile.readText())
-        .jsonObject["version"]
-        ?.jsonPrimitive
-        ?.contentOrNull
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
+      val pidData = json.parseToJsonElement(pidFile.readText()).jsonObject
+      DaemonPidState(
+        version =
+          pidData["version"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
+        launchArguments = pidData["options"]?.jsonObject?.toLaunchArguments().orEmpty(),
+      )
     } catch (_: Exception) {
       null
     }
+  }
+
+  /**
+   * Mirrors the daemon CLI's option parser for the stable PID-file options boundary. A closed list
+   * avoids forwarding unknown JSON values into a process invocation while retaining every
+   * behavior-affecting option that a running daemon has already accepted.
+   */
+  private fun JsonObject.toLaunchArguments(): List<String> = buildList {
+    fun booleanOption(key: String, flag: String) {
+      if (this@toLaunchArguments[key]?.jsonPrimitive?.booleanOrNull == true) add(flag)
+    }
+    fun valueOption(key: String, flag: String) {
+      this@toLaunchArguments[key]
+        ?.jsonPrimitive
+        ?.contentOrNull
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { value -> addAll(listOf(flag, value)) }
+    }
+
+    valueOption("port", "--port")
+    valueOption("host", "--host")
+    booleanOption("debug", "--debug")
+    booleanOption("debugPerf", "--debug-perf")
+    valueOption("planExecutionLockScope", "--plan-execution-lock-scope")
+    valueOption("videoQualityPreset", "--video-quality")
+    valueOption("videoTargetBitrateKbps", "--video-target-bitrate-kbps")
+    valueOption("videoMaxThroughputMbps", "--video-max-throughput-mbps")
+    valueOption("videoFps", "--video-fps")
+    valueOption("videoFormat", "--video-format")
+    valueOption("videoMaxArchiveSizeMb", "--video-archive-size-mb")
+    valueOption("toolOutputsDir", "--tool-outputs-dir")
+    booleanOption("networkMockable", "--network-mockable")
+    booleanOption("embeddedSdk", "--embedded-sdk")
+    booleanOption("dismissKeyboardAfterInput", "--dismiss-keyboard-after-input")
+    val eventAllMarkers = this@toLaunchArguments["eventAllMarkers"] as? JsonArray
+    val markerValues = eventAllMarkers?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
+    if (markerValues.isNotEmpty()) {
+      addAll(listOf("--event-all-markers", markerValues.joinToString(",")))
+    } else {
+      booleanOption("eventAllMarkersCliOverride", "--event-all-markers=")
+    }
+    booleanOption("noUiPerfMode", "--no-ui-perf-mode")
+    booleanOption("memPerfAudit", "--mem-perf-audit")
+    booleanOption("accessibilityAudit", "--accessibility-audit")
+    valueOption("accessibilityLevel", "--accessibility-level")
+    valueOption("accessibilityFailureMode", "--accessibility-failure-mode")
+    valueOption("accessibilityMinSeverity", "--accessibility-min-severity")
+    booleanOption("accessibilityUseBaseline", "--accessibility-use-baseline")
+    booleanOption("predictiveUi", "--predictive-ui")
+    booleanOption("rawElementSearch", "--raw-element-search")
+    booleanOption("skipCtrlProxyDownload", "--skip-ctrl-proxy-download")
+    booleanOption("mcpRecording", "--mcp-recording")
+    booleanOption("noNavigationScreenshots", "--no-navigation-screenshots")
+    booleanOption("noWaitForPollingOverhead", "--no-waitfor-polling-overhead")
+    booleanOption("noA11yIncludeNotImportantViews", "--no-include-not-important-views")
+    booleanOption("noA11yReportViewIds", "--no-report-view-ids")
+    booleanOption("noA11yRetrieveInteractiveWindows", "--no-retrieve-interactive-windows")
+    booleanOption("noOcclusion", "--no-occlusion")
+    booleanOption("safeAreaWarnings", "--safe-area-warnings")
+    booleanOption("observeResultDropElements", "--observe-result-drop-elements")
+    booleanOption("observeResultCompact", "--observe-result-compact")
+    booleanOption("observeResultProjectSkeleton", "--observe-result-project-skeleton")
+    booleanOption("toolResultsNoStructuredContent", "--tool-results-no-structured-content")
+    booleanOption("actionsDiffObserve", "--actions-diff-observe")
+    booleanOption("actionsNoObserve", "--actions-no-observe")
+    booleanOption("toolResultsCompactJson", "--tool-results-compact-json")
+    booleanOption("observeFocusScope", "--observe-focus-scope")
+    booleanOption("observeOverview", "--observe-overview")
+    booleanOption("observeRegion", "--observe-region")
   }
 }
 
@@ -99,7 +175,8 @@ internal class DesktopDaemonLifecycle(
             "Cannot verify the AutoMobile daemon version because this desktop build has no version. " +
               "Rebuild or reinstall the desktop application, then try again."
           )
-      val currentVersion = pidFileReader.readVersion()
+      val currentDaemon = pidFileReader.read()
+      val currentVersion = currentDaemon?.version
       val daemonAvailable = socketChecker.exists()
       if (daemonAvailable && versionsMatch(currentVersion, expectedVersion)) {
         return DaemonLifecycleResult.Ready(restarted = false)
@@ -113,7 +190,8 @@ internal class DesktopDaemonLifecycle(
       }
 
       val action = if (daemonAvailable) "restart" else "start"
-      val command = packageDaemonCommand(expectedVersion, action)
+      val command =
+        packageDaemonCommand(expectedVersion, action, currentDaemon?.launchArguments.orEmpty())
       val commandResult =
         try {
           commandExecutor.execute(command)
@@ -134,7 +212,7 @@ internal class DesktopDaemonLifecycle(
 
       var actualVersion: String? = null
       repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
-        actualVersion = pidFileReader.readVersion()
+        actualVersion = pidFileReader.read()?.version
         if (socketChecker.exists() && versionsMatch(actualVersion, expectedVersion)) {
           return DaemonLifecycleResult.Ready(restarted = true)
         }
@@ -149,14 +227,18 @@ internal class DesktopDaemonLifecycle(
       )
     }
 
-  private fun packageDaemonCommand(version: String, action: String): List<String> =
+  private fun packageDaemonCommand(
+    version: String,
+    action: String,
+    existingOptions: List<String>,
+  ): List<String> =
     listOf(
       npxExecutable(System.getProperty("os.name", "")),
       "-y",
       "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
       "--daemon",
       action,
-    )
+    ) + if (action == "restart") existingOptions else emptyList()
 
   private fun versionsMatch(
     actualVersion: String?,

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -67,6 +68,42 @@ class DesktopDaemonLifecycleTest {
     assertTrue(result.restarted)
     assertEquals(
       listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      commands.commands,
+    )
+  }
+
+  @Test
+  fun `preserves the skewed daemon options when restarting`() {
+    val commands = FakeDaemonCommandExecutor()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true, true)),
+        pidFileReader =
+          FakeDaemonPidFileReader(
+            versions = listOf("0.0.39", "0.0.40"),
+            launchArguments = listOf("--network-mockable", "--video-fps", "30"),
+          ),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertEquals(
+      listOf(
+        listOf(
+          "npx",
+          "-y",
+          "@kaeawc/auto-mobile@0.0.40",
+          "--daemon",
+          "restart",
+          "--network-mockable",
+          "--video-fps",
+          "30",
+        )
+      ),
       commands.commands,
     )
   }
@@ -158,6 +195,29 @@ class DesktopDaemonLifecycleTest {
     assertEquals("npx", lifecycle.npxExecutable("Mac OS X"))
   }
 
+  @Test
+  fun `reads supported daemon options as restart arguments`() {
+    val pidFile = Files.createTempFile("automobile-daemon", ".json").toFile()
+    pidFile.writeText(
+      """
+      {"version":"0.0.39","options":{"networkMockable":true,"videoFps":30,"eventAllMarkers":["login","save"]}}
+      """
+        .trimIndent()
+    )
+
+    try {
+      val state = JsonDaemonPidFileReader(pidFile.absolutePath).read()
+
+      assertEquals("0.0.39", state?.version)
+      assertEquals(
+        listOf("--video-fps", "30", "--network-mockable", "--event-all-markers", "login,save"),
+        state?.launchArguments,
+      )
+    } finally {
+      pidFile.delete()
+    }
+  }
+
   private class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {
     private var reads = 0
 
@@ -168,13 +228,18 @@ class DesktopDaemonLifecycleTest {
     }
   }
 
-  private class FakeDaemonPidFileReader(private val versions: List<String?>) : DaemonPidFileReader {
+  private class FakeDaemonPidFileReader(
+    private val versions: List<String?>,
+    private val launchArguments: List<String> = emptyList(),
+  ) : DaemonPidFileReader {
     private var reads = 0
 
-    override fun readVersion(): String? {
+    override fun read(): DaemonPidState? {
       val index = reads.coerceAtMost(versions.lastIndex)
       reads++
-      return versions[index]
+      return versions[index]?.let {
+        DaemonPidState(version = it, launchArguments = launchArguments)
+      }
     }
   }
 

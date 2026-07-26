@@ -7,7 +7,7 @@ import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import { AppPermissions } from "../features/action/AppPermissions";
 import { createJSONToolResponse, DefaultToolResponseFormatter, ToolResponseFormatter } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases, withJsonSchemaOverride } from "./toolSchemaHelpers";
 import {
   APPS_RESOURCE_URIS,
   APP_RESOURCE_TEMPLATES,
@@ -64,25 +64,29 @@ export const uninstallAppSchema = withAppIdAliases(addDeviceTargetingToSchema(z.
 
 const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
 
-export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSchema(
+export const setAppPermissionsSchema = withJsonSchemaOverride(withAppIdAliases(addDeviceTargetingToSchema(
   z.object({
     appId: z.string(),
     action: appPermissionActionSchema
       .optional()
       .describe(
-        "Permission action; defaults to grant. Android supports grant; iOS simulators " +
-        "support grant/revoke/reset; iOS physical devices support reset only, including permissions=['all']."
+        "Action (default grant). Android reset requires permissions=['all'] device-wide; " +
+        "iOS physical devices support reset only."
       ),
     permissions: z
       .array(z.string().min(1))
       .optional()
-      .describe("Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'"),
+      .describe("Permissions; Android reset accepts only 'all'; physical iOS accepts it too"),
     userId: z
       .number()
       .int()
       .nonnegative()
       .optional()
-      .describe("Android user id"),
+      .describe("Android user ID for grant/revoke, not reset"),
+    notificationsEnabled: z
+      .boolean()
+      .optional()
+      .describe("Android notification state, independent of POST_NOTIFICATIONS"),
     notificationPolicyAccess: z
       .boolean()
       .optional()
@@ -95,10 +99,59 @@ export const setAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSche
 )).refine(
   args =>
     (args.permissions !== undefined && args.permissions.length > 0) ||
+    args.notificationsEnabled !== undefined ||
     args.notificationPolicyAccess !== undefined ||
     args.scheduleExactAlarm !== undefined,
   "Provide at least one permission or platform-specific permission option"
-);
+).refine(
+  args => args.action !== "reset" || args.userId === undefined,
+  "Android reset is device-wide and does not support userId"
+).refine(
+  args => args.action !== "reset" || args.permissions?.some(permission => permission.trim().length > 0) === true,
+  "Reset requires permissions"
+).refine(
+  args =>
+    args.action !== "reset" ||
+    args.platform !== "android" ||
+    (args.permissions?.length === 1 && args.permissions[0].trim() === "all"),
+  "Android reset requires permissions=['all']"
+), jsonSchema => {
+  const properties = jsonSchema.properties as Record<string, Record<string, unknown>>;
+  delete properties.action?.type;
+  delete properties.scheduleExactAlarm?.type;
+  for (const name of [
+    "action",
+    "permissions",
+    "userId",
+    "notificationsEnabled",
+    "notificationPolicyAccess",
+    "scheduleExactAlarm",
+    "sessionUuid",
+    "device",
+  ]) {
+    delete properties[name]?.description;
+  }
+  jsonSchema.if = {
+    properties: { action: { const: "reset" } },
+    required: ["action"],
+  };
+  jsonSchema.then = {
+    required: ["permissions"],
+    not: { required: ["userId"] },
+    if: {
+      properties: { platform: { const: "android" } },
+      required: ["platform"],
+    },
+    then: {
+      properties: {
+        permissions: {
+          maxItems: 1,
+          items: { const: "all" },
+        },
+      },
+    },
+  };
+});
 
 export const getAppPermissionsSchema = withAppIdAliases(addDeviceTargetingToSchema(
   z.object({
@@ -276,6 +329,7 @@ export function registerAppTools(
       action: args.action,
       permissions: args.permissions,
       userId: args.userId,
+      notificationsEnabled: args.notificationsEnabled,
       notificationPolicyAccess: args.notificationPolicyAccess,
       scheduleExactAlarm: args.scheduleExactAlarm,
     });
@@ -333,8 +387,7 @@ export function registerAppTools(
 
   ToolRegistry.registerDeviceAware(
     "setAppPermissions",
-    "Grant, revoke, reset, or configure app permissions on Android devices, iOS simulators " +
-    "(grant/revoke/reset), and iOS physical devices (reset only, permissions=['all'] supported)",
+    "Set permissions; notification state excludes POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler
   );

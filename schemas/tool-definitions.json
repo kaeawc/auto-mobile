@@ -6894,7 +6894,7 @@
   },
   {
     "name": "setAppPermissions",
-    "description": "Grant, revoke, reset, or configure app permissions on Android devices, iOS simulators (grant/revoke/reset), and iOS physical devices (reset only, permissions=['all'] supported)",
+    "description": "Set permissions; notification state excludes POST_NOTIFICATIONS.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -6903,8 +6903,6 @@
           "type": "string"
         },
         "action": {
-          "description": "Permission action; defaults to grant. Android supports grant; iOS simulators support grant/revoke/reset; iOS physical devices support reset only, including permissions=['all'].",
-          "type": "string",
           "enum": [
             "grant",
             "revoke",
@@ -6912,7 +6910,6 @@
           ]
         },
         "permissions": {
-          "description": "Runtime permissions or simulator privacy services to change; iOS physical reset accepts 'all'",
           "type": "array",
           "items": {
             "type": "string",
@@ -6920,18 +6917,17 @@
           }
         },
         "userId": {
-          "description": "Android user id",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "notificationsEnabled": {
+          "type": "boolean"
+        },
         "notificationPolicyAccess": {
-          "description": "Android: set DND policy access",
           "type": "boolean"
         },
         "scheduleExactAlarm": {
-          "description": "Android: set SCHEDULE_EXACT_ALARM appop",
-          "type": "string",
           "enum": [
             "allow",
             "deny"
@@ -6945,21 +6941,59 @@
           ]
         },
         "sessionUuid": {
-          "description": "Session",
           "type": "string"
         },
         "keepScreenAwake": {
           "type": "boolean"
         },
         "device": {
-          "description": "Device label",
           "type": "string"
         }
       },
       "required": [
         "appId"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "action": {
+            "const": "reset"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "permissions"
+        ],
+        "not": {
+          "required": [
+            "userId"
+          ]
+        },
+        "if": {
+          "properties": {
+            "platform": {
+              "const": "android"
+            }
+          },
+          "required": [
+            "platform"
+          ]
+        },
+        "then": {
+          "properties": {
+            "permissions": {
+              "maxItems": 1,
+              "items": {
+                "const": "all"
+              }
+            }
+          }
+        }
+      }
     }
   },
   {

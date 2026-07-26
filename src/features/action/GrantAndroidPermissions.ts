@@ -7,7 +7,10 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 
 
+export type AndroidPermissionChangeAction = "grant" | "revoke" | "reset";
+
 export interface GrantAndroidPermissionsInput {
+  action?: AndroidPermissionChangeAction;
   permissions: string[];
   userId?: number;
 }
@@ -25,9 +28,10 @@ export class GrantAndroidPermissions {
 
   async execute(packageName: string, input: GrantAndroidPermissionsInput): Promise<GrantAndroidPermissionsResult> {
     const perf = createGlobalPerformanceTracker();
-    perf.serial("grantAndroidPermissions");
+    perf.serial("changeAndroidPermissions");
 
     const permissions = input.permissions ?? [];
+    const action = input.action ?? "grant";
 
     if (this.device.platform !== "android") {
       perf.end();
@@ -36,23 +40,37 @@ export class GrantAndroidPermissions {
         appId: packageName,
         userId: input.userId ?? 0,
         results: [],
-        error: "grantAndroidPermissions is only supported on Android devices",
+        error: "Android permission changes are only supported on Android devices",
       };
     }
 
+    if (action === "reset") {
+      return this.resetPermissions(packageName, permissions, input.userId, perf);
+    }
+
+    return this.changePermissions(packageName, permissions, input.userId, action, perf);
+  }
+
+  private async changePermissions(
+    packageName: string,
+    permissions: string[],
+    userId: number | undefined,
+    action: Exclude<AndroidPermissionChangeAction, "reset">,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>
+  ): Promise<GrantAndroidPermissionsResult> {
     if (permissions.length === 0) {
       perf.end();
       return {
         success: false,
         appId: packageName,
-        userId: input.userId ?? 0,
+        userId: userId ?? 0,
         results: [],
         error: "Provide at least one permission in `permissions`",
       };
     }
 
     const targetUserId = await perf.track("detectTargetUser", async () => {
-      return (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: input.userId })).userId;
+      return (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: userId })).userId;
     });
 
     const results: GrantAndroidPermissionItemResult[] = [];
@@ -62,7 +80,7 @@ export class GrantAndroidPermissions {
         const trimmed = permission.trim();
         if (!trimmed) {
           results.push({
-            operationId: "pm_grant:(empty)",
+            operationId: `pm_${action}:(empty)`,
             permission,
             success: false,
             countsTowardSuccess: true,
@@ -71,45 +89,45 @@ export class GrantAndroidPermissions {
           continue;
         }
 
-        const cmd = `shell pm grant --user ${targetUserId} ${packageName} ${trimmed}`;
+        const cmd = `shell pm ${action} --user ${targetUserId} ${packageName} ${trimmed}`;
 
         try {
-          await perf.track(`pmGrant:${trimmed}`, async () => {
+          await perf.track(`pm${action[0].toUpperCase()}${action.slice(1)}:${trimmed}`, async () => {
             const execResult = await this.adb.executeCommand(cmd, undefined, undefined, true);
             const stdout = execResult.stdout ?? "";
             const stderr = execResult.stderr ?? "";
 
             if (outputLooksLikeShellFailure(stdout, stderr)) {
-              const message = `${stdout}\n${stderr}`.trim() || "pm grant reported an error";
+              const message = `${stdout}\n${stderr}`.trim() || `pm ${action} reported an error`;
               results.push({
-                operationId: `pm_grant:${trimmed}`,
+                operationId: `pm_${action}:${trimmed}`,
                 permission: trimmed,
                 success: false,
                 countsTowardSuccess: true,
                 error: message,
               });
-              logger.warn(`[GrantAndroidPermissions] Grant failed for ${trimmed}: ${message}`);
+              logger.warn(`[GrantAndroidPermissions] ${action} failed for ${trimmed}: ${message}`);
               return;
             }
 
             results.push({
-              operationId: `pm_grant:${trimmed}`,
+              operationId: `pm_${action}:${trimmed}`,
               permission: trimmed,
               success: true,
               countsTowardSuccess: true,
             });
-            logger.info(`[GrantAndroidPermissions] Granted ${trimmed} to ${packageName} (user ${targetUserId})`);
+            logger.info(`[GrantAndroidPermissions] ${action} ${trimmed} for ${packageName} (user ${targetUserId})`);
           });
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : String(cause);
           results.push({
-            operationId: `pm_grant:${trimmed}`,
+            operationId: `pm_${action}:${trimmed}`,
             permission: trimmed,
             success: false,
             countsTowardSuccess: true,
             error: message,
           });
-          logger.warn(`[GrantAndroidPermissions] Grant threw for ${trimmed}: ${message}`);
+          logger.warn(`[GrantAndroidPermissions] ${action} threw for ${trimmed}: ${message}`);
         }
       }
     } finally {
@@ -135,8 +153,87 @@ export class GrantAndroidPermissions {
           error:
               failedRequired.length > 0
                 ? `Failed step(s): ${failedRequired.map(f => f.operationId).join(", ")}`
-                : "One or more required grant steps failed",
+                : "One or more required Android permission changes failed",
         }),
     };
+  }
+
+  private async resetPermissions(
+    packageName: string,
+    permissions: string[],
+    userId: number | undefined,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>
+  ): Promise<GrantAndroidPermissionsResult> {
+    const resetPermissions = permissions.map(permission => permission.trim());
+    if (userId !== undefined) {
+      perf.end();
+      return {
+        success: false,
+        appId: packageName,
+        userId: 0,
+        results: [{
+          operationId: "pm_reset_permissions",
+          success: false,
+          countsTowardSuccess: true,
+          error: "Android reset is device-wide and does not support userId",
+        }],
+        error: "Failed step(s): pm_reset_permissions",
+      };
+    }
+
+    if (resetPermissions.length !== 1 || resetPermissions[0] !== "all") {
+      perf.end();
+      return {
+        success: false,
+        appId: packageName,
+        userId: 0,
+        results: [{
+          operationId: "pm_reset_permissions",
+          success: false,
+          countsTowardSuccess: true,
+          error: "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+        }],
+        error: "Failed step(s): pm_reset_permissions",
+      };
+    }
+
+    try {
+      await perf.track("pmResetPermissions", async () => {
+        const execResult = await this.adb.executeCommand("shell pm reset-permissions", undefined, undefined, true);
+        const stdout = execResult.stdout ?? "";
+        const stderr = execResult.stderr ?? "";
+
+        if (outputLooksLikeShellFailure(stdout, stderr)) {
+          throw new Error(`${stdout}\n${stderr}`.trim() || "pm reset-permissions reported an error");
+        }
+      });
+      return {
+        success: true,
+        appId: packageName,
+        userId: 0,
+        results: [{
+          operationId: "pm_reset_permissions",
+          success: true,
+          countsTowardSuccess: true,
+        }],
+      };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      logger.warn(`[GrantAndroidPermissions] reset threw: ${message}`);
+      return {
+        success: false,
+        appId: packageName,
+        userId: 0,
+        results: [{
+          operationId: "pm_reset_permissions",
+          success: false,
+          countsTowardSuccess: true,
+          error: message,
+        }],
+        error: "Failed step(s): pm_reset_permissions",
+      };
+    } finally {
+      perf.end();
+    }
   }
 }

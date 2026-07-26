@@ -1,10 +1,10 @@
 /**
- * One step in a grantAndroidPermissions run (`pm grant` only).
+ * One step in an Android runtime-permission mutation (`pm grant`, `pm revoke`, or reset).
  */
 export interface GrantAndroidPermissionItemResult {
   /** Stable step id, e.g. pm_grant:android.permission.CAMERA, cmd.notification.allow_dnd */
   operationId: string;
-  /** Present when this row is a runtime `pm grant` */
+  /** Present when this row mutates one runtime permission with `pm grant` or `pm revoke`. */
   permission?: string;
   success: boolean;
   /**
@@ -17,12 +17,15 @@ export interface GrantAndroidPermissionItemResult {
 }
 
 /**
- * Result of batch-granting Android runtime permissions (`pm grant`) for a package.
+ * Result of an Android runtime-permission mutation for a package.
  */
 export interface GrantAndroidPermissionsResult {
   success: boolean;
   appId: string;
-  /** User id used with `pm grant --user` (0 = primary, 10+ = work profile when inferred). */
+  /**
+   * User id used with `pm grant` or `pm revoke` (0 = primary, 10+ = work profile when inferred).
+   * Device-wide `pm reset-permissions` does not target a user and returns 0.
+   */
   userId: number;
   results: GrantAndroidPermissionItemResult[];
   error?: string;

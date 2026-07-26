@@ -55,6 +55,15 @@ class LayoutInspectorState {
   var lastScreenshotTimestamp by mutableStateOf(0L)
     private set
 
+  // Device id the currently rendered screenshot came from (issue #3347). Frames are filtered to the
+  // active device before they reach [updateScreenshot], so this records which device the on-screen
+  // frame belongs to. Device control compares it against the selected device: after a device switch
+  // the previous frame lingers until a new one arrives, and a control tap must not actuate the
+  // newly
+  // selected device against a stale mirror of the previous one. Null until the first live frame.
+  var renderedDeviceId by mutableStateOf<String?>(null)
+    private set
+
   // Screenshot capture metadata (from the observation stream's screenshot_update message). Absent
   // (null/false) when the daemon predates this metadata or a field wasn't reported.
   var screenshotFallback by mutableStateOf(false)
@@ -174,6 +183,7 @@ class LayoutInspectorState {
     fallbackReason: String? = null,
     format: String? = null,
     captureSource: String? = null,
+    deviceId: String? = null,
   ) {
     screenshotData = data
     screenWidth = width
@@ -183,6 +193,7 @@ class LayoutInspectorState {
     screenshotFallbackReason = fallbackReason
     screenshotFormat = format
     screenshotCaptureSource = captureSource
+    renderedDeviceId = deviceId
   }
 
   /**
@@ -300,6 +311,7 @@ class LayoutInspectorState {
     screenshotFallbackReason = null
     screenshotFormat = null
     screenshotCaptureSource = null
+    renderedDeviceId = null
     currentParsedHierarchy = null
     rotation = 0
     selectedElementId = null

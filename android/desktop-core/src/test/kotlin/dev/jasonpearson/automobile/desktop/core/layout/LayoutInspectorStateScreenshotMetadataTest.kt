@@ -59,6 +59,24 @@ class LayoutInspectorStateScreenshotMetadataTest {
   }
 
   @Test
+  fun `updateScreenshot records the source device and disconnect clears it`() {
+    val state = LayoutInspectorState()
+    assertNull(state.renderedDeviceId)
+
+    state.updateScreenshot(
+      data = byteArrayOf(1),
+      width = 100,
+      height = 200,
+      timestamp = 1L,
+      deviceId = "emulator-5554",
+    )
+    assertEquals("emulator-5554", state.renderedDeviceId)
+
+    state.disconnect()
+    assertNull(state.renderedDeviceId)
+  }
+
+  @Test
   fun `disconnect clears screenshot metadata`() {
     val state = LayoutInspectorState()
     state.updateScreenshot(

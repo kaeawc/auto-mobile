@@ -180,6 +180,37 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
 }
 
 /**
+ * Whether client device control (issue #3347) may be active for the live layout view. Control taps
+ * actuate a real device, so this gate is deliberately strict: it is true only when
+ * - the app opted in ([enableDeviceControl]),
+ * - we are in Real device mode (not Fake mock data),
+ * - a device is explicitly selected ([activeDeviceId] non-null) — switching Fake→Real clears the
+ *   selection while keeping the socket and last frame, and a null selection must not let the daemon
+ *   pick a device the user never chose,
+ * - the connected transport can carry daemon input ([McpConnectionType.supportsDaemonInput]), and
+ * - the currently rendered frame belongs to that same selected device ([renderedDeviceId] ==
+ *   [activeDeviceId]) — after a device switch the previous frame lingers until a new one arrives,
+ *   and a click on that stale mirror would be mapped against the old device yet sent to the new
+ *   one.
+ *
+ * When any condition fails the view falls back to inspector mode, so the user is never tapping
+ * blind.
+ */
+internal fun isDeviceControlActive(
+  enableDeviceControl: Boolean,
+  isRealDeviceMode: Boolean,
+  activeDeviceId: String?,
+  connectionType: McpConnectionType?,
+  renderedDeviceId: String?,
+): Boolean {
+  return enableDeviceControl &&
+    isRealDeviceMode &&
+    activeDeviceId != null &&
+    connectionType?.supportsDaemonInput == true &&
+    renderedDeviceId == activeDeviceId
+}
+
+/**
  * Connects a live-mirroring source for this composition and exposes only its newest decoded frame.
  *
  * The source already drops old decoded frames; conflation here also prevents Compose conversion
@@ -826,6 +857,11 @@ fun AutoMobileContent(
           fallbackReason = update.screenshotFallbackReason,
           format = update.screenshotFormat,
           captureSource = update.screenshotCaptureSource,
+          // Tag the rendered frame with its source device so device control can require the
+          // on-screen
+          // frame to match the selected device (issue #3347). The frame already passed the
+          // active-device filter above, so this equals activeDeviceId at apply time.
+          deviceId = update.deviceId,
         )
       }
     }
@@ -1414,13 +1450,21 @@ fun AutoMobileContent(
       centerContent = { mod ->
         if (isLiveLayoutMode) {
           // Live layout mode: center shows device screenshot with element overlays.
-          // Device control (issue #3347) is only offered when the app opted in AND the connected
-          // transport can actually carry daemon input (Unix socket). On an input-incapable
-          // transport
-          // (HTTP/STDIO) every tap would fail, so staying in inspector mode (element selection) is
-          // strictly better than a control mode whose clicks always error.
+          // Device control (issue #3347) is strict about which device a tap can actuate: it
+          // requires
+          // the app opt-in, Real mode, an explicitly selected device, an input-capable transport,
+          // and
+          // a rendered frame that belongs to that selected device (so a click on a stale mirror
+          // after
+          // a device switch can't actuate the wrong device). Otherwise we stay in inspector mode.
           val deviceControlActive =
-            enableDeviceControl && connectedMcpProcess?.connectionType?.supportsDaemonInput == true
+            isDeviceControlActive(
+              enableDeviceControl = enableDeviceControl,
+              isRealDeviceMode = dataSourceMode == DataSourceMode.Real,
+              activeDeviceId = activeDeviceId,
+              connectionType = connectedMcpProcess?.connectionType,
+              renderedDeviceId = layoutInspectorState.renderedDeviceId,
+            )
           Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
             DeviceScreenView(
               screenshotData = layoutInspectorState.screenshotData,
@@ -1454,26 +1498,31 @@ fun AutoMobileContent(
                     // Snapshot the whole tap target atomically on the UI thread: the active device
                     // can change before the IO coroutine runs, and resolving client/platform/device
                     // late would send this coordinate to the wrong device.
-                    val tapClient = clientProvider?.invoke()
-                    val tapPlatform = platformString
                     val tapDeviceId = activeDeviceId
-                    val tapToken = deviceControlTapGate.nextToken()
-                    deviceControlTapError = null
-                    screenshotScope.launch(Dispatchers.IO) {
-                      deviceControlTapForwarder.forward(
-                        point = point,
-                        client = tapClient,
-                        platform = tapPlatform,
-                        deviceId = tapDeviceId,
-                        onError = { message ->
-                          // Only the latest tap may publish an error; a stale failure from a
-                          // superseded tap is ignored so it can't resurrect a banner a newer tap
-                          // already cleared.
-                          if (deviceControlTapGate.isCurrent(tapToken)) {
-                            deviceControlTapError = message
-                          }
-                        },
-                      )
+                    // Refuse a tap with no explicitly selected device: deviceControlActive already
+                    // requires a non-null selection, this guards the click-vs-recompose race so the
+                    // daemon can never pick a device the user did not choose.
+                    if (tapDeviceId != null) {
+                      val tapClient = clientProvider?.invoke()
+                      val tapPlatform = platformString
+                      val tapToken = deviceControlTapGate.nextToken()
+                      deviceControlTapError = null
+                      screenshotScope.launch(Dispatchers.IO) {
+                        deviceControlTapForwarder.forward(
+                          point = point,
+                          client = tapClient,
+                          platform = tapPlatform,
+                          deviceId = tapDeviceId,
+                          onError = { message ->
+                            // Only the latest tap may publish an error; a stale failure from a
+                            // superseded tap is ignored so it can't resurrect a banner a newer tap
+                            // already cleared.
+                            if (deviceControlTapGate.isCurrent(tapToken)) {
+                              deviceControlTapError = message
+                            }
+                          },
+                        )
+                      }
                     }
                   }
                 } else {

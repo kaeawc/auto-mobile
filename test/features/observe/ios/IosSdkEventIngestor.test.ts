@@ -386,5 +386,30 @@ describe("DefaultIosSdkEventIngestor", () => {
       // ... and must have restored the prior context despite the throw.
       expect(recorder.getContext()).toEqual({ deviceId: "prev-device", sessionId: "prev-session" });
     });
+
+    test("stays non-fatal when restoring the context itself throws", () => {
+      // The restore runs in the finally, OUTSIDE the catch. If the recorder's
+      // setContext throws while restoring the prior context, the exception must be
+      // swallowed — processMessage calls this and telemetry must never break
+      // observation. Only the restore call (deviceId "prev-device") throws; the
+      // setContext(iOS) at the start still succeeds.
+      class RestoreThrows extends CapturingTelemetryRecorder {
+        setContext(deviceId: string | null, sessionId: string | null): void {
+          if (deviceId === "prev-device") {
+            throw new Error("setContext failed during restore");
+          }
+          super.setContext(deviceId, sessionId);
+        }
+      }
+      const localIngestor = new DefaultIosSdkEventIngestor({
+        deviceId: DEVICE_ID,
+        getNavigationGraphManager: () => navSink,
+        captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
+        telemetryRecorder: new RestoreThrows() as unknown as IosTelemetryRecorder,
+        failureRecorder,
+        navigationScreenshotsEnabled: () => false,
+      });
+      expect(() => localIngestor.recordLayoutTelemetryEvent(hierarchy())).not.toThrow();
+    });
   });
 });

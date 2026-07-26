@@ -348,9 +348,16 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     } finally {
       // Restore previous context so Android events aren't mis-attributed, even
       // when the body threw after setContext (getContext throwing leaves
-      // prevContext undefined — nothing to restore).
+      // prevContext undefined — nothing to restore). The restore runs in the
+      // finally, OUTSIDE the catch above, so it must guard its own throw or the
+      // exception would escape this best-effort method and break observation
+      // (processMessage calls it).
       if (prevContext) {
-        recorder.setContext(prevContext.deviceId, prevContext.sessionId);
+        try {
+          recorder.setContext(prevContext.deviceId, prevContext.sessionId);
+        } catch (error) {
+          logger.warn(`[IosSdkEventIngestor] Failed to restore telemetry context: ${error}`);
+        }
       }
     }
   }

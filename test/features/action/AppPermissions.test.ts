@@ -393,6 +393,37 @@ describe("AppPermissions", () => {
       );
     });
 
+    test("rejects the Android-only notificationsEnabled field on iOS", async () => {
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+
+      const result = await permissions.setPermissions("com.example.app", {
+        action: "grant",
+        notificationsEnabled: true,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "setAppPermissions does not support the following fields on iOS: notificationsEnabled"
+      );
+    });
+
+    test("rejects an Android-only boolean field on iOS even when it is false", async () => {
+      // The presence check is `!== undefined`, so a FALSE value must still reject.
+      // A regression to a truthiness check would silently accept `false` here.
+      const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
+
+      const result = await permissions.setPermissions("com.example.app", {
+        action: "grant",
+        notificationPolicyAccess: false,
+        notificationsEnabled: false,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "setAppPermissions does not support the following fields on iOS: notificationPolicyAccess, notificationsEnabled"
+      );
+    });
+
     test("lists every unsupported field when several are supplied on iOS", async () => {
       const permissions = new AppPermissions(iosSimulator, { simctl: new FakeSimCtlClient() });
 

@@ -2187,5 +2187,81 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("keeps the newest navigation identity when SDK events arrive out of order", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encode = (destination: string, timestamp: number): string => Buffer.from(JSON.stringify({ destination, timestamp })).toString("base64");
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [{
+          bundleId: "com.example.ios",
+          events: [
+            { eventType: "navigation", payload: encode("NewScreen", 200) },
+            { eventType: "navigation", payload: encode("OldScreen", 100) },
+          ],
+        }],
+      })) as unknown as typeof fetch;
+
+      try {
+        const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
+
+        expect(identity?.components.navigationRoute).toBe("NewScreen");
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
+    test("does not restore an SDK identity after the connection closes during a poll", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const encoded = Buffer.from(JSON.stringify({ destination: "StaleScreen", timestamp: 100 })).toString("base64");
+      let releaseFetch: ((response: { ok: boolean; json: () => Promise<unknown> }) => void) | undefined;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (() => new Promise(resolve => {
+        releaseFetch = resolve;
+      })) as unknown as typeof fetch;
+
+      try {
+        const poll = (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
+        await flushPromises();
+        (testClient as unknown as { onConnectionClosed(): void }).onConnectionClosed();
+        releaseFetch?.({
+          ok: true,
+          json: async () => [{ bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encoded }] }],
+        });
+        await poll;
+
+        expect(testClient.getSdkScreenIdentity("com.example.ios")).toBeUndefined();
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
+
+    test("falls back without waiting for a stalled SDK-event poll", async function() {
+      const controlledTimer = new FakeTimer();
+      const { factory } = createCapturingWebSocketFactory(controlledTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, controlledTimer);
+      let releaseFetch: ((response: { ok: boolean; json: () => Promise<unknown> }) => void) | undefined;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (() => new Promise(resolve => {
+        releaseFetch = resolve;
+      })) as unknown as typeof fetch;
+
+      try {
+        const identity = testClient.refreshSdkScreenIdentity("com.example.ios");
+        controlledTimer.advanceTime(100);
+
+        expect(await identity).toBeUndefined();
+        releaseFetch?.({ ok: true, json: async () => [] });
+        await flushPromises();
+      } finally {
+        globalThis.fetch = originalFetch;
+        await testClient.close();
+      }
+    });
   });
 });

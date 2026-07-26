@@ -408,7 +408,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
   private readonly sdkScreenIdentitiesByApplicationId = new Map<string, ScreenIdentity>();
-  private sdkEventPollInFlight: Promise<void> | null = null;
+  private readonly sdkScreenIdentityTimestampsByApplicationId = new Map<string, number>();
+  private sdkEventPollGeneration = 0;
+  private sdkEventPollAbortController: AbortController | null = null;
+  private sdkEventPollInFlight: { generation: number; promise: Promise<void> } | null = null;
+  private static readonly SDK_EVENT_POLL_TIMEOUT_MS = 2000;
+  private static readonly SDK_IDENTITY_REFRESH_TIMEOUT_MS = 100;
 
   private constructor(
     device: BootedDevice,
@@ -483,7 +488,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * not wait for the background poll interval before it reaches the diff gate.
    */
   public async refreshSdkScreenIdentity(applicationId?: string): Promise<ScreenIdentity | undefined> {
-    await this.pollSdkEvents();
+    const poll = this.pollSdkEvents();
+    let timeoutId: ReturnType<Timer["setTimeout"]> | null = null;
+    const timeout = new Promise<void>(resolve => {
+      timeoutId = this.timer.setTimeout(resolve, IOSCtrlProxyClient.SDK_IDENTITY_REFRESH_TIMEOUT_MS);
+    });
+    await Promise.race([poll, timeout]);
+    if (timeoutId) {
+      this.timer.clearTimeout(timeoutId);
+    }
     return this.getSdkScreenIdentity(applicationId);
   }
 
@@ -906,8 +919,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected onConnectionClosed(): void {
     this.cancelScreenshotBackoff();
     this.stopSdkEventPolling();
+    this.sdkEventPollGeneration++;
+    this.sdkEventPollAbortController?.abort();
+    this.sdkEventPollAbortController = null;
     this.cachedHierarchy = null;
     this.sdkScreenIdentitiesByApplicationId.clear();
+    this.sdkScreenIdentityTimestampsByApplicationId.clear();
     this.supportedCommands = null;
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
@@ -936,50 +953,99 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private async pollSdkEvents(): Promise<void> {
-    if (this.sdkEventPollInFlight) {
-      return this.sdkEventPollInFlight;
+    const generation = this.sdkEventPollGeneration;
+    if (this.sdkEventPollInFlight?.generation === generation) {
+      return this.sdkEventPollInFlight.promise;
     }
 
-    this.sdkEventPollInFlight = this.pollSdkEventsOnce();
-    try {
-      await this.sdkEventPollInFlight;
-    } finally {
-      this.sdkEventPollInFlight = null;
-    }
+    const promise = this.pollSdkEventsOnce(generation);
+    const inFlight = { generation, promise };
+    this.sdkEventPollInFlight = inFlight;
+    void promise.finally(() => {
+      if (this.sdkEventPollInFlight === inFlight) {
+        this.sdkEventPollInFlight = null;
+      }
+    });
+    return promise;
   }
 
-  private async pollSdkEventsOnce(): Promise<void> {
+  private async pollSdkEventsOnce(generation: number): Promise<void> {
     const host = this.resolveWebSocketHost();
     const url = `http://${host}:${this.port}/sdk-events`;
+    const abortController = new AbortController();
+    this.sdkEventPollAbortController = abortController;
+    const timeoutId = this.timer.setTimeout(
+      () => abortController.abort(),
+      IOSCtrlProxyClient.SDK_EVENT_POLL_TIMEOUT_MS,
+    );
     try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      const resp = await fetch(url, { signal: abortController.signal });
+      if (generation !== this.sdkEventPollGeneration) {return;}
       if (!resp.ok) {return;}
       const batches = await resp.json() as Array<{
         bundleId?: string;
         events?: Array<{ eventType: string; payload: string }>;
       }>;
-      for (const batch of batches) {
-        if (!batch.events) {continue;}
-        for (const envelope of batch.events) {
-          try {
-            // SDK envelopes have base64-encoded payload
-            const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
-            const payload = JSON.parse(payloadJson) as Record<string, unknown>;
-            const timestamp = (payload.timestamp as number) ?? Date.now();
-            this.rememberSdkScreenIdentity(envelope.eventType, batch.bundleId, payload);
-            await this.sdkEventIngestor.recordSdkEvent(
-              { type: envelope.eventType, timestamp, payload },
-              batch.bundleId ?? null,
-            );
-          } catch (error) {
-            // Malformed SDK envelope (bad base64/JSON) — skip it, but leave a trace.
-            logger.debug(`[IOSCtrlProxy] skipping malformed SDK event envelope: ${error}`);
-          }
-        }
-      }
+      await this.processSdkEventBatches(batches, generation);
     } catch (error) {
       // Polling failure is non-fatal (endpoint down, timeout) — trace at debug.
       logger.debug(`[IOSCtrlProxy] SDK event poll failed: ${error}`);
+    } finally {
+      this.timer.clearTimeout(timeoutId);
+      if (this.sdkEventPollAbortController === abortController) {
+        this.sdkEventPollAbortController = null;
+      }
+    }
+  }
+
+  private async processSdkEventBatches(
+    batches: Array<{ bundleId?: string; events?: Array<{ eventType: string; payload: string }> }>,
+    generation: number,
+  ): Promise<void> {
+    for (const batch of batches) {
+      if (generation !== this.sdkEventPollGeneration) {
+        return;
+      }
+      await this.processSdkEventBatch(batch, generation);
+    }
+  }
+
+  private async processSdkEventBatch(
+    batch: { bundleId?: string; events?: Array<{ eventType: string; payload: string }> },
+    generation: number,
+  ): Promise<void> {
+    if (!batch.events) {
+      return;
+    }
+    for (const envelope of batch.events) {
+      if (generation !== this.sdkEventPollGeneration) {
+        return;
+      }
+      await this.processSdkEventEnvelope(envelope, batch.bundleId, generation);
+    }
+  }
+
+  private async processSdkEventEnvelope(
+    envelope: { eventType: string; payload: string },
+    applicationId: string | undefined,
+    generation: number,
+  ): Promise<void> {
+    try {
+      // SDK envelopes have base64-encoded payload.
+      const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
+      const payload = JSON.parse(payloadJson) as Record<string, unknown>;
+      const timestamp = (payload.timestamp as number) ?? Date.now();
+      if (generation !== this.sdkEventPollGeneration) {
+        return;
+      }
+      this.rememberSdkScreenIdentity(envelope.eventType, applicationId, payload, timestamp);
+      await this.sdkEventIngestor.recordSdkEvent(
+        { type: envelope.eventType, timestamp, payload },
+        applicationId ?? null,
+      );
+    } catch (error) {
+      // Malformed SDK envelope (bad base64/JSON) — skip it, but leave a trace.
+      logger.debug(`[IOSCtrlProxy] skipping malformed SDK event envelope: ${error}`);
     }
   }
 
@@ -994,13 +1060,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     eventType: string,
     applicationId: string | undefined,
     payload: Record<string, unknown>,
+    timestamp: number,
   ): void {
     if (!applicationId) {
       return;
     }
     const identity = deriveIosSdkScreenIdentity(eventType, applicationId, payload);
-    if (identity) {
+    const currentTimestamp = this.sdkScreenIdentityTimestampsByApplicationId.get(applicationId);
+    if (identity && (currentTimestamp === undefined || timestamp >= currentTimestamp)) {
       this.sdkScreenIdentitiesByApplicationId.set(applicationId, identity);
+      this.sdkScreenIdentityTimestampsByApplicationId.set(applicationId, timestamp);
     }
   }
 

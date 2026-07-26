@@ -1614,7 +1614,7 @@
   },
   {
     "name": "getNavigationGraph",
-    "description": "Get navigation graph for debugging",
+    "description": "Get navigation graph",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

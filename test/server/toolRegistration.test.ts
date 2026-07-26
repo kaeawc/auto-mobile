@@ -123,8 +123,6 @@ class ToolRegistrationValidator {
     "criticalSection",
     "executePlan",
 
-    // Resource-only tools (exposed as resources, not tools)
-    "getNavigationGraph",
   ]);
 
   extractSchemaNames(module: ToolModule): string[] {

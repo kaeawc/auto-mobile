@@ -116,9 +116,9 @@ export function registerNavigationTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware("navigateTo", "Navigate to screen using navigation graph", navigateToSchema, navigateToHandler, { supportsProgress: true, debugOnly: true });
+  ToolRegistry.registerDeviceAware("navigateTo", "Navigate to screen using navigation graph", navigateToSchema, navigateToHandler, { supportsProgress: true });
 
-  ToolRegistry.registerDeviceAware("getNavigationGraph", "Get navigation graph for debugging", getNavigationGraphSchema, getNavigationGraphHandler, { debugOnly: true });
+  ToolRegistry.registerDeviceAware("getNavigationGraph", "Get navigation graph", getNavigationGraphSchema, getNavigationGraphHandler);
 
   // Explore handler
   const exploreHandler = async (
@@ -157,5 +157,5 @@ export function registerNavigationTools() {
     }
   };
 
-  ToolRegistry.registerDeviceAware("explore", "Automatically explore app to build navigation graph", exploreSchema, exploreHandler, { supportsProgress: true, debugOnly: true });
+  ToolRegistry.registerDeviceAware("explore", "Automatically explore app to build navigation graph", exploreSchema, exploreHandler, { supportsProgress: true });
 }

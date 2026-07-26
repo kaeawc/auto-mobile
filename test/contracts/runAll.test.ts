@@ -5,7 +5,6 @@ import path from "node:path";
 import { DefaultChecksumCalculator } from "../../src/utils/ChecksumCalculator";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
-import { DefaultProcessExecutor } from "../../src/utils/ProcessExecutor";
 import { CountingIdGenerator, NodeIdGenerator } from "../../src/utils/IdGenerator";
 import { CryptoRandom } from "../../src/utils/Random";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -16,13 +15,9 @@ import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 import { FakeFileSystem } from "../fakes/FakeFileSystem";
 import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
-import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { runChecksumCalculatorContract } from "./ChecksumCalculatorContract";
-import {
-  runHostCommandExecutorContract,
-  runProcessExecutorContract
-} from "./CommandExecutorContract";
+import { runHostCommandExecutorContract } from "./CommandExecutorContract";
 import { runFileDownloaderContract } from "./FileDownloaderContract";
 import { runFileSystemContract } from "./FileSystemContract";
 import { runIdGeneratorContract } from "./IdGeneratorContract";
@@ -77,29 +72,7 @@ runFileDownloaderContract("FakeFileDownloader", payload => {
   return downloader;
 });
 
-// Real subprocess: a contended CI runner can stall the fork/exec, so allow a
-// generous timeout (matching the ProcessExecutor smoke test) instead of bun's default (#2914).
 const REAL_SUBPROCESS_CONTRACT_TIMEOUT_MS = 30_000;
-
-runProcessExecutorContract("DefaultProcessExecutor", {
-  make: () => new DefaultProcessExecutor(),
-  command: "echo contract-output",
-  timeoutMs: REAL_SUBPROCESS_CONTRACT_TIMEOUT_MS
-});
-runProcessExecutorContract("FakeProcessExecutor", {
-  make: () => {
-    const executor = new FakeProcessExecutor();
-    executor.setDefaultResponse({
-      stdout: "contract-output",
-      stderr: "",
-      toString() { return this.stdout; },
-      trim() { return this.stdout.trim(); },
-      includes(searchString: string) { return this.stdout.includes(searchString); }
-    });
-    return executor;
-  },
-  command: "contract-command"
-});
 
 runHostCommandExecutorContract("DefaultHostCommandExecutor", {
   make: () => new DefaultHostCommandExecutor(),

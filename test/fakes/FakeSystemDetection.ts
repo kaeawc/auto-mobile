@@ -143,4 +143,8 @@ export class FakeSystemDetection implements SystemDetection {
     // Default: command not found
     throw new Error(`Command not found: ${command}`);
   }
+
+  async executeCommand(file: string, args: string[] = []): Promise<{ stdout: string; stderr: string }> {
+    return this.exec([file, ...args].join(" "));
+  }
 }

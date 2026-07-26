@@ -83,7 +83,7 @@ describe("DeviceAppManager", () => {
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec,
+      execute: (file, args) => exec([file, ...args].join(" ")),
       readFile: async path => fs.readFile(path, "utf-8"),
       mkdtemp: async prefix => fs.mkdtemp(prefix),
       rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -123,7 +123,7 @@ describe("DeviceAppManager", () => {
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec,
+      execute: (file, args) => exec([file, ...args].join(" ")),
       readFile: async path => fs.readFile(path, "utf-8"),
       mkdtemp: async prefix => fs.mkdtemp(prefix),
       rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -141,7 +141,8 @@ describe("DeviceAppManager", () => {
     const fakeLogger = createFakeLogger();
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec: async command => {
+      execute: async (_file, args) => {
+        const command = [_file, ...args].join(" ");
         if (command.includes("simctl get_app_container")) {
           throw new Error("No such file or directory");
         }
@@ -180,7 +181,8 @@ describe("DeviceAppManager", () => {
     const fakeLogger = createFakeLogger();
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec: async command => {
+      execute: async (_file, args) => {
+        const command = [_file, ...args].join(" ");
         if (command.includes("simctl get_app_container")) {
           throw new Error("Invalid device: simulator is not booted");
         }
@@ -219,7 +221,8 @@ describe("DeviceAppManager", () => {
     const fakeLogger = createFakeLogger();
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec: async command => {
+      execute: async (_file, args) => {
+        const command = [_file, ...args].join(" ");
         if (command.includes("devicectl device info apps")) {
           throw new Error("devicectl unavailable");
         }
@@ -252,7 +255,8 @@ describe("DeviceAppManager", () => {
     const fakeLogger = createFakeLogger();
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec: async command => {
+      execute: async (_file, args) => {
+        const command = [_file, ...args].join(" ");
         if (command.includes("simctl get_app_container")) {
           return {
             stdout: "/tmp/missing/ExistingApp.app\n",
@@ -306,7 +310,7 @@ describe("DeviceAppManager", () => {
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec,
+      execute: (file, args) => exec([file, ...args].join(" ")),
       readFile: async path => fs.readFile(path, "utf-8"),
       mkdtemp: async prefix => fs.mkdtemp(prefix),
       rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -338,7 +342,7 @@ describe("DeviceAppManager", () => {
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec,
+      execute: (file, args) => exec([file, ...args].join(" ")),
       readFile: async path => fs.readFile(path, "utf-8"),
       mkdtemp: async prefix => fs.mkdtemp(prefix),
       rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -387,7 +391,7 @@ describe("DeviceAppManager", () => {
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec,
+      execute: (file, args) => exec([file, ...args].join(" ")),
       readFile: async path => fs.readFile(path, "utf-8"),
       mkdtemp: async prefix => fs.mkdtemp(prefix),
       rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -412,7 +416,8 @@ describe("DeviceAppManager", () => {
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
       // info apps writes no/empty json → bundle entry not found
-      exec: async (command: string) => {
+      execute: async (_file, args) => {
+        const command = [_file, ...args].join(" ");
         if (command.includes("device info apps")) {
           const jsonPath = parseDevicectlJsonOutputPath(command);
           if (jsonPath) { await fs.writeFile(jsonPath, JSON.stringify({ apps: [] }), "utf-8"); }
@@ -473,7 +478,7 @@ describe("DeviceAppManager", () => {
 
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      exec,
+      execute: (file, args) => exec([file, ...args].join(" ")),
       readFile: async path => fs.readFile(path, "utf-8"),
       mkdtemp: async prefix => fs.mkdtemp(prefix),
       rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -506,7 +511,7 @@ describe("DeviceAppManager launch (devicectl)", () => {
   }) => {
     return new DeviceAppManager({
       platform: () => opts.platform ?? "darwin",
-      exec: opts.exec,
+      execute: (file, args) => opts.exec([file, ...args].join(" ")),
       readFile: async path => fs.readFile(path, "utf-8"),
       mkdtemp: async prefix => fs.mkdtemp(prefix),
       rm: async path => fs.rm(path, { recursive: true, force: true }),
@@ -820,7 +825,7 @@ describe("DeviceAppManager terminate (devicectl)", () => {
     exec: (command: string) => Promise<ReturnType<typeof makeExecResult>>;
   }) => new DeviceAppManager({
     platform: () => opts.platform ?? "darwin",
-    exec: opts.exec,
+    execute: (file, args) => opts.exec([file, ...args].join(" ")),
     readFile: async path => fs.readFile(path, "utf-8"),
     mkdtemp: async prefix => fs.mkdtemp(prefix),
     rm: async path => fs.rm(path, { recursive: true, force: true }),

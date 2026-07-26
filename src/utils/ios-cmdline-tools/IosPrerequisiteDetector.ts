@@ -38,19 +38,19 @@ export class DefaultIosPrerequisiteDetector implements IosPrerequisiteDetector {
 
     // Either tool being runnable proves an Xcode toolchain is installed. Skip
     // only when neither works — the clear "no iOS tooling" case.
-    if (await this.canRun("xcrun --version")) {
+    if (await this.canRun("xcrun", ["--version"])) {
       return true;
     }
-    return this.canRun("xcodebuild -version");
+    return this.canRun("xcodebuild", ["-version"]);
   }
 
-  private async canRun(command: string): Promise<boolean> {
+  private async canRun(file: string, args: string[]): Promise<boolean> {
     try {
-      await this.systemDetection.exec(command);
+      await this.systemDetection.executeCommand(file, args);
       return true;
     } catch (error) {
       // A non-zero exit / missing binary is a normal "not available", not a fault.
-      logger.debug(`[IOS_PREREQ] probe failed for '${command}': ${error}`, error);
+      logger.debug(`[IOS_PREREQ] probe failed for '${file} ${args.join(" ")}': ${error}`, error);
       return false;
     }
   }

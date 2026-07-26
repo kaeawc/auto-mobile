@@ -199,7 +199,7 @@ export function getAndroidSdkFromEnvironment(systemDetection = createDefaultSyst
 export async function isToolInPath(toolName: string, systemDetection = createDefaultSystemDetection()): Promise<boolean> {
   try {
     const command = systemDetection.getCurrentPlatform() === "win32" ? "where" : "which";
-    await systemDetection.exec(`${command} ${toolName}`);
+    await systemDetection.executeCommand(command, [toolName]);
     return true;
   } catch (error) {
     // which/where exits non-zero when the tool isn't on PATH; that's a normal "not found", not a fault.
@@ -214,7 +214,7 @@ export async function isToolInPath(toolName: string, systemDetection = createDef
 export async function getToolPathFromPath(toolName: string, systemDetection = createDefaultSystemDetection()): Promise<string | null> {
   try {
     const command = systemDetection.getCurrentPlatform() === "win32" ? "where" : "which";
-    const result = await systemDetection.exec(`${command} ${toolName}`);
+    const result = await systemDetection.executeCommand(command, [toolName]);
     const path = result.stdout.trim().split("\n")[0]; // Take first result if multiple
     return path || null;
   } catch (error) {

@@ -1,6 +1,6 @@
 import type { BootedDevice } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { ProcessExecutor } from "../../../utils/ProcessExecutor";
+import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import type { SystemConfigurationAdapter } from "../../../utils/interfaces/SystemConfigurationAdapter";
 import { AndroidSystemConfigurationAdapter } from "./AndroidSystemConfigurationAdapter";
 import { IosSystemConfigurationAdapter } from "./IosSystemConfigurationAdapter";
@@ -13,7 +13,7 @@ import { IosSystemConfigurationAdapter } from "./IosSystemConfigurationAdapter";
 export function createSystemConfigurationAdapter(
   device: BootedDevice,
   adb: AdbExecutor,
-  processExecutor: ProcessExecutor
+  processExecutor: HostCommandExecutor
 ): SystemConfigurationAdapter {
   if (device.platform === "ios") {
     return new IosSystemConfigurationAdapter(device, processExecutor);

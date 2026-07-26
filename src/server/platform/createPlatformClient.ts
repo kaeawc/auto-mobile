@@ -7,14 +7,14 @@ import type { PlatformClient } from "../../utils/interfaces/PlatformClient";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
-import type { ProcessExecutor } from "../../utils/ProcessExecutor";
+import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import type {
   AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
-import { DefaultProcessExecutor } from "../../utils/ProcessExecutor";
+import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../features/observe/ios/IOSCtrlProxyClient";
 import { createTapStrategy } from "../../features/action/strategies/createTapStrategy";
@@ -34,7 +34,7 @@ export interface CreatePlatformClientOptions {
   adbFactory?: AdbClientFactory;
   accessibilityDetector?: AccessibilityDetector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  processExecutor?: ProcessExecutor;
+  processExecutor?: HostCommandExecutor;
   // Per-handle overrides for tests. Pass a fake instead of letting the
   // factory build the default platform-specific implementation.
   ctrlProxy?: CtrlProxyClient;
@@ -63,7 +63,7 @@ export function createPlatformClient(
   const iosVoiceOverDetector =
     options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
   const processExecutor =
-    options.processExecutor ?? new DefaultProcessExecutor();
+    options.processExecutor ?? new DefaultHostCommandExecutor();
 
   const ctrlProxy: CtrlProxyClient =
     options.ctrlProxy ??

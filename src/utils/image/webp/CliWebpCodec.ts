@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { Writable } from "node:stream";
 import { ActionableError } from "../../../models/ActionableError";
-import { DefaultProcessExecutor, type ProcessExecutor } from "../../ProcessExecutor";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../../HostCommandExecutor";
 import { WebpBinaryResolver, type WebpBinaryProvider } from "./WebpBinaryResolver";
 
 export interface CliWebpEncodeOptions {
@@ -19,7 +19,7 @@ export function isWebpBuffer(buffer: Buffer): boolean {
 export class CliWebpCodec {
   constructor(
     private readonly binaryResolver: WebpBinaryProvider = new WebpBinaryResolver(),
-    private readonly processExecutor: ProcessExecutor = new DefaultProcessExecutor()
+    private readonly processExecutor: HostProcessExecutor = new DefaultHostCommandExecutor()
   ) {}
 
   async encode(pngBuffer: Buffer, options: CliWebpEncodeOptions = {}): Promise<Buffer> {

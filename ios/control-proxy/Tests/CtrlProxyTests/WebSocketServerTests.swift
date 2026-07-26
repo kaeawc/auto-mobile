@@ -227,4 +227,20 @@ final class WebSocketServerTests: XCTestCase {
         XCTAssertNil(WebSocketConnection.frameReadLength(payloadLength: UInt64(Int.max) + 1, isMasked: false))
         XCTAssertNil(WebSocketConnection.frameReadLength(payloadLength: .max, isMasked: true))
     }
+
+    // MARK: - HTTP request framing
+
+    func testCompleteHTTPRequestLengthWaitsForSplitPostBody() {
+        let header = Data("POST /sdk-events HTTP/1.1\r\nContent-Length: 19\r\n\r\n".utf8)
+        XCTAssertNil(WebSocketConnection.completeHTTPRequestLength(in: header))
+
+        var completeRequest = header
+        completeRequest.append(Data("{\"events\":[],\"x\":1}".utf8))
+        XCTAssertEqual(WebSocketConnection.completeHTTPRequestLength(in: completeRequest), completeRequest.count)
+    }
+
+    func testCompleteHTTPRequestLengthAcceptsHeaderOnlyHealthRequest() {
+        let request = Data("GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8)
+        XCTAssertEqual(WebSocketConnection.completeHTTPRequestLength(in: request), request.count)
+    }
 }

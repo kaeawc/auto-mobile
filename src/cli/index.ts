@@ -414,10 +414,20 @@ async function runToolViaDaemon(
  * {@link handleDoctorResult}/`applyClientBuildIdentity` step reports the mismatch. Throws (→ direct
  * fallback) only when the daemon is unreachable.
  */
+/** Remove CLI-only presentation options before calling the daemon's doctor tool. */
+export function doctorToolParams(params: Record<string, any>): Record<string, any> {
+  const doctorParams = { ...params };
+  delete doctorParams.json;
+  return doctorParams;
+}
+
 async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
   const client = new DaemonClient(undefined, undefined, undefined, {}, null);
   try {
-    const result = await client.callTool("doctor", params);
+    // `json` controls CLI presentation only. The daemon's doctor tool accepts
+    // diagnostic options, so do not forward the local formatting flag through
+    // its strict schema.
+    const result = await client.callTool("doctor", doctorToolParams(params));
     if (result === null) {
       throw new ActionableError(
         "Daemon returned null result for doctor. " +

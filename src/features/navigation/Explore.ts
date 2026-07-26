@@ -9,6 +9,7 @@ import { NavigationGraphManager, type NavigationEdge, type NavigationGraphServic
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { TapOnElement } from "../action/TapOnElement";
 import { SwipeOnElement } from "../action/SwipeOnElement";
+import { PressButton } from "../action/PressButton";
 import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -775,16 +776,25 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Recovery is an internal interaction, not an Android transport detail.
-      // callInternal marks it no-diff so the observation it produces does not
-      // advance the caller-visible baseline during exploration.
-      const response = await ToolRegistry.callInternal("pressButton", {
-        button: "back",
-        platform: this.device.platform,
-        deviceId: this.device.deviceId,
-        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
-      }, progress);
-      throwIfInternalToolFailed(response, "pressButton", this.device.platform);
+      if (this.device.platform === "android") {
+        // Preserve the Explore instance's injected transport and timer. Calling
+        // press() avoids nested observed-interaction progress on this operation.
+        const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+        if (!result.success) {
+          throw new Error(result.error ?? "Android back navigation failed");
+        }
+      } else {
+        // iOS recovery must route through the selected device/session tool.
+        // Do not forward the outer progress callback: the nested action has a
+        // different scale and would make exploration progress jump backward.
+        const response = await ToolRegistry.callInternal("pressButton", {
+          button: "back",
+          platform: this.device.platform,
+          deviceId: this.device.deviceId,
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+        });
+        throwIfInternalToolFailed(response, "pressButton", this.device.platform);
+      }
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
@@ -808,15 +818,22 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // `homeScreen` owns the platform-specific implementation and its
-      // actionable failures. Keep the internal recovery call out of the
-      // external observation-diff baseline.
-      const response = await ToolRegistry.callInternal("homeScreen", {
-        platform: this.device.platform,
-        deviceId: this.device.deviceId,
-        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
-      }, progress);
-      throwIfInternalToolFailed(response, "homeScreen", this.device.platform);
+      if (this.device.platform === "android") {
+        // PressButton's Android home path retains the injected ADB/timer and
+        // performs the same accessibility-service then ADB fallback.
+        const result = await new PressButton(this.device, this.adb, this.timer).press("home");
+        if (!result.success) {
+          throw new Error(result.error ?? "Android home navigation failed");
+        }
+      } else {
+        // Keep iOS recovery session/device-aware without nested progress.
+        const response = await ToolRegistry.callInternal("homeScreen", {
+          platform: this.device.platform,
+          deviceId: this.device.deviceId,
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+        });
+        throwIfInternalToolFailed(response, "homeScreen", this.device.platform);
+      }
 
       // Wait for home screen
       await this.timer.sleep(2000);

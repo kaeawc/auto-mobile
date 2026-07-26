@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { Explore } from "../../../src/features/navigation/Explore";
 import { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
@@ -30,6 +30,7 @@ import {
 } from "../../../src/features/navigation/ExploreValidateMode";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 describe("Explore", () => {
   let explore: Explore;
@@ -482,54 +483,111 @@ describe("Explore", () => {
       }
     });
 
-    test("records failed dead-end recovery as a terminal partial-report reason", async () => {
-      ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
-        success: false,
-        error: "Back navigation was rejected"
-      }));
-      explore = new Explore(device, null, fakeTimer, fakeGraph);
+    test("uses injected Android recovery dependencies without nested progress", async () => {
+      const commands: string[] = [];
+      const adb = {
+        executeCommand: async (command: string) => {
+          commands.push(command);
+          return "";
+        }
+      } as AdbClient;
+      const progressUpdates: Array<{ current: number; total?: number; message?: string }> = [];
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      ToolRegistry.register("pressButton", "pressButton", {}, async () => {
+        throw new Error("Android recovery must not use the global tool registry");
+      });
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async () => {
+        throw new Error("Android recovery must not use the global tool registry");
+      });
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
-      await (explore as any).handleDeadEnd();
+      try {
+        await (explore as any).handleDeadEnd(async (current: number, total?: number, message?: string) => {
+          progressUpdates.push({ current, total, message });
+        });
+        await (explore as any).resetToHome(async (current: number, total?: number, message?: string) => {
+          progressUpdates.push({ current, total, message });
+        });
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
+
+      expect(commands).toEqual(["shell input keyevent 4", "shell input keyevent 3"]);
+      expect(progressUpdates).toEqual([
+        { current: 0, total: 1, message: "Dead end detected, navigating back..." },
+        { current: 0, total: 1, message: "Resetting to home screen..." }
+      ]);
+    });
+
+    test("records failed dead-end recovery as a terminal partial-report reason", async () => {
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      const adb = {
+        executeCommand: async () => { throw new Error("Back navigation was rejected"); }
+      } as AdbClient;
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
+
+      try {
+        await (explore as any).handleDeadEnd();
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
 
       expect((explore as any).stopReason).toBe(
-        "Back-navigation recovery failed: pressButton failed on android: Back navigation was rejected"
+        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
       );
     });
 
     test("records failed home reset as a terminal partial-report reason", async () => {
-      ToolRegistry.register("homeScreen", "homeScreen", {}, async () => ({
-        success: false,
-        error: "Home navigation was rejected"
-      }));
-      explore = new Explore(device, null, fakeTimer, fakeGraph);
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      const adb = {
+        executeCommand: async () => { throw new Error("Home navigation was rejected"); }
+      } as AdbClient;
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
-      await (explore as any).resetToHome();
+      try {
+        await (explore as any).resetToHome();
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
 
       expect((explore as any).stopReason).toBe(
-        "Home-screen recovery failed: homeScreen failed on android: Home navigation was rejected"
+        "Home-screen recovery failed: Failed to press button: Home navigation was rejected"
       );
     });
 
     test("returns a partial report when dead-end recovery fails", async () => {
-      ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
-        success: false,
-        error: "Back navigation was rejected"
-      }));
-      explore = new Explore(device, null, fakeTimer, fakeGraph);
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" })
+      } as never);
+      const adb = {
+        executeCommand: async () => { throw new Error("Back navigation was rejected"); }
+      } as AdbClient;
+      explore = new Explore(device, adb, fakeTimer, fakeGraph);
       (explore as any).observeScreen = {
         execute: async () => createMockObservation([], "com.test.app")
       };
       (explore as any).selectNextElement = async () => undefined;
 
-      const result = await explore.execute({
-        maxInteractions: 1,
-        timeoutMs: 5000,
-        packageName: "com.test.app"
-      });
+      let result;
+      try {
+        result = await explore.execute({
+          maxInteractions: 1,
+          timeoutMs: 5000,
+          packageName: "com.test.app"
+        });
+      } finally {
+        ctrlProxySpy.mockRestore();
+      }
 
       expect(result.success).toBe(true);
       expect(result.stopReason).toBe(
-        "Back-navigation recovery failed: pressButton failed on android: Back navigation was rejected"
+        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
       );
     });
   });

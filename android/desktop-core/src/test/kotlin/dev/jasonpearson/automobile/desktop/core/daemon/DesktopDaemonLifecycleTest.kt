@@ -272,6 +272,12 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `extends the command timeout for a configured daemon startup timeout`() {
+    assertEquals(125_000L, SystemDaemonCommandExecutor.commandTimeoutMillis("120000"))
+    assertEquals(60_000L, SystemDaemonCommandExecutor.commandTimeoutMillis("invalid"))
+  }
+
+  @Test
   fun `retries a transient PID-file read before deciding to restart`() {
     val commands = FakeDaemonCommandExecutor()
     val timer = FakeDaemonRetryTimer()

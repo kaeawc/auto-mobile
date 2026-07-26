@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
 // Test result state
@@ -178,7 +179,7 @@ internal fun McpProcessesPanel(
         deviceImages = emptyList()
         when (
           val result =
-            withContext(Dispatchers.IO) {
+            runInterruptible(Dispatchers.IO) {
               DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
             }
         ) {
@@ -328,7 +329,7 @@ internal fun McpProcessesPanel(
         LOG.debug("[AutoMobile IDE] Starting daemon...")
         when (
           val result =
-            withContext(Dispatchers.IO) {
+            runInterruptible(Dispatchers.IO) {
               DesktopDaemonLifecycle().ensureVersionMatchedDaemon()
             }
         ) {

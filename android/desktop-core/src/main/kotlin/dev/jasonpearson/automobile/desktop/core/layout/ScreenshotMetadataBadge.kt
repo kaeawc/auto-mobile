@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,8 +9,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -37,6 +41,40 @@ fun ScreenshotMetadataOverlay(
     if (hasSourceLabel) {
       ScreenshotSourceLabel(format = format, captureSource = captureSource)
     }
+  }
+}
+
+/**
+ * Non-blocking error banner for a failed device-control tap (issue #3347). Surfaces the daemon's
+ * actionable error message returned by the `input/tap` helper so a failed tap is visible without
+ * crashing the live layout view. Click the banner to dismiss it.
+ */
+@Composable
+fun DeviceControlTapErrorBanner(
+  message: String,
+  onDismiss: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Row(
+    modifier =
+      modifier
+        .background(Color(0xFFD32F2F).copy(alpha = 0.9f), RoundedCornerShape(6.dp))
+        .clickable(onClick = onDismiss)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 12.dp, vertical = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Text(
+      text = "Tap failed: $message",
+      color = Color.White,
+      fontSize = 11.sp,
+    )
+    Text(
+      text = "✕", // ✕ dismiss
+      color = Color.White.copy(alpha = 0.8f),
+      fontSize = 11.sp,
+    )
   }
 }
 

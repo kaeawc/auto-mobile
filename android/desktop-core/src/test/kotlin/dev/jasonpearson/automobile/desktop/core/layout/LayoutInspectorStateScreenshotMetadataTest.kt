@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.layout
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -56,6 +57,62 @@ class LayoutInspectorStateScreenshotMetadataTest {
 
     assertFalse(state.screenshotFallback)
     assertNull(state.screenshotFallbackReason)
+  }
+
+  @Test
+  fun `updateScreenshot records the source device and disconnect clears it`() {
+    val state = LayoutInspectorState()
+    assertNull(state.renderedDeviceId)
+
+    state.updateScreenshot(
+      data = byteArrayOf(1),
+      width = 100,
+      height = 200,
+      timestamp = 1L,
+      deviceId = "emulator-5554",
+    )
+    assertEquals("emulator-5554", state.renderedDeviceId)
+
+    state.disconnect()
+    assertNull(state.renderedDeviceId)
+  }
+
+  @Test
+  fun `updateHierarchy records the source device and disconnect clears it`() {
+    val state = LayoutInspectorState()
+
+    state.updateHierarchy(
+      newHierarchy = LayoutInspectorMockData.mockHierarchy,
+      deviceId = "emulator-5554",
+    )
+    assertEquals("emulator-5554", state.renderedHierarchyDeviceId)
+
+    state.disconnect()
+    assertNull(state.renderedHierarchyDeviceId)
+  }
+
+  @Test
+  fun `invalidateRenderedDeviceIdentity clears both device ids but keeps the frame`() {
+    val state = LayoutInspectorState()
+    state.updateScreenshot(
+      data = byteArrayOf(1),
+      width = 100,
+      height = 200,
+      timestamp = 1L,
+      deviceId = "emulator-5554",
+    )
+    state.updateHierarchy(
+      newHierarchy = LayoutInspectorMockData.mockHierarchy,
+      deviceId = "emulator-5554",
+    )
+
+    state.invalidateRenderedDeviceIdentity()
+
+    assertNull(state.renderedDeviceId)
+    assertNull(state.renderedHierarchyDeviceId)
+    // The frame is retained for inspection.
+    assertNotNull(state.screenshotData)
+    assertNotNull(state.hierarchy)
   }
 
   @Test

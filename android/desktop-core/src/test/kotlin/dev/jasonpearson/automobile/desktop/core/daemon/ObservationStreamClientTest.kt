@@ -242,6 +242,49 @@ class ObservationStreamClientTest {
       }
     }
 
+  @Test
+  fun `resetLayoutReplayCache drops the buffered layout frame for new subscribers`() = runTest {
+    // Reproduces Live Layout reopen: a screenshot+hierarchy frame is buffered (replay=1), then the
+    // layout replay is cleared so a resubscribing collector must NOT replay the stale pre-close
+    // frame
+    // and re-arm control from it (issue #3347).
+    val client = ObservationStreamClient()
+
+    client.handleMessage(
+      """
+      {
+        "type": "hierarchy_update",
+        "deviceId": "emulator-5554",
+        "timestamp": 1000,
+        "data": { "packageName": "com.example" }
+      }
+      """
+        .trimIndent()
+    )
+    client.handleMessage(
+      """
+      {
+        "type": "screenshot_update",
+        "deviceId": "emulator-5554",
+        "timestamp": 1001,
+        "screenshotBase64": "aW1hZ2U=",
+        "screenWidth": 100,
+        "screenHeight": 200
+      }
+      """
+        .trimIndent()
+    )
+
+    // Before reset, a new subscriber replays the buffered frame.
+    client.screenshotUpdates.test { assertEquals("emulator-5554", awaitItem().deviceId) }
+
+    client.resetLayoutReplayCache()
+
+    // After reset, a new subscriber gets nothing until a genuinely fresh frame arrives.
+    client.hierarchyUpdates.test { expectNoEvents() }
+    client.screenshotUpdates.test { expectNoEvents() }
+  }
+
   private fun deviceConnectionLostMessage(): String =
     """
     {

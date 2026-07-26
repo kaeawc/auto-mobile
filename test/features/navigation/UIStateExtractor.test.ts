@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ObserveResult } from "../../../src/models";
+import type { SwipeOnOptions } from "../../../src/models";
 import { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
 describe("UIStateExtractor (iOS hierarchy)", () => {
@@ -105,5 +106,72 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
       windowId: 22,
       windowType: "3"
     });
+  });
+});
+
+describe("UIStateExtractor.createScrollPosition", () => {
+  function opts(overrides: Partial<SwipeOnOptions>): SwipeOnOptions {
+    return { direction: "up", ...overrides } as SwipeOnOptions;
+  }
+
+  test("returns undefined when there is no lookFor element search", () => {
+    expect(UIStateExtractor.createScrollPosition(opts({ direction: "up" }))).toBeUndefined();
+  });
+
+  test("returns undefined when the swipe direction is missing", () => {
+    const noDirection = { lookFor: { text: "Save" } } as unknown as SwipeOnOptions;
+    expect(UIStateExtractor.createScrollPosition(noDirection)).toBeUndefined();
+  });
+
+  test("records the finger direction verbatim for a default finger-gesture scroll", () => {
+    const result = UIStateExtractor.createScrollPosition(
+      opts({ lookFor: { text: "Save" }, direction: "up" })
+    );
+    expect(result?.direction).toBe("up");
+    expect(result?.targetElement).toEqual({ text: "Save", resourceId: undefined });
+  });
+
+  test("inverts the direction for a scrollTowardsDirection content gesture", () => {
+    // Content scrolling "down" is revealed by a finger swipe "up"
+    // (SCROLL_TO_FINGER_DIRECTION.down === "up"). A non-inverting mutant that
+    // maps down -> down is caught here.
+    const result = UIStateExtractor.createScrollPosition(
+      opts({
+        lookFor: { text: "Save" },
+        direction: "down",
+        gestureType: "scrollTowardsDirection",
+      })
+    );
+    expect(result?.direction).toBe("up");
+  });
+
+  test("carries the requested scroll speed onto the scroll position", () => {
+    const result = UIStateExtractor.createScrollPosition(
+      opts({ lookFor: { text: "Save" }, direction: "up", speed: "fast" })
+    );
+    expect(result?.speed).toBe("fast");
+  });
+
+  test("captures container text and resource id when a container is specified", () => {
+    const result = UIStateExtractor.createScrollPosition(
+      opts({
+        lookFor: { elementId: "id/save" },
+        direction: "up",
+        container: { text: "List", elementId: "id/list" },
+      })
+    );
+    expect(result?.targetElement).toEqual({ text: undefined, resourceId: "id/save" });
+    expect(result?.container).toEqual({ text: "List", resourceId: "id/list" });
+  });
+
+  test("records a target-less scroll position for an empty lookFor", () => {
+    const result = UIStateExtractor.createScrollPosition(
+      opts({ lookFor: {}, direction: "up" })
+    );
+    expect(result).toBeDefined();
+    expect(result?.direction).toBe("up");
+    expect(result?.targetElement).toEqual({ text: undefined, resourceId: undefined });
+    expect(result?.speed).toBeUndefined();
+    expect(result?.container).toBeUndefined();
   });
 });

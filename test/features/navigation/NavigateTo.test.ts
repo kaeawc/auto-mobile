@@ -2,6 +2,8 @@ import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { SmartNavigationHelper } from "../../../src/features/navigation/SmartNavigationHelper";
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
+import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
+import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { BootedDevice } from "../../../src/models";
 import { z } from "zod";
@@ -358,6 +360,166 @@ describe("NavigateTo", () => {
       expect(result.path).toEqual(["pressButton(back)"]);
       expect(fakeAdbFactory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent 4"]);
       expect(fakeTimer.getSleepHistory()).toEqual([300]);
+    });
+  });
+
+  describe("failure envelopes", () => {
+    // A Timer whose now() replays a fixed script (last value sticky), so we can
+    // force the elapsed clock to cross the 30s ceiling or report a real, non-zero
+    // durationMs without any wall-clock dependency. startTime consumes the first
+    // reading; the in-loop timeout check and the envelope's durationMs consume
+    // the rest.
+    class ScriptedTimer extends FakeTimer {
+      private idx = 0;
+      constructor(private readonly script: number[]) {
+        super();
+      }
+      now(): number {
+        const value = this.script[Math.min(this.idx, this.script.length - 1)];
+        this.idx += 1;
+        return value;
+      }
+    }
+
+    function toolEdge(from: string, to: string): NavigationEdge {
+      return {
+        from,
+        to,
+        timestamp: 0,
+        edgeType: "tool",
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Next", action: "tap", platform: "android" },
+          timestamp: 0,
+        },
+      };
+    }
+
+    test("aborts with a timeout envelope once the 30s ceiling is crossed", async () => {
+      await fakeGraph.recordNavigationEvent({
+        destination: "HomeScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: Date.now(),
+        sequenceNumber: 0,
+      });
+      fakeGraph.setPathResult({
+        found: true,
+        path: [toolEdge("HomeScreen", "TargetScreen")],
+        startScreen: "HomeScreen",
+        targetScreen: "TargetScreen",
+      });
+
+      // startTime = 0, first in-loop check = 40_000 (> MAX_TIMEOUT_MS 30_000).
+      const timer = new ScriptedTimer([0, 40_000]);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph, timer);
+
+      const result = await navigateTo.execute({
+        targetScreen: "TargetScreen",
+        platform: "android",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Navigation timeout (30 seconds)");
+      expect(result.stepsExecuted).toBe(0);
+      expect(result.partialPath).toEqual([]);
+      // A real elapsed duration, not a hard-coded 0 (guards the durationMs mutant).
+      expect(result.durationMs).toBe(40_000);
+      // The offending tool step must never have run.
+      expect(toolCallLog).toHaveLength(0);
+    });
+
+    test("reports the failing step number and partial path when a step throws", async () => {
+      await fakeGraph.recordNavigationEvent({
+        destination: "HomeScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: Date.now(),
+        sequenceNumber: 0,
+      });
+      fakeGraph.setPathResult({
+        found: true,
+        path: [toolEdge("HomeScreen", "TargetScreen")],
+        startScreen: "HomeScreen",
+        targetScreen: "TargetScreen",
+      });
+
+      const throwingUiStateSetup: UIStateSetup = {
+        setupUIState: async () => {
+          throw new Error("ui-state boom");
+        },
+        setupScrollPosition: async () => null,
+      };
+
+      // startTime = 0, in-loop timeout check = 100 (no timeout), catch durationMs = 31_000.
+      const timer = new ScriptedTimer([0, 100, 31_000]);
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        throwingUiStateSetup,
+        null,
+        fakeGraph,
+        timer
+      );
+
+      const result = await navigateTo.execute({
+        targetScreen: "TargetScreen",
+        platform: "android",
+      });
+
+      expect(result.success).toBe(false);
+      // 1-based step index (guards the `step ${i}` off-by-one mutant).
+      expect(result.error).toContain("Failed to execute step 1");
+      expect(result.error).toContain("ui-state boom");
+      expect(result.partialPath).toEqual([]);
+      // Bundled with A3 so the durationMs assertion measures a real elapsed span.
+      expect(result.durationMs).toBe(31_000);
+    });
+
+    test("records a back-button hop for an edge with no known interaction", async () => {
+      await fakeGraph.recordNavigationEvent({
+        destination: "HomeScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: Date.now(),
+        sequenceNumber: 0,
+      });
+      fakeGraph.setPathResult({
+        found: true,
+        path: [
+          { from: "HomeScreen", to: "TargetScreen", timestamp: 0, edgeType: "back" },
+        ],
+        startScreen: "HomeScreen",
+        targetScreen: "TargetScreen",
+      });
+
+      const screenWaiter: ScreenTransitionWaiter = {
+        waitForScreen: async screenName => screenName === "TargetScreen",
+      };
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        null,
+        screenWaiter,
+        fakeGraph,
+        timer
+      );
+
+      const result = await navigateTo.execute({
+        targetScreen: "TargetScreen",
+        platform: "android",
+      });
+
+      expect(result.success).toBe(true);
+      // Guards the dropped `executedPath.push("pressButton(back)")` in the
+      // no-interaction branch of the step loop.
+      expect(result.path).toEqual(["pressButton(back)"]);
+      expect(result.stepsExecuted).toBe(1);
     });
   });
 

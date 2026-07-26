@@ -32,7 +32,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
   private edgeSummaries: NavigationGraphSummaryEdge[] = [];
   private nextNodeId = 1;
   private nextEdgeId = 1;
-  private graphUpdateListener?: () => void;
+  private graphUpdateListeners: Array<() => void> = [];
 
   // Call tracking
   private methodCalls: Map<string, any[][]> = new Map();
@@ -143,7 +143,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
     this.edgeSummaries = [];
     this.nextNodeId = 1;
     this.nextEdgeId = 1;
-    this.graphUpdateListener = undefined;
+    this.graphUpdateListeners = [];
     this.pathResult = null;
     this.methodCalls.clear();
   }
@@ -366,12 +366,16 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
   }
 
   setGraphUpdateListener(listener: (() => void) | null): void {
-    this.graphUpdateListener = listener ?? undefined;
+    if (listener === null) {
+      this.graphUpdateListeners = [];
+    } else {
+      this.graphUpdateListeners.push(listener);
+    }
   }
 
   private emitGraphUpdated(): void {
-    if (this.graphUpdateListener) {
-      this.graphUpdateListener();
+    for (const listener of this.graphUpdateListeners) {
+      listener();
     }
   }
 

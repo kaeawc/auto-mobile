@@ -134,6 +134,47 @@ describe("ScreenFingerprint - Enhanced Implementation", () => {
       expect(result.method).toBe(FingerprintMethod.SHALLOW_SCROLLABLE);
       expect(result.keyboardDetected).toBe(false);
     });
+
+    // The cache freshness gate is `cacheAge < cacheTTL`, where updatedAt is
+    // 1234567890 and cacheAge = updatedAt - cachedNavigationIdTimestamp. These
+    // rows pin the boundary, including the explicit `cacheTTL: 0` "never cache"
+    // request that `||` silently rewrote to the default TTL before the `??` fix.
+    interface CacheTtlRow {
+      name: string;
+      ageMs: number;
+      cacheTTL?: number;
+      usesCache: boolean;
+    }
+
+    const cacheTtlRows: CacheTtlRow[] = [
+      { name: "uses cache when age is within an explicit TTL", ageMs: 5000, cacheTTL: 10000, usesCache: true },
+      { name: "rejects cache when age equals the TTL boundary", ageMs: 10000, cacheTTL: 10000, usesCache: false },
+      { name: "rejects cache when age exceeds the TTL", ageMs: 15000, cacheTTL: 10000, usesCache: false },
+      { name: "rejects cache when the requested TTL is negative", ageMs: 5000, cacheTTL: -1, usesCache: false },
+      { name: "rejects cache when the requested TTL is zero (no cache)", ageMs: 5000, cacheTTL: 0, usesCache: false },
+    ];
+
+    test.each(cacheTtlRows)("$name", ({ ageMs, cacheTTL, usesCache }) => {
+      const hierarchyWithKeyboard = createHierarchy({
+        node: {
+          "content-desc": "Delete",
+          "node": { "content-desc": "Enter" },
+        },
+      });
+
+      const result = ScreenFingerprint.compute(hierarchyWithKeyboard, {
+        cachedNavigationId: "navigation.TextScreen",
+        cachedNavigationIdTimestamp: 1234567890 - ageMs,
+        cacheTTL,
+      });
+
+      expect(result.keyboardDetected).toBe(true);
+      if (usesCache) {
+        expect(result.method).toBe(FingerprintMethod.CACHED_NAVIGATION_ID);
+      } else {
+        expect(result.method).not.toBe(FingerprintMethod.CACHED_NAVIGATION_ID);
+      }
+    });
   });
 
   describe("Keyboard Detection", () => {

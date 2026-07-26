@@ -195,36 +195,15 @@ describe("NavigationScreenshotManager", () => {
   });
 
   describe("generateFilename", () => {
-    test("should generate unique filename with hash and timestamp", () => {
+    test("names the file {md5(appId_screenName).slice(0,12)}_{timestamp}.webp", () => {
       const filename = manager.generateFilename("com.test.app", "HomeScreen");
 
-      expect(filename).toMatch(/^[a-f0-9]+_\d+\.webp$/);
-      expect(filename).toContain("0"); // timestamp from fake timer starts at 0
-    });
-
-    test("should generate consistent hash for same app/screen", () => {
-      const filename1 = manager.generateFilename("com.test.app", "HomeScreen");
-      fakeTimer.advanceTime(1000);
-      const filename2 = manager.generateFilename("com.test.app", "HomeScreen");
-
-      // Hash should be the same, but timestamp different
-      const hash1 = filename1.split("_")[0];
-      const hash2 = filename2.split("_")[0];
-      expect(hash1).toBe(hash2);
-
-      // Timestamps should be different
-      const ts1 = filename1.split("_")[1]?.split(".")[0];
-      const ts2 = filename2.split("_")[1]?.split(".")[0];
-      expect(ts1).not.toBe(ts2);
-    });
-
-    test("should generate different hash for different screens", () => {
-      const filename1 = manager.generateFilename("com.test.app", "HomeScreen");
-      const filename2 = manager.generateFilename("com.test.app", "SettingsScreen");
-
-      const hash1 = filename1.split("_")[0];
-      const hash2 = filename2.split("_")[0];
-      expect(hash1).not.toBe(hash2);
+      // Exact 12-char md5 prefix of "com.test.app_HomeScreen". Pinning the exact
+      // hash (not merely "hex prefix") subsumes both the same-input-same-hash and
+      // different-input-different-hash tautologies while also guarding the
+      // hash-input string, the digest, the truncation length, and the .webp
+      // extension against a filename-format change. Timestamp is 0 (fake clock).
+      expect(filename).toBe("6d8c20971f5d_0.webp");
     });
   });
 

@@ -203,6 +203,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
             metadata: event.metadata
         )
         eventBuffer?.add(sdkEvent)
+        // Navigation is control-plane state for observe/diff, not bulk telemetry.
+        // Flush it immediately so a post-action observation can fetch the current
+        // screen identity instead of waiting for the regular telemetry cadence.
+        eventBuffer?.flush()
     }
 
     /// Number of registered listeners.

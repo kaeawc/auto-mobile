@@ -10,7 +10,7 @@ export interface ViewHierarchy {
    * Return the latest app-provided iOS navigation identity, if this hierarchy
    * reader has one. Optional so hierarchy-only fakes do not need an SDK seam.
    */
-  getScreenIdentity?(applicationId?: string): ScreenIdentity | undefined;
+  getScreenIdentity?(applicationId?: string): ScreenIdentity | undefined | Promise<ScreenIdentity | undefined>;
 
   /**
    * Retrieve the view hierarchy of the current screen.

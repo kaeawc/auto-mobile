@@ -2129,10 +2129,7 @@ describe("IOSCtrlProxyClient", function() {
       })) as unknown as typeof fetch;
 
       try {
-        (testClient as unknown as { startSdkEventPolling(): void }).startSdkEventPolling();
-        // Auto-advance timer fires the interval via setImmediate; flush the async
-        // fetch → decode → recordSdkEvent chain.
-        await flushPromises(8);
+        await (testClient as unknown as { pollSdkEvents(): Promise<void> }).pollSdkEvents();
 
         expect(fakeIngestor.sdkEvents.length).toBe(1);
         expect(fakeIngestor.sdkEvents[0].applicationId).toBe("com.example.ios");
@@ -2144,7 +2141,49 @@ describe("IOSCtrlProxyClient", function() {
         });
       } finally {
         globalThis.fetch = originalFetch;
-        (testClient as unknown as { stopSdkEventPolling(): void }).stopSdkEventPolling();
+        await testClient.close();
+      }
+    });
+
+    test("drains a navigation envelope before returning the SDK screen identity", async function() {
+      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      const payload = {
+        destination: "ScrollPerformanceDemo",
+        timestamp: 4242,
+        arguments: { tab: "demos" },
+        metadata: { presentation: "push" },
+      };
+      const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => ({
+        ok: true,
+        json: async () => [
+          { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encoded }] },
+        ],
+      })) as unknown as typeof fetch;
+
+      try {
+        const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
+
+        expect(identity).toMatchObject({
+          platform: "ios",
+          source: "sdk",
+          confidence: "high",
+          components: {
+            bundleId: "com.example.ios",
+            navigationRoute: "ScrollPerformanceDemo",
+            selectedTab: "demos",
+            presentation: "push",
+          },
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
         await testClient.close();
       }
     });

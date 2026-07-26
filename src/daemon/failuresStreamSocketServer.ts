@@ -14,6 +14,17 @@ const STREAM_LIMIT_MAX = 500;
 const failureAnalyticsRepository = new FailureAnalyticsRepository();
 
 /**
+ * Narrow view of {@link FailureAnalyticsRepository} — exactly the four query
+ * methods the handlers call. Injected via the constructor so tests can exercise
+ * the request handlers with a fake and never resolve the real file-backed
+ * database (issue #3067).
+ */
+export type FailuresStreamRepository = Pick<
+  FailureAnalyticsRepository,
+  "getNotificationsSince" | "getAggregatedGroups" | "getTimelineData" | "acknowledgeNotifications"
+>;
+
+/**
  * Get duration in ms for a date range preset
  */
 function getDateRangeDuration(preset: DateRangePreset): number {
@@ -49,14 +60,21 @@ function normalizeTimestamp(value: unknown, label: string): number | undefined {
     if (trimmed === "") {
       return undefined;
     }
-    // Try parsing as ISO string or number
+    // Parse a bare numeric string as an epoch-ms number FIRST: `new Date("1000")`
+    // yields the year 1000 (a large negative epoch), not 1000ms after the epoch,
+    // so a numeric cursor like "1000" or " 1 " must be read as Number, and "-5"
+    // must trip the negative guard rather than becoming a year.
+    const num = Number(trimmed);
+    if (Number.isFinite(num)) {
+      if (num < 0) {
+        throw new Error(`Invalid ${label}: ${value}`);
+      }
+      return num;
+    }
+    // Fall back to ISO date parsing for non-numeric strings.
     const date = new Date(trimmed);
     if (!Number.isNaN(date.getTime())) {
       return date.getTime();
-    }
-    const num = Number(trimmed);
-    if (Number.isFinite(num) && num >= 0) {
-      return num;
     }
     throw new Error(`Invalid ${label}: ${value}`);
   }
@@ -133,8 +151,15 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(FAILURES_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  private readonly repository: FailuresStreamRepository;
+
+  constructor(
+    socketPath: string = getSocketPath(FAILURES_STREAM_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+    repository: FailuresStreamRepository = failureAnalyticsRepository
+  ) {
     super(socketPath, timer, "FailuresStream");
+    this.repository = repository;
   }
 
   protected async handleRequest(
@@ -179,7 +204,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
       startTime = endTime - getDateRangeDuration(dateRange);
     }
 
-    const result = await failureAnalyticsRepository.getNotificationsSince({
+    const result = await this.repository.getNotificationsSince({
       sinceTimestamp,
       sinceId,
       startTime,
@@ -211,7 +236,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
       startTime = endTime - getDateRangeDuration(dateRange);
     }
 
-    const result = await failureAnalyticsRepository.getAggregatedGroups({
+    const result = await this.repository.getAggregatedGroups({
       startTime,
       endTime,
       type: request.type,
@@ -246,7 +271,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
       startTime = startTime ?? (endTime - 24 * 60 * 60 * 1000);
     }
 
-    const result = await failureAnalyticsRepository.getTimelineData({
+    const result = await this.repository.getTimelineData({
       startTime,
       endTime,
       aggregation,
@@ -274,7 +299,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
       }
     }
 
-    await failureAnalyticsRepository.acknowledgeNotifications(ids);
+    await this.repository.acknowledgeNotifications(ids);
 
     return {
       success: true,

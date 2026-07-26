@@ -371,6 +371,34 @@ describe("DevicePool autolock", () => {
       expect(device.autolockSessionId).toBeUndefined();
     });
 
+    it("a stale lock released by the idle timeout lets a new session acquire the device", async () => {
+      // Symmetric to the auto-release cases above: an expired session's lock must
+      // not permanently strand the device. Prove a real before/after transition on
+      // the acquire itself — the new session is refused while the stale lock holds
+      // the device, then succeeds once the idle timeout frees it.
+      await initializeLiveAndroidDevice();
+
+      await pool.autolockDevice("emulator-5554", "android");
+      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
+
+      // BEFORE advancing time: the stale lock still holds the only device busy, so
+      // a new session cannot acquire it. timeoutMs === the 1s wait interval yields
+      // maxAttempts 1, so allocation fails fast (no retry sleep, no hang).
+      await expect(
+        pool.assignMultipleDevices(["new-session"], 1000, "android"),
+      ).rejects.toThrow(ActionableError);
+      expect(pool.getDevice("emulator-5554")!.sessionId).not.toBe("new-session");
+
+      // Advance past the idle timeout (60s) and the cleanup interval (5 min) so the
+      // periodic sweep releases the expired autolock session's device.
+      timer.advanceTime(6 * 60 * 1000);
+
+      // AFTER advancing time: the freed device is acquirable by the new session.
+      const assignments = await pool.assignMultipleDevices(["new-session"], 1000, "android");
+      expect(assignments.get("new-session")).toBe("emulator-5554");
+      expect(pool.getDevice("emulator-5554")!.sessionId).toBe("new-session");
+    });
+
     it("heartbeat before the idle timeout keeps the device locked", async () => {
       await initializeLiveAndroidDevice();
 

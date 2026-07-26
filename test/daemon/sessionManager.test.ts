@@ -377,7 +377,11 @@ describe("SessionManager", () => {
         mgr.recordHeartbeat("s1");
         await Promise.resolve(); // let the void-tracked write run
         expect(activity).toContain("s1");
-        expect(barrier.ran.length).toBeGreaterThan(0);
+        // Exactly one barrier-tracked write: a single recordHeartbeat drives one
+        // fire-and-forget recordSessionActivity. createSession's persistSession is
+        // awaited, not barrier-tracked. A regression that fires the barrier twice
+        // for one logical write (#2912's failure mode) would push this to 2.
+        expect(barrier.ran.length).toBe(1);
       } finally {
         mgr.stopCleanupTimer();
       }
@@ -415,7 +419,10 @@ describe("SessionManager", () => {
         fakeTimer.advanceTime(36 * 60 * 1000);
         await Promise.resolve();
         expect(released).toContain("s1");
-        expect(barrier.ran.length).toBeGreaterThan(0);
+        // Exactly one barrier-tracked write: the cleanup sweep releases the single
+        // expired session once, routing one fire-and-forget markReleased through the
+        // barrier. A duplicate-write regression would push this to 2.
+        expect(barrier.ran.length).toBe(1);
       } finally {
         mgr.stopCleanupTimer();
       }

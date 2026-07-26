@@ -139,7 +139,7 @@ describe("UnixSocketServer input/key", () => {
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
-    (server as unknown as { createMcpClient: typeof createMcpClient }).createMcpClient = createMcpClient;
+    server.mcpClientFactory = createMcpClient;
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {

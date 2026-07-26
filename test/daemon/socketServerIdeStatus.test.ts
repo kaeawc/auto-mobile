@@ -11,7 +11,9 @@ import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
-import { RELEASE_CHECKSUM_REGISTRY } from "../../src/constants/release";
+import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 function createFakeDaemonState() {
   return {
@@ -92,7 +94,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     }
   });
 
-  test("ide/status returns expected shape", async () => {
+  test("ide/status returns a usable, self-consistent update artifact", async () => {
     const response = await sendRequest(socketPath, "ide/status");
 
     expect(response.success).toBe(true);
@@ -102,17 +104,29 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       android: { ctrlProxy: { expectedSha256: string; url: string } };
       ios: { xcTestService: { expectedSha256: string; expectedAppHash: string; url: string } };
     };
-    expect(typeof result.version).toBe("string");
-    expect(typeof result.releaseVersion).toBe("string");
-    expect(result.android).toBeDefined();
-    expect(result.android.ctrlProxy).toBeDefined();
-    expect(typeof result.android.ctrlProxy.expectedSha256).toBe("string");
-    expect(typeof result.android.ctrlProxy.url).toBe("string");
-    expect(result.ios).toBeDefined();
-    expect(result.ios.xcTestService).toBeDefined();
-    expect(typeof result.ios.xcTestService.expectedSha256).toBe("string");
-    expect(typeof result.ios.xcTestService.expectedAppHash).toBe("string");
-    expect(typeof result.ios.xcTestService.url).toBe("string");
+    const entry = RELEASE_CHECKSUM_REGISTRY[0];
+
+    expect(result.version.length).toBeGreaterThan(0);
+    // No env override in this test, so the daemon resolves to the newest pinned
+    // release — not the floating "latest" tag (#2746).
+    expect(result.releaseVersion).toBe(entry.version);
+
+    // Android artifact must be actually fetchable + verifiable: the checksum is a
+    // real 64-hex digest equal to the registry's, and the URL points at this
+    // version's apk. An empty-string url/sha (the prior weakness) fails both.
+    expect(result.android.ctrlProxy.expectedSha256).toMatch(SHA256_HEX);
+    expect(result.android.ctrlProxy.expectedSha256).toBe(entry.apkSha256);
+    expect(result.android.ctrlProxy.url).toContain(`/${entry.version}/`);
+    expect(result.android.ctrlProxy.url.endsWith("control-proxy-debug.apk")).toBe(true);
+
+    // iOS xctest service, same contract. expectedAppHash is deliberately the empty
+    // "skip verification" sentinel (IOS_CTRL_PROXY_APP_HASH), so pin it to that
+    // constant rather than a 64-hex shape.
+    expect(result.ios.xcTestService.expectedSha256).toMatch(SHA256_HEX);
+    expect(result.ios.xcTestService.expectedSha256).toBe(entry.ipaSha256);
+    expect(result.ios.xcTestService.url).toContain(`/${entry.version}/`);
+    expect(result.ios.xcTestService.url.endsWith("control-proxy.ipa")).toBe(true);
+    expect(result.ios.xcTestService.expectedAppHash).toBe(IOS_CTRL_PROXY_APP_HASH);
   });
 
   test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {

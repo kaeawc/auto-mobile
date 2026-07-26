@@ -160,6 +160,18 @@ describe("DevicePool", () => {
         expect(device?.sessionId).toBeNull();
       }
     });
+
+    // Boundary row (PARAM-7): the pool is keyed by device id, so two devices
+    // with the same id collapse to a single tracked entry rather than being
+    // double-counted. Pins the de-dup invariant a duplicate-id feed depends on.
+    test("collapses duplicate device ids to a single tracked device", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5554"),
+      ]);
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
+      expect(devicePool.getAvailableDeviceCount()).toBe(1);
+    });
   });
 
   describe("refreshDevices", () => {
@@ -1216,15 +1228,6 @@ describe("DevicePool", () => {
   });
 
   describe("session tracking", () => {
-    test("should set session tracking when device is initialized", async () => {
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
-
-      // Verify setSessionTracking was called
-      const apps = await fakeAppsRepo.listInstalledApps("emulator-5554");
-      // No apps yet, but we can verify the repository was called by checking it doesn't error
-      expect(apps).toEqual([]);
-    });
-
     test("should clear cache when device is removed", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
 
@@ -1237,17 +1240,6 @@ describe("DevicePool", () => {
       await devicePool.removeDevice("emulator-5554");
       const appsAfter = await fakeAppsRepo.listInstalledApps("emulator-5554");
       expect(appsAfter.length).toBe(0);
-    });
-
-    test("should use injected repository", async () => {
-      // Verify we're using the fake repository by checking initial state
-      const initialApps = await fakeAppsRepo.listInstalledApps("any-device");
-      expect(initialApps).toEqual([]);
-
-      // Add device and verify tracking works
-      await devicePool.addDevice(createBootedDevice("test-device"));
-      const appsAfter = await fakeAppsRepo.listInstalledApps("test-device");
-      expect(appsAfter).toEqual([]);
     });
   });
 });

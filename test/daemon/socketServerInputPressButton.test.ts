@@ -206,7 +206,7 @@ describe("UnixSocketServer input/pressButton", () => {
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
-    (server as unknown as { createMcpClient: typeof createMcpClient }).createMcpClient = createMcpClient;
+    server.mcpClientFactory = createMcpClient;
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {

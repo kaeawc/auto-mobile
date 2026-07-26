@@ -132,8 +132,19 @@ describe("DeviceService Interface Compliance", () => {
         fakeTimer
       );
 
-      // The Apple-specific methods (requestLaunchApp/requestPressHome/…) are compile-time-proven by
-      // the client's type; the behavioral assertion exercises the client's initial disconnected state.
+      // Pin the Apple-specific control surface at compile time: dropping any of these
+      // from IOSCtrlProxyClient fails tsc HERE, which is what this test's name guards.
+      const appleControls: {
+        requestLaunchApp: typeof client.requestLaunchApp;
+        requestPressHome: typeof client.requestPressHome;
+        requestPressButton: typeof client.requestPressButton;
+      } = {
+        requestLaunchApp: client.requestLaunchApp,
+        requestPressHome: client.requestPressHome,
+        requestPressButton: client.requestPressButton,
+      };
+      void appleControls;
+      // The behavioral assertion exercises the client's initial disconnected state.
       expect(client.isConnected()).toBe(false);
 
       void client.close();

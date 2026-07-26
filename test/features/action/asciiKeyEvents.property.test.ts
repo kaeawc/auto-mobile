@@ -27,8 +27,12 @@ const directSym = fc.constantFrom(...Object.keys(DIRECT_CODES));
 const shiftedSym = fc.constantFrom(...Object.keys(SHIFTED_CODES));
 const shiftRequiring = fc.oneof(upper, shiftedSym);
 const nonShift = fc.oneof(lower, digit, directSym);
-// Untypeable single code units: control chars and BMP non-ASCII.
-const untypeable = fc.oneof(fromRange(0x00, 0x1f), fc.constant(""), fromRange(0x0080, 0xffff));
+// Untypeable inputs: control chars, BMP non-ASCII, and astral code points
+// (U+10000+). Real callers pass astral chars as two-code-unit strings via
+// Array.from(text); fromCharCode makes only single units, so generate the
+// astral range separately with String.fromCodePoint.
+const astral = fc.integer({ min: 0x10000, max: 0x10ffff }).map(cp => String.fromCodePoint(cp));
+const untypeable = fc.oneof(fromRange(0x00, 0x1f), fc.constant(""), fromRange(0x0080, 0xffff), astral);
 const anyChar = fc.oneof(nonShift, shiftRequiring, untypeable, fromRange(0, 0xffff));
 
 const eqPlan = (a: KeyEventPlan | null, b: KeyEventPlan | null): boolean => JSON.stringify(a) === JSON.stringify(b);

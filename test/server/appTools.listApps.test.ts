@@ -169,6 +169,11 @@ describe("app permission tools", () => {
     expect(() => setAppTool!.schema.parse({
       appId: "com.example.app",
       action: "reset",
+      permissions: [],
+    })).toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      action: "reset",
       permissions: ["camera"],
       platform: "android",
     })).toThrow();

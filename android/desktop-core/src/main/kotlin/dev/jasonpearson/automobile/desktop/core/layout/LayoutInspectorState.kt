@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import dev.jasonpearson.automobile.desktop.domain.HierarchyFrameFacts
+import dev.jasonpearson.automobile.desktop.domain.ScreenshotFrameFacts
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,8 +27,16 @@ import kotlinx.coroutines.launch
  * @param debounceContext coroutine context for the hierarchy-update debounce. Defaults to the UI
  *   dispatcher in production; tests inject a `TestDispatcher` to drive the debounce
  *   deterministically with virtual time (no real timers).
+ * @param nowMs the client's MONOTONIC clock, stamped onto each applied update so device control can
+ *   bound how old the rendered frame is (issue #3348). Monotonic, not wall time: a backwards
+ *   wall-clock step (NTP, manual change, VM resume) would make a stalled frame's computed age
+ *   negative and leave a frozen mirror controllable. Injected so tests are deterministic without
+ *   real timers.
  */
-class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main) {
+class LayoutInspectorState(
+  debounceContext: CoroutineContext = Dispatchers.Main,
+  private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
+) {
   /** Debounce window for rapid hierarchy updates from the stream. */
   companion object {
     const val HIERARCHY_DEBOUNCE_MS = 100L
@@ -96,6 +106,28 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
   // dimensions and sent to another. Null until the first hierarchy is applied.
   var renderedHierarchyDeviceId by mutableStateOf<String?>(null)
     private set
+
+  // Provenance of the applied screenshot / hierarchy (issue #3348). These are the inputs
+  // DeviceControlPolicy assembles an atomic DeviceFrameSnapshot from: which update it is
+  // (sequence), which device CAPTURE it describes (the daemon's shared captureSequence, paired by
+  // equality against the other source's), and how old it is on the CLIENT clock (receivedAtMs is
+  // stamped here, by us, never taken from a daemon or device message). Compose state so a
+  // composition that evaluates control availability recomposes when a source updates.
+  var screenshotFacts by mutableStateOf<ScreenshotFrameFacts?>(null)
+    private set
+
+  var hierarchyFacts by mutableStateOf<HierarchyFrameFacts?>(null)
+    private set
+
+  // Monotonic across every applied source update, so a snapshot built from them can be ordered
+  // against an earlier one — which is how the post-input refresh policy recognizes the first
+  // snapshot that supersedes the one an input was dispatched through.
+  private var sourceSequence: Long = 0L
+
+  private fun nextSourceSequence(): Long {
+    sourceSequence++
+    return sourceSequence
+  }
 
   // Screenshot capture metadata (from the observation stream's screenshot_update message). Absent
   // (null/false) when the daemon predates this metadata or a field wasn't reported.
@@ -223,6 +255,7 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
     captureSource: String? = null,
     deviceId: String? = null,
     generation: Long? = null,
+    captureSequence: Long? = null,
   ) {
     if (generation != null && generation != this.generation) return
     screenshotData = data
@@ -234,6 +267,18 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
     screenshotFormat = format
     screenshotCaptureSource = captureSource
     renderedDeviceId = deviceId
+    screenshotFacts =
+      ScreenshotFrameFacts(
+        deviceId = deviceId,
+        sequence = nextSourceSequence(),
+        captureSequence = captureSequence,
+        receivedAtMs = nowMs(),
+        width = width,
+        height = height,
+        // Pair the pixels into the facts, so a snapshot built from them owns the frame it
+        // describes and a retained snapshot can render its own bytes (issue #3348).
+        data = data,
+      )
   }
 
   /**
@@ -241,14 +286,19 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
    * internally. For the streaming path, prefer [applyHierarchyUpdate] with a pre-computed
    * [ParsedHierarchy].
    */
-  fun updateHierarchy(newHierarchy: UIElementInfo, newRotation: Int = 0, deviceId: String? = null) {
+  fun updateHierarchy(
+    newHierarchy: UIElementInfo,
+    newRotation: Int = 0,
+    deviceId: String? = null,
+    captureSequence: Long? = null,
+  ) {
     // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
     // immediate
     // one (or restore stale hierarchy identity/bounds).
     debounceJob?.cancel()
     val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
     val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
-    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId)
+    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence)
   }
 
   /**
@@ -264,6 +314,7 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
     changedIds: Set<String>,
     deviceId: String? = null,
     generation: Long? = null,
+    captureSequence: Long? = null,
   ) {
     debounceJob?.cancel()
     debounceJob = debounceScope.launch {
@@ -271,7 +322,7 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
       // Drop a debounced job whose generation was superseded while it waited (device change,
       // invalidation, or disconnect) so it can't restore stale hierarchy identity/bounds.
       if (generation != null && generation != this@LayoutInspectorState.generation) return@launch
-      applyHierarchyUpdateImmediate(parsed, changedIds, deviceId)
+      applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence)
     }
   }
 
@@ -284,11 +335,25 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
     parsed: ParsedHierarchy,
     changedIds: Set<String>,
     deviceId: String? = null,
+    captureSequence: Long? = null,
   ) {
     changedElementIds = changedIds
     currentParsedHierarchy = parsed
     rotation = parsed.rotation
     renderedHierarchyDeviceId = deviceId
+    hierarchyFacts =
+      HierarchyFrameFacts(
+        deviceId = deviceId,
+        sequence = nextSourceSequence(),
+        captureSequence = captureSequence,
+        receivedAtMs = nowMs(),
+        hierarchy = parsed,
+        // The root commonly reports (0,0,0,0) on Android (accessibility service); 0 tells the
+        // policy to fall back to the observation stream's reported screen size, exactly as the
+        // renderer does.
+        rootWidth = parsed.root.bounds.width.takeIf { it > 0 } ?: 0,
+        rootHeight = parsed.root.bounds.height.takeIf { it > 0 } ?: 0,
+      )
 
     // Clear selection if the selected element no longer exists — O(1) map check
     val currentSelectedId = selectedElementId
@@ -325,6 +390,10 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
     advanceGeneration()
     renderedDeviceId = null
     renderedHierarchyDeviceId = null
+    // Drop the provenance too: with no facts there is no snapshot, so device control fails closed
+    // to inspector mode (issue #3348) while the frame itself stays visible for inspection.
+    screenshotFacts = null
+    hierarchyFacts = null
   }
 
   /**
@@ -393,6 +462,8 @@ class LayoutInspectorState(debounceContext: CoroutineContext = Dispatchers.Main)
     screenshotCaptureSource = null
     renderedDeviceId = null
     renderedHierarchyDeviceId = null
+    screenshotFacts = null
+    hierarchyFacts = null
     currentParsedHierarchy = null
     rotation = 0
     selectedElementId = null

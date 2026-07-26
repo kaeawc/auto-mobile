@@ -2,6 +2,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import crypto from "crypto";
 import type { ScreenshotMetadata } from "./ScreenshotMetadata";
+import type { ScreenGeometryBinding } from "./TrackedScreenGeometry";
 
 /**
  * Result of a screenshot capture attempt
@@ -11,6 +12,13 @@ export interface ScreenshotCaptureResult extends ScreenshotMetadata {
   data?: string; // base64 encoded
   checksum?: string;
   error?: string;
+  /**
+   * The screen geometry and capture identity that were current when this capture was REQUESTED
+   * (issue #3348). Carried through the capture so the observation-stream push labels the frame
+   * with the capture it belongs to, rather than whichever hierarchy happened to arrive while it
+   * was in flight. Absent when there was no forwarded capture to bind.
+   */
+  captureBinding?: ScreenGeometryBinding;
 }
 
 /**
@@ -287,13 +295,19 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
     }
   }
 
-  private createMetadataSignature(metadata: ScreenshotMetadata): string {
+  private createMetadataSignature(result: ScreenshotCaptureResult): string {
     return JSON.stringify([
-      metadata.screenshotMimeType ?? null,
-      metadata.screenshotFormat ?? null,
-      metadata.screenshotCaptureSource ?? null,
-      metadata.screenshotFallback ?? null,
-      metadata.screenshotFallbackReason ?? null,
+      result.screenshotMimeType ?? null,
+      result.screenshotFormat ?? null,
+      result.screenshotCaptureSource ?? null,
+      result.screenshotFallback ?? null,
+      result.screenshotFallbackReason ?? null,
+      // A new capture identity makes a byte-identical frame a DIFFERENT frame (issue #3348).
+      // Navigating to a same-size screen whose pixels happen to be identical would otherwise
+      // discard every screenshot in the new backoff burst as a duplicate, leaving the desktop
+      // holding the new hierarchy id with no screenshot bound to it — stuck in UnpairedHierarchy
+      // until the ~3s keepalive, which can also outlast the post-input refresh timeout.
+      result.captureBinding?.captureSequence ?? null,
     ]);
   }
 

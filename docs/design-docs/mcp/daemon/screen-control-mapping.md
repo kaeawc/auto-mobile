@@ -169,3 +169,12 @@ The mapper is pure Kotlin with no Compose or daemon dependency, so it is unit
 tested directly (`DeviceScreenCoordinateMapperTest`) without rendering a device
 or opening a socket: scale, pan, aspect fit, rotation detection, rounding,
 out-of-bounds, round-trip, and the inspector selection/deselection path.
+
+## Which frame the mapping runs against
+
+This document defines the mapping. It deliberately says nothing about *which*
+frame a control client is allowed to map against, or what the client shows after
+it forwards an input — a coordinate mapped correctly through a stale frame still
+taps the wrong pixel. Those rules are specified in
+[Client Frame Snapshot](client-frame-snapshot.md), which a control client must
+follow in addition to the formulas here.

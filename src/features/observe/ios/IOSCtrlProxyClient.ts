@@ -52,6 +52,7 @@ import type { BaseResult } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
 import type { SimulatedErrorType } from "../../../server/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
+import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import {
@@ -417,7 +418,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // Screenshot backoff scheduler for real-time screenshot streaming
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
-  private cachedScreenDimensions: { width: number; height: number } | null = null;
+  // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
+  // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
+  private readonly screenGeometry = new TrackedScreenGeometry();
 
   // Connection failure tracking for auto-restart
   private consecutiveConnectionFailures: number = 0;
@@ -1438,7 +1441,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (requestId) {
         const suppressObservationStreamPush = this.consumeHierarchyObservationStreamSuppression(requestId);
         if (!suppressObservationStreamPush) {
-          this.pushHierarchyToObservationStream(converted);
+          this.pushHierarchyToObservationStream(converted, message.data as XCTestHierarchy);
         } else {
           logger.debug("[IOSCtrlProxyClient] Suppressed hierarchy observation stream push for explicit initial-frame request");
         }
@@ -1472,7 +1475,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
       // Convert and push to observation stream for IDE plugins
       const viewHierarchyResult = this.convertToViewHierarchyResult(message.data);
-      this.pushHierarchyToObservationStream(viewHierarchyResult);
+      this.pushHierarchyToObservationStream(viewHierarchyResult, message.data as XCTestHierarchy);
 
       // Start screenshot backoff sequence for real-time screenshot streaming
       this.startScreenshotBackoff();
@@ -2020,14 +2023,32 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /**
    * Push hierarchy update to the device data stream for IDE plugins.
    */
-  private pushHierarchyToObservationStream(hierarchy: ViewHierarchyResult): void {
+  private pushHierarchyToObservationStream(
+    hierarchy: ViewHierarchyResult,
+    source: XCTestHierarchy | undefined
+  ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
     }
 
     try {
-      server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
+      // Derive geometry from the hierarchy BEING FORWARDED, before the push, so the identity
+      // recorded below belongs to the geometry it actually describes.
+      //
+      // Reading this.cachedHierarchy here would be wrong on the request/response path: processMessage
+      // forwards the converted response before CtrlProxyHierarchy.requestHierarchySync resumes and
+      // installs it in the cache, so the cache still holds the PREVIOUS hierarchy (or nothing at
+      // all on the first response). A resolution-changing response would then associate its capture
+      // id with the old dimensions and screenshots could not pair until another hierarchy arrived.
+      this.updateScreenGeometryFrom(source);
+      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
+      // Record the identity the daemon assigned, so screenshot requests initiated from here on are
+      // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
+      // geometry untracked, and the daemon then omits the identity so a control client fails closed.
+      if (captureSequence !== null) {
+        this.screenGeometry.markForwarded(captureSequence);
+      }
     } catch (error) {
       logger.warn(`[IOSCtrlProxyClient] Failed to push hierarchy to observation stream: ${error}`);
     }
@@ -2040,7 +2061,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     screenshotBase64: string,
     screenWidth: number,
     screenHeight: number,
-    metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA
+    metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
+    captureSequence?: number
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -2048,7 +2070,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     try {
-      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata);
+      // The identity travels with the frame from the moment it was requested (issue #3348). The
+      // daemon still verifies these declared dimensions against the frame's real pixels before
+      // stamping it, which catches a geometry change between binding and delivery.
+      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
+        captureSequence,
+      });
     } catch (error) {
       logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
     }
@@ -2082,10 +2109,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           if (!result.data) {
             return;
           }
-          // Get screen dimensions from cached hierarchy or use defaults
-          const screenWidth = this.cachedScreenDimensions?.width ?? 1170;
-          const screenHeight = this.cachedScreenDimensions?.height ?? 2532;
-          this.pushScreenshotToObservationStream(result.data, screenWidth, screenHeight, result);
+          // Get screen dimensions from cached hierarchy or use defaults. A fallback has no capture
+          // provenance at all, so it must never be asserted as tracked.
+          // Declare the geometry the request was BOUND to, not whatever the cache holds now.
+          // Without a binding, fall back to a nominal size and send no identity, so a control
+          // client fails closed.
+          const binding = result.captureBinding;
+          const screenWidth = binding?.width ?? this.screenGeometry.width ?? 1170;
+          const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2532;
+          this.pushScreenshotToObservationStream(
+            result.data,
+            screenWidth,
+            screenHeight,
+            result,
+            binding?.captureSequence
+          );
         },
         {
           getKeepAliveIntervalMs: () => {
@@ -2109,17 +2147,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return { success: false, error: "No subscribers" };
     }
 
+    // Bind the capture identity current at INITIATION and carry it through the await, so a
+    // hierarchy forwarded while this frame is in flight cannot relabel it. Same-resolution
+    // navigation makes this the only defence — the pixels are identical in size either way.
+    const captureBinding = this.screenGeometry.bind() ?? undefined;
+
     try {
       const result = await this.requestScreenshot(5000);
       if (!result.success || !result.data) {
         return { success: false, error: result.error || "No screenshot data" };
       }
 
-      this.cacheScreenDimensionsFromHierarchy();
-
       return {
         success: true,
         data: result.data,
+        captureBinding,
         ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, result.format),
       };
     } catch (error) {
@@ -2127,18 +2169,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
-  private cacheScreenDimensionsFromHierarchy(): void {
-    const hierarchy = this.cachedHierarchy?.hierarchy;
+  /**
+   * Record the screen geometry described by [source] — the hierarchy about to be forwarded, never
+   * whatever happens to be cached (issue #3348).
+   */
+  private updateScreenGeometryFrom(source: { screenWidth?: number; screenHeight?: number; screenScale?: number } | null | undefined): void {
+    const hierarchy = source;
     if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
+      // No usable geometry in this hierarchy. Clearing (rather than keeping the previous entry)
+      // stops a later push from vouching for dimensions this hierarchy cannot confirm.
+      this.screenGeometry.clear();
       return;
     }
     // screenWidth/screenHeight are in iOS points — multiply by screenScale to get pixels,
     // matching the screenshot image resolution and the TakeScreenshot path (which reads PNG header pixels).
     const scale = hierarchy.screenScale ?? 1;
-    this.cachedScreenDimensions = {
-      width: Math.round(hierarchy.screenWidth * scale),
-      height: Math.round(hierarchy.screenHeight * scale),
-    };
+    // A change clears the forwarded flag: the geometry becomes capture-tracked only once a
+    // hierarchy carrying it is forwarded (see pushHierarchyToObservationStream) — which will NOT
+    // happen while hierarchy pushes are suppressed, or when there is no stream server.
+    this.screenGeometry.update(
+      Math.round(hierarchy.screenWidth * scale),
+      Math.round(hierarchy.screenHeight * scale)
+    );
   }
 
   /**

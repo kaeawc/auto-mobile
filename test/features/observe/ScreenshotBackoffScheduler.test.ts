@@ -363,6 +363,38 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       expect(emittedScreenshots[0]).toBe("same-data");
     });
 
+    it("emits when the capture identity changes even if image bytes are unchanged", async () => {
+      // Issue #3348: navigating to a same-size screen whose pixels happen to be byte-identical
+      // still starts a new capture. Discarding those frames as duplicates would leave the desktop
+      // holding the new hierarchy id with NO screenshot bound to it — stuck in UnpairedHierarchy
+      // until the ~3s keepalive, which can outlast the post-input refresh timeout.
+      const emittedResults: ScreenshotCaptureResult[] = [];
+      const captures: ScreenshotCaptureResult[] = [
+        { success: true, data: "same-data", captureBinding: { captureSequence: 7, width: 1080, height: 2340 } },
+        // Same bytes, same geometry, NEW capture: a different frame as far as pairing is concerned.
+        { success: true, data: "same-data", captureBinding: { captureSequence: 8, width: 1080, height: 2340 } },
+        // Same bytes AND same capture: a genuine duplicate, still skipped.
+        { success: true, data: "same-data", captureBinding: { captureSequence: 8, width: 1080, height: 2340 } },
+      ];
+      let index = 0;
+
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        async () => captures[index++],
+        (result: ScreenshotCaptureResult) => {
+          emittedResults.push(result);
+        },
+        { intervals: [0, 100, 200] },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+
+      expect(emittedResults.map(r => r.captureBinding?.captureSequence)).toEqual([7, 8]);
+    });
+
     it("emits when screenshot metadata changes even if image bytes are unchanged", async () => {
       const emittedResults: ScreenshotCaptureResult[] = [];
       const captures: ScreenshotCaptureResult[] = [

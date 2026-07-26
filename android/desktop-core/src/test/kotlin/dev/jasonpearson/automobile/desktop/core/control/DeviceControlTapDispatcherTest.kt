@@ -25,7 +25,7 @@ class DeviceControlTapDispatcherTest {
       point = DevicePoint(x = 0, y = 0, inBounds = true),
       client = client,
       platform = "android",
-      deviceId = "emulator-5554",
+      snapshot = testSnapshot(),
       token = token,
     )
 

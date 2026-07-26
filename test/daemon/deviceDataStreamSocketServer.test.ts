@@ -543,6 +543,17 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   describe("hierarchy diff annotation", () => {
+    /** A minimal PNG whose IHDR declares the given pixel size, base64-encoded as CtrlProxy sends it. */
+    const pngFrame = (width: number, height: number): string => {
+      const buffer = Buffer.alloc(24);
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
+      buffer.writeUInt32BE(13, 8); // IHDR data length, fixed by the PNG spec
+      buffer.write("IHDR", 12, "ascii");
+      buffer.writeUInt32BE(width, 16);
+      buffer.writeUInt32BE(height, 20);
+      return buffer.toString("base64");
+    };
+
     const frame = (text: string) =>
       ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } } }) as any;
 
@@ -581,6 +592,202 @@ describe("DeviceDataStreamSocketServer", () => {
       const messages = socket.getWrittenMessages<any>();
       const hierarchyMessages = messages.filter(m => m.type === "hierarchy_update");
       expect(hierarchyMessages[hierarchyMessages.length - 1].hierarchyDiff.hasBaseline).toBe(false);
+    });
+
+    it("stamps a monotonic capture identity on each hierarchy and echoes it on matching screenshots", () => {
+      // Issue #3348: a control client pairs a screenshot with the hierarchy its geometry came from
+      // by requiring equal captureSequence. The echo happens only when the frame's REAL pixels
+      // match the geometry the capture client claimed for it.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const first = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
+        captureSequence: first ?? undefined,
+      });
+      const second = server.pushHierarchyUpdate("device-1", frame("b"));
+      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 720, 1560, {}, {
+        captureSequence: second ?? undefined,
+      });
+
+      const [h1, s1, h2, s2] = socket
+        .getWrittenMessages<any>()
+        .filter(m => m.type === "hierarchy_update" || m.type === "screenshot_update");
+
+      expect(h1.captureSequence).toBe(1);
+      expect(s1.captureSequence).toBe(1);
+      expect(h2.captureSequence).toBe(2);
+      expect(s2.captureSequence).toBe(2);
+    });
+
+    it("omits the capture identity when fresh pixels outran the hierarchy that claimed the geometry", () => {
+      // THE defect this pairing exists for. The device drops to 720x1560. The next screenshot
+      // carries the new pixels, but the capture client's screen-dimension cache is still the
+      // previous hierarchy's 1080x2340 — so it CLAIMS 1080x2340 for a 720x1560 frame. Stamping the
+      // outstanding capture id here would let a client pair those pixels with the stale hierarchy
+      // and map a tap through the wrong absolute bounds. The two resolutions share an aspect ratio
+      // exactly, so nothing downstream could detect it.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+      // The published geometry is the frame's real size, not the stale claim, so a client that
+      // falls back to it maps through the pixels it is actually rendering.
+      expect(screenshot.screenWidth).toBe(720);
+      expect(screenshot.screenHeight).toBe(1560);
+    });
+
+    it("omits the capture identity for callers whose geometry has no tracked capture", () => {
+      // TakeScreenshot reads dimensions out of the PNG it just captured; they match the pixels by
+      // construction but have no relationship to any hierarchy, so they must never be paired.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("accepts a landscape claim against a native-portrait frame (orientation swap)", () => {
+      // iOS landscape: hierarchy geometry is display-oriented (2532x1170) while the screenshot
+      // arrives in native portrait pixel orientation (1170x2532) - the rotation the renderer
+      // already corrects for. Rejecting this would strip the identity from every landscape frame
+      // and make device control impossible in that orientation.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(1170, 2532), 2532, 1170, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBe(captureSequence);
+      // The MEASURED dimensions are still what gets published, so a client maps through the pixels
+      // it actually renders rather than the claim.
+      expect(screenshot.screenWidth).toBe(1170);
+      expect(screenshot.screenHeight).toBe(2532);
+    });
+
+    it("still rejects a scale change that happens to preserve aspect", () => {
+      // The swap accepts exactly ONE alternative. A uniform scale is not it.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("still rejects dimensions unrelated to the claim", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", pngFrame(800, 600), 1080, 2340, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("omits the capture identity for a frame with a malformed header", () => {
+      // A PNG signature with a bad IHDR chunk must read as unmeasurable, not as whatever bytes sit
+      // at the width offset — otherwise the "measure, don't trust the claim" guarantee is silently
+      // defeated and a bogus measurement could match the claim and get stamped.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      const malformed = Buffer.from(pngFrame(1080, 2340), "base64");
+      malformed.write("IDAT", 12, "ascii");
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", malformed.toString("base64"), 1080, 2340, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("omits the capture identity for a frame whose dimensions cannot be measured", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushScreenshotUpdate("device-1", Buffer.from("not-an-image").toString("base64"), 1080, 2340, {}, {
+        captureSequence: captureSequence ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+      // Unmeasurable: fall back to the caller's claim for display, but never pair on it.
+      expect(screenshot.screenWidth).toBe(1080);
+    });
+
+    it("omits the capture identity until a hierarchy has been pushed", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
+    });
+
+    it("keeps a screenshot bound to the capture it was REQUESTED under, not the newest one", () => {
+      // Same-resolution navigation, the case no measurement can catch. A frame is requested while
+      // screen A's hierarchy is current; screen B's hierarchy — identical dimensions — is forwarded
+      // before the frame is pushed. Reading "the newest capture" at push time would label A's
+      // pixels with B's identity and let a control client tap stale content.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      const screenA = server.pushHierarchyUpdate("device-1", frame("screen-a"));
+      // ... screenshot request goes out here, bound to screenA ...
+      const screenB = server.pushHierarchyUpdate("device-1", frame("screen-b"));
+      expect(screenB).toBeGreaterThan(screenA!);
+      // ... and only now does the in-flight frame arrive and get pushed.
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
+        captureSequence: screenA ?? undefined,
+      });
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBe(screenA);
+      expect(screenshot.captureSequence).not.toBe(screenB);
+    });
+
+    it("never reuses a capture identity after a reconnect", () => {
+      // Resetting the counter to 1 on connection loss would COLLIDE with a pre-drop hierarchy a
+      // client may still hold, letting a post-reconnect screenshot pair with stale geometry.
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.pushHierarchyUpdate("device-1", frame("b"));
+      server.onDeviceConnectionLost("device-1");
+      server.pushHierarchyUpdate("device-1", frame("c"));
+
+      const ids = socket
+        .getWrittenMessages<any>()
+        .filter(m => m.type === "hierarchy_update")
+        .map(m => m.captureSequence);
+
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids[2]).toBeGreaterThan(ids[1]);
+    });
+
+    it("drops the device's current capture so a pre-reconnect screenshot cannot pair", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+      server.onDeviceConnectionLost("device-1");
+      // The client drops its binding when the connection goes away, so nothing is supplied.
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
+
+      const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(screenshot.captureSequence).toBeUndefined();
     });
 
     it("does not mutate the caller's hierarchy when annotating", () => {

@@ -1,21 +1,26 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
 /**
- * One device-control tap, snapshotted at click time (issue #3347). Carries the tap target — client,
- * platform, device id — captured atomically on the UI thread, plus the [token] the error-ordering
- * gate ([ControlTapErrorGate]) issued for this attempt.
+ * One device-control tap, bound to the frame it was clicked on (issues #3347, #3348).
+ *
+ * [snapshot] is the atomic [DeviceFrameSnapshot] the view mapped [point] through, captured together
+ * with the point on the UI thread. It is the authority for the target device, so a snapshot swap
+ * between click and dispatch cannot redirect this tap or rescale its coordinate. [token] is the
+ * error-ordering claim [dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession]
+ * issued for this attempt.
  */
 data class DeviceControlTapCommand(
   val point: DevicePoint,
   val client: AutoMobileClient?,
   val platform: String,
-  val deviceId: String,
+  val snapshot: DeviceFrameSnapshot,
   val token: Long,
 )
 
@@ -37,8 +42,8 @@ data class DeviceControlTapCommand(
  * the queued backlog (closing each pending client) when the control context changes, so a
  * stalled/aged tap can't fire after a device/mode/stream change.
  *
- * Its only consumer is `AutoMobileContent`; it is a deliberate testability seam extracted from that
- * Compose host so the ordering/back-pressure guarantees are Compose-free and unit-testable. Do not
+ * Its only consumer is `DeviceControlSession`; it is a deliberate testability seam extracted from
+ * that session so the ordering/back-pressure guarantees are Compose-free and unit-testable. Do not
  * inline it.
  *
  * @param scope the coroutine scope the single consumer runs in (cancelled with the composition).

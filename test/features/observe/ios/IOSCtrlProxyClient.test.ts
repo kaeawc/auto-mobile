@@ -13,7 +13,11 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
-import { stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
+import {
+  startDeviceDataStreamSocketServer,
+  stopDeviceDataStreamSocketServer,
+} from "../../../../src/daemon/deviceDataStreamSocketServer";
+import { FakeSocket } from "../../../fakes/FakeNetServer";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -2715,6 +2719,87 @@ describe("IOSCtrlProxyClient", function() {
         globalThis.fetch = originalFetch;
         await testClient.close();
       }
+    });
+  });
+
+  describe("capture provenance for screenshot geometry (issue #3348)", function() {
+    // The iOS ordering rule: geometry must be derived from a hierarchy BEFORE it is pushed, so the
+    // identity the daemon assigns is recorded against the geometry it actually describes.
+
+    const startStreamServer = async (): Promise<FakeSocket> => {
+      await stopDeviceDataStreamSocketServer();
+      const server = await startDeviceDataStreamSocketServer(fakeTimer);
+      const socket = new FakeSocket();
+      await (server as any).processLine(
+        socket as any,
+        JSON.stringify({
+          id: "subscribe-capture-provenance",
+          command: "subscribe",
+          deviceId: testDevice.deviceId,
+          screenshotIntervalMs: 250,
+        })
+      );
+      socket.reset();
+      return socket;
+    };
+
+    /**
+     * Forward a hierarchy the way processMessage does: the SOURCE hierarchy is handed to the push
+     * alongside the converted result. The cache is deliberately left holding something ELSE, which
+     * is the real request/response ordering — processMessage forwards the converted response before
+     * requestHierarchySync resumes and installs it in the cache.
+     */
+    const forwardHierarchy = (screenWidth: number, screenHeight: number, screenScale: number): void => {
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+        screenWidth,
+        screenHeight,
+        screenScale,
+      });
+    };
+
+    /** Put a DIFFERENT hierarchy in the cache, so a cache-reading implementation is caught. */
+    const setStaleCache = (screenWidth: number, screenHeight: number, screenScale: number): void => {
+      (ctrlProxyClient as any).cachedHierarchy = {
+        hierarchy: { screenWidth, screenHeight, screenScale },
+        receivedAt: fakeTimer.now(),
+        fresh: true,
+      };
+    };
+
+    test("derives geometry from the hierarchy being forwarded, not from the cache", async function() {
+      await startStreamServer();
+      const geometry = (ctrlProxyClient as any).screenGeometry;
+
+      // The cache is EMPTY, exactly as it is when the first request/response hierarchy is forwarded
+      // (processMessage pushes before requestHierarchySync installs it). A cache-reading
+      // implementation clears geometry here and never establishes provenance at all.
+      forwardHierarchy(390, 844, 3);
+      expect(geometry.bind()).toEqual({ captureSequence: expect.any(Number), width: 1170, height: 2532 });
+
+      // Now the cache holds the PREVIOUS hierarchy while a resolution-changing response is
+      // forwarded. A cache-reading implementation would associate the new capture id with the old
+      // 1170x2532 dimensions, so screenshots could not pair until another hierarchy arrived.
+      setStaleCache(390, 844, 3);
+      forwardHierarchy(320, 693, 3);
+
+      const bound = geometry.bind();
+      expect(bound).not.toBeNull();
+      expect(bound.width).toBe(960);
+      expect(bound.height).toBe(2079);
+    });
+
+    test("clears tracked geometry when the forwarded hierarchy reports none", async function() {
+      await startStreamServer();
+      const geometry = (ctrlProxyClient as any).screenGeometry;
+
+      forwardHierarchy(390, 844, 3);
+      expect(geometry.bind()).not.toBeNull();
+
+      // A forwarded hierarchy with no usable screen size must not leave the previous dimensions
+      // vouched for — even though the cache still holds a perfectly good one.
+      setStaleCache(390, 844, 3);
+      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {} as any);
+      expect(geometry.bind()).toBeNull();
     });
   });
 });

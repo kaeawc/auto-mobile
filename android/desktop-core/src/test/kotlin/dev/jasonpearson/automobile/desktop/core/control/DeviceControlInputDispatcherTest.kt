@@ -120,9 +120,9 @@ class DeviceControlInputDispatcherTest {
   }
 
   @Test
-  fun `taps and swipes share one queue and drain in gesture order`() = runTest {
-    // Issue #3350: a swipe must not get its own queue, or a tap-then-swipe sequence could execute
-    // reversed — the exact race the single-consumer FIFO exists to remove.
+  fun `every input action shares one queue and drains in gesture order`() = runTest {
+    // Issues #3350 and #3351: no action may get its own queue, or a tap-then-swipe-then-type
+    // sequence could execute reversed — the exact race the single-consumer FIFO exists to remove.
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val processed = mutableListOf<String>()
     val dispatcher =
@@ -133,6 +133,9 @@ class DeviceControlInputDispatcherTest {
           when (cmd) {
             is DeviceControlInputCommand.Tap -> "tap${cmd.token}"
             is DeviceControlInputCommand.Swipe -> "swipe${cmd.token}"
+            is DeviceControlInputCommand.PressButton -> "button${cmd.token}"
+            is DeviceControlInputCommand.TypeText -> "text${cmd.token}"
+            is DeviceControlInputCommand.SendKey -> "key${cmd.token}"
           }
         )
       }
@@ -149,10 +152,36 @@ class DeviceControlInputDispatcherTest {
         token = 1L,
       )
     )
-    dispatcher.enqueue(command(token = 2L))
+    dispatcher.enqueue(
+      DeviceControlInputCommand.TypeText(
+        text = "a",
+        client = null,
+        platform = "android",
+        snapshot = testSnapshot(),
+        token = 2L,
+      )
+    )
+    dispatcher.enqueue(
+      DeviceControlInputCommand.SendKey(
+        key = "enter",
+        client = null,
+        platform = "android",
+        snapshot = testSnapshot(),
+        token = 3L,
+      )
+    )
+    dispatcher.enqueue(
+      DeviceControlInputCommand.PressButton(
+        button = "back",
+        client = null,
+        platform = "android",
+        snapshot = testSnapshot(),
+        token = 4L,
+      )
+    )
     advanceUntilIdle()
 
-    assertEquals(listOf("tap0", "swipe1", "tap2"), processed)
+    assertEquals(listOf("tap0", "swipe1", "text2", "key3", "button4"), processed)
     scope.cancel()
   }
 }

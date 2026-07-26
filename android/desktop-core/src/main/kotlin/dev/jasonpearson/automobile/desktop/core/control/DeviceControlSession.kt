@@ -8,6 +8,9 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
+import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
+import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.PostInputRefreshState
 import dev.jasonpearson.automobile.desktop.domain.PostInputRefreshTracker
@@ -28,8 +31,9 @@ import kotlinx.coroutines.withContext
  * own gates. This type owns them instead, so the Compose layer wires it **once** and later actions
  * add a dispatch method here rather than a new gate up there. Drag/swipe
  * ([#3350](https://github.com/kaeawc/auto-mobile/issues/3350)) did exactly that — [swipe] joins
- * [tap] on the one queue, the one error claim and the one refresh tracker — and keyboard/text
- * ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) follows the same shape.
+ * [tap] on the one queue, the one error claim and the one refresh tracker — and
+ * keyboard/text/button ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) did the same:
+ * [key] is one more dispatch method on the same three, not a fourth mechanism.
  *
  * Responsibilities:
  * - **Decide** whether control is available, via the pure [DeviceControlPolicy], and expose the one
@@ -243,8 +247,65 @@ class DeviceControlSession(
   }
 
   /**
+   * Enqueue whatever [stroke] should send, on the SAME queue as [tap] and [swipe] — so a
+   * tap-then-type sequence executes in the order the user made it (issue #3351).
+   *
+   * What a keystroke means is decided by the pure [DeviceKeyboardInputPolicy]: a device-meaningful
+   * key becomes one `input/pressButton` or one `input/key`, a printable character becomes one
+   * `input/typeText`, and anything else — notably a modifier-bearing host chord — sends nothing.
+   *
+   * Returns whether the caller should **consume** the key event, which is not the same question as
+   * "was it dispatched":
+   * - An ignored keystroke returns false so the event reaches the host. That is the whole
+   *   host-shortcut guarantee: the client must not swallow a chord it declined to forward.
+   * - A forwarded keystroke returns true even when the bounded queue rejected it. The overload
+   *   error has already been published, and letting the key fall through to the host afterwards
+   *   would type into the host's own UI as a consolation prize for a dropped device input.
+   *
+   * Focus and mode gating are the caller's: this is only ever consulted for a keystroke the device
+   * view received while focused and in control mode.
+   */
+  fun key(snapshot: DeviceFrameSnapshot, stroke: DeviceKeyStroke): Boolean {
+    when (val decision = DeviceKeyboardInputPolicy.evaluate(stroke)) {
+      is DeviceKeyboardDecision.PressButton ->
+        enqueue { client, platformName, token ->
+          DeviceControlInputCommand.PressButton(
+            button = decision.button,
+            client = client,
+            platform = platformName,
+            snapshot = snapshot,
+            token = token,
+          )
+        }
+      is DeviceKeyboardDecision.SendKey ->
+        enqueue { client, platformName, token ->
+          DeviceControlInputCommand.SendKey(
+            key = decision.key,
+            client = client,
+            platform = platformName,
+            snapshot = snapshot,
+            token = token,
+          )
+        }
+      is DeviceKeyboardDecision.TypeText ->
+        enqueue { client, platformName, token ->
+          DeviceControlInputCommand.TypeText(
+            text = decision.text,
+            client = client,
+            platform = platformName,
+            snapshot = snapshot,
+            token = token,
+          )
+        }
+      // Not ours: send nothing, surface nothing, and leave the event for the host.
+      is DeviceKeyboardDecision.Ignored -> return false
+    }
+    return true
+  }
+
+  /**
    * Claim the newest-attempt error token, clear the banner, and enqueue the command [build] makes
-   * from the routing facts read at this instant. Shared by [tap] and [swipe] so both actions run
+   * from the routing facts read at this instant. Shared by every dispatch method so all actions run
    * through the one error claim and the one bounded queue rather than each re-deriving them.
    */
   private inline fun enqueue(
@@ -279,31 +340,7 @@ class DeviceControlSession(
   private suspend fun execute(command: DeviceControlInputCommand) {
     var error: String? = null
     try {
-      withContext(ioDispatcher) {
-        val onError: (String) -> Unit = { message -> error = message }
-        // The device id comes from the command's own snapshot in BOTH branches, never from a
-        // selection resolved at dispatch time.
-        when (command) {
-          is DeviceControlInputCommand.Tap ->
-            forwarder.forwardTap(
-              point = command.point,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.snapshot.deviceId,
-              onError = onError,
-            )
-          is DeviceControlInputCommand.Swipe ->
-            forwarder.forwardSwipe(
-              start = command.start,
-              end = command.end,
-              durationMs = command.durationMs,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.snapshot.deviceId,
-              onError = onError,
-            )
-        }
-      }
+      withContext(ioDispatcher) { forward(command) { message -> error = message } }
     } finally {
       command.client?.close()
     }
@@ -320,6 +357,57 @@ class DeviceControlSession(
         // attempt's stale error cannot resurrect a banner a newer attempt already cleared.
         if (command.token == errorToken.get()) publishError(message)
       }
+    }
+  }
+
+  /**
+   * Hand one command to the matching typed forwarder. The device id comes from the command's own
+   * snapshot in EVERY branch, never from a selection resolved at dispatch time.
+   */
+  private fun forward(command: DeviceControlInputCommand, onError: (String) -> Unit) {
+    when (command) {
+      is DeviceControlInputCommand.Tap ->
+        forwarder.forwardTap(
+          point = command.point,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          onError = onError,
+        )
+      is DeviceControlInputCommand.Swipe ->
+        forwarder.forwardSwipe(
+          start = command.start,
+          end = command.end,
+          durationMs = command.durationMs,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          onError = onError,
+        )
+      is DeviceControlInputCommand.PressButton ->
+        forwarder.forwardPressButton(
+          button = command.button,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          onError = onError,
+        )
+      is DeviceControlInputCommand.TypeText ->
+        forwarder.forwardTypeText(
+          text = command.text,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          onError = onError,
+        )
+      is DeviceControlInputCommand.SendKey ->
+        forwarder.forwardKey(
+          key = command.key,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          onError = onError,
+        )
     }
   }
 

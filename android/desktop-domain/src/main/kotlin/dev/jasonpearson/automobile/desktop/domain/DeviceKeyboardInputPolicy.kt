@@ -1,0 +1,213 @@
+package dev.jasonpearson.automobile.desktop.domain
+
+/**
+ * The host-independent identity of a key that means something to a device on its own, as opposed to
+ * one that means "type this character".
+ *
+ * Deliberately small and **not** a mirror of any toolkit's key enum: it lists only the keys
+ * [DeviceKeyboardInputPolicy] has a device meaning for. A client translates its own toolkit's key
+ * codes into these (the desktop app does it in `DeviceKeyboardEventTranslator`), which is what
+ * keeps the policy free of Compose, AWT, or any other host key vocabulary.
+ */
+public enum class DeviceKeyboardKey {
+  Escape,
+  Enter,
+  Tab,
+  Backspace,
+  Delete,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+}
+
+/**
+ * The modifier keys held during a keystroke.
+ *
+ * [shift] is separated from the rest on purpose — see [hasChordModifier].
+ */
+public data class DeviceKeyModifiers(
+  val ctrl: Boolean = false,
+  val alt: Boolean = false,
+  val meta: Boolean = false,
+  val shift: Boolean = false,
+) {
+  /**
+   * True when a modifier that makes this keystroke a **host chord** is held.
+   *
+   * Ctrl, Alt and Meta (Cmd/Win) are the modifiers hosts build their menu accelerators and window
+   * shortcuts out of, on every desktop platform. Shift is not one of them: it is part of ordinary
+   * typing (it is how a capital letter or a `?` is produced), so treating it as a chord modifier
+   * would make control mode unable to type half the characters on the keyboard.
+   */
+  public val hasChordModifier: Boolean
+    get() = ctrl || alt || meta
+}
+
+/**
+ * One keystroke, described without reference to any UI toolkit.
+ *
+ * @param key the device-meaningful key, or null when the host key has no device meaning of its own
+ *   (an ordinary letter, a function key, a modifier pressed alone).
+ * @param character the printable character the host says this keystroke produced, or null. Hosts
+ *   report control characters here for keys like Enter and Tab; [DeviceKeyboardInputPolicy] filters
+ *   those out rather than typing them.
+ * @param modifiers the modifiers held at the time.
+ */
+public data class DeviceKeyStroke(
+  val key: DeviceKeyboardKey? = null,
+  val character: Char? = null,
+  val modifiers: DeviceKeyModifiers = DeviceKeyModifiers(),
+)
+
+/** Why [DeviceKeyboardInputPolicy] declined to forward a keystroke to the device. */
+public enum class DeviceKeyboardRejection {
+  /**
+   * A modifier-bearing chord that is not on the client's explicit forward list. It belongs to the
+   * host application, so the client must leave the event **unconsumed**.
+   */
+  HostChord,
+
+  /**
+   * Neither a device-meaningful key nor a printable character (a function key, a modifier pressed
+   * alone, a dead key). Nothing is sent and nothing is reported; the event is left unconsumed so
+   * the host may still act on it.
+   */
+  Unsupported,
+}
+
+/** What [DeviceKeyboardInputPolicy.evaluate] decided one keystroke should send. */
+public sealed interface DeviceKeyboardDecision {
+  /** Send exactly one `input/pressButton` with this daemon button name. */
+  public data class PressButton(val button: String) : DeviceKeyboardDecision
+
+  /** Send exactly one `input/key` with this daemon key name. */
+  public data class SendKey(val key: String) : DeviceKeyboardDecision
+
+  /** Send exactly one `input/typeText` with this text. Never empty. */
+  public data class TypeText(val text: String) : DeviceKeyboardDecision
+
+  /** Send nothing. [reason] is diagnostic; no daemon request is made and no error is shown. */
+  public data class Ignored(val reason: DeviceKeyboardRejection) : DeviceKeyboardDecision
+}
+
+/**
+ * The **client-side** keyboard-forwarding policy for a mirrored device screen (issue
+ * [#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+ *
+ * As with the drag policy, the daemon has no say in any of this: `input/pressButton`,
+ * `input/typeText` and `input/key` faithfully execute whatever they are handed, so deciding *which
+ * keystrokes reach the device at all* is entirely the client's job. This object is that decision,
+ * expressed purely so any daemon client — the desktop app or a third party embedding control mode
+ * in some other host — converges on the same behavior instead of inventing one. The rules are
+ * documented for porting in `docs/design-docs/mcp/daemon/screen-control-mapping.md`.
+ *
+ * Four rules, in the order they are applied:
+ * 1. **Modifier-bearing chords stay with the host.** Any keystroke with Ctrl, Alt or Meta held is
+ *    [DeviceKeyboardRejection.HostChord] unless its key is on the caller's explicit
+ *    `forwardedChordKeys` list. This is stated in terms of *modifiers*, not in terms of one host's
+ *    keymap, precisely because the host is not knowable from here: the desktop app has its own menu
+ *    accelerators, and a third-party host has different ones again. Refusing every chord by default
+ *    is the only rule that is correct for all of them.
+ * 2. **A device-meaningful key wins over the character it produced.** Enter, Tab and Backspace all
+ *    report a control character; sending those as text would put a literal `\n` in a text field.
+ * 3. **A printable character is typed.** Exactly one character per keystroke — this is not IME
+ *    composition, which is explicitly out of scope for #3351.
+ * 4. **Everything else is ignored**, and must be left unconsumed so the host can still use it.
+ *
+ * This object says nothing about **when** a client is allowed to consult it. Focus and mode gating
+ * are host concerns — the reference implementation relies on the toolkit's own focus routing, so a
+ * keystroke only reaches the policy when the device view holds focus and is in control mode — and
+ * are specified in the document above rather than modeled here.
+ *
+ * Pure: no clock, no Compose, no daemon. [evaluate] is a total function of its arguments.
+ */
+public object DeviceKeyboardInputPolicy {
+
+  /**
+   * Keys that map to a device **button** (`input/pressButton`) rather than to a key event.
+   *
+   * Only Escape is mapped, and only to `back`. That is not an oversight:
+   * - Escape→back is the mapping Android itself applies to a hardware ESC key, and it is supported
+   *   on both platforms (unlike `input/key`, which the iOS control proxy does not implement).
+   * - Every *other* device button — `home`, `recent`, `power`, `volume_up`, `volume_down`, `menu` —
+   *   has no unambiguous keyboard key. Binding `home` to the Home key, for example, would make a
+   *   keystroke that means "move to line start" everywhere else silently throw the user out of the
+   *   app under test. Buttons with no natural key belong on an explicit on-screen affordance, not
+   *   on a guessed binding that steals a host key.
+   *
+   * A client with a different host may extend the mapping by supplying its own table; this one is
+   * the conservative default.
+   */
+  public val BUTTON_KEYS: Map<DeviceKeyboardKey, String> = mapOf(DeviceKeyboardKey.Escape to "back")
+
+  /**
+   * Keys that map to a discrete device key event (`input/key`), using the daemon's own key
+   * vocabulary (`src/features/action/InputKey.ts`).
+   *
+   * `escape` is a valid daemon key name but is deliberately absent here — Escape is claimed by
+   * [BUTTON_KEYS] above, and a key cannot be both.
+   *
+   * `input/key` is Android-only; on iOS the daemon answers with an actionable error, which the
+   * client surfaces exactly as it surfaces any other failed input. That is the "report" half of the
+   * unsupported-key policy: a key the *client* has no mapping for is silently ignored, while a key
+   * the client maps but the *device* cannot accept is reported by the daemon.
+   */
+  public val DISCRETE_KEYS: Map<DeviceKeyboardKey, String> =
+    mapOf(
+      DeviceKeyboardKey.Enter to "enter",
+      DeviceKeyboardKey.Tab to "tab",
+      DeviceKeyboardKey.Backspace to "backspace",
+      DeviceKeyboardKey.Delete to "delete",
+      DeviceKeyboardKey.ArrowUp to "arrow_up",
+      DeviceKeyboardKey.ArrowDown to "arrow_down",
+      DeviceKeyboardKey.ArrowLeft to "arrow_left",
+      DeviceKeyboardKey.ArrowRight to "arrow_right",
+    )
+
+  /**
+   * Decide what [stroke] should send.
+   *
+   * @param forwardedChordKeys the explicit escape hatch to rule 1: keys listed here forward even
+   *   when a chord modifier is held. Empty by default, because a default that forwarded any chord
+   *   would be wrong for some host. A client that knows its host's keymap — and knows a given chord
+   *   is unclaimed there — opts that key in deliberately.
+   */
+  public fun evaluate(
+    stroke: DeviceKeyStroke,
+    forwardedChordKeys: Set<DeviceKeyboardKey> = emptySet(),
+  ): DeviceKeyboardDecision {
+    if (stroke.modifiers.hasChordModifier && stroke.key !in forwardedChordKeys) {
+      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord)
+    }
+    val key = stroke.key
+    if (key != null) {
+      BUTTON_KEYS[key]?.let {
+        return DeviceKeyboardDecision.PressButton(it)
+      }
+      DISCRETE_KEYS[key]?.let {
+        return DeviceKeyboardDecision.SendKey(it)
+      }
+      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.Unsupported)
+    }
+    val character = stroke.character
+    if (character != null && isTypable(character)) {
+      return DeviceKeyboardDecision.TypeText(character.toString())
+    }
+    return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.Unsupported)
+  }
+
+  /**
+   * Whether [character] is something a device text field can receive.
+   *
+   * Excludes ISO control characters (which is how hosts report Enter, Tab, Backspace and friends as
+   * characters) and the "no character" sentinel every AWT-derived toolkit uses. Without the first
+   * exclusion an unmapped control key would type an invisible control character into whatever field
+   * has device focus.
+   */
+  private fun isTypable(character: Char): Boolean =
+    !character.isISOControl() && character != NO_CHARACTER
+
+  /** `KeyEvent.CHAR_UNDEFINED`: "this keystroke produced no character". */
+  private const val NO_CHARACTER: Char = '\uFFFF'
+}

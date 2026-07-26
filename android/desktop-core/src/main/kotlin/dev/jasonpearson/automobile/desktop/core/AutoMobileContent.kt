@@ -1690,6 +1690,12 @@ fun AutoMobileContent(
               onControlSwipe = { snapshot, start, end ->
                 deviceControlSession.swipe(snapshot, start, end)
               },
+              // Keyboard, text and device buttons (issue #3351) travel that SAME session too, so a
+              // tap-then-type sequence reaches the device in order. The session answers whether it
+              // forwarded anything, and the view returns that as its onKeyEvent result — so a chord
+              // the policy leaves to the host is not consumed here and still reaches this app's own
+              // shortcuts.
+              onControlKey = { snapshot, stroke -> deviceControlSession.key(snapshot, stroke) },
             )
 
             ScreenshotMetadataOverlay(

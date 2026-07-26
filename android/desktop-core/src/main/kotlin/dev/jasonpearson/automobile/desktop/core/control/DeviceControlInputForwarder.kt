@@ -109,9 +109,74 @@ class DeviceControlInputForwarder {
   }
 
   /**
+   * Send a device/navigation button press to [client] via the typed `input/pressButton` helper
+   * (issue #3351).
+   *
+   * [button] is already in the daemon's button vocabulary — the pure
+   * [dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy] resolved the keystroke
+   * before the command was enqueued, so no key mapping is re-derived here. A null [client] drops
+   * the press silently; a daemon failure or thrown client exception is routed to [onError].
+   */
+  fun forwardPressButton(
+    button: String,
+    client: AutoMobileClient?,
+    platform: String,
+    deviceId: String?,
+    onError: (String) -> Unit,
+  ) {
+    if (client == null) return
+    forward(onError) {
+      client.inputPressButton(button = button, platform = platform, deviceId = deviceId)
+    }
+  }
+
+  /**
+   * Send printable text to [client] via the typed `input/typeText` helper (issue #3351).
+   *
+   * Empty text is dropped without contacting the daemon: there is no such thing as typing nothing,
+   * and forwarding it would start a post-input refresh wait for a device change that never happens
+   * — the same reasoning that drops an out-of-bounds tap in [forwardTap].
+   *
+   * `submit` is deliberately not passed. Submitting is the Enter key's job, which travels this seam
+   * as its own `input/key` command; folding it into the text call would make one keystroke's effect
+   * depend on what was typed before it.
+   */
+  fun forwardTypeText(
+    text: String,
+    client: AutoMobileClient?,
+    platform: String,
+    deviceId: String?,
+    onError: (String) -> Unit,
+  ) {
+    if (text.isEmpty()) return
+    if (client == null) return
+    forward(onError) {
+      client.inputTypeText(text = text, platform = platform, deviceId = deviceId)
+    }
+  }
+
+  /**
+   * Send a discrete key event to [client] via the typed `input/key` helper (issue #3351).
+   *
+   * [key] is already in the daemon's key vocabulary. `input/key` is Android-only; on iOS the daemon
+   * answers with an actionable error, which reaches [onError] like any other daemon rejection and
+   * surfaces in the client's error banner rather than being swallowed.
+   */
+  fun forwardKey(
+    key: String,
+    client: AutoMobileClient?,
+    platform: String,
+    deviceId: String?,
+    onError: (String) -> Unit,
+  ) {
+    if (client == null) return
+    forward(onError) { client.inputKey(key = key, platform = platform, deviceId = deviceId) }
+  }
+
+  /**
    * Run one typed daemon input call, converting both a thrown client exception and a
-   * daemon-reported failure into a single [onError] callback. Shared by [forwardTap] and
-   * [forwardSwipe] so the two cannot drift in how they report failure.
+   * daemon-reported failure into a single [onError] callback. Shared by every forward method so
+   * they cannot drift in how they report failure.
    */
   private inline fun forward(
     onError: (String) -> Unit,

@@ -6,8 +6,9 @@ Part of milestone 28 (Client Screen Control), parent [#1099](https://github.com/
 This document specifies how a mirrored device screen converts a **viewport point**
 (a pixel the user clicked/dragged on the rendered canvas) into a **device
 coordinate** suitable for the typed daemon input helpers (`inputTap`,
-`inputSwipe`). It is written so a third-party daemon client can reproduce the
-mapping without reading any Compose code.
+`inputSwipe`), and the client-side policies that decide which pointer and
+keyboard gestures become daemon input at all. It is written so a third-party
+daemon client can reproduce all of it without reading any Compose code.
 
 The reference implementation is the Compose-free
 `DeviceScreenCoordinateMapper` in the `desktop-domain` module
@@ -24,15 +25,20 @@ A device-screen view honors one of two modes (`DeviceScreenControlMode`):
   behavior. It is the default so existing consumers (including the Android IDE
   plugin, which shares `desktop-core`) are unaffected with no source change.
 - **Control** — a click maps to a device coordinate that the client forwards to
-  the daemon input helpers as a tap, and a drag maps to a start/end pair the
-  client forwards as a swipe (see [Drag-to-swipe policy](#drag-to-swipe-policy)).
-  Element selection and hover highlighting are suppressed.
+  the daemon input helpers as a tap, a drag maps to a start/end pair the client
+  forwards as a swipe (see [Drag-to-swipe policy](#drag-to-swipe-policy)), and a
+  keystroke received **while the view holds focus** maps to a button press, a
+  discrete key or typed text (see
+  [Keyboard forwarding policy](#keyboard-forwarding-policy)). Element selection
+  and hover highlighting are suppressed.
 
 Control mode is strictly opt-in. The view itself never sends daemon input; it
-only reports the mapped coordinate to a caller-supplied callback. Wiring the
-coordinate to `inputTap`/`inputSwipe` is the client's responsibility
+only reports the mapped coordinate or keystroke to a caller-supplied callback.
+Wiring that to `inputTap`/`inputSwipe`/`inputPressButton`/`inputTypeText`/
+`inputKey` is the client's responsibility
 ([#3347](https://github.com/kaeawc/auto-mobile/issues/3347),
-[#3350](https://github.com/kaeawc/auto-mobile/issues/3350)).
+[#3350](https://github.com/kaeawc/auto-mobile/issues/3350),
+[#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
 
 ## Coordinate spaces
 
@@ -194,6 +200,121 @@ viewportY = deviceY * deviceToFrame * scale + offsetY
 
 Modulo integer rounding, `deviceToViewport` and `viewportToDevice` round-trip.
 
+## Keyboard forwarding policy
+
+Keyboard, text and device-button forwarding is **client-side policy** in exactly
+the same sense as the drag rules above: `input/pressButton`, `input/typeText` and
+`input/key` faithfully execute whatever they are handed, so deciding *which
+keystrokes reach the device at all* is entirely the client's job. The reference
+implementation is the Compose-free `DeviceKeyboardInputPolicy` in the
+`desktop-domain` module
+([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+
+This section is written for a client author embedding control mode in **their
+own** host — the desktop app, or something else entirely. It deliberately does
+not enumerate any one host's keymap, because the host is not knowable from the
+policy.
+
+### When keyboard input forwards at all
+
+Two conditions, both required:
+
+| Condition | Why |
+| --- | --- |
+| The device-screen view **holds keyboard focus** | Forwarding without it would type into the device while the user is filling in a field elsewhere in the host |
+| The view is in **Control** mode | Inspector mode produces no daemon input of any kind, which is what keeps an inspector-only embedder (the IDE plugin) unaffected |
+
+Focus is the *only* place a global-capture design would be tempting; do not take
+it. Use the toolkit's own focus routing — the reference client attaches its
+handler to the focusable device-screen node, so a keystroke reaches the policy
+only when that node is on the focus path, and nothing has to be re-checked. The
+view takes focus when it **enters** control mode and releases it like any other
+focusable node.
+
+Control mode is additionally **inert without a frame snapshot**, the same
+fail-closed rule taps and drags follow: with no snapshot there is no frame the
+keystroke belongs to.
+
+### Host shortcuts
+
+**A keystroke with Ctrl, Alt or Meta (Cmd/Win) held belongs to the host and is
+not forwarded.** Ctrl/Alt/Meta are what hosts build menu accelerators and window
+shortcuts out of on every desktop platform, so refusing all of them is the only
+rule that is correct for every host. Shift is **not** a chord modifier: it is how
+a capital letter or a shifted symbol is produced, and treating it as one would
+make control mode unable to type half the keyboard.
+
+A client that knows its own host leaves a particular chord unclaimed may opt that
+key in explicitly (`forwardedChordKeys`). The default list is **empty**.
+
+The mechanism matters as much as the rule: a declined keystroke must be left
+**unconsumed** so it continues to the host's own shortcut handling. In the
+reference client the view returns the client's own "did you forward it?" answer
+as its key-event result, so there is no separate pass-it-on path that could fall
+out of step with the policy.
+
+### What each keystroke sends
+
+Applied in this order:
+
+| Keystroke | Sends |
+| --- | --- |
+| Any chord modifier held, key not explicitly opted in | **nothing**; leave unconsumed |
+| `Escape` | one `input/pressButton` with `back` |
+| `Enter`, `Tab`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right` | one `input/key` with `enter`, `tab`, `backspace`, `delete`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right` |
+| A printable character | one `input/typeText` with that single character |
+| Anything else (function keys, a modifier pressed alone, a dead key) | **nothing**; leave unconsumed |
+
+A key with a device meaning **wins over the character it produced**. Hosts report
+a control character for Enter, Tab and Backspace; typing those as text would put
+a literal newline in a text field instead of pressing the key.
+
+`Escape` is the only key bound to a device *button*, and deliberately so.
+Escape→back is the mapping Android itself applies to a hardware ESC key, and
+`pressButton` works on both platforms. Every other device button — `home`,
+`recent`, `power`, `volume_up`, `volume_down`, `menu` — has no unambiguous
+keyboard key; binding `home` to the Home key would make a keystroke that means
+"move to line start" everywhere else silently throw the user out of the app under
+test. Buttons with no natural key belong on an explicit on-screen affordance.
+
+### Unsupported keys
+
+Two different situations, handled differently:
+
+- **The client has no mapping** (a function key, a dead key, a supplementary code
+  point that cannot be one UTF-16 unit). Send nothing, show nothing, leave the
+  event unconsumed. Silence is correct: the user did not ask for a device action,
+  and the host may still want the key.
+- **The client maps it but the device cannot accept it.** `input/key` is
+  Android-only; on iOS the daemon answers with an actionable error. Surface it
+  through the same error path as any other failed input rather than swallowing
+  it.
+
+### Scope
+
+One keystroke produces at most one daemon request. This is **not** IME
+composition: dead keys, multi-keystroke composition and supplementary-plane
+characters are out of scope, and a code point that cannot be expressed as a
+single UTF-16 unit is dropped rather than sent as half a surrogate pair.
+
+Only the key **press** forwards. The matching release is left unconsumed, so a
+host that tracks key releases still sees them and no keystroke is sent twice.
+
+### Ordering and refresh
+
+Keyboard, text and button inputs travel the **same** ordered, bounded dispatch
+queue as taps and swipes, so a tap-then-type sequence reaches the device in the
+order the user made it, and a successful keystroke starts the same post-input
+refresh wait a successful tap does. See
+[Client Frame Snapshot](client-frame-snapshot.md#post-input-refresh-policy). A
+keystroke the policy ignored is **not** an input: it starts no wait and shows no
+error.
+
+One consequence of sharing the bounded queue: a keystroke the policy *did*
+forward is consumed even if the queue rejected it. The overload error has already
+been surfaced, and letting the key fall through to the host afterwards would type
+into the host's own UI as a consolation prize for a dropped device input.
+
 ## Fit-to-viewport sizing
 
 Given the rotation-aligned image size (`imageWidth`, `imageHeight`), the viewport
@@ -256,6 +377,19 @@ the off-screen start, and the degenerate-screen case. View-level routing
 control-mode drag reporting exactly one swipe and **no** tap, a sub-threshold
 movement still reporting a tap and no swipe, and an inspector-mode drag reporting
 nothing.
+
+The keyboard policy is pure too (`DeviceKeyboardInputPolicyTest`), pinning the
+chord rule from **both** sides — every chord modifier must stay with the host,
+and Shift must **not**, or capitals become untypable — plus key-over-character
+precedence, the control-character filter and the explicit chord allowlist.
+`DeviceKeyboardEventTranslatorTest` pins the toolkit-key translation.
+`DeviceControlSessionKeyboardTest` asserts the exact daemon payloads a keystroke
+produces against a fake client, that keyboard shares the one ordered queue with
+taps, and that a successful keystroke starts the same post-input refresh wait.
+View-level routing (`DeviceScreenViewKeyboardTest`) observes **both** what the
+view forwarded and what an ancestor host handler still received, so
+"host shortcuts are not swallowed" is checked rather than assumed, alongside the
+focus and mode gates.
 
 ## Which frame the mapping runs against
 

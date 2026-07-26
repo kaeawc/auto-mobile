@@ -54,8 +54,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -69,8 +72,10 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
+import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
@@ -141,6 +146,52 @@ private fun transformBoundsForRotation(
 
 private fun PointerEvent.isZoomModifierPressed(): Boolean =
   if (IS_MAC) keyboardModifiers.isMetaPressed else keyboardModifiers.isCtrlPressed
+
+/**
+ * The one key-event handler for the device screen, which — like the drag gesture — means different
+ * things per mode (issue [#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+ *
+ * - **Inspector** — Escape deselects, exactly as before. No daemon input is ever produced from this
+ *   mode, which is what keeps the IDE plugin (inspector-only) unchanged.
+ * - **Control** — the keystroke is translated to a Compose-free
+ *   [dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke] and offered to the caller, which
+ *   applies the pure `DeviceKeyboardInputPolicy` and answers whether it forwarded anything.
+ *
+ * Returning that answer as the handler's own result is the whole host-shortcut guarantee, and it is
+ * stock Compose rather than hand-rolled interception: `onKeyEvent` consumes the event only when it
+ * returns true, and an unconsumed event keeps bubbling to ancestor handlers and on to the host's
+ * window shortcuts. So a chord the policy declines is *not* swallowed, by construction — there is
+ * no separate "pass it on" path that could fall out of step with the policy.
+ *
+ * Only [KeyEventType.KeyDown] forwards. The matching KeyUp is left unconsumed so a host that tracks
+ * key releases still sees them; forwarding both would send every keystroke to the device twice.
+ *
+ * @param controlFrame the pinned snapshot + geometry; null makes control-mode keyboard inert, the
+ *   same fail-closed rule the tap and drag paths use.
+ * @param onControlKey receives the snapshot the keystroke belongs to and the translated stroke, and
+ *   returns whether the event was consumed. Null makes control-mode keyboard inert.
+ */
+private fun handleDeviceScreenKeyEvent(
+  keyEvent: KeyEvent,
+  controlMode: DeviceScreenControlMode,
+  controlFrame: Pair<DeviceFrameSnapshot, DeviceScreenGeometry>?,
+  onControlKey: ((DeviceFrameSnapshot, DeviceKeyStroke) -> Boolean)?,
+  selectedElementId: String?,
+  onElementSelected: (String?) -> Unit,
+): Boolean {
+  if (controlMode == DeviceScreenControlMode.Control) {
+    if (keyEvent.type != KeyEventType.KeyDown) return false
+    val snapshot = controlFrame?.first ?: return false
+    val forward = onControlKey ?: return false
+    return forward(snapshot, DeviceKeyboardEventTranslator.translate(keyEvent))
+  }
+  // Inspector mode: Escape deselects (unchanged behavior).
+  if (keyEvent.key == Key.Escape && selectedElementId != null) {
+    onElementSelected(null)
+    return true
+  }
+  return false
+}
 
 /**
  * The one pointer-drag gesture for the device screen, which means different things per mode (issue
@@ -298,6 +349,20 @@ fun DeviceScreenView(
    * never called.
    */
   onControlSwipe: ((DeviceFrameSnapshot, DevicePoint, DevicePoint) -> Unit)? = null,
+  /**
+   * Called in [DeviceScreenControlMode.Control] for each key press this view receives **while it
+   * holds keyboard focus**, with the snapshot the keystroke belongs to and the toolkit-free
+   * [DeviceKeyStroke] it translated to (issue #3351). Returns whether the caller forwarded anything
+   * to the device; the view uses that answer verbatim as its `onKeyEvent` result, so a keystroke
+   * the caller declines stays **unconsumed** and continues to the host's own shortcut handling.
+   *
+   * The stroke is raw: which keys become a device button, which become a discrete key event, which
+   * become typed text, and which are refused as host chords are decided by the caller through the
+   * Compose-free [dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy] — so a
+   * third-party daemon client shares the policy rather than reimplementing it. A null default makes
+   * control-mode keyboard inert; in inspector mode Escape still deselects and this is never called.
+   */
+  onControlKey: ((DeviceFrameSnapshot, DeviceKeyStroke) -> Boolean)? = null,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -309,6 +374,8 @@ fun DeviceScreenView(
   // Same reasoning for the drag callback: the gesture coroutine is keyed on controlMode alone, so
   // it must read the LATEST callback rather than the one captured when the gesture started.
   val currentOnControlSwipe by rememberUpdatedState(onControlSwipe)
+  // Same reasoning again for the key callback (issue #3351).
+  val currentOnControlKey by rememberUpdatedState(onControlKey)
 
   // Leaving inspector mode must drop the inspector affordances already drawn: the Move guard only
   // suppresses future hover updates, and the selection/hover overlays render unconditionally from
@@ -631,6 +698,18 @@ fun DeviceScreenView(
         }
       }
 
+      // Entering control mode takes keyboard focus (issue #3351). Focus is the ONLY gate on
+      // keyboard forwarding — Compose delivers a key event to `onKeyEvent` only when this node is
+      // on the focus path — so without this the view would be in control mode and yet never see a
+      // keystroke: control mode clears the selection, and the effect above is the only other thing
+      // that ever asked for focus. Nothing is grabbed in inspector mode, so the IDE plugin's focus
+      // behavior is untouched.
+      LaunchedEffect(controlMode) {
+        if (controlMode == DeviceScreenControlMode.Control) {
+          focusRequester.requestFocus()
+        }
+      }
+
       Box(
         modifier =
           Modifier.fillMaxSize()
@@ -638,13 +717,14 @@ fun DeviceScreenView(
             .focusRequester(focusRequester)
             .focusTarget()
             .onKeyEvent { keyEvent ->
-              // Handle Escape to deselect
-              if (keyEvent.key == Key.Escape && selectedElementId != null) {
-                onElementSelected(null)
-                true
-              } else {
-                false
-              }
+              handleDeviceScreenKeyEvent(
+                keyEvent = keyEvent,
+                controlMode = controlMode,
+                controlFrame = controlFrame,
+                onControlKey = currentOnControlKey,
+                selectedElementId = selectedElementId,
+                onElementSelected = onElementSelected,
+              )
             }
             // Kept where the pan gesture always was, ahead of the tap detector. A drag consumes
             // every change once it passes touch slop, and the tap detector's Final-pass consume

@@ -16,9 +16,10 @@ import kotlinx.coroutines.launch
  * [token] is the error-ordering claim [DeviceControlSession] issued for this attempt.
  *
  * Sealed rather than one command with a nullable end point: every input action added to this seam
- * ([Tap], [Swipe], and keyboard/text under #3351) carries the same routing fields and travels the
- * same queue, but its payload is its own. A shared shape would make "a tap is a swipe with a null
- * end" representable, which the forwarder would then have to re-derive at dispatch time.
+ * ([Tap], [Swipe], and keyboard/text/button — [PressButton], [TypeText], [SendKey] — under #3351)
+ * carries the same routing fields and travels the same queue, but its payload is its own. A shared
+ * shape would make "a tap is a swipe with a null end" representable, which the forwarder would then
+ * have to re-derive at dispatch time.
  */
 sealed interface DeviceControlInputCommand {
   /** The daemon client this input was captured against; null when nothing was connected. */
@@ -55,6 +56,44 @@ sealed interface DeviceControlInputCommand {
     override val snapshot: DeviceFrameSnapshot,
     override val token: Long,
   ) : DeviceControlInputCommand
+
+  /**
+   * A device/navigation button press (issue #3351), e.g. `back`. [button] is already in the
+   * daemon's `input/pressButton` vocabulary — the keyboard policy resolved it before enqueue, so
+   * nothing downstream re-derives a key mapping.
+   */
+  data class PressButton(
+    val button: String,
+    override val client: AutoMobileClient?,
+    override val platform: String,
+    override val snapshot: DeviceFrameSnapshot,
+    override val token: Long,
+  ) : DeviceControlInputCommand
+
+  /**
+   * Printable text to type on the device (issue #3351). One keystroke produces one character, so
+   * [text] is normally a single character; the field is a String because `input/typeText` takes one
+   * and a client is free to batch.
+   */
+  data class TypeText(
+    val text: String,
+    override val client: AutoMobileClient?,
+    override val platform: String,
+    override val snapshot: DeviceFrameSnapshot,
+    override val token: Long,
+  ) : DeviceControlInputCommand
+
+  /**
+   * A discrete device key event (issue #3351), e.g. `enter`. [key] is already in the daemon's
+   * `input/key` vocabulary.
+   */
+  data class SendKey(
+    val key: String,
+    override val client: AutoMobileClient?,
+    override val platform: String,
+    override val snapshot: DeviceFrameSnapshot,
+    override val token: Long,
+  ) : DeviceControlInputCommand
 }
 
 /**
@@ -67,9 +106,10 @@ sealed interface DeviceControlInputCommand {
  * [kotlinx.coroutines.sync.Mutex] would not fix this: with independent launches, which coroutine
  * acquires the lock first is scheduling-dependent, not gesture-ordered. A single-consumer FIFO
  * channel does: inputs are enqueued synchronously on the UI thread in gesture order and drained one
- * at a time, so each [handle] completes before the next begins. Taps and swipes share this ONE
- * queue, which is what makes a tap-then-swipe sequence reach the device in the order the user made
- * it; a second queue for swipes would reintroduce exactly the race this type removed.
+ * at a time, so each [handle] completes before the next begins. Taps, swipes, button presses, typed
+ * text and discrete keys all share this ONE queue, which is what makes a tap-then-type sequence
+ * reach the device in the order the user made it; a second queue for any of them would reintroduce
+ * exactly the race this type removed.
  *
  * The queue is **bounded** ([INPUT_QUEUE_CAPACITY]). An unbounded queue would retain every rapid
  * gesture and its captured [AutoMobileClient] while a slow/stalled daemon blocks the sole consumer,

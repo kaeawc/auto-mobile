@@ -52,7 +52,10 @@ describe("BaseVisualChange post-action observation", () => {
   test("retries a stale observation on the [50,100,200,400] backoff and caps at four attempts", async () => {
     const instance = createVisualChange("ios");
     // Every observation reports not-fresh, so shouldRetry stays true until the cap.
-    fakeObserveScreen.setObserveResult(makeObserve({ freshness: { isFresh: false } }));
+    // Use the factory form so each retry gets a DISTINCT observation object — the
+    // final stale-warning assertion then pins the observation actually returned from
+    // the last attempt, not a shared object any earlier attempt could have mutated.
+    fakeObserveScreen.setObserveResult(() => makeObserve({ freshness: { isFresh: false } }));
 
     const result = await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,

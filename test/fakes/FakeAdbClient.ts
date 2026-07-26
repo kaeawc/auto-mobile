@@ -201,6 +201,13 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.commandCalls = [];
     this.commandResults.clear();
     this.commandErrors.clear();
+    // Also clear the scripted seams added for the action-lifecycle slice, or a
+    // suite that reuses a client after reset() inherits stale sequences/cursors,
+    // a lingering foreground-app error, and hanging-command patterns.
+    this.commandResultSequences.clear();
+    this.commandSequenceCursor.clear();
+    this.foregroundAppError = null;
+    this.hangingCommandPatterns = [];
   }
 
   /**

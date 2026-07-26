@@ -101,7 +101,7 @@ import { CtrlProxyGestures } from "./CtrlProxyGestures";
 import { CtrlProxyText } from "./CtrlProxyText";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
-import { CtrlProxyCertificates } from "./CtrlProxyCertificates";
+import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus } from "./CtrlProxyFocus";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
@@ -938,6 +938,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private readonly crashEventSink: CrashEventSink;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
+  private readonly certificateFileSystem: CertificateFileSystem | undefined;
 
   /**
    * Owns SDK telemetry/crash/ANR ingestion (issue #2764). Lazily built so it can
@@ -963,7 +964,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     crashEventSink?: CrashEventSink,
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: AndroidSdkEventIngestor,
-    loggerInstance: Logger = logger
+    loggerInstance: Logger = logger,
+    certificateFileSystem?: CertificateFileSystem
   ) {
     super(timer ?? defaultTimer, webSocketFactory ?? defaultWebSocketFactory, {}, retryExecutor ?? defaultRetryExecutor);
     this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
@@ -974,6 +976,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
     this.deviceConnectionLostNotifier =
       deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
+    this.certificateFileSystem = certificateFileSystem;
     this.localPort = PortManager.allocate(device.deviceId, {
       reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
     });
@@ -1088,7 +1091,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     crashEventSink?: CrashEventSink,
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: AndroidSdkEventIngestor,
-    loggerInstance?: Logger
+    loggerInstance?: Logger,
+    certificateFileSystem?: CertificateFileSystem
   ): AndroidCtrlProxyClient {
     return new AndroidCtrlProxyClient(
       device,
@@ -1100,7 +1104,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       crashEventSink,
       deviceConnectionLostNotifier,
       sdkEventIngestor,
-      loggerInstance
+      loggerInstance,
+      certificateFileSystem
     );
   }
 
@@ -1171,7 +1176,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private get certificates(): CtrlProxyCertificates {
     if (!this._certificates) {
-      this._certificates = new CtrlProxyCertificates(this.createCertificatesDelegateContext());
+      this._certificates = new CtrlProxyCertificates(
+        this.createCertificatesDelegateContext(),
+        this.certificateFileSystem
+      );
     }
     return this._certificates;
   }

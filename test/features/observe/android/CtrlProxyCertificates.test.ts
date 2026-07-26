@@ -10,6 +10,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -18,6 +20,8 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState, createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { PortManager } from "../../../../src/utils/PortManager";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../../src/utils/workingDirectory";
 
 describe("CtrlProxyCertificates (Android)", function() {
   let fakeAdb: FakeAdbExecutor;
@@ -29,6 +33,7 @@ describe("CtrlProxyCertificates (Android)", function() {
 
   beforeEach(function() {
     fakeTimer = new FakeTimer();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
 
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
@@ -48,6 +53,7 @@ describe("CtrlProxyCertificates (Android)", function() {
 
   afterEach(function() {
     NavigationGraphManager.getInstance();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
   class CapturingWebSocket extends FakeWebSocket {
@@ -55,6 +61,27 @@ describe("CtrlProxyCertificates (Android)", function() {
     send(data: any): void {
       this.sentMessages.push(data.toString());
       super.send(data);
+    }
+  }
+
+  class FakeCertificateFileSystem {
+    readonly statCalls: string[] = [];
+    private readonly files = new Map<string, { size: number; isFile: boolean }>();
+
+    setFile(filePath: string, size: number, isFile = true): void {
+      this.files.set(filePath, { size, isFile });
+    }
+
+    async stat(filePath: string): Promise<{ size: number; isFile(): boolean }> {
+      this.statCalls.push(filePath);
+      const file = this.files.get(filePath);
+      if (!file) {
+        throw new Error(`File not found: ${filePath}`);
+      }
+      return {
+        size: file.size,
+        isFile: () => file.isFile,
+      };
     }
   }
 
@@ -122,12 +149,24 @@ describe("CtrlProxyCertificates (Android)", function() {
     });
 
   /** Connect a capturing client and return the client + its socket. */
-  const connectClient = async (): Promise<{
+  const connectClient = async (certificateFileSystem?: FakeCertificateFileSystem): Promise<{
     client: AndroidCtrlProxyClient;
     socket: CapturingWebSocket;
   }> => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      factory,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      certificateFileSystem
+    );
     await client.ensureConnected();
     const socket = await waitForSocket(getSocket);
     await waitForSocketOpen(socket);
@@ -245,6 +284,11 @@ describe("CtrlProxyCertificates (Android)", function() {
   // ===========================================================================
 
   describe("requestInstallCaCertificateFromFile", function() {
+    const relativeCertificatePath = path.join("fixtures", "certs", "relative ca.crt");
+    const daemonLaunchCwd = path.join(process.cwd(), "tmp", "automobile-launch");
+    const relativeResolvedPath = path.join(daemonLaunchCwd, relativeCertificatePath);
+    const fileUrlResolvedPath = path.join(process.cwd(), "tmp", "automobile ca.crt");
+
     test("rejects an empty path without touching the device", async function() {
       const { client, socket } = await connectClient();
       try {
@@ -290,6 +334,90 @@ describe("CtrlProxyCertificates (Android)", function() {
         expect(result.success).toBe(false);
         // Never pushed the file and never asked the runner to install it.
         expect(fakeAdb.getExecutedCommands().some(c => c.startsWith("push"))).toBe(false);
+        expect(hasSentMessage(socket, "install_ca_cert_from_path")).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test.each([
+      {
+        name: "a relative path from the daemon launch directory",
+        certificatePath: relativeCertificatePath,
+        resolvedPath: relativeResolvedPath,
+        daemonLaunchCwd,
+      },
+      {
+        name: "a file URL",
+        certificatePath: pathToFileURL(fileUrlResolvedPath).href,
+        resolvedPath: fileUrlResolvedPath,
+        daemonLaunchCwd: undefined,
+      },
+    ])("pushes $name and resolves the install result over the wire", async function({
+      certificatePath,
+      resolvedPath,
+      daemonLaunchCwd,
+    }) {
+      const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+      if (daemonLaunchCwd !== undefined) {
+        process.env[DAEMON_LAUNCH_CWD_ENV] = daemonLaunchCwd;
+      }
+
+      try {
+        const fakeFileSystem = new FakeCertificateFileSystem();
+        fakeFileSystem.setFile(resolvedPath, 128);
+        const { client, socket } = await connectClient(fakeFileSystem);
+        try {
+          const baseCount = socket.sentMessages.length;
+          const resultPromise = client.requestInstallCaCertificateFromFile(certificatePath);
+          await waitForSentMessages(socket, baseCount + 1);
+
+          const sent = findSentMessage(socket, "install_ca_cert_from_path");
+          expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
+
+          const push = fakeAdb.getExecutedCommands().find(command => command.startsWith("push "));
+          expect(push?.replace(/\\\\/g, "\\")).toContain(`"${resolvedPath}"`);
+          expect(push).toEndWith(`"${sent.devicePath}"`);
+
+          socket.simulateMessage(JSON.stringify({
+            type: "ca_cert_result",
+            requestId: sent.requestId,
+            success: true,
+            action: "install",
+            alias: "user-ca-cert",
+            totalTimeMs: 3,
+          }));
+
+          const result = await resultPromise;
+          expect(result).toMatchObject({
+            success: true,
+            action: "install",
+            alias: "user-ca-cert",
+          });
+        } finally {
+          await client.close();
+        }
+      } finally {
+        if (previousLaunchCwd === undefined) {
+          delete process.env[DAEMON_LAUNCH_CWD_ENV];
+        } else {
+          process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
+        }
+      }
+    });
+
+    test("rejects an empty certificate file before pushing or sending a wire request", async function() {
+      const resolvedPath = "/tmp/empty-ca.crt";
+      const fakeFileSystem = new FakeCertificateFileSystem();
+      fakeFileSystem.setFile(resolvedPath, 0);
+      const { client, socket } = await connectClient(fakeFileSystem);
+      try {
+        const result = await client.requestInstallCaCertificateFromFile(resolvedPath);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Certificate file is empty");
+        expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
+        expect(fakeAdb.getExecutedCommands().some(command => command.startsWith("push "))).toBe(false);
         expect(hasSentMessage(socket, "install_ca_cert_from_path")).toBe(false);
       } finally {
         await client.close();

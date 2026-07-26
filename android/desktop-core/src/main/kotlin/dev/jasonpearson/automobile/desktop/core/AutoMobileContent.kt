@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.control.DeviceControlTapForwarder
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -96,6 +97,7 @@ import dev.jasonpearson.automobile.desktop.core.failures.McpFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.StreamingFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.TimeAggregation
 import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlTapErrorBanner
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotMetadataOverlay
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
@@ -149,6 +151,8 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
+import dev.jasonpearson.automobile.desktop.domain.DevicePoint
+import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
@@ -336,6 +340,14 @@ fun AutoMobileContent(
   onOpenSource: ((String, Int, String) -> Unit)? = null,
   menuBarActions: MenuBarActions? = null,
   videoStreamSourceFactory: () -> VideoStreamSource = { VideoStreamClient() },
+  /**
+   * Opt-in device control for the live layout view (issue #3347). When true, a click on the
+   * mirrored device screen in live-layout mode is mapped to a device coordinate and forwarded to
+   * the daemon `input/tap` helper instead of selecting an inspector element. Defaults to false so
+   * the IDE plugin (which shares this composable) stays inspector-only with no source change; the
+   * reference desktop app opts in.
+   */
+  enableDeviceControl: Boolean = false,
 ) {
   // When a MenuBarActions bridge is supplied (from Main.kt's MenuBar), delegate
   // pane-visibility and overlay state to it so the native menu items and the
@@ -362,6 +374,10 @@ fun AutoMobileContent(
   var selectedTelemetryEvent by remember { mutableStateOf<TelemetryDisplayEvent?>(null) }
   var isLiveLayoutMode by remember { mutableStateOf(false) }
   val layoutInspectorState = rememberLayoutInspectorState()
+
+  // Last device-control tap error (issue #3347). Set from the daemon's actionable error when a
+  // control-mode tap fails so the live layout view can surface it; cleared on the next tap attempt.
+  var deviceControlTapError by remember { mutableStateOf<String?>(null) }
 
   // Command palette & global search state (delegated to MenuBarActions)
   var showCommandPalette by actions::showCommandPalette
@@ -1410,6 +1426,31 @@ fun AutoMobileContent(
               socketExists = true,
               elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
               modifier = Modifier.fillMaxSize(),
+              // Device control (issue #3347): the reference desktop app opts in via
+              // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only.
+              controlMode =
+                if (enableDeviceControl) DeviceScreenControlMode.Control
+                else DeviceScreenControlMode.Inspector,
+              // The view only maps a click to a device coordinate; forwarding it to the daemon
+              // input/tap helper is our job. Runs off the UI thread and never crashes on failure —
+              // the daemon's actionable error surfaces in deviceControlTapError instead.
+              onControlTap =
+                if (enableDeviceControl) {
+                  { point: DevicePoint ->
+                    deviceControlTapError = null
+                    screenshotScope.launch(Dispatchers.IO) {
+                      DeviceControlTapForwarder(
+                          clientProvider = { clientProvider?.invoke() },
+                          platformProvider = { platformString },
+                          deviceIdProvider = { activeDeviceId },
+                          onError = { message -> deviceControlTapError = message },
+                        )
+                        .forward(point)
+                    }
+                  }
+                } else {
+                  null
+                },
             )
 
             ScreenshotMetadataOverlay(
@@ -1419,6 +1460,14 @@ fun AutoMobileContent(
               captureSource = layoutInspectorState.screenshotCaptureSource,
               modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
             )
+
+            deviceControlTapError?.let { message ->
+              DeviceControlTapErrorBanner(
+                message = message,
+                onDismiss = { deviceControlTapError = null },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+              )
+            }
           }
         } else {
           Column(mod) {

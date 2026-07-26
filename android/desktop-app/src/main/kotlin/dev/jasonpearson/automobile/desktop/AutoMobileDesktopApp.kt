@@ -55,6 +55,9 @@ fun AutoMobileDesktopApp(menuBarActions: MenuBarActions = remember { MenuBarActi
           )
         },
         menuBarActions = menuBarActions,
+        // The reference desktop client opts into device control (issue #3347): a click on the live
+        // layout screen taps the device via the daemon. The IDE plugin leaves this off.
+        enableDeviceControl = true,
       )
     }
   }

@@ -10,7 +10,7 @@
  * production.
  */
 
-import { expect, describe, it, beforeEach, afterEach } from "bun:test";
+import { expect, describe, it, test, beforeEach, afterEach } from "bun:test";
 import type { WcagViolation } from "../../../src/models/AccessibilityAudit";
 import { createTestDatabase } from "../../db/testDbHelper";
 import { BaselineManager } from "../../../src/features/accessibility/BaselineManager";
@@ -296,6 +296,40 @@ describe("BaselineManager", function() {
       const baseline = await manager.getBaseline(screenId);
       expect(baseline).not.toBeNull();
       expect(baseline!.screenId).toBe(screenId);
+    });
+
+    test("getBaseline returns null instead of throwing when a row has corrupt violations_json", async function() {
+      const now = new Date().toISOString();
+      await testDb
+        .insertInto("accessibility_baselines")
+        .values({
+          screen_id: "corrupt_screen",
+          violations_json: "{ this is not valid json",
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      // A raw SyntaxError must not escape the read boundary (issue #4179).
+      const baseline = await manager.getBaseline("corrupt_screen");
+      expect(baseline).toBeNull();
+    });
+
+    test("listBaselines skips a corrupt row and still returns the intact ones", async function() {
+      const now = new Date().toISOString();
+      await manager.saveBaseline("good_screen", []);
+      await testDb
+        .insertInto("accessibility_baselines")
+        .values({
+          screen_id: "corrupt_screen",
+          violations_json: "not json at all",
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+
+      const baselines = await manager.listBaselines();
+      expect(baselines.map(b => b.screenId)).toEqual(["good_screen"]);
     });
 
     it("should store and retrieve updated_at timestamp", async function() {

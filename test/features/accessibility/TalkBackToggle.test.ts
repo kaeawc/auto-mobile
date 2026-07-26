@@ -3,6 +3,7 @@ import { TalkBackToggle } from "../../../src/features/accessibility/TalkBackTogg
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeSecureSettingsRpc } from "../../fakes/FakeSecureSettingsRpc";
 import type { BootedDevice } from "../../../src/models";
 
 const ANDROID_DEVICE: BootedDevice = {
@@ -10,17 +11,6 @@ const ANDROID_DEVICE: BootedDevice = {
   name: "Pixel 7 API 35",
   platform: "android"
 };
-
-const DUMPSYS_WITH_TALKBACK = `
-Installed Services:
-  Service[label=TalkBack, feedbackType[spokenFeedback], targetSdkVersion=32]
-    Id: com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService
-`;
-
-const DUMPSYS_WITHOUT_TALKBACK = `
-Installed Services:
-  (none)
-`;
 
 const PACKAGE_LIST_WITH_TALKBACK = `
 package:com.google.android.marvin.talkback
@@ -53,12 +43,17 @@ describe("TalkBackToggle", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDetector: FakeAccessibilityDetector;
   let fakeTimer: FakeTimer;
+  let fakeSecureSettings: FakeSecureSettingsRpc;
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
     fakeDetector = new FakeAccessibilityDetector();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    // Default: a11y-service path unavailable, so writes fall back to ADB (the
+    // path the existing assertions target). No real AdbClient enters the static
+    // singleton map (issue #4179).
+    fakeSecureSettings = new FakeSecureSettingsRpc();
     fakeAdb.setCommandResponse(
       "pm list packages com.google.android.marvin.talkback",
       makeExecResult(PACKAGE_LIST_WITH_TALKBACK)
@@ -73,12 +68,11 @@ describe("TalkBackToggle", () => {
 
   describe("enable TalkBack", () => {
     test("returns supported:true applied:true when TalkBack is installed and currently disabled", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       // Pre-apply idempotency detect: not talkback -> proceed. Post-apply
       // confirmation detect: talkback -> applied:true (#3921).
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -88,12 +82,11 @@ describe("TalkBackToggle", () => {
     });
 
     test("reports applied:false when TalkBack did not activate after apply (e.g. consent dialog blocked it)", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       // Idempotency detect: not talkback -> proceed. Confirmation detect: STILL
       // not talkback -> the toggle must not claim success optimistically (#3921).
       fakeDetector.enqueueDetectMethodResults("unknown", "unknown");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -102,10 +95,9 @@ describe("TalkBackToggle", () => {
     });
 
     test("runs the correct enable ADB commands", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       expect(
@@ -119,20 +111,18 @@ describe("TalkBackToggle", () => {
     });
 
     test("invalidates the detector cache after enabling", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       expect(fakeDetector.getInvalidatedDevices()).toContain(ANDROID_DEVICE.deviceId);
     });
 
     test("invalidates cache before idempotency check to avoid stale state", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       // Cache must have been invalidated at least once before detectMethod was called
@@ -140,10 +130,9 @@ describe("TalkBackToggle", () => {
     });
 
     test("attempts dialog dismissal via a file dump (not /dev/tty) after enabling", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       // #3921: dump to a device file and read it back, never to /dev/tty.
@@ -153,14 +142,13 @@ describe("TalkBackToggle", () => {
     });
 
     test("taps Allow button when permission dialog is present (English)", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeAdb.setCommandResponse(
         "shell cat /sdcard/window_dump.xml",
         makeExecResult(DIALOG_XML_WITH_BUTTON1)
       );
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       // Center of [180,684][540,740] = (360, 712)
@@ -168,14 +156,13 @@ describe("TalkBackToggle", () => {
     });
 
     test("taps Allow button on non-English locale using resource-id", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeAdb.setCommandResponse(
         "shell cat /sdcard/window_dump.xml",
         makeExecResult(DIALOG_XML_NON_ENGLISH)
       );
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       // Center of [180,684][540,740] = (360, 712)
@@ -183,7 +170,6 @@ describe("TalkBackToggle", () => {
     });
 
     test("does not tap when no permission dialog appears", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeAdb.setCommandResponse(
         "shell cat /sdcard/window_dump.xml",
         makeExecResult("<hierarchy><node text='Home' /></hierarchy>")
@@ -191,7 +177,7 @@ describe("TalkBackToggle", () => {
       // Idempotency: not talkback -> proceed. Confirmation: talkback -> applied:true.
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
@@ -205,7 +191,6 @@ describe("TalkBackToggle", () => {
   <node index="0" text="Allow this app to access your location?" resource-id="" />
   <node index="1" text="Allow" resource-id="android:id/button1" bounds="[180,684][540,740]" />
 </hierarchy>`;
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeAdb.setCommandResponse(
         "shell cat /sdcard/window_dump.xml",
         makeExecResult(unrelatedDialogXml)
@@ -213,7 +198,7 @@ describe("TalkBackToggle", () => {
       // Idempotency: not talkback -> proceed. Confirmation: talkback -> applied:true.
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
@@ -221,10 +206,9 @@ describe("TalkBackToggle", () => {
     });
 
     test("is idempotent when TalkBack is already enabled", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -234,12 +218,11 @@ describe("TalkBackToggle", () => {
     });
 
     test("enables TalkBack when another service is active but TalkBack is not", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       // Idempotency: another service active but not talkback ("unknown") -> proceed.
       // Confirmation: talkback -> applied:true (#3921).
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(result.applied).toBe(true);
@@ -247,14 +230,13 @@ describe("TalkBackToggle", () => {
     });
 
     test("appends TalkBack to existing services list when enabling", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeAdb.setCommandResponse(
         "settings get secure enabled_accessibility_services",
         makeExecResult("com.example.other/OtherService")
       );
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       expect(
@@ -279,7 +261,7 @@ describe("TalkBackToggle", () => {
       );
       fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(false);
 
       expect(result).toEqual({ supported: true, applied: true, currentState: false });
@@ -292,12 +274,11 @@ describe("TalkBackToggle", () => {
     });
 
     test("returns supported:true applied:true when TalkBack is installed and currently enabled", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       // Idempotency: talkback (currently on) -> proceed to disable. Confirmation:
       // not talkback -> applied:true, currentState:false (#3921).
       fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(false);
 
       expect(result.supported).toBe(true);
@@ -306,10 +287,9 @@ describe("TalkBackToggle", () => {
     });
 
     test("runs the correct disable ADB commands", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(false);
 
       expect(
@@ -321,27 +301,24 @@ describe("TalkBackToggle", () => {
     });
 
     test("does not attempt dialog dismissal when disabling", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(false);
 
       expect(fakeAdb.wasCommandExecuted("shell uiautomator dump /sdcard/window_dump.xml")).toBe(false);
     });
 
     test("invalidates the detector cache after disabling", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(false);
 
       expect(fakeDetector.getInvalidatedDevices()).toContain(ANDROID_DEVICE.deviceId);
     });
 
     test("preserves other accessibility services when disabling TalkBack", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeAdb.setCommandResponse(
         "settings get secure enabled_accessibility_services",
         makeExecResult(
@@ -350,7 +327,7 @@ describe("TalkBackToggle", () => {
       );
       fakeDetector.setDefaultResult(true, "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(false);
 
       expect(
@@ -368,10 +345,9 @@ describe("TalkBackToggle", () => {
     });
 
     test("is idempotent when TalkBack is already disabled", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(false);
 
       expect(result.supported).toBe(true);
@@ -388,7 +364,7 @@ describe("TalkBackToggle", () => {
         makeExecResult("")
       );
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(false);
@@ -402,7 +378,7 @@ describe("TalkBackToggle", () => {
         makeExecResult("")
       );
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       expect(fakeAdb.wasCommandExecuted("accessibility_enabled")).toBe(false);
@@ -414,7 +390,7 @@ describe("TalkBackToggle", () => {
         new Error("ADB connection failed")
       );
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(false);
@@ -432,7 +408,7 @@ describe("TalkBackToggle", () => {
       );
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       // #3921: the apply failure is wrapped into a typed result, matching the
       // graceful contract of the other paths, rather than propagating raw.
       const result = await toggle.toggle(true);
@@ -445,10 +421,9 @@ describe("TalkBackToggle", () => {
 
   describe("TalkBack service component", () => {
     test("enables an installed but disabled TalkBack that is absent from dumpsys", async () => {
-      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITHOUT_TALKBACK));
       fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       const result = await toggle.toggle(true);
 
       expect(result).toEqual({ supported: true, applied: true, currentState: true });
@@ -466,7 +441,7 @@ describe("TalkBackToggle", () => {
     test("uses the known TalkBack service component", async () => {
       fakeDetector.setDefaultResult(false);
 
-      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
       await toggle.toggle(true);
 
       expect(
@@ -475,5 +450,79 @@ describe("TalkBackToggle", () => {
         )
       ).toBe(true);
     });
+  });
+
+  describe("secure settings seam (a11y-first / ADB fallback)", () => {
+    test("writes settings through the a11y service and skips the ADB fallback when the a11y put succeeds", async () => {
+      // a11y path reports success for every write, so the toggle must NOT issue
+      // the `settings put` ADB fallback for the enable writes.
+      fakeSecureSettings.setPutResult({ success: true });
+      fakeSecureSettings.setGetResult({ success: true, found: false });
+      fakeDetector.setDefaultResult(false);
+
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
+      await toggle.toggle(true);
+
+      // The a11y seam received the enable writes...
+      expect(fakeSecureSettings.putCalls.map(c => c.key)).toEqual(
+        expect.arrayContaining(["enabled_accessibility_services", "accessibility_enabled"])
+      );
+      // ...and the ADB `settings put secure` fallback was never used.
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure enabled_accessibility_services")).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled")).toBe(false);
+    });
+
+    test("falls back to the ADB write when the a11y put reports failure", async () => {
+      // a11y path unavailable (default) → the toggle must issue the ADB fallback.
+      fakeSecureSettings.setPutResult({ success: false });
+      fakeDetector.setDefaultResult(false);
+
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
+      await toggle.toggle(true);
+
+      expect(
+        fakeAdb.wasCommandExecuted(
+          "shell settings put secure enabled_accessibility_services com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService"
+        )
+      ).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled 1")).toBe(true);
+    });
+  });
+
+  describe("enabled_accessibility_services parsing", () => {
+    // getOtherServices() reads the existing list and appends TalkBack while
+    // preserving unrelated services. These rows pin the parse rules: a literal
+    // "null"/empty/whitespace value contributes no other services, and duplicate
+    // or padded entries are trimmed. The observable outcome is the exact
+    // `enabled_accessibility_services` value written back on enable.
+    const TALKBACK = "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService";
+    const OTHER = "com.example.other/OtherService";
+
+    test.each([
+      ["literal string \"null\"", "null", TALKBACK],
+      ["empty string", "", TALKBACK],
+      ["whitespace only", "   ", TALKBACK],
+      ["single other service", OTHER, `${OTHER}:${TALKBACK}`],
+      ["padded entries with blanks", `  ${OTHER}  : `, `${OTHER}:${TALKBACK}`],
+      ["duplicate other services", `${OTHER}:${OTHER}`, `${OTHER}:${OTHER}:${TALKBACK}`],
+    ])(
+      "writes the correct services list when the existing value is %s",
+      async (_label, existing, expected) => {
+        fakeAdb.setCommandResponse(
+          "settings get secure enabled_accessibility_services",
+          makeExecResult(existing)
+        );
+        fakeDetector.setDefaultResult(false);
+
+        const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer, fakeSecureSettings);
+        await toggle.toggle(true);
+
+        expect(
+          fakeAdb.wasCommandExecuted(
+            `shell settings put secure enabled_accessibility_services ${expected}`
+          )
+        ).toBe(true);
+      }
+    );
   });
 });

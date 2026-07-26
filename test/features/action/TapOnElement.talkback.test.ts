@@ -209,7 +209,7 @@ describe("TapOnElement TalkBack mode detection", () => {
   });
 
   describe("TalkBack detection integration", () => {
-    test("calls accessibility detector on each tap", async () => {
+    test("checks TalkBack state once per tap (no cross-tap caching in the executor)", async () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
 
       const element = {
@@ -217,17 +217,14 @@ describe("TapOnElement TalkBack mode detection", () => {
         "resource-id": "test:id/button",
       } as any;
 
-      // First call
+      // Each executeAndroidTap consults the detector exactly once; two taps
+      // therefore produce exactly two checks. (Caching lives in the real
+      // AccessibilityDetector, not this executor, and is tested there.)
       await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
-      const firstCheckCount = fakeAccessibilityDetector.getCheckCount();
-      expect(firstCheckCount).toBe(1);
+      expect(fakeAccessibilityDetector.getCheckCount()).toBe(1);
 
-      // Second call - note: real AccessibilityDetector would cache, but FakeAccessibilityDetector doesn't
       await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
-      const secondCheckCount = fakeAccessibilityDetector.getCheckCount();
-
-      // Verify detector was called for second tap (caching is tested in AccessibilityDetector tests)
-      expect(secondCheckCount).toBeGreaterThanOrEqual(1);
+      expect(fakeAccessibilityDetector.getCheckCount()).toBe(2);
     });
 
     test("respects cache invalidation", async () => {

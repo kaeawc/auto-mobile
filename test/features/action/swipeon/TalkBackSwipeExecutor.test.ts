@@ -168,10 +168,9 @@ describe("TalkBackSwipeExecutor", () => {
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
     });
 
-    test("uses standard swipe for all directions", async () => {
-      const directions: SwipeDirection[] = ["up", "down", "left", "right"];
-
-      for (const direction of directions) {
+    test.each(["up", "down", "left", "right"] as SwipeDirection[])(
+      "dispatches a standard coordinate swipe for direction %s",
+      async direction => {
         fakeGestureExecutor.getSwipeCalls().length = 0;
 
         const fresh = makeExecutor(
@@ -190,10 +189,15 @@ describe("TalkBackSwipeExecutor", () => {
           perf
         );
 
+        // The dispatch the name claims: a single standard gesture swipe with the
+        // exact coordinates, and NO accessibility action/two-finger path.
+        const swipeCalls = fakeGestureExecutor.getSwipeCalls();
+        expect(swipeCalls).toHaveLength(1);
+        expect(swipeCalls[0]).toMatchObject({ x1: 100, y1: 500, x2: 100, y2: 200 });
         expect(fakeCtrlProxy.getActionHistory()).toHaveLength(0);
         expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
       }
-    });
+    );
   });
 
   describe("when TalkBack is enabled (android)", () => {
@@ -247,11 +251,40 @@ describe("TalkBackSwipeExecutor", () => {
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(1);
     });
 
-    test("uses accessibility method for all swipe directions", async () => {
-      const directions: SwipeDirection[] = ["up", "down", "left", "right"];
+    test("surfaces a failed two-finger swipe as an ActionableError instead of a successful scroll", async () => {
+      fakeCtrlProxy.setTwoFingerSwipeResult({ success: false, totalTimeMs: 1, error: "scroll rejected" });
 
-      for (const direction of directions) {
+      await expect(
+        executor.executeSwipeGesture(
+          100, 500, 100, 200,
+          "up" as SwipeDirection,
+          null,
+          { duration: 300 },
+          perf
+        )
+      ).rejects.toThrow("Two-finger swipe failed: scroll rejected");
+    });
+
+    test("uses the \"Unknown error\" fallback when the two-finger failure carries an empty message", async () => {
+      // "" is falsy, so this exercises the `|| "Unknown error"` boundary.
+      fakeCtrlProxy.setTwoFingerSwipeResult({ success: false, totalTimeMs: 1, error: "" });
+
+      await expect(
+        executor.executeSwipeGesture(
+          100, 500, 100, 200,
+          "up" as SwipeDirection,
+          null,
+          { duration: 300 },
+          perf
+        )
+      ).rejects.toThrow("Two-finger swipe failed: Unknown error");
+    });
+
+    test.each(["up", "down", "left", "right"] as SwipeDirection[])(
+      "dispatches an accessibility two-finger swipe for direction %s (no container)",
+      async direction => {
         fakeCtrlProxy.clearHistory();
+        fakeGestureExecutor.getSwipeCalls().length = 0;
         const fresh = makeExecutor(
           ANDROID_DEVICE,
           fakeGestureExecutor,
@@ -268,9 +301,13 @@ describe("TalkBackSwipeExecutor", () => {
           perf
         );
 
+        // The dispatch the name claims: with TalkBack on and no container, the
+        // swipe routes through the accessibility two-finger path, never the
+        // standard coordinate gesture.
+        expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(1);
         expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(0);
       }
-    });
+    );
 
     test("boomerang mode announces swipeable element instead of swiping", async () => {
       const containerElement = {

@@ -235,46 +235,4 @@ describe("TapOnElement VoiceOver mode", () => {
     });
   });
 
-  describe("Android platform unaffected", () => {
-    test("does not call iosVoiceOverDetector for Android device", async () => {
-      const androidTapOnElement = new TapOnElement(
-        {
-          name: "test-device",
-          platform: "android",
-          id: "emulator-5554",
-          deviceId: "emulator-5554",
-        } as any,
-        fakeAdb as any,
-        {
-          iosVoiceOverDetector: fakeVoiceOverDetector,
-          timer: fakeTimer,
-        }
-      );
-
-      fakeVoiceOverDetector.setVoiceOverEnabled(true);
-
-      spyOn(
-        androidTapOnElement as any,
-        "executeAndroidTap"
-      ).mockResolvedValue(undefined);
-
-      // The isVoiceOverEnabled should not be called for Android
-      // We verify via call count
-      const initialCallCount = fakeVoiceOverDetector.getCallCount();
-
-      await (androidTapOnElement as any).executeAndroidTap(
-        "tap",
-        50,
-        50,
-        500,
-        {} as any,
-        undefined,
-        undefined,
-        undefined,
-        []
-      );
-
-      expect(fakeVoiceOverDetector.getCallCount()).toBe(initialCallCount);
-    });
-  });
 });

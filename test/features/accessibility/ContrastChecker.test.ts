@@ -8,6 +8,7 @@ import * as path from "path";
 import { ContrastChecker } from "../../../src/features/accessibility/ContrastChecker";
 import type { Element } from "../../../src/models/Element";
 import { FakeImageBackend } from "../../fakes/FakeImageBackend";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 /** Build a uniform RGBA raw image for backend-seam tests. */
 function uniformRaw(width: number, height: number, r: number, g: number, b: number): {
@@ -277,16 +278,18 @@ describe("ContrastChecker", function() {
 
       const result = await checker.checkContrast(screenshotPath, edgeElement, "AA");
 
-      // Should either return valid result or null, but not throw
-      if (result !== null) {
-        expect(result.ratio).toBeTypeOf("number");
-      }
+      // A 5x5 element flush against the image edge is analyzable (>= 2px on both
+      // axes) and must yield a concrete, finite ratio >= 1 — not silently null.
+      expect(result).not.toBeNull();
+      expect(Number.isFinite(result!.ratio)).toBe(true);
+      expect(result!.ratio).toBeGreaterThanOrEqual(1);
     });
 
     it("should handle elements larger than screenshot", async function() {
       const screenshotPath = path.join(fixturesDir, "small-element.png");
 
-      // Element bounds larger than the 20x10 image
+      // Element bounds larger than the image: pixel sampling edge-clamps rather
+      // than throwing, so this must still produce a finite ratio >= 1.
       const oversizedElement: Element = {
         bounds: { left: 0, top: 0, right: 200, bottom: 100 },
         text: "Oversized",
@@ -294,8 +297,9 @@ describe("ContrastChecker", function() {
 
       const result = await checker.checkContrast(screenshotPath, oversizedElement, "AA");
 
-      // Should handle gracefully
-      expect(result === null || typeof result?.ratio === "number").toBe(true);
+      expect(result).not.toBeNull();
+      expect(Number.isFinite(result!.ratio)).toBe(true);
+      expect(result!.ratio).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -433,6 +437,111 @@ describe("ContrastChecker", function() {
       const result = await seamChecker.checkContrast(syntheticScreenshotPath, element, "AA");
 
       expect(result).not.toBeNull();
+    });
+  });
+
+  describe("Required ratio (parameterized)", function() {
+    // getRequiredContrastRatio keys off isLargeText (height >= 24) and the level.
+    // 23/24/25 straddle the large-text boundary; level "A" falls through to the
+    // same ratios as AA. requiredRatio is independent of the sampled contrast,
+    // so a uniform fake image is sufficient and keeps this fast.
+    function ratioChecker(): ContrastChecker {
+      const backend = new FakeImageBackend();
+      backend.setRawPixelsResult(uniformRaw(200, 200, 255, 255, 255));
+      return new ContrastChecker({}, new FakeTimer(), backend, {
+        readFile: async () => Buffer.from("synthetic"),
+      });
+    }
+
+    it.each([
+      [23, "A", 4.5],
+      [24, "A", 3.0],
+      [25, "A", 3.0],
+      [23, "AA", 4.5],
+      [24, "AA", 3.0],
+      [25, "AA", 3.0],
+      [23, "AAA", 7.0],
+      [24, "AAA", 4.5],
+      [25, "AAA", 4.5],
+    ])(
+      "height %i at level %s requires %f:1",
+      async function(height, level, expected) {
+        const element: Element = {
+          bounds: { left: 0, top: 0, right: 100, bottom: height as number },
+          text: "Sample",
+        };
+        const result = await ratioChecker().checkContrast(
+          syntheticScreenshotPath,
+          element,
+          level as "A" | "AA" | "AAA"
+        );
+
+        expect(result).not.toBeNull();
+        expect(result!.requiredRatio).toBe(expected as number);
+      }
+    );
+  });
+
+  describe("Screenshot cache (TTL + fingerprint)", function() {
+    // A real fixture path is used where a STABLE fingerprint is needed:
+    // getScreenshotFingerprint stats the real file, so its mtime/size are fixed
+    // across a FakeTimer advance — isolating the TTL check from the fingerprint
+    // check. Element caching is disabled so the second call actually reaches the
+    // screenshot cache instead of short-circuiting on the element result.
+    const realFixture = path.join(fixturesDir, "black-on-white.png");
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      text: "Sample",
+    };
+
+    function cachingChecker(timer: FakeTimer, backend: FakeImageBackend): ContrastChecker {
+      return new ContrastChecker({ enableElementCache: false }, timer, backend, {
+        readFile: async () => Buffer.from("synthetic"),
+      });
+    }
+
+    it("decodes once when the same screenshot is reused within the TTL", async function() {
+      const timer = new FakeTimer();
+      const backend = new FakeImageBackend();
+      backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
+      const cache = cachingChecker(timer, backend);
+
+      await cache.checkContrast(realFixture, element, "AA");
+      // No time advance and an unchanged (real-file) fingerprint → cache hit.
+      await cache.checkContrast(realFixture, element, "AA");
+
+      expect(backend.rawPixelsCalls).toHaveLength(1);
+    });
+
+    it("re-decodes a screenshot whose cache entry has aged past the TTL", async function() {
+      const timer = new FakeTimer();
+      const backend = new FakeImageBackend();
+      backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
+      const cache = cachingChecker(timer, backend);
+
+      await cache.checkContrast(realFixture, element, "AA");
+      // Age the entry past the default 60s TTL. The fingerprint is stable (real
+      // file stat), so ONLY the TTL expiry can force the re-decode.
+      timer.advanceTime(60_001);
+      await cache.checkContrast(realFixture, element, "AA");
+
+      expect(backend.rawPixelsCalls).toHaveLength(2);
+    });
+
+    it("re-decodes when the screenshot fingerprint changes within the TTL", async function() {
+      const timer = new FakeTimer();
+      const backend = new FakeImageBackend();
+      backend.setRawPixelsResult(uniformRaw(100, 50, 255, 255, 255));
+      const cache = cachingChecker(timer, backend);
+
+      // A nonexistent path makes the fingerprint fall back to `path:timer.now()`,
+      // so a small (sub-TTL) advance changes the fingerprint without expiring the
+      // TTL — isolating the fingerprint check.
+      await cache.checkContrast(syntheticScreenshotPath, element, "AA");
+      timer.advanceTime(100);
+      await cache.checkContrast(syntheticScreenshotPath, element, "AA");
+
+      expect(backend.rawPixelsCalls).toHaveLength(2);
     });
   });
 });

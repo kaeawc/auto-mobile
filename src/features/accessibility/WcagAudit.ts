@@ -22,9 +22,9 @@ export class WcagAudit {
   private baselineManager: BaselineManager;
   private timer: Timer;
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(timer: Timer = defaultTimer, baselineManager: BaselineManager = new BaselineManager()) {
     this.contrastChecker = new ContrastChecker({}, timer);
-    this.baselineManager = new BaselineManager();
+    this.baselineManager = baselineManager;
     this.timer = timer;
   }
 

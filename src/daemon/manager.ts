@@ -940,10 +940,19 @@ export class DaemonManager implements DaemonManagerLike {
    */
   async restart(options: DaemonOptions = {}): Promise<void> {
     stderrLog("Restarting daemon...");
+    // A bare `--daemon restart` has no CLI options, but it is commonly used to
+    // replace a stale checkout. Preserve the daemon's PID-recorded options so
+    // that replacement cannot silently discard configuration such as debug,
+    // output, or accessibility flags.
+    const runningOptions = (await this.status()).options ?? {};
+    const requestedOptions = Object.fromEntries(
+      Object.entries(options).filter(([, value]) => value !== undefined)
+    ) as DaemonOptions;
+    const restartOptions: DaemonOptions = { ...runningOptions, ...requestedOptions };
     await this.stop();
     // Wait a bit before starting
     await this.timer.sleep(1000);
-    await this.start(options);
+    await this.start(restartOptions);
   }
 
   /**

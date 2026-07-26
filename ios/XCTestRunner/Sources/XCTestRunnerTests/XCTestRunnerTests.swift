@@ -96,6 +96,32 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertEqual(timer.sleeps, [1])
     }
 
+    func testDaemonSocketPreflightPassesConfiguredRepoRootToDaemonManager() throws {
+        let planLoader = FakePlanLoader(content: "name: Daemon Plan\nsteps:\n  - tool: observe")
+        let mcpClient = FakeMCPClient()
+        let daemonEnsurer = FakeDaemonEnsurer()
+        let repoRoot = "/checkout/current"
+        mcpClient.queueResponse(success: true, executedSteps: 1, totalSteps: 1)
+
+        let config = AutoMobilePlanExecutor.Configuration(
+            transport: .daemonUnixSocket(path: DaemonManager.socketPath),
+            planPath: "daemon-plan.yaml",
+            daemonRepoRoot: repoRoot
+        )
+        let executor = AutoMobilePlanExecutor(
+            configuration: config,
+            planLoader: planLoader,
+            mcpClient: mcpClient,
+            timer: FakeTimer(),
+            logger: NullLogger(),
+            daemonEnsurer: daemonEnsurer
+        )
+
+        _ = try executor.execute(testMetadata: nil)
+
+        XCTAssertEqual(daemonEnsurer.repoRoots, [repoRoot])
+    }
+
     func testExecutePlanStopsAfterRetries() throws {
         let planLoader = FakePlanLoader(content: "name: Fail Plan\nsteps:\n  - tool: observe")
         let mcpClient = FakeMCPClient()
@@ -478,6 +504,15 @@ private struct NullLogger: AutoMobileLogger {
     func info(_: String) {}
     func warn(_: String) {}
     func error(_: String) {}
+}
+
+private final class FakeDaemonEnsurer: AutoMobileDaemonEnsuring {
+    private(set) var repoRoots: [String?] = []
+
+    func ensureDaemonRunning(repoRoot: String?) -> Bool {
+        repoRoots.append(repoRoot)
+        return true
+    }
 }
 
 private func decodePlanContent(from encoded: String?) -> String? {

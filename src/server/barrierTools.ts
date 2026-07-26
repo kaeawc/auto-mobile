@@ -95,7 +95,7 @@ export function registerBarrierTools(): void {
     // Plan-only: a multi-device coordination primitive that only makes sense as
     // a plan step (a single direct call would just block). Hidden from tools/list
     // discovery, still runnable in plans via getToolForPlan.
-    { planOnly: true, planExecutable: true }
+    { planOnly: true, planExecutable: true, acceptsPlanLockNamespace: true }
   );
 
   logger.info("Barrier tools registered");

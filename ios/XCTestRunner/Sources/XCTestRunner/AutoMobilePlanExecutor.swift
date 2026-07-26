@@ -58,6 +58,20 @@ public final class FakeTimer: AutoMobileTimer {
     }
 }
 
+/// The daemon lifecycle boundary used by plan execution. Kept injectable so executor tests never
+/// start or restart a real shared daemon.
+public protocol AutoMobileDaemonEnsuring {
+    func ensureDaemonRunning(repoRoot: String?) -> Bool
+}
+
+public struct SystemDaemonEnsurer: AutoMobileDaemonEnsuring {
+    public init() {}
+
+    public func ensureDaemonRunning(repoRoot: String?) -> Bool {
+        return DaemonManager.ensureDaemonRunning(repoRoot: repoRoot)
+    }
+}
+
 public protocol AutoMobilePlanLoading {
     func loadPlan(at path: String, bundle: Bundle?) throws -> String
 }
@@ -663,6 +677,8 @@ public final class AutoMobilePlanExecutor {
 
     public struct Configuration {
         public let transport: Transport
+        /// Source checkout whose built daemon should own the managed socket, when available.
+        public let daemonRepoRoot: String?
         public let planPath: String
         public let retryCount: Int
         public let timeoutSeconds: TimeInterval
@@ -680,6 +696,7 @@ public final class AutoMobilePlanExecutor {
         public init(
             transport: Transport,
             planPath: String,
+            daemonRepoRoot: String? = nil,
             retryCount: Int = 0,
             timeoutSeconds: TimeInterval = 300,
             retryDelaySeconds: TimeInterval = 1,
@@ -691,6 +708,7 @@ public final class AutoMobilePlanExecutor {
             aiAssistance: Bool = true
         ) {
             self.transport = transport
+            self.daemonRepoRoot = daemonRepoRoot
             self.planPath = planPath
             self.retryCount = max(0, retryCount)
             self.timeoutSeconds = timeoutSeconds
@@ -791,6 +809,7 @@ public final class AutoMobilePlanExecutor {
     private let mcpClient: AutoMobileMCPClient
     private let timer: AutoMobileTimer
     private let logger: AutoMobileLogger
+    private let daemonEnsurer: AutoMobileDaemonEnsuring
     private let sessionIdProvider: () -> String
     private let recoveryConfigProvider: RecoveryConfigProviding
     // Nil = no AI recovery (no injected handler and no model API key in the environment); the executor
@@ -806,12 +825,14 @@ public final class AutoMobilePlanExecutor {
         sessionIdProvider: @escaping () -> String = { AutoMobileSession.currentSessionUuid() },
         recoveryHandler: PlanRecoveryHandler? = nil,
         recoveryConfigProvider: RecoveryConfigProviding? = nil,
-        recoveryModelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve()
+        recoveryModelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
+        daemonEnsurer: AutoMobileDaemonEnsuring = SystemDaemonEnsurer()
     ) {
         self.configuration = configuration
         self.planLoader = planLoader
         self.timer = timer
         self.logger = logger
+        self.daemonEnsurer = daemonEnsurer
         self.sessionIdProvider = sessionIdProvider
 
         if let mcpClient = mcpClient {
@@ -862,7 +883,7 @@ public final class AutoMobilePlanExecutor {
         // manages (its env/default path) — a custom socket path is the caller's own daemon that
         // DaemonManager can't target. No-op for HTTP transport.
         if case let .daemonUnixSocket(path) = configuration.transport, path == DaemonManager.socketPath {
-            _ = DaemonManager.ensureDaemonRunning()
+            _ = daemonEnsurer.ensureDaemonRunning(repoRoot: configuration.daemonRepoRoot)
         }
 
         for attempt in 0 ... configuration.retryCount {
@@ -907,7 +928,7 @@ public final class AutoMobilePlanExecutor {
         // Only the DaemonManager-managed (env/default) socket can be restarted here; for a custom
         // socket path (the caller's own daemon) just drop the session so the retry reconnects.
         if path == DaemonManager.socketPath {
-            _ = DaemonManager.ensureDaemonRunning()
+            _ = daemonEnsurer.ensureDaemonRunning(repoRoot: configuration.daemonRepoRoot)
         }
         mcpClient.resetSession()
     }

@@ -79,6 +79,8 @@ interface ToolRegistrationOptions {
   supportsProgress?: boolean;
   debugOnly?: boolean;
   outputSchema?: any;
+  /** Accept the plan executor's internal coordination namespace. */
+  acceptsPlanLockNamespace?: boolean;
 }
 
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
@@ -114,6 +116,7 @@ export interface RegisteredTool {
   embeddedSdkOnly?: boolean;
   planExecutable?: boolean;
   planOnly?: boolean;
+  acceptsPlanLockNamespace?: boolean;
   outputSchema?: any;
 }
 
@@ -791,6 +794,7 @@ export class ToolRegistryClass {
       requiresDevice: false,
       debugOnly: options.debugOnly ?? false,
       embeddedSdkOnly: false,
+      acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema
     });
   }
@@ -894,6 +898,7 @@ export class ToolRegistryClass {
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
+      acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema
     });
   }

@@ -95,13 +95,17 @@ mirror can only serve unverified assets if you deliberately opt out of verificat
 1. **Pin the runner + daemon:**
    ```bash
    export AUTOMOBILE_VERSION=0.0.40
+   export AUTOMOBILE_REPO_ROOT="$GITHUB_WORKSPACE" # checkout with dist/src/index.js
    ```
-   Pin the XCTestRunner SPM dependency to the matching git tag. Note: the iOS
-   XCTestRunner autostart currently spawns a bare-PATH `auto-mobile --daemon start`
-   (`AutoMobileEnvironment.swift`) — it does **not** yet pin the daemon package version
-   itself. Pin it by installing the exact `@kaeawc/auto-mobile@0.0.40` on the runner's
-   PATH, or start the daemon yourself before the test job. (Baking the pin into the
-   Swift runner is tracked as follow-up work for #2746.)
+   Pin the XCTestRunner SPM dependency to the matching git tag. When
+   `AUTOMOBILE_REPO_ROOT` (or the runner's source checkout) contains
+   `dist/src/index.js`, XCTestRunner starts or restarts that exact checkout's daemon and
+   rejects a same-release daemon from a different checkout. Set the variable explicitly
+   for an embedding project or CI layout where the runner source cannot identify the
+   checkout. For a package consumer without a built checkout, XCTestRunner falls back to
+   the PATH `auto-mobile` CLI; pin the exact `@kaeawc/auto-mobile@0.0.40` there or start
+   the daemon yourself before the test job. (Embedding a package-version pin in the Swift
+   runner remains tracked by [#2746](https://github.com/kaeawc/auto-mobile/issues/2746).)
 2. **Vendor the IPA** so nothing is fetched or compiled at test time:
    ```bash
    export AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH=/opt/automobile/control-proxy.ipa
@@ -122,16 +126,24 @@ mirror can only serve unverified assets if you deliberately opt out of verificat
 
 The pin is a property of **the daemon's launch environment**, resolved where the download
 happens. AutoMobile runs **one daemon per UID**, shared across worktrees via a single
-socket + PID file, and runners **reuse an already-running daemon** rather than restart it.
-So if a daemon is already up with a different `AUTOMOBILE_VERSION` (or none), a second job
-that exports a new pin will silently be served by the **existing** daemon — the pin is
-ignored until the daemon is restarted.
+socket + PID file.
 
-For hermetic CI, force a clean daemon so the pin actually takes effect:
+The checkout-aware iOS XCTestRunner path above is an exception: when it has a built
+`AUTOMOBILE_REPO_ROOT` (or can identify its source checkout), it reconciles a running daemon
+whose release or checkout build identity differs by restarting it from that checkout. A
+pin-only asset mismatch fails closed with a diagnostic instead of silently reusing the daemon;
+restart the daemon from the runner's environment to reconcile that case.
+
+Other runners reuse an already-running daemon rather than restart it. If a daemon is already
+up with a different `AUTOMOBILE_VERSION` (or none), a second job that exports a new pin will
+silently be served by the **existing** daemon — the pin is ignored until the daemon is restarted.
+
+For hermetic CI runners that do not use the checkout-aware XCTestRunner path, force a clean
+daemon so the pin actually takes effect:
 
 - **Android:** `-Dautomobile.daemon.force.restart=true` (already in the recipe above).
-- **Any platform:** `bunx @kaeawc/auto-mobile@<version> --daemon restart` before the job,
-  then confirm via `ide/status` (below) that `releaseVersion` matches your pin.
+- **Other unreconciled runners:** `bunx @kaeawc/auto-mobile@<version> --daemon restart` before
+  the job, then confirm via `ide/status` (below) that `releaseVersion` matches your pin.
 
 ## Verifying the pin
 

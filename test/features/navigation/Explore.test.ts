@@ -4,6 +4,8 @@ import { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 
 // Import extracted functions for testing
 import {
@@ -99,7 +101,7 @@ describe("Explore", () => {
   });
 
   afterEach(() => {
-    // No cleanup needed since we're using injected fakes
+    ToolRegistry.clearTools();
   });
 
   function createMockViewHierarchyNode(overrides: any = {}): any {
@@ -408,6 +410,49 @@ describe("Explore", () => {
 
       expect(result.stopReason).toContain("com.test.app");
       expect(backPresses.length).toBe(outOfAppLimit);
+    });
+  });
+
+  describe("platform-aware recovery", () => {
+    test("routes iOS dead-end and home recovery through internal interaction tools without ADB", async () => {
+      const iOSDevice = {
+        deviceId: "ios-simulator-123",
+        platform: "ios",
+        source: "local"
+      } as BootedDevice;
+      const adbCommands: string[] = [];
+      const adb = {
+        executeCommand: async (command: string) => {
+          adbCommands.push(command);
+          return "";
+        }
+      } as AdbClient;
+      const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+      ToolRegistry.register("pressButton", "pressButton", {}, async args => {
+        calls.push({ name: "pressButton", args });
+        return { success: true };
+      });
+      ToolRegistry.register("homeScreen", "homeScreen", {}, async args => {
+        calls.push({ name: "homeScreen", args });
+        return { success: true };
+      });
+
+      explore = new Explore(iOSDevice, adb, fakeTimer, fakeGraph);
+      await (explore as any).handleDeadEnd();
+      await (explore as any).resetToHome();
+
+      expect(calls).toEqual([
+        {
+          name: "pressButton",
+          args: { button: "back", platform: "ios", [INTERNAL_NO_DIFF_PARAM]: true }
+        },
+        {
+          name: "homeScreen",
+          args: { platform: "ios", [INTERNAL_NO_DIFF_PARAM]: true }
+        }
+      ]);
+      expect(adbCommands).toEqual([]);
     });
   });
 

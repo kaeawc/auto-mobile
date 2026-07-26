@@ -348,6 +348,7 @@ jobs:
               - 'bunfig.toml'
               - 'test/setup/**'
               - 'test/integration/iosVideoRecordingStartStop.integration.test.ts'
+              - 'test/features/navigation/iosNavigationGraphWorkflow.test.ts'
               - 'package.json'
               - 'bun.lock'
 
@@ -1738,6 +1739,13 @@ jobs:
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 12
         run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      - name: "Run iOS navigation graph Simulator workflow"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          xcrun simctl getenv "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}" HOME >/dev/null
+          bun test test/features/navigation/iosNavigationGraphWorkflow.test.ts
 
       # Compile the XCTest bundle BEFORE the target-app warm-up. Otherwise `swift test`
       # in the timed Reminders step spends tens of seconds compiling first, letting the

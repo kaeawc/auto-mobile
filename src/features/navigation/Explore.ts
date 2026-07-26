@@ -3,7 +3,7 @@ import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { ToolRegistry } from "../../server/toolRegistry";
 import { NavigationGraphManager, type NavigationEdge, type NavigationGraphService } from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { TapOnElement } from "../action/TapOnElement";
@@ -767,18 +767,13 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Press back button via accessibility service, fall back to ADB
-      let backSuccess = false;
-      try {
-        const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-        const result = await client.requestGlobalAction("back", 3000);
-        backSuccess = result.success;
-      } catch {
-        // Fall through to ADB
-      }
-      if (!backSuccess) {
-        await this.adb.executeCommand("shell input keyevent KEYCODE_BACK");
-      }
+      // Recovery is an internal interaction, not an Android transport detail.
+      // callInternal marks it no-diff so the observation it produces does not
+      // advance the caller-visible baseline during exploration.
+      await ToolRegistry.callInternal("pressButton", {
+        button: "back",
+        platform: this.device.platform
+      }, progress);
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
@@ -801,18 +796,12 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Press home button via accessibility service, fall back to ADB
-      let homeSuccess = false;
-      try {
-        const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-        const result = await client.requestGlobalAction("home", 3000);
-        homeSuccess = result.success;
-      } catch {
-        // Fall through to ADB
-      }
-      if (!homeSuccess) {
-        await this.adb.executeCommand("shell input keyevent KEYCODE_HOME");
-      }
+      // `homeScreen` owns the platform-specific implementation and its
+      // actionable failures. Keep the internal recovery call out of the
+      // external observation-diff baseline.
+      await ToolRegistry.callInternal("homeScreen", {
+        platform: this.device.platform
+      }, progress);
 
       // Wait for home screen
       await this.timer.sleep(2000);

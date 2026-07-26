@@ -2,7 +2,6 @@ import { BootedDevice, NavigateToResult } from "../../models";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
 import {
@@ -36,7 +35,6 @@ export interface NavigateToOptions {
 export class NavigateTo {
   private device: BootedDevice;
   private adb: AdbExecutor;
-  private adbFactory: AdbClientFactory;
   private navigationManager: NavigationGraphService;
   private uiStateSetup: UIStateSetup;
   private screenWaiter: ScreenTransitionWaiter;
@@ -57,7 +55,6 @@ export class NavigateTo {
     pathOptimizer?: PathOptimizer
   ) {
     this.device = device;
-    this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
     this.timer = timer;
@@ -328,19 +325,14 @@ export class NavigateTo {
    * Press the back button as a fallback navigation action.
    */
   private async pressBack(): Promise<void> {
-    // Try accessibility service global action first, fall back to ADB
-    try {
-      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-      const result = await client.requestGlobalAction("back", 3000);
-      if (result.success) {
-        logger.debug("[NAVIGATE_TO] Pressed back via accessibility service");
-        return;
-      }
-    } catch {
-      // Fall through to ADB
-    }
-    await this.adb.executeCommand("shell input keyevent 4");
-    logger.debug("[NAVIGATE_TO] Pressed back via ADB keyevent");
+    // Keep learned-path recovery platform-aware. The interaction tool selects
+    // CtrlProxy on iOS and retains Android's accessibility/ADB fallback; the
+    // registry call also preserves the internal no-diff contract.
+    await ToolRegistry.callInternal("pressButton", {
+      button: "back",
+      platform: this.device.platform
+    });
+    logger.debug(`[NAVIGATE_TO] Pressed back via ${this.device.platform} interaction tool`);
   }
 
   /**

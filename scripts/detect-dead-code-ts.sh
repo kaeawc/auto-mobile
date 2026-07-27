@@ -87,6 +87,13 @@ if [ $TS_PRUNE_EXIT -eq 0 ] || [ -s "$TS_PRUNE_OUTPUT" ]; then
             continue
         fi
 
+        # ts-prune marks exports referenced within their own module separately;
+        # they are not dead-code candidates. Keep this aligned with
+        # dead-code:ts:prune in package.json.
+        if [[ "$line" == *" (used in module)" ]]; then
+            continue
+        fi
+
         # Parse: src/file.ts:123 - exportName (used in module)
         if [[ "$line" =~ ^(.+):([0-9]+)[[:space:]]*-[[:space:]]*(.+)$ ]]; then
             file="${BASH_REMATCH[1]}"

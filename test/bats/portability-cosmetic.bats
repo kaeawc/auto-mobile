@@ -33,6 +33,39 @@ teardown() {
   [[ "$output" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+Z$ ]]
 }
 
+@test "dead-code detection excludes ts-prune exports used in their module" {
+  local detector
+  detector="$(cd scripts && pwd)/detect-dead-code-ts.sh"
+  local bin="$WORK_DIR/bin"
+  local report="$WORK_DIR/report"
+  mkdir -p "$bin" "$WORK_DIR/scripts"
+  : > "$WORK_DIR/scripts/fixture.sh"
+
+  cat > "$bin/bunx" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "ts-prune" ]; then
+  printf '%s\n' \
+    'src/example.ts:1 - UsedExport (used in module)' \
+    'src/example.ts:2 - DeadExport'
+  exit 1
+fi
+
+if [ "$1" = "knip" ]; then
+  printf '%s\n' '{}'
+  exit 0
+fi
+
+exit 2
+EOF
+  chmod +x "$bin/bunx"
+
+  run env PATH="$bin:$PATH" bash -c 'cd "$1" && "$2" --json --output-dir="$3" --threshold=1' _ "$WORK_DIR" "$detector" "$report"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq '.totalIssues' "$report/dead-code-report.json")" -eq 1 ]
+  [ "$(jq -r '.issues[0].name' "$report/dead-code-report.json")" = "DeadExport" ]
+}
+
 # --- B ---------------------------------------------------------------------
 @test "shell/xml validators do not use a bare -P \"\$(nproc)\"" {
   for s in scripts/shellcheck/validate_shell_scripts.sh scripts/xml/validate_xml.sh; do

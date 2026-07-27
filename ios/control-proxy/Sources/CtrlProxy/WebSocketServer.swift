@@ -308,7 +308,7 @@ public class WebSocketServer: WebSocketServing {
             requestId: nil, // No requestId for push updates
             data: hierarchy,
             perfTiming: nil,
-            frameContext: FrameContext.forHierarchy(hierarchy)
+            frameContext: FrameContext.recordHierarchy(hierarchy)
         )
 
         do {

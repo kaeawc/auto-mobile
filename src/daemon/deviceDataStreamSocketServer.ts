@@ -350,6 +350,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult, frameContext?: string): number | null {
     if (frameContext !== undefined) {
       this.currentFrameContexts.set(deviceId, frameContext);
+    } else {
+      // The device could not prove which UI the hierarchy describes. Its previous token is no
+      // longer authoritative: keeping it would let stale non-gesture input pass the daemon gate.
+      this.currentFrameContexts.delete(deviceId);
     }
     // Skip the diff clone+walk when nobody is listening (the layout inspector is
     // usually closed): the frame would reach zero subscribers anyway. Drop the

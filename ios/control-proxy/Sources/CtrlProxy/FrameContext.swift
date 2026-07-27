@@ -3,7 +3,27 @@ import Foundation
 /// Stable, opaque identity for a device hierarchy. It deliberately hashes the encoded hierarchy
 /// rather than dimensions: same-size navigation must still invalidate a mirrored frame.
 enum FrameContext {
+    private static let lock = NSLock()
+    private static var generation: UInt64 = 0
+
+    /// Each pushed hierarchy advances a process-local generation. This detects an A→B→A change
+    /// while a screenshot is in flight even when its semantic hash returns to the same value.
+    static func recordHierarchy(_ hierarchy: ViewHierarchy) -> String? {
+        lock.lock()
+        generation &+= 1
+        let currentGeneration = generation
+        lock.unlock()
+        return semanticHash(hierarchy).map { "\(currentGeneration):\($0)" }
+    }
+
     static func forHierarchy(_ hierarchy: ViewHierarchy) -> String? {
+        lock.lock()
+        let currentGeneration = generation
+        lock.unlock()
+        return semanticHash(hierarchy).map { "\(currentGeneration):\($0)" }
+    }
+
+    private static func semanticHash(_ hierarchy: ViewHierarchy) -> String? {
         // `updatedAt` is assigned for every extraction, so including it would reject an unchanged
         // screen merely because validation sampled it a millisecond later. Hash only semantic
         // screen state, with sorted keys for deterministic dictionary encoding.

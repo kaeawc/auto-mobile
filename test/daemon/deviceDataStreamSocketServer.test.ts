@@ -80,6 +80,18 @@ describe("DeviceDataStreamSocketServer", () => {
     expect(server.getCurrentFrameContext("device-1")).toBe("frame-A");
   });
 
+  it("clears a device frame context when a hierarchy has no proven context", () => {
+    const hierarchy = {
+      updatedAt: 123,
+      packageName: "com.example.app",
+      hierarchy: { text: "Home" },
+    } as any;
+    server.pushHierarchyUpdate("device-1", hierarchy, "frame-A");
+    server.pushHierarchyUpdate("device-1", hierarchy);
+
+    expect(server.getCurrentFrameContext("device-1")).toBeUndefined();
+  });
+
   describe("request_observation", () => {
     const requestedObservation = (deviceId: string): RequestedObservation => ({
       deviceId,

@@ -461,7 +461,8 @@ the current device orientation.
     "deviceId": "emulator-5554",
     "x": 240,
     "y": 640,
-    "duration": 50
+    "duration": 50,
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -510,7 +511,8 @@ duration.
     "startY": 1700,
     "endX": 520,
     "endY": 500,
-    "durationMs": 350
+    "durationMs": 350,
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -550,7 +552,9 @@ Presses a device or navigation button.
   "method": "input/pressButton",
   "params": {
     "platform": "android",
-    "button": "back"
+    "deviceId": "emulator-5554",
+    "button": "back",
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -572,12 +576,12 @@ Presses a device or navigation button.
 Examples for supported Android navigation and hardware actions:
 
 ```json
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "back" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "home" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "app_switch" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "power" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "volume_up" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "volume_down" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "back", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "home", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "app_switch", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "power", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "volume_up", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "volume_down", "frameContext": "android-generation-42" } }
 ```
 
 `app_switch` is the socket API name for the app switcher and maps to the MCP
@@ -684,7 +688,8 @@ but it does not make a timed-out key event atomic.
     "platform": "ios",
     "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
     "text": "hello",
-    "submit": false
+    "submit": false,
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -700,7 +705,8 @@ but it does not make a timed-out key event atomic.
     "platform": "ios",
     "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
     "text": "a",
-    "mode": "append"
+    "mode": "append",
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -759,7 +765,8 @@ Supported key names:
   "params": {
     "platform": "android",
     "deviceId": "emulator-5554",
-    "key": "enter"
+    "key": "enter",
+    "frameContext": "android-generation-42"
   }
 }
 ```

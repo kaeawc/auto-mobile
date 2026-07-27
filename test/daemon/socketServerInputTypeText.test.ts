@@ -273,6 +273,38 @@ describe("UnixSocketServer input/typeText", () => {
     expect(response.result).toBeUndefined();
   });
 
+  test("append reports full progress when submit fails after all text lands", async () => {
+    const requestImeAction = mock(async () => ({
+      success: false,
+      error: "enter key unavailable",
+      totalTimeMs: 1,
+    }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({ success: true, charsSent: 2 }),
+    });
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+      submit: true,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "enter key unavailable",
+      charsSent: 2,
+    });
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+  });
+
   // The review's Critical + P1 finding, which share one root cause: the append path
   // used to receive no timeout at all. `runInputOperationWithTimeout` detects the
   // socket deadline but then AWAITS the in-flight operation before releasing the
@@ -631,6 +663,7 @@ describe("UnixSocketServer input/typeText", () => {
 
     expect(response.success).toBe(false);
     expect(String(response.error)).toContain("append cannot type \"A\"");
+    expect(response.charsSent).toBe(0);
     // Not silently repaired by the replace path, which would wipe the field.
     expect(requestSetText).not.toHaveBeenCalled();
     expect(adb.inputCommands()).toEqual([]);

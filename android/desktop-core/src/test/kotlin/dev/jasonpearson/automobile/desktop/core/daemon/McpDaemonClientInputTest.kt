@@ -214,7 +214,7 @@ class McpDaemonClientInputTest {
   }
 
   @Test
-  fun `append mode queries capabilities once before sending input`() {
+  fun `append mode shares a capability query across per-action socket clients`() {
     TestDaemonSocket(
         responses =
           listOf(
@@ -224,10 +224,16 @@ class McpDaemonClientInputTest {
           )
       )
       .use { server ->
-        val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
-
-        client.inputTypeText(text = "a", append = true)
-        client.inputTypeText(text = "b", append = true)
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .inputTypeText(
+            text = "a",
+            append = true,
+          )
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .inputTypeText(
+            text = "b",
+            append = true,
+          )
 
         assertEquals(
           listOf("daemon/capabilities", "input/typeText", "input/typeText"),

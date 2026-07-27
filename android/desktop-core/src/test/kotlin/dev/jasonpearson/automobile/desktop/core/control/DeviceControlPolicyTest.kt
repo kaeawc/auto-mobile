@@ -205,6 +205,7 @@ class DeviceControlPolicyTest {
               width = 720,
               height = 1560,
               data = null,
+              rotation = 0,
             ),
           hierarchy =
             HierarchyFrameFacts(
@@ -215,6 +216,7 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
               rootHeight = 2340,
+              rotation = 0,
             ),
         ),
         now,
@@ -244,6 +246,7 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(720, 1560),
               rootWidth = 720,
               rootHeight = 1560,
+              rotation = 0,
             )
         )
       ),

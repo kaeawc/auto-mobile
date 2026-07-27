@@ -279,8 +279,31 @@ Tests live under `android/desktop-core/src/test/kotlin/` and cover:
 
 All fakes and test utilities follow the interface + fake pattern mandated by the project, with injectable time/clock for deterministic behavior.
 
+## Device Screen Control
+
+The Layout dashboard's device mirror is interactive in the desktop app: in *control mode* a click
+becomes a device tap, a drag becomes a swipe, and (on Android) keystrokes forward to the focused
+field. This is milestone 28 (parent [#1099](https://github.com/kaeawc/auto-mobile/issues/1099)),
+implemented across `desktop-domain` (pure policies) and `desktop-core` (the
+`DeviceControlSession` seam and `DeviceScreenView` wiring).
+
+- **Opt-in, default-off.** `AutoMobileContent(enableDeviceControl = ...)` gates it. The desktop app
+  passes `true`; `desktop-core`'s default is `false`.
+- **The IDE plugin is inspector-only.** It shares `desktop-core` but leaves `enableDeviceControl`
+  false, so it selects and highlights elements and **never forwards device input**. This is a
+  deliberate scope decision, not a dropped feature — control mode is a desktop-app (and third-party
+  daemon client) feature.
+- **Input goes over the daemon `input/*` socket endpoints**, not a bespoke protocol, so any client
+  can implement the same surface. The client-facing contracts (coordinate mapping, drag-to-swipe,
+  keyboard policy, frame-snapshot pairing, post-input refresh) are published for third-party
+  authors.
+
+User-facing docs: [Controlling a Device from the Desktop App](../../../using/screen-control.md).
+Client-author docs: [third-party client guide](../../mcp/daemon/client-screen-control.md).
+
 ## See Also
 
 - [Android Overview](index.md)
 - [Observe](observe.md) -- observation pipeline that feeds the Layout dashboard
 - [IDE Plugin](ide-plugin/) -- IntelliJ plugin that shares `desktop-core`
+- [Client Screen Control (third-party guide)](../../mcp/daemon/client-screen-control.md)

@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -81,10 +82,18 @@ import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenGeometry
+import dev.jasonpearson.automobile.desktop.domain.TouchFeedbackModel
 import dev.jasonpearson.automobile.desktop.domain.ViewportPoint
 import org.jetbrains.skia.Image
 
 private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCase = true)
+
+/**
+ * Base radius, in frame pixels at zoom 1.0, of the transient control-tap feedback pulse
+ * (issue #3352). Scaled up with the device frame by the same `boundsToFrameScale` the element
+ * overlays use, and grown further as the pulse fades.
+ */
+private const val TOUCH_PULSE_BASE_RADIUS_PX = 12f
 
 /**
  * Transform element bounds from the original (unrotated) hierarchy coordinate system to the rotated
@@ -399,6 +408,34 @@ fun DeviceScreenView(
       onElementSelected(null)
     }
   }
+
+  // Transient touch-point feedback for a forwarded control-mode tap (issue #3352). A control-mode
+  // tap otherwise produces no on-canvas confirmation until the device redraws, so a brief pulse at
+  // the tapped device coordinate tells the user the click registered and was forwarded. The fade
+  // math is the pure, unit-tested TouchFeedbackModel; this composable only owns the clock and the
+  // per-frame tick that drives the fade. Inert in inspector mode, so the IDE plugin is unaffected.
+  val touchFeedback = remember { TouchFeedbackModel() }
+  var touchFeedbackNow by remember { mutableStateOf(0L) }
+  // Bumped on each recorded pulse so the tick effect (re)launches; the loop exits on its own once
+  // nothing is left to fade, so it never spins while the screen is idle.
+  var touchFeedbackGeneration by remember { mutableStateOf(0) }
+  LaunchedEffect(controlMode) {
+    if (controlMode != DeviceScreenControlMode.Control) touchFeedback.reset()
+  }
+  LaunchedEffect(touchFeedbackGeneration, controlMode) {
+    if (controlMode != DeviceScreenControlMode.Control) return@LaunchedEffect
+    while (touchFeedback.hasActive(System.currentTimeMillis())) {
+      withFrameMillis { touchFeedbackNow = System.currentTimeMillis() }
+    }
+  }
+  // Resolved during composition (a pure read) so the draw closure never mutates state; reading
+  // touchFeedbackNow here is what re-composes the overlay each frame while a pulse is fading.
+  val activeTouchFeedback =
+    if (controlMode == DeviceScreenControlMode.Control) {
+      touchFeedback.active(touchFeedbackNow)
+    } else {
+      emptyList()
+    }
 
   // Zoom and pan state
   var scale by remember { mutableFloatStateOf(1f) }
@@ -784,6 +821,14 @@ fun DeviceScreenView(
                           geometry,
                         )
                       currentOnControlTap?.invoke(snapshot, point)
+                      // Pulse where the tap landed, but only for a point the session will actually
+                      // forward: an out-of-bounds tap is dropped per the coordinate-mapping
+                      // contract, so showing a marker for it would be misleading feedback.
+                      if (point.inBounds) {
+                        touchFeedback.record(point.x, point.y, System.currentTimeMillis())
+                        touchFeedbackNow = System.currentTimeMillis()
+                        touchFeedbackGeneration++
+                      }
                     }
                   }
                   // Inspector mode: select the deepest element under the click (unchanged
@@ -943,6 +988,29 @@ fun DeviceScreenView(
                         size = Size(r[2], r[3]),
                       )
                     }
+                  }
+
+                  // Transient touch-point feedback (issue #3352): a blue pulse at each forwarded
+                  // control tap, fading and expanding over its lifetime. Marker coordinates are in
+                  // device (== hierarchy bounds) space, so they scale to frame pixels the same way
+                  // element overlays do. Empty in inspector mode.
+                  for (feedback in activeTouchFeedback) {
+                    val cx = feedback.marker.x * boundsToFrameScale
+                    val cy = feedback.marker.y * boundsToFrameScale
+                    val alpha = (1f - feedback.progress).coerceIn(0f, 1f)
+                    val radius = TOUCH_PULSE_BASE_RADIUS_PX * (0.7f + 0.6f * feedback.progress)
+                    val pulseColor = Color(0xFF2196F3)
+                    drawCircle(
+                      color = pulseColor.copy(alpha = alpha * 0.25f),
+                      radius = radius,
+                      center = Offset(cx, cy),
+                    )
+                    drawCircle(
+                      color = pulseColor.copy(alpha = alpha),
+                      radius = radius,
+                      center = Offset(cx, cy),
+                      style = Stroke(width = 2f),
+                    )
                   }
                 },
             )

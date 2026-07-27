@@ -86,6 +86,7 @@ nav:
           - 'Startup': using/perf-analysis/startup.md
           - 'Screen Transition': using/perf-analysis/screen-transition.md
           - 'Scroll Framerate': using/perf-analysis/scroll-framerate.md
+      - 'Device Screen Control': using/screen-control.md
       - 'Accessibility': using/a11y.md
       - 'TalkBack Testing': using/talkback.md
       - 'VoiceOver Testing': using/voiceover.md
@@ -122,6 +123,7 @@ nav:
              - 'Critical Section': design-docs/mcp/daemon/critical-section.md
              - 'Multi-Agent Filesystem Contract': design-docs/mcp/daemon/multi-agent-filesystem-contract.md
              - 'Unix Socket API': design-docs/mcp/daemon/unix-socket-api.md
+             - 'Client Screen Control (3rd-party guide)': design-docs/mcp/daemon/client-screen-control.md
              - 'Screen Control Mapping': design-docs/mcp/daemon/screen-control-mapping.md
              - 'Client Frame Snapshot': design-docs/mcp/daemon/client-frame-snapshot.md
           - 'Multi-device': design-docs/mcp/multi-device.md

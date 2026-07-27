@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 import org.junit.Test
 
 /**
@@ -261,5 +262,46 @@ class DeviceControlInputForwarderTest {
     )
 
     assertNull(error)
+  }
+
+  @Test
+  fun `empty text never reaches the daemon`() {
+    // Nothing is "typed" by an empty string, so sending it would produce a successful input for a
+    // device change that never happened — and park the client in the post-input refresh wait.
+    val client = FakeAutoMobileClient()
+
+    forwarder.forwardTypeText(
+      text = "",
+      client = client,
+      platform = "android",
+      deviceId = "emulator-5554",
+      onError = { fail("empty text must not be an error, it must be a no-op: $it") },
+    )
+
+    assertEquals(emptyList(), client.inputTypeTextCalls)
+  }
+
+  @Test
+  fun `no connected client drops button, text and key without error`() {
+    var error: String? = null
+    val onError: (String) -> Unit = { error = it }
+
+    forwarder.forwardPressButton("back", null, "android", null, onError)
+    forwarder.forwardTypeText("a", null, "android", null, onError)
+    forwarder.forwardKey("enter", null, "android", null, onError)
+
+    assertNull(error)
+  }
+
+  @Test
+  fun `a daemon rejection of a key surfaces its actionable error verbatim`() {
+    val client = FakeAutoMobileClient()
+    client.inputKeyResult =
+      InputActionResult(action = "input/key", success = false, error = "unsupported on ios")
+    var error: String? = null
+
+    forwarder.forwardKey("enter", client, "ios", "iphone-1", onError = { error = it })
+
+    assertEquals("unsupported on ios", error)
   }
 }

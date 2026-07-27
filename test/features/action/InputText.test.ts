@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { AdbClient, AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 
 interface TestInputText {
   executeAndroidTextInput: (
@@ -34,6 +36,16 @@ function stubAndroidSetText(requestSetText: RequestSetText): void {
   AndroidCtrlProxyClient.getInstance = (() => ({
     requestSetText
   })) as typeof AndroidCtrlProxyClient.getInstance;
+}
+
+function execResult(stdout: string): ExecResult {
+  return {
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  };
 }
 
 function inputCommands(factory: FakeAdbClientFactory): string[] {
@@ -554,4 +566,309 @@ describe("InputText", () => {
     expect(setTextCalls).toEqual(["next"]);
     expect(inputCommands(factory)).toEqual([]);
   });
+
+  // Issue #3351: an interactive client mirroring a keyboard sends one call per
+  // keystroke. Every other Android mode is replace-shaped (a11y sets the whole
+  // string; eventAll/eventOnly clear first), so per-keystroke typing through
+  // them leaves only the last character and wipes whatever was in the field.
+  test("append types with key events and never clears or sets text", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "ab",
+      undefined,
+      false,
+      "append"
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("append");
+    // The whole point: no ACTION_SET_TEXT at all, so the field's existing
+    // contents survive.
+    expect(setTextCalls).toEqual([]);
+    // And no clear either - unlike eventOnly, which deletes the field first.
+    const commands = inputCommands(factory);
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.some(command => command.includes("KEYCODE_DEL"))).toBe(false);
+  });
+
+  test("append sends one keystroke per call without disturbing earlier ones", async () => {
+    // Three separate single-character calls, as a keyboard-mirroring client
+    // makes them. None may clear, or "abc" would end up as "c".
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    for (const char of ["a", "b", "c"]) {
+      const result = await inputText.appendText(char);
+      expect(result.success).toBe(true);
+    }
+
+    expect(setTextCalls).toEqual([]);
+    expect(inputCommands(factory).some(command => command.includes("KEYCODE_DEL"))).toBe(false);
+  });
+
+  test("append fails rather than falling back to a destructive a11y setText", async () => {
+    // The fallback every other mode performs would REPLACE the field, which is
+    // exactly what append exists to avoid. An actionable error is correct.
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "😊",
+      undefined,
+      false,
+      "append"
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.method).toBe("append");
+    expect(result.error).toContain("append cannot type");
+    expect(setTextCalls).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  // Issue #3351 review: the API-level capability is needed ONLY for uppercase/
+  // shifted characters, so a lowercase/digit/space/unshifted append must not probe
+  // `ro.build.version.sdk` at all — the probe is a wasted device round trip that
+  // could even consume the budget and drop the keystroke.
+  test("append does not probe the API level for characters that never need it (cold cache)", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    // Cold cache: no getprop result configured, and the probe must never run.
+    const result = await inputText.appendText("a1 .");
+
+    expect(result.success).toBe(true);
+    const allCommands = factory.getFakeClient().getAllCommands();
+    expect(allCommands.some(command => command.includes("getprop ro.build.version.sdk"))).toBe(false);
+    // The key events still went out — skipping the probe did not skip the typing.
+    expect(inputCommands(factory)).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_1",
+      "shell input keyevent KEYCODE_SPACE",
+      "shell input keyevent KEYCODE_PERIOD",
+    ]);
+  });
+
+  test("append still probes the API level when a character needs the capability (cold cache)", async () => {
+    // The other direction: an uppercase character DOES need `input keycombination`,
+    // so the probe must run — skipping it for the whole batch would be wrong.
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+
+    const result = await inputText.appendText("A");
+
+    expect(result.success).toBe(true);
+    const allCommands = factory.getFakeClient().getAllCommands();
+    expect(allCommands.some(command => command.includes("getprop ro.build.version.sdk"))).toBe(true);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A",
+    ]);
+  });
+
+  // Issue #3351: append is best-effort and char-by-char, so a partial failure must
+  // report how much of `text` landed. A caller retrying the whole string after a
+  // prefix already typed would corrupt the field ("ab" after "a" -> "aab").
+  test("append reports charsSent for a fully successful batch", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+
+    const result = await inputText.appendText("abc");
+
+    expect(result.success).toBe(true);
+    expect(result.charsSent).toBe(3);
+  });
+
+  test("append reports charsSent up to the failing character, not a generic failure", async () => {
+    // "abc": KEYCODE_A lands, KEYCODE_B rejects (device offline mid-batch), so the
+    // field holds "a". The result must say charsSent=1 and KEYCODE_C must never run,
+    // so a caller resumes from text.slice(1) instead of re-appending "abc".
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandError(
+      "shell input keyevent KEYCODE_B",
+      new Error("device offline")
+    );
+
+    const result = await inputText.appendText("abc");
+
+    expect(result.success).toBe(false);
+    expect(result.charsSent).toBe(1);
+    expect(result.error).toContain("append key event failed");
+    expect(inputCommands(factory)).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+    ]);
+  });
+
+  // Issue #3351 review: the client forwards every printable ASCII character, but
+  // uppercase and shifted symbols need `input keycombination` (API 31+). The client
+  // cannot see the API level, so the daemon has to REPORT the failure — the one
+  // outcome that must never happen is a silent success that typed nothing.
+  test("append reports an actionable failure for uppercase below API 31", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await inputText.appendText("A");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("append cannot type \"A\"");
+    // Not typed, and emphatically not repaired by a setText that would wipe the field.
+    expect(setTextCalls).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  test("append still types uppercase on API 31 and above", async () => {
+    // The other direction: the failure above must be the device's limitation, not
+    // the append path refusing capitals outright.
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await inputText.appendText("A");
+
+    expect(result.success).toBe(true);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A"
+    ]);
+  });
+
+  test("an OUR-timeout API probe does not permanently disable SHIFT for a cached instance", async () => {
+    // The daemon keeps one InputText+AdbClient per device for minutes (#3351
+    // finding 4). A single budget-timed-out probe must not disable SHIFT chords
+    // for that whole window: the next keystroke, with a fresh budget, must re-probe
+    // and recover. Drives a REAL AdbClient so the actual probe/cache path runs; the
+    // authoritative not-cached assertion lives in AdbClientApiLevelTimeout.test.ts.
+    let timeOut = true;
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes("getprop ro.build.version.sdk")) {
+        if (timeOut) {
+          // Exactly what execWithSignal throws when the threaded timeoutMs expires.
+          return Promise.reject(
+            new AdbCommandTimeoutError("Command timed out after 5ms: adb shell getprop ro.build.version.sdk")
+          );
+        }
+        return Promise.resolve(execResult("31\n"));
+      }
+      // Key events (and anything else) succeed.
+      return Promise.resolve(execResult(""));
+    };
+    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    // Inject a FakeTimer into InputText too: createBudget reads THIS clock, so a
+    // wall clock here would race the 5ms budget against the char-unmappable path
+    // (repo rule: no real timers in unit tests). Never advanced, so the budget
+    // stays positive and the "cannot type" path is exercised deterministically.
+    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+
+    const whileTimedOut = await inputText.appendText("A", 5);
+    expect(whileTimedOut.success).toBe(false);
+    expect(whileTimedOut.error).toContain("append cannot type");
+
+    // Fresh budget on the next keystroke: neither InputText nor AdbClient may have
+    // cached the timed-out probe as "unsupported", so the capital now types.
+    timeOut = false;
+    const afterRetry = await inputText.appendText("A", 5000);
+    expect(afterRetry.success).toBe(true);
+  });
+
+  test("a timed-out append key event is attempted ONCE, not retried up to 4x", async () => {
+    // Production AdbClient retries a retryable failure (a timeout IS retryable —
+    // "timed out" is not in the non-retryable list) up to MAX_ADB_RETRIES+1 = 4
+    // attempts, each charged the SAME budget. Because runInputOperationWithTimeout
+    // awaits the losing operation before releasing the per-device queue, an
+    // unbounded retry would hold the queue for ~4x the request deadline. The
+    // append path must pass noRetry so the whole append stays inside one budget.
+    let keyEventCalls = 0;
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes("getprop ro.build.version.sdk")) {
+        return Promise.resolve(execResult("31\n"));
+      }
+      if (command.includes("input keyevent")) {
+        keyEventCalls += 1;
+        // A retryable timeout: its message is NOT in AdbClient's non-retryable set,
+        // so without noRetry the retry executor would attempt it four times.
+        return Promise.reject(
+          new AdbCommandTimeoutError("Command timed out after 5ms: adb shell input keyevent KEYCODE_A")
+        );
+      }
+      return Promise.resolve(execResult(""));
+    };
+    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    // FakeTimer into InputText as well, so createBudget never reads the wall clock
+    // (repo rule: no real timers). Never advanced, so the budget cannot expire and
+    // the assertion is purely about the retry count, not timing.
+    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+
+    const result = await inputText.appendText("a", 5000);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("append key event failed");
+    // Exactly one attempt: the deadline is not multiplied by the retry count.
+    expect(keyEventCalls).toBe(1);
+  });
+
+  test("append charges the API probe and every key event against the caller's budget", async () => {
+    // Without this the daemon's per-device queue is held by an unbounded subprocess:
+    // the socket race only REPORTS the timeout, it still waits for the operation.
+    const factory = new FakeAdbClientFactory();
+    const timer = new FakeTimer();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await inputText.appendText("ab", 5_000);
+
+    expect(result.success).toBe(true);
+    const calls = factory.getFakeClient().getCommandCalls();
+    expect(calls.length).toBeGreaterThan(1);
+    for (const call of calls) {
+      expect(call.timeoutMs).toBeDefined();
+      expect(call.timeoutMs).toBeLessThanOrEqual(5_000);
+    }
+  });
+
+  test("append gives up once the budget is spent instead of issuing more key events", async () => {
+    const factory = new FakeAdbClientFactory();
+    const timer = new FakeTimer();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    // The budget is already gone by the time the first device round trip is due.
+    const result = await inputText.appendText("a", 0);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("append exceeded its 0ms budget");
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
 });

@@ -1192,6 +1192,13 @@ export class Daemon {
           }
 
           await this.devicePool.removeDisconnectedDevice(deviceId);
+          // Drop any per-device input caches so a device replaced under the same
+          // serial does not inherit the previous one's cached API-level capability
+          // (issue #3351): an API 31+/pre-31 mismatch mis-handles SHIFT/uppercase.
+          // This fires only on a CONFIRMED disappearance; a fast same-serial restart
+          // that never confirms is not caught here (the 5-min idle close is the
+          // backstop until a device-connect signal exists — issue #4534).
+          this.socketServer?.evictDeviceInputCache(deviceId);
           if (this.devicePool.getDevice(deviceId)) {
             deviceCleanupSucceeded = false;
           }

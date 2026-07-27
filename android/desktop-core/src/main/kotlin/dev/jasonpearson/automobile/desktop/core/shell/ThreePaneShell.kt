@@ -34,6 +34,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
@@ -113,6 +114,27 @@ fun ThreePaneShell(
   menuBarActions: MenuBarActions? = null,
   // Vim mode
   vimModeEnabled: Boolean = false,
+  /**
+   * Per-event predicate: will the device-control canvas actually claim this keystroke?
+   * (issue #3351).
+   *
+   * This shell's navigation shortcuts live in a **preview** handler, which by design runs before
+   * any focused descendant sees the event. That is right for shell navigation and fatal for
+   * device-control keyboard forwarding: Tab, the arrows, Enter and Escape are exactly the keys a
+   * mirrored device needs, and every one of them would be consumed here first — Escape being the
+   * client's only device-button binding.
+   *
+   * It is a **per-event predicate**, not a mode flag, because Compose never reruns a preview
+   * handler while an unconsumed event bubbles back up. A blanket "canvas is focused" stand-down
+   * would send every un-chorded key past this handler, and any keystroke the forwarding policy then
+   * *declines* (a printable character on a platform whose daemon cannot append, a shifted device
+   * key) would reach **neither** the device **nor** the shell — a dead zone. The caller answers
+   * with the same policy the canvas will apply, so the shell stands down exactly for the keystrokes
+   * the device claims and keeps everything else, chords included.
+   *
+   * Defaults to never capturing, so an inspector-only embedder (the IDE plugin) is unchanged.
+   */
+  deviceControlCapturesKeys: (KeyEvent) -> Boolean = { false },
   // Pane content slots
   centerContent: @Composable (Modifier) -> Unit,
   leftPaneContent: @Composable () -> Unit,
@@ -177,6 +199,16 @@ fun ThreePaneShell(
           return@onPreviewKeyEvent true
         }
         if (showQuickJump) return@onPreviewKeyEvent false
+
+        // Device control owns exactly the keystrokes its policy will claim. Declining here
+        // (rather than not registering the handler) keeps this one preview handler as the single
+        // place shell navigation is decided, and lets the event fall through to the focused
+        // device canvas. Modal overlays above still win, because they are checked first — and a
+        // keystroke the canvas would DECLINE never stands the shell down, so it keeps its
+        // binding instead of dying in the preview/bubbling gap.
+        if (deviceControlCapturesKeys(event)) {
+          return@onPreviewKeyEvent false
+        }
 
         when {
           // Cmd+0 -> toggle left pane

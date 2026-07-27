@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
+import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -732,6 +733,11 @@ fun AutoMobileContent(
   // invalidates the rendered frame identity (device change, transport/mode change, stream
   // disconnect, Live Layout open/close). See DeviceControlSession.reset.
   val resetControlTapContext: () -> Unit = { deviceControlSession.reset() }
+
+  // Whether the mirrored device canvas holds the keyboard (issue #3351). Reported by
+  // DeviceScreenView; consumed by the shell so its preview navigation handler stands aside while
+  // the device owns un-chorded keys.
+  var deviceCanvasFocused by remember { mutableStateOf(false) }
 
   val takeScreenshot: () -> Unit =
     remember(clientProvider, screenshotScope) {
@@ -1591,6 +1597,17 @@ fun AutoMobileContent(
       onQuickJump = { /* Timestamp jump placeholder */ },
       menuBarActions = menuBarActions,
       vimModeEnabled = vimModeEnabled,
+      // The shell's navigation shortcuts run in a PREVIEW handler, so without this they consume
+      // Tab / arrows / Enter / Escape before the focused device canvas ever sees them — and Escape
+      // is the client's only device-button binding (issue #3351). Evaluated PER EVENT with the same
+      // policy the canvas applies: Compose never reruns a preview handler while an unconsumed
+      // event bubbles up, so standing down for a keystroke the canvas then declines (a printable
+      // key on iOS, a shifted device key) would leave it with neither the device nor the shell.
+      deviceControlCapturesKeys = { event ->
+        deviceCanvasFocused &&
+          deviceControlSession.interactionSnapshot != null &&
+          deviceControlSession.wouldForwardKey(DeviceKeyboardEventTranslator.translate(event))
+      },
       centerContent = { mod ->
         if (isLiveLayoutMode) {
           // Live layout mode: center shows device screenshot with element overlays.
@@ -1692,6 +1709,13 @@ fun AutoMobileContent(
               onControlSwipe = { snapshot, start, end ->
                 deviceControlSession.swipe(snapshot, start, end)
               },
+              // Keyboard, text and device buttons (issue #3351) travel that SAME session too, so a
+              // tap-then-type sequence reaches the device in order. The session answers whether it
+              // forwarded anything, and the view returns that as its onKeyEvent result — so a chord
+              // the policy leaves to the host is not consumed here and still reaches this app's own
+              // shortcuts.
+              onControlKey = { snapshot, stroke -> deviceControlSession.key(snapshot, stroke) },
+              onControlFocusChanged = { focused -> deviceCanvasFocused = focused },
             )
 
             ScreenshotMetadataOverlay(

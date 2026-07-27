@@ -313,7 +313,7 @@ the input response returns.
 | `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |
 | `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
 | `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |
-| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |
+| `input/typeText` | Supported | Supported (replace only) | Sends committed text only; IME composition is deferred. Non-destructive `mode: "append"` is **Android only** — iOS rejects it rather than silently replacing the field. |
 | `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |
 
 All successful input responses use this result shape:
@@ -551,6 +551,58 @@ this contract; clients should send the final committed string.
 | `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
 | `text` | `string` | Yes | Non-empty text to type. |
 | `submit` | `boolean` | No | When true, press enter/return after typing if the platform supports it. |
+| `mode` | `"append"` | No | **Android only.** Append to the focused field with real key events instead of replacing its contents. `"append"` is the only accepted value; any other value fails validation. |
+
+**Replace vs. append.** The default path sets the focused field's contents via
+`ACTION_SET_TEXT`, which **replaces** whatever is there — right for "make this
+field say X" automation, destructive for a client mirroring a keyboard one
+keystroke at a time (typing `abc` as three requests would leave the field saying
+`c`). `mode: "append"` is the non-destructive alternative: it types through real
+Android key events, never clears, and never calls set-text. Interactive
+keyboard-forwarding clients MUST use it; see
+[screen-control-mapping.md](./screen-control-mapping.md) for the full client
+policy.
+
+Append's semantics and limits:
+
+- **Android only.** iOS exposes no non-destructive text primitive, so
+  `mode: "append"` with `platform: "ios"` is rejected at validation with
+  `input/typeText mode "append" is only supported on android` — rejected rather
+  than silently downgraded to the destructive replace path.
+- **Printable ASCII only** (`U+0020`–`U+007E`). Any other character fails with
+  `append cannot type "<char>" with Android key events`, and nothing is typed —
+  a partial append would leave a prefix of the text in the field.
+- **Uppercase and shifted symbols need Android 12 (API 31)**, where
+  `input keycombination` can hold SHIFT. On older devices those characters fail
+  with the same actionable error; lowercase, digits and unshifted punctuation
+  work on every supported API level.
+- **A daemon predating `mode: "append"` rejects the param.** `mode` is validated
+  against a known set, so a daemon built before this field existed answers with
+  `input/typeText unsupported params: mode` (a `success: false` response). This is
+  surfaced to the caller like any other daemon rejection — the reference client
+  routes it to its error banner — never silently swallowed. The daemon does not
+  negotiate capabilities by build identity; a client that emits `mode: "append"`
+  against an older same-release daemon (e.g. a rebuilt desktop against a still-
+  running daemon) sees this error rather than a silent no-op. Optional capability
+  negotiation is tracked in
+  [#4535](https://github.com/kaeawc/auto-mobile/issues/4535).
+
+**Best-effort, character-by-character — retry the remainder, not the whole
+string.** Append types one key event per character in order, so it is atomic only
+for a **single character**: a one-character append either lands or reports failure
+with nothing typed. A **multi-character** append is best-effort — if it fails
+partway (an adb reject/timeout mid-batch), a leading prefix of `text` has already
+been typed into the field. The failure is reported the same way as any other input
+error (a `success: false` response with a message; the daemon does **not** return a
+structured partial-progress count on the wire — see
+[#4537](https://github.com/kaeawc/auto-mobile/issues/4537)). Therefore a client
+that batches multiple characters into one request **must not blindly retry the
+whole string** on failure — re-sending `"ab"` after `"a"` already landed produces
+`"aab"`. A client that needs per-character atomicity must send **one character per
+`input/typeText` request**, which is exactly what the reference desktop client does
+(one request per keystroke). The in-process primitive already tracks how many
+characters landed (`SendTextResult.charsSent`); surfacing that on a failed wire
+response is deferred to [#4537](https://github.com/kaeawc/auto-mobile/issues/4537).
 
 **Request**
 
@@ -564,6 +616,22 @@ this contract; clients should send the final committed string.
     "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
     "text": "hello",
     "submit": false
+  }
+}
+```
+
+**Request (append mode — one keystroke from an interactive client)**
+
+```json
+{
+  "id": "type-2",
+  "type": "mcp_request",
+  "method": "input/typeText",
+  "params": {
+    "platform": "android",
+    "deviceId": "emulator-5554",
+    "text": "a",
+    "mode": "append"
   }
 }
 ```

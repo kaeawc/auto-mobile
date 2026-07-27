@@ -32,6 +32,7 @@ import {
   extractClientHandshake,
   type DaemonSelfIdentity,
 } from "./daemonHandshake";
+import { InputText } from "../features/action/InputText";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
@@ -110,6 +111,20 @@ interface SocketFileIdentity {
  */
 export type McpClientFactory = () => Promise<Client>;
 
+/**
+ * The narrow append-text surface `input/typeText mode:"append"` needs.
+ *
+ * Exactly one method, deliberately: the daemon never wants the observe round trip
+ * or the replace-shaped modes {@link InputText} also exposes, and a narrow seam is
+ * what lets a test inject a fake adb instead of shelling out.
+ */
+export interface AppendTextInput {
+  appendText(
+    text: string,
+    timeoutMs?: number
+  ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private socketFileIdentity: SocketFileIdentity | null = null;
@@ -137,6 +152,28 @@ export class UnixSocketServer {
    * exercise forwarding without a live HTTP endpoint.
    */
   mcpClientFactory: McpClientFactory = () => this.createMcpClient();
+
+  /**
+   * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
+   *
+   * Defaults to the real {@link InputText} bound to the default adb client factory and
+   * this server's timer; tests assign a fake so the append path is exercised without
+   * shelling out to a real `adb` (and so a stalled subprocess can be simulated).
+   */
+  appendTextFactory: (device: BootedDevice) => AppendTextInput = device =>
+    new InputText(device, defaultAdbClientFactory, undefined, this.timer);
+
+  /**
+   * Per-device append helpers, cached so the API-level probe (`adb shell getprop`)
+   * runs once per device instead of once PER KEYSTROKE — an interactive client
+   * sends one `input/typeText` per key press, and a fresh {@link InputText} would
+   * re-pay that round trip every time (issue #1099 tracks interactive latency).
+   *
+   * Evicted alongside the device's idle MCP-client close ({@link closeIdleMcpClient},
+   * same per-device key, same idle window), so a device that re-appears under the
+   * same id with a different image re-probes rather than trusting a stale API level.
+   */
+  private appendTextInputs: Map<string, AppendTextInput> = new Map();
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -961,7 +998,15 @@ export class UnixSocketServer {
         totalTimeoutMs,
         remainingTimeoutMs,
         "UnixSocketServer.handleInputTypeText",
-        () => this.executeInputTypeText(args.platform, targetDevice, args.text, imeAction, remainingTimeoutMs)
+        () =>
+          this.executeInputTypeText(
+            args.platform,
+            targetDevice,
+            args.text,
+            imeAction,
+            remainingTimeoutMs,
+            args.append
+          )
       );
     });
 
@@ -1069,7 +1114,8 @@ export class UnixSocketServer {
     targetDevice: BootedDevice,
     text: string,
     imeAction: ImeAction | undefined,
-    timeoutMs: number
+    timeoutMs: number,
+    append: boolean = false
   ): Promise<{ success: boolean; error?: string }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
@@ -1081,9 +1127,19 @@ export class UnixSocketServer {
         ? AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory)
         : IOSCtrlProxyClient.getInstance(targetDevice);
 
-    const textResult = await client.requestSetText(text, { timeoutMs });
+    // Append never touches requestSetText: that is ACTION_SET_TEXT, which
+    // REPLACES the field. Real key events are the only non-destructive path.
+    //
+    // The budget is threaded in for the same reason the replace path gets it: this
+    // runs while the per-device queue is held, and the outer race only *reports* a
+    // timeout — it still waits for the operation to settle before releasing the
+    // queue. An unbounded adb subprocess here would therefore wedge every later
+    // input for this device, not just this one request.
+    const textResult = append
+      ? await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs)
+      : await client.requestSetText(text, { timeoutMs });
     if (!textResult.success) {
-      return textResult;
+      return { success: false, error: textResult.error };
     }
     if (!imeAction) {
       return { success: true };
@@ -1258,13 +1314,14 @@ export class UnixSocketServer {
     deviceId?: string;
     text: string;
     submit: boolean;
+    append: boolean;
   } {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error("input/typeText requires params object");
     }
 
     const args = params as Record<string, unknown>;
-    const supportedParams = new Set(["platform", "deviceId", "text", "submit"]);
+    const supportedParams = new Set(["platform", "deviceId", "text", "submit", "mode"]);
     const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
     if (unsupportedParams.length > 0) {
       throw new Error(`input/typeText unsupported params: ${unsupportedParams.join(", ")}`);
@@ -1281,12 +1338,24 @@ export class UnixSocketServer {
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/typeText deviceId must be a string when provided");
     }
+    // "append" adds to the focused field instead of replacing it, which is what
+    // an interactive client mirroring one keystroke at a time needs: the default
+    // replace semantics would leave only the last character typed (#3351). It is
+    // Android-only — iOS exposes no non-destructive text primitive — so it is
+    // rejected rather than silently ignored on iOS.
+    if (args.mode !== undefined && args.mode !== "append") {
+      throw new Error('input/typeText mode must be "append" when provided');
+    }
+    if (args.mode === "append" && args.platform !== "android") {
+      throw new Error('input/typeText mode "append" is only supported on android');
+    }
 
     return {
       platform: args.platform,
       deviceId: args.deviceId,
       text: args.text,
       submit: args.submit ?? false,
+      append: args.mode === "append",
     };
   }
 
@@ -1559,7 +1628,41 @@ export class UnixSocketServer {
     if (this.mcpForwardTails.has(key)) {
       return;
     }
+    // The append helper shares the device's idle lifecycle: once nothing has
+    // used this device key for the idle window, drop the cached InputText so
+    // its API-level cache cannot go stale across a device swap under the same id.
+    const devicePrefix = "device:";
+    if (key.startsWith(devicePrefix)) {
+      this.appendTextInputs.delete(key.slice(devicePrefix.length));
+    }
     await this.resetMcpClient(key);
+  }
+
+  /**
+   * Drop the cached append helper for a device that has disconnected (issue #3351).
+   *
+   * The cache is keyed by deviceId and otherwise lives until the 5-minute idle
+   * close. If an emulator is replaced under a reused serial (`emulator-5554`)
+   * before then, the next device would inherit the previous one's cached API-level
+   * capability — an API 31+ / pre-31 mismatch that mis-handles SHIFT and uppercase.
+   * The daemon's device-disconnect monitor calls this on a confirmed disconnect so
+   * the replacement re-probes from scratch. Idempotent; safe for an unknown id.
+   */
+  evictDeviceInputCache(deviceId: string): void {
+    if (this.appendTextInputs.delete(deviceId)) {
+      logger.debug(`[UnixSocketServer] Evicted cached append helper for disconnected device ${deviceId}`);
+    }
+  }
+
+  /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
+  private getAppendTextInput(device: BootedDevice): AppendTextInput {
+    const existing = this.appendTextInputs.get(device.deviceId);
+    if (existing) {
+      return existing;
+    }
+    const created = this.appendTextFactory(device);
+    this.appendTextInputs.set(device.deviceId, created);
+    return created;
   }
 
   /**
@@ -1641,6 +1744,7 @@ export class UnixSocketServer {
       }
     }
     this.mcpForwardTails.clear();
+    this.appendTextInputs.clear();
 
     // Clear sessions
     this.sessions.clear();

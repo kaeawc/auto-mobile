@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -13,12 +13,13 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
+  asciiKeyEventNeedsKeyCombination,
   buildAsciiKeyEventPlan,
   type KeyEventPlan
 } from "./asciiKeyEvents";
 import { Keyboard } from "./Keyboard";
 
-export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly";
+export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
 
 interface KeyboardCloser {
   close(): Promise<KeyboardResult>;
@@ -39,9 +40,10 @@ export class InputText extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
-    private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory
+    private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory,
+    timer: Timer = defaultTimer
   ) {
-    super(device, adbFactoryOrExecutor);
+    super(device, adbFactoryOrExecutor, timer);
     this.device = device;
   }
 
@@ -147,6 +149,10 @@ export class InputText extends BaseVisualChange {
 
     if (mode === "eventAll") {
       return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard);
+    }
+
+    if (mode === "append") {
+      return this.executeAndroidAppendTextInput(text, imeAction, dismissKeyboard);
     }
 
     if (mode === "eventOnly") {
@@ -301,6 +307,229 @@ export class InputText extends BaseVisualChange {
     };
   }
 
+  /**
+   * Public entry point for the append mode, bypassing the observe round trip
+   * `execute` performs.
+   *
+   * An interactive client mirroring a keyboard sends one call per keystroke, so
+   * a before/after observation per character would dominate the latency of
+   * every key press — and the append path needs no hierarchy at all (it neither
+   * clears nor measures the field). Android only; the caller checks platform.
+   *
+   * @param timeoutMs - Total budget for this call's OWN device operations, charged
+   *   across the API-level probe and every `adb shell input ...` subprocess it spawns
+   *   (each re-reads the remaining budget and bails at <= 0), so their combined
+   *   elapsed cannot exceed one budget. Callers that hold a per-device queue (the
+   *   daemon's `input/typeText`) MUST pass it: without a bound, one stalled adb
+   *   invocation blocks both the response and every later input for that device.
+   *   Omitting it leaves the subprocesses unbounded, which is only safe for a caller
+   *   that owns its own lifetime.
+   *
+   *   Caveat: the budget bounds only the operations this method issues. It does NOT
+   *   bound `AdbClient`'s shared ADB-path discovery (`ensureAdbPath`), which runs
+   *   inside `executeArgsImpl` BEFORE the per-command timeout applies. On a cold or
+   *   expired 60s path cache a stalled discovery probe can still wedge the queue —
+   *   a property of the shared adb primitive every input path uses, tracked in
+   *   #4533, not fixable here.
+   */
+  async appendText(
+    text: string,
+    timeoutMs?: number
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs);
+  }
+
+  /**
+   * Append `text` to the focused field using real key events only.
+   *
+   * Every other Android mode is REPLACE-shaped: `a11y` sends the whole string
+   * through `ACTION_SET_TEXT`, and `eventAll`/`eventOnly` clear the field before
+   * typing. That is right for "make this field say X" automation, but wrong for
+   * an interactive client mirroring one keystroke at a time — there, each
+   * keystroke would wipe the field and leave only the last character
+   * (issue #3351). This mode never clears and never calls setText, so N
+   * single-character calls build up the same text a human would type.
+   *
+   * Unmappable characters FAIL rather than falling back to `a11y`: the fallback
+   * would silently replace the field's contents, which is the exact destruction
+   * this mode exists to avoid. The caller sees an actionable error instead.
+   *
+   * Unlike `eventOnly` this needs no view hierarchy — it neither clears nor
+   * measures the field — which also keeps a per-keystroke call to one round trip.
+   *
+   * Every device round trip — the API-level probe and each `adb shell input ...`
+   * subprocess — is charged against `timeoutMs` when the caller supplies one, so a
+   * stalled adb fails fast inside the caller's budget instead of parking the
+   * caller's queue forever.
+   */
+  private async executeAndroidAppendTextInput(
+    text: string,
+    imeAction?: ImeAction,
+    dismissKeyboard: boolean = false,
+    timeoutMs?: number
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const remaining = this.createBudget(timeoutMs);
+    const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs);
+    if (planned.error) {
+      // Planning failed before any key event was issued, so nothing landed.
+      return this.appendFailure(text, planned.error, 0);
+    }
+
+    const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs);
+    if (typed.error) {
+      // Partial failure: `charsSent` characters already landed on the device. The
+      // caller must retry only `text.slice(charsSent)`, never the whole string.
+      return this.appendFailure(text, typed.error, typed.charsSent);
+    }
+
+    if (dismissKeyboard) {
+      const dismissError = await this.dismissKeyboardAfterAppend();
+      if (dismissError) {
+        // All characters landed; only the post-typing keyboard dismissal failed,
+        // so the full text was sent — a retry must NOT re-append any of it.
+        return this.appendFailure(text, dismissError, typed.charsSent);
+      }
+    }
+
+    if (imeAction) {
+      await this.executeImeAction(imeAction);
+    }
+
+    return {
+      success: true,
+      text,
+      imeAction,
+      method: "append",
+      charsSent: typed.charsSent
+    };
+  }
+
+  /**
+   * Map every character of `text` to a key-event plan.
+   *
+   * The API-level capability (`input keycombination`, API 31+) is needed ONLY for
+   * uppercase/shifted characters, so the probe runs once for the whole batch and
+   * ONLY when at least one character needs it (issue #3351). A lowercase / digit /
+   * space / unshifted-punctuation append never probes: the probe is a device round
+   * trip that would be pure waste there — and worse, if it consumed the remaining
+   * budget the typing phase would then report exhaustion and drop a keystroke that
+   * needed no capability at all. When it does probe, the probe is charged against
+   * the same budget the typing uses.
+   *
+   * Returns an `error` instead of throwing so the caller emits one uniform append
+   * failure. Nothing is sent when any character is unmappable: a partial append
+   * would leave the field holding a prefix of what the user typed.
+   */
+  private async planAppendKeyEvents(
+    text: string,
+    remaining: () => number | undefined,
+    timeoutMs: number | undefined
+  ): Promise<{ plans: KeyEventPlan[]; error?: string }> {
+    const chars = Array.from(text);
+    const needsCapability = chars.some(char => asciiKeyEventNeedsKeyCombination(char));
+
+    let supportsKeyCombination = false;
+    if (needsCapability) {
+      const budget = remaining();
+      if (budget !== undefined && budget <= 0) {
+        return { plans: [], error: this.appendBudgetExceeded(timeoutMs, "resolving key events") };
+      }
+      supportsKeyCombination = await this.supportsAndroidInputKeyCombination(budget);
+    }
+
+    const plans: KeyEventPlan[] = [];
+    for (const char of chars) {
+      const keyEventPlan = buildAsciiKeyEventPlan(char, supportsKeyCombination);
+      if (!keyEventPlan) {
+        return {
+          plans,
+          error: `append cannot type ${JSON.stringify(char)} with Android key events`
+        };
+      }
+      plans.push(keyEventPlan);
+    }
+    return { plans };
+  }
+
+  /**
+   * Issue the planned key events, re-reading the remaining budget before each one so
+   * a slow device cannot let N subprocesses each consume the full timeout.
+   *
+   * Returns how many plans (i.e. leading characters of the append) were sent, plus
+   * an optional error. One plan == one character, executed in order, so `charsSent`
+   * is the length of the prefix that landed on the device — a caller retrying after
+   * a partial failure must re-send only `text.slice(charsSent)`, never the whole
+   * string (issue #3351: re-appending "ab" after "a" landed would produce "aab").
+   * An adb rejection becomes a typed failure rather than a throw: the daemon holds a
+   * per-device queue across this call and needs a prompt, describable answer.
+   */
+  private async typeAppendKeyEvents(
+    plans: KeyEventPlan[],
+    remaining: () => number | undefined,
+    timeoutMs: number | undefined
+  ): Promise<{ charsSent: number; error?: string }> {
+    let charsSent = 0;
+    for (const plan of plans) {
+      const budget = remaining();
+      if (budget !== undefined && budget <= 0) {
+        return { charsSent, error: this.appendBudgetExceeded(timeoutMs, "typing") };
+      }
+      try {
+        // noRetry: production AdbClient retries a timed-out command up to 4 total
+        // attempts, each charged the SAME budget — and runInputOperationWithTimeout
+        // awaits the losing operation before releasing the per-device queue, so a
+        // stalled key event would otherwise hold the queue for ~4x the request
+        // deadline. A single attempt keeps this append's own device ops within one
+        // budget (the shared ensureAdbPath discovery is the one exception — see the
+        // appendText caveat and issue #4533).
+        await this.executeKeyEventPlan(plan, budget, true);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn(`[InputText] append key event failed after ${charsSent} char(s): ${message}`, error);
+        return { charsSent, error: `append key event failed: ${message}` };
+      }
+      charsSent += 1;
+    }
+    return { charsSent };
+  }
+
+  /** Returns an error message when the keyboard could not be dismissed, else null. */
+  private async dismissKeyboardAfterAppend(): Promise<string | null> {
+    const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
+    if (keyboardResult.success) {
+      return null;
+    }
+    const cause = keyboardResult.error ?? keyboardResult.message ?? "unknown error";
+    return `append input completed but keyboard dismissal failed: ${cause}`;
+  }
+
+  /**
+   * Turn `timeoutMs` into a remaining-budget reader.
+   *
+   * `undefined` means unbounded, which is what a caller that owns its own lifetime
+   * gets; every bounded caller shares one deadline across the whole append so N
+   * subprocesses cannot each consume the full budget.
+   */
+  private createBudget(timeoutMs: number | undefined): () => number | undefined {
+    if (timeoutMs === undefined) {
+      return () => undefined;
+    }
+    const deadline = this.timer.now() + timeoutMs;
+    return () => deadline - this.timer.now();
+  }
+
+  private appendBudgetExceeded(timeoutMs: number | undefined, phase: string): string {
+    return `append exceeded its ${timeoutMs}ms budget while ${phase}`;
+  }
+
+  private appendFailure(
+    text: string,
+    error: string,
+    charsSent: number
+  ): SendTextResult & { method?: InputTextMode } {
+    return { success: false, text, error, method: "append", charsSent };
+  }
+
   private async executeAndroidEventOnlyTextInput(
     text: string,
     imeAction: ImeAction | undefined,
@@ -422,24 +651,36 @@ export class InputText extends BaseVisualChange {
     return false;
   }
 
-  private async getAsciiKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
-    return buildAsciiKeyEventPlan(char, await this.supportsAndroidInputKeyCombination());
+  private async getAsciiKeyEventPlan(char: string, timeoutMs?: number): Promise<KeyEventPlan | null> {
+    return buildAsciiKeyEventPlan(char, await this.supportsAndroidInputKeyCombination(timeoutMs));
   }
 
-  private async supportsAndroidInputKeyCombination(): Promise<boolean> {
+  private async supportsAndroidInputKeyCombination(timeoutMs?: number): Promise<boolean> {
     if (this.androidInputKeyCombinationSupported !== undefined) {
       return this.androidInputKeyCombinationSupported;
     }
 
-    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb, timeoutMs, this.timer);
+    if (apiLevel === null) {
+      // Unknown is not "unsupported": a transient probe failure (or the caller's
+      // budget expiring mid-probe) must not permanently disable SHIFT chords for
+      // this instance — which now outlives a single request (the daemon caches
+      // InputText per device). Answer conservatively but leave the cache empty
+      // so the next call re-probes.
+      return false;
+    }
     this.androidInputKeyCombinationSupported =
-      apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
+      apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
     return this.androidInputKeyCombinationSupported;
   }
 
-  private async executeKeyEventPlan(plan: KeyEventPlan): Promise<void> {
+  private async executeKeyEventPlan(
+    plan: KeyEventPlan,
+    timeoutMs?: number,
+    noRetry: boolean = false
+  ): Promise<void> {
     for (const command of plan.commands) {
-      await this.adb.executeCommand(command);
+      await this.adb.executeCommand(command, timeoutMs, undefined, noRetry);
     }
   }
 

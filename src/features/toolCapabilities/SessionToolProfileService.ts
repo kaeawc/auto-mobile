@@ -18,8 +18,12 @@ export const TOOL_CAPABILITIES = [
 
 export type ToolCapability = typeof TOOL_CAPABILITIES[number];
 
-/** Core navigation and device lifecycle are always available. */
-export const DEFAULT_TOOL_CAPABILITIES: ReadonlySet<ToolCapability> = new Set();
+/**
+ * Preserve the existing MCP surface until a profile deliberately narrows it.
+ * This keeps new session-scoped profiles opt-in and avoids breaking existing
+ * agents, scripts, and daemon integrations during an upgrade.
+ */
+export const DEFAULT_TOOL_CAPABILITIES: ReadonlySet<ToolCapability> = new Set(TOOL_CAPABILITIES);
 
 export interface SessionToolProfileRepository {
   list(sessionUuid: string): Promise<Map<string, boolean>>;
@@ -39,7 +43,10 @@ export class SessionToolProfileService {
 
   async isEnabled(sessionUuid: string | undefined, capability: ToolCapability): Promise<boolean> {
     if (!sessionUuid) {
-      return DEFAULT_TOOL_CAPABILITIES.has(capability);
+      // tools/list has no device session before an agent's first device-aware
+      // call. Keep that initial list compatible, then refresh it once a
+      // session UUID is bound and its persisted profile can be applied.
+      return true;
     }
     const overrides = await this.repository.list(sessionUuid);
     return overrides.get(capability) ?? this.environmentDefaults.has(capability);

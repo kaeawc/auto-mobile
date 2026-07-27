@@ -20,10 +20,15 @@ class FakeRepository implements SessionToolProfileRepository {
 }
 
 describe("SessionToolProfileService", () => {
-  test("uses core defaults before a device session binds", async () => {
+  test("keeps the existing surface before a device session binds", async () => {
     const service = new SessionToolProfileService(new FakeRepository());
-    expect(await service.isEnabled(undefined, "clipboard")).toBe(false);
-    expect(DEFAULT_TOOL_CAPABILITIES.has("clipboard")).toBe(false);
+    expect(await service.isEnabled(undefined, "clipboard")).toBe(true);
+    expect(DEFAULT_TOOL_CAPABILITIES.has("clipboard")).toBe(true);
+  });
+
+  test("keeps the existing surface for an untouched device session", async () => {
+    const service = new SessionToolProfileService(new FakeRepository());
+    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(true);
   });
 
   test("persists a session override and restores it in a fresh service", async () => {
@@ -33,6 +38,15 @@ describe("SessionToolProfileService", () => {
 
     const restarted = new SessionToolProfileService(repository);
     expect(await restarted.isEnabled("device-session-1", "clipboard")).toBe(true);
+  });
+
+  test("lets a session profile narrow the default surface", async () => {
+    const repository = new FakeRepository();
+    const service = new SessionToolProfileService(repository);
+
+    await service.setEnabled("device-session-1", "clipboard", false);
+
+    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(false);
   });
 
   test("uses environment defaults only when no session override exists", async () => {

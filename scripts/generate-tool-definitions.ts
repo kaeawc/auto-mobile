@@ -18,7 +18,6 @@ import { registerDeepLinkTools } from "../src/server/deepLinkTools";
 import { registerNavigationTools } from "../src/server/navigationTools";
 import { registerNotificationTools } from "../src/server/notificationTools";
 import { registerPlanTools } from "../src/server/planTools";
-import { registerDoctorTools } from "../src/server/doctorTools";
 import { registerCriticalSectionTools } from "../src/server/criticalSectionTools";
 import { registerBarrierTools } from "../src/server/barrierTools";
 import { registerVideoRecordingTools } from "../src/server/videoRecordingTools";
@@ -48,7 +47,6 @@ function registerAllTools(): void {
   registerNavigationTools();
   registerNotificationTools();
   registerPlanTools();
-  registerDoctorTools();
   registerCriticalSectionTools();
   registerBarrierTools();
   registerVideoRecordingTools();

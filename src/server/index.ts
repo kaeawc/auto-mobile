@@ -88,7 +88,13 @@ function effectiveSessionUuid(mcpSessionId: string | undefined, params?: unknown
 
 async function isToolVisibleForSession(name: string, sessionUuid: string | undefined): Promise<boolean> {
   const capability = TOOL_CAPABILITY_BY_NAME.get(name);
-  return !capability || await getSessionToolProfileService().isEnabled(sessionUuid, capability);
+  // Before the first device-aware call, no session has been selected and the
+  // persisted profile is not applicable. Avoid opening the profile database
+  // merely to serve the legacy initial tools/list response.
+  if (!capability || !sessionUuid) {
+    return true;
+  }
+  return getSessionToolProfileService().isEnabled(sessionUuid, capability);
 }
 
 function extractInternalMcpSessionId(params: unknown): string | undefined {

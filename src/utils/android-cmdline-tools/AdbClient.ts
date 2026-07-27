@@ -135,7 +135,8 @@ export class AdbClient implements AdbExecutor {
     execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync | null = null,
     spawnFn: typeof spawn | null = null,
     retryExecutor: RetryExecutor = defaultRetryExecutor,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    private readonly systemDetectionFactory: () => SystemDetection = () => new DefaultSystemDetection()
   ) {
     this.device = device;
     // Test mode if: custom execAsync provided OR global test mode flag is set
@@ -280,13 +281,13 @@ export class AdbClient implements AdbExecutor {
     deadlineMs: number | undefined,
     signal?: AbortSignal
   ): SystemDetection {
-    const defaults = new DefaultSystemDetection();
+    const defaults = this.systemDetectionFactory();
     return {
       getCurrentPlatform: () => defaults.getCurrentPlatform(),
       getHomeDir: () => defaults.getHomeDir(),
       getEnvVar: name => defaults.getEnvVar(name),
       fileExistsSync: path => defaults.fileExistsSync(path),
-      fileExists: path => defaults.fileExists(path),
+      fileExists: path => this.executeDetectionFileProbe(defaults, path, deadlineMs, signal),
       executeCommand: async (file, args = []) => {
         try {
           return await this.executeAdbPathProbe(file, args, deadlineMs, signal);
@@ -301,6 +302,57 @@ export class AdbClient implements AdbExecutor {
         }
       },
     };
+  }
+
+  private async executeDetectionFileProbe(
+    systemDetection: SystemDetection,
+    path: string,
+    deadlineMs: number | undefined,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    if (signal?.aborted) {
+      throw new AndroidToolsDetectionAbortError(this.getAbortError(signal));
+    }
+
+    const timeoutMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
+    if (timeoutMs !== undefined && timeoutMs <= 0) {
+      throw new AndroidToolsDetectionTimeoutError(`Command timed out before ADB path discovery: ${path}`);
+    }
+    if (timeoutMs === undefined && !signal) {
+      return systemDetection.fileExists(path);
+    }
+
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      const cleanup = () => {
+        if (timeoutHandle) {
+          this.timer.clearTimeout(timeoutHandle);
+        }
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const settle = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        callback();
+      };
+      const onAbort = () => settle(() => reject(new AndroidToolsDetectionAbortError(this.getAbortError(signal!))));
+
+      if (timeoutMs !== undefined) {
+        timeoutHandle = this.timer.setTimeout(
+          () => settle(() => reject(new AndroidToolsDetectionTimeoutError(`Command timed out before ADB path discovery: ${path}`))),
+          timeoutMs
+        );
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      void systemDetection.fileExists(path).then(
+        exists => settle(() => resolve(exists)),
+        error => settle(() => reject(error))
+      );
+    });
   }
 
   private throwIfAdbPathTimeout(error: unknown, signal?: AbortSignal): void {

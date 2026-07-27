@@ -8,6 +8,7 @@ import { clearDetectionCache } from "../../../src/utils/android-cmdline-tools/de
 import { defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";
+import type { SystemDetection } from "../../../src/utils/system/SystemDetection";
 
 const ANDROID_ENV_NAMES = ["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME"] as const;
 const savedAndroidEnvironment = new Map(
@@ -229,5 +230,54 @@ describe("AdbClient ADB-path discovery deadline", () => {
 
     expect(adbPathProbeCalls).toBe(2);
     expect(commandFiles).toEqual(["/sdk/platform-tools/adb"]);
+  });
+
+  test("times out instead of blocking on a stalled fallback filesystem probe", async () => {
+    const timer = new FakeTimer();
+    let fileProbeStarted = false;
+    const commandFiles: string[] = [];
+    const stalledSystemDetection: SystemDetection = {
+      getCurrentPlatform: () => "darwin",
+      getHomeDir: () => "/Users/test",
+      getEnvVar: () => undefined,
+      fileExistsSync: () => false,
+      fileExists: async () => {
+        fileProbeStarted = true;
+        return new Promise<boolean>(() => {});
+      },
+      executeCommand: async () => {
+        throw new Error("command not found");
+      },
+    };
+    const client = new AdbClient(
+      null,
+      null,
+      null,
+      defaultRetryExecutor,
+      timer,
+      () => stalledSystemDetection
+    );
+    const internals = client as unknown as AdbClientInternals;
+    internals.isTestMode = false;
+    internals.execWithSignal = async (file, args) => {
+      if (file === "which" && args[0] === "adb") {
+        return ok("");
+      }
+      if (args[0] === "shell") {
+        commandFiles.push(file);
+      }
+      return ok();
+    };
+
+    let settled: unknown = undefined;
+    void client.execute(["shell", "true"], { timeoutMs: 20, noRetry: true })
+      .catch(error => { settled = error; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(fileProbeStarted).toBe(true);
+    timer.advanceTime(20);
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    expect(settled).toBeInstanceOf(AdbCommandTimeoutError);
+    expect(commandFiles).toEqual([]);
   });
 });

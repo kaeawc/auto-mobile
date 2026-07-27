@@ -1,4 +1,5 @@
 import { existsSync } from "fs";
+import { access } from "fs/promises";
 import { homedir, platform } from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -58,7 +59,10 @@ export class DefaultSystemDetection implements SystemDetection {
   }
 
   async fileExists(path: string): Promise<boolean> {
-    return existsSync(path);
+    return access(path).then(
+      () => true,
+      () => false
+    );
   }
 
   async executeCommand(file: string, args: string[] = []): Promise<{ stdout: string; stderr: string }> {

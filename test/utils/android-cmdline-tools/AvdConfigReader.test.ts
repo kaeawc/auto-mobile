@@ -98,18 +98,40 @@ describe("parseAvdConfig", () => {
 });
 
 describe("apiLevelToVersion", () => {
-  it("maps known API levels", () => {
-    expect(apiLevelToVersion(34)).toBe("14");
-    expect(apiLevelToVersion(35)).toBe("15");
-    expect(apiLevelToVersion(33)).toBe("13");
-    expect(apiLevelToVersion(28)).toBe("9");
-    expect(apiLevelToVersion(21)).toBe("5.0");
-  });
+  // PARAM-10: pin the entire API-level -> version map, not a sample of five, so
+  // a drifted or removed entry is caught. The map runs contiguously 21..36.
+  const mapRows: Array<[number, string]> = [
+    [21, "5.0"],
+    [22, "5.1"],
+    [23, "6.0"],
+    [24, "7.0"],
+    [25, "7.1"],
+    [26, "8.0"],
+    [27, "8.1"],
+    [28, "9"],
+    [29, "10"],
+    [30, "11"],
+    [31, "12"],
+    [32, "12L"],
+    [33, "13"],
+    [34, "14"],
+    [35, "15"],
+    [36, "16"],
+  ];
 
-  it("returns undefined for unknown API levels", () => {
-    expect(apiLevelToVersion(99)).toBeUndefined();
-    expect(apiLevelToVersion(0)).toBeUndefined();
-  });
+  for (const [apiLevel, version] of mapRows) {
+    it(`maps API ${apiLevel} to Android ${version}`, () => {
+      expect(apiLevelToVersion(apiLevel)).toBe(version);
+    });
+  }
+
+  // Boundaries just outside the map, plus clearly-out-of-range values.
+  const unknownRows = [20, 37, 0, -1, 99];
+  for (const apiLevel of unknownRows) {
+    it(`returns undefined for unmapped API ${apiLevel}`, () => {
+      expect(apiLevelToVersion(apiLevel)).toBeUndefined();
+    });
+  }
 });
 
 describe("FileAvdConfigReader", () => {

@@ -49,10 +49,7 @@ export function compareVersions(a: string, b: string): number {
     if (delta !== 0) {
       return delta;
     }
-    if (parsedA.qpr !== undefined && parsedB.qpr !== undefined) {
-      return parsedA.qpr - parsedB.qpr;
-    }
-    return 0;
+    return (parsedA.qpr ?? 0) - (parsedB.qpr ?? 0);
   }
   if (parsedA || parsedB) {
     return Number.NaN;
@@ -78,9 +75,21 @@ function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCrit
 
 function matchesVersionRange(item: { osVersion?: string }, criteria: DeviceMatchCriteria): boolean {
   const version = item.osVersion;
-  const meetsMinimum = !criteria.minOsVersion || Boolean(version && compareVersions(version, criteria.minOsVersion) >= 0);
-  const meetsMaximum = !criteria.maxOsVersion || Boolean(version && compareVersions(version, criteria.maxOsVersion) <= 0);
+  const meetsMinimum = !criteria.minOsVersion || Boolean(version && compareVersionToBound(version, criteria.minOsVersion) >= 0);
+  const meetsMaximum = !criteria.maxOsVersion || Boolean(version && compareVersionToBound(version, criteria.maxOsVersion) <= 0);
   return meetsMinimum && meetsMaximum;
+}
+
+function compareVersionToBound(version: string, bound: string): number {
+  const parsedVersion = parseDeviceVersion(version);
+  const parsedBound = parseDeviceVersion(bound);
+  if (parsedVersion && parsedBound) {
+    const delta = compareParsedVersions(parsedVersion.components, parsedBound.components);
+    if (delta !== 0) { return delta; }
+    if (parsedBound.qpr === undefined) { return 0; }
+    return (parsedVersion.qpr ?? 0) - parsedBound.qpr;
+  }
+  return compareVersions(version, bound);
 }
 
 function matchesName(item: { name: string }, criteria: DeviceMatchCriteria): boolean {

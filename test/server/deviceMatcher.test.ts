@@ -40,8 +40,9 @@ describe("compareVersions", () => {
     expect(compareVersions("17.1", "17")).toBeGreaterThan(0);
   });
 
-  it("orders quarterly-release suffixes while treating a bare major as the same release", () => {
-    expect(compareVersions("14-QPR1", "14")).toBe(0);
+  it("orders quarterly-release suffixes after their bare release", () => {
+    expect(compareVersions("14", "14-QPR1")).toBeLessThan(0);
+    expect(compareVersions("14-QPR1", "14")).toBeGreaterThan(0);
     expect(compareVersions("14-QPR2", "14-QPR1")).toBeGreaterThan(0);
     expect(compareVersions("15-QPR1", "14")).toBeGreaterThan(0);
   });
@@ -291,6 +292,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
 
   it("does not let an older QPR satisfy a newer QPR minimum", () => {
     const devices = [
+      bootedDevice({ deviceId: "bare", osVersion: "14" }),
       bootedDevice({ deviceId: "qpr1", osVersion: "14-QPR1" }),
       bootedDevice({ deviceId: "qpr2", osVersion: "14-QPR2" }),
     ];
@@ -300,6 +302,16 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       devices,
       "LATEST"
     );
+    expect(result?.deviceId).toBe("qpr2");
+  });
+
+  it("prefers a QPR update over the bare release for LATEST", () => {
+    const devices = [
+      bootedDevice({ deviceId: "bare", osVersion: "14" }),
+      bootedDevice({ deviceId: "qpr2", osVersion: "14-QPR2" }),
+    ];
+
+    const result = matcher.matchBootedDevice({ platform: "android" }, devices, "LATEST");
     expect(result?.deviceId).toBe("qpr2");
   });
 

@@ -1,7 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
-import dev.jasonpearson.automobile.desktop.domain.ActiveTouchFeedback
-import dev.jasonpearson.automobile.desktop.domain.TouchFeedbackMarker
 import dev.jasonpearson.automobile.desktop.domain.TouchFeedbackModel
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -11,9 +9,11 @@ import kotlin.test.assertTrue
 /**
  * The pure transient touch-feedback model (issue #3352). The clock is injected — a mutable
  * monotonic fake — so the fade transitions run with no timer: record, age partway, age out, cap,
- * reset, the dispatch gate, monotonic aging, and the captured-geometry rendering, the same way the
- * other `desktop-domain` policies are tested. Aging reads the injected clock, so a model that read
- * a real clock instead would leave a pulse un-aged under the fed clock (see the monotonic test).
+ * reset, the dispatch gate, monotonic aging, and the aspect-based geometry retention, the same way
+ * the other `desktop-domain` policies are tested. Aging reads the injected clock, so a model that
+ * read a real clock instead would leave a pulse un-aged under the fed clock (see the monotonic
+ * test). Placement itself is covered in `TouchFeedbackPlacementTest`, which pins the render path to
+ * the canonical [dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper].
  */
 class TouchFeedbackModelTest {
 
@@ -186,48 +186,11 @@ class TouchFeedbackModelTest {
     assertEquals(1, model.active().size)
   }
 
-  // --- Captured geometry (issue #3352, finding B): the pulse renders through the snapshot bounds
-  // it was captured with, not a later/live geometry. ---
+  // --- Geometry retention (issues #3352, #4546): a mid-pulse frame reshape drops stale markers.
+  // The rule is aspect-based, so it catches both rotations and same-orientation aspect changes. ---
 
   @Test
-  fun `frameOffset scales through the marker's captured device width, not a live one`() {
-    // A center tap captured against a 1080-wide snapshot.
-    val marker =
-      TouchFeedbackMarker(
-        x = 540,
-        y = 1170,
-        deviceWidth = 1080,
-        deviceHeight = 2340,
-        startedAtMs = 0L,
-      )
-    val active = ActiveTouchFeedback(marker = marker, progress = 0f)
-
-    // Rendered into a 540px-wide frame: exactly half device -> the frame center x.
-    val offset = active.frameOffset(frameWidthPx = 540f)
-    assertEquals(270f, offset.x)
-    assertEquals(585f, offset.y)
-
-    // The SAME device point captured against a different (e.g. post-resolution-change) snapshot
-    // width lands at a DIFFERENT frame offset for the same frame — proving the captured width, not
-    // a live dimension, drives placement.
-    val staleWidthMarker = marker.copy(deviceWidth = 720)
-    val staleOffset = ActiveTouchFeedback(staleWidthMarker, 0f).frameOffset(540f)
-    assertEquals(405f, staleOffset.x)
-  }
-
-  @Test
-  fun `frameOffset yields the origin for a degenerate zero-width snapshot`() {
-    val marker =
-      TouchFeedbackMarker(x = 5, y = 9, deviceWidth = 0, deviceHeight = 0, startedAtMs = 0L)
-    val offset = ActiveTouchFeedback(marker, 0f).frameOffset(540f)
-    assertEquals(0f, offset.x)
-    assertEquals(0f, offset.y)
-  }
-
-  // --- Orientation (issue #3352): a rotation mid-pulse drops stale-oriented markers. ---
-
-  @Test
-  fun `retainOnlyOrientation drops pulses after a portrait to landscape flip`() {
+  fun `retainOnlyMatchingAspect drops pulses after a portrait to landscape flip`() {
     val model = model()
     now = 0L
     // Captured in portrait (w < h).
@@ -235,20 +198,57 @@ class TouchFeedbackModelTest {
     assertEquals(1, model.active().size)
 
     // Device rotates to landscape (w > h): the portrait marker no longer maps into the frame.
-    model.retainOnlyOrientation(deviceWidth = 2340, deviceHeight = 1080)
+    model.retainOnlyMatchingAspect(deviceWidth = 2340, deviceHeight = 1080)
     assertTrue(model.active().isEmpty())
   }
 
   @Test
-  fun `retainOnlyOrientation keeps pulses on a same-orientation resolution change`() {
+  fun `retainOnlyMatchingAspect keeps pulses on an equal-aspect resolution change`() {
     val model = model()
     now = 0L
     // Captured in portrait 1080x2340.
     model.record(x = 540, y = 1170, deviceWidth = 1080, deviceHeight = 2340)
 
-    // A same-orientation resolution change (still portrait) must NOT drop the pulse — the captured
-    // bounds already place it correctly.
-    model.retainOnlyOrientation(deviceWidth = 720, deviceHeight = 1560)
+    // An equal-aspect resolution change (720x1560 has the same 13:6 aspect) must NOT drop the
+    // pulse — the captured bounds already place it correctly in the same-shaped frame.
+    model.retainOnlyMatchingAspect(deviceWidth = 720, deviceHeight = 1560)
     assertEquals(1, model.active().size)
+  }
+
+  @Test
+  fun `retainOnlyMatchingAspect drops pulses on a same-orientation aspect change`() {
+    // The finding behind #4546: an orientation-keyed rule kept this marker even though a
+    // portrait -> portrait resolution change (1080x2340 -> 1080x1920) reshapes the frame, leaving
+    // a marker near the old bottom edge mapped below the new frame.
+    val model = model()
+    now = 0L
+    model.record(x = 540, y = 2200, deviceWidth = 1080, deviceHeight = 2340)
+    assertEquals(1, model.active().size)
+
+    model.retainOnlyMatchingAspect(deviceWidth = 1080, deviceHeight = 1920)
+    assertTrue(model.active().isEmpty())
+  }
+
+  @Test
+  fun `retainOnlyMatchingAspect keeps pulses within the geometry tolerance`() {
+    // Aspect within DeviceControlPolicy's 5% relative geometry tolerance is "the same shape":
+    // 1080x2340 (2.1667) vs 1080x2300 (2.1296) differ by ~1.7%, so the pulse is retained.
+    val model = model()
+    now = 0L
+    model.record(x = 540, y = 1170, deviceWidth = 1080, deviceHeight = 2340)
+
+    model.retainOnlyMatchingAspect(deviceWidth = 1080, deviceHeight = 2300)
+    assertEquals(1, model.active().size)
+  }
+
+  @Test
+  fun `retainOnlyMatchingAspect drops every pulse for a degenerate current dimension`() {
+    // Non-positive current dimensions describe no drawable frame, so nothing can be vouched for.
+    val model = model()
+    now = 0L
+    model.record(x = 540, y = 1170, deviceWidth = 1080, deviceHeight = 2340)
+
+    model.retainOnlyMatchingAspect(deviceWidth = 0, deviceHeight = 2340)
+    assertTrue(model.active().isEmpty())
   }
 }

@@ -76,6 +76,32 @@ Send a `subscribe` command; the daemon replies once, then pushes update messages
   "hierarchyIntervalMs": … }`; to stop, send `{ "command": "unsubscribe" }`. An older daemon that
   does not know a command replies with a benign error and keeps its default cadence.
 
+### Keepalive (ping/pong) — required to stay connected
+
+The daemon actively reaps subscribers it considers dead. Every **10 s** it sends each subscriber a
+ping push, and any subscriber whose activity has not been refreshed within the last **30 s** has its
+socket **destroyed** and its subscription removed. A client that subscribes but never answers pings
+is disconnected roughly 30 s after connecting — even while it is happily receiving frames.
+
+```json
+// daemon -> client, every 10 s
+{ "type": "ping", "timestamp": 1737942000789 }
+// client -> daemon, in reply
+{ "command": "pong" }
+```
+
+- Reply to each `ping` with `{ "command": "pong" }` on the same connection (newline-terminated,
+  like every request). No `id` is needed, and the daemon sends **no response** to a pong — it only
+  refreshes your subscription's activity timestamp.
+- The ping's `timestamp` is the daemon's clock in epoch milliseconds; it is informational.
+- **Receiving pushed frames does not count as activity.** The daemon deliberately refreshes
+  liveness only on inbound traffic (your `pong`, or the initial `subscribe`), never on its own
+  outbound writes — otherwise the frame stream itself would keep a hung client "alive" forever. A
+  client that consumes `screenshot_update`s but never pongs still times out at 30 s.
+- Simplest compliant implementation: on any received line with `"type": "ping"`, immediately write
+  `{"command":"pong"}\n`. There is no harm in an unsolicited pong; an unknown command, by contrast,
+  gets an `error` response.
+
 ### Pushed messages
 
 Every push carries a `type`, the `deviceId` it belongs to, and a display-only `timestamp`. Pair

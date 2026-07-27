@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.domain
 
+import kotlin.math.abs
+
 /**
  * A transient marker for a control-mode input the client actually forwarded, used to draw a brief
  * touch pulse where a tap landed (issue #3352).
@@ -19,31 +21,19 @@ public data class TouchFeedbackMarker(
   val startedAtMs: Long,
 )
 
-/** Frame-pixel center of a pulse, produced by [ActiveTouchFeedback.frameOffset]. */
-public data class TouchFeedbackFrameOffset(val x: Float, val y: Float)
-
 /**
  * A [TouchFeedbackMarker] still visible at a given instant, with its fade resolved.
  *
  * [progress] runs from `0.0` at the instant the input was forwarded to `1.0` at the moment the
  * pulse fully expires, so a UI layer derives alpha (`1 - progress`) and an expanding radius from it
  * without repeating the clock math.
+ *
+ * Placement is NOT resolved here: a renderer maps [marker]'s device point back to frame pixels by
+ * building a [DeviceScreenGeometry] from the marker's own captured bounds and calling the canonical
+ * [DeviceScreenCoordinateMapper.deviceToViewport] — one inverse transform for the whole module, so
+ * a mapper fix can never leave pulse placement behind (issue #4546).
  */
-public data class ActiveTouchFeedback(val marker: TouchFeedbackMarker, val progress: Float) {
-  /**
-   * The pulse's center in frame pixels, for a device frame [frameWidthPx] wide.
-   *
-   * Scaled through the marker's OWN captured [TouchFeedbackMarker.deviceWidth] — a single
-   * width-based ratio for both axes, the exact inverse of the width-based viewport→device mapping —
-   * so the pulse lands where the tap did and cannot drift when the live frame geometry changes
-   * mid-fade. A non-positive captured width yields the origin (a degenerate snapshot has no
-   * addressable pixel to place a pulse at).
-   */
-  public fun frameOffset(frameWidthPx: Float): TouchFeedbackFrameOffset {
-    val scale = if (marker.deviceWidth > 0) frameWidthPx / marker.deviceWidth else 0f
-    return TouchFeedbackFrameOffset(marker.x * scale, marker.y * scale)
-  }
-}
+public data class ActiveTouchFeedback(val marker: TouchFeedbackMarker, val progress: Float)
 
 /**
  * Holds the transient touch-feedback pulses for a mirrored device screen and resolves which are
@@ -121,20 +111,37 @@ public class TouchFeedbackModel(
   }
 
   /**
-   * Drop pulses whose captured orientation no longer matches the current [deviceWidth] x
-   * [deviceHeight] (issue #3352).
+   * Drop pulses whose captured aspect ratio no longer matches the current [deviceWidth] x
+   * [deviceHeight] (issues #3352, #4546).
    *
-   * A marker is placed by scaling its captured device point through its captured bounds
-   * ([ActiveTouchFeedback.frameOffset]), which is exact only within the orientation it was captured
-   * in. If the device rotates during a pulse (portrait↔landscape — the width/height aspect flips),
-   * the same device point maps into a differently-shaped frame and the pulse would land outside the
-   * clipped canvas. A transient 600ms marker is not worth transforming across a rotation, and a
-   * stale-oriented pulse is worse than none — so it is simply dropped. Same-orientation resolution
-   * changes are unaffected (that is what the captured bounds already handle).
+   * A marker is placed by mapping its captured device point through its captured bounds (via
+   * [DeviceScreenCoordinateMapper.deviceToViewport]), which is exact only while the frame keeps the
+   * shape it was captured against. Two changes break that:
+   * - a **rotation** (portrait↔landscape) flips the aspect, so the same device point maps into a
+   *   differently-shaped frame and the pulse lands outside the clipped canvas;
+   * - a **same-orientation aspect change** (1080x2340 -> 1080x1920) reshapes the frame the same way
+   *   — a marker near the old bottom edge maps below the new frame.
+   *
+   * Both are caught by one rule: retain a marker only while its captured aspect matches the current
+   * aspect within [ASPECT_TOLERANCE] (relative, matching [DeviceControlPolicy]'s
+   * geometry-consistency tolerance). An equal-aspect resolution change (1080x2340 -> 720x1560)
+   * passes and keeps its pulses — that is exactly what the captured bounds already handle. A
+   * transient 600ms marker is not worth transforming across a reshape, and a stale-shaped pulse is
+   * worse than none — so it is simply dropped. Non-positive current dimensions describe no drawable
+   * frame, so every pulse is dropped.
    */
-  public fun retainOnlyOrientation(deviceWidth: Int, deviceHeight: Int) {
-    val landscape = deviceWidth > deviceHeight
-    markers.removeAll { (it.deviceWidth > it.deviceHeight) != landscape }
+  public fun retainOnlyMatchingAspect(deviceWidth: Int, deviceHeight: Int) {
+    if (deviceWidth <= 0 || deviceHeight <= 0) {
+      markers.clear()
+      return
+    }
+    val currentAspect = deviceHeight.toFloat() / deviceWidth.toFloat()
+    markers.removeAll { marker ->
+      marker.deviceWidth <= 0 ||
+        marker.deviceHeight <= 0 ||
+        abs(marker.deviceHeight.toFloat() / marker.deviceWidth.toFloat() - currentAspect) >
+          ASPECT_TOLERANCE * currentAspect
+    }
   }
 
   /**
@@ -162,5 +169,13 @@ public class TouchFeedbackModel(
 
     /** Upper bound on simultaneously-retained pulses; the oldest is dropped past this. */
     public const val MAX_MARKERS: Int = 8
+
+    /**
+     * Relative aspect-ratio tolerance for [retainOnlyMatchingAspect]. Matches
+     * `DeviceControlPolicy.GEOMETRY_ASPECT_TOLERANCE` (5%), so "the frame still has the shape the
+     * marker was captured against" means the same thing here as it does for the control gate's
+     * geometry-consistency check.
+     */
+    public const val ASPECT_TOLERANCE: Float = 0.05f
   }
 }

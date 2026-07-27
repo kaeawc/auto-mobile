@@ -91,8 +91,8 @@ private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCas
 
 /**
  * Base radius, in frame pixels at zoom 1.0, of the transient control-tap feedback pulse
- * (issue #3352). Placed via the marker's captured `frameOffset`, and grown further as the pulse
- * fades.
+ * (issue #3352). Placed via `touchFeedbackCenter` (the canonical mapper through the marker's
+ * captured bounds, #4546), and grown further as the pulse fades.
  */
 private const val TOUCH_PULSE_BASE_RADIUS_PX = 12f
 
@@ -433,14 +433,16 @@ fun DeviceScreenView(
   LaunchedEffect(controlMode) {
     if (controlMode != DeviceScreenControlMode.Control) touchFeedback.reset()
   }
-  // Drop pulses when the device rotates mid-fade (issue #3352): a marker is placed by scaling its
-  // captured device point through its captured bounds, which only holds within the orientation it
-  // was captured in — after a portrait<->landscape flip the same point maps into a differently
-  // shaped frame and would land outside the clipped canvas. Keying on the orientation flag fires
-  // this only on an actual flip, so a same-orientation resolution change keeps its pulses.
-  val controlSnapshotLandscape = controlSnapshot?.let { it.deviceWidth > it.deviceHeight }
-  LaunchedEffect(controlSnapshotLandscape) {
-    controlSnapshot?.let { touchFeedback.retainOnlyOrientation(it.deviceWidth, it.deviceHeight) }
+  // Drop pulses when the device frame changes shape mid-fade (issues #3352, #4546): a marker is
+  // placed by mapping its captured device point through its captured bounds, which only holds
+  // while the frame keeps the aspect it was captured against. Both a portrait<->landscape flip AND
+  // a same-orientation aspect change (1080x2340 -> 1080x1920) reshape the frame, so keying on the
+  // snapshot dimensions fires the cleanup on any dimension change; the model's aspect-tolerance
+  // rule then retains equal-aspect pulses (a plain resolution change keeps them) and drops the
+  // reshaped ones.
+  val controlSnapshotDims = controlSnapshot?.let { it.deviceWidth to it.deviceHeight }
+  LaunchedEffect(controlSnapshotDims) {
+    controlSnapshot?.let { touchFeedback.retainOnlyMatchingAspect(it.deviceWidth, it.deviceHeight) }
   }
   LaunchedEffect(touchFeedbackGeneration, controlMode) {
     if (controlMode != DeviceScreenControlMode.Control) return@LaunchedEffect
@@ -1023,12 +1025,14 @@ fun DeviceScreenView(
                   }
 
                   // Transient touch-point feedback (issue #3352): a blue pulse at each forwarded
-                  // control tap, fading and expanding over its lifetime. Each marker is placed
-                  // through its OWN captured snapshot bounds (frameOffset), not the live
+                  // control tap, fading and expanding over its lifetime. Each marker is placed by
+                  // the canonical mapper through its OWN captured snapshot bounds
+                  // (touchFeedbackCenter -> deviceToViewport, #4546), not the live
                   // boundsToFrameScale — so it lands where the tap mapped and does not drift if a
                   // resolution/rotation change arrives mid-fade. Empty in inspector mode.
                   for (feedback in activeTouchFeedback) {
-                    val center = feedback.frameOffset(size.width)
+                    val center =
+                      touchFeedbackCenter(feedback.marker, size.width, size.height) ?: continue
                     val alpha = (1f - feedback.progress).coerceIn(0f, 1f)
                     val radius = TOUCH_PULSE_BASE_RADIUS_PX * (0.7f + 0.6f * feedback.progress)
                     val pulseColor = Color(0xFF2196F3)

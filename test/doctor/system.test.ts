@@ -25,20 +25,22 @@ describe("system doctor checks", () => {
     expect(result.message).toBe(process.arch);
   });
 
-  test("checkRuntime returns pass with Bun version when running in Bun", () => {
-    const result = checkRuntime();
+  test("checkRuntime reports the Bun runtime when a Bun version is present", () => {
+    const result = checkRuntime(() => "1.2.3");
 
     expect(result.name).toBe("Runtime");
     expect(result.status).toBe("pass");
-    // Tests run under Bun, so we expect Bun version
-    const bunVersion = (globalThis as any).Bun?.version;
-    if (bunVersion) {
-      expect(result.message).toBe(`Bun ${bunVersion}`);
-      expect(result.value).toBe(`bun@${bunVersion}`);
-    } else {
-      expect(result.message).toContain("Node.js");
-      expect(result.value).toContain("node@");
-    }
+    expect(result.message).toBe("Bun 1.2.3");
+    expect(result.value).toBe("bun@1.2.3");
+  });
+
+  test("checkRuntime reports the Node.js runtime when no Bun version is present", () => {
+    const result = checkRuntime(() => undefined);
+
+    expect(result.name).toBe("Runtime");
+    expect(result.status).toBe("pass");
+    expect(result.message).toBe(`Node.js ${process.version}`);
+    expect(result.value).toBe(`node@${process.version}`);
   });
 
   test("runSystemChecks returns all three checks", () => {

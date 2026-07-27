@@ -58,15 +58,53 @@ function collectRecommendations(allChecks: CheckResult[]): string[] {
 }
 
 /**
+ * Injectable check-runner seams for {@link runDoctor}. Unit tests supply fakes so
+ * the orchestration (which sections run, summary math, version resolution) is
+ * exercised without real ADB / socket / iOS I/O. Defaults call the real runners.
+ */
+export interface RunDoctorDependencies {
+  runSystemChecks?: () => CheckResult[];
+  runAndroidChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
+  runIosChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
+  runAutoMobileChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
+}
+
+interface ResolvedDoctorRunners {
+  system: () => CheckResult[];
+  android: (options: DoctorOptions) => Promise<CheckResult[]>;
+  ios: (options: DoctorOptions) => Promise<CheckResult[]>;
+  autoMobile: (options: DoctorOptions) => Promise<CheckResult[]>;
+}
+
+/**
+ * Resolve each injectable check-runner seam to its live default. Extracted from
+ * {@link runDoctor} so the `??` fallbacks live here rather than inflating the
+ * orchestrator's cyclomatic complexity past the ratchet.
+ */
+function resolveDoctorRunners(dependencies: RunDoctorDependencies): ResolvedDoctorRunners {
+  return {
+    system: dependencies.runSystemChecks ?? runSystemChecks,
+    android: dependencies.runAndroidChecks ?? runAndroidChecks,
+    ios: dependencies.runIosChecks ?? runIosChecks,
+    autoMobile: dependencies.runAutoMobileChecks ?? runAutoMobileChecks,
+  };
+}
+
+/**
  * Run the doctor diagnostic tool
  */
 export async function runDoctor(
-  options: DoctorOptions = {}
+  options: DoctorOptions = {},
+  dependencies: RunDoctorDependencies = {}
 ): Promise<DoctorReport> {
   const allChecks: CheckResult[] = [];
 
+  // Resolve injectable seams to their live defaults once (keeps the `??`
+  // fallbacks out of this function's complexity budget).
+  const runners = resolveDoctorRunners(dependencies);
+
   // Always run system checks
-  const systemChecks = runSystemChecks();
+  const systemChecks = runners.system();
   allChecks.push(...systemChecks);
 
   // Determine which platform checks to run
@@ -76,19 +114,19 @@ export async function runDoctor(
   // Run Android checks if applicable
   let androidChecks: CheckResult[] | undefined;
   if (runAndroid) {
-    androidChecks = await runAndroidChecks(options);
+    androidChecks = await runners.android(options);
     allChecks.push(...androidChecks);
   }
 
   // Run iOS checks if applicable
   let iosChecks: CheckResult[] | undefined;
   if (runIos) {
-    iosChecks = await runIosChecks(options);
+    iosChecks = await runners.ios(options);
     allChecks.push(...iosChecks);
   }
 
   // Always run AutoMobile checks
-  const autoMobileChecks = await runAutoMobileChecks(options);
+  const autoMobileChecks = await runners.autoMobile(options);
   allChecks.push(...autoMobileChecks);
 
   // Calculate summary and recommendations

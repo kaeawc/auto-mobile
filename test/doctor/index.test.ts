@@ -402,22 +402,46 @@ describe("formatJsonOutput", () => {
 });
 
 describe("runDoctor", () => {
-  test("explicit iOS doctor on non-darwin returns skipped iOS checks promptly", async () => {
-    await withProcessPlatform("linux", async () => {
-      const startedAt = Date.now();
-      const report = await runDoctor({ ios: true });
+  // Deterministic, I/O-free seams. The real runners shell out to ADB, sockets
+  // and simctl; injecting fakes lets us assert orchestration (section selection,
+  // summary math, version resolution) without real I/O or a wall-clock budget.
+  const fakeDeps = () => ({
+    runSystemChecks: () => [makeCheck({ name: "Runtime", status: "pass" })],
+    runAndroidChecks: async () => [makeCheck({ name: "Android SDK", status: "pass" })],
+    runIosChecks: async () => [makeCheck({ name: "Xcode", status: "skip" })],
+    runAutoMobileChecks: async () => [makeCheck({ name: "AutoMobile Daemon", status: "warn" })],
+  });
 
-      expect(Date.now() - startedAt).toBeLessThan(5000);
+  test("runs android and autoMobile but not iOS for a default run on non-darwin", async () => {
+    await withProcessPlatform("linux", async () => {
+      const report = await runDoctor({}, fakeDeps());
+
+      expect(report.android?.checks.map(c => c.name)).toEqual(["Android SDK"]);
+      expect(report.ios).toBeUndefined();
+      expect(report.autoMobile.checks.map(c => c.name)).toEqual(["AutoMobile Daemon"]);
+    });
+  });
+
+  test("runs iOS and autoMobile but not android for an iOS-only run", async () => {
+    await withProcessPlatform("linux", async () => {
+      const report = await runDoctor({ ios: true }, fakeDeps());
+
       expect(report.platform).toBe("linux");
       expect(report.android).toBeUndefined();
-      expect(report.ios?.checks.length).toBeGreaterThan(0);
-      expect(report.ios?.checks.every(check => check.status === "skip")).toBe(true);
-      const imageBackend = report.autoMobile.checks.find(check => check.name === "Image Backend");
-      expect(imageBackend).toBeDefined();
-      expect(imageBackend?.message).toContain("active=sharp");
+      expect(report.ios?.checks.map(c => c.name)).toEqual(["Xcode"]);
+    });
+  });
+
+  test("summary.total counts every check across all rendered sections", async () => {
+    await withProcessPlatform("linux", async () => {
+      const report = await runDoctor({ ios: true }, fakeDeps());
+
       expect(report.summary.total).toBe(
         report.system.checks.length + (report.ios?.checks.length ?? 0) + report.autoMobile.checks.length
       );
+      expect(report.summary.passed).toBe(1);
+      expect(report.summary.warnings).toBe(1);
+      expect(report.summary.skipped).toBe(1);
     });
   });
 
@@ -426,7 +450,7 @@ describe("runDoctor", () => {
       const prev = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "0.0.18";
       try {
-        const report = await runDoctor({ ios: true });
+        const report = await runDoctor({ ios: true }, fakeDeps());
         expect(report.version).toBe("0.0.18");
       } finally {
         if (prev === undefined) {

@@ -368,13 +368,11 @@ one character per keystroke through it would type `abc` as "a", then "b", then
 key. Pass `mode: "append"`, which routes through real key events and adds to the
 field instead. This is a hard requirement, not a tuning knob.
 
-`mode: "append"` is **Android-only**; the daemon rejects it on iOS, whose control
-proxy exposes no non-destructive text primitive. A client targeting iOS must
-therefore **not forward printable text at all** — a disabled typing path is
-strictly better than one that erases the field on every keystroke. Buttons and
-discrete keys are unaffected, so control mode stays useful there. Lifting this
-needs an iOS-side insert primitive, tracked under
-[#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
+`mode: "append"` is supported on both platforms. Android realizes it with real
+key events; iOS routes it to CtrlProxy's focused-field insert primitive, which
+calls XCUITest `typeText` at the current caret without clearing or resolving a
+resource id. The desktop client therefore forwards printable text on both
+platforms and marks every per-keystroke request as append.
 
 **Only printable ASCII is forwarded, because that is exactly what append can
 type.** Append works by injecting real Android key events, and the daemon's
@@ -415,9 +413,6 @@ Two different situations, handled differently:
   Android-only; on iOS the daemon answers with an actionable error. Surface it
   through the same error path as any other failed input rather than swallowing
   it.
-- **The platform has no non-destructive text path.** Printable characters are
-  dropped before any request is made (see the append rule above). This is a
-  client-side refusal, not a daemon error.
 - **The character is outside printable ASCII.** Dropped before any request is
   made, for the same reason and with the same handling: the append path has no
   key event for it, so consuming the keystroke would lose it at both ends.
@@ -521,7 +516,7 @@ with a typable character types; one the host did not resolve — a Windows/Linux
 `Alt+F` menu accelerator — stays with the host even though it reports a printable
 char),
 key-over-character precedence, the control-character filter, the character-keyed
-chord allowlist, the platform text gate, and the printable-ASCII range from both
+chord allowlist, and the printable-ASCII range from both
 sides (every character in `U+0020`–`U+007E` forwards; `é`/`€`/CJK are declined and
 left unconsumed). `DeviceKeyboardEventTranslatorTest` pins the platform-aware
 resolution of that flag (native AltGraph composes on Linux; Ctrl+Alt remains the
@@ -534,6 +529,9 @@ below API 31 and succeeds at 31+; and that every adb round trip is charged again
 the caller's timeout budget. `socketServerInputTypeText.test.ts` pins the same
 through the socket against a fake adb, including that a stalled adb call answers
 inside the request budget and leaves the per-device queue free for the next input.
+The same socket suite and CtrlProxy command-handler tests pin the iOS append route:
+three single-character calls reach the focused-field insert primitive in order and
+never use the resource-targeted replace operation.
 `DeviceKeyboardEventTranslatorTest` pins the toolkit-key translation.
 `DeviceControlSessionKeyboardTest` asserts the exact daemon payloads a keystroke
 produces against a fake client, that keyboard shares the one ordered queue with

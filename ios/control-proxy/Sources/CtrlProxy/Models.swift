@@ -107,6 +107,11 @@ public struct RequestSetText: Decodable {
     public var resourceId: String?
 }
 
+public struct RequestAppendText: Decodable {
+    public var requestId: String?
+    public var text: String
+}
+
 public struct RequestClearText: Decodable {
     public var requestId: String?
     public var resourceId: String?
@@ -291,6 +296,7 @@ extension RequestMultiFingerSwipe: CommandPayload {}
 extension RequestDrag: CommandPayload {}
 extension RequestPinch: CommandPayload {}
 extension RequestSetText: CommandPayload {}
+extension RequestAppendText: CommandPayload {}
 extension RequestClearText: CommandPayload {}
 extension RequestImeAction: CommandPayload {}
 extension RequestKeyboard: CommandPayload {}
@@ -334,6 +340,7 @@ public enum WebSocketRequest: Decodable {
     case pinch(RequestPinch)
 
     case setText(RequestSetText)
+    case appendText(RequestAppendText)
     case clearText(RequestClearText)
     case imeAction(RequestImeAction)
     case selectAll(RequestEnvelope)
@@ -410,6 +417,8 @@ public enum WebSocketRequest: Decodable {
             self = try .pinch(RequestPinch(from: decoder))
         case .requestSetText:
             self = try .setText(RequestSetText(from: decoder))
+        case .requestAppendText:
+            self = try .appendText(RequestAppendText(from: decoder))
         case .requestClearText:
             self = try .clearText(RequestClearText(from: decoder))
         case .requestImeAction:
@@ -489,6 +498,7 @@ public enum WebSocketRequest: Decodable {
         case .drag: return .requestDrag
         case .pinch: return .requestPinch
         case .setText: return .requestSetText
+        case .appendText: return .requestAppendText
         case .clearText: return .requestClearText
         case .imeAction: return .requestImeAction
         case .selectAll: return .requestSelectAll
@@ -555,6 +565,7 @@ public enum WebSocketRequest: Decodable {
         case let .drag(payload): return payload
         case let .pinch(payload): return payload
         case let .setText(payload): return payload
+        case let .appendText(payload): return payload
         case let .clearText(payload): return payload
         case let .imeAction(payload): return payload
         case let .keyboard(payload): return payload
@@ -1615,6 +1626,7 @@ public enum RequestType: String, CaseIterable {
 
     // Text input
     case requestSetText = "request_set_text"
+    case requestAppendText = "request_append_text"
     case requestClearText = "request_clear_text"
     case requestImeAction = "request_ime_action"
     case requestSelectAll = "request_select_all"
@@ -1677,6 +1689,7 @@ public enum ResponseType: String {
     case dragResult = "drag_result"
     case pinchResult = "pinch_result"
     case setTextResult = "set_text_result"
+    case appendTextResult = "append_text_result"
     case clearTextResult = "clear_text_result"
     case imeActionResult = "ime_action_result"
     case selectAllResult = "select_all_result"
@@ -1740,6 +1753,7 @@ extension RequestType {
         case .requestDrag: return .dragResult
         case .requestPinch: return .pinchResult
         case .requestSetText: return .setTextResult
+        case .requestAppendText: return .appendTextResult
         case .requestClearText: return .clearTextResult
         case .requestImeAction: return .imeActionResult
         case .requestSelectAll: return .selectAllResult

@@ -135,31 +135,10 @@ class ThreePaneShellDeviceKeyTest {
    * the point — the dead zone this guards is a DISAGREEMENT between the shell's stand-down and the
    * canvas's decision, which a hand-rolled boolean cannot exhibit.
    */
-  private fun policyPredicate(
-    textSupported: Boolean
-  ): (androidx.compose.ui.input.key.KeyEvent) -> Boolean = { event ->
+  private fun policyPredicate(): (androidx.compose.ui.input.key.KeyEvent) -> Boolean = { event ->
     DeviceKeyboardInputPolicy.evaluate(
       stroke = DeviceKeyboardEventTranslator.translate(event),
-      textSupported = textSupported,
     ) !is DeviceKeyboardDecision.Ignored
-  }
-
-  @Test
-  fun `a keystroke the device declines still reaches the shell binding`() {
-    // The dead-zone bug: Compose does not rerun a preview handler while an unconsumed event
-    // bubbles back up, so a blanket stand-down would leave a policy-declined key with NEITHER the
-    // device NOR the shell. On a platform whose daemon cannot append text, a bare printable key is
-    // exactly such a keystroke — with vim mode on, j must still navigate.
-    val activity = ShellActivity()
-    runShell(policyPredicate(textSupported = false), activity, vimModeEnabled = true) {
-      pressKey(Key.J)
-    }
-
-    assertEquals(
-      listOf("down"),
-      activity.navigated,
-      "a declined printable key must fall back to the shell's vim binding",
-    )
   }
 
   @Test
@@ -167,7 +146,7 @@ class ThreePaneShellDeviceKeyTest {
     // The other direction: on Android the policy claims 'j' as typed text, so the shell must NOT
     // navigate — the canvas gets the key.
     val activity = ShellActivity()
-    runShell(policyPredicate(textSupported = true), activity, vimModeEnabled = true) {
+    runShell(policyPredicate(), activity, vimModeEnabled = true) {
       pressKey(Key.J)
     }
 
@@ -183,7 +162,7 @@ class ThreePaneShellDeviceKeyTest {
     // declines it — and the shell, asked per event, keeps navigating instead of dead-zoning it.
     // The PLAIN arrow is claimed by the device and must not navigate.
     val activity = ShellActivity()
-    runShell(policyPredicate(textSupported = true), activity) {
+    runShell(policyPredicate(), activity) {
       withKeyDown(Key.ShiftLeft) { pressKey(Key.DirectionUp) }
       pressKey(Key.DirectionDown)
     }
@@ -201,7 +180,7 @@ class ThreePaneShellDeviceKeyTest {
     // chord is a HostChord rejection, so the predicate answers false and the shell keeps its
     // accelerators even while the device canvas owns the rest of the keyboard.
     val capturing = ShellActivity()
-    runShell(policyPredicate(textSupported = true), capturing) {
+    runShell(policyPredicate(), capturing) {
       withKeyDown(Key.MetaLeft) { pressKey(Key.Zero) }
     }
 

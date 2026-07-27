@@ -320,15 +320,11 @@ class DeviceControlSession(
   /**
    * The one policy consultation both [key] and [wouldForwardKey] share.
    *
-   * Text forwarding needs a daemon helper that APPENDS. Only Android has one (`mode: "append"`,
-   * real key events); iOS text input can only replace the focused field, which typing one character
-   * at a time would wipe on every keystroke. Buttons and discrete keys are unaffected.
+   * Text forwarding always uses the daemon's append contract. Android realizes it with real key
+   * events; iOS realizes it through CtrlProxy's focused-field insert primitive.
    */
   private fun decide(stroke: DeviceKeyStroke): DeviceKeyboardDecision =
-    DeviceKeyboardInputPolicy.evaluate(
-      stroke = stroke,
-      textSupported = platform() == ANDROID_PLATFORM,
-    )
+    DeviceKeyboardInputPolicy.evaluate(stroke = stroke)
 
   /**
    * Claim the newest-attempt error token, clear the banner, and enqueue the command [build] makes

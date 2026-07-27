@@ -319,7 +319,7 @@ the input response returns.
 | `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |
 | `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
 | `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |
-| `input/typeText` | Supported | Supported (replace only) | Sends committed text only; IME composition is deferred. Non-destructive `mode: "append"` is **Android only** — iOS rejects it rather than silently replacing the field. |
+| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. Non-destructive `mode: "append"` is supported on both platforms. |
 | `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |
 
 All successful input responses use this result shape:
@@ -557,25 +557,25 @@ this contract; clients should send the final committed string.
 | `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
 | `text` | `string` | Yes | Non-empty text to type. |
 | `submit` | `boolean` | No | When true, press enter/return after typing if the platform supports it. |
-| `mode` | `"append"` | No | **Android only.** Append to the focused field with real key events instead of replacing its contents. `"append"` is the only accepted value; any other value fails validation. |
+| `mode` | `"append"` | No | Append to the focused field instead of replacing its contents. Android uses real key events; iOS uses CtrlProxy's focused-field insert primitive. `"append"` is the only accepted value; any other value fails validation. |
 
-**Replace vs. append.** The default path sets the focused field's contents via
-`ACTION_SET_TEXT`, which **replaces** whatever is there — right for "make this
-field say X" automation, destructive for a client mirroring a keyboard one
-keystroke at a time (typing `abc` as three requests would leave the field saying
-`c`). `mode: "append"` is the non-destructive alternative: it types through real
-Android key events, never clears, and never calls set-text. Interactive
+**Replace vs. append.** On Android, the default path sets the focused field's
+contents via `ACTION_SET_TEXT`, which **replaces** whatever is there — right for
+"make this field say X" automation, destructive for a client mirroring a keyboard
+one keystroke at a time (typing `abc` as three requests would leave the field
+saying `c`). `mode: "append"` is the non-destructive alternative: it never clears or
+uses the replace path. Android types through real key events; iOS dispatches to
+CtrlProxy's focused-field insert primitive. Interactive
 keyboard-forwarding clients MUST use it; see
 [screen-control-mapping.md](./screen-control-mapping.md) for the full client
 policy.
 
 Append's semantics and limits:
 
-- **Android only.** iOS exposes no non-destructive text primitive, so
-  `mode: "append"` with `platform: "ios"` is rejected at validation with
-  `input/typeText mode "append" is only supported on android` — rejected rather
-  than silently downgraded to the destructive replace path.
-- **Printable ASCII only** (`U+0020`–`U+007E`). Any other character fails with
+- **iOS.** Append dispatches to CtrlProxy's focused-field insert primitive, which
+  calls XCUITest `typeText` at the current caret without clearing or resolving a
+  resource id.
+- **Android printable ASCII only** (`U+0020`–`U+007E`). Any other character fails with
   `append cannot type "<char>" with Android key events`, and nothing is typed —
   a partial append would leave a prefix of the text in the field.
 - **Uppercase and shifted symbols need Android 12 (API 31)**, where
@@ -591,8 +591,8 @@ Append's semantics and limits:
   subject to the normal socket version and build-identity handshake; clients must surface a mismatch
   error rather than treating it as unknown support.
 
-**Best-effort, character-by-character — retry the remainder, not the whole
-string.** Append types one key event per character in order, so it is atomic only
+**Android is best-effort, character-by-character — retry the remainder, not the whole
+string.** Android append types one key event per character in order, so it is atomic only
 for a **single character**: a one-character append either lands or reports failure
 with nothing typed. A **multi-character** append is best-effort — if it fails
 partway (an adb reject/timeout mid-batch), a leading prefix of `text` has already
@@ -632,8 +632,8 @@ response is deferred to [#4537](https://github.com/kaeawc/auto-mobile/issues/453
   "type": "mcp_request",
   "method": "input/typeText",
   "params": {
-    "platform": "android",
-    "deviceId": "emulator-5554",
+    "platform": "ios",
+    "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
     "text": "a",
     "mode": "append"
   }

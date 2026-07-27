@@ -168,6 +168,11 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     invoke: h => new CtrlProxyText(h.context).requestSetText("hello world", { resourceId: "login_username_field" }),
   },
   {
+    name: "request_append_text",
+    builder: "CtrlProxyText.requestAppendText",
+    invoke: h => new CtrlProxyText(h.context).requestAppendText("a"),
+  },
+  {
     name: "request_clear_text",
     builder: "CtrlProxyText.requestClearText",
     invoke: h => new CtrlProxyText(h.context).requestClearText("login_username_field"),
@@ -460,6 +465,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
     const required = [
       "request_action",
       "request_set_text",
+      "request_append_text",
       "request_ime_action",
       "request_hierarchy",
       "request_hierarchy_if_stale",

@@ -35,6 +35,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
 
   // Text input
   "request_set_text",
+  "request_append_text",
   "request_clear_text",
   "request_ime_action",
   "request_select_all",

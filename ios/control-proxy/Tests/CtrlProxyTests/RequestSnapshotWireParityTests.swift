@@ -199,6 +199,7 @@ final class RequestSnapshotWireParityTests: XCTestCase {
         let required: Set<String> = [
             "request_action",
             "request_set_text",
+            "request_append_text",
             "request_ime_action",
             "request_hierarchy",
             "request_hierarchy_if_stale",

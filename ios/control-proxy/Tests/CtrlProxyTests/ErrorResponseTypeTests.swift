@@ -23,6 +23,7 @@ final class ErrorResponseTypeTests: XCTestCase {
             .requestDrag: .dragResult,
             .requestPinch: .pinchResult,
             .requestSetText: .setTextResult,
+            .requestAppendText: .appendTextResult,
             .requestClearText: .clearTextResult,
             .requestImeAction: .imeActionResult,
             .requestSelectAll: .selectAllResult,

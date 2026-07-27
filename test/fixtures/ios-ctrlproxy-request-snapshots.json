@@ -118,6 +118,15 @@
       }
     },
     {
+      "name": "request_append_text",
+      "builder": "CtrlProxyText.requestAppendText",
+      "wire": {
+        "type": "request_append_text",
+        "requestId": "fixture-request-id",
+        "text": "a"
+      }
+    },
+    {
       "name": "request_clear_text",
       "builder": "CtrlProxyText.requestClearText",
       "wire": {

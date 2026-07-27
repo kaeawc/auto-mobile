@@ -50,6 +50,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_drag",
   "request_pinch",
   "request_set_text",
+  "request_append_text",
   "request_clear_text",
   "request_ime_action",
   "request_select_all",
@@ -229,8 +230,9 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
     expect(unknown).toEqual([]);
   });
 
-  test("IOS_RUNNER_FEATURE_COMMANDS excludes feature-gated unreleased commands", () => {
+  test("IOS_RUNNER_FEATURE_COMMANDS includes the released append input capability", () => {
     const baselineCommands: readonly string[] = IOS_RUNNER_FEATURE_COMMANDS;
+    expect(baselineCommands).toContain("request_append_text");
     expect(baselineCommands).not.toContain("set_network_error_simulation");
   });
 });

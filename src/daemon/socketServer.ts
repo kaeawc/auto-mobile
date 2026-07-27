@@ -1145,8 +1145,9 @@ export class UnixSocketServer {
         ? AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory)
         : IOSCtrlProxyClient.getInstance(targetDevice);
 
-    // Append never touches requestSetText: that is ACTION_SET_TEXT, which
-    // REPLACES the field. Real key events are the only non-destructive path.
+    // Append never touches requestSetText: on Android it emits real key events;
+    // on iOS it invokes CtrlProxy's focused-field insert primitive. Both preserve
+    // the current text and caret rather than taking the replace-shaped path.
     //
     // The budget is threaded in for the same reason the replace path gets it: this
     // runs while the per-device queue is held, and the outer race only *reports* a
@@ -1154,7 +1155,9 @@ export class UnixSocketServer {
     // queue. An unbounded adb subprocess here would therefore wedge every later
     // input for this device, not just this one request.
     const textResult = append
-      ? await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs)
+      ? platform === "android"
+        ? await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs)
+        : await (client as IOSCtrlProxyClient).requestAppendText(text, timeoutMs)
       : await client.requestSetText(text, { timeoutMs });
     if (!textResult.success) {
       return { success: false, error: textResult.error };
@@ -1358,16 +1361,10 @@ export class UnixSocketServer {
     }
     // "append" adds to the focused field instead of replacing it, which is what
     // an interactive client mirroring one keystroke at a time needs: the default
-    // replace semantics would leave only the last character typed (#3351). It is
-    // Android-only — iOS exposes no non-destructive text primitive — so it is
-    // rejected rather than silently ignored on iOS.
+    // replace semantics would leave only the last character typed (#3351).
     if (args.mode !== undefined && args.mode !== "append") {
       throw new Error('input/typeText mode must be "append" when provided');
     }
-    if (args.mode === "append" && args.platform !== "android") {
-      throw new Error('input/typeText mode "append" is only supported on android');
-    }
-
     return {
       platform: args.platform,
       deviceId: args.deviceId,

@@ -696,6 +696,17 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(setTextHistory.first?.resourceId, "input_field")
     }
 
+    func testAppendTextAccumulatesSingleCharacterRequestsWithoutSetText() {
+        for text in ["a", "b", "c"] {
+            let request = WebSocketRequest.appendText(RequestAppendText(text: text))
+            guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+            XCTAssertEqual(response.success, true)
+        }
+
+        XCTAssertEqual(fakeGesturePerformer.getAppendTextHistory(), ["a", "b", "c"])
+        XCTAssertTrue(fakeGesturePerformer.getSetTextHistory().isEmpty)
+    }
+
     /// `text` is now decode-required for `request_set_text`.
     func testSetTextMissingTextFailsToDecode() {
         XCTAssertThrowsError(

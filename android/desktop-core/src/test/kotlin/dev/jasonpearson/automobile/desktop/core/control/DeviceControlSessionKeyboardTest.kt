@@ -91,21 +91,22 @@ class DeviceControlSessionKeyboardTest {
   }
 
   @Test
-  fun `printable text is not forwarded on a platform that can only replace the field`() = runTest {
-    // iOS has no append-capable text helper, so forwarding would wipe the focused field on every
-    // keystroke. Disabled beats destructive — and buttons still work, so control mode stays useful.
+  fun `iOS printable keystrokes forward as ordered append requests`() = runTest {
+    // The iOS control proxy has an explicit append primitive. The desktop must not hard-code a
+    // platform veto here: each character travels through the same ordered queue, with append=true,
+    // so a focused field receives a, then b, then c instead of three replace operations.
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client, platform = "ios")
 
-    val typed = session.key(testSnapshot(), DeviceKeyStroke(character = 'a'))
-    val escaped = session.key(testSnapshot(), escape())
+    val consumed = listOf('a', 'b', 'c').map { character ->
+      session.key(testSnapshot(), DeviceKeyStroke(character = character))
+    }
     advanceUntilIdle()
 
-    assertFalse(typed, "a keystroke that cannot be forwarded is left to the host")
-    assertTrue(client.inputTypeTextCalls.isEmpty(), "nothing may reach the iOS text helper")
-    assertTrue(escaped, "buttons are unaffected by the text restriction")
-    assertEquals("back", client.inputPressButtonCalls.single().button)
+    assertTrue(consumed.all { it }, "every forwarded keystroke is consumed")
+    assertEquals(listOf("a", "b", "c"), client.inputTypeTextCalls.map { it.text })
+    assertTrue(client.inputTypeTextCalls.all { it.platform == "ios" && it.append })
     scope.cancel()
   }
 
@@ -222,8 +223,8 @@ class DeviceControlSessionKeyboardTest {
       )
     )
     assertFalse(android.wouldForwardKey(DeviceKeyStroke(character = 'é')))
-    // Declined on iOS (no append-capable text helper) but keys/buttons still claimed.
-    assertFalse(ios.wouldForwardKey(DeviceKeyStroke(character = 'j')))
+    // iOS has the same append contract, so printable text is claimed there too.
+    assertTrue(ios.wouldForwardKey(DeviceKeyStroke(character = 'j')))
     assertTrue(ios.wouldForwardKey(DeviceKeyStroke(key = DeviceKeyboardKey.Escape)))
     scope.cancel()
   }

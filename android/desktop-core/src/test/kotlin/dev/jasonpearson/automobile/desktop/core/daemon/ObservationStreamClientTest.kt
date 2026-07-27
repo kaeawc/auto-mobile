@@ -88,7 +88,8 @@ class ObservationStreamClientTest {
           "screenshotCaptureDurationMs": 42,
           "screenshotEncodeDurationMs": 7,
           "screenshotByteLength": 1200,
-          "screenshotBase64Length": 1600
+          "screenshotBase64Length": 1600,
+          "rotation": 1
         }
         """
           .trimIndent()
@@ -104,6 +105,7 @@ class ObservationStreamClientTest {
       assertEquals(7L, update.screenshotEncodeDurationMs)
       assertEquals(1200, update.screenshotByteLength)
       assertEquals(1600, update.screenshotBase64Length)
+      assertEquals(1, update.rotation)
     }
   }
 
@@ -201,7 +203,8 @@ class ObservationStreamClientTest {
           "deviceId": "emulator-5554",
           "timestamp": 2000,
           "data": { "packageName": "com.example" },
-          "hierarchyDiff": { "hasBaseline": true, "added": 2, "changed": 3, "removed": 1 }
+          "hierarchyDiff": { "hasBaseline": true, "added": 2, "changed": 3, "removed": 1 },
+          "rotation": 1
         }
         """
           .trimIndent()
@@ -212,6 +215,7 @@ class ObservationStreamClientTest {
         HierarchyDiffSummary(hasBaseline = true, added = 2, changed = 3, removed = 1),
         update.diff,
       )
+      assertEquals(1, update.rotation)
     }
   }
 

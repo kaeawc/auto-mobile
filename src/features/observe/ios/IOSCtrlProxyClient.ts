@@ -205,16 +205,16 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
 
   requestSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySwipeResult>;
 
   requestTapCoordinates(
-    x: number, y: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    x: number, y: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyTapResult>;
 
   requestDrag(
     x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number
+    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
   ): Promise<CtrlProxyDragResult>;
 
   requestPinch(
@@ -1461,7 +1461,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (requestId) {
         const suppressObservationStreamPush = this.consumeHierarchyObservationStreamSuppression(requestId);
         if (!suppressObservationStreamPush) {
-          this.pushHierarchyToObservationStream(converted, message.data as XCTestHierarchy);
+          this.pushHierarchyToObservationStream(converted, message.data as XCTestHierarchy, message.frameContext);
         } else {
           logger.debug("[IOSCtrlProxyClient] Suppressed hierarchy observation stream push for explicit initial-frame request");
         }
@@ -1495,7 +1495,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
       // Convert and push to observation stream for IDE plugins
       const viewHierarchyResult = this.convertToViewHierarchyResult(message.data);
-      this.pushHierarchyToObservationStream(viewHierarchyResult, message.data as XCTestHierarchy);
+      this.pushHierarchyToObservationStream(viewHierarchyResult, message.data as XCTestHierarchy, message.frameContext);
 
       // Start screenshot backoff sequence for real-time screenshot streaming
       this.startScreenshotBackoff();
@@ -1705,23 +1705,23 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestTapCoordinates(
-    x: number, y: number, duration: number = 0, timeoutMs: number = 5000, perf?: PerformanceTracker
+    x: number, y: number, duration: number = 0, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyTapResult> {
-    return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf);
+    return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
   }
 
   async requestSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    duration: number = 300, timeoutMs: number = 5000, perf?: PerformanceTracker
+    duration: number = 300, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySwipeResult> {
-    return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf);
+    return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
   }
 
   async requestDrag(
     x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number
+    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
   ): Promise<CtrlProxyDragResult> {
-    return this.gestures.requestDrag(x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs);
+    return this.gestures.requestDrag(x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs, frameContext);
   }
 
   async requestPinch(
@@ -2051,7 +2051,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   private pushHierarchyToObservationStream(
     hierarchy: ViewHierarchyResult,
-    source: XCTestHierarchy | undefined
+    source: XCTestHierarchy | undefined,
+    frameContext?: string,
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -2068,7 +2069,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // all on the first response). A resolution-changing response would then associate its capture
       // id with the old dimensions and screenshots could not pair until another hierarchy arrived.
       this.updateScreenGeometryFrom(source);
-      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
+      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy, frameContext);
       // Record the identity the daemon assigned, so screenshot requests initiated from here on are
       // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
       // geometry untracked, and the daemon then omits the identity so a control client fails closed.
@@ -2089,7 +2090,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     screenHeight: number,
     metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
     captureSequence?: number,
-    coordinateSpace?: CoordinateSpace
+    coordinateSpace?: CoordinateSpace,
+    frameContext?: string,
+    rotation?: number,
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -2106,6 +2109,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
         captureSequence,
         ...(coordinateSpace ? { coordinateSpace } : {}),
+        frameContext,
+        rotation,
       });
     } catch (error) {
       logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
@@ -2154,7 +2159,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
             screenHeight,
             result,
             binding?.captureSequence,
-            binding?.coordinateSpace
+            binding?.coordinateSpace,
+            result.frameContext,
+            result.rotation
           );
         },
         {
@@ -2194,6 +2201,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         success: true,
         data: result.data,
         captureBinding,
+        frameContext: result.frameContext,
+        rotation: result.rotation,
         ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, result.format),
       };
     } catch (error) {

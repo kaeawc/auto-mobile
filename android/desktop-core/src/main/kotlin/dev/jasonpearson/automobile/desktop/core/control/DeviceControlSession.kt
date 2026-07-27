@@ -128,6 +128,10 @@ class DeviceControlSession(
   // [onObservationSpaceDeclared]).
   private val streamSpace = SpaceTracker()
 
+  // Newest device rotation any source has proven, for the dispatch-time gate. Null until one is
+  // observed, which is why a session that has seen no rotation accepts every snapshot.
+  private var lastProvenRotation: Int? = null
+
   // Backstop trackers on the frame FACTS, for updates that never came through the stream collectors
   // (see [resetOnCoordinateSpaceTransition]).
   private val screenshotFactSpace = SpaceTracker()
@@ -193,6 +197,10 @@ class DeviceControlSession(
   fun evaluate(inputs: DeviceControlInputs): DeviceControlDecision {
     val now = nowMs()
     resetOnCoordinateSpaceTransition(inputs)
+    // Newest PROVEN rotation, kept so dispatch can reject a snapshot the device has since rotated
+    // away from (issue #4502 + #4550). Only recorded — the retirement decisions themselves stay
+    // where each fix put them.
+    inputs.newestProvenRotation()?.let { lastProvenRotation = it }
     val decision = DeviceControlPolicy.evaluate(inputs, now)
     val live = decision.snapshotOrNull
     if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
@@ -216,7 +224,7 @@ class DeviceControlSession(
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
       if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
-        retainedIfStillActionable(decision, now)
+        retainedIfStillActionable(decision, inputs, now)
       } else {
         live
       }
@@ -226,22 +234,34 @@ class DeviceControlSession(
   /**
    * The retained frame, or null once it is no longer safe to act through.
    *
-   * Three independent signals retire it, because any one can be the first to notice:
+   * Four independent signals retire it, because any one can be the first to notice:
    * - the live decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped
    *   producing),
+   * - the live decision reporting [DeviceControlBlockReason.RotationMismatch] (the displayed bounds
+   *   are no longer safe to map through) — issue #4502,
+   * - a valid incoming source rotation differing from the retained snapshot, since a partial
+   *   rotation update can otherwise be unpaired (issue #4502), and
    * - the retained frame's own age (nothing new has arrived to make the live decision say
-   *   anything), and
-   * - a **coordinate-space transition** on the sources it was built from (issue #4550), which is
-   *   handled one layer up — see [resetOnCoordinateSpaceTransition].
+   *   anything).
+   *
+   * A **coordinate-space transition** (issue #4550) is deliberately NOT one of them: it is a change
+   * of control *context* rather than a property of this one frame, so it is handled one layer up by
+   * [resetOnCoordinateSpaceTransition] / [onObservationSpaceDeclared], which also drain the queued
+   * backlog. Rotation and coordinate space are complementary gates — a frame is actionable only
+   * when both are current — and neither subsumes the other.
    */
   private fun retainedIfStillActionable(
     decision: DeviceControlDecision,
+    inputs: DeviceControlInputs,
     nowMs: Long,
   ): DeviceFrameSnapshot? {
     val retained = renderSnapshot ?: return null
-    val blockedForStaleness =
-      (decision as? DeviceControlDecision.Blocked)?.reason == DeviceControlBlockReason.StaleFrame
-    if (blockedForStaleness) return null
+    when ((decision as? DeviceControlDecision.Blocked)?.reason) {
+      DeviceControlBlockReason.StaleFrame,
+      DeviceControlBlockReason.RotationMismatch -> return null
+      else -> Unit
+    }
+    if (inputs.hasProvenRotationDifferentFrom(retained.rotation)) return null
     return retained.takeIf { DeviceControlPolicy.isSnapshotFresh(it, nowMs) }
   }
 
@@ -296,8 +316,9 @@ class DeviceControlSession(
   }
 
   /**
-   * Whether [snapshot]'s coordinates can still be sent to the device — i.e. its declared
-   * [CoordinateSpace] is the one the device is currently publishing (issue #4550).
+   * Whether [snapshot]'s coordinates can still be sent to the device: its declared
+   * [CoordinateSpace] AND its capture rotation are both the ones the device is currently reporting
+   * (issues #4550, #4502).
    *
    * Defence in depth, at the last possible moment. [onObservationSpaceDeclared] retires the
    * interaction snapshot as soon as the flip is observed, and that state is Compose-observable so
@@ -309,12 +330,32 @@ class DeviceControlSession(
    * they use the snapshot solely for its device id, which a space change does not invalidate — so
    * rejecting them here would drop keystrokes for a reason that does not apply to them.
    *
-   * Uses the same recorded stream space the transition check does, so there is one notion of "the
-   * current space" rather than a third mechanism. A session that has observed no declaration yet
-   * accepts everything: there is nothing to contradict.
+   * Both properties are checked because both can invalidate a coordinate independently: a space
+   * flip changes the UNIT the numbers are in, a rotation changes the AXES they are measured on, and
+   * a frame is dispatchable only when both are current. Each reuses the value its own fix already
+   * records — the stream space tracker and the newest proven rotation — rather than introducing a
+   * third notion of "current". A session that has observed neither accepts everything: there is
+   * nothing to contradict.
    */
   private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
-    streamSpace.matches(snapshot.coordinateSpace)
+    streamSpace.matches(snapshot.coordinateSpace) &&
+      lastProvenRotation.let { it == null || it == snapshot.rotation }
+
+  /**
+   * A source can arrive before it pairs with its counterpart during a rotation. That unpaired
+   * source still proves the device no longer has [retainedRotation], so retain display pixels if
+   * useful but never retain their old coordinate mapping for a second input.
+   */
+  private fun DeviceControlInputs.hasProvenRotationDifferentFrom(retainedRotation: Int): Boolean =
+    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).any {
+      it in 0..3 && it != retainedRotation
+    }
+
+  /** The newest rotation any source has PROVEN (a value in `0..3`), or null if none has yet. */
+  private fun DeviceControlInputs.newestProvenRotation(): Int? =
+    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).lastOrNull {
+      it in 0..3
+    }
 
   /**
    * Enqueue a tap on [snapshot] at the mapped device coordinate [point], in click order.
@@ -500,6 +541,7 @@ class DeviceControlSession(
     streamSpace.forget()
     screenshotFactSpace.forget()
     hierarchyFactSpace.forget()
+    lastProvenRotation = null
   }
 
   /**

@@ -84,6 +84,10 @@ import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
+import java.util.Collections
+import java.util.IdentityHashMap
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
@@ -345,6 +349,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
   @Volatile private var lastWindowClassName: String? = null
+  /**
+   * Changes immediately on a native UI event; capture and input share this device-owned context.
+   */
+  private val frameContext = AtomicLong(0)
+  /** Fresh for every service process, preventing a restarted runner from reusing an old token. */
+  private val frameContextEpoch = UUID.randomUUID().toString()
+
+  private fun currentFrameContext(): String = "$frameContextEpoch:${frameContext.get()}"
+
+  // A hierarchy has object identity for its short trip from extraction to broadcast. Retaining the
+  // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
+  private val extractedHierarchyFrameContexts =
+    Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
 
   @Volatile private var isRecording: Boolean = false
 
@@ -370,6 +387,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private data class ScreenshotCapturePayload(
     val base64Image: String,
+    val rotation: Int?,
     val captureDurationMs: Long,
     val encodeDurationMs: Long,
     val byteLength: Int,
@@ -970,6 +988,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 if (broadcastThrottler.shouldBroadcast()) {
                   broadcastHierarchyUpdate(result.hierarchy)
                 } else {
+                  extractedHierarchyFrameContexts.remove(result.hierarchy)
                   Log.d(
                     TAG,
                     "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
@@ -984,6 +1003,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 if (broadcastThrottler.shouldBroadcast()) {
                   broadcastHierarchyUpdate(result.hierarchy)
                 } else {
+                  extractedHierarchyFrameContexts.remove(result.hierarchy)
                   Log.d(
                     TAG,
                     "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
@@ -1169,8 +1189,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     duration: Long,
   ) = performSwipe(requestId, x1, y1, x2, y2, duration)
 
+  override fun requestSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "swipe")) return
+    performSwipe(requestId, x1, y1, x2, y2, duration)
+  }
+
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
     performTapCoordinates(requestId, x, y, duration)
+
+  override fun requestTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long,
+    frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "tap")) return
+    performTapCoordinates(requestId, x, y, duration)
+  }
 
   override fun requestTwoFingerSwipe(
     requestId: String?,
@@ -1192,6 +1236,41 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     dragDurationMs: Long,
     holdDurationMs: Long,
   ) = performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+
+  override fun requestDrag(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
+    frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "drag")) return
+    performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+  }
+
+  /**
+   * Rejects an input that was mapped through a screen state the service has since observed change.
+   */
+  private fun rejectStaleFrameContext(
+    requestId: String?,
+    expected: String?,
+    action: String,
+  ): Boolean {
+    if (expected == null || expected == currentFrameContext()) return false
+    val error = "Stale frame context for input/$action; observe a fresh frame before retrying"
+    launchRequestScope(requestId) {
+      when (action) {
+        "tap" -> broadcastTapCoordinatesResult(requestId, false, error, 0)
+        "swipe" -> broadcastSwipeResult(requestId, false, error, 0, null)
+        "drag" -> broadcastDragResult(requestId, false, error, 0, null)
+      }
+    }
+    return true
+  }
 
   override fun requestPinch(
     requestId: String?,
@@ -1510,15 +1589,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             recordInteractionEvent(event, "inputText")
           }
         }
-        AccessibilityEvent.TYPE_VIEW_SCROLLED -> recordDebouncedScroll(event)
+        AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+          frameContext.incrementAndGet()
+          recordDebouncedScroll(event)
+        }
       }
 
       // Delegate to the smart debouncer for content/window changes
       // The debouncer uses structural hash comparison to detect animation vs real changes
       if (
         event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-          event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+          event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+          event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
       ) {
+        frameContext.incrementAndGet()
         if (::hierarchyDebouncer.isInitialized) {
           hierarchyDebouncer.onAccessibilityEvent()
         }
@@ -1781,19 +1865,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /** Get current display rotation. Returns 0=portrait, 1=landscape90, 2=reverse, 3=landscape270. */
   @Suppress("DEPRECATION")
   private fun getRotation(): Int {
+    return getRotationOrNull() ?: 0
+  }
+
+  /**
+   * Read the display rotation without inventing portrait when the display is unavailable.
+   * Screenshot capture provenance uses this nullable form: an unknown rotation must make desktop
+   * control fail closed, unlike the older diagnostic hierarchy/device-info fields that retain their
+   * 0 fallback.
+   */
+  @Suppress("DEPRECATION")
+  private fun getRotationOrNull(): Int? {
     return try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         // Use DisplayManager for AccessibilityService context (can't use context.display)
         val displayManager =
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-        displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation ?: 0
+        displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation
       } else {
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-        windowManager?.defaultDisplay?.rotation ?: 0
+        windowManager?.defaultDisplay?.rotation
       }
     } catch (e: Exception) {
       Log.w(TAG, "Failed to get rotation", e)
-      0
+      null
     }
   }
 
@@ -2025,6 +2120,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * all visible windows to capture popups, toolbars, etc.
    */
   private fun extractHierarchyDirect(disableAllFiltering: Boolean = false): ViewHierarchy? {
+    val contextAtExtractionStart = currentFrameContext()
+    // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
+    // that interval, hierarchy geometry cannot be proven to match a single display orientation.
+    val rotationBeforeExtraction = getRotationOrNull()
     // Get all windows to capture popups, toolbars, and other floating windows
     val allWindows = windows
     val rootNode = rootInActiveWindow
@@ -2033,7 +2132,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions()
-    val rotation = getRotation()
     val insets = getObservationInsets()
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
@@ -2068,6 +2166,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       }
 
+    val rotationAfterExtraction = getRotationOrNull()
+    val rotation =
+      if (rotationBeforeExtraction == rotationAfterExtraction) rotationAfterExtraction else null
+
     // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
     val wakefulness = getWakefulness()
     val foreground = getForegroundActivity(capturedRootPackage, capturedWindowClass)
@@ -2086,7 +2188,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         deviceModel = Build.MODEL,
         isEmulator = getIsEmulator(),
       )
-    return withScaleMetadata(enriched, screenDimensions)
+    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
+    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
+      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
+    }
+    return hierarchyWithScaleMetadata
   }
 
   /**
@@ -2200,6 +2306,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     textFilter: String? = null,
     disableAllFiltering: Boolean = false,
   ): ViewHierarchy? {
+    val contextAtExtractionStart = currentFrameContext()
+    // This is the synchronous ADB-broadcast fallback, not the debounced direct route above. It
+    // must bracket the same inputs and extraction so the fallback never publishes a hierarchy
+    // whose geometry and rotation came from different display states.
+    val rotationBeforeExtraction = getRotationOrNull()
     val allWindows = windows
     val rootNode = rootInActiveWindow
     val screenDimensions = getScreenDimensions()
@@ -2233,9 +2344,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           disableAllFiltering,
         )
       }
+    val rotationAfterExtraction = getRotationOrNull()
+    val rotation =
+      if (rotationBeforeExtraction == rotationAfterExtraction) rotationAfterExtraction else null
     // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
     // add the other device metadata, but the daemon retains scale metadata off any route).
-    return withScaleMetadata(hierarchy, screenDimensions)
+    val hierarchyWithScaleMetadata =
+      withScaleMetadata(hierarchy?.copy(rotation = rotation), screenDimensions)
+    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
+      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
+    }
+    return hierarchyWithScaleMetadata
   }
 
   private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {
@@ -2283,6 +2402,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    *   ordering.
    */
   private suspend fun broadcastHierarchyUpdate(hierarchy: ViewHierarchy, sync: Boolean = false) {
+    val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping broadcast")
       return
@@ -2305,6 +2425,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(
             """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString"""
           )
+          if (contextAtExtraction != null && contextAtExtraction == currentFrameContext()) {
+            append(""","frameContext":"$contextAtExtraction"""")
+          }
           if (perfTiming != null) {
             append(""","perfTiming":$perfTiming""")
           }
@@ -2377,8 +2500,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val startTime = System.currentTimeMillis()
 
         // Use suspendCancellableCoroutine to bridge callback-based API
-        val bitmap =
-          suspendCancellableCoroutine<Bitmap?> { continuation ->
+        val rotationBeforeCapture = getRotationOrNull()
+        val captured =
+          suspendCancellableCoroutine<Pair<Bitmap, Int?>?> { continuation ->
             takeScreenshot(
               Display.DEFAULT_DISPLAY,
               mainExecutor,
@@ -2390,7 +2514,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                       screenshot.colorSpace,
                     )
                   screenshot.hardwareBuffer.close()
-                  continuation.resume(hardwareBitmap)
+                  if (hardwareBitmap == null) {
+                    continuation.resume(null)
+                    return
+                  }
+                  val rotationAfterCapture = getRotationOrNull()
+                  // A changed rotation makes the pixels' orientation ambiguous. Preserve that
+                  // ambiguity as null so desktop control fails closed rather than guessing.
+                  val rotation =
+                    if (rotationBeforeCapture == rotationAfterCapture) rotationAfterCapture
+                    else null
+                  continuation.resume(hardwareBitmap to rotation)
                 }
 
                 override fun onFailure(errorCode: Int) {
@@ -2401,10 +2535,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             )
           }
 
-        if (bitmap == null) {
+        if (captured == null) {
           Log.e(TAG, "Failed to capture screenshot bitmap")
           return@withContext null
         }
+
+        val (bitmap, rotation) = captured
 
         val screenshotTime = System.currentTimeMillis() - startTime
         Log.d(TAG, "Screenshot captured in ${screenshotTime}ms (${bitmap.width}x${bitmap.height})")
@@ -2433,6 +2569,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
         ScreenshotCapturePayload(
           base64Image = base64String,
+          rotation = rotation,
           captureDurationMs = screenshotTime,
           encodeDurationMs = encodeTime,
           byteLength = jpegBytes.size,
@@ -5160,7 +5297,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // otherwise be logged-and-swallowed here, emitting neither `screenshot` nor `screenshot_error`
     // and hanging the awaiting client until timeout (issue #3023).
     asyncActionRunner.launch(requestId, "screenshot") {
+      val contextBeforeCapture = currentFrameContext()
       val screenshot = takeScreenshotAsync()
+      val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       if (screenshot != null) {
         webSocketServer.broadcast(
           ProtocolScreenshotResult(
@@ -5168,10 +5307,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             requestId = requestId,
             data = screenshot.base64Image,
             format = "jpeg",
+            rotation = screenshot.rotation,
             screenshotCaptureDurationMs = screenshot.captureDurationMs,
             screenshotEncodeDurationMs = screenshot.encodeDurationMs,
             screenshotByteLength = screenshot.byteLength,
             screenshotBase64Length = screenshot.base64Length,
+            frameContext = stableContext?.toString(),
           )
         )
         Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")

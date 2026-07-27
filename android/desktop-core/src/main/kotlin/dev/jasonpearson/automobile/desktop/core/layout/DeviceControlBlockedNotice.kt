@@ -55,6 +55,8 @@ internal fun deviceControlBlockReasonText(reason: DeviceControlBlockReason): Str
     // client, so the wording points at the fix (update) instead of implying it will resolve itself.
     DeviceControlBlockReason.UnsupportedCoordinateSpace ->
       "Device control unavailable: daemon uses a newer coordinate space — update the app"
+    DeviceControlBlockReason.RotationMismatch ->
+      "Device control paused: screenshot and layout rotation disagree"
     DeviceControlBlockReason.StaleFrame -> "Device control paused: frame is stale"
     DeviceControlBlockReason.GeometryMismatch ->
       "Device control paused: screenshot and layout geometry disagree"

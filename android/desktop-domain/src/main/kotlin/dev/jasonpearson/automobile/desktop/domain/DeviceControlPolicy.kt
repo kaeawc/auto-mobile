@@ -41,8 +41,14 @@ public enum class DeviceControlBlockReason {
    * unknown space is a forward-compatibility failure — the client can know neither what the
    * reported bounds mean nor what unit the daemon's input endpoints expect for that device — so
    * control fails closed instead of guessing that it resembles the legacy space.
+   *
+   * Independent of [RotationMismatch]: a frame is actionable only when its rotation provenance AND
+   * its coordinate space are both current, so the two gates block separately and stay named
+   * separately.
    */
   UnsupportedCoordinateSpace,
+  /** Screenshot and hierarchy originated while the device had different rotations. */
+  RotationMismatch,
   /** The displayed frame is older than the freshness bound for its source. */
   StaleFrame,
   /** The displayed screenshot and the mapping bounds disagree geometrically. */
@@ -211,6 +217,26 @@ public object DeviceControlPolicy {
     if (captureSequence == null || hierarchy.captureSequence == null) {
       return blocked(DeviceControlBlockReason.CaptureIdentityUnavailable)
     }
+
+    // Rotation is capture-time provenance, distinct from pixel orientation. iOS can deliver
+    // native-portrait screenshot pixels for a landscape device, so geometry intentionally accepts
+    // a rotated image below. What must agree here is the device orientation at which each source
+    // was captured; a missing value from an older daemon is not evidence and fails closed. This
+    // precedes capture pairing because a hierarchy-first rotation update has a new capture identity
+    // while the displayed screenshot still has the old orientation; retention must not leave that
+    // frame interactive during the ensuing screenshot capture.
+    val screenshotRotation = screenshot.rotation
+    val hierarchyRotation = hierarchy.rotation
+    if (
+      screenshotRotation == null ||
+        hierarchyRotation == null ||
+        screenshotRotation !in 0..3 ||
+        hierarchyRotation !in 0..3 ||
+        screenshotRotation != hierarchyRotation
+    ) {
+      return blocked(DeviceControlBlockReason.RotationMismatch)
+    }
+
     if (captureSequence != hierarchy.captureSequence) {
       return blocked(DeviceControlBlockReason.UnpairedHierarchy)
     }
@@ -228,6 +254,17 @@ public object DeviceControlPolicy {
       // The relay is stalled: same socket, same state, same bitmap, same dimensions. Only recency
       // reveals it.
       return blocked(DeviceControlBlockReason.StaleFrame)
+    }
+    if (
+      liveFrame != null &&
+        (liveFrame.rotation == null ||
+          liveFrame.rotation !in 0..3 ||
+          liveFrame.rotation != screenshotRotation)
+    ) {
+      // A WebRTC frame has no observation capture identity, so its own rotation provenance is the
+      // only evidence that the displayed pixels still match the hierarchy bounds. In particular,
+      // 180-degree rotation keeps dimensions unchanged and defeats the exact-geometry check below.
+      return blocked(DeviceControlBlockReason.RotationMismatch)
     }
 
     val frameWidth = liveFrame?.width ?: screenshot.width
@@ -298,6 +335,7 @@ public object DeviceControlPolicy {
         // coordinates are in must travel with it rather than be re-derived at dispatch time.
         coordinateSpace = pairedSpace,
         captureSequence = captureSequence,
+        rotation = screenshotRotation,
         screenshotSequence = screenshot.sequence,
         hierarchySequence = hierarchy.sequence,
         liveFrameSequence = liveFrame?.sequence,

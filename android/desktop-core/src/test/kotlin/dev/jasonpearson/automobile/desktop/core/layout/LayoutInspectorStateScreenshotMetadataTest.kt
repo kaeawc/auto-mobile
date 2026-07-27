@@ -78,6 +78,26 @@ class LayoutInspectorStateScreenshotMetadataTest {
   }
 
   @Test
+  fun `updateScreenshot records capture-time rotation and invalidation clears it`() {
+    val state = LayoutInspectorState()
+
+    state.updateScreenshot(
+      data = byteArrayOf(1),
+      width = 2340,
+      height = 1080,
+      timestamp = 1L,
+      deviceId = "emulator-5554",
+      rotation = 1,
+    )
+    assertEquals(1, state.renderedScreenshotRotation)
+    assertEquals(1, state.screenshotFacts?.rotation)
+
+    state.invalidateRenderedDeviceIdentity()
+    assertNull(state.renderedScreenshotRotation)
+    assertNull(state.screenshotFacts)
+  }
+
+  @Test
   fun `updateHierarchy records the source device and disconnect clears it`() {
     val state = LayoutInspectorState()
 

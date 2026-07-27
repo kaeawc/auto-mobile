@@ -36,7 +36,25 @@ interface CtrlProxyActions {
     duration: Long,
   )
 
+  fun requestSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    frameContext: String?,
+  ) = requestSwipe(requestId, x1, y1, x2, y2, duration)
+
   fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long)
+
+  fun requestTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long,
+    frameContext: String?,
+  ) = requestTapCoordinates(requestId, x, y, duration)
 
   fun requestTwoFingerSwipe(
     requestId: String?,
@@ -58,6 +76,18 @@ interface CtrlProxyActions {
     dragDurationMs: Long,
     holdDurationMs: Long,
   )
+
+  fun requestDrag(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
+    frameContext: String?,
+  ) = requestDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
 
   fun requestPinch(
     requestId: String?,

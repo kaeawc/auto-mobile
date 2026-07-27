@@ -10,6 +10,10 @@ timestamp_ms="$(($(date +%s) * 1000))"
 bundle_id="dev.jasonpearson.automobile.issue4460"
 home_screen="Issue4460Home"
 detail_screen="Issue4460Detail"
+# Keep the runner's SDK-event consumer and the public graph query in one session. Each CLI
+# invocation otherwise receives a distinct MCP session, which can route the injected events to a
+# different session-scoped NavigationGraphManager than getNavigationGraph reads.
+session_uuid="44600000-0000-4000-8000-000000000000"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -76,12 +80,12 @@ curl --fail --silent --show-error --max-time 5 \
 # relying on its background poll leaves a race on a busy Simulator runner.
 # Query through the public, daemon-backed tool until the batched events appear.
 for attempt in 1 2 3 4 5; do
-  if ! auto-mobile --debug --cli observe --platform ios --deviceId "${device_id}" >/dev/null; then
+  if ! auto-mobile --debug --cli --session-uuid "${session_uuid}" observe --platform ios --deviceId "${device_id}" >/dev/null; then
     echo "observe refresh attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2
     continue
   fi
-  if ! graph="$(auto-mobile --debug --cli getNavigationGraph --platform ios --deviceId "${device_id}")"; then
+  if ! graph="$(auto-mobile --debug --cli --session-uuid "${session_uuid}" getNavigationGraph --platform ios --deviceId "${device_id}")"; then
     echo "getNavigationGraph attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2
     continue

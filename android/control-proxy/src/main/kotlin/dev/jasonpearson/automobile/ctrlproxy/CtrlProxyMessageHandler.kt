@@ -109,6 +109,7 @@ class CtrlProxyMessageHandler(
           request.x2,
           request.y2,
           request.duration,
+          request.frameContext,
         )
       }
       is RequestTapCoordinates -> {
@@ -121,7 +122,13 @@ class CtrlProxyMessageHandler(
             error = nonFiniteError(field, value),
           )
         }
-        actions.requestTapCoordinates(request.requestId, request.x, request.y, request.duration)
+        actions.requestTapCoordinates(
+          request.requestId,
+          request.x,
+          request.y,
+          request.duration,
+          request.frameContext,
+        )
       }
       is RequestTwoFingerSwipe -> {
         // Two-finger swipe shares the swipe_result response type. `offset` is an Int (a pixel gap),
@@ -170,6 +177,7 @@ class CtrlProxyMessageHandler(
           request.resolvedPressDurationMs,
           request.resolvedDragDurationMs,
           request.holdDurationMs,
+          request.frameContext,
         )
       }
       is RequestPinch -> {

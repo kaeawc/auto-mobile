@@ -197,7 +197,9 @@ export interface ScreenshotResult extends ScreenshotPerformanceMetadata {
   data?: string; // Base64 encoded JPEG
   format?: string;
   timestamp?: number;
+  rotation?: number;
   error?: string;
+  frameContext?: string;
 }
 
 /** Swipe result from accessibility service */

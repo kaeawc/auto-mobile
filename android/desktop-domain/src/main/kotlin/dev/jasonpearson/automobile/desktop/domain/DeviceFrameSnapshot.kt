@@ -49,6 +49,8 @@ public data class ScreenshotFrameFacts(
   val height: Int,
   val data: ByteArray?,
   val coordinateSpace: CoordinateSpace? = null,
+  /** Device display rotation reported for this capture; null means legacy/unproven provenance. */
+  val rotation: Int? = null,
 ) {
   // ByteArray uses reference equality, which would make every copy of an otherwise-identical facts
   // object unequal. Identity is exactly what we want here — a snapshot is tied to the specific
@@ -63,6 +65,7 @@ public data class ScreenshotFrameFacts(
       receivedAtMs == other.receivedAtMs &&
       width == other.width &&
       height == other.height &&
+      rotation == other.rotation &&
       data === other.data &&
       coordinateSpace == other.coordinateSpace
   }
@@ -74,6 +77,7 @@ public data class ScreenshotFrameFacts(
     result = 31 * result + receivedAtMs.hashCode()
     result = 31 * result + width
     result = 31 * result + height
+    result = 31 * result + (rotation ?: 0)
     result = 31 * result + System.identityHashCode(data)
     result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
     return result
@@ -105,6 +109,8 @@ public data class HierarchyFrameFacts(
   val rootWidth: Int,
   val rootHeight: Int,
   val coordinateSpace: CoordinateSpace? = null,
+  /** Device display rotation reported for this hierarchy capture. */
+  val rotation: Int? = null,
 )
 
 /**
@@ -120,6 +126,8 @@ public data class LiveFrameFacts(
   val receivedAtMs: Long,
   val width: Int,
   val height: Int,
+  /** Device display rotation proven for these live-video pixels; absent provenance fails closed. */
+  val rotation: Int? = null,
 )
 
 /**
@@ -165,6 +173,9 @@ public data class LiveFrameFacts(
  *   the wrong physical place. Carrying the space lets the session notice the transition and fail
  *   closed; see `DeviceControlSession`.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
+ * @param rotation the device rotation the contributing sources agreed on when this snapshot was
+ *   captured. Retention compares later source observations against this value so a partially
+ *   received rotation update cannot leave old coordinate bounds clickable.
  * @param screenshotSequence provenance of the observation screenshot this snapshot was built from.
  * @param hierarchySequence provenance of the hierarchy this snapshot was built from.
  * @param liveFrameSequence provenance of the live frame, or null when none is displayed.
@@ -182,6 +193,7 @@ public data class DeviceFrameSnapshot(
   val hierarchy: ParsedHierarchy?,
   val coordinateSpace: CoordinateSpace?,
   val captureSequence: Long,
+  val rotation: Int = 0,
   val screenshotSequence: Long,
   val hierarchySequence: Long,
   val liveFrameSequence: Long?,
@@ -211,6 +223,7 @@ public data class DeviceFrameSnapshot(
     return deviceId == other.deviceId &&
       sequence == other.sequence &&
       captureSequence == other.captureSequence &&
+      rotation == other.rotation &&
       screenshotSequence == other.screenshotSequence &&
       hierarchySequence == other.hierarchySequence &&
       liveFrameSequence == other.liveFrameSequence &&
@@ -221,6 +234,7 @@ public data class DeviceFrameSnapshot(
     var result = deviceId.hashCode()
     result = 31 * result + sequence.hashCode()
     result = 31 * result + captureSequence.hashCode()
+    result = 31 * result + rotation
     result = 31 * result + screenshotSequence.hashCode()
     result = 31 * result + hierarchySequence.hashCode()
     result = 31 * result + (liveFrameSequence?.hashCode() ?: 0)

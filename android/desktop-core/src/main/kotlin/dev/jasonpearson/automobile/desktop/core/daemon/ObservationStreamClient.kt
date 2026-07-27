@@ -318,6 +318,7 @@ class ObservationStreamClient {
             diff = response.hierarchyDiff,
             captureSequence = response.captureSequence,
             coordinateSpace = CoordinateSpace.fromWire(response.coordinateSpace),
+            rotation = response.rotation,
           )
         _hierarchyUpdates.emit(update)
         log.info("Emitted hierarchy update to flow")
@@ -344,6 +345,7 @@ class ObservationStreamClient {
             screenshotBase64Length = response.screenshotBase64Length,
             captureSequence = response.captureSequence,
             coordinateSpace = CoordinateSpace.fromWire(response.coordinateSpace),
+            rotation = response.rotation,
           )
         _screenshotUpdates.emit(update)
         log.info("Emitted screenshot update to flow")
@@ -584,6 +586,8 @@ data class StreamResponse(
    * narrowed to the typed [CoordinateSpace] (unknown -> null -> legacy) at the emit boundary.
    */
   val coordinateSpace: String? = null,
+  /** Device display rotation for this captured frame. */
+  val rotation: Int? = null,
 )
 
 /**
@@ -672,6 +676,8 @@ data class HierarchyStreamUpdate(
    * [StreamResponse.coordinateSpace]. Null means the daemon declared none (legacy point-space).
    */
   val coordinateSpace: CoordinateSpace? = null,
+  /** Device display rotation for this captured hierarchy. */
+  val rotation: Int? = null,
 )
 
 data class ScreenshotStreamUpdate(
@@ -696,6 +702,8 @@ data class ScreenshotStreamUpdate(
    * [StreamResponse.coordinateSpace]. Null means the daemon declared none (legacy point-space).
    */
   val coordinateSpace: CoordinateSpace? = null,
+  /** Device display rotation for this captured screenshot. */
+  val rotation: Int? = null,
 )
 
 data class NavigationGraphStreamUpdate(

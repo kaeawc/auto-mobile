@@ -39,6 +39,15 @@ function makeHierarchy(root: CtrlProxyNode): any {
 describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
 
+  test("preserves capture-time device rotation", () => {
+    const result = subject.convertToViewHierarchyResult({
+      ...makeHierarchy({ className: "XCUIApplication" }),
+      rotation: 3,
+    });
+
+    expect(result.rotation).toBe(3);
+  });
+
   test("surfaces `value` separately from `text` for text-input nodes", () => {
     const root: CtrlProxyNode = {
       className: "XCUIApplication",

@@ -67,6 +67,7 @@ class DeviceControlPolicyTest {
         width = 1080,
         height = 2340,
         data = null,
+        rotation = 0,
       ),
     hierarchy: HierarchyFrameFacts? =
       HierarchyFrameFacts(
@@ -77,6 +78,7 @@ class DeviceControlPolicyTest {
         hierarchy = hierarchyOf(1080, 2340),
         rootWidth = 1080,
         rootHeight = 2340,
+        rotation = 0,
       ),
     liveFrame: LiveFrameFacts? = null,
   ) =
@@ -205,6 +207,7 @@ class DeviceControlPolicyTest {
               width = 720,
               height = 1560,
               data = null,
+              rotation = 0,
             ),
           hierarchy =
             HierarchyFrameFacts(
@@ -215,6 +218,7 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
               rootHeight = 2340,
+              rotation = 0,
             ),
         ),
         now,
@@ -244,9 +248,116 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(720, 1560),
               rootWidth = 720,
               rootHeight = 1560,
+              rotation = 0,
             )
         )
       ),
+    )
+  }
+
+  @Test
+  fun `same-device rotation mismatch blocks a tap while hierarchy debounce is pending`() {
+    // A screenshot captured after portrait -> landscape can retain the same device id, aspect
+    // ratio, and request-bound capture identity as the hierarchy currently on screen. Rotation is
+    // the remaining capture-time signal that tells us those sources cannot be mapped together.
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(
+        inputs(
+          screenshot =
+            ScreenshotFrameFacts(
+              deviceId = device,
+              sequence = 12L,
+              captureSequence = 7L,
+              receivedAtMs = 9_990L,
+              width = 2340,
+              height = 1080,
+              data = null,
+              rotation = 1,
+            ),
+          hierarchy =
+            HierarchyFrameFacts(
+              deviceId = device,
+              sequence = 11L,
+              captureSequence = 7L,
+              receivedAtMs = 9_950L,
+              hierarchy = hierarchyOf(1080, 2340),
+              rootWidth = 1080,
+              rootHeight = 2340,
+              rotation = 0,
+            ),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `unknown rotation fails closed instead of pairing two malformed frames`() {
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(
+        inputs(
+          screenshot =
+            ScreenshotFrameFacts(
+              deviceId = device,
+              sequence = 12L,
+              captureSequence = 7L,
+              receivedAtMs = 9_990L,
+              width = 1080,
+              height = 2340,
+              data = null,
+              rotation = 4,
+            ),
+          hierarchy =
+            HierarchyFrameFacts(
+              deviceId = device,
+              sequence = 11L,
+              captureSequence = 7L,
+              receivedAtMs = 9_950L,
+              hierarchy = hierarchyOf(1080, 2340),
+              rootWidth = 1080,
+              rootHeight = 2340,
+              rotation = 4,
+            ),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `matching device rotation keeps iOS native portrait pixels controllable in landscape`() {
+    // iOS screenshot pixels remain native portrait-oriented while the device and hierarchy are
+    // landscape. The policy compares device rotation, not pixel orientation, so the renderer may
+    // keep its existing screenshot-rotation detection without disabling a valid frame.
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+          inputs(
+            screenshot =
+              ScreenshotFrameFacts(
+                deviceId = device,
+                sequence = 12L,
+                captureSequence = 7L,
+                receivedAtMs = 9_990L,
+                width = 1170,
+                height = 2532,
+                data = null,
+                rotation = 1,
+              ),
+            hierarchy =
+              HierarchyFrameFacts(
+                deviceId = device,
+                sequence = 11L,
+                captureSequence = 7L,
+                receivedAtMs = 9_950L,
+                hierarchy = hierarchyOf(2532, 1170),
+                rootWidth = 2532,
+                rootHeight = 1170,
+                rotation = 1,
+              ),
+          ),
+          now,
+        )
+        .snapshotOrNull
     )
   }
 
@@ -315,6 +426,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - DeviceControlPolicy.LIVE_FRAME_MAX_AGE_MS - 1,
         width = 1080,
         height = 2340,
+        rotation = 0,
       )
     assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(liveFrame = stalled)))
   }
@@ -328,6 +440,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 1080,
         height = 2340,
+        rotation = 0,
       )
     val snapshot =
       assertNotNull(DeviceControlPolicy.evaluate(inputs(liveFrame = live), now).snapshotOrNull)
@@ -336,6 +449,43 @@ class DeviceControlPolicyTest {
     // Ordering comes from the OBSERVATION counter alone: the mirror's counter is a different
     // domain, and folding it in would make the sequence fall back when the mirror clears.
     assertEquals(11L, snapshot.sequence)
+  }
+
+  @Test
+  fun `a live frame without rotation provenance fails closed`() {
+    val unproven =
+      LiveFrameFacts(
+        deviceId = device,
+        sequence = 905L,
+        receivedAtMs = now - 50L,
+        width = 1080,
+        height = 2340,
+      )
+
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(inputs(liveFrame = unproven)),
+    )
+  }
+
+  @Test
+  fun `a 180 degree live rotation blocks even when dimensions still match`() {
+    // Rotation 0 -> 2 preserves 1080x2340, so the exact live-frame geometry check alone would
+    // otherwise map the upside-down new pixels through the old hierarchy bounds.
+    val upsideDown =
+      LiveFrameFacts(
+        deviceId = device,
+        sequence = 906L,
+        receivedAtMs = now - 50L,
+        width = 1080,
+        height = 2340,
+        rotation = 2,
+      )
+
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(inputs(liveFrame = upsideDown)),
+    )
   }
 
   @Test
@@ -349,6 +499,7 @@ class DeviceControlPolicyTest {
         width = 1080,
         height = 2340,
         data = null,
+        rotation = 0,
       )
     assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(screenshot = stale)))
   }
@@ -397,6 +548,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 720,
         height = 1560,
+        rotation = 0,
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
@@ -417,6 +569,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 360,
         height = 780,
+        rotation = 0,
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
@@ -436,6 +589,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 2340,
         height = 1080,
+        rotation = 0,
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
@@ -459,6 +613,7 @@ class DeviceControlPolicyTest {
                   hierarchy = hierarchyOf(0, 0),
                   rootWidth = 0,
                   rootHeight = 0,
+                  rotation = 0,
                 )
             ),
             now,
@@ -481,6 +636,9 @@ class DeviceControlPolicyTest {
       height = height,
       data = null,
       coordinateSpace = coordinateSpace,
+      // Proven rotation so the #4502 gate passes and these tests isolate the COORDINATE-SPACE
+      // behavior they were written for. Rotation has its own dedicated tests.
+      rotation = 0,
     )
 
   private fun hierarchyFacts(width: Int, height: Int, coordinateSpace: CoordinateSpace?) =
@@ -493,6 +651,7 @@ class DeviceControlPolicyTest {
       rootWidth = width,
       rootHeight = height,
       coordinateSpace = coordinateSpace,
+      rotation = 0,
     )
 
   /**
@@ -657,6 +816,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 1170,
         height = 2532,
+        rotation = 0,
       )
     val snapshot =
       assertNotNull(

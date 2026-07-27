@@ -954,6 +954,7 @@ fun AutoMobileContent(
             // policy only compares dimensions exactly when the paired screenshot declared the same
             // thing (issue #4550).
             coordinateSpace = update.coordinateSpace,
+            captureRotation = update.rotation,
           )
         }
       }
@@ -998,6 +999,7 @@ fun AutoMobileContent(
           // Same reasoning as the hierarchy collector: the declared unit travels with the frame
           // (issue #4550).
           coordinateSpace = update.coordinateSpace,
+          rotation = update.rotation,
         )
       }
     }
@@ -1660,6 +1662,7 @@ fun AutoMobileContent(
                       receivedAtMs = frame.receivedAtMs,
                       width = frame.bitmap.width,
                       height = frame.bitmap.height,
+                      rotation = frame.rotation,
                     )
                   },
               )

@@ -377,6 +377,7 @@ class DeviceControlSessionTest {
               receivedAtMs = 1_000L,
               width = 1080,
               height = 2340,
+              rotation = 0,
             )
         )
     val mirrored = assertNotNull(session.evaluate(withMirror).snapshotOrNull)
@@ -966,6 +967,68 @@ class DeviceControlSessionTest {
     scope.cancel()
   }
 
+  @Test
+  fun `rotation mismatch drops retained interaction while awaiting refresh`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    assertNotNull(session.evaluate(clicked).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // The retained screenshot remains useful for display, but a new hierarchy from a different
+    // rotation and capture makes its coordinate bounds unsafe for another gesture. Platform
+    // clients publish this hierarchy before beginning the next screenshot capture.
+    val mismatchedRotation =
+      clicked.copy(
+        hierarchy = clicked.hierarchy?.copy(sequence = 11L, captureSequence = 8L, rotation = 1)
+      )
+    val decision = session.evaluate(mismatchedRotation)
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      (decision as DeviceControlDecision.Blocked).reason,
+    )
+    assertEquals(retained, session.renderSnapshot, "the old frame can remain visible")
+    assertNull(session.interactionSnapshot, "a rotation mismatch must drop to Inspector")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a proven unpaired rotation drops retained interaction while awaiting refresh`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val session = session(scope, FakeAutoMobileClient())
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    assertNotNull(session.evaluate(clicked).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // Both new sources prove landscape, but neither has a capture identity yet. The policy cannot
+    // assemble them, so this is deliberately not RotationMismatch; it must nevertheless retire
+    // the portrait mapping before a second click can be sent through stale bounds.
+    val incomingLandscape =
+      clicked.copy(
+        screenshot = clicked.screenshot?.copy(sequence = 11L, captureSequence = null, rotation = 1),
+        hierarchy = clicked.hierarchy?.copy(sequence = 12L, captureSequence = null, rotation = 1),
+      )
+    val decision = session.evaluate(incomingLandscape)
+    assertEquals(
+      DeviceControlBlockReason.CaptureIdentityUnavailable,
+      (decision as DeviceControlDecision.Blocked).reason,
+    )
+    assertEquals(retained, session.renderSnapshot, "the old frame can remain visible")
+    assertNull(session.interactionSnapshot, "a proven incoming rotation must drop to Inspector")
+    scope.cancel()
+  }
+
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
   private fun paired(
     captureSequence: Long,
@@ -992,6 +1055,7 @@ class DeviceControlSessionTest {
           height = height,
           data = data,
           coordinateSpace = coordinateSpace,
+          rotation = 0,
         ),
       hierarchy =
         HierarchyFrameFacts(
@@ -1003,6 +1067,7 @@ class DeviceControlSessionTest {
           rootWidth = width,
           rootHeight = height,
           coordinateSpace = coordinateSpace,
+          rotation = 0,
         ),
       liveFrame = null,
     )

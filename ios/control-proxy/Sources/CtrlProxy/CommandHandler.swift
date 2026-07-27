@@ -311,7 +311,8 @@ public class CommandHandler: CommandHandling {
         return HierarchyUpdateResponse(
             requestId: request.requestId,
             data: enriched,
-            perfTiming: perfTimings?.first
+            perfTiming: perfTimings?.first,
+            frameContext: FrameContext.forHierarchy(enriched)
         )
     }
 
@@ -393,14 +394,35 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleRequestScreenshot(_ request: RequestEnvelope, startTime _: Date) throws -> ScreenshotResponse {
-        let data = try gesturePerformer.getScreenshot()
-        let base64 = data.base64EncodedString()
+        // Read the hierarchy on both sides of the pixel capture. A change during capture leaves
+        // the context absent, which makes a context-aware client fail closed instead of pairing
+        // pixels from one screen with the identity of another.
+        let before = currentFrameContext()
+        let screenshot = try gesturePerformer.getScreenshotCapture()
+        let after = currentFrameContext()
+        let base64 = screenshot.data.base64EncodedString()
 
         return ScreenshotResponse(
             requestId: request.requestId,
             data: base64,
-            format: "png"
+            format: "png",
+            rotation: screenshot.rotation,
+            frameContext: before == after ? before : nil
         )
+    }
+
+    private func currentFrameContext() -> String? {
+        guard let hierarchy = try? elementLocator.getViewHierarchy(disableAllFiltering: false) else {
+            return nil
+        }
+        return FrameContext.forHierarchy(enrichWithMatchingSdkHierarchy(hierarchy))
+    }
+
+    private func requireCurrentFrameContext(_ expected: String?) throws {
+        guard let expected else { return }
+        guard currentFrameContext() == expected else {
+            throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+        }
     }
 
     // MARK: - Gestures
@@ -427,6 +449,7 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleTapCoordinates(_ request: RequestTapCoordinates, startTime: Date) throws -> WebSocketResponse {
+        try requireCurrentFrameContext(request.frameContext)
         try requireFinite(request.x, field: "x")
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
@@ -440,6 +463,7 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleSwipe(_ request: RequestSwipe, startTime: Date) throws -> WebSocketResponse {
+        try requireCurrentFrameContext(request.frameContext)
         try requireFinite(request.x1, field: "x1")
         try requireFinite(request.y1, field: "y1")
         try requireFinite(request.x2, field: "x2")
@@ -496,6 +520,7 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleDrag(_ request: RequestDrag, startTime: Date) throws -> WebSocketResponse {
+        try requireCurrentFrameContext(request.frameContext)
         try requireFinite(request.x1, field: "x1")
         try requireFinite(request.y1, field: "y1")
         try requireFinite(request.x2, field: "x2")

@@ -2,6 +2,23 @@
 import XCTest
 
 final class ModelsTests: XCTestCase {
+    func testFrameContextGenerationInvalidatesAnABAReturnToTheSameHierarchy() {
+        let screenA = ViewHierarchy(
+            packageName: "com.example.a",
+            hierarchy: UIElementInfo(text: "A")
+        )
+        let screenB = ViewHierarchy(
+            packageName: "com.example.b",
+            hierarchy: UIElementInfo(text: "B")
+        )
+
+        let firstScreenAContext = FrameContext.recordHierarchy(screenA)
+        _ = FrameContext.recordHierarchy(screenB)
+        let returnedScreenAContext = FrameContext.recordHierarchy(screenA)
+
+        XCTAssertNotEqual(firstScreenAContext, returnedScreenAContext)
+    }
+
     // MARK: - PerfTiming Tests
 
     func testPerfTimingEncoding() throws {

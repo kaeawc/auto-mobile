@@ -410,6 +410,24 @@ The socket returns exactly one response per request. If the request times out,
 the envelope has `success: false`; treat that response as authoritative and
 re-observe device state before assuming the input landed.
 
+### Frame-context safety
+
+Every `input/*` request may include an optional `frameContext` string copied from both the
+`screenshot_update` and `hierarchy_update` that describe the exact rendered frame. Omit it to
+retain the legacy behavior byte-for-byte.
+
+When supplied, the daemon compares it with the newest device-authored observation context and
+rejects a mismatch before executing the action with an actionable `observe a fresh frame before
+retrying` error. Current Android and iOS CtrlProxy runners also validate context-bearing gestures
+at the device boundary. iOS derives the opaque value from the captured hierarchy before and after
+a screenshot; if the UI changes during capture, the screenshot intentionally has no context and a
+client must not invent one. This protects same-size navigation as well as rotations and resolution
+changes.
+
+The value is opaque, device-specific, and must only be echoed unchanged. It is not a timestamp,
+not portable across devices or runner restarts, and a client must fail closed when the screenshot
+and hierarchy contexts are absent or unequal.
+
 ### `input/tap`
 
 Taps an absolute device-screen coordinate. Coordinates are physical pixels in

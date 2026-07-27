@@ -285,6 +285,9 @@ data class ScreenshotResult(
   val format: String = "jpeg",
   val width: Int? = null,
   val height: Int? = null,
+  val frameContext: String? = null,
+  /** Display rotation sampled when the screenshot capture completed (0..3). */
+  val rotation: Int? = null,
   val screenshotCaptureDurationMs: Long? = null,
   val screenshotEncodeDurationMs: Long? = null,
   val screenshotByteLength: Int? = null,

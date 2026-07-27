@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
-import { registerNavigationTools } from "../../src/server/navigationTools";
+import {
+  exploreSchema,
+  getNavigationGraphSchema,
+  navigateToSchema,
+  registerNavigationTools,
+} from "../../src/server/navigationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import type { BootedDevice } from "../../src/models";
@@ -84,6 +89,39 @@ describe("navigation tool session graph selection", () => {
       sessionManagerSpy.mockRestore();
       navigateExecuteSpy.mockRestore();
       exploreExecuteSpy.mockRestore();
+    }
+  });
+
+  test("leaves navigation platform unset until device routing resolves it", async () => {
+    expect(navigateToSchema.parse({ targetScreen: "Settings" }).platform).toBeUndefined();
+    expect(getNavigationGraphSchema.parse({}).platform).toBeUndefined();
+    expect(exploreSchema.parse({}).platform).toBeUndefined();
+
+    const sessionGraph = new FakeNavigationGraphManager();
+    const sessionManagerSpy = spyOn(NavigationGraphManager, "getInstanceForSession")
+      .mockReturnValue(sessionGraph as unknown as NavigationGraphManager);
+    const navigateExecuteSpy = spyOn(NavigateTo.prototype, "execute").mockResolvedValue({
+      success: true,
+      currentScreen: "Settings",
+      targetScreen: "Settings",
+      stepsExecuted: 0,
+    });
+
+    try {
+      const tools = ToolRegistry as unknown as {
+        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<unknown> }>;
+      };
+      const navigateHandler = tools.tools.get("navigateTo")?.deviceAwareHandler;
+
+      await navigateHandler!(device, { targetScreen: "Settings", sessionUuid: "ios-session" });
+
+      expect(navigateExecuteSpy).toHaveBeenCalledWith(expect.objectContaining({
+        platform: "ios",
+        sessionUuid: "ios-session",
+      }), undefined);
+    } finally {
+      sessionManagerSpy.mockRestore();
+      navigateExecuteSpy.mockRestore();
     }
   });
 });

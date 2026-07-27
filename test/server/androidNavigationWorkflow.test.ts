@@ -55,6 +55,15 @@ describe("Android navigation graph workflow (#4459)", () => {
         "getNavigationGraph",
         "navigateTo",
       ]));
+
+      for (const name of ["explore", "getNavigationGraph", "navigateTo"]) {
+        const tool = result.tools.find(candidate => candidate.name === name) as {
+          inputSchema?: { properties?: Record<string, { default?: unknown }>; required?: string[] };
+        } | undefined;
+
+        expect(tool?.inputSchema?.properties?.platform?.default).toBeUndefined();
+        expect(tool?.inputSchema?.required ?? []).not.toContain("platform");
+      }
     } finally {
       await client.close();
     }

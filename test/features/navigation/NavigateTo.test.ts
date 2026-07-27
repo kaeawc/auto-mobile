@@ -590,6 +590,40 @@ describe("NavigateTo", () => {
       expect(result.durationMs).toBe(31_000);
     });
 
+    test("returns a failed partial path when a replayed transition does not arrive", async () => {
+      await fakeGraph.recordNavigationEvent({
+        destination: "HomeScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: 0,
+        sequenceNumber: 0,
+      });
+      fakeGraph.setPathResult({
+        found: true,
+        path: [toolEdge("HomeScreen", "TargetScreen")],
+        startScreen: "HomeScreen",
+        targetScreen: "TargetScreen",
+      });
+
+      const screenWaiter: ScreenTransitionWaiter = {
+        waitForScreen: async () => false,
+      };
+      navigateTo = new NavigateTo(device, fakeAdbFactory, null, screenWaiter, fakeGraph);
+
+      const result = await navigateTo.execute({
+        targetScreen: "TargetScreen",
+        platform: "android",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Did not reach "TargetScreen"');
+      expect(result.currentScreen).toBe("HomeScreen");
+      expect(result.partialPath).toEqual([
+        'tapOn({"text":"Next","action":"tap","platform":"android"})',
+      ]);
+    });
+
     test("records a back-button hop for an edge with no known interaction", async () => {
       await fakeGraph.recordNavigationEvent({
         destination: "HomeScreen",

@@ -12,11 +12,11 @@ import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers"
 // Schema definitions
 export const navigateToSchema = addDeviceTargetingToSchema(z.object({
   targetScreen: z.string().describe("Target screen name"),
-  platform: platformSchema.default("android")
+  platform: platformSchema.optional()
 }));
 
 export const getNavigationGraphSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema.default("android")
+  platform: platformSchema.optional()
 }));
 
 export const exploreSchema = addDeviceTargetingToSchema(z.object({
@@ -28,24 +28,24 @@ export const exploreSchema = addDeviceTargetingToSchema(z.object({
   mode: z.enum(["discover", "validate", "hybrid"]).optional().describe("Mode (default: hybrid)"),
   packageName: z.string().optional().describe("Package to limit exploration"),
   dryRun: z.boolean().optional().describe("Dry run (no interactions)"),
-  platform: platformSchema.default("android")
+  platform: platformSchema.optional()
 }));
 
 
 // Export interfaces for type safety
 export interface NavigateToArgs {
   targetScreen: string;
-  platform: Platform;
+  platform?: Platform;
   sessionUuid?: string;
 }
 
 export interface GetNavigationGraphArgs {
-  platform: Platform;
+  platform?: Platform;
   sessionUuid?: string;
 }
 
 export interface ExploreArgs extends ExploreOptions {
-  platform: Platform;
+  platform?: Platform;
   sessionUuid?: string;
 }
 
@@ -77,7 +77,7 @@ export function registerNavigationTools() {
       );
       const options: NavigateToOptions = {
         targetScreen: args.targetScreen,
-        platform: args.platform || "android",
+        platform: device.platform,
         sessionUuid: args.sessionUuid
       };
       const result = await navigateTo.execute(options, progress);

@@ -159,6 +159,18 @@ describe("Explore", () => {
   }
 
   describe("execute", () => {
+    test("uses the advertised default of 50 interactions", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = mockObserveScreen;
+      const progressTotals: number[] = [];
+
+      await explore.execute({ dryRun: true }, async (_current, total) => {
+        progressTotals.push(total);
+      });
+
+      expect(progressTotals[0]).toBe(50);
+    });
+
     for (const mode of ["hybrid", "discover"] as const) {
       test(`should use graph stats instead of exporting the full graph for ${mode} progress node counts`, async () => {
         fakeGraph.recordNavigationEvent({

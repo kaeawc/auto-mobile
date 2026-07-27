@@ -1416,7 +1416,6 @@
           "type": "boolean"
         },
         "platform": {
-          "default": "android",
           "type": "string",
           "enum": [
             "android",
@@ -1435,9 +1434,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "platform"
-      ],
       "additionalProperties": false
     }
   },
@@ -1620,7 +1616,6 @@
       "type": "object",
       "properties": {
         "platform": {
-          "default": "android",
           "type": "string",
           "enum": [
             "android",
@@ -1639,9 +1634,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "platform"
-      ],
       "additionalProperties": false
     }
   },
@@ -2962,7 +2954,6 @@
           "description": "Target screen name"
         },
         "platform": {
-          "default": "android",
           "type": "string",
           "enum": [
             "android",
@@ -2982,8 +2973,7 @@
         }
       },
       "required": [
-        "targetScreen",
-        "platform"
+        "targetScreen"
       ],
       "additionalProperties": false
     }

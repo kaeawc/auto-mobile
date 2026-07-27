@@ -97,7 +97,7 @@ export class Explore extends BaseVisualChange {
   private static readonly MAX_CONSECUTIVE_BACKS = 5;
   private static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
   private static readonly MAX_LOOP_ITERATIONS = 3;
-  private static readonly DEFAULT_MAX_INTERACTIONS = 200;
+  private static readonly DEFAULT_MAX_INTERACTIONS = 50;
   private static readonly DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly DEFAULT_RESET_INTERVAL = 15;
   private static readonly MAX_OUT_OF_APP_ATTEMPTS = 5;

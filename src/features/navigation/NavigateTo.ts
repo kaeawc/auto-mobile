@@ -277,7 +277,16 @@ export class NavigateTo {
         const reached = await this.screenWaiter.waitForScreen(edge.to, NavigateTo.STEP_TIMEOUT_MS);
         if (!reached) {
           logger.warn(`[NAVIGATE_TO] Screen "${edge.to}" not reached within timeout`);
-          // Continue anyway - navigation events might be delayed
+          perf.end();
+          return {
+            success: false,
+            error: `Did not reach "${edge.to}" after step ${i + 1}`,
+            currentScreen: this.navigationManager.getCurrentScreen(),
+            targetScreen,
+            stepsExecuted: executedPath.length,
+            partialPath: executedPath,
+            durationMs: this.timer.now() - startTime
+          };
         }
       }
 

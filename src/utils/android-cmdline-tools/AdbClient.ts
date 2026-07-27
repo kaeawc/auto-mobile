@@ -19,6 +19,24 @@ import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHeal
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
+/**
+ * Thrown when an adb command exceeds the caller-supplied `timeoutMs` budget, as
+ * opposed to failing for a device reason (offline, adb error, non-numeric output).
+ *
+ * The distinction is load-bearing for callers that thread a request deadline — the
+ * daemon's append-text path. They tell "our budget expired" apart from "the device
+ * cannot answer" by an `instanceof` check, never a message match: the former must
+ * NOT be cached (a later request with a fresh budget should retry), the latter is
+ * cached so a dead device is not re-probed on every call. The message is preserved
+ * verbatim, so existing message-based logging is unaffected.
+ */
+export class AdbCommandTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AdbCommandTimeoutError";
+  }
+}
+
 // Module-level cache configuration and instances
 const moduleTimer: Timer = defaultTimer;
 let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
@@ -452,9 +470,16 @@ export class AdbClient implements AdbExecutor {
       return this.apiLevelCache;
     } catch (error) {
       logger.warn(`[ADB] Failed to read API level: ${error}`);
-      // Deliberately NOT cached: a transient failure (device busy, a caller's
-      // timeout expiring) must not permanently mark the device as unknown-API.
-      // The next caller re-probes; a genuinely broken device just fails again.
+      // A GENUINE device failure (offline, adb error) is cached as null so a
+      // device that cannot answer is not re-probed on every call. But OUR injected
+      // budget timeout is not a device verdict — a later request with a fresh
+      // budget must be free to retry — so it returns null WITHOUT poisoning the
+      // cache. The distinction matters because the daemon keeps one AdbClient per
+      // device for minutes (#3351 finding 4); a cached null from a single
+      // timed-out probe would disable SHIFT chords for that whole window.
+      if (!(error instanceof AdbCommandTimeoutError)) {
+        this.apiLevelCache = null;
+      }
       return null;
     }
   }
@@ -679,7 +704,7 @@ export class AdbClient implements AdbExecutor {
           settled = true;
           cleanup();
           child.kill("SIGTERM");
-          reject(new Error(`Command timed out after ${timeoutMs}ms: ${file} ${args.join(" ")}`));
+          reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms: ${file} ${args.join(" ")}`));
         }, timeoutMs);
       }
 

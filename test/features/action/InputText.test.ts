@@ -4,8 +4,9 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { AdbClient, AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 
 interface TestInputText {
   executeAndroidTextInput: (
@@ -35,6 +36,16 @@ function stubAndroidSetText(requestSetText: RequestSetText): void {
   AndroidCtrlProxyClient.getInstance = (() => ({
     requestSetText
   })) as typeof AndroidCtrlProxyClient.getInstance;
+}
+
+function execResult(stdout: string): ExecResult {
+  return {
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  };
 }
 
 function inputCommands(factory: FakeAdbClientFactory): string[] {
@@ -677,32 +688,38 @@ describe("InputText", () => {
     ]);
   });
 
-  test("a failed API probe is not cached as unsupported", async () => {
-    // The daemon now keeps one InputText per device across keystrokes, so a single
-    // transient probe failure (device busy, budget expired mid-probe) must not
-    // permanently disable SHIFT chords for that device. Unknown answers "no" for
-    // THIS call but leaves the cache empty, and the next call re-probes.
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
-    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
-    factory.getFakeClient().setCommandError(
-      "shell getprop ro.build.version.sdk",
-      new Error("device temporarily busy")
-    );
+  test("an OUR-timeout API probe does not permanently disable SHIFT for a cached instance", async () => {
+    // The daemon keeps one InputText+AdbClient per device for minutes (#3351
+    // finding 4). A single budget-timed-out probe must not disable SHIFT chords
+    // for that whole window: the next keystroke, with a fresh budget, must re-probe
+    // and recover. Drives a REAL AdbClient so the actual probe/cache path runs; the
+    // authoritative not-cached assertion lives in AdbClientApiLevelTimeout.test.ts.
+    let timeOut = true;
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes("getprop ro.build.version.sdk")) {
+        if (timeOut) {
+          // Exactly what execWithSignal throws when the threaded timeoutMs expires.
+          return Promise.reject(
+            new AdbCommandTimeoutError("Command timed out after 5ms: adb shell getprop ro.build.version.sdk")
+          );
+        }
+        return Promise.resolve(execResult("31\n"));
+      }
+      // Key events (and anything else) succeed.
+      return Promise.resolve(execResult(""));
+    };
+    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb);
 
-    const whileFailing = await inputText.appendText("A");
-    expect(whileFailing.success).toBe(false);
-    expect(whileFailing.error).toContain("append cannot type");
+    const whileTimedOut = await inputText.appendText("A", 5);
+    expect(whileTimedOut.success).toBe(false);
+    expect(whileTimedOut.error).toContain("append cannot type");
 
-    // The device recovers; the same instance must now discover API 31.
-    factory.getFakeClient().reset();
-    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
-
-    const afterRecovery = await inputText.appendText("A");
-    expect(afterRecovery.success).toBe(true);
-    expect(inputCommands(factory)).toEqual([
-      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A"
-    ]);
+    // Fresh budget on the next keystroke: neither InputText nor AdbClient may have
+    // cached the timed-out probe as "unsupported", so the capital now types.
+    timeOut = false;
+    const afterRetry = await inputText.appendText("A", 5000);
+    expect(afterRetry.success).toBe(true);
   });
 
   test("append charges the API probe and every key event against the caller's budget", async () => {

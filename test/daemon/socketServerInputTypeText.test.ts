@@ -878,6 +878,31 @@ describe("UnixSocketServer input/typeText", () => {
     expect(requestImeAction).not.toHaveBeenCalled();
   });
 
+  test("forwards an Android frame context to CtrlProxy text input", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "context-bound",
+      frameContext: "frame-1",
+    });
+
+    expect(response.success).toBe(true);
+    expect(requestSetText).toHaveBeenCalledWith("context-bound", {
+      timeoutMs: 30_000,
+      frameContext: "frame-1",
+    });
+  });
+
   test("serializes concurrent typeText calls for the same device", async () => {
     let inFlight = 0;
     let maxInFlight = 0;

@@ -384,6 +384,13 @@ interface WsGlobalActionResultMessage extends WsMessageBase {
   totalTimeMs?: number;
 }
 
+interface WsFrameContextValidationResultMessage extends WsMessageBase {
+  type: "frame_context_validation_result";
+  requestId: string;
+  success?: boolean;
+  totalTimeMs?: number;
+}
+
 interface WsDeviceInfoResultMessage extends WsMessageBase {
   type: "device_info_result";
   requestId: string;
@@ -703,6 +710,7 @@ type WebSocketMessage =
   | WsInstalledPackagesResultMessage
   | WsPackageInfoResultMessage
   | WsLaunchIntentResultMessage
+  | WsFrameContextValidationResultMessage
   | WsNavigationEventMessage
   | WsPackageEventMessage
   | WsInteractionEventMessage
@@ -1873,7 +1881,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   async requestGlobalAction(
     action: string,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    frameContext?: string
   ): Promise<{ success: boolean; action: string; totalTimeMs: number; error?: string }> {
     const startTime = this.timer.now();
     try {
@@ -1893,13 +1902,52 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         throw new Error("WebSocket not connected");
       }
       this.ws.send(serializeCtrlProxyRequest(
-        ctrlProxyRequests.requestGlobalAction({ requestId, action })
+        ctrlProxyRequests.requestGlobalAction({ requestId, action, frameContext })
       ));
       logger.debug(`[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`);
 
       return await promise;
     } catch (error) {
       return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
+    }
+  }
+
+  /**
+   * Verifies that an observed frame context still matches device state immediately before
+   * an ADB-only input action is issued.
+   */
+  async validateFrameContext(
+    frameContext: string,
+    timeoutMs: number = 5000
+  ): Promise<{ success: boolean; totalTimeMs: number; error?: string }> {
+    const startTime = this.timer.now();
+    try {
+      if (!this.isConnected()) {
+        return { success: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+      }
+
+      const requestId = this.requestManager.generateId("validate_frame_context");
+      const promise = this.requestManager.register<{ success: boolean; totalTimeMs: number; error?: string }>(
+        requestId,
+        "validate_frame_context",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          totalTimeMs: this.timer.now() - startTime,
+          error: `Frame context validation timeout after ${timeout}ms`,
+        })
+      );
+
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      this.ws.send(serializeCtrlProxyRequest(
+        ctrlProxyRequests.validateFrameContext({ requestId, frameContext })
+      ));
+
+      return await promise;
+    } catch (error) {
+      return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
     }
   }
 
@@ -2601,6 +2649,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.requestManager.resolve(message.requestId, {
           success: message.success ?? false, action: message.action,
           totalTimeMs: message.totalTimeMs ?? 0, error: message.error
+        });
+      }
+
+      if (message.type === "frame_context_validation_result" && message.requestId) {
+        this.requestManager.resolve(message.requestId, {
+          success: message.success ?? false,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
         });
       }
 

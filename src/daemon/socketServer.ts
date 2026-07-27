@@ -1189,6 +1189,7 @@ export class UnixSocketServer {
             imeAction,
             remainingTimeoutMs,
             args.append,
+            args.frameContext,
             charsSent => {
               confirmedAppendCharsSent = charsSent;
             }
@@ -1246,7 +1247,10 @@ export class UnixSocketServer {
         });
       }
 
-      return await new PressButton(targetDevice).press(args.button, remainingTimeoutMs);
+      const pressButton = new PressButton(targetDevice);
+      return args.frameContext === undefined
+        ? await pressButton.press(args.button, remainingTimeoutMs)
+        : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext);
     });
 
     if (!buttonResult.success) {
@@ -1291,7 +1295,10 @@ export class UnixSocketServer {
         });
       }
 
-      return await new InputKey(targetDevice).press(args.key, remainingTimeoutMs);
+      const inputKey = new InputKey(targetDevice);
+      return args.frameContext === undefined
+        ? await inputKey.press(args.key, remainingTimeoutMs)
+        : await inputKey.press(args.key, remainingTimeoutMs, args.frameContext);
     });
 
     if (!keyResult.success) {
@@ -1314,6 +1321,7 @@ export class UnixSocketServer {
     imeAction: ImeAction | undefined,
     timeoutMs: number,
     append: boolean = false,
+    frameContext?: string,
     onConfirmedAppendCharsSent?: (charsSent: number) => void
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
@@ -1352,7 +1360,7 @@ export class UnixSocketServer {
     } else {
       const textResult = append
         ? await (client as IOSCtrlProxyClient).requestAppendText(text, timeoutMs)
-        : await client.requestSetText(text, { timeoutMs });
+        : await client.requestSetText(text, { timeoutMs, frameContext });
       if (!textResult.success) {
         return { success: false, error: textResult.error };
       }

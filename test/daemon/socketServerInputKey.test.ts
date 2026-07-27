@@ -161,6 +161,29 @@ describe("UnixSocketServer input/key", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
+  test("forwards an Android frame context to the key implementation", async () => {
+    const press = mock(async (key: InputKeyName): Promise<InputKeyResult> => ({
+      success: true,
+      key,
+      keyCode: "KEYCODE_ENTER",
+    }));
+    InputKey.prototype.press = press;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    await server.start();
+
+    const { response } = await sendRequest(socketPath, "input/key", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      key: "enter",
+      frameContext: "frame-1",
+    });
+
+    expect(response.success).toBe(true);
+    expect(press).toHaveBeenCalledWith("enter", 30_000, "frame-1");
+  });
+
   test("returns one clear unsupported-platform response for iOS", async () => {
     const press = mock(async (key: InputKeyName): Promise<InputKeyResult> => ({
       success: false,

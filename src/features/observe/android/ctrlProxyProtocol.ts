@@ -143,6 +143,7 @@ export interface RequestSetTextMessage {
   text: string;
   resourceId?: string;
   dismissKeyboard?: boolean;
+  frameContext?: string;
 }
 
 /** `@SerialName("request_ime_action")` → `RequestImeAction` */
@@ -150,6 +151,7 @@ export interface RequestImeActionMessage {
   type: "request_ime_action";
   requestId: string;
   action: ImeAction;
+  frameContext?: string;
 }
 
 /** `@SerialName("request_select_all")` → `RequestSelectAll` */
@@ -413,6 +415,14 @@ export interface RequestGlobalActionMessage {
   type: "request_global_action";
   requestId: string;
   action: string;
+  frameContext?: string;
+}
+
+/** `@SerialName("validate_frame_context")` → `ValidateFrameContext` */
+export interface ValidateFrameContextMessage {
+  type: "validate_frame_context";
+  requestId: string;
+  frameContext: string;
 }
 
 // =============================================================================
@@ -536,6 +546,7 @@ export type CtrlProxyRequest =
   | RemovePreferenceMessage
   | ClearPreferencesMessage
   | RequestGlobalActionMessage
+  | ValidateFrameContextMessage
   | SetRecompositionTrackingMessage
   | SetAccessibilityFlagsMessage
   | SetNetworkMockRulesMessage
@@ -599,6 +610,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   remove_preference: true,
   clear_preferences: true,
   request_global_action: true,
+  validate_frame_context: true,
   set_recomposition_tracking: true,
   set_accessibility_flags: true,
   set_network_mock_rules: true,
@@ -847,8 +859,28 @@ export const ctrlProxyRequests = {
     };
   },
 
-  requestGlobalAction(args: { requestId: string; action: string }): RequestGlobalActionMessage {
-    return { type: "request_global_action", requestId: args.requestId, action: args.action };
+  requestGlobalAction(args: {
+    requestId: string;
+    action: string;
+    frameContext?: string;
+  }): RequestGlobalActionMessage {
+    return {
+      type: "request_global_action",
+      requestId: args.requestId,
+      action: args.action,
+      frameContext: args.frameContext,
+    };
+  },
+
+  validateFrameContext(args: {
+    requestId: string;
+    frameContext: string;
+  }): ValidateFrameContextMessage {
+    return {
+      type: "validate_frame_context",
+      requestId: args.requestId,
+      frameContext: args.frameContext,
+    };
   },
 
   setRecompositionTracking(args: { requestId: string; enabled: boolean }): SetRecompositionTrackingMessage {

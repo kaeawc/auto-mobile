@@ -50,6 +50,8 @@ export interface SetTextOptions {
    * setText. Ignored on iOS (no handler on the Swift side).
    */
   dismissKeyboard?: boolean;
+  /** Device-authored context paired with the observed Android frame. */
+  frameContext?: string;
 }
 
 /**

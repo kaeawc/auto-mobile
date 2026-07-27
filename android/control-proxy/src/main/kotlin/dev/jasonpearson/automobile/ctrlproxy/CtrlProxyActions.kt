@@ -106,7 +106,18 @@ interface CtrlProxyActions {
     dismissKeyboard: Boolean,
   )
 
+  fun requestSetText(
+    requestId: String?,
+    text: String,
+    resourceId: String?,
+    dismissKeyboard: Boolean,
+    frameContext: String?,
+  ) = requestSetText(requestId, text, resourceId, dismissKeyboard)
+
   fun requestImeAction(requestId: String?, action: String)
+
+  fun requestImeAction(requestId: String?, action: String, frameContext: String?) =
+    requestImeAction(requestId, action)
 
   fun requestSelectAll(requestId: String?)
 
@@ -126,6 +137,11 @@ interface CtrlProxyActions {
   fun removeCaCert(requestId: String?, alias: String?, certificate: String?)
 
   fun requestGlobalAction(requestId: String?, action: String)
+
+  fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) =
+    requestGlobalAction(requestId, action)
+
+  fun validateFrameContext(requestId: String?, frameContext: String) = Unit
 
   fun requestDeviceInfo(requestId: String?)
 

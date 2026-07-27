@@ -21,13 +21,16 @@ export class SharedTextDelegate {
     text: string,
     options: SetTextOptions = {}
   ): Promise<BaseResult> {
-    const { resourceId, timeoutMs = 5000, perf, dismissKeyboard = false } = options;
+    const { resourceId, timeoutMs = 5000, perf, dismissKeyboard = false, frameContext } = options;
     const params: Record<string, unknown> = { text };
     if (resourceId) {
       params.resourceId = resourceId;
     }
     if (dismissKeyboard) {
       params.dismissKeyboard = true;
+    }
+    if (frameContext !== undefined) {
+      params.frameContext = frameContext;
     }
 
     return sendCommand<BaseResult>(this.context, {

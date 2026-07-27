@@ -58,6 +58,7 @@ const KOTLIN_SERIAL_NAMES = [
   "remove_preference",
   "clear_preferences",
   "request_global_action",
+  "validate_frame_context",
   "request_device_info",
   "set_recomposition_tracking",
   "set_accessibility_flags",
@@ -395,6 +396,14 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       expected: '{"type":"request_global_action","requestId":"ga-1","action":"back"}',
     },
     {
+      builder: "validateFrameContext",
+      name: "frame context",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.validateFrameContext({ requestId: "fc-1", frameContext: "epoch:5" })
+      ),
+      expected: '{"type":"validate_frame_context","requestId":"fc-1","frameContext":"epoch:5"}',
+    },
+    {
       builder: "setRecompositionTracking",
       name: "enabled flag",
       actual: serializeCtrlProxyRequest(ctrlProxyRequests.setRecompositionTracking({ requestId: "rt-1", enabled: true })),
@@ -475,12 +484,12 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   });
 
   // Completeness guard: every builder in the module must have at least one wire row above, and the
-  // total builder count is pinned. Ship builder #37 without a row and this fails — not a silently
+  // total builder count is pinned. Ship builder #38 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 36", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 37", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(36);
+    expect(builderNames.length).toBe(37);
     const covered = new Set(cases.map(row => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });

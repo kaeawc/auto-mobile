@@ -77,6 +77,44 @@ describe("InputKey", () => {
     ]);
   });
 
+  test("does not issue an ADB keyevent when device validation rejects a frame context", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const validator = {
+      validateFrameContext: async () => ({
+        success: false,
+        error: "Stale frame context for input/key; observe a fresh frame before retrying",
+      }),
+    };
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator);
+
+    const result = await inputKey.press("enter", 1234, "epoch:2");
+
+    expect(result).toEqual({
+      success: false,
+      key: "enter",
+      keyCode: "KEYCODE_ENTER",
+      error: "Stale frame context for input/key; observe a fresh frame before retrying",
+    });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("validates a supplied frame context before issuing an ADB keyevent", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const calls: Array<[string, number | undefined]> = [];
+    const validator = {
+      validateFrameContext: async (frameContext: string, timeoutMs?: number) => {
+        calls.push([frameContext, timeoutMs]);
+        return { success: true };
+      },
+    };
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator);
+
+    await inputKey.press("tab", 1234, "epoch:3");
+
+    expect(calls).toEqual([["epoch:3", 1234]]);
+    expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_TAB"]);
+  });
+
   test("wraps an ADB keyevent failure in a stable error envelope", async () => {
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandError("KEYCODE_TAB", new Error("device offline"));

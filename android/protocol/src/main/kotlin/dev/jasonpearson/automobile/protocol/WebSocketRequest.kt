@@ -145,6 +145,7 @@ data class RequestSetText(
   val text: String,
   val resourceId: String? = null,
   val dismissKeyboard: Boolean = false,
+  val frameContext: String? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -152,6 +153,7 @@ data class RequestSetText(
 data class RequestImeAction(
   override val requestId: String? = null,
   val action: String, // done, next, search, send, go, previous
+  val frameContext: String? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -391,6 +393,14 @@ data class ClearPreferences(
 data class RequestGlobalAction(
   override val requestId: String? = null,
   val action: String, // back, home, recent, notifications, power_dialog, lock_screen
+  val frameContext: String? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("validate_frame_context")
+data class ValidateFrameContext(
+  override val requestId: String? = null,
+  val frameContext: String,
 ) : WebSocketRequest()
 
 // =============================================================================

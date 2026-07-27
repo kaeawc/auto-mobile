@@ -412,9 +412,23 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `forwards frame context with request_set_text`() = runTest {
+    dispatch(
+      """{"type":"request_set_text","requestId":"txt1","text":"Hello","frameContext":"frame-1"}"""
+    )
+    assertEquals("requestSetText" to listOf<Any?>("txt1", "Hello", null, false, "frame-1"), lastCall)
+  }
+
+  @Test
   fun `dispatches request_ime_action`() = runTest {
     dispatch("""{"type":"request_ime_action","requestId":"i1","action":"search"}""")
     assertEquals("requestImeAction" to listOf<Any?>("i1", "search"), lastCall)
+  }
+
+  @Test
+  fun `forwards frame context with request_ime_action`() = runTest {
+    dispatch("""{"type":"request_ime_action","requestId":"i1","action":"search","frameContext":"frame-1"}""")
+    assertEquals("requestImeAction" to listOf<Any?>("i1", "search", "frame-1"), lastCall)
   }
 
   @Test
@@ -527,6 +541,18 @@ class CtrlProxyMessageHandlerTest {
   fun `dispatches request_global_action`() = runTest {
     dispatch("""{"type":"request_global_action","requestId":"g1","action":"back"}""")
     assertEquals("requestGlobalAction" to listOf<Any?>("g1", "back"), lastCall)
+  }
+
+  @Test
+  fun `dispatches validate_frame_context`() = runTest {
+    dispatch("""{"type":"validate_frame_context","requestId":"context-1","frameContext":"epoch:4"}""")
+    assertEquals("validateFrameContext" to listOf<Any?>("context-1", "epoch:4"), lastCall)
+  }
+
+  @Test
+  fun `forwards frame context with request_global_action`() = runTest {
+    dispatch("""{"type":"request_global_action","requestId":"g1","action":"back","frameContext":"frame-1"}""")
+    assertEquals("requestGlobalAction" to listOf<Any?>("g1", "back", "frame-1"), lastCall)
   }
 
   @Test

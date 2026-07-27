@@ -11,8 +11,7 @@ New to screen control? Start at the
 becomes a device coordinate. This document specifies the other half a control
 client needs: **which frame that mapping is allowed to run against**, and **what
 the client shows after it forwards an input**. Both are written so a third-party
-daemon client can follow them without reading any Compose code; the desktop
-inspector is the reference implementation.
+daemon client can follow them without reading any Compose code.
 
 ## Why a snapshot
 
@@ -278,7 +277,12 @@ Deterministic in every case:
   current: a selected element id that no longer exists in the new hierarchy is
   dropped, which is the pre-existing inspector behavior.
 
-## Reference implementation
+## Legacy desktop implementation
+
+The desktop inspector below implements the earlier capture-sequence policy, but
+does not pair or echo `frameContext`. It is not a reference implementation for
+this protocol until [#4596](https://github.com/kaeawc/auto-mobile/issues/4596)
+lands.
 
 | Concern | Type | Module |
 | --- | --- | --- |

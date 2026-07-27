@@ -176,6 +176,9 @@ describe("daemon input API consumer docs", () => {
     expect(clientGuide).toContain("[#4596](https://github.com/kaeawc/auto-mobile/issues/4596)");
     expect(clientGuide).toContain("having the gesture guarantee");
     expect(snapshotGuide).toContain("default `0.0.46` CtrlProxy artifacts predate this protocol");
+    expect(snapshotGuide).toContain("Legacy desktop implementation");
+    expect(snapshotGuide).toContain("does not pair or echo `frameContext`");
+    expect(snapshotGuide).toMatch(/not a reference implementation for\s+this protocol/);
     expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
     expect(unixSocketApi).toContain("default `0.0.46` CtrlProxy artifacts are legacy");
     expect(unixSocketApi).toContain("device-boundary guarantee currently applies to `input/tap` and `input/swipe`");

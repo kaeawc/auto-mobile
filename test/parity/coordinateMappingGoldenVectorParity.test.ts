@@ -261,17 +261,19 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
     expect(computed.x).not.toBe(row.expectedX + 7);
   });
 
-  test("AC3: iOS point-space rows are explicitly flagged as changing under canonical pixels", function() {
-    // The proof the suite will catch the #4549 conversion: at least one row in each affected
-    // section is documented as MUST-change, so that PR has to touch this fixture deliberately.
+  test("AC3: the iOS rows were converted to canonical pixels under #4549", function() {
+    // The flags are the campaign's cross-language marker; #4549 UPDATED these rows to their
+    // post-conversion (canonical-pixel) values (the review artifact is this fixture's diff). The
+    // flags are retained so a FUTURE conversion change still has to touch the fixture deliberately.
     expect(canonical.viewportToDevice.some(row => row.willChangeUnderCanonicalPixels === true)).toBe(true);
     expect(canonical.deviceToViewport.some(row => row.willChangeUnderCanonicalPixels === true)).toBe(true);
     expect(canonical.iosPointToPixel.every(row => row.willChangeUnderCanonicalPixels === true)).toBe(true);
-    // And the flagged viewportToDevice rows are exactly the point-space ones (deviceWidth equals
-    // the frame width at scale 1 with an iOS point-class dimension, not an Android pixel one).
+    // Post-#4549 the flagged viewportToDevice rows are in PHYSICAL-PIXEL device space, which upscales
+    // the point-space display frame: deviceWidth = frameWidthPx * nativeScale, strictly greater than
+    // the frame width (an iOS point-class device dim equal to the frame width was the pre-#4549 state).
     for (const row of canonical.viewportToDevice) {
       if (row.willChangeUnderCanonicalPixels) {
-        expect(row.deviceWidth).toBeLessThan(1000);
+        expect(row.deviceWidth).toBeGreaterThan(row.frameWidthPx);
       }
     }
   });

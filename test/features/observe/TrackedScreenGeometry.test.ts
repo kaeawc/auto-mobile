@@ -102,4 +102,32 @@ describe("TrackedScreenGeometry", () => {
     expect(geometry.width).toBeNull();
     expect(geometry.isForwarded).toBe(false);
   });
+
+  it("carries the coordinate space bound at update time through markForwarded and bind (#4549)", () => {
+    const geometry = new TrackedScreenGeometry();
+    geometry.update(1170, 2532, "px");
+    geometry.markForwarded(9);
+    expect(geometry.bind()).toEqual({ captureSequence: 9, width: 1170, height: 2532, coordinateSpace: "px" });
+  });
+
+  it("omits coordinateSpace from the binding when the geometry was bound in legacy point-space", () => {
+    const geometry = new TrackedScreenGeometry();
+    geometry.update(1170, 2532); // no space => legacy
+    geometry.markForwarded(9);
+    expect(geometry.bind()).toEqual({ captureSequence: 9, width: 1170, height: 2532 });
+  });
+
+  it("resets provenance on a coordinate-space flip even when the numeric dimensions coincide", () => {
+    // On a non-Display-Zoom device points*screenScale == points*nativeScale, so metadata
+    // appearing (legacy -> px) does not move the pixels. The space change must still reset the
+    // forwarded flag, or a later push would vouch a px identity for a legacy-bound capture.
+    const geometry = new TrackedScreenGeometry();
+    geometry.update(1170, 2532); // legacy
+    geometry.markForwarded(9);
+    expect(geometry.isForwarded).toBe(true);
+
+    geometry.update(1170, 2532, "px"); // same dims, space flips
+    expect(geometry.isForwarded).toBe(false);
+    expect(geometry.bind()).toBeNull();
+  });
 });

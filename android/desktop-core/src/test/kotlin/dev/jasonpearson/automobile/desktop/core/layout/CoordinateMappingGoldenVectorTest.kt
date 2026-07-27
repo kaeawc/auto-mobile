@@ -21,9 +21,10 @@ import org.junit.Test
  * regions (booleans are encoded as 0/1) — the TypeScript parser extracts numbers positionally. Row
  * order must match the JSON.
  *
- * These vectors PIN CURRENT BEHAVIOR. The iOS point-space rows (flagged
- * willChangeUnderCanonicalPixels in the JSON) MUST change when #4549 converts hierarchy bounds to
- * canonical pixels; update the JSON and every consumer together in that PR.
+ * The iOS rows flagged willChangeUnderCanonicalPixels in the JSON were converted to canonical
+ * pixels in #4549 (device dimensions are now physical pixels); the mapper CODE is unchanged — it
+ * simply receives px device dims from the daemon now. Keep these literals in lockstep with the JSON
+ * (the parity suite parses them out of this source).
  */
 class CoordinateMappingGoldenVectorTest {
 
@@ -74,12 +75,13 @@ class CoordinateMappingGoldenVectorTest {
       ViewportToDeviceVector(1170f, 540f, 1f, 0f, 0f, 2340, 1080, 585f, 270f, 1170, 540, 1),
       // Degenerate zero frame width: frame-to-device ratio falls back to 1.
       ViewportToDeviceVector(0f, 0f, 1f, 0f, 0f, 1080, 2340, 12.5f, 7f, 13, 7, 1),
-      // iOS 3x device (390x844): device space is POINTS today; changes under #4549.
-      ViewportToDeviceVector(390f, 844f, 1f, 0f, 0f, 390, 844, 195f, 422f, 195, 422, 1),
-      // iOS 2x device (375x667) with fractional viewport input; changes under #4549.
-      ViewportToDeviceVector(375f, 667f, 1f, 0f, 0f, 375, 667, 100.4f, 200.6f, 100, 201, 1),
-      // iOS Display Zoom-like device (320x693 zoomed points at 3x); changes under #4549.
-      ViewportToDeviceVector(320f, 693f, 1f, 0f, 0f, 320, 693, 160f, 346.5f, 160, 347, 1),
+      // iOS 3x device (390x844): CANONICAL PIXELS (#4549) — device dims are now physical pixels
+      // (390pt x nativeScale 3 = 1170x2532), so expected outputs scale by 3.
+      ViewportToDeviceVector(390f, 844f, 1f, 0f, 0f, 1170, 2532, 195f, 422f, 585, 1266, 1),
+      // iOS 2x device (375x667) with fractional viewport input: CANONICAL PIXELS (#4549), 750x1334.
+      ViewportToDeviceVector(375f, 667f, 1f, 0f, 0f, 750, 1334, 100.4f, 200.6f, 201, 401, 1),
+      // iOS Display Zoom-like device (320x693 at 3x): CANONICAL PIXELS (#4549), 960x2079.
+      ViewportToDeviceVector(320f, 693f, 1f, 0f, 0f, 960, 2079, 160f, 346.5f, 480, 1040, 1),
       // Width-derived-ratio invariant: aspect-MISMATCHED frame (width ratio 2, height ratio
       // 4). Pins that BOTH axes scale by deviceWidth/frameWidthPx (height-derived y = 800).
       ViewportToDeviceVector(500f, 500f, 1f, 0f, 0f, 1000, 2000, 100f, 200f, 200, 400, 1),
@@ -107,8 +109,9 @@ class CoordinateMappingGoldenVectorTest {
       DeviceToViewportVector(270, 585, 540f, 1170f, 2f, 100f, 50f, 1080, 2340, 370f, 635f),
       // Degenerate zero device width: device-to-frame ratio falls back to 1.
       DeviceToViewportVector(7, 9, 540f, 1170f, 1f, 10f, 20f, 0, 2340, 17f, 29f),
-      // iOS 3x point-space inverse; changes under #4549.
-      DeviceToViewportVector(195, 422, 390f, 844f, 1f, 0f, 0f, 390, 844, 195f, 422f),
+      // iOS 3x inverse: CANONICAL PIXELS (#4549) — device dims 1170x2532, so the same device point
+      // (195,422) now in px maps back through ratio 390/1170 = 1/3 to viewport (65, 140.66667).
+      DeviceToViewportVector(195, 422, 390f, 844f, 1f, 0f, 0f, 1170, 2532, 65f, 140.66667f),
       // Width-derived-ratio invariant (inverse): aspect-MISMATCHED frame (width ratio 0.5,
       // height ratio 0.25). Pins BOTH axes scale by frameWidthPx/deviceWidth (height y = 100).
       DeviceToViewportVector(200, 400, 500f, 500f, 1f, 0f, 0f, 1000, 2000, 100f, 200f),

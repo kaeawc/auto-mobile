@@ -17,6 +17,8 @@ import {
   metadataForScreenshotFormat,
   pickScreenshotMetadata,
 } from "../features/observe/ScreenshotMetadata";
+import { readScreenScaleMetadata } from "../models/ScreenScaleMetadata";
+import { COORDINATE_SPACE_PX } from "./canonicalPixels";
 
 const INITIAL_FRAME_HIERARCHY_TIMEOUT_MS = 3_000;
 const INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS = 3_000;
@@ -152,9 +154,21 @@ async function pushAndroidInitialScreenshot(
       screenshot.data,
       dimensions.width,
       dimensions.height,
-      pickScreenshotMetadata(screenshot)
+      pickScreenshotMetadata(screenshot),
+      canonicalPixelScreenshotOptions(viewHierarchy)
     );
   }
+}
+
+/**
+ * Declare `coordinateSpace: "px"` on the screenshot when — and only when — the runner supplied
+ * complete scale metadata (#4549), matching the stamp `pushHierarchyUpdate` applies to the paired
+ * hierarchy. A pre-#4548 runner has no metadata, so the frame stays legacy point-space.
+ */
+function canonicalPixelScreenshotOptions(
+  hierarchy: ViewHierarchyResult
+): { coordinateSpace: typeof COORDINATE_SPACE_PX } | Record<string, never> {
+  return readScreenScaleMetadata(hierarchy) ? { coordinateSpace: COORDINATE_SPACE_PX } : {};
 }
 
 async function getAndroidInitialHierarchy(
@@ -209,7 +223,8 @@ async function pushIosInitialObservationFrame(
       screenshot.data,
       dimensions.width,
       dimensions.height,
-      metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format)
+      metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format),
+      canonicalPixelScreenshotOptions(viewHierarchy)
     );
   }
 }
@@ -244,6 +259,14 @@ function getAndroidScreenshotDimensions(hierarchy: ViewHierarchyResult): { width
 }
 
 function getIosScreenshotDimensions(hierarchy: ViewHierarchyResult): { width: number; height: number } {
+  // Canonical pixels (#4549): when the runner supplied complete scale metadata, the physical
+  // screenshot pixel dimensions are the runner-reported `pixelWidth`/`pixelHeight` — the daemon no
+  // longer multiplies points by a screen scale for them. A pre-#4548 runner has no metadata, so
+  // fall back to the legacy `round(points * screenScale)` claim, byte-identical to before.
+  const metadata = readScreenScaleMetadata(hierarchy);
+  if (metadata) {
+    return { width: metadata.pixelWidth, height: metadata.pixelHeight };
+  }
   const scale = hierarchy.screenScale ?? 1;
   return {
     width: hierarchy.screenWidth ? Math.round(hierarchy.screenWidth * scale) : IOS_DEFAULT_SCREEN_WIDTH,

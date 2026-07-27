@@ -21,8 +21,8 @@ several sources that update independently:
 
 | Source | Carries | Updates |
 | --- | --- | --- |
-| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence` | continuously while subscribed |
-| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence` | continuously, usually debounced client-side |
+| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence`, `coordinateSpace` | continuously while subscribed |
+| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence`, `coordinateSpace` | continuously, usually debounced client-side |
 | live mirror relay (optional) | decoded video frames | at the mirror's frame rate |
 | daemon connection state | transport liveness | on connect/disconnect |
 | device selection | which device the user chose | on user action |
@@ -99,8 +99,32 @@ and unit-testable without a device.
 | Both messages carry a `captureSequence` at all | Older daemons do not stamp one; control fails closed rather than guessing |
 | `now - screenshot.receivedAt <= 5000 ms` | The daemon may stop pushing without disconnecting |
 | `now - liveFrame.receivedAt <= 1000 ms` (when a live frame is displayed) | **Recency** — this is what catches the stalled mirror |
-| Displayed **screenshot** and mapping bounds agree in aspect (rotation-tolerant) | A screenshot may be a downscale, and iOS reports pixels against point-space bounds |
+| Displayed **screenshot** and mapping bounds agree in aspect (rotation-tolerant) | A screenshot may be a downscale, and a legacy (no `coordinateSpace`) frame reports iOS pixels against point-space bounds — see [Coordinate space](#coordinate-space-canonical-pixels) |
 | Displayed **live mirror frame** matches the mapping bounds EXACTLY | See below — an aspect check would accept a scale change |
+
+### Coordinate space: canonical pixels
+
+Every geometry-bearing message declares its coordinate space with a
+`coordinateSpace` field. `"px"` means the message's element `bounds` and screen
+`screenWidth`/`screenHeight` are **canonical physical pixels** — the daemon
+converted the runner's logical points using the runner-reported `nativeScale`
+(issue [#4548](https://github.com/kaeawc/auto-mobile/issues/4548)), so a screenshot
+and the hierarchy that describes it share one unit and compare **exactly** (the
+rotation W/H swap for native-portrait screenshots is still accepted). Android
+bounds are already physical pixels (`nativeScale` 1), so it declares `"px"` too.
+
+The field is **absent** when the runner supplied no scale metadata (a pre-#4548
+runner). That is the **legacy fallback**: `bounds` stay in logical points while
+the screenshot is pixels — the mixed-unit state that predates canonical pixels —
+and a client keeps its aspect-only (±tolerance) geometry check. A client that
+sees no `coordinateSpace` must not assume pixels; a client that sees `"px"` can
+compare absolute dimensions exactly. On the input side, a client that renders a
+`"px"` frame sends `input/*` coordinates in **pixels**; the daemon divides by
+`nativeScale` (an exact fractional quotient — the runner takes `Double` points)
+before dispatching to the iOS runner, so the physical tap location is unchanged.
+(The desktop client's
+migration to exact px checks is issue
+[#4550](https://github.com/kaeawc/auto-mobile/issues/4550); #4549 ships the field.)
 
 ### Pairing is identity, never elapsed time
 

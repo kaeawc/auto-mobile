@@ -12,6 +12,12 @@ import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
 import { annotateHierarchyDiff, type HierarchyDiffSummary } from "./hierarchyStreamDiff";
 import { readImageHeaderDimensions } from "../utils/screenshot/imageHeaderDimensions";
+import { readScreenScaleMetadata } from "../models/ScreenScaleMetadata";
+import {
+  COORDINATE_SPACE_PX,
+  convertHierarchyToCanonicalPixels,
+  type CoordinateSpace,
+} from "./canonicalPixels";
 
 /**
  * Navigation graph summary for streaming to IDE plugins.
@@ -114,6 +120,13 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
    * instant the geometry does, at any delta.
    */
   captureSequence?: number;
+  /**
+   * Coordinate space of this message's geometry (element bounds, screen dimensions) — `"px"` for
+   * canonical physical pixels (issue #4549). Present only when the runner supplied complete scale
+   * metadata; ABSENT means legacy point-space, so a control client (and #4550's exact geometry
+   * checks) can tell converted frames from a pre-#4548 runner's and fall back accordingly.
+   */
+  coordinateSpace?: CoordinateSpace;
 }
 
 /**
@@ -164,6 +177,13 @@ interface PushScreenshotOptions {
    * fails closed instead of pairing them with an unrelated hierarchy.
    */
   captureSequence?: number;
+  /**
+   * Set to `"px"` when the caller's device is publishing canonical physical pixels (issue #4549) —
+   * i.e. the runner supplied complete scale metadata. Stamps `coordinateSpace: "px"` on the
+   * screenshot so a control client reads the published `screenWidth`/`screenHeight` as pixels;
+   * omitted for a pre-#4548 runner, keeping the frame legacy point-space.
+   */
+  coordinateSpace?: CoordinateSpace;
 }
 
 /**
@@ -334,7 +354,17 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // as the next baseline.
     const previous = this.previousHierarchyByDevice.get(deviceId) ?? null;
     const { hierarchy: annotated, summary } = annotateHierarchyDiff(previous, hierarchy);
+    // Baseline the UN-annotated, UN-converted original so the next frame's diff is computed in the
+    // same (point) space the runner reports — the diff must not see the canonical-pixel rewrite.
     this.previousHierarchyByDevice.set(deviceId, hierarchy);
+
+    // Convert to canonical pixels on the clone we own (never the caller's hierarchy or the baseline,
+    // so MCP observe keeps serving point-space bounds). Only when the runner supplied complete scale
+    // metadata; otherwise the frame stays point-space and is not stamped (legacy fallback).
+    const scaleMetadata = readScreenScaleMetadata(hierarchy);
+    if (scaleMetadata) {
+      convertHierarchyToCanonicalPixels(annotated, scaleMetadata);
+    }
 
     // Assign this capture's shared identity and RETURN it, so the caller can bind it to the
     // screenshot requests it initiates while this hierarchy is current.
@@ -350,6 +380,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       data: annotated,
       hierarchyDiff: summary,
       captureSequence,
+      ...(scaleMetadata ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
@@ -408,6 +439,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // other case the field is omitted and the control client fails closed rather than pairing
       // against mapping bounds that may not describe these pixels.
       captureSequence: claimMatchesPixels ? options.captureSequence : undefined,
+      ...(options.coordinateSpace ? { coordinateSpace: options.coordinateSpace } : {}),
       screenshotMimeType,
       screenshotFormat,
       screenshotCaptureSource,

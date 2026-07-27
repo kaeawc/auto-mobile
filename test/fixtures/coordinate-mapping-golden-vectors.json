@@ -77,6 +77,12 @@
       "expectedX": -20, "expectedY": -20, "expectedInBounds": 0
     },
     {
+      "comment": "y-only out of bounds: x well inside, y exactly at deviceHeight (exclusive) — pins the y bounds predicate independently of x",
+      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
+      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 270, "viewportY": 1170,
+      "expectedX": 540, "expectedY": 2340, "expectedInBounds": 0
+    },
+    {
       "comment": "far past the bottom-right edge: raw coordinates preserved, flagged out of bounds",
       "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
       "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 1000, "viewportY": 2000,
@@ -177,6 +183,11 @@
       "padding": 32, "expectedWidthPx": 340.7407, "expectedHeightPx": 736
     },
     {
+      "comment": "non-default padding 10 (not the 32 default): max sides 780, height-constrained 390x780 — substituting DEFAULT_PADDING would give 368x736",
+      "imageWidth": 1080, "imageHeight": 2160, "viewportWidth": 800, "viewportHeight": 800,
+      "padding": 10, "expectedWidthPx": 390, "expectedHeightPx": 780
+    },
+    {
       "comment": "tiny viewport: max frame sides coerce to the 1px floor -> 0.5x1",
       "imageWidth": 1080, "imageHeight": 2160, "viewportWidth": 10, "viewportHeight": 10,
       "padding": 32, "expectedWidthPx": 0.5, "expectedHeightPx": 1
@@ -202,6 +213,11 @@
       "comment": "HEIGHT candidate decisive mid-range: height ratio 400/(736+64)=0.5 binds while the width ratio is 800/(336+64)=2.0 — pins that the height term participates in the min",
       "frameWidthPx": 336, "frameHeightPx": 736, "viewportWidth": 800, "viewportHeight": 400,
       "padding": 32, "expected": 0.5
+    },
+    {
+      "comment": "non-default padding 20 (not the 32 default): padded sides 800, width candidate 400/800=0.5 — substituting DEFAULT_PADDING would give 400/824=0.4854",
+      "frameWidthPx": 760, "frameHeightPx": 760, "viewportWidth": 400, "viewportHeight": 800,
+      "padding": 20, "expected": 0.5
     }
   ],
   "screenshotRotation": [
@@ -236,6 +252,26 @@
     {
       "comment": "square image counts as landscape (height > width is false) against portrait bounds -> code 1",
       "imageWidth": 1000, "imageHeight": 1000, "rootWidth": 1080, "rootHeight": 2340, "expected": 1
+    },
+    {
+      "comment": "square ROOT bounds count as landscape against a portrait screenshot -> code 3: pins strict rootHeight > rootWidth (a >= mutation flips this to 0)",
+      "imageWidth": 1080, "imageHeight": 2340, "rootWidth": 1000, "rootHeight": 1000, "expected": 3
+    },
+    {
+      "comment": "DECISIVE zero imageWidth: orientations would MISMATCH (portrait-by-height image, landscape bounds), so deleting the imageWidth guard clause changes the result to 3",
+      "imageWidth": 0, "imageHeight": 2340, "rootWidth": 2340, "rootHeight": 1080, "expected": 0
+    },
+    {
+      "comment": "DECISIVE zero imageHeight alone: landscape-by-default image vs portrait bounds, so deleting the imageHeight guard clause changes the result to 1",
+      "imageWidth": 2340, "imageHeight": 0, "rootWidth": 1080, "rootHeight": 2340, "expected": 0
+    },
+    {
+      "comment": "DECISIVE zero rootWidth alone: portrait-by-height bounds vs landscape image, so deleting the rootWidth guard clause changes the result to 1",
+      "imageWidth": 2340, "imageHeight": 1080, "rootWidth": 0, "rootHeight": 2340, "expected": 0
+    },
+    {
+      "comment": "DECISIVE zero rootHeight alone: landscape-by-default bounds vs portrait image, so deleting the rootHeight guard clause changes the result to 3",
+      "imageWidth": 1080, "imageHeight": 2340, "rootWidth": 1080, "rootHeight": 0, "expected": 0
     }
   ],
   "geometryPairing": [

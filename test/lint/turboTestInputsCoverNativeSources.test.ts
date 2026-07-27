@@ -66,6 +66,18 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     return JSON.parse(readFileSync(join(ROOT, "turbo.json"), "utf8")) as TurboConfig;
   }
 
+  /**
+   * Repo-relative form of an absolute path, ALWAYS forward-slashed (#4367 hazard class: Windows
+   * `path.join` produces backslashed absolutes, and every comparison downstream — the owner-file
+   * exclusion, glob coverage, exemption keys, reporting — is forward-slash-sensitive). Without
+   * this single choke-point normalization the owner exclusion fails on Windows, the scanner reads
+   * its own source, and the join-segment example in the scan's comment self-flags as a referenced
+   * native path.
+   */
+  function repoRelative(abs: string): string {
+    return abs.slice(ROOT.length + 1).replace(/\\/g, "/");
+  }
+
   for (const taskName of CACHED_TASKS) {
     describe(`tasks.${taskName}.inputs`, () => {
       test("declares every native source tree a guard reads", () => {
@@ -100,7 +112,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
         if (entry.isDirectory()) {
           walk(abs);
         } else if (entry.name.endsWith(".ts")) {
-          const rel = abs.slice(ROOT.length + 1);
+          const rel = repoRelative(abs);
           // Skip this guard itself: its REQUIRED_NATIVE_GLOBS and
           // NOT_READ_EXEMPTIONS literals would otherwise make every entry
           // trivially "referenced" by its own definition, so the stale-exemption
@@ -134,6 +146,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           // initially slipped past this lint (issue #4547 follow-up). Single-
           // segment reconstructions ("ios" alone) are skipped: they are always
           // temp-dir fixtures or prose, and the bare repo dir is never a read.
+          // Known regex miss cases (nested calls in join args, template
+          // literals, computed segments) are tracked in #4568 (AST promotion);
+          // REQUIRED_NATIVE_GLOBS still enforces every declared read meanwhile.
           for (const call of source.matchAll(/\bjoin\(([^)]*)\)/gs)) {
             const literals = [...call[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
             const start = literals.findIndex(l => l === "android" || l === "ios");
@@ -182,6 +197,22 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       `Native paths referenced by tests but neither a declared test input nor exempted:\n${uncovered.join("\n")}\n` +
         `Add a narrow glob to REQUIRED_NATIVE_GLOBS (and turbo.json) if a test reads it, or a NOT_READ_EXEMPTIONS entry if it does not.`
     ).toEqual([]);
+  });
+
+  test("#4367 hazard: a win32 backslashed absolute normalizes to the forward-slash owner path", () => {
+    // Deterministic reproduction of the Windows CI failure shape: path.join on win32 yields
+    // `ROOT\test\lint\...`, and without normalization `rel === GUARD_PATH` is false, so the
+    // scanner reads its own source and self-flags the join-segment example in its comments.
+    const winAbs = `${ROOT}\\test\\lint\\turboTestInputsCoverNativeSources.test.ts`;
+    expect(repoRelative(winAbs)).toBe(GUARD_PATH);
+  });
+
+  test("the scan never attributes a native path to its own owner file", () => {
+    // Belt to the normalization above: whatever the platform separator, the owner exclusion must
+    // hold — the guard's own comments deliberately contain scan-pattern examples.
+    for (const [path, tests] of referencedNativePaths()) {
+      expect([...tests], `${path} attributed to the scanner itself`).not.toContain(GUARD_PATH);
+    }
   });
 
   test("no not-read exemption is stale", () => {

@@ -62,6 +62,8 @@ class CoordinateMappingGoldenVectorTest {
       ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, 540f, 585f, 1080, 1170, 0),
       // Negative out of bounds: raw coordinates returned, never clamped.
       ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, -10f, -10f, -20, -20, 0),
+      // y-only out of bounds: x inside, y exactly at deviceHeight (exclusive).
+      ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, 270f, 1170f, 540, 2340, 0),
       // Far past the bottom-right edge.
       ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, 1000f, 2000f, 2000, 4000, 0),
       // Landscape device space (rotation-aligned upstream).
@@ -128,6 +130,8 @@ class CoordinateMappingGoldenVectorTest {
       FitToViewportVector(2160, 1080, 1200f, 1200f, 32f, 1136f, 568f),
       // Unknown image width falls back to aspect ratio 2.16.
       FitToViewportVector(0, 0, 800f, 800f, 32f, 340.7407f, 736f),
+      // Non-default padding 10: height-constrained 390x780 (default padding would give 368x736).
+      FitToViewportVector(1080, 2160, 800f, 800f, 10f, 390f, 780f),
       // Tiny viewport: max frame sides coerce to the 1px floor.
       FitToViewportVector(1080, 2160, 10f, 10f, 32f, 0.5f, 1f),
     )
@@ -151,6 +155,8 @@ class CoordinateMappingGoldenVectorTest {
       FitScaleVector(736f, 736f, 400f, 800f, 32f, 0.5f),
       // HEIGHT candidate decisive mid-range: 400/(736+64)=0.5 binds; width candidate is 2.0.
       FitScaleVector(336f, 736f, 800f, 400f, 32f, 0.5f),
+      // Non-default padding 20: 400/(760+40)=0.5 (default padding would give 400/824=0.4854).
+      FitScaleVector(760f, 760f, 400f, 800f, 20f, 0.5f),
     )
 
   private data class ScreenshotRotationVector(
@@ -179,6 +185,16 @@ class CoordinateMappingGoldenVectorTest {
       ScreenshotRotationVector(1170, 2532, 390, 844, 0),
       // Square image counts as landscape against portrait bounds.
       ScreenshotRotationVector(1000, 1000, 1080, 2340, 1),
+      // Square ROOT bounds count as landscape against a portrait screenshot (strict >).
+      ScreenshotRotationVector(1080, 2340, 1000, 1000, 3),
+      // Decisive zero imageWidth: orientations would mismatch without the guard.
+      ScreenshotRotationVector(0, 2340, 2340, 1080, 0),
+      // Decisive zero imageHeight alone.
+      ScreenshotRotationVector(2340, 0, 1080, 2340, 0),
+      // Decisive zero rootWidth alone.
+      ScreenshotRotationVector(2340, 1080, 0, 2340, 0),
+      // Decisive zero rootHeight alone.
+      ScreenshotRotationVector(1080, 2340, 1080, 0, 0),
     )
 
   private fun geometry(vector: ViewportToDeviceVector) =

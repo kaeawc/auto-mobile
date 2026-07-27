@@ -73,6 +73,29 @@ class DeviceControlBlockedNoticeUiTest {
   }
 
   @Test
+  fun `a reason change after the notice is visible re-debounces the new reason`() =
+    runComposeUiTest {
+      mainClock.autoAdvance = false
+      var reason by mutableStateOf<DeviceControlBlockReason?>(DeviceControlBlockReason.StaleFrame)
+      setContent { MaterialTheme { DeviceControlBlockedNotice(reason = reason) } }
+      val staleText = deviceControlBlockReasonText(DeviceControlBlockReason.StaleFrame)!!
+      val unpairedText = deviceControlBlockReasonText(DeviceControlBlockReason.UnpairedHierarchy)!!
+
+      mainClock.advanceTimeBy(holdMs * 2)
+      onNodeWithText(staleText).assertIsDisplayed()
+
+      // The replacement must not inherit the shown reason's completed hold: only text the hold
+      // effect committed is rendered, so the new reason waits out its own full hold.
+      reason = DeviceControlBlockReason.UnpairedHierarchy
+      mainClock.advanceTimeBy(holdMs / 2)
+      onNodeWithText(staleText).assertDoesNotExist()
+      onNodeWithText(unpairedText).assertDoesNotExist()
+
+      mainClock.advanceTimeBy(holdMs)
+      onNodeWithText(unpairedText).assertIsDisplayed()
+    }
+
+  @Test
   fun `notice hides as soon as the reason clears`() = runComposeUiTest {
     mainClock.autoAdvance = false
     var reason by mutableStateOf<DeviceControlBlockReason?>(DeviceControlBlockReason.StaleFrame)

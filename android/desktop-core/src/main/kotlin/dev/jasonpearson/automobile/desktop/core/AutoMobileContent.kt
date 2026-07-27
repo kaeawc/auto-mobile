@@ -99,6 +99,7 @@ import dev.jasonpearson.automobile.desktop.core.failures.McpFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.StreamingFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.TimeAggregation
 import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlBlockedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlTapErrorBanner
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotMetadataOverlay
@@ -155,6 +156,7 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
+import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import dev.jasonpearson.automobile.desktop.domain.LiveFrameFacts
@@ -1698,6 +1700,21 @@ fun AutoMobileContent(
               format = layoutInspectorState.screenshotFormat,
               captureSource = layoutInspectorState.screenshotCaptureSource,
               modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            )
+
+            // Why control is unavailable (issue #3490). The policy's reason is surfaced only when
+            // no interaction snapshot exists — while a post-input refresh retains one, clicks
+            // still actuate the device, so a "blocked" notice would contradict what the user
+            // experiences. The notice itself debounces, so the transient reasons that come and go
+            // during normal streaming never flicker into view.
+            DeviceControlBlockedNotice(
+              reason =
+                if (controlSnapshot == null) {
+                  (deviceControlDecision as? DeviceControlDecision.Blocked)?.reason
+                } else {
+                  null
+                },
+              modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
             )
 
             deviceControlTapError?.let { message ->

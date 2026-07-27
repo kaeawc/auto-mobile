@@ -35,9 +35,14 @@ public enum class DeviceScreenControlMode {
 public data class ViewportPoint(val x: Float, val y: Float)
 
 /**
- * A point in device coordinates: the same coordinate space as [ElementBounds] (Android device
- * pixels, or iOS logical points). [inBounds] reports whether the point falls inside the device
- * screen rectangle `[0, deviceWidth) x
+ * A point in device coordinates: the same coordinate space as [ElementBounds], whatever that frame
+ * declared. There is ONE unit on both platforms — canonical physical pixels — whenever the frame
+ * carries [CoordinateSpace.Pixels]; a frame that declares nothing is the legacy fallback, where iOS
+ * bounds (and therefore these points) are logical points. Either way this is the unit the daemon's
+ * `input/tap` and `input/swipe` endpoints take, so a client forwards the coordinate unchanged and
+ * never converts.
+ *
+ * [inBounds] reports whether the point falls inside the device screen rectangle `[0, deviceWidth) x
  * [0, deviceHeight)`. Callers that must not act outside the screen (e.g. sending a tap) should reject when `!inBounds` or use [clampedTo].
  */
 public data class DevicePoint(val x: Int, val y: Int, val inBounds: Boolean) {

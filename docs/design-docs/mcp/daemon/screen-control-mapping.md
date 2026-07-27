@@ -49,11 +49,36 @@ Wiring that to `inputTap`/`inputSwipe`/`inputPressButton`/`inputTypeText`/
 | --- | --- | --- |
 | **Viewport** | top-left of the rendered canvas | canvas pixels, before pan/zoom are removed |
 | **Frame** | top-left of the fitted device frame | frame pixels at zoom 1.0 |
-| **Device** | top-left of the device screen | same space as hierarchy `bounds` — Android device pixels, or iOS logical points |
+| **Device** | top-left of the device screen | same space as hierarchy `bounds` — **canonical physical pixels** |
 
 Device coordinates share the hierarchy `bounds` coordinate system, so a mapped
 point can be handed directly to element hit-testing (inspector) or to the daemon
 input helpers (control).
+
+### One unit, both platforms
+
+There is **one** device unit and it is the same on Android and iOS: physical
+pixels in the current device orientation. A message that carries
+`coordinateSpace: "px"` states this explicitly for its `bounds` and its
+`screenWidth`/`screenHeight`, and the daemon accepts pixels on `input/tap` and
+`input/swipe` for that device. **A client author needs no platform-specific unit
+knowledge**: read the numbers, map them with the formulas below, send them back.
+Nothing on this page branches on the platform.
+
+The daemon does the platform work internally. iOS runners report logical points,
+so the daemon multiplies by the runner-reported `nativeScale` when publishing and
+divides by it (exactly, without rounding) when dispatching input. Android runners
+are already physical pixels (`nativeScale` 1), so its conversion is the identity.
+
+> **Legacy fallback.** A message with **no** `coordinateSpace` comes from a daemon
+> or runner that predates canonical pixels ([#4548](https://github.com/kaeawc/auto-mobile/issues/4548)).
+> There, and only there, iOS `bounds` are logical points while the screenshot is
+> pixels, so the two are not directly comparable and input coordinates are passed
+> through untouched. Everything in this document still applies — the mapping
+> formulas are ratio-based and unit-agnostic — but a client must not compare the
+> frame's absolute dimensions against the bounds' (see
+> [Client Frame Snapshot](client-frame-snapshot.md#coordinate-space-canonical-pixels)).
+> Never infer pixels from a missing field.
 
 ## Rendering pipeline
 
@@ -145,9 +170,10 @@ means the same thing regardless of the client's zoom level: a viewport-space
 threshold would send a swipe for one hand movement at one zoom and not at
 another, and would let a few pixels of pointer jitter become a large device
 gesture when zoomed out. `24` sits just above the platforms' own touch slop
-(Android's 8dp is ~24px at the ~3x density of a 1080p-class phone; iOS's is ~10
-logical points), so any forwarded swipe is one the device itself reads as a drag
-rather than as a tap.
+expressed in physical pixels: Android's 8dp is ~24px at the ~3x density of a
+1080p-class phone, and iOS's ~10 logical points is ~20-30px at 2x-3x. So any
+forwarded swipe is one the device itself reads as a drag rather than as a tap, on
+either platform, with no per-platform threshold.
 
 A below-threshold drag is **not** promoted to a tap. Actuating an input the user
 did not ask for is worse than ignoring an ambiguous one, and a click that barely
@@ -499,6 +525,15 @@ The mapper is pure Kotlin with no Compose or daemon dependency, so it is unit
 tested directly (`DeviceScreenCoordinateMapperTest`) without rendering a device
 or opening a socket: scale, pan, aspect fit, rotation detection, rounding,
 out-of-bounds, round-trip, and the inspector selection/deselection path.
+
+The unit change is pinned from both ends. `DeviceControlPolicyTest` asserts that
+the *same* geometry pair is rejected under `coordinateSpace: "px"` and accepted
+without it, that the rotation transpose still passes in exact mode, and that a
+declaration on only one of the two messages falls back to the legacy comparison.
+`CanonicalPixelClientMigrationTest` pins the inspector side: overlay placement,
+hit-testing and rotation detection all come out identical whether bounds arrive as
+iOS points or as the same screen's canonical pixels, because every mapping ratio
+has hierarchy geometry on both sides.
 
 The drag policy is likewise pure and unit tested directly
 (`DeviceDragGesturePolicyTest`), pinning the threshold from **both** sides — one

@@ -123,12 +123,13 @@ public class TouchFeedbackModel(
    *   — a marker near the old bottom edge maps below the new frame.
    *
    * Both are caught by one rule: retain a marker only while its captured aspect matches the current
-   * aspect within [ASPECT_TOLERANCE] (relative, matching [DeviceControlPolicy]'s
-   * geometry-consistency tolerance). An equal-aspect resolution change (1080x2340 -> 720x1560)
-   * passes and keeps its pulses — that is exactly what the captured bounds already handle. A
-   * transient 600ms marker is not worth transforming across a reshape, and a stale-shaped pulse is
-   * worse than none — so it is simply dropped. Non-positive current dimensions describe no drawable
-   * frame, so every pulse is dropped.
+   * aspect within [ASPECT_TOLERANCE]. This is aspect-based for its own reason — both dimensions
+   * here come from frame snapshots and are therefore always the same unit, so it is unrelated to
+   * (and unaffected by) the legacy unit tolerance in [DeviceControlPolicy.isGeometryConsistent]. An
+   * equal-aspect resolution change (1080x2340 -> 720x1560) passes and keeps its pulses — that is
+   * exactly what the captured bounds already handle. A transient 600ms marker is not worth
+   * transforming across a reshape, and a stale-shaped pulse is worse than none — so it is simply
+   * dropped. Non-positive current dimensions describe no drawable frame, so every pulse is dropped.
    */
   public fun retainOnlyMatchingAspect(deviceWidth: Int, deviceHeight: Int) {
     if (deviceWidth <= 0 || deviceHeight <= 0) {
@@ -171,10 +172,10 @@ public class TouchFeedbackModel(
     public const val MAX_MARKERS: Int = 8
 
     /**
-     * Relative aspect-ratio tolerance for [retainOnlyMatchingAspect]. Matches
-     * `DeviceControlPolicy.GEOMETRY_ASPECT_TOLERANCE` (5%), so "the frame still has the shape the
-     * marker was captured against" means the same thing here as it does for the control gate's
-     * geometry-consistency check.
+     * Relative aspect-ratio tolerance for [retainOnlyMatchingAspect]: how far the frame may reshape
+     * before a pulse captured against the old shape is dropped rather than drawn in the wrong
+     * place. 5%, numerically the same as the control gate's legacy aspect tolerance but independent
+     * of it — see [retainOnlyMatchingAspect] for why this one is not a units concession.
      */
     public const val ASPECT_TOLERANCE: Float = 0.05f
   }

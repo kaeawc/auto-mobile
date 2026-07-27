@@ -35,6 +35,10 @@ public enum class DeviceFrameSource {
  *   renders, and pulling bytes from newest-independent state would put new pixels on screen against
  *   the retained hierarchy — the half-updated frame this whole mechanism exists to prevent.
  *   Compared by identity, never by content (see [DeviceFrameSnapshot]).
+ * @param coordinateSpace the unit [width]/[height] are expressed in, as the daemon declared it
+ *   (issue #4550). [CoordinateSpace.Pixels] when the message carried `coordinateSpace: "px"`; null
+ *   for a legacy frame that declared nothing. Travels per message rather than per session because
+ *   the declaration is per message: a runner can start reporting scale metadata mid-stream.
  */
 public data class ScreenshotFrameFacts(
   val deviceId: String?,
@@ -44,6 +48,7 @@ public data class ScreenshotFrameFacts(
   val width: Int,
   val height: Int,
   val data: ByteArray?,
+  val coordinateSpace: CoordinateSpace? = null,
 ) {
   // ByteArray uses reference equality, which would make every copy of an otherwise-identical facts
   // object unequal. Identity is exactly what we want here — a snapshot is tied to the specific
@@ -58,7 +63,8 @@ public data class ScreenshotFrameFacts(
       receivedAtMs == other.receivedAtMs &&
       width == other.width &&
       height == other.height &&
-      data === other.data
+      data === other.data &&
+      coordinateSpace == other.coordinateSpace
   }
 
   override fun hashCode(): Int {
@@ -69,6 +75,7 @@ public data class ScreenshotFrameFacts(
     result = 31 * result + width
     result = 31 * result + height
     result = 31 * result + System.identityHashCode(data)
+    result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
     return result
   }
 }
@@ -83,6 +90,11 @@ public data class ScreenshotFrameFacts(
  * @param rootWidth hierarchy root bounds width, or 0 when the root has no explicit bounds (the
  *   common Android accessibility-service case).
  * @param rootHeight hierarchy root bounds height, or 0 as above.
+ * @param coordinateSpace the unit this update's element `bounds` (and therefore
+ *   [rootWidth]/[rootHeight]) are expressed in; see
+ *   [ScreenshotFrameFacts.coordinateSpace][ScreenshotFrameFacts]. Only when this AND the paired
+ *   screenshot both declare [CoordinateSpace.Pixels] do the two describe one unit, which is the
+ *   precondition [DeviceControlPolicy] requires before comparing absolute dimensions.
  */
 public data class HierarchyFrameFacts(
   val deviceId: String?,
@@ -92,6 +104,7 @@ public data class HierarchyFrameFacts(
   val hierarchy: ParsedHierarchy?,
   val rootWidth: Int,
   val rootHeight: Int,
+  val coordinateSpace: CoordinateSpace? = null,
 )
 
 /**

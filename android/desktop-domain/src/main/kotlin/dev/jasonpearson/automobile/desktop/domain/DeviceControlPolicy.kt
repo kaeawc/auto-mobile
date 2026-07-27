@@ -120,7 +120,12 @@ public object DeviceControlPolicy {
    */
   public const val LIVE_FRAME_MAX_AGE_MS: Long = 1_000L
 
-  /** Relative aspect-ratio tolerance for [isGeometryConsistent]. */
+  /**
+   * Relative aspect-ratio tolerance for the LEGACY branch of [isGeometryConsistent].
+   *
+   * Only reachable for frames that declare no [CoordinateSpace]; a `"px"` frame is compared
+   * exactly. See [isGeometryConsistent] for why the tolerance existed at all.
+   */
   private const val GEOMETRY_ASPECT_TOLERANCE = 0.05f
 
   /**
@@ -169,9 +174,12 @@ public object DeviceControlPolicy {
     // Elapsed time cannot do this job. After an aspect-preserving resolution change
     // (1080x2340 -> 720x1560) the new screenshot and the not-yet-applied older hierarchy are
     // milliseconds apart and identical in aspect, so any window wide enough for normal streaming
-    // also admits the mis-scaled pair. Neither can a dimension comparison: on iOS the reported
-    // screen size is a uniform scale of the hierarchy's point-space bounds, indistinguishable from
-    // a uniform resolution change.
+    // also admits the mis-scaled pair.
+    //
+    // Neither can a dimension comparison, at any strictness. Canonical pixels do make the exact
+    // comparison below meaningful, and it does reject a resolution change — but two captures of
+    // DIFFERENT content at the SAME resolution are dimensionally identical, and that is the
+    // ordinary case (navigation). Identity is the only thing that separates them.
     //
     // The messages' `timestamp` fields are deliberately unused: the hierarchy's originates on the
     // DEVICE (its own wall clock, forwarded unchanged) while the screenshot's is stamped by the
@@ -210,10 +218,13 @@ public object DeviceControlPolicy {
       // a center click is then sent as (540,1170) instead of (360,780).
       //
       // So require the mirror's pixels to match the mapping bounds EXACTLY. That excludes a scale
-      // change, which is the whole failure mode. Where the platform makes an exact match
-      // impossible — iOS reports hierarchy bounds in logical points against pixel frames — control
-      // is blocked rather than accepting an unverifiable pair. Losing control while mirroring is
-      // acceptable; sending a mis-scaled tap to real hardware is not.
+      // change, which is the whole failure mode. This check has always been exact and is unchanged
+      // by canonical pixels — what canonical pixels changed is that it can now SUCCEED on iOS. A
+      // px-space hierarchy reports the same physical pixels the mirror decodes, so an iOS live
+      // frame matches its mapping bounds instead of being permanently unverifiable against
+      // point-space bounds. A legacy (undeclared) iOS frame still fails here, and blocking is
+      // still the right answer for it: losing control while mirroring is acceptable, sending a
+      // mis-scaled tap to real hardware is not.
       //
       // Giving live frames a real identity needs WebRTC-side plumbing; tracked under #1099.
       if (frameWidth != deviceWidth || frameHeight != deviceHeight) {
@@ -228,6 +239,7 @@ public object DeviceControlPolicy {
         // A polled screenshot may arrive in native pixel orientation (notably iOS) and the renderer
         // rotates it, so an orientation difference there is expected.
         allowRotation = true,
+        coordinateSpace = pairedCoordinateSpace(screenshot, hierarchy),
       )
     ) {
       return blocked(DeviceControlBlockReason.GeometryMismatch)
@@ -278,19 +290,46 @@ public object DeviceControlPolicy {
   }
 
   /**
+   * The coordinate space the screenshot and the hierarchy AGREE on, or null when they do not
+   * (issue #4550).
+   *
+   * All-or-nothing on purpose, matching the daemon's own rule: a comparison between the two
+   * messages' dimensions is only meaningful when both are the same unit, and one declared `"px"`
+   * message paired with one undeclared message is exactly the mixed-unit state the exact check must
+   * not be applied to. In practice the two travel together — the daemon binds a screenshot's
+   * declaration at request initiation from the hierarchy that was current — so a disagreement means
+   * a transition is in flight, and a transition should take the conservative path.
+   */
+  private fun pairedCoordinateSpace(
+    screenshot: ScreenshotFrameFacts,
+    hierarchy: HierarchyFrameFacts,
+  ): CoordinateSpace? =
+    screenshot.coordinateSpace.takeIf { it != null && it == hierarchy.coordinateSpace }
+
+  /**
    * Whether the displayed frame and the effective device bounds used for mapping describe a
    * geometrically-consistent view of the same screen. A renderer fits the displayed frame by its
-   * own aspect ratio while mapping clicks through the device bounds, so disagreeing aspect ratios
-   * mean a tap is scaled wrong. Aspect ratios must agree within [GEOMETRY_ASPECT_TOLERANCE].
+   * own aspect ratio while mapping clicks through the device bounds, so disagreeing geometry means
+   * a tap is scaled wrong.
    *
-   * Absolute dimensions are deliberately *not* compared: a screenshot may be a downscale of the
-   * device screen, and iOS hierarchy bounds are logical points against pixel screenshots. That is
-   * precisely why this check alone cannot catch an equal-aspect resolution change — provenance
-   * pairing does that.
+   * There are two comparison modes, selected by [coordinateSpace] — the space the frame and the
+   * bounds were BOTH declared in (see [pairedCoordinateSpace]):
+   * - **[CoordinateSpace.Pixels] — exact.** Both sides are canonical physical pixels, one unit, so
+   *   absolute dimensions must be EQUAL. The rotation swap is still accepted, because it is a real
+   *   property of the pixels rather than a units artifact: a polled screenshot can arrive in native
+   *   portrait orientation while the bounds are display-oriented, and the renderer rotates it.
+   *   Nothing else is: a downscale, a resolution change, and a stale-bounds pair are all rejected,
+   *   where an aspect check would accept every one of them.
+   * - **`null` — LEGACY aspect-only fallback**, for a daemon (or a pre-#4548 runner) that declares
+   *   no space. There, iOS hierarchy bounds are logical points against a pixel screenshot, so the
+   *   two sides are a uniform scale apart by construction and absolute dimensions are simply not
+   *   comparable. All that can be checked is that the aspect ratios agree within
+   *   [GEOMETRY_ASPECT_TOLERANCE] — which is why this path cannot catch an equal-aspect resolution
+   *   change, and why provenance pairing exists. Retained only for those frames; do not extend it.
    *
-   * A non-positive displayed dimension (no frame yet) is inconsistent. Non-positive device
-   * dimensions mean neither source reported a size, in which case the renderer falls back to the
-   * displayed frame itself and the two are consistent by construction.
+   * A non-positive displayed dimension (no frame yet) is inconsistent in both modes. Non-positive
+   * device dimensions mean neither source reported a size, in which case the renderer falls back to
+   * the displayed frame itself and the two are consistent by construction.
    */
   public fun isGeometryConsistent(
     frameWidth: Int,
@@ -298,9 +337,15 @@ public object DeviceControlPolicy {
     deviceWidth: Int,
     deviceHeight: Int,
     allowRotation: Boolean = true,
+    coordinateSpace: CoordinateSpace? = null,
   ): Boolean {
     if (frameWidth <= 0 || frameHeight <= 0) return false
     if (deviceWidth <= 0 || deviceHeight <= 0) return true
+    if (coordinateSpace == CoordinateSpace.Pixels) {
+      val matchesExactly = frameWidth == deviceWidth && frameHeight == deviceHeight
+      if (!allowRotation) return matchesExactly
+      return matchesExactly || (frameWidth == deviceHeight && frameHeight == deviceWidth)
+    }
     val frameAspect = frameWidth.toFloat() / frameHeight.toFloat()
     val deviceAspect = deviceWidth.toFloat() / deviceHeight.toFloat()
     val matchesDirect = abs(frameAspect - deviceAspect) <= GEOMETRY_ASPECT_TOLERANCE * deviceAspect

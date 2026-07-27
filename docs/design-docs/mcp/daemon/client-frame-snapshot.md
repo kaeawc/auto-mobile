@@ -99,7 +99,7 @@ and unit-testable without a device.
 | Both messages carry a `captureSequence` at all | Older daemons do not stamp one; control fails closed rather than guessing |
 | `now - screenshot.receivedAt <= 5000 ms` | The daemon may stop pushing without disconnecting |
 | `now - liveFrame.receivedAt <= 1000 ms` (when a live frame is displayed) | **Recency** — this is what catches the stalled mirror |
-| Displayed **screenshot** and mapping bounds agree in aspect (rotation-tolerant) | A screenshot may be a downscale, and a legacy (no `coordinateSpace`) frame reports iOS pixels against point-space bounds — see [Coordinate space](#coordinate-space-canonical-pixels) |
+| Displayed **screenshot** and mapping bounds agree — **exactly** (rotation-tolerant) when both messages declare `coordinateSpace: "px"`, **in aspect** (±5%) when they do not | One unit means absolute dimensions are comparable; a legacy frame reports iOS pixels against point-space bounds and cannot be — see [Coordinate space](#coordinate-space-canonical-pixels) |
 | Displayed **live mirror frame** matches the mapping bounds EXACTLY | See below — an aspect check would accept a scale change |
 
 ### Coordinate space: canonical pixels
@@ -122,9 +122,17 @@ compare absolute dimensions exactly. On the input side, a client that renders a
 `"px"` frame sends `input/*` coordinates in **pixels**; the daemon divides by
 `nativeScale` (an exact fractional quotient — the runner takes `Double` points)
 before dispatching to the iOS runner, so the physical tap location is unchanged.
-(The desktop client's
-migration to exact px checks is issue
-[#4550](https://github.com/kaeawc/auto-mobile/issues/4550); #4549 ships the field.)
+The two comparison modes are all-or-nothing per snapshot: the exact check runs
+only when the screenshot **and** the hierarchy both declare `"px"`. One declared
+message paired with one undeclared message is precisely the mixed-unit state the
+exact check must not be applied to, so it takes the legacy path
+([#4550](https://github.com/kaeawc/auto-mobile/issues/4550)).
+
+One consequence worth calling out: a **live mirror** frame on iOS is verifiable
+again. The live-frame check below has always demanded an exact match, which a
+point-space hierarchy could never satisfy against pixel mirror frames; published
+in pixels, the mirror matches its mapping bounds and control stays available
+while mirroring.
 
 ### Pairing is identity, never elapsed time
 
@@ -180,9 +188,11 @@ Two things that look like they would work, and do not:
   clock: a hierarchy's originates on the **device** (its own wall clock, forwarded
   unchanged) while a screenshot's is stamped by the **daemon**, so their difference
   is dominated by clock skew. Treat `timestamp` as display-only.
-- **Comparing absolute dimensions.** A screenshot may be a downscale of the device
-  screen, and iOS reports screen size in pixels against hierarchy bounds in logical
-  points — a uniform scale that is indistinguishable from a uniform resolution
+- **Comparing absolute dimensions.** Even under canonical pixels, where the
+  comparison *is* exact, two captures of different content at the same resolution
+  are dimensionally identical — and that is the ordinary case. In the legacy space
+  it is weaker still: iOS reports screen size in pixels against hierarchy bounds in
+  logical points, a uniform scale indistinguishable from a uniform resolution
   change.
 
 The only time values this policy compares are **client-stamped receive instants
@@ -208,10 +218,12 @@ and a center click is then sent as (540,1170) instead of (360,780).
 
 A client displaying a live mirror frame must therefore require its dimensions to
 match the mapping bounds **exactly**, which is the only thing that excludes a
-scale change. Where the platform makes that impossible — iOS reports hierarchy
-bounds in logical points against pixel frames — control is **blocked** rather
-than acting on an unverifiable pair. Losing control while mirroring is
-acceptable; sending a mis-scaled tap to real hardware is not. Giving live frames
+scale change. Under `coordinateSpace: "px"` that match is achievable on both
+platforms: the hierarchy reports the same physical pixels the mirror decodes. In
+the **legacy** space it is not — iOS reports hierarchy bounds in logical points
+against pixel frames — and there control is **blocked** rather than acting on an
+unverifiable pair. Losing control while mirroring is acceptable; sending a
+mis-scaled tap to real hardware is not. Giving live frames
 a real capture identity needs WebRTC-side plumbing, tracked under
 [#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
 

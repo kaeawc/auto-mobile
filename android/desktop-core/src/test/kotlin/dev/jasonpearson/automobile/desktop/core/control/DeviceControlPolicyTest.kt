@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
@@ -351,12 +352,15 @@ class DeviceControlPolicyTest {
     assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(screenshot = stale)))
   }
 
-  // ---- Geometry cross-check (retained for the live path) --------------------
+  // ---- Geometry cross-check: LEGACY aspect-only fallback --------------------
+  // These pin the behavior for frames that declare no coordinate space (a pre-#4548 runner). The
+  // px-mode exact checks are in the canonical-pixels section at the bottom of this file.
 
   @Test
-  fun `geometry consistent up to rotation and scale for a polled screenshot`() {
-    // iOS: screenshot in device pixels, hierarchy in logical points at 3x, rotated 90 degrees. The
-    // renderer rotates the screenshot, so this must NOT disable control.
+  fun `legacy geometry is consistent up to rotation and scale for a polled screenshot`() {
+    // The mixed-unit shape canonical pixels replaced: screenshot in device pixels, hierarchy in
+    // logical points at 3x, rotated 90 degrees. Absolute dimensions are simply not comparable
+    // here, so the aspect-only tolerance is all this path has — and it must NOT disable control.
     assert(
       DeviceControlPolicy.isGeometryConsistent(
         frameWidth = 2340,
@@ -368,7 +372,7 @@ class DeviceControlPolicyTest {
   }
 
   @Test
-  fun `geometry inconsistent when aspect ratios disagree beyond rotation`() {
+  fun `legacy geometry is inconsistent when aspect ratios disagree beyond rotation`() {
     assert(
       !DeviceControlPolicy.isGeometryConsistent(
         frameWidth = 1920,
@@ -400,9 +404,11 @@ class DeviceControlPolicyTest {
   }
 
   @Test
-  fun `a live frame in logical points against pixel bounds is blocked, not accepted`() {
-    // The iOS shape: hierarchy bounds in points, mirror pixels at 3x. An exact match is impossible
-    // here, so control is unavailable while mirroring rather than acting on an unverifiable pair.
+  fun `a legacy live frame in logical points against pixel bounds is blocked, not accepted`() {
+    // The LEGACY iOS shape (no declared coordinate space): hierarchy bounds in points, mirror
+    // pixels at 3x. An exact match is impossible here, so control is unavailable while mirroring
+    // rather than acting on an unverifiable pair. Under `"px"` the same mirror now matches — see
+    // `an iOS live mirror frame becomes verifiable once the hierarchy is published in pixels`.
     val points =
       LiveFrameFacts(
         deviceId = device,
@@ -460,5 +466,227 @@ class DeviceControlPolicyTest {
       )
     assertEquals(1080, snapshot.deviceWidth)
     assertEquals(2340, snapshot.deviceHeight)
+  }
+
+  // ---- Canonical pixels: exact vs legacy geometry (issue #4550) -------------
+
+  private fun screenshotFacts(width: Int, height: Int, coordinateSpace: CoordinateSpace?) =
+    ScreenshotFrameFacts(
+      deviceId = device,
+      sequence = 10L,
+      captureSequence = 7L,
+      receivedAtMs = 9_900L,
+      width = width,
+      height = height,
+      data = null,
+      coordinateSpace = coordinateSpace,
+    )
+
+  private fun hierarchyFacts(width: Int, height: Int, coordinateSpace: CoordinateSpace?) =
+    HierarchyFrameFacts(
+      deviceId = device,
+      sequence = 11L,
+      captureSequence = 7L,
+      receivedAtMs = 9_950L,
+      hierarchy = hierarchyOf(width, height),
+      rootWidth = width,
+      rootHeight = height,
+      coordinateSpace = coordinateSpace,
+    )
+
+  /**
+   * The whole point of the campaign, stated as one pair of assertions: the SAME geometry is
+   * rejected under `"px"` and accepted under the legacy declaration-less frame. A 720x1560 frame
+   * against 1080x2340 mapping bounds is an exact 2/3 uniform scale, so its aspect matches to the
+   * bit; only an absolute comparison can see it. Under px both sides are physical pixels, so the
+   * absolute comparison is meaningful and this pair cannot be anything but a mis-scale.
+   */
+  @Test
+  fun `px mode rejects an equal-aspect scale that the legacy tolerance accepts`() {
+    assertEquals(
+      DeviceControlBlockReason.GeometryMismatch,
+      blockedReason(
+        inputs(
+          screenshot = screenshotFacts(720, 1560, CoordinateSpace.Pixels),
+          hierarchy = hierarchyFacts(1080, 2340, CoordinateSpace.Pixels),
+        )
+      ),
+    )
+
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+          inputs(
+            screenshot = screenshotFacts(720, 1560, coordinateSpace = null),
+            hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
+          ),
+          now,
+        )
+        .snapshotOrNull,
+      "a legacy frame declares no unit, so absolute dimensions are not comparable and the " +
+        "aspect-only fallback must still accept this pair",
+    )
+  }
+
+  @Test
+  fun `px mode accepts a frame whose pixels equal the mapping bounds`() {
+    // iOS at 3x: 390x844 points published as 1170x2532 pixels, and the screenshot is the same
+    // 1170x2532 PNG. Before canonical pixels these two could only be compared by aspect.
+    val snapshot =
+      assertNotNull(
+        DeviceControlPolicy.evaluate(
+            inputs(
+              screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
+              hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels),
+            ),
+            now,
+          )
+          .snapshotOrNull
+      )
+    assertEquals(1170, snapshot.deviceWidth)
+    assertEquals(2532, snapshot.deviceHeight)
+  }
+
+  @Test
+  fun `px mode keeps the rotation swap for a native-portrait screenshot`() {
+    // The swap is a real property of the pixels, not a units artifact: a polled screenshot can
+    // arrive in native portrait orientation against display-oriented bounds, and the renderer
+    // rotates it. Exact comparison must not break landscape control.
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+          inputs(
+            screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
+            hierarchy = hierarchyFacts(2532, 1170, CoordinateSpace.Pixels),
+          ),
+          now,
+        )
+        .snapshotOrNull
+    )
+  }
+
+  @Test
+  fun `px mode rejects a swap that is not the exact transpose`() {
+    // The rotation allowance is exactly ONE alternative — the transpose. A near-transpose is a
+    // different screen, and the legacy tolerance would have accepted it as "close enough".
+    assertEquals(
+      DeviceControlBlockReason.GeometryMismatch,
+      blockedReason(
+        inputs(
+          screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
+          hierarchy = hierarchyFacts(2534, 1172, CoordinateSpace.Pixels),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `a declaration on only one of the two messages falls back to the legacy comparison`() {
+    // All-or-nothing: one declared message paired with one undeclared message is exactly the
+    // mixed-unit state the exact comparison must not be applied to. The daemon binds the two
+    // together, so a disagreement means a transition is in flight — take the conservative path.
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+          inputs(
+            screenshot = screenshotFacts(720, 1560, CoordinateSpace.Pixels),
+            hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
+          ),
+          now,
+        )
+        .snapshotOrNull,
+      "screenshot declared px, hierarchy did not",
+    )
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+          inputs(
+            screenshot = screenshotFacts(720, 1560, coordinateSpace = null),
+            hierarchy = hierarchyFacts(1080, 2340, CoordinateSpace.Pixels),
+          ),
+          now,
+        )
+        .snapshotOrNull,
+      "hierarchy declared px, screenshot did not",
+    )
+  }
+
+  @Test
+  fun `an iOS live mirror frame becomes verifiable once the hierarchy is published in pixels`() {
+    // The carve-out this campaign retires. In point-space the mirror decoded 1170x2532 pixels
+    // against 390x844 mapping bounds, so the exact live-frame check could never pass and iOS lost
+    // control whenever a live mirror was displayed. Published in pixels, the same frame matches.
+    val mirror =
+      LiveFrameFacts(
+        deviceId = device,
+        sequence = 905L,
+        receivedAtMs = now - 50L,
+        width = 1170,
+        height = 2532,
+      )
+    val snapshot =
+      assertNotNull(
+        DeviceControlPolicy.evaluate(
+            inputs(
+              screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
+              hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels),
+              liveFrame = mirror,
+            ),
+            now,
+          )
+          .snapshotOrNull
+      )
+    assertEquals(DeviceFrameSource.LiveVideo, snapshot.source)
+  }
+
+  @Test
+  fun `isGeometryConsistent compares exactly only when told the space is pixels`() {
+    // The pure function, exercised directly on the one input that separates the two modes.
+    assert(
+      DeviceControlPolicy.isGeometryConsistent(
+        frameWidth = 720,
+        frameHeight = 1560,
+        deviceWidth = 1080,
+        deviceHeight = 2340,
+        coordinateSpace = null,
+      )
+    )
+    assert(
+      !DeviceControlPolicy.isGeometryConsistent(
+        frameWidth = 720,
+        frameHeight = 1560,
+        deviceWidth = 1080,
+        deviceHeight = 2340,
+        coordinateSpace = CoordinateSpace.Pixels,
+      )
+    )
+    // allowRotation still gates the transpose in exact mode.
+    assert(
+      !DeviceControlPolicy.isGeometryConsistent(
+        frameWidth = 2340,
+        frameHeight = 1080,
+        deviceWidth = 1080,
+        deviceHeight = 2340,
+        allowRotation = false,
+        coordinateSpace = CoordinateSpace.Pixels,
+      )
+    )
+    // Neither mode can judge a frame with no reported device bounds; the renderer falls back to the
+    // frame itself, so the two are consistent by construction.
+    assert(
+      DeviceControlPolicy.isGeometryConsistent(
+        frameWidth = 1170,
+        frameHeight = 2532,
+        deviceWidth = 0,
+        deviceHeight = 0,
+        coordinateSpace = CoordinateSpace.Pixels,
+      )
+    )
+  }
+
+  @Test
+  fun `an unrecognized wire space is read as legacy, never as pixels`() {
+    // A future daemon that declares a space this client does not know must degrade to the
+    // conservative path rather than be silently treated as pixels.
+    assertEquals(CoordinateSpace.Pixels, CoordinateSpace.fromWire("px"))
+    assertNull(CoordinateSpace.fromWire(null))
+    assertNull(CoordinateSpace.fromWire("pt"))
+    assertNull(CoordinateSpace.fromWire("PX"))
   }
 }

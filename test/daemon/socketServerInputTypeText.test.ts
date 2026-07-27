@@ -358,7 +358,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
@@ -447,11 +447,15 @@ describe("UnixSocketServer input/typeText", () => {
       ...androidDevice,
       transportId: "1",
     } as BootedDevice;
+    let bypassedAndroidDeviceListCache = false;
     PlatformDeviceManagerFactory.setInstance({
-      getBootedDevicesDetailed: async () => ({
-        devices: [discoveredDevice],
-        succeededPlatforms: new Set(["android"]),
-      }),
+      getBootedDevicesDetailed: async (_platform, options?: { bypassAndroidDeviceListCache?: boolean }) => {
+        bypassedAndroidDeviceListCache ||= options?.bypassAndroidDeviceListCache === true;
+        return {
+          devices: [discoveredDevice],
+          succeededPlatforms: new Set(["android"]),
+        };
+      },
     } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
@@ -474,6 +478,38 @@ describe("UnixSocketServer input/typeText", () => {
       ...androidDevice,
       transportId: "2",
     } as BootedDevice;
+    expect((await append()).success).toBe(true);
+
+    expect(factoryCalls).toBe(2);
+    expect(adb.probeCalls.length).toBe(2);
+    expect(bypassedAndroidDeviceListCache).toBe(true);
+  });
+
+  test("does not reuse append input when direct discovery omits transport identity", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ProductionShapedAdbExecutor(fakeTimer);
+    let factoryCalls = 0;
+    server.appendTextFactory = device => {
+      factoryCalls++;
+      return createAppendTextInput(device, adb, fakeTimer);
+    };
+    await server.start();
+
+    const append = () => sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "A",
+      mode: "append",
+    }, 1234);
+
+    expect((await append()).success).toBe(true);
     expect((await append()).success).toBe(true);
 
     expect(factoryCalls).toBe(2);

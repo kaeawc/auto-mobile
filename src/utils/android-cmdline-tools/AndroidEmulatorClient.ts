@@ -779,12 +779,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * must distinguish "no emulators are booted" from "adb discovery failed"
    * should use this.
    */
-  async getBootedDevicesChecked(onlyEmulators: boolean = false): Promise<BootedDevice[]> {
+  async getBootedDevicesChecked(
+    onlyEmulators: boolean = false,
+    options: { bypassDeviceListCache?: boolean } = {}
+  ): Promise<BootedDevice[]> {
     const perf = createGlobalPerformanceTracker();
     {
       const adb = this.adbFactory.create(null);
       perf.startOperation("adbDeviceScan");
-      const devices = await adb.getBootedAndroidDevices();
+      const devices = await adb.getBootedAndroidDevices({ bypassCache: options.bypassDeviceListCache });
       perf.endOperation("adbDeviceScan");
       const runningDevices: BootedDevice[] = [];
 
@@ -815,6 +818,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           // If we can't get the AVD name, just use the device ID
           logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
           runningDevices.push({
+            ...device,
             name: this.unknownEmulatorName(deviceId),
             platform: "android",
             deviceId: deviceId,

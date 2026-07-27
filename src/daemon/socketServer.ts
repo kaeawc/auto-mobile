@@ -983,7 +983,8 @@ export class UnixSocketServer {
       args.platform,
       args.deviceId,
       socketSessionId,
-      "input/typeText"
+      "input/typeText",
+      args.append
     );
     const inputResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
       const queueWaitMs = this.timer.now() - queueEnterMs;
@@ -1437,13 +1438,14 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key"
+    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key",
+    bypassAndroidDeviceListCache: boolean = false
   ): Promise<BootedDevice> {
-    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
-    if (!discovery.succeededPlatforms.has(platform)) {
-      throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
-    }
-    const bootedDevices = discovery.devices;
+    const bootedDevices = await this.discoverInputTargetDevices(
+      platform,
+      action,
+      bypassAndroidDeviceListCache
+    );
     if (deviceId) {
       const targetDevice = bootedDevices.find(device => device.deviceId === deviceId);
       if (!targetDevice) {
@@ -1475,6 +1477,20 @@ export class UnixSocketServer {
       throw new Error(`No booted ${platform} devices found for ${action}`);
     }
     throw new Error(`${action} requires deviceId when multiple ${platform} devices are booted`);
+  }
+
+  private async discoverInputTargetDevices(
+    platform: "android" | "ios",
+    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key",
+    bypassAndroidDeviceListCache: boolean
+  ): Promise<BootedDevice[]> {
+    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform, {
+      bypassAndroidDeviceListCache,
+    });
+    if (!discovery.succeededPlatforms.has(platform)) {
+      throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
+    }
+    return discovery.devices;
   }
 
   private async handleIdeRequest(
@@ -1666,8 +1682,8 @@ export class UnixSocketServer {
   private getAppendTextInput(device: BootedDevice): AppendTextInput {
     const existing = this.appendTextInputs.get(device.deviceId);
     if (
-      existing &&
-      (existing.transportId === undefined || device.transportId === undefined || existing.transportId === device.transportId)
+      existing?.transportId !== undefined &&
+      device.transportId === existing.transportId
     ) {
       return existing.input;
     }

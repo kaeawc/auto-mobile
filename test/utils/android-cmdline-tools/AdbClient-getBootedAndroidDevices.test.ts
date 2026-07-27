@@ -52,6 +52,25 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     ]);
   });
 
+  test("bypasses the device-list cache when checking a connection incarnation", async () => {
+    let calls = 0;
+    const adb = new AdbClient(null, async (command: string): Promise<ExecResult> => {
+      if (!command.includes("adb devices")) {
+        return createExecResult("");
+      }
+      calls++;
+      return createExecResult([
+        "List of devices attached",
+        `emulator-5554\tdevice transport_id:${calls}`,
+        "",
+      ].join("\n"));
+    });
+
+    expect(await adb.getBootedAndroidDevices()).toMatchObject([{ transportId: "1" }]);
+    expect(await adb.getBootedAndroidDevices({ bypassCache: true })).toMatchObject([{ transportId: "2" }]);
+    expect(calls).toBe(2);
+  });
+
   test("does not retry commands when adb reports the target serial is gone", async () => {
     let calls = 0;
     const execAsync = async (): Promise<ExecResult> => {

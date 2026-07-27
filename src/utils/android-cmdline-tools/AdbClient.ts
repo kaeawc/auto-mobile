@@ -780,14 +780,14 @@ export class AdbClient implements AdbExecutor {
    * Get the list of connected devices
    * @returns Promise with an array of device IDs
    */
-  async getBootedAndroidDevices(): Promise<BootedDevice[]> {
+  async getBootedAndroidDevices(options: { bypassCache?: boolean } = {}): Promise<BootedDevice[]> {
     if (this.shouldSkipMissingAdbProbe()) {
       return [];
     }
 
     // Check cache first - TTLCache handles expiration automatically
     const cache = getDeviceListCache();
-    const cachedDevices = cache.get("devices");
+    const cachedDevices = options.bypassCache ? undefined : cache.get("devices");
     if (cachedDevices) {
       logger.debug("Getting list of connected devices (cached)");
       return cachedDevices;

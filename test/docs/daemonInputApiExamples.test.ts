@@ -192,6 +192,15 @@ describe("daemon input API consumer docs", () => {
     expect(unixSocketApi).toContain("iOS simulators return clear unsupported errors for");
   });
 
+  test("documents the additive append-mode capability query without version gating", async () => {
+    const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
+
+    expect(unixSocketApi).toContain("### `daemon/capabilities`");
+    expect(unixSocketApi).toContain('"input/typeText.mode:append"');
+    expect(unixSocketApi).toContain("does not participate in version or build-identity gating");
+    expect(unixSocketApi).toContain("Unsupported daemon method: daemon/capabilities");
+  });
+
   test("documents pressButton values that the socket actually accepts", async () => {
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
 

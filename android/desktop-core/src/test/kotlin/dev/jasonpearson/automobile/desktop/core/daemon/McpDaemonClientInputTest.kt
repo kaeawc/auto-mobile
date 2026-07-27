@@ -214,6 +214,49 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `append mode queries capabilities once before sending input`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(resultJson = """{ "capabilities": ["input/typeText.mode:append"] }"""),
+            SocketResponse(resultJson = """{ "action": "input/typeText", "success": true }"""),
+            SocketResponse(resultJson = """{ "action": "input/typeText", "success": true }"""),
+          )
+      )
+      .use { server ->
+        val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
+
+        client.inputTypeText(text = "a", append = true)
+        client.inputTypeText(text = "b", append = true)
+
+        assertEquals(
+          listOf("daemon/capabilities", "input/typeText", "input/typeText"),
+          server.awaitRequests().map { it.method },
+        )
+        assertEquals(JsonPrimitive("append"), server.awaitRequests()[1].params["mode"])
+      }
+  }
+
+  @Test
+  fun `append mode stops before input when an older daemon has no capabilities endpoint`() {
+    TestDaemonSocket(error = "Unsupported daemon method: daemon/capabilities").use { server ->
+      val result =
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .inputTypeText(
+            text = "a",
+            append = true,
+          )
+
+      assertEquals("daemon/capabilities", server.awaitRequest().method)
+      assertEquals(false, result.success)
+      assertEquals(
+        "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device.",
+        result.error,
+      )
+    }
+  }
+
+  @Test
   fun `input helpers reject malformed success payloads`() {
     TestDaemonSocket(resultJson = "{}", error = null).use { server ->
       assertFailsWith<SerializationException> {
@@ -262,38 +305,42 @@ class McpDaemonClientInputTest {
   }
 
   private inner class TestDaemonSocket(
-    private val resultJson: String?,
-    private val error: String?,
+    resultJson: String? = null,
+    error: String? = null,
+    private val responses: List<SocketResponse> = listOf(SocketResponse(resultJson, error)),
   ) : AutoCloseable {
     private val tempDir = Files.createTempDirectory(Path.of("/tmp"), "amk-")
     val socketPath = tempDir.resolve("daemon.sock")
     private val serverChannel =
       ServerSocketChannel.open(StandardProtocolFamily.UNIX)
         .bind(UnixDomainSocketAddress.of(socketPath))
-    private var capturedRequest: CapturedDaemonRequest? = null
+    private val capturedRequests = mutableListOf<CapturedDaemonRequest>()
     private var failure: Throwable? = null
     private val thread = Thread {
       try {
-        serverChannel.accept().use { channel ->
-          val reader =
-            BufferedReader(
-              InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+        responses.forEach { response ->
+          serverChannel.accept().use { channel ->
+            val reader =
+              BufferedReader(
+                InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+              )
+            val writer =
+              BufferedWriter(
+                OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+              )
+            val requestLine = reader.readLine()
+            val request = json.parseToJsonElement(requestLine).jsonObject
+            capturedRequests.add(
+              CapturedDaemonRequest(
+                method = request.getValue("method").jsonPrimitive.content,
+                params = request.getValue("params").jsonObject,
+                clientVersion = request["clientVersion"]?.jsonPrimitive?.content,
+              )
             )
-          val writer =
-            BufferedWriter(
-              OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
-            )
-          val requestLine = reader.readLine()
-          val request = json.parseToJsonElement(requestLine).jsonObject
-          capturedRequest =
-            CapturedDaemonRequest(
-              method = request.getValue("method").jsonPrimitive.content,
-              params = request.getValue("params").jsonObject,
-              clientVersion = request["clientVersion"]?.jsonPrimitive?.content,
-            )
-          writer.write(responseLine(request.getValue("id").jsonPrimitive.content))
-          writer.newLine()
-          writer.flush()
+            writer.write(responseLine(request.getValue("id").jsonPrimitive.content, response))
+            writer.newLine()
+            writer.flush()
+          }
         }
       } catch (throwable: Throwable) {
         failure = throwable
@@ -307,17 +354,27 @@ class McpDaemonClientInputTest {
         throw AssertionError("Daemon client did not send a request before timeout")
       }
       failure?.let { throw AssertionError("Test daemon socket failed", it) }
-      return capturedRequest ?: throw AssertionError("Daemon client did not send a request")
+      return capturedRequests.firstOrNull()
+        ?: throw AssertionError("Daemon client did not send a request")
     }
 
-    private fun responseLine(requestId: String): String {
+    fun awaitRequests(): List<CapturedDaemonRequest> {
+      thread.join(REQUEST_TIMEOUT_MILLIS)
+      if (thread.isAlive) {
+        throw AssertionError("Daemon client did not send every request before timeout")
+      }
+      failure?.let { throw AssertionError("Test daemon socket failed", it) }
+      return capturedRequests.toList()
+    }
+
+    private fun responseLine(requestId: String, response: SocketResponse): String {
       val body =
-        if (error == null) {
-          """"result": ${compactJson(resultJson ?: "{}")}"""
+        if (response.error == null) {
+          """"result": ${compactJson(response.resultJson ?: "{}")}"""
         } else {
-          """"error": ${JsonPrimitive(error)}"""
+          """"error": ${JsonPrimitive(response.error)}"""
         }
-      val success = error == null
+      val success = response.error == null
       return """{ "id": "$requestId", "type": "mcp_response", "success": $success, $body }"""
     }
 
@@ -339,6 +396,11 @@ class McpDaemonClientInputTest {
 private data class CapturedInputCall(
   val request: CapturedDaemonRequest,
   val response: InputActionResult,
+)
+
+private data class SocketResponse(
+  val resultJson: String? = null,
+  val error: String? = null,
 )
 
 private data class CapturedDaemonRequest(

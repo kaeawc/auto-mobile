@@ -576,16 +576,14 @@ Append's semantics and limits:
   `input keycombination` can hold SHIFT. On older devices those characters fail
   with the same actionable error; lowercase, digits and unshifted punctuation
   work on every supported API level.
-- **A daemon predating `mode: "append"` rejects the param.** `mode` is validated
-  against a known set, so a daemon built before this field existed answers with
-  `input/typeText unsupported params: mode` (a `success: false` response). This is
-  surfaced to the caller like any other daemon rejection — the reference client
-  routes it to its error banner — never silently swallowed. The daemon does not
-  negotiate capabilities by build identity; a client that emits `mode: "append"`
-  against an older same-release daemon (e.g. a rebuilt desktop against a still-
-  running daemon) sees this error rather than a silent no-op. Optional capability
-  negotiation is tracked in
-  [#4535](https://github.com/kaeawc/auto-mobile/issues/4535).
+- **Clients may query before requesting append mode.** `daemon/capabilities` returns
+  `input/typeText.mode:append` when this daemon understands the optional parameter.
+  A daemon predating the query answers `Unsupported daemon method: daemon/capabilities`;
+  clients must treat that as absent capability, show an actionable update/restart error,
+  and must not fall back to destructive replacement. The query is additive and does not
+  participate in version or build-identity gating. A client that does not query still gets
+  the existing `input/typeText unsupported params: mode` `success: false` response from an
+  older daemon, never a silently swallowed keystroke.
 
 **Best-effort, character-by-character — retry the remainder, not the whole
 string.** Append types one key event per character in order, so it is atomic only
@@ -837,6 +835,28 @@ Convenience wrapper that calls the `getNavigationGraph` MCP tool and returns its
 ## Daemon Management Endpoints
 
 These manage the device pool and session lifecycle. See [Daemon Overview](index.md) for pool architecture details.
+
+### `daemon/capabilities`
+
+Returns additive socket capabilities that a client may inspect before sending an optional newer
+parameter. It is available during daemon startup and does not participate in version or build-identity gating.
+An older daemon that predates this endpoint returns its normal unsupported-method error, which a
+newer client must treat as an empty capability list.
+
+**Params:** none
+
+**Result**
+
+```json
+{
+  "capabilities": ["input/typeText.mode:append"]
+}
+```
+
+`input/typeText.mode:append` means the daemon accepts `mode: "append"` for Android text input.
+The list is intentionally extensible; clients must ignore capability strings they do not recognize.
+
+---
 
 ### `daemon/availableDevices`
 

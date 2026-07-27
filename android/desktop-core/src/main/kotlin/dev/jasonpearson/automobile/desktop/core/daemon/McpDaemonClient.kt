@@ -25,6 +25,11 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.serializer
 
+private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
+private const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
+private const val UNSUPPORTED_APPEND_MODE_ERROR =
+  "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
+
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
   private val json: Json = DaemonJson,
@@ -48,6 +53,7 @@ class McpDaemonClient(
     get() = socketPathValue
 
   private val testRecordingClient = TestRecordingSocketClient()
+  private var daemonCapabilities: Set<String>? = null
 
   override fun ping() {
     val response = sendRequest("ide/ping")
@@ -344,6 +350,13 @@ class McpDaemonClient(
     submit: Boolean?,
     append: Boolean,
   ): InputActionResult {
+    if (append && !supportsInputTypeTextAppend()) {
+      return InputActionResult(
+        action = "input/typeText",
+        success = false,
+        error = UNSUPPORTED_APPEND_MODE_ERROR,
+      )
+    }
     return sendInputRequest(
       "input/typeText",
       buildJsonObject {
@@ -481,6 +494,37 @@ class McpDaemonClient(
       )
     }
     return inputResult
+  }
+
+  /**
+   * Reads the daemon's additive capability list before the desktop sends `mode: "append"`.
+   *
+   * An older daemon answers this query with its normal unsupported-method envelope. That is a
+   * capability miss rather than a transport error: the caller receives
+   * [UNSUPPORTED_APPEND_MODE_ERROR] and never emits the destructive replace request. Successful
+   * responses are immutable for a daemon process, so retain them for this client; an unsupported
+   * older daemon is deliberately not cached so restarting it lets the next keystroke discover the
+   * upgraded capability.
+   */
+  private fun supportsInputTypeTextAppend(): Boolean {
+    val capabilities = daemonCapabilities ?: queryDaemonCapabilities() ?: return false
+    return INPUT_TYPE_TEXT_APPEND_CAPABILITY in capabilities
+  }
+
+  private fun queryDaemonCapabilities(): Set<String>? {
+    val response = sendRequest(DAEMON_CAPABILITIES_METHOD)
+    if (!response.success || response.result == null) {
+      return null
+    }
+    val capabilities =
+      try {
+        json
+          .decodeFromJsonElement(serializer<DaemonCapabilitiesResult>(), response.result)
+          .capabilities
+      } catch (_: Exception) {
+        return null
+      }
+    return capabilities.toSet().also { daemonCapabilities = it }
   }
 
   private fun sendRequest(
@@ -670,5 +714,8 @@ data class DaemonResponse(
   val result: JsonElement? = null,
   val error: String? = null,
 )
+
+@Serializable
+private data class DaemonCapabilitiesResult(val capabilities: List<String> = emptyList())
 
 class DaemonUnavailableException(message: String) : McpConnectionException(message)

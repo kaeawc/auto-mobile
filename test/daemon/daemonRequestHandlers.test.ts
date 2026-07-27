@@ -95,6 +95,19 @@ describe("handleDaemonRequest", () => {
     expect(response.error).toBe("Daemon not initialized");
   });
 
+  test("reports additive socket capabilities before daemon initialization", async () => {
+    const state = new FakeDaemonState(null, null);
+
+    const response = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
+
+    expect(response).toEqual({
+      success: true,
+      result: {
+        capabilities: ["input/typeText.mode:append"],
+      },
+    });
+  });
+
   test("returns session info for active session", async () => {
     const devicePool = new FakeDevicePool({
       total: 1,

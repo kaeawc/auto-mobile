@@ -324,6 +324,22 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `append mode rejects a successful capability probe without capabilities`() {
+    TestDaemonSocket(resultJson = "{}").use { server ->
+      val result =
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .inputTypeText(
+            text = "a",
+            append = true,
+          )
+
+      assertEquals(listOf("daemon/capabilities"), server.awaitRequests().map { it.method })
+      assertEquals(false, result.success)
+      assertEquals("Daemon capability probe returned an invalid result.", result.error)
+    }
+  }
+
+  @Test
   fun `input helpers reject malformed success payloads`() {
     TestDaemonSocket(resultJson = "{}", error = null).use { server ->
       assertFailsWith<SerializationException> {

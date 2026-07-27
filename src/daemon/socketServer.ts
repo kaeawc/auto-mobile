@@ -125,6 +125,11 @@ export interface AppendTextInput {
   ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
 }
 
+interface CachedAppendTextInput {
+  input: AppendTextInput;
+  transportId?: string;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private socketFileIdentity: SocketFileIdentity | null = null;
@@ -173,7 +178,7 @@ export class UnixSocketServer {
    * same per-device key, same idle window), so a device that re-appears under the
    * same id with a different image re-probes rather than trusting a stale API level.
    */
-  private appendTextInputs: Map<string, AppendTextInput> = new Map();
+  private appendTextInputs: Map<string, CachedAppendTextInput> = new Map();
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -1646,9 +1651,9 @@ export class UnixSocketServer {
    * before then, the next device would inherit the previous one's cached API-level
    * capability — an API 31+ / pre-31 mismatch that mis-handles SHIFT and uppercase.
    * The device pool calls this after it adds a device, rediscovers it during a
-   * refresh, or binds it after startDevice. That covers rapid same-serial
-   * replacements that the disconnect monitor never observes as absent. The
-   * confirmed-disconnect monitor also calls it as a backstop.
+   * refresh, or binds it after startDevice. Direct socket discovery also rebuilds
+   * a helper when ADB reports a changed transport id for the same serial. The
+   * confirmed-disconnect monitor remains a backstop.
    * Idempotent; safe for an unknown id.
    */
   evictDeviceInputCache(deviceId: string): void {
@@ -1660,11 +1665,20 @@ export class UnixSocketServer {
   /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
   private getAppendTextInput(device: BootedDevice): AppendTextInput {
     const existing = this.appendTextInputs.get(device.deviceId);
+    if (
+      existing &&
+      (existing.transportId === undefined || device.transportId === undefined || existing.transportId === device.transportId)
+    ) {
+      return existing.input;
+    }
     if (existing) {
-      return existing;
+      logger.debug(
+        `[UnixSocketServer] Rebuilding cached append helper for ${device.deviceId}: ` +
+        `ADB transport changed from ${existing.transportId} to ${device.transportId}`
+      );
     }
     const created = this.appendTextFactory(device);
-    this.appendTextInputs.set(device.deviceId, created);
+    this.appendTextInputs.set(device.deviceId, { input: created, transportId: device.transportId });
     return created;
   }
 

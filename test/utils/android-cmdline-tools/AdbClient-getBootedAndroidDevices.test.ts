@@ -29,7 +29,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       if (command.includes("adb devices")) {
         return createExecResult([
           "List of devices attached",
-          "emulator-5554\tdevice",
+          "emulator-5554\tdevice product:sdk_gphone64_arm64 transport_id:42",
           "emulator-5556\tbooting",
           "emulator-5558\toffline",
           "emulator-5560\tunauthorized",
@@ -43,7 +43,12 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const devices = await adb.getBootedAndroidDevices();
 
     expect(devices).toEqual([
-      { name: "emulator-5554", platform: "android", deviceId: "emulator-5554" },
+      {
+        name: "emulator-5554",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "42",
+      },
     ]);
   });
 

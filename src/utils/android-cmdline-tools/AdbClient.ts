@@ -797,7 +797,7 @@ export class AdbClient implements AdbExecutor {
     let result: ExecResult;
     try {
       result = await this.executeCommand(
-        "devices",
+        "devices -l",
         AdbClient.DEVICE_LIST_TIMEOUT_MS,
         undefined,
         true
@@ -814,13 +814,19 @@ export class AdbClient implements AdbExecutor {
     const devices = lines
       .filter(line => line.trim().length > 0)
       .flatMap(line => {
-        const parts = line.split("\t");
-        const deviceId = parts[0]?.trim();
-        const state = parts[1]?.trim();
+        const [deviceId, state, ...details] = line.trim().split(/\s+/);
         if (!deviceId || state !== "device") {
           return [];
         }
-        return [{ name: deviceId, platform: "android", deviceId } as BootedDevice];
+        const transportId = details
+          .find(detail => detail.startsWith("transport_id:"))
+          ?.slice("transport_id:".length);
+        return [{
+          name: deviceId,
+          platform: "android",
+          deviceId,
+          ...(transportId ? { transportId } : {}),
+        } satisfies BootedDevice];
       });
 
     // Cache the result

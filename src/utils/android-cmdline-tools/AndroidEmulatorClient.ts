@@ -805,6 +805,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
 
           runningDevices.push({
+            ...device,
             name: avdName || this.unknownEmulatorName(deviceId),
             platform: "android",
             deviceId: deviceId,
@@ -853,6 +854,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         runningDevices.push({
+          ...device,
           name: deviceName,
           platform: "android",
           deviceId: device.deviceId,

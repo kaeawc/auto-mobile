@@ -157,6 +157,54 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
+  it("evicts the pooled device cache before cold-boot resource notifications", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const readyDeviceIds: string[] = [];
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      deviceId => readyDeviceIds.push(deviceId)
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(coldBootImage);
+
+    let releaseResources!: () => void;
+    const resourcesStarted = new Promise<void>(resolve => {
+      releaseResources = resolve;
+    });
+    let signalResourcesStarted!: () => void;
+    const waitForResources = new Promise<void>(resolve => {
+      signalResourcesStarted = resolve;
+    });
+    setDeviceToolsDependencies({
+      notifyResourcesChanged: async () => {
+        signalResourcesStarted();
+        await resourcesStarted;
+      },
+    });
+
+    const start = callStartDevice({ platform: "android" });
+    await waitForResources;
+    try {
+      expect(readyDeviceIds).toEqual(["emulator-5554"]);
+    } finally {
+      releaseResources();
+      await start;
+    }
+  });
+
   it("cold-boots without a process handle (adopted device: startDevice returns null)", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);

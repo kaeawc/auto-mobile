@@ -436,6 +436,50 @@ describe("UnixSocketServer input/typeText", () => {
     expect(adb.probeCalls.length).toBe(2);
   });
 
+  test("re-probes append input when direct discovery reports a new connection incarnation", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    let discoveredDevice = {
+      ...androidDevice,
+      transportId: "1",
+    } as BootedDevice;
+    PlatformDeviceManagerFactory.setInstance({
+      getBootedDevicesDetailed: async () => ({
+        devices: [discoveredDevice],
+        succeededPlatforms: new Set(["android"]),
+      }),
+    } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ProductionShapedAdbExecutor(fakeTimer);
+    let factoryCalls = 0;
+    server.appendTextFactory = device => {
+      factoryCalls++;
+      return createAppendTextInput(device, adb, fakeTimer);
+    };
+    await server.start();
+
+    const append = () => sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "A",
+      mode: "append",
+    }, 1234);
+
+    expect((await append()).success).toBe(true);
+    discoveredDevice = {
+      ...androidDevice,
+      transportId: "2",
+    } as BootedDevice;
+    expect((await append()).success).toBe(true);
+
+    expect(factoryCalls).toBe(2);
+    expect(adb.probeCalls.length).toBe(2);
+  });
+
   // The client forwards every printable ASCII character, but uppercase and shifted
   // symbols need `input keycombination` (API 31+) and the client cannot see the API
   // level. The daemon therefore has to REPORT the failure; a silent success that

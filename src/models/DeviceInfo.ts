@@ -27,6 +27,8 @@ export interface BootedDevice {
   name: string;
   platform: Platform;
   deviceId: string;
+  /** ADB transport identity, which changes when a serial reconnects. */
+  transportId?: string;
   source?: "local";
   iosVersion?: string;
   osVersion?: string;

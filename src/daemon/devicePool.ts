@@ -280,7 +280,8 @@ export class DevicePool {
     }
   }
 
-  private notifyDeviceReady(deviceId: string): void {
+  /** Notify consumers that a device has reached a boot-ready connection boundary. */
+  notifyDeviceReady(deviceId: string): void {
     try {
       this.onDeviceReady?.(deviceId);
     } catch (error) {

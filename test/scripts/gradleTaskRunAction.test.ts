@@ -6,7 +6,14 @@ import { load } from "js-yaml";
 const actionPath = join(import.meta.dir, "../../.github/actions/gradle-task-run/action.yml");
 
 interface CompositeAction {
-  runs?: { using?: string; steps?: Array<{ uses?: string }> };
+  runs?: { using?: string; steps?: CompositeActionStep[] };
+}
+
+interface CompositeActionStep {
+  id?: string;
+  name?: string;
+  run?: string;
+  uses?: string;
 }
 
 function usesRefs(action: CompositeAction): string[] {
@@ -40,5 +47,12 @@ describe("gradle-task-run action", () => {
     }
 
     expect(refs.some(ref => ref.startsWith("pplanel/hash-calculator-action@"))).toBe(false);
+
+    const evalGradle = action.runs?.steps?.find(step => step.id === "eval_gradle");
+    expect(evalGradle?.run).toContain('echo "version=$(cat /tmp/gradle_version.txt)" >> "$GITHUB_OUTPUT"');
+    expect(evalGradle?.run).toContain('echo "version=${{ inputs.gradle-version }}" >> "$GITHUB_OUTPUT"');
+
+    const hashGradleTasks = action.runs?.steps?.find(step => step.name === "Hash Gradle Tasks");
+    expect(hashGradleTasks?.run).toContain('echo "digest=$digest" >> "$GITHUB_OUTPUT"');
   });
 });

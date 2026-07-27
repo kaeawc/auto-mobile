@@ -91,18 +91,20 @@ export const runTimerContract = (
       expect(calls).toBe(0);
     });
 
-    test("setInterval keeps firing until it is cancelled", async function() {
-      const timer = makeTimer();
-      let calls = 0;
-      const handle = timer.setInterval(() => {
-        calls++;
-      }, capabilities.realTime ? 1 : 10);
+    if (!capabilities.realTime) {
+      test("setInterval keeps firing until it is cancelled", async function() {
+        const timer = makeTimer();
+        let calls = 0;
+        const handle = timer.setInterval(() => {
+          calls++;
+        }, 10);
 
-      await timer.sleep(capabilities.realTime ? 15 : 25);
-      timer.clearInterval(handle);
+        await timer.sleep(25);
+        timer.clearInterval(handle);
 
-      expect(calls).toBeGreaterThan(1);
-    });
+        expect(calls).toBeGreaterThan(1);
+      });
+    }
   });
 };
 

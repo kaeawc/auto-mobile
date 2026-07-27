@@ -69,6 +69,8 @@ export class FakeTimer implements Timer {
   private pendingAutoAdvanceTasks: PendingAutoAdvanceTask[] = [];
   private nextAutoAdvanceTaskOrder: number = 1;
   private autoAdvanceDispatchScheduled: boolean = false;
+  // Invalidates auto-advance callbacks that were scheduled before reset().
+  private autoAdvanceGeneration: number = 0;
   // Monotonic registration counter so manual advanceTime() can break equal
   // due-time ties by FIFO registration order across sleeps/timeouts/intervals.
   private nextEventSeq: number = 1;
@@ -307,6 +309,7 @@ export class FakeTimer implements Timer {
    * Reset all state (clears pending sleeps, timeouts, intervals, history, and time).
    */
   reset(): void {
+    this.autoAdvanceGeneration++;
     // Resolve all pending sleeps before clearing to avoid hanging promises
     this.resolveAll();
     this.sleepHistory = [];
@@ -380,15 +383,18 @@ export class FakeTimer implements Timer {
     this.nextIntervalId++;
     if (this.autoAdvance) {
       const period = ms > 0 ? ms : 1;
+      const generation = this.autoAdvanceGeneration;
       const scheduleNext = (): void => this.enqueueAutoAdvanceTask(() => {
-        if (!this.cancelledIntervalIds.has(numericId)) {
+        if (generation === this.autoAdvanceGeneration && !this.cancelledIntervalIds.has(numericId)) {
           callback();
-          if (!this.cancelledIntervalIds.has(numericId)) {
+          if (generation === this.autoAdvanceGeneration && !this.cancelledIntervalIds.has(numericId)) {
             scheduleNext();
             return;
           }
         }
-        this.cancelledIntervalIds.delete(numericId);
+        if (generation === this.autoAdvanceGeneration) {
+          this.cancelledIntervalIds.delete(numericId);
+        }
       }, period);
       scheduleNext();
       return id;

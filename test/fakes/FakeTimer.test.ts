@@ -37,6 +37,22 @@ describe("FakeTimer auto-advance", function() {
 
     expect(events).toEqual(["first", "second"]);
   });
+
+  test("reset during an interval callback prevents recurrence", async function() {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let calls = 0;
+
+    timer.setInterval(() => {
+      calls++;
+      timer.reset();
+    }, 1);
+
+    await timer.sleep(10);
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    expect(calls).toBe(1);
+  });
 });
 
 describe("FakeTimer async manual advancement", function() {

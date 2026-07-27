@@ -580,10 +580,11 @@ Append's semantics and limits:
   `input/typeText.mode:append` when this daemon understands the optional parameter.
   A daemon predating the query answers `Unsupported daemon method: daemon/capabilities`;
   clients must treat that as absent capability, show an actionable update/restart error,
-  and must not fall back to destructive replacement. The query is additive and does not
-  participate in version or build-identity gating. A client that does not query still gets
-  the existing `input/typeText unsupported params: mode` `success: false` response from an
-  older daemon, never a silently swallowed keystroke.
+  and must not fall back to destructive replacement. The query remains subject to the normal
+  socket version and build-identity handshake; clients must surface a mismatch error rather than
+  treating it as an absent capability. A client that does not query still gets the existing
+  `input/typeText unsupported params: mode` `success: false` response from an older daemon, never
+  a silently swallowed keystroke.
 
 **Best-effort, character-by-character — retry the remainder, not the whole
 string.** Append types one key event per character in order, so it is atomic only
@@ -839,9 +840,10 @@ These manage the device pool and session lifecycle. See [Daemon Overview](index.
 ### `daemon/capabilities`
 
 Returns additive socket capabilities that a client may inspect before sending an optional newer
-parameter. It is available during daemon startup and does not participate in version or build-identity gating.
-An older daemon that predates this endpoint returns its normal unsupported-method error, which a
-newer client must treat as an empty capability list.
+parameter. It is available during daemon startup and remains subject to the normal socket version
+and build-identity handshake. An older daemon that predates this endpoint returns its normal
+unsupported-method error, which a newer client must treat as an empty capability list. A version or
+build-identity mismatch is a handshake error, not an absent capability.
 
 **Params:** none
 

@@ -44,6 +44,10 @@ describe("LaunchApp", () => {
     fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
   };
 
+  const hasStartedAppLaunch = () => fakeAdb.getExecutedCommands().some(command =>
+    command.includes("shell am start --user 0") || command.includes(`shell monkey -p ${packageName}`)
+  );
+
   beforeEach(() => {
     device = { name: "test-device", platform: "android", deviceId: "device-123" };
     fakeAdb = new FakeAdbExecutor();
@@ -87,12 +91,14 @@ describe("LaunchApp", () => {
     const lifecycleLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       createAndroidClearAppData: clearDevice => ({
         execute: async (clearPackageName: string, userId?: number) => {
+          expect(hasStartedAppLaunch()).toBe(false);
           clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
           return { success: true, packageName: clearPackageName, userId };
         },
       }),
       createAndroidColdBoot: () => ({
         execute: async (coldBootPackageName: string, options?: unknown) => {
+          expect(hasStartedAppLaunch()).toBe(false);
           coldBootCalls.push({ packageName: coldBootPackageName, options });
           return {
             success: true,
@@ -126,6 +132,7 @@ describe("LaunchApp", () => {
     const lifecycleLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       createAndroidClearAppData: clearDevice => ({
         execute: async (clearPackageName: string, userId?: number) => {
+          expect(hasStartedAppLaunch()).toBe(false);
           clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
           return { success: true, packageName: clearPackageName, userId };
         },
@@ -158,6 +165,7 @@ describe("LaunchApp", () => {
       }),
       createAndroidColdBoot: coldBootDevice => ({
         execute: async (coldBootPackageName: string, options?: unknown) => {
+          expect(hasStartedAppLaunch()).toBe(false);
           coldBootCalls.push({ device: coldBootDevice, packageName: coldBootPackageName, options });
           return {
             success: true,

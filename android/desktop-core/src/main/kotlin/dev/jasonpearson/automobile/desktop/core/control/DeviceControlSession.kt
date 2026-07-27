@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
@@ -83,6 +84,15 @@ class DeviceControlSession(
 
   private val dispatcher = DeviceControlInputDispatcher(scope) { command -> execute(command) }
 
+  // The coordinate space each source last declared, tracked so a change can invalidate the control
+  // context (issue #4550). The `seen` flags distinguish "declared nothing" from "not observed yet":
+  // both are null, but only the former can be flipped AWAY from. Cleared by reset(), so the first
+  // observation in a new context is a baseline rather than a transition.
+  private var lastScreenshotSpace: CoordinateSpace? = null
+  private var seenScreenshotSpace: Boolean = false
+  private var lastHierarchySpace: CoordinateSpace? = null
+  private var seenHierarchySpace: Boolean = false
+
   /** The post-input refresh state a client should be rendering; see [PostInputRefreshTracker]. */
   val refreshState: PostInputRefreshState
     get() = refreshTracker.state
@@ -131,6 +141,7 @@ class DeviceControlSession(
    */
   fun evaluate(inputs: DeviceControlInputs): DeviceControlDecision {
     val now = nowMs()
+    resetOnCoordinateSpaceTransition(inputs)
     val decision = DeviceControlPolicy.evaluate(inputs, now)
     val live = decision.snapshotOrNull
     if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
@@ -154,7 +165,7 @@ class DeviceControlSession(
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
       if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
-        retainedIfStillActionable(decision, inputs, now)
+        retainedIfStillActionable(decision, now)
       } else {
         live
       }
@@ -169,56 +180,67 @@ class DeviceControlSession(
    *   producing),
    * - the retained frame's own age (nothing new has arrived to make the live decision say
    *   anything), and
-   * - a **coordinate-space transition** on the sources it was built from (issue #4550), below.
+   * - a **coordinate-space transition** on the sources it was built from (issue #4550), which is
+   *   handled one layer up — see [resetOnCoordinateSpaceTransition].
    */
   private fun retainedIfStillActionable(
     decision: DeviceControlDecision,
-    inputs: DeviceControlInputs,
     nowMs: Long,
   ): DeviceFrameSnapshot? {
     val retained = renderSnapshot ?: return null
     val blockedForStaleness =
       (decision as? DeviceControlDecision.Blocked)?.reason == DeviceControlBlockReason.StaleFrame
     if (blockedForStaleness) return null
-    if (!spaceStillMatchesSources(retained, inputs)) return null
     return retained.takeIf { DeviceControlPolicy.isSnapshotFresh(it, nowMs) }
   }
 
   /**
-   * Whether the retained frame's bound coordinate space still describes the device's current
-   * sources (issue #4550).
+   * Treat a change in a source's declared [CoordinateSpace] as a control-context invalidation, and
+   * [reset] on it (issue #4550).
    *
    * The daemon converts an incoming `input/tap` or `input/swipe` coordinate using the runner's
-   * **current** scale metadata, not the frame's. Retention breaks the usual coupling: after a
-   * successful input this session deliberately keeps the clicked frame **clickable** while its
-   * sources move on, so a hierarchy that arrives with a different declaration (iOS scale metadata
-   * appearing, or a runner downgrade removing it) leaves a frame on screen whose coordinates are in
-   * one space while the daemon would convert them as the other — a tap in the wrong physical place,
-   * silently.
+   * **current** scale metadata, not the frame's. Two pieces of client state outlive the sources a
+   * coordinate was mapped against, and both are dangerous when the space flips underneath them:
+   * - the **retained snapshot**, which the post-input refresh deliberately keeps clickable while
+   *   its sources move on, and
+   * - the **queued backlog**, which holds commands already accepted into the bounded FIFO but not
+   *   yet forwarded. With a stalled daemon request ahead of it, a queued tap can be forwarded long
+   *   after the flip and be converted as the wrong unit — landing in the wrong physical place.
    *
-   * A retained frame whose sources have changed space is therefore retired exactly like a stale
-   * one: control drops to Inspector until a fresh, agreed frame arrives. Failing closed is cheap
-   * here (the user loses control for one refresh cycle) and the alternative is a mis-placed tap on
-   * real hardware.
+   * Clearing only the first would stop future clicks while leaving the already-queued ones armed,
+   * so this routes through the SAME [reset] every other context change uses (device change,
+   * transport/mode change, stream disconnect, live-layout open/close). That drains the queue and
+   * closes each pending command's captured client, drops the retention, advances the error token
+   * and clears the banner — one mechanism, not a second one that has to be kept in step.
    *
-   * A source that is absent proves nothing, so it is not treated as a transition — the retained
-   * frame's own age and the live decision still bound it.
+   * Each source is tracked independently, because either can be the first to declare the new space,
+   * and a source not seen yet is not a transition — there is nothing for it to differ from. The
+   * first observation after a [reset] likewise only records; it never re-fires.
    *
-   * Scope note: this closes the window the client can observe, which is the one that lasts (a
-   * retention is bounded by the 3 s refresh timeout, not by a scheduler tick). The residual
-   * sub-dispatch race — metadata flipping between the click and the queued request reaching the
-   * daemon — cannot be closed from the client at all; it needs the input endpoints to accept a
+   * Scope note: this closes the windows the client can observe, which are the ones that last (a
+   * retention is bounded by the 3 s refresh timeout; a queued command by the daemon's stall). The
+   * residual sub-dispatch race — metadata flipping after a command has already left the queue —
+   * cannot be closed from the client at all; it needs the input endpoints to accept a
    * caller-declared space, which is a wire change and deliberately out of scope here.
    */
-  private fun spaceStillMatchesSources(
-    retained: DeviceFrameSnapshot,
-    inputs: DeviceControlInputs,
-  ): Boolean {
-    val screenshotAgrees =
-      inputs.screenshot?.let { it.coordinateSpace == retained.coordinateSpace } ?: true
-    val hierarchyAgrees =
-      inputs.hierarchy?.let { it.coordinateSpace == retained.coordinateSpace } ?: true
-    return screenshotAgrees && hierarchyAgrees
+  private fun resetOnCoordinateSpaceTransition(inputs: DeviceControlInputs) {
+    val screenshot = inputs.screenshot
+    val hierarchy = inputs.hierarchy
+    val screenshotFlipped =
+      seenScreenshotSpace && screenshot != null && screenshot.coordinateSpace != lastScreenshotSpace
+    val hierarchyFlipped =
+      seenHierarchySpace && hierarchy != null && hierarchy.coordinateSpace != lastHierarchySpace
+    // reset() clears the tracking below, so re-record AFTER it: the new space becomes the baseline
+    // and the very next evaluate must not see the same flip a second time.
+    if (screenshotFlipped || hierarchyFlipped) reset()
+    if (screenshot != null) {
+      lastScreenshotSpace = screenshot.coordinateSpace
+      seenScreenshotSpace = true
+    }
+    if (hierarchy != null) {
+      lastHierarchySpace = hierarchy.coordinateSpace
+      seenHierarchySpace = true
+    }
   }
 
   /**
@@ -269,6 +291,9 @@ class DeviceControlSession(
         end = end,
         deviceWidth = snapshot.deviceWidth,
         deviceHeight = snapshot.deviceHeight,
+        // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
+        // endpoints are in. Read from the clicked snapshot, never from current stream state.
+        coordinateSpace = snapshot.coordinateSpace,
       )
     // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
     // surfaced, and the refresh tracker is left alone.
@@ -386,12 +411,14 @@ class DeviceControlSession(
   /**
    * Coherently reset the control context. Call at every point that invalidates the rendered frame
    * identity — device change, transport/mode change, observation-stream disconnect, live layout
-   * open/close.
+   * open/close, and a coordinate-space transition ([resetOnCoordinateSpaceTransition], which calls
+   * this itself).
    *
    * Drops the queued backlog (closing each captured client, so a stalled/aged action cannot fire in
    * the new context), advances the error token so a late failure from a pre-reset attempt is no
-   * longer current, clears any shown banner, and drops a pending post-input refresh wait so an
-   * action dispatched in the previous context cannot settle one in the new one.
+   * longer current, clears any shown banner, drops a pending post-input refresh wait so an action
+   * dispatched in the previous context cannot settle one in the new one, and forgets the observed
+   * coordinate spaces so the next frame is a baseline rather than a transition.
    */
   fun reset() {
     dispatcher.reset()
@@ -399,6 +426,10 @@ class DeviceControlSession(
     refreshTracker.reset()
     renderSnapshot = null
     interactionSnapshot = null
+    lastScreenshotSpace = null
+    seenScreenshotSpace = false
+    lastHierarchySpace = null
+    seenHierarchySpace = false
     publishError(null)
   }
 

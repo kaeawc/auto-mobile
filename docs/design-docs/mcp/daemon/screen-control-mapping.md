@@ -164,7 +164,9 @@ the drag-shaped case of the rule in
 
 | Rule | Value |
 | --- | --- |
-| Minimum travelled distance | **24 device coordinates**, straight-line (Euclidean), measured **after** the end is clamped |
+| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **32 device coordinates** (physical pixels) |
+| Minimum travelled distance, legacy frame (no declaration) | **24 device coordinates** (logical points) |
+| Measurement | straight-line (Euclidean), in **device** coordinates, **after** the end is clamped |
 | Below the threshold | send **nothing** — not a swipe, and **not** a tap either |
 | Duration sent | **300 ms**, a fixed client value |
 
@@ -172,11 +174,30 @@ The threshold is measured in **device** coordinates, not viewport pixels, so it
 means the same thing regardless of the client's zoom level: a viewport-space
 threshold would send a swipe for one hand movement at one zoom and not at
 another, and would let a few pixels of pointer jitter become a large device
-gesture when zoomed out. `24` sits just above the platforms' own touch slop
-expressed in physical pixels: Android's 8dp is ~24px at the ~3x density of a
-1080p-class phone, and iOS's ~10 logical points is ~20-30px at 2x-3x. So any
-forwarded swipe is one the device itself reads as a drag rather than as a tap, on
-either platform, with no per-platform threshold.
+gesture when zoomed out.
+
+**Why two numbers.** The threshold is a *physical* distance — "far enough that
+the device itself reads the gesture as a drag rather than a tap" — so its numeric
+value depends on the unit the frame declares. In the legacy point space, `24`
+sits just above both platforms' touch slop (Android's 8dp is ~24px at the ~3x
+density of a 1080p-class phone; iOS's is ~10 logical points). Under canonical
+pixels the unit changed underneath it: the daemon divides an incoming pixel
+coordinate by `nativeScale` before dispatch, so on a 3× iOS device 24 physical
+pixels arrives as **8 logical points** — *below* the slop the value was chosen to
+clear, and movements the device reads as taps would be forwarded as swipes.
+
+`32` restores the intent at the worst scale a client can meet: 32 ÷ 3 = 10.67
+logical points, just above the ~10-point iOS slop, and 16 points at 2×. Android
+publishes pixels at `nativeScale` 1, so its bar moves from 8dp to ~10.7dp at a 3×
+density — still small, still above its own slop, and erring toward *not* sending
+a gesture the user did not intend.
+
+A single canonical-pixel constant rather than `24 × nativeScale` because the
+observation stream **does not publish `nativeScale`** — the daemon keeps it
+internal, and a `"px"` frame's screenshot dimensions and bounds are equal by
+construction, so a client cannot recover the scale either. Scaling exactly would
+require the daemon to publish it. Until then this constant is deliberately
+correct at the worst scale rather than optimal at every one.
 
 A below-threshold drag is **not** promoted to a tap. Actuating an input the user
 did not ask for is worse than ignoring an ambiguous one, and a click that barely

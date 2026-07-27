@@ -592,7 +592,7 @@ class DeviceControlSessionTest {
         )
       assertNull(session.evaluate(flipped).snapshotOrNull)
 
-      assertEquals(retained, session.renderSnapshot, "the picture does not flicker")
+      assertNull(session.renderSnapshot, "a space flip is a context invalidation, like a reset")
       assertNull(
         session.interactionSnapshot,
         "a frame mapped in the old space must not be dispatched under the new one",
@@ -627,13 +627,64 @@ class DeviceControlSessionTest {
         )
       assertNull(session.evaluate(flipped).snapshotOrNull)
 
-      assertEquals(retained, session.renderSnapshot, "the picture does not flicker")
+      assertNull(session.renderSnapshot, "a space flip is a context invalidation, like a reset")
       assertNull(
         session.interactionSnapshot,
         "a screenshot-space flip must retire the retained frame too",
       )
       scope.cancel()
     }
+
+  @Test
+  fun `a coordinate-space flip purges commands already queued for dispatch`() = runTest {
+    // Clearing the retained snapshot stops FUTURE clicks, but a command already accepted into the
+    // bounded FIFO is untouched by that. With a stalled daemon request ahead of it, a queued tap
+    // would be forwarded after the flip and converted by the daemon under the NEW scale metadata —
+    // actuating the wrong physical location. The flip must drain the queue, like every other
+    // control-context invalidation.
+    //
+    // StandardTestDispatcher (not Unconfined) so the single consumer is dispatched but has not run
+    // when the tap is enqueued — exactly the state a consumer blocked on a stalled daemon is in.
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val clients = mutableListOf<FakeAutoMobileClient>()
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { FakeAutoMobileClient().also { clients.add(it) } },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(testScheduler),
+      )
+
+    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    assertNotNull(session.evaluate(legacy).snapshotOrNull)
+    assertTrue(session.tap(assertNotNull(session.interactionSnapshot), point))
+    assertEquals(1, clients.size, "the tap is queued, with its client captured")
+
+    // The space flips while that tap is still sitting in the queue.
+    val flipped =
+      legacy.copy(
+        hierarchy =
+          legacy.hierarchy?.copy(
+            sequence = 20L,
+            captureSequence = 8L,
+            coordinateSpace = CoordinateSpace.Pixels,
+          )
+      )
+    session.evaluate(flipped)
+    advanceUntilIdle()
+
+    val queued = clients.single()
+    assertTrue(
+      queued.inputTapCalls.isEmpty(),
+      "a tap mapped in the old space must never reach the device after the flip",
+    )
+    assertTrue("close" in queued.calls, "and its captured client must be closed")
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
 
   @Test
   fun `a flip into an unrecognized space retires the retained frame`() = runTest {
@@ -663,6 +714,37 @@ class DeviceControlSessionTest {
       session.interactionSnapshot,
       "legacy -> unrecognized is a transition, not a no-op",
     )
+    scope.cancel()
+  }
+
+  @Test
+  fun `the swipe threshold follows the clicked frame's coordinate space`() = runTest {
+    // The threshold is a PHYSICAL distance, so canonical pixels changed its numeric value. A
+    // 24-unit
+    // drag is a swipe in the legacy point space and is NOT one on a px frame, where 24 physical
+    // pixels reaches a 3x iOS runner as 8 logical points — below its own touch slop.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val start = DevicePoint(100, 100, inBounds = true)
+    val short = DevicePoint(124, 100, inBounds = true) // 24 units
+    val long = DevicePoint(172, 100, inBounds = true) // 72 units
+
+    val px = testSnapshot(coordinateSpace = CoordinateSpace.Pixels)
+    assertFalse(session.swipe(px, start, short), "24px is below the canonical-pixel threshold")
+    advanceUntilIdle()
+    assertTrue(client.inputSwipeCalls.isEmpty(), "and nothing reached the device")
+
+    assertTrue(session.swipe(px, start, long), "72px clears it")
+    advanceUntilIdle()
+    assertEquals(1, client.inputSwipeCalls.size)
+
+    // The legacy path keeps its 24-unit behavior exactly.
+    val legacy = testSnapshot(coordinateSpace = null)
+    assertTrue(session.swipe(legacy, start, short), "24 units is still a swipe in point space")
+    advanceUntilIdle()
+    assertEquals(2, client.inputSwipeCalls.size)
     scope.cancel()
   }
 

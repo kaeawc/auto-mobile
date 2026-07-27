@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { RELEASE_CHECKSUM_REGISTRY } from "../../src/constants/release";
 
 const repoRoot = join(import.meta.dir, "../..");
+const defaultReleaseVersion = RELEASE_CHECKSUM_REGISTRY[0].version;
 
 async function readRepoFile(relativePath: string): Promise<string> {
   return readFile(join(repoRoot, relativePath), "utf-8");
@@ -171,16 +173,22 @@ describe("daemon input API consumer docs", () => {
     expect(clientGuide).toContain("stale-context rejection");
     expect(clientGuide).toContain("wait for a newly paired snapshot before");
     expect(clientGuide).toContain("runner that does not publish `frameContext` cannot produce a controllable");
-    expect(clientGuide).toContain("default `0.0.46` CtrlProxy artifacts predate `frameContext`");
+    expect(clientGuide).toContain(
+      `default \`${defaultReleaseVersion}\` CtrlProxy artifacts predate \`frameContext\``,
+    );
     expect(clientGuide).toContain("does not yet implement `frameContext` pairing or echoing");
     expect(clientGuide).toContain("[#4596](https://github.com/kaeawc/auto-mobile/issues/4596)");
     expect(clientGuide).toContain("having the gesture guarantee");
-    expect(snapshotGuide).toContain("default `0.0.46` CtrlProxy artifacts predate this protocol");
+    expect(snapshotGuide).toContain(
+      `default \`${defaultReleaseVersion}\` CtrlProxy artifacts predate this protocol`,
+    );
     expect(snapshotGuide).toContain("Legacy desktop implementation");
     expect(snapshotGuide).toContain("does not pair or echo `frameContext`");
     expect(snapshotGuide).toMatch(/not a reference implementation for\s+this protocol/);
     expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
-    expect(unixSocketApi).toContain("default `0.0.46` CtrlProxy artifacts are legacy");
+    expect(unixSocketApi).toContain(
+      `default \`${defaultReleaseVersion}\` CtrlProxy artifacts are legacy`,
+    );
     expect(unixSocketApi).toContain("device-boundary guarantee currently applies to `input/tap` and `input/swipe`");
     expect(unixSocketApi).toMatch(/"duration": 50,\r?\n    "frameContext": "android-generation-42"/);
     expect(unixSocketApi).toMatch(/"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/);

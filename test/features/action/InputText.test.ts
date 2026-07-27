@@ -709,7 +709,11 @@ describe("InputText", () => {
       return Promise.resolve(execResult(""));
     };
     const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
-    const inputText = new InputText(androidDevice, adb);
+    // Inject a FakeTimer into InputText too: createBudget reads THIS clock, so a
+    // wall clock here would race the 5ms budget against the char-unmappable path
+    // (repo rule: no real timers in unit tests). Never advanced, so the budget
+    // stays positive and the "cannot type" path is exercised deterministically.
+    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
 
     const whileTimedOut = await inputText.appendText("A", 5);
     expect(whileTimedOut.success).toBe(false);
@@ -745,7 +749,10 @@ describe("InputText", () => {
       return Promise.resolve(execResult(""));
     };
     const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
-    const inputText = new InputText(androidDevice, adb);
+    // FakeTimer into InputText as well, so createBudget never reads the wall clock
+    // (repo rule: no real timers). Never advanced, so the budget cannot expire and
+    // the assertion is purely about the retry count, not timing.
+    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
 
     const result = await inputText.appendText("a", 5000);
 

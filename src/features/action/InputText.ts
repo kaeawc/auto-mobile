@@ -315,12 +315,21 @@ export class InputText extends BaseVisualChange {
    * every key press — and the append path needs no hierarchy at all (it neither
    * clears nor measures the field). Android only; the caller checks platform.
    *
-   * @param timeoutMs - Total budget for the whole call, charged across the API-level
-   *   probe and every `adb shell input ...` subprocess it spawns. Callers that hold a
-   *   per-device queue (the daemon's `input/typeText`) MUST pass it: without a bound,
-   *   one stalled adb invocation blocks both the response and every later input for
-   *   that device. Omitting it leaves the subprocesses unbounded, which is only safe
-   *   for a caller that owns its own lifetime.
+   * @param timeoutMs - Total budget for this call's OWN device operations, charged
+   *   across the API-level probe and every `adb shell input ...` subprocess it spawns
+   *   (each re-reads the remaining budget and bails at <= 0), so their combined
+   *   elapsed cannot exceed one budget. Callers that hold a per-device queue (the
+   *   daemon's `input/typeText`) MUST pass it: without a bound, one stalled adb
+   *   invocation blocks both the response and every later input for that device.
+   *   Omitting it leaves the subprocesses unbounded, which is only safe for a caller
+   *   that owns its own lifetime.
+   *
+   *   Caveat: the budget bounds only the operations this method issues. It does NOT
+   *   bound `AdbClient`'s shared ADB-path discovery (`ensureAdbPath`), which runs
+   *   inside `executeArgsImpl` BEFORE the per-command timeout applies. On a cold or
+   *   expired 60s path cache a stalled discovery probe can still wedge the queue —
+   *   a property of the shared adb primitive every input path uses, tracked in
+   *   [#4533](https://github.com/kaeawc/auto-mobile/issues/4533), not fixable here.
    */
   async appendText(
     text: string,
@@ -442,7 +451,9 @@ export class InputText extends BaseVisualChange {
         // attempts, each charged the SAME budget — and runInputOperationWithTimeout
         // awaits the losing operation before releasing the per-device queue, so a
         // stalled key event would otherwise hold the queue for ~4x the request
-        // deadline. A single attempt keeps the whole append inside one budget.
+        // deadline. A single attempt keeps this append's own device ops within one
+        // budget (the shared ensureAdbPath discovery is the one exception — see the
+        // appendText caveat and issue #4533).
         await this.executeKeyEventPlan(plan, budget, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

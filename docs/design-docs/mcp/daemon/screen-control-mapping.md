@@ -265,7 +265,7 @@ One documented exception is built in: **Alt-family character composition** — A
 and macOS Option — and it is **platform-dependent**, so the host (not the pure
 policy) must resolve it. The rule is:
 
-```
+```text
 altComposesText = printable && !meta && ( isMac ? alt : (ctrl && alt) )
 ```
 

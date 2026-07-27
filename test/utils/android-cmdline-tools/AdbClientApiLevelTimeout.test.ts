@@ -26,7 +26,6 @@ import type { BootedDevice, ExecResult } from "../../../src/models";
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 

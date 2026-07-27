@@ -444,6 +444,16 @@ describe("DeviceAppManager", () => {
 
     expect(error).toBeInstanceOf(ActionableError);
     expect((error as Error).message).toContain(bundleId);
+    expect(commands).toEqual([{
+      file: "xcrun",
+      args: [
+        "devicectl", "device", "info", "apps",
+        "--device", "device-udid",
+        "--bundle-id", bundleId,
+        "--json-output", "/tmp/automobile-device-app-manager-test/apps.json",
+        "--quiet"
+      ]
+    }]);
     expect(commands.some(({ file, args }) =>
       file === "xcrun" && args.slice(0, 4).join(" ") === "devicectl device uninstall app"
     )).toBe(false);

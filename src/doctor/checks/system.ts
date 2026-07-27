@@ -36,11 +36,24 @@ export function checkArchitecture(): CheckResult {
 }
 
 /**
- * Check runtime environment (Node.js or Bun)
+ * Detect the Bun version of the current runtime, or `undefined` under Node.js.
+ * Injected into {@link checkRuntime} so the Node arm is testable — `globalThis.Bun`
+ * is a non-configurable property and cannot be deleted or redefined in a test.
  */
-export function checkRuntime(): CheckResult {
-  // Check if running in Bun
-  const bunVersion = (globalThis as any).Bun?.version;
+export function detectBunVersion(): string | undefined {
+  return (globalThis as { Bun?: { version?: string } }).Bun?.version;
+}
+
+/**
+ * Check runtime environment (Node.js or Bun).
+ *
+ * @param detectVersion Injected runtime seam; defaults to the live detection.
+ *   Return `undefined` to exercise the Node.js arm and a version string for the
+ *   Bun arm. A function (not a value) is required because passing `undefined` to
+ *   a defaulted value parameter would re-trigger the default.
+ */
+export function checkRuntime(detectVersion: () => string | undefined = detectBunVersion): CheckResult {
+  const bunVersion = detectVersion();
 
   if (bunVersion) {
     return {

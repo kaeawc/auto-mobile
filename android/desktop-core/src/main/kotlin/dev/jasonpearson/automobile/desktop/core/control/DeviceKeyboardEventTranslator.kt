@@ -15,6 +15,28 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardKey
 /** Whether this host is macOS. Resolved once; the composition rule below branches on it. */
 private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCase = true)
 
+/** Whether this host is Linux, where AWT's native AltGraph signal is reliable. */
+private val IS_LINUX = System.getProperty("os.name", "").contains("Linux", ignoreCase = true)
+
+/** Compose Desktop's public key-event wrapper retains its AWT event behind an internal carrier. */
+private val COMPOSE_NATIVE_EVENT_GETTER = runCatching {
+  Class.forName("androidx.compose.ui.input.key.InternalKeyEvent").getMethod("getNativeEvent")
+}
+  .getOrNull()
+
+/**
+ * Returns AWT's AltGraph state when Compose Desktop exposes its retained native event.
+ *
+ * Compose 1.11.1 makes the carrier type internal, so this narrowly uses its public JVM getter. A
+ * missing or changed carrier returns null so the caller can retain the Ctrl+Alt fallback rather
+ * than regressing AltGr input.
+ */
+private fun KeyEvent.nativeAltGraphDown(): Boolean? = runCatching {
+  COMPOSE_NATIVE_EVENT_GETTER?.invoke(nativeKeyEvent) as? java.awt.event.KeyEvent
+}
+  .getOrNull()
+  ?.isAltGraphDown
+
 /**
  * Translates a Compose key event into the Compose-free [DeviceKeyStroke] that
  * [dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy] decides on (issue #3351).
@@ -52,8 +74,12 @@ object DeviceKeyboardEventTranslator {
       Key.DirectionRight to DeviceKeyboardKey.ArrowRight,
     )
 
-  /** Translate a live Compose [event]. */
-  fun translate(event: KeyEvent): DeviceKeyStroke =
+  /** Translate a live Compose [event]. Platform inputs are injectable for the native-event test. */
+  fun translate(
+    event: KeyEvent,
+    isMac: Boolean = IS_MAC,
+    isLinux: Boolean = IS_LINUX,
+  ): DeviceKeyStroke =
     translate(
       key = event.key,
       utf16CodePoint = event.utf16CodePoint,
@@ -64,6 +90,9 @@ object DeviceKeyboardEventTranslator {
           meta = event.isMetaPressed,
           shift = event.isShiftPressed,
         ),
+      isMac = isMac,
+      isLinux = isLinux,
+      isAltGraphDown = event.nativeAltGraphDown(),
     )
 
   /**
@@ -75,21 +104,27 @@ object DeviceKeyboardEventTranslator {
    * point yields a null character, so the policy ignores the keystroke rather than mangling it —
    * multi-unit input is IME territory, explicitly out of scope for #3351.
    *
-   * @param isMac the host platform, injectable so the composition rule below is unit-testable
+   * @param isMac whether the host is macOS, injectable so the composition rule is unit-testable
    *   without a real `os.name`; defaults to this host.
+   * @param isLinux whether the host is Linux, where native AltGraph is reliable; defaults to this
+   *   host.
+   * @param isAltGraphDown AWT's native AltGraph state, or null when the toolkit cannot expose it.
+   *   It is injectable because primitive translation tests do not construct an AWT event.
    */
   fun translate(
     key: Key,
     utf16CodePoint: Int,
     modifiers: DeviceKeyModifiers,
     isMac: Boolean = IS_MAC,
+    isLinux: Boolean = IS_LINUX,
+    isAltGraphDown: Boolean? = null,
   ): DeviceKeyStroke =
     DeviceKeyStroke(
       key = DEVICE_KEYS[key],
       character =
         utf16CodePoint.takeIf { it in Char.MIN_VALUE.code..Char.MAX_VALUE.code }?.toChar(),
       modifiers = modifiers,
-      altComposesText = resolvesAltComposition(modifiers, isMac),
+      altComposesText = resolvesAltComposition(modifiers, isMac, isLinux, isAltGraphDown),
     )
 
   /**
@@ -97,32 +132,34 @@ object DeviceKeyboardEventTranslator {
    * than a menu/window accelerator. This is the platform decision the pure policy cannot make; it
    * lives here because only the toolkit adapter sees the host OS and AWT's modifier masks.
    *
-   * - **Windows/Linux:** composition is AltGr, which AWT surfaces as **Ctrl+Alt**. A plain `Alt`
-   *   (no Ctrl) is a menu accelerator (`Alt+F` → File) — and AWT still reports a printable keyChar
-   *   for it — so it must NOT count as composition or the canvas would swallow the host's mnemonic.
+   * - **Linux:** composition is native AltGraph. A genuine Ctrl+Alt host shortcut has the native
+   *   AltGraph state unset, so it stays with the host.
+   * - **Windows:** composition is AltGr, which many JDKs expose only as **Ctrl+Alt**. The native
+   *   AltGraph state is not reliable there, so the Ctrl+Alt fallback remains. A plain `Alt` (no
+   *   Ctrl) is a menu accelerator (`Alt+F` → File) and must NOT count as composition or the canvas
+   *   would swallow the host's mnemonic.
    * - **macOS:** composition is the **Option** key (plain Alt, no Ctrl) — Option+L = `@` — and
    *   macOS menus use Cmd/Meta, never Alt, so plain Alt is safe to treat as composition there.
    *
    * Meta always disqualifies: `Cmd`/`Meta` shortcuts never compose characters, so Meta-held is the
    * reliable "shortcut, not typing" signal on every platform.
    *
-   * KNOWN LIMITATION (Windows/Linux): the `ctrl && alt` test is a heuristic, not a true AltGraph
-   * detector. AWT does expose an AltGraph signal — the native
-   * [java.awt.event.KeyEvent.isAltGraphDown] behind
-   * [androidx.compose.ui.input.key.KeyEvent.nativeKeyEvent], mirrored by Compose's
-   * `PointerKeyboardModifiers.isAltGraphPressed` — but it is NOT reliable on the platform that
-   * needs it: many Windows JDKs report a real AltGr keystroke as plain Ctrl+Alt with the ALT_GRAPH
-   * mask UNSET, so AltGr and a genuine Ctrl+Alt host shortcut are indistinguishable there.
-   * Requiring the mask would therefore regress AltGr typing (`@`, `€`, `{`) on those JDKs —
-   * breaking the common case the exception exists for — to fix only the rare
-   * genuine-Ctrl+Alt-shortcut-with-a-printable- char case. So the heuristic stays: a Ctrl+Alt host
-   * shortcut that happens to produce a printable character on some Windows/Linux layout is
-   * forwarded to the device rather than reaching the host. Tracked in #4536; if a reliable
-   * per-platform AltGraph signal becomes available, thread it in alongside `isMac` and prefer it
-   * over `ctrl && alt`.
+   * KNOWN LIMITATION (Windows): many Windows JDKs report a real AltGr keystroke as plain Ctrl+Alt
+   * with the native ALT_GRAPH mask unset. Therefore Windows keeps the Ctrl+Alt heuristic: a genuine
+   * Ctrl+Alt host shortcut that produces a printable character can still be forwarded to the
+   * device. Linux uses the reliable native signal instead.
    */
-  private fun resolvesAltComposition(modifiers: DeviceKeyModifiers, isMac: Boolean): Boolean {
+  private fun resolvesAltComposition(
+    modifiers: DeviceKeyModifiers,
+    isMac: Boolean,
+    isLinux: Boolean,
+    isAltGraphDown: Boolean?,
+  ): Boolean {
     if (modifiers.meta || !modifiers.alt) return false
-    return isMac || modifiers.ctrl
+    return when {
+      isMac -> true
+      isLinux && isAltGraphDown != null -> isAltGraphDown
+      else -> modifiers.ctrl
+    }
   }
 }

@@ -1,6 +1,12 @@
 import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session } from "./sessionManager";
 
+/** Socket endpoint clients may query before sending optional newer parameters. */
+export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
+
+/** Non-destructive Android text input introduced with desktop keyboard forwarding. */
+export const INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append";
+
 export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
@@ -41,6 +47,17 @@ export async function handleDaemonRequest(
     return {
       success: false,
       error: `Unsupported daemon method: ${request.method}`,
+    };
+  }
+
+  // This is daemon self-description, not a pool operation. Keep it available while startup is
+  // still settling so a client can decide whether to issue an optional request before forwarding.
+  if (request.method === DAEMON_CAPABILITIES_METHOD) {
+    return {
+      success: true,
+      result: {
+        capabilities: [INPUT_TYPE_TEXT_APPEND_CAPABILITY],
+      },
     };
   }
 

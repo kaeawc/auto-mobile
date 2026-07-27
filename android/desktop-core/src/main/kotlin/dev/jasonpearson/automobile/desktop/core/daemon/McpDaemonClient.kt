@@ -11,7 +11,9 @@ import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -24,6 +26,13 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.serializer
+
+private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
+private const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
+private const val OLD_DAEMON_CAPABILITIES_ERROR = "Unsupported daemon method: daemon/capabilities"
+private const val OLD_DAEMON_APPEND_MODE_ERROR = "input/typeText unsupported params: mode"
+private const val UNSUPPORTED_APPEND_MODE_ERROR =
+  "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
 
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
@@ -48,6 +57,7 @@ class McpDaemonClient(
     get() = socketPathValue
 
   private val testRecordingClient = TestRecordingSocketClient()
+  private var daemonCapabilities: CachedDaemonCapabilities? = null
 
   override fun ping() {
     val response = sendRequest("ide/ping")
@@ -344,18 +354,39 @@ class McpDaemonClient(
     submit: Boolean?,
     append: Boolean,
   ): InputActionResult {
-    return sendInputRequest(
-      "input/typeText",
-      buildJsonObject {
-        put("platform", JsonPrimitive(platform))
-        putOptionalString("deviceId", deviceId)
-        put("text", JsonPrimitive(text))
-        putOptionalBoolean("submit", submit)
-        // Omitted entirely when false: the daemon rejects unknown/!append values, and older
-        // daemons reject the param outright.
-        if (append) put("mode", JsonPrimitive("append"))
-      },
-    )
+    val appendSupportError = if (append) inputTypeTextAppendSupportError() else null
+    if (appendSupportError != null) {
+      return InputActionResult(
+        action = "input/typeText",
+        success = false,
+        error = appendSupportError,
+      )
+    }
+    return try {
+      sendInputRequest(
+          "input/typeText",
+          buildJsonObject {
+            put("platform", JsonPrimitive(platform))
+            putOptionalString("deviceId", deviceId)
+            put("text", JsonPrimitive(text))
+            putOptionalBoolean("submit", submit)
+            // Omitted entirely when false: the daemon rejects unknown/!append values, and older
+            // daemons reject the param outright.
+            if (append) put("mode", JsonPrimitive("append"))
+          },
+        )
+        .let { result ->
+          if (append && result.error == OLD_DAEMON_APPEND_MODE_ERROR) {
+            evictDaemonCapabilities()
+            result.copy(error = UNSUPPORTED_APPEND_MODE_ERROR)
+          } else {
+            result
+          }
+        }
+    } catch (error: Exception) {
+      if (append) evictDaemonCapabilities()
+      throw error
+    }
   }
 
   override fun inputKey(
@@ -481,6 +512,86 @@ class McpDaemonClient(
       )
     }
     return inputResult
+  }
+
+  /**
+   * Reads the daemon's additive capability list before the desktop sends `mode: "append"`.
+   *
+   * An older daemon answers this query with its normal unsupported-method envelope. That leaves
+   * append support unknown, so the client attempts the non-destructive append request and
+   * translates only its exact unsupported-parameter response. Other probe failures, including
+   * version mismatches, are preserved. Successful responses are shared only while the Unix socket's
+   * file identity is unchanged, so the per-action facade clients in the control queue reuse one
+   * probe without trusting a daemon restarted at the same pathname. An unsupported older daemon is
+   * deliberately not cached so restarting it lets the next keystroke discover the upgraded
+   * capability.
+   */
+  private fun inputTypeTextAppendSupportError(): String? {
+    val identity = socketIdentity()
+    val capabilities =
+      if (identity == null) {
+        when (val probe = queryDaemonCapabilities(null)) {
+          is DaemonCapabilitiesProbe.Available -> probe.capabilities
+          DaemonCapabilitiesProbe.Legacy -> return null
+          is DaemonCapabilitiesProbe.Failure -> return probe.error
+        }
+      } else {
+        daemonCapabilities?.takeIf { it.identity == identity }?.capabilities
+          ?: sharedDaemonCapabilities[identity]
+          ?: when (val probe = queryDaemonCapabilities(identity)) {
+            is DaemonCapabilitiesProbe.Available -> probe.capabilities
+            DaemonCapabilitiesProbe.Legacy -> return null
+            is DaemonCapabilitiesProbe.Failure -> return probe.error
+          }
+      }
+    return if (INPUT_TYPE_TEXT_APPEND_CAPABILITY in capabilities) null
+    else UNSUPPORTED_APPEND_MODE_ERROR
+  }
+
+  private fun queryDaemonCapabilities(identity: SocketIdentity?): DaemonCapabilitiesProbe {
+    val response = sendRequest(DAEMON_CAPABILITIES_METHOD)
+    if (!response.success) {
+      if (response.error == OLD_DAEMON_CAPABILITIES_ERROR) return DaemonCapabilitiesProbe.Legacy
+      return DaemonCapabilitiesProbe.Failure(response.error ?: "Daemon capability probe failed.")
+    }
+    if (response.result == null) {
+      return DaemonCapabilitiesProbe.Failure("Daemon capability probe returned no result.")
+    }
+    val capabilities =
+      try {
+        json
+          .decodeFromJsonElement(serializer<DaemonCapabilitiesResult>(), response.result)
+          .capabilities
+      } catch (_: Exception) {
+        return DaemonCapabilitiesProbe.Failure(
+          "Daemon capability probe returned an invalid result."
+        )
+      }
+    val resolved = capabilities.toSet()
+    // A daemon restart can replace a socket at the same pathname between the probe and this
+    // point. Only publish the result if the response came from the same socket identity.
+    if (identity != null && socketIdentity() == identity) {
+      daemonCapabilities = CachedDaemonCapabilities(identity, resolved)
+      sharedDaemonCapabilities[identity] = resolved
+    }
+    return DaemonCapabilitiesProbe.Available(resolved)
+  }
+
+  private fun evictDaemonCapabilities() {
+    daemonCapabilities?.identity?.let(sharedDaemonCapabilities::remove)
+    daemonCapabilities = null
+  }
+
+  /** A socket pathname is not daemon identity: a restart can replace its inode. */
+  private fun socketIdentity(): SocketIdentity? {
+    val path = File(socketPathValue).toPath()
+    return try {
+      Files.readAttributes(path, BasicFileAttributes::class.java).fileKey()?.toString()?.let {
+        SocketIdentity(socketPathValue, it)
+      }
+    } catch (_: Exception) {
+      null
+    }
   }
 
   private fun sendRequest(
@@ -670,5 +781,28 @@ data class DaemonResponse(
   val result: JsonElement? = null,
   val error: String? = null,
 )
+
+@Serializable
+private data class DaemonCapabilitiesResult(val capabilities: List<String> = emptyList())
+
+private data class SocketIdentity(
+  val path: String,
+  val fileKey: String,
+)
+
+private data class CachedDaemonCapabilities(
+  val identity: SocketIdentity,
+  val capabilities: Set<String>,
+)
+
+private sealed interface DaemonCapabilitiesProbe {
+  data class Available(val capabilities: Set<String>) : DaemonCapabilitiesProbe
+
+  data object Legacy : DaemonCapabilitiesProbe
+
+  data class Failure(val error: String) : DaemonCapabilitiesProbe
+}
+
+private val sharedDaemonCapabilities = ConcurrentHashMap<SocketIdentity, Set<String>>()
 
 class DaemonUnavailableException(message: String) : McpConnectionException(message)

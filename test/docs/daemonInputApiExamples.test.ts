@@ -192,6 +192,20 @@ describe("daemon input API consumer docs", () => {
     expect(unixSocketApi).toContain("iOS simulators return clear unsupported errors for");
   });
 
+  test("documents the additive append-mode capability query with the normal socket handshake", async () => {
+    const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
+
+    expect(unixSocketApi).toContain("### `daemon/capabilities`");
+    expect(unixSocketApi).toContain('"input/typeText.mode:append"');
+    expect(unixSocketApi).toContain("remains subject to the normal socket version");
+    expect(unixSocketApi).toContain(
+      "subject to the normal socket version and build-identity handshake; clients must surface a mismatch",
+    );
+    expect(unixSocketApi).toContain("that leaves append support unknown");
+    expect(unixSocketApi).toContain("translate only the exact `input/typeText unsupported params: mode` response");
+    expect(unixSocketApi).toContain("Unsupported daemon method: daemon/capabilities");
+  });
+
   test("documents pressButton values that the socket actually accepts", async () => {
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
 

@@ -622,6 +622,7 @@ class DeviceControlSessionTest {
           width = width,
           height = height,
           data = data,
+          rotation = 0,
         ),
       hierarchy =
         HierarchyFrameFacts(
@@ -632,6 +633,7 @@ class DeviceControlSessionTest {
           hierarchy = null,
           rootWidth = width,
           rootHeight = height,
+          rotation = 0,
         ),
       liveFrame = null,
     )

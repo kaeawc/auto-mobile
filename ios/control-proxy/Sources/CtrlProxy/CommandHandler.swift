@@ -407,6 +407,8 @@ public class CommandHandler: CommandHandling {
             data: base64,
             format: "png",
             frameContext: before == after ? before : nil
+            rotation: gesturePerformer.getDisplayRotation(),
+            frameContext: before == after ? before : nil
         )
     }
 

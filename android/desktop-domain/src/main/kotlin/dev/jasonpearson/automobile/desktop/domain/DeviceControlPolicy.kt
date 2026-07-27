@@ -32,6 +32,8 @@ public enum class DeviceControlBlockReason {
    * guessing.
    */
   CaptureIdentityUnavailable,
+  /** Screenshot and hierarchy originated while the device had different rotations. */
+  RotationMismatch,
   /** The displayed frame is older than the freshness bound for its source. */
   StaleFrame,
   /** The displayed screenshot and the mapping bounds disagree geometrically. */
@@ -182,6 +184,22 @@ public object DeviceControlPolicy {
     }
     if (captureSequence != hierarchy.captureSequence) {
       return blocked(DeviceControlBlockReason.UnpairedHierarchy)
+    }
+
+    // Rotation is capture-time provenance, distinct from pixel orientation. iOS can deliver
+    // native-portrait screenshot pixels for a landscape device, so geometry intentionally accepts
+    // a rotated image below. What must agree here is the device orientation at which each source
+    // was captured; a missing value from an older daemon is not evidence and fails closed.
+    val screenshotRotation = screenshot.rotation
+    val hierarchyRotation = hierarchy.rotation
+    if (
+      screenshotRotation == null ||
+        hierarchyRotation == null ||
+        screenshotRotation !in 0..3 ||
+        hierarchyRotation !in 0..3 ||
+        screenshotRotation != hierarchyRotation
+    ) {
+      return blocked(DeviceControlBlockReason.RotationMismatch)
     }
 
     // Effective mapping bounds: the SAME rule the renderer uses — hierarchy root bounds when the

@@ -387,6 +387,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private data class ScreenshotCapturePayload(
     val base64Image: String,
+    val rotation: Int?,
     val captureDurationMs: Long,
     val encodeDurationMs: Long,
     val byteLength: Int,
@@ -1864,19 +1865,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /** Get current display rotation. Returns 0=portrait, 1=landscape90, 2=reverse, 3=landscape270. */
   @Suppress("DEPRECATION")
   private fun getRotation(): Int {
+    return getRotationOrNull() ?: 0
+  }
+
+  /**
+   * Read the display rotation without inventing portrait when the display is unavailable.
+   * Screenshot capture provenance uses this nullable form: an unknown rotation must make desktop
+   * control fail closed, unlike the older diagnostic hierarchy/device-info fields that retain their
+   * 0 fallback.
+   */
+  @Suppress("DEPRECATION")
+  private fun getRotationOrNull(): Int? {
     return try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         // Use DisplayManager for AccessibilityService context (can't use context.display)
         val displayManager =
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-        displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation ?: 0
+        displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation
       } else {
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-        windowManager?.defaultDisplay?.rotation ?: 0
+        windowManager?.defaultDisplay?.rotation
       }
     } catch (e: Exception) {
       Log.w(TAG, "Failed to get rotation", e)
-      0
+      null
     }
   }
 
@@ -2474,8 +2486,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val startTime = System.currentTimeMillis()
 
         // Use suspendCancellableCoroutine to bridge callback-based API
-        val bitmap =
-          suspendCancellableCoroutine<Bitmap?> { continuation ->
+        val captured =
+          suspendCancellableCoroutine<Pair<Bitmap, Int?>?> { continuation ->
             takeScreenshot(
               Display.DEFAULT_DISPLAY,
               mainExecutor,
@@ -2487,7 +2499,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                       screenshot.colorSpace,
                     )
                   screenshot.hardwareBuffer.close()
-                  continuation.resume(hardwareBitmap)
+                  if (hardwareBitmap == null) {
+                    continuation.resume(null)
+                    return
+                  }
+                  // This callback is the capture completion boundary. Sample rotation here rather
+                  // than when the request was sent or the JPEG is later encoded, so a rotation
+                  // during capture cannot be labelled as the older hierarchy's orientation.
+                  continuation.resume(hardwareBitmap to getRotationOrNull())
                 }
 
                 override fun onFailure(errorCode: Int) {
@@ -2498,10 +2517,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             )
           }
 
-        if (bitmap == null) {
+        if (captured == null) {
           Log.e(TAG, "Failed to capture screenshot bitmap")
           return@withContext null
         }
+
+        val (bitmap, rotation) = captured
 
         val screenshotTime = System.currentTimeMillis() - startTime
         Log.d(TAG, "Screenshot captured in ${screenshotTime}ms (${bitmap.width}x${bitmap.height})")
@@ -2530,6 +2551,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
         ScreenshotCapturePayload(
           base64Image = base64String,
+          rotation = rotation,
           captureDurationMs = screenshotTime,
           encodeDurationMs = encodeTime,
           byteLength = jpegBytes.size,
@@ -5267,6 +5289,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             requestId = requestId,
             data = screenshot.base64Image,
             format = "jpeg",
+            rotation = screenshot.rotation,
             screenshotCaptureDurationMs = screenshot.captureDurationMs,
             screenshotEncodeDurationMs = screenshot.encodeDurationMs,
             screenshotByteLength = screenshot.byteLength,

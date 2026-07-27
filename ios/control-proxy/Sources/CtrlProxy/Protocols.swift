@@ -166,6 +166,9 @@ public protocol GesturePerforming {
     /// Get current orientation
     func getOrientation() -> String
 
+    /// Get the current display rotation as Android-compatible 0...3, if available.
+    func getDisplayRotation() -> Int?
+
     /// Press home button
     func pressHome() throws
 
@@ -204,6 +207,12 @@ public protocol GesturePerforming {
     /// an unmapped name throws so the caller can surface a per-permission failure.
     /// Works on physical devices, not just simulators. (#2491/#3133)
     func resetAuthorizations(bundleId: String, resources: [String]) throws
+}
+
+extension GesturePerforming {
+    public func getDisplayRotation() -> Int? {
+        DeviceRotation.fromOrientationName(getOrientation())
+    }
 }
 
 // MARK: - StorageInspecting Protocol

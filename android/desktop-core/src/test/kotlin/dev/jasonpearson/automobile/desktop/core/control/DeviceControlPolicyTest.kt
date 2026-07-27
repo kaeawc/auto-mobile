@@ -65,6 +65,7 @@ class DeviceControlPolicyTest {
         width = 1080,
         height = 2340,
         data = null,
+        rotation = 0,
       ),
     hierarchy: HierarchyFrameFacts? =
       HierarchyFrameFacts(
@@ -75,6 +76,7 @@ class DeviceControlPolicyTest {
         hierarchy = hierarchyOf(1080, 2340),
         rootWidth = 1080,
         rootHeight = 2340,
+        rotation = 0,
       ),
     liveFrame: LiveFrameFacts? = null,
   ) =
@@ -249,6 +251,112 @@ class DeviceControlPolicyTest {
   }
 
   @Test
+  fun `same-device rotation mismatch blocks a tap while hierarchy debounce is pending`() {
+    // A screenshot captured after portrait -> landscape can retain the same device id, aspect
+    // ratio, and request-bound capture identity as the hierarchy currently on screen. Rotation is
+    // the remaining capture-time signal that tells us those sources cannot be mapped together.
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(
+        inputs(
+          screenshot =
+            ScreenshotFrameFacts(
+              deviceId = device,
+              sequence = 12L,
+              captureSequence = 7L,
+              receivedAtMs = 9_990L,
+              width = 2340,
+              height = 1080,
+              data = null,
+              rotation = 1,
+            ),
+          hierarchy =
+            HierarchyFrameFacts(
+              deviceId = device,
+              sequence = 11L,
+              captureSequence = 7L,
+              receivedAtMs = 9_950L,
+              hierarchy = hierarchyOf(1080, 2340),
+              rootWidth = 1080,
+              rootHeight = 2340,
+              rotation = 0,
+            ),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `unknown rotation fails closed instead of pairing two malformed frames`() {
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(
+        inputs(
+          screenshot =
+            ScreenshotFrameFacts(
+              deviceId = device,
+              sequence = 12L,
+              captureSequence = 7L,
+              receivedAtMs = 9_990L,
+              width = 1080,
+              height = 2340,
+              data = null,
+              rotation = 4,
+            ),
+          hierarchy =
+            HierarchyFrameFacts(
+              deviceId = device,
+              sequence = 11L,
+              captureSequence = 7L,
+              receivedAtMs = 9_950L,
+              hierarchy = hierarchyOf(1080, 2340),
+              rootWidth = 1080,
+              rootHeight = 2340,
+              rotation = 4,
+            ),
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `matching device rotation keeps iOS native portrait pixels controllable in landscape`() {
+    // iOS screenshot pixels remain native portrait-oriented while the device and hierarchy are
+    // landscape. The policy compares device rotation, not pixel orientation, so the renderer may
+    // keep its existing screenshot-rotation detection without disabling a valid frame.
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+          inputs(
+            screenshot =
+              ScreenshotFrameFacts(
+                deviceId = device,
+                sequence = 12L,
+                captureSequence = 7L,
+                receivedAtMs = 9_990L,
+                width = 1170,
+                height = 2532,
+                data = null,
+                rotation = 1,
+              ),
+            hierarchy =
+              HierarchyFrameFacts(
+                deviceId = device,
+                sequence = 11L,
+                captureSequence = 7L,
+                receivedAtMs = 9_950L,
+                hierarchy = hierarchyOf(2532, 1170),
+                rootWidth = 2532,
+                rootHeight = 1170,
+                rotation = 1,
+              ),
+          ),
+          now,
+        )
+        .snapshotOrNull
+    )
+  }
+
+  @Test
   fun `a screenshot whose pixels outran the hierarchy carries no identity and cannot mis-scale`() {
     // The daemon refuses to stamp a capture id on a frame whose real pixels do not match the
     // geometry its capture client claimed — the resolution-change window where fresh 720x1560
@@ -347,6 +455,7 @@ class DeviceControlPolicyTest {
         width = 1080,
         height = 2340,
         data = null,
+        rotation = 0,
       )
     assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(screenshot = stale)))
   }
@@ -452,6 +561,7 @@ class DeviceControlPolicyTest {
                   hierarchy = hierarchyOf(0, 0),
                   rootWidth = 0,
                   rootHeight = 0,
+                  rotation = 0,
                 )
             ),
             now,

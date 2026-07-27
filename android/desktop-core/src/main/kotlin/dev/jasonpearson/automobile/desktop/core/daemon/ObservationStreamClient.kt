@@ -316,6 +316,7 @@ class ObservationStreamClient {
             packageName = packageName,
             diff = response.hierarchyDiff,
             captureSequence = response.captureSequence,
+            rotation = response.rotation,
           )
         _hierarchyUpdates.emit(update)
         log.info("Emitted hierarchy update to flow")
@@ -341,6 +342,7 @@ class ObservationStreamClient {
             screenshotByteLength = response.screenshotByteLength,
             screenshotBase64Length = response.screenshotBase64Length,
             captureSequence = response.captureSequence,
+            rotation = response.rotation,
           )
         _screenshotUpdates.emit(update)
         log.info("Emitted screenshot update to flow")
@@ -574,6 +576,8 @@ data class StreamResponse(
    * reports geometry derived from that hierarchy. Null on daemons that predate it.
    */
   val captureSequence: Long? = null,
+  /** Device display rotation for this captured frame. */
+  val rotation: Int? = null,
 )
 
 /**
@@ -657,6 +661,8 @@ data class HierarchyStreamUpdate(
   val diff: HierarchyDiffSummary? = null,
   /** Shared capture identity; see [StreamResponse.captureSequence]. */
   val captureSequence: Long? = null,
+  /** Device display rotation for this captured hierarchy. */
+  val rotation: Int? = null,
 )
 
 data class ScreenshotStreamUpdate(
@@ -676,6 +682,8 @@ data class ScreenshotStreamUpdate(
   val screenshotBase64Length: Int? = null,
   /** Shared capture identity; see [StreamResponse.captureSequence]. */
   val captureSequence: Long? = null,
+  /** Device display rotation for this captured screenshot. */
+  val rotation: Int? = null,
 )
 
 data class NavigationGraphStreamUpdate(

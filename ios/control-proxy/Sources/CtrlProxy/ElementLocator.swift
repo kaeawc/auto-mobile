@@ -119,6 +119,14 @@ final class ForegroundTracker {
 /// Locates elements using XCUITest APIs and returns Android-compatible format
 /// Applies filtering similar to Android's ViewHierarchyExtractor to reduce hierarchy size
 public class ElementLocator: ElementLocating {
+    private struct ScreenMetrics {
+        let scale: Float
+        let nativeScale: Float
+        let fallbackWidth: Int
+        let fallbackHeight: Int
+        let rotation: Int?
+    }
+
     // MARK: - Filtering Constants
 
     /// Maximum depth to traverse (prevent infinite recursion)
@@ -622,22 +630,27 @@ public class ElementLocator: ElementLocating {
             // Display Zoom changes nativeScale while scale stays put, and
             // XCUIScreenshot.pngRepresentation renders at native scale (#4548). screenScale
             // (UIScreen.scale) is still reported unchanged for backward compatibility.
-            let (screenScale, nativeScale, fallbackWidth, fallbackHeight): (Float, Float, Int, Int) =
-                try runOnMainThread {
-                    let scale = Float(UIScreen.main.scale)
-                    let native = Float(UIScreen.main.nativeScale)
-                    let bounds = UIScreen.main.bounds
-                    return (scale, native, Int(bounds.width), Int(bounds.height))
-                }
+            let screenMetrics: ScreenMetrics = try runOnMainThread {
+                let scale = Float(UIScreen.main.scale)
+                let nativeScale = Float(UIScreen.main.nativeScale)
+                let bounds = UIScreen.main.bounds
+                return ScreenMetrics(
+                    scale: scale,
+                    nativeScale: nativeScale,
+                    fallbackWidth: Int(bounds.width),
+                    fallbackHeight: Int(bounds.height),
+                    rotation: DeviceRotation.current()
+                )
+            }
             let (screenWidth, screenHeight) = ElementLocator.resolveScreenDimensions(
                 rootBounds: finalHierarchy.bounds,
-                fallbackWidth: fallbackWidth,
-                fallbackHeight: fallbackHeight
+                fallbackWidth: screenMetrics.fallbackWidth,
+                fallbackHeight: screenMetrics.fallbackHeight
             )
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,
                 pointHeight: screenHeight,
-                nativeScale: Double(nativeScale)
+                nativeScale: Double(screenMetrics.nativeScale)
             )
 
             return ViewHierarchy(
@@ -645,12 +658,13 @@ public class ElementLocator: ElementLocating {
                 hierarchy: finalHierarchy,
                 windowInfo: windowInfo,
                 windows: [windowInfo],
-                screenScale: screenScale,
+                screenScale: screenMetrics.scale,
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,
-                nativeScale: pixelDimensions == nil ? nil : nativeScale,
+                nativeScale: pixelDimensions == nil ? nil : screenMetrics.nativeScale,
                 pixelWidth: pixelDimensions?.pixelWidth,
                 pixelHeight: pixelDimensions?.pixelHeight,
+                rotation: screenMetrics.rotation,
                 fallbackToSpringboard: tracker.didFallbackToSpringboard ? true : nil
             )
         }

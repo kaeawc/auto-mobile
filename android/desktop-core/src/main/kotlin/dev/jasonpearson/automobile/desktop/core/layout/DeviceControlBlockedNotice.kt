@@ -51,6 +51,8 @@ internal fun deviceControlBlockReasonText(reason: DeviceControlBlockReason): Str
       "Device control paused: waiting for screenshot and layout to sync"
     DeviceControlBlockReason.CaptureIdentityUnavailable ->
       "Device control unavailable: daemon does not report capture identity"
+    DeviceControlBlockReason.RotationMismatch ->
+      "Device control paused: screenshot and layout rotation disagree"
     DeviceControlBlockReason.StaleFrame -> "Device control paused: frame is stale"
     DeviceControlBlockReason.GeometryMismatch ->
       "Device control paused: screenshot and layout geometry disagree"

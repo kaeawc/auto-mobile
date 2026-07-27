@@ -568,6 +568,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         )
         XCTAssertEqual(response?.type, "screenshot")
         XCTAssertEqual(response?.requestId, "ss-1")
+        XCTAssertEqual(response?.rotation, 0)
     }
 
     // MARK: - Accessibility

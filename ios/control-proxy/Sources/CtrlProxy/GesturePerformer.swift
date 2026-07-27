@@ -4,12 +4,66 @@ import ObjCExceptionCatcher
     import os
 #endif
 #if canImport(XCTest) && os(iOS)
+    import UIKit
     import XCTest
 #endif
 
 /// Logger for text-input focus diagnostics.
 /// See `Logging.swift` for the log-level contract shared across CtrlProxy.
 private let gestureLog = Logger(subsystem: ctrlProxyLogSubsystem, category: "GesturePerformer")
+
+/// Maps platform orientation observations to the rotation epoch shared by hierarchy and screenshot
+/// frames. A value is intentionally absent when the platform cannot identify an interface rotation.
+enum DeviceRotation {
+    static func fromOrientationName(_ orientation: String) -> Int? {
+        switch orientation {
+        case "portrait": return 0
+        case "landscape_left": return 1
+        case "portrait_upside_down": return 2
+        case "landscape_right": return 3
+        default: return nil
+        }
+    }
+
+    #if canImport(XCTest) && os(iOS)
+        static func current() -> Int? {
+            fromInterfaceOrientation(currentInterfaceOrientation())
+        }
+
+        static func fromInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Int? {
+            switch orientation {
+            case .portrait: return 0
+            case .landscapeLeft: return 1
+            case .portraitUpsideDown: return 2
+            case .landscapeRight: return 3
+            default: return nil
+            }
+        }
+
+        static func currentInterfaceOrientation() -> UIInterfaceOrientation {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            if let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) {
+                return activeScene.interfaceOrientation
+            }
+            if let scene = scenes.first {
+                return scene.interfaceOrientation
+            }
+
+            switch UIDevice.current.orientation {
+            case .portrait:
+                return .portrait
+            case .portraitUpsideDown:
+                return .portraitUpsideDown
+            case .landscapeLeft:
+                return .landscapeLeft
+            case .landscapeRight:
+                return .landscapeRight
+            default:
+                return .unknown
+            }
+        }
+    #endif
+}
 
 /// Performs gestures and interactions using XCUITest APIs
 public class GesturePerformer: GesturePerforming {
@@ -438,7 +492,7 @@ public class GesturePerformer: GesturePerforming {
             }
 
             try runOnMainThread {
-                let orientation = GesturePerformer.currentInterfaceOrientation()
+                let orientation = DeviceRotation.currentInterfaceOrientation()
                 var errorMessage: NSString?
                 var symbolsUnavailable: ObjCBool = false
                 let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
@@ -470,29 +524,6 @@ public class GesturePerformer: GesturePerforming {
                         )
                     )
                 }
-            }
-        }
-
-        private static func currentInterfaceOrientation() -> UIInterfaceOrientation {
-            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            if let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) {
-                return activeScene.interfaceOrientation
-            }
-            if let scene = scenes.first {
-                return scene.interfaceOrientation
-            }
-
-            switch UIDevice.current.orientation {
-            case .portrait:
-                return .portrait
-            case .portraitUpsideDown:
-                return .portraitUpsideDown
-            case .landscapeLeft:
-                return .landscapeLeft
-            case .landscapeRight:
-                return .landscapeRight
-            default:
-                return .portrait
             }
         }
 
@@ -555,7 +586,7 @@ public class GesturePerformer: GesturePerforming {
             }
 
             return try runOnMainThread {
-                let orientation = GesturePerformer.currentInterfaceOrientation()
+                let orientation = DeviceRotation.currentInterfaceOrientation()
                 var errorMessage: NSString?
                 var symbolsUnavailable: ObjCBool = false
                 let succeeded = ObjCExceptionCatcher_synthesizePinch(
@@ -942,6 +973,10 @@ public class GesturePerformer: GesturePerforming {
                 default: return "unknown"
                 }
             }, fallback: "unknown")
+        }
+
+        public func getDisplayRotation() -> Int? {
+            runOnMainThreadNonThrowing({ DeviceRotation.current() }, fallback: nil)
         }
 
         // MARK: - Clipboard
@@ -1539,6 +1574,10 @@ public class GesturePerformer: GesturePerforming {
 
         public func getOrientation() -> String {
             return "unknown"
+        }
+
+        public func getDisplayRotation() -> Int? {
+            nil
         }
 
         public func clipboard(action _: String, text _: String?) throws -> String? {

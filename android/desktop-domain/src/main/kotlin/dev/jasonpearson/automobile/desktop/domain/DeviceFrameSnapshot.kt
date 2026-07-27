@@ -44,6 +44,8 @@ public data class ScreenshotFrameFacts(
   val width: Int,
   val height: Int,
   val data: ByteArray?,
+  /** Device display rotation reported for this capture; null means legacy/unproven provenance. */
+  val rotation: Int? = null,
 ) {
   // ByteArray uses reference equality, which would make every copy of an otherwise-identical facts
   // object unequal. Identity is exactly what we want here — a snapshot is tied to the specific
@@ -58,6 +60,7 @@ public data class ScreenshotFrameFacts(
       receivedAtMs == other.receivedAtMs &&
       width == other.width &&
       height == other.height &&
+      rotation == other.rotation &&
       data === other.data
   }
 
@@ -68,6 +71,7 @@ public data class ScreenshotFrameFacts(
     result = 31 * result + receivedAtMs.hashCode()
     result = 31 * result + width
     result = 31 * result + height
+    result = 31 * result + (rotation ?: 0)
     result = 31 * result + System.identityHashCode(data)
     return result
   }
@@ -92,6 +96,8 @@ public data class HierarchyFrameFacts(
   val hierarchy: ParsedHierarchy?,
   val rootWidth: Int,
   val rootHeight: Int,
+  /** Device display rotation reported for this hierarchy capture. */
+  val rotation: Int? = null,
 )
 
 /**

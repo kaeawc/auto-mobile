@@ -87,6 +87,8 @@ export interface XCTestHierarchy {
   pixelWidth?: number;
   /** Physical screenshot pixel height: round(screenHeight * nativeScale) (#4548, additive). */
   pixelHeight?: number;
+  /** Device display rotation captured with the hierarchy: Android-compatible 0..3. */
+  rotation?: number;
   systemInsets?: { top: number; right: number; bottom: number; left: number };
   insets?: ObservationInsets;
   error?: string;
@@ -129,6 +131,7 @@ export interface WebSocketMessage {
   data?: XCTestHierarchy;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;
+  rotation?: number;
   success?: boolean;
   ok?: boolean;
   open?: boolean;
@@ -155,6 +158,7 @@ export interface CtrlProxyScreenshotResult {
   data?: string; // Base64 encoded PNG
   format?: string;
   timestamp?: number;
+  rotation?: number;
   error?: string;
   frameContext?: string;
 }

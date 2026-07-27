@@ -21,6 +21,8 @@ export interface ScreenshotCaptureResult extends ScreenshotMetadata {
   captureBinding?: ScreenGeometryBinding;
   /** Device-authored identity captured with the pixels, if the native runner could prove it. */
   frameContext?: string;
+  /** Device rotation reported by the platform with the captured pixels. */
+  rotation?: number;
 }
 
 /**

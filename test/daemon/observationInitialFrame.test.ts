@@ -32,8 +32,11 @@ class FakeObservationStreamServer {
     screenWidth: number,
     screenHeight: number,
     metadata?: Record<string, unknown>,
-    options?: { coordinateSpace?: "px" }
+    options?: { captureSequence?: number; coordinateSpace?: "px"; rotation?: number }
   ): void {
+    const screenshotOptions = options?.captureSequence === undefined && options?.rotation === undefined
+      ? undefined
+      : options;
     this.screenshotUpdates.push({
       deviceId,
       screenshotBase64,
@@ -41,6 +44,7 @@ class FakeObservationStreamServer {
       screenHeight,
       ...(metadata === undefined ? {} : { metadata }),
       ...(options?.coordinateSpace === undefined ? {} : { coordinateSpace: options.coordinateSpace }),
+      ...(screenshotOptions === undefined ? {} : { options: screenshotOptions }),
     });
   }
 }
@@ -52,6 +56,7 @@ interface ScreenshotUpdate {
   screenHeight: number;
   metadata?: Record<string, unknown>;
   coordinateSpace?: "px";
+  options?: { captureSequence?: number; rotation?: number };
 }
 
 class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
@@ -185,6 +190,7 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
       ...(typedHierarchy.nativeScale === undefined ? {} : { nativeScale: typedHierarchy.nativeScale }),
       ...(typedHierarchy.pixelWidth === undefined ? {} : { pixelWidth: typedHierarchy.pixelWidth }),
       ...(typedHierarchy.pixelHeight === undefined ? {} : { pixelHeight: typedHierarchy.pixelHeight }),
+      rotation: typedHierarchy.rotation,
     };
   }
 
@@ -442,8 +448,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       screenWidth: 390,
       screenHeight: 844,
       screenScale: 3,
+      rotation: 1,
       hierarchy: { text: "Home" },
-    });
+    }, undefined, { success: true, data: "ios-shot", format: "png", rotation: 1 });
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
       streamServer,
@@ -468,6 +475,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
           screenshotCaptureSource: "ios_ctrlproxy",
           screenshotFallback: false,
         },
+        options: { rotation: 1 },
       },
     ]);
     expect(iosClient.syncHierarchyCalls).toHaveLength(0);

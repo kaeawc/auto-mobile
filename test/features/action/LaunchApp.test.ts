@@ -117,6 +117,31 @@ describe("LaunchApp", () => {
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName} --user 0 1`)).toBe(true);
   });
 
+  test("clears Android app data through the injected action before relaunch when not running", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse(`shell ps | grep ${packageName}`, { stdout: "0\n", stderr: "" });
+
+    const clearCalls: Array<{ device: BootedDevice; packageName: string; userId: number | undefined }> = [];
+    const lifecycleLaunchApp = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      createAndroidClearAppData: clearDevice => ({
+        execute: async (clearPackageName: string, userId?: number) => {
+          clearCalls.push({ device: clearDevice, packageName: clearPackageName, userId });
+          return { success: true, packageName: clearPackageName, userId };
+        },
+      }),
+    });
+    (lifecycleLaunchApp as any).awaitIdle = fakeAwaitIdle;
+    (lifecycleLaunchApp as any).observeScreen = fakeObserveScreen;
+    (lifecycleLaunchApp as any).window = fakeWindow;
+
+    const result = await lifecycleLaunchApp.execute(packageName, true, false);
+
+    expect(result.success).toBe(true);
+    expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName} --user 0 1`)).toBe(true);
+  });
+
   test("cold boots Android through the injected action before relaunch", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });

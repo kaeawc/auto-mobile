@@ -306,6 +306,9 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       result.screenshotCaptureSource ?? null,
       result.screenshotFallback ?? null,
       result.screenshotFallbackReason ?? null,
+      // Rotation is capture provenance for desktop control. A corrected rotation must not wait
+      // for the keepalive just because the pixels and the requested capture are unchanged.
+      result.rotation ?? null,
       // A new capture identity makes a byte-identical frame a DIFFERENT frame (issue #3348).
       // Navigating to a same-size screen whose pixels happen to be identical would otherwise
       // discard every screenshot in the new backoff burst as a duplicate, leaving the desktop

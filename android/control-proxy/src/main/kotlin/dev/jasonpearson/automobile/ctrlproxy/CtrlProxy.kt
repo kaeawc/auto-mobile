@@ -2121,6 +2121,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    */
   private fun extractHierarchyDirect(disableAllFiltering: Boolean = false): ViewHierarchy? {
     val contextAtExtractionStart = currentFrameContext()
+    // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
+    // that interval, hierarchy geometry cannot be proven to match a single display orientation.
+    val rotationBeforeExtraction = getRotationOrNull()
     // Get all windows to capture popups, toolbars, and other floating windows
     val allWindows = windows
     val rootNode = rootInActiveWindow
@@ -2129,7 +2132,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions()
-    val rotationBeforeExtraction = getRotationOrNull()
     val insets = getObservationInsets()
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {

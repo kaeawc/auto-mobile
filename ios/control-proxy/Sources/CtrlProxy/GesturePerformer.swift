@@ -27,7 +27,7 @@ enum DeviceRotation {
 
     #if canImport(XCTest) && os(iOS)
         static func current() -> Int? {
-            fromInterfaceOrientation(currentInterfaceOrientation())
+            fromInterfaceOrientation(currentInterfaceOrientation(fallback: .unknown))
         }
 
         static func fromInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Int? {
@@ -40,12 +40,18 @@ enum DeviceRotation {
             }
         }
 
-        static func currentInterfaceOrientation() -> UIInterfaceOrientation {
+        static func currentGestureInterfaceOrientation() -> UIInterfaceOrientation {
+            currentInterfaceOrientation(fallback: .portrait)
+        }
+
+        private static func currentInterfaceOrientation(fallback: UIInterfaceOrientation) -> UIInterfaceOrientation {
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            if let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) {
+            if let activeScene = scenes.first(where: {
+                $0.activationState == .foregroundActive && fromInterfaceOrientation($0.interfaceOrientation) != nil
+            }) {
                 return activeScene.interfaceOrientation
             }
-            if let scene = scenes.first {
+            if let scene = scenes.first(where: { fromInterfaceOrientation($0.interfaceOrientation) != nil }) {
                 return scene.interfaceOrientation
             }
 
@@ -59,7 +65,7 @@ enum DeviceRotation {
             case .landscapeRight:
                 return .landscapeRight
             default:
-                return .unknown
+                return fallback
             }
         }
     #endif
@@ -492,7 +498,7 @@ public class GesturePerformer: GesturePerforming {
             }
 
             try runOnMainThread {
-                let orientation = DeviceRotation.currentInterfaceOrientation()
+                let orientation = DeviceRotation.currentGestureInterfaceOrientation()
                 var errorMessage: NSString?
                 var symbolsUnavailable: ObjCBool = false
                 let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
@@ -586,7 +592,7 @@ public class GesturePerformer: GesturePerforming {
             }
 
             return try runOnMainThread {
-                let orientation = DeviceRotation.currentInterfaceOrientation()
+                let orientation = DeviceRotation.currentGestureInterfaceOrientation()
                 var errorMessage: NSString?
                 var symbolsUnavailable: ObjCBool = false
                 let succeeded = ObjCExceptionCatcher_synthesizePinch(

@@ -1224,7 +1224,6 @@ public struct ScreenshotResponse: Codable {
         self.data = data
         self.frameContext = frameContext
         self.rotation = rotation
-        self.frameContext = frameContext
     }
 }
 

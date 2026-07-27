@@ -940,6 +940,20 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func getScreenshotCapture() throws -> ScreenshotCapture {
+            guard let app = application else {
+                throw GestureError.noApplication
+            }
+
+            return try runOnMainThread {
+                let rotationBeforeCapture = DeviceRotation.current()
+                let screenshot = app.screenshot()
+                let rotationAfterCapture = DeviceRotation.current()
+                let rotation = rotationBeforeCapture == rotationAfterCapture ? rotationAfterCapture : nil
+                return ScreenshotCapture(data: screenshot.pngRepresentation, rotation: rotation)
+            }
+        }
+
         // MARK: - Device Control
 
         public func setOrientation(_ orientation: String) throws {

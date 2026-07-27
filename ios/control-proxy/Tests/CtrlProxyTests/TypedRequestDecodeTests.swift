@@ -571,6 +571,20 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
         XCTAssertEqual(response?.rotation, 0)
     }
 
+    func testScreenshotDecodeDispatchUsesCaptureRotation() {
+        fakeGesturePerformer.setScreenshotCapture(
+            ScreenshotCapture(data: Data(), rotation: 3)
+        )
+
+        let response = dispatch(
+            #"{"type":"request_screenshot","requestId":"ss-capture-rotation"}"#,
+            as: ScreenshotResponse.self
+        )
+
+        XCTAssertEqual(response?.rotation, 3)
+        XCTAssertEqual(fakeGesturePerformer.getScreenshotCallCount(), 1)
+    }
+
     // MARK: - Accessibility
 
     func testGetVoiceOverStateDecodeDispatch() {

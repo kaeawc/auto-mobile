@@ -2129,7 +2129,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions()
-    val rotation = getRotation()
+    val rotationBeforeExtraction = getRotationOrNull()
     val insets = getObservationInsets()
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
@@ -2163,6 +2163,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           disableAllFiltering,
         )
       }
+
+    val rotationAfterExtraction = getRotationOrNull()
+    val rotation =
+      if (rotationBeforeExtraction == rotationAfterExtraction) rotationAfterExtraction else null
 
     // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
     val wakefulness = getWakefulness()
@@ -2486,6 +2490,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val startTime = System.currentTimeMillis()
 
         // Use suspendCancellableCoroutine to bridge callback-based API
+        val rotationBeforeCapture = getRotationOrNull()
         val captured =
           suspendCancellableCoroutine<Pair<Bitmap, Int?>?> { continuation ->
             takeScreenshot(
@@ -2503,10 +2508,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                     continuation.resume(null)
                     return
                   }
-                  // This callback is the capture completion boundary. Sample rotation here rather
-                  // than when the request was sent or the JPEG is later encoded, so a rotation
-                  // during capture cannot be labelled as the older hierarchy's orientation.
-                  continuation.resume(hardwareBitmap to getRotationOrNull())
+                  val rotationAfterCapture = getRotationOrNull()
+                  // A changed rotation makes the pixels' orientation ambiguous. Preserve that
+                  // ambiguity as null so desktop control fails closed rather than guessing.
+                  val rotation =
+                    if (rotationBeforeCapture == rotationAfterCapture) rotationAfterCapture
+                    else null
+                  continuation.resume(hardwareBitmap to rotation)
                 }
 
                 override fun onFailure(errorCode: Int) {

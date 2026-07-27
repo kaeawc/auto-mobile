@@ -60,6 +60,17 @@ public protocol ElementLocating {
 
 // MARK: - GesturePerformer Protocol
 
+/// A screenshot and the device rotation sampled around the same capture operation.
+public struct ScreenshotCapture {
+    public let data: Data
+    public let rotation: Int?
+
+    public init(data: Data, rotation: Int?) {
+        self.data = data
+        self.rotation = rotation
+    }
+}
+
 /// Protocol for performing gestures and interactions
 public protocol GesturePerforming {
     // MARK: - Tap Gestures
@@ -158,6 +169,9 @@ public protocol GesturePerforming {
     /// Capture screenshot
     func getScreenshot() throws -> Data
 
+    /// Capture a screenshot with its device rotation provenance.
+    func getScreenshotCapture() throws -> ScreenshotCapture
+
     // MARK: - Device Control
 
     /// Set device orientation
@@ -210,6 +224,10 @@ public protocol GesturePerforming {
 }
 
 extension GesturePerforming {
+    public func getScreenshotCapture() throws -> ScreenshotCapture {
+        ScreenshotCapture(data: try getScreenshot(), rotation: getDisplayRotation())
+    }
+
     public func getDisplayRotation() -> Int? {
         DeviceRotation.fromOrientationName(getOrientation())
     }

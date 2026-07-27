@@ -398,16 +398,15 @@ public class CommandHandler: CommandHandling {
         // the context absent, which makes a context-aware client fail closed instead of pairing
         // pixels from one screen with the identity of another.
         let before = currentFrameContext()
-        let data = try gesturePerformer.getScreenshot()
+        let screenshot = try gesturePerformer.getScreenshotCapture()
         let after = currentFrameContext()
-        let base64 = data.base64EncodedString()
+        let base64 = screenshot.data.base64EncodedString()
 
         return ScreenshotResponse(
             requestId: request.requestId,
             data: base64,
             format: "png",
-            frameContext: before == after ? before : nil
-            rotation: gesturePerformer.getDisplayRotation(),
+            rotation: screenshot.rotation,
             frameContext: before == after ? before : nil
         )
     }

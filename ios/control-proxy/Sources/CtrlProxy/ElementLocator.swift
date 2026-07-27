@@ -532,8 +532,9 @@ public class ElementLocator: ElementLocating {
             // IMPORTANT: Create a FRESH XCUIApplication instance for each snapshot to avoid
             // stale accessibility cache. Cached instances may not reflect system-presented
             // alerts like permission dialogs.
-            let (snapshot, keyboardFocusFrame) = try perfProvider.track("snapshot") {
+            let (snapshot, keyboardFocusFrame, screenMetrics) = try perfProvider.track("snapshot") {
                 try runOnMainThread {
+                    let rotationBeforeSnapshot = DeviceRotation.current()
                     let freshApp = XCUIApplication(bundleIdentifier: bundleId)
                     let snap = try freshApp.snapshot()
 
@@ -543,8 +544,20 @@ public class ElementLocator: ElementLocating {
                         .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                         .firstMatch
                     let focusFrame: CGRect? = focused.exists ? focused.frame : nil
+                    let rotationAfterSnapshot = DeviceRotation.current()
+                    let bounds = UIScreen.main.bounds
+                    let rotation = rotationBeforeSnapshot == rotationAfterSnapshot ? rotationAfterSnapshot : nil
 
-                    return (snap, focusFrame)
+                    return (
+                        snap,
+                        focusFrame,
+                        ScreenMetrics(
+                            scale: Float(UIScreen.main.scale),
+                            fallbackWidth: Int(bounds.width),
+                            fallbackHeight: Int(bounds.height),
+                            rotation: rotation
+                        )
+                    )
                 }
             }
 

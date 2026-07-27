@@ -96,20 +96,49 @@ public object DeviceDragGesturePolicy {
    * *below* the ~10-point iOS touch slop the legacy value was chosen to clear. Movements the device
    * then reads as a tap rather than a drag would be forwarded as swipes.
    *
-   * `32` restores the intent for the worst case this client can encounter: at `nativeScale` 3 it is
-   * 10.67 logical points, just above the ~10-point slop, and at 2x it is 16 points — comfortably
-   * above. Android publishes pixels at `nativeScale` 1, so its bar moves from 8dp to ~10.7dp at a
-   * 3x density: still small, still above its own 8dp slop, and erring toward *not* sending a
-   * gesture the user did not intend.
+   * `36` is a conservative floor covering every `nativeScale` up to and including
+   * [MAX_COVERED_NATIVE_SCALE]. It is chosen from the scales this project actually carries rather
+   * than from a guess: the cross-language golden vectors
+   * (`test/fixtures/coordinate-mapping-golden-vectors.json`) pin `1.0` (Android), `2.0`, `2.608696`
+   * (the Plus-family downsampling panel), `3.0`, `3.144` and `3.5`. Divided out, `36` clears the
+   * ~10-point slop at every one of them — 10.29pt at 3.5x, 11.5pt at 3.144x, 12pt at 3x, 13.8pt at
+   * 2.6x, 18pt at 2x.
+   *
+   * The bound is real, not theoretical. `readScreenScaleMetadata` accepts ANY finite positive
+   * scale, so a runner reporting a scale **above** [MAX_COVERED_NATIVE_SCALE] would divide this
+   * back below the slop and the under-shoot would return. That is precisely why per-frame scaling
+   * matters and is tracked as follow-up, not a reason to pretend the constant is universal.
+   *
+   * The cost, stated rather than glossed: one constant cannot be tight at every scale, so it
+   * over-shoots at the low end — 18 logical points at 2x where ~10 would do, meaning a slightly
+   * longer drag than strictly necessary on those devices. Two mitigations make that acceptable. It
+   * is still well inside the LEGACY point-space bar of 24 points at every covered scale, so no iOS
+   * user is asked for a longer drag than before canonical pixels. And on Android (`nativeScale` 1)
+   * it is a straight raise from 24 to 36 physical pixels — ~12dp at a 3x density, up from ~8dp —
+   * which errs toward *not* sending a gesture the user did not intend, the correct direction for a
+   * threshold whose failure mode is actuating real hardware.
    *
    * A single constant rather than `24 * nativeScale` because **the observation stream does not
    * publish `nativeScale`** — the daemon keeps it internal (issue #4548) and a `"px"` frame's
-   * screenshot and bounds are equal by construction, so the scale cannot be recovered client-side
-   * either. Scaling exactly would need the daemon to publish it, which is a wire addition. Tracked
-   * as follow-up; until then this constant is the conservative stand-in, chosen to be correct at
-   * the worst scale rather than optimal at every one.
+   * screenshot dimensions and bounds are equal by construction, so the scale cannot be recovered
+   * client-side either. Scaling exactly would need the daemon to publish it, which is a wire
+   * addition; tracked as follow-up (#4582). Until then this is a conservative floor over the scales
+   * we know of, NOT a value that is correct for every scale the wire permits.
    */
-  public const val MIN_SWIPE_DISTANCE_PX: Int = 32
+  public const val MIN_SWIPE_DISTANCE_PX: Int = 36
+
+  /**
+   * The largest `nativeScale` [MIN_SWIPE_DISTANCE_PX] is chosen to cover.
+   *
+   * The maximum appearing in the cross-language golden vectors. Above this the constant divides
+   * back below the ~10-point iOS touch slop, so a device reporting a larger scale needs the
+   * per-frame scaling tracked in #4582. Recorded as a named value so the bound is testable instead
+   * of living only in prose.
+   */
+  public const val MAX_COVERED_NATIVE_SCALE: Double = 3.5
+
+  /** The iOS touch slop, in logical points, that [MIN_SWIPE_DISTANCE_PX] is sized to clear. */
+  public const val IOS_TOUCH_SLOP_POINTS: Double = 10.0
 
   /**
    * The threshold that applies to a frame in [coordinateSpace] — [MIN_SWIPE_DISTANCE_PX] for

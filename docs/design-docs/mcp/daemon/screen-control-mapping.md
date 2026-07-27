@@ -164,7 +164,7 @@ the drag-shaped case of the rule in
 
 | Rule | Value |
 | --- | --- |
-| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **32 device coordinates** (physical pixels) |
+| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **36 device coordinates** (physical pixels) |
 | Minimum travelled distance, legacy frame (no declaration) | **24 device coordinates** (logical points) |
 | Measurement | straight-line (Euclidean), in **device** coordinates, **after** the end is clamped |
 | Below the threshold | send **nothing** — not a swipe, and **not** a tap either |
@@ -186,18 +186,42 @@ coordinate by `nativeScale` before dispatch, so on a 3× iOS device 24 physical
 pixels arrives as **8 logical points** — *below* the slop the value was chosen to
 clear, and movements the device reads as taps would be forwarded as swipes.
 
-`32` restores the intent at the worst scale a client can meet: 32 ÷ 3 = 10.67
-logical points, just above the ~10-point iOS slop, and 16 points at 2×. Android
-publishes pixels at `nativeScale` 1, so its bar moves from 8dp to ~10.7dp at a 3×
-density — still small, still above its own slop, and erring toward *not* sending
-a gesture the user did not intend.
+`36` is a **conservative floor covering every `nativeScale` up to and including
+3.5×**, chosen from the scales this project actually carries rather than from a
+guess. The cross-language golden vectors pin `1.0` (Android), `2.0`, `2.608696`
+(the Plus-family downsampling panel), `3.0`, `3.144` and `3.5`; divided out, `36`
+clears the ~10-point slop at every one:
+
+| `nativeScale` | 36px arrives as |
+| --- | --- |
+| 2.0 | 18.0 pt |
+| 2.608696 | 13.8 pt |
+| 3.0 | 12.0 pt |
+| 3.144 | 11.5 pt |
+| 3.5 | 10.29 pt |
+
+**The bound is a floor, not a guarantee.** The protocol accepts any finite
+positive `nativeScale`, so a device reporting more than 3.5× would divide `36`
+back below the slop and the under-shoot returns. That is exactly why per-frame
+scaling matters (below), not a reason to read this constant as universal.
+
+The cost, stated rather than glossed: one constant cannot be tight at every
+scale, so it over-shoots at the low end — 18 points at 2×, where ~10 would do,
+means a slightly longer drag than strictly necessary on those devices. Two things
+make that acceptable. It stays well inside the legacy point-space bar of 24
+points at *every* covered scale, so no iOS user is asked for a longer drag than
+before canonical pixels. And on Android (`nativeScale` 1) it is a straight raise
+from 24 to 36 physical pixels — ~12dp at a 3× density, up from ~8dp — which errs
+toward *not* sending a gesture the user did not intend, the correct direction for
+a threshold whose failure mode is actuating real hardware.
 
 A single canonical-pixel constant rather than `24 × nativeScale` because the
 observation stream **does not publish `nativeScale`** — the daemon keeps it
 internal, and a `"px"` frame's screenshot dimensions and bounds are equal by
 construction, so a client cannot recover the scale either. Scaling exactly would
-require the daemon to publish it. Until then this constant is deliberately
-correct at the worst scale rather than optimal at every one.
+require the daemon to publish it, tracked as
+[#4582](https://github.com/kaeawc/auto-mobile/issues/4582). Until then this
+constant is a conservative floor over the scales we know of.
 
 A below-threshold drag is **not** promoted to a tap. Actuating an input the user
 did not ask for is worse than ignoring an ambiguous one, and a click that barely

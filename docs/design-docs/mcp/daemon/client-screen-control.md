@@ -271,9 +271,11 @@ executes whatever it is handed, so convergence on one policy is what keeps clien
 
 - **Tap** — an in-bounds click → one [`input/tap`](unix-socket-api.md#inputtap) at the mapped
   coordinate.
-- **Drag → swipe** — a drag is a swipe only if it travels far enough to be deliberate: **≥ 32
+- **Drag → swipe** — a drag is a swipe only if it travels far enough to be deliberate: **≥ 36
   device coordinates** on a `coordinateSpace: "px"` frame, **≥ 24** on a legacy one (the threshold
-  is a physical distance, so its number depends on the frame's unit), measured after the end is
+  is a physical distance, so its number depends on the frame's unit; the pixel value is a
+  conservative floor covering `nativeScale` up to 3.5× — see
+  [Drag-to-swipe policy](screen-control-mapping.md#threshold)), measured after the end is
   clamped. Below that, send **nothing** — not a swipe and *not* a tap. Map both
   endpoints through the **one** snapshot pinned when the drag began. A drag that *started*
   off-screen is dropped; a drag that *ended* off-screen is clamped to the last addressable pixel.

@@ -2,17 +2,17 @@
   "version": "1.0.0",
   "metadata": {
     "generatedAt": "2026-07-24",
-    "description": "MCP context usage thresholds with manual headroom for resource/template growth. tools baseline/threshold reconciled to current main: #4390 (observe.scope, ~433 tokens) and #4396 (observe.project, ~108 tokens) both merged over the non-required benchmark without raising the threshold, and #3490 adds openLink's integrated waitFor (the whole predicate surface, previously observe-only) plus absent/settled (~194 tokens after trimming shared waitFor descriptions). #4398 wires the settleObserve + waitForCondition tools and the observe.waitFor for-DSL (~1089 tokens: two new device-aware tools plus the for/pollMs/stableReads compact-schema fields, advertised on both observe and openLink, after trimming shared descriptions).",
+    "description": "MCP context usage thresholds with manual headroom for resource/template growth. tools baseline/threshold reconciled to current main: #4390 (observe.scope, ~433 tokens) and #4396 (observe.project, ~108 tokens) both merged over the non-required benchmark without raising the threshold, and #3490 adds openLink's integrated waitFor (the whole predicate surface, previously observe-only) plus absent/settled (~194 tokens after trimming shared waitFor descriptions). #4398 wires the settleObserve + waitForCondition tools and the observe.waitFor for-DSL (~1089 tokens: two new device-aware tools plus the for/pollMs/stableReads compact-schema fields, advertised on both observe and openLink, after trimming shared descriptions). #4459 publishes explore, getNavigationGraph, and navigateTo in normal tools/list after iOS parity.",
     "baseline": {
-      "tools": 16734,
+      "tools": 17653,
       "resources": 440,
       "resourceTemplates": 1885,
-      "total": 19059
+      "total": 19978
     },
     "buffer": "custom"
   },
   "thresholds": {
-    "tools": 16830,
+    "tools": 20000,
     "resources": 1000,
     "resourceTemplates": 2000,
     "total": 20000

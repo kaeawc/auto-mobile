@@ -24,6 +24,19 @@ The agent will:
 4. Use device interaction [tool calls](../design-docs/mcp/tools.md) to tap, swipe, pinch, drag, and generally interact to accomplish the given tasks.
 5. At each step the agent will have full device state and observations to keep iterating.
 
+## Learn and Replay Navigation
+
+For repeatable exploration, use the navigation graph workflow:
+
+1. Start with `observe`, then run `explore` with a bounded `maxInteractions` to discover screens and transitions.
+2. Call `getNavigationGraph` to inspect the screens, learned actions, and current screen for the device session.
+3. Call `navigateTo` with a known `targetScreen`, then use `observe` to verify the arrival.
+4. If a route is unknown or stale, return to a known app state, explore again, and retry. If recovery fails, inspect the current screen and continue with deliberate platform interaction rather than assuming the recorded route is still valid.
+
+Android navigation graphs are supported on devices and emulators. iOS navigation graph workflows use the XCUITest CtrlProxy runner on simulators. Recovery uses the corresponding platform controls; iOS does not fall back to Android shell commands.
+
+Graphs are learned from observations, tool calls, and SDK navigation events. SDK events provide the strongest screen identity. Treat routes through screens with similar structure, dynamic content, authentication, or feature flags as lower-confidence, and verify important arrivals with `observe`.
+
 ??? example "See demo: Google Maps exploration"
     ![Exploring Google Maps](../img/google-maps.gif)
     *Demo: An AI agent exploring Google Maps, searching for locations, and interacting with map controls.*

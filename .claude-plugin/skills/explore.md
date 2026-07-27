@@ -1,9 +1,9 @@
 ---
-description: Explore and interact with mobile devices using all available tools
-allowed-tools: mcp__auto-mobile__observe, mcp__auto-mobile__tapOn, mcp__auto-mobile__swipeOn, mcp__auto-mobile__inputText, mcp__auto-mobile__clearText, mcp__auto-mobile__selectAllText, mcp__auto-mobile__pressButton, mcp__auto-mobile__pressKey, mcp__auto-mobile__dragAndDrop, mcp__auto-mobile__pinchOn, mcp__auto-mobile__keyboard, mcp__auto-mobile__imeAction, mcp__auto-mobile__homeScreen, mcp__auto-mobile__recentApps, mcp__auto-mobile__systemTray, mcp__auto-mobile__launchApp, mcp__auto-mobile__terminateApp, mcp__auto-mobile__openLink, mcp__auto-mobile__clipboard, mcp__auto-mobile__rotate, mcp__auto-mobile__shake, mcp__auto-mobile__deviceSnapshot, mcp__auto-mobile__installApp, mcp__auto-mobile__clearAppData
+description: Explore a mobile app, build a navigation graph, and reuse learned paths
+allowed-tools: mcp__auto-mobile__observe, mcp__auto-mobile__tapOn, mcp__auto-mobile__swipeOn, mcp__auto-mobile__inputText, mcp__auto-mobile__clearText, mcp__auto-mobile__selectAllText, mcp__auto-mobile__pressButton, mcp__auto-mobile__pressKey, mcp__auto-mobile__dragAndDrop, mcp__auto-mobile__pinchOn, mcp__auto-mobile__keyboard, mcp__auto-mobile__imeAction, mcp__auto-mobile__homeScreen, mcp__auto-mobile__recentApps, mcp__auto-mobile__systemTray, mcp__auto-mobile__launchApp, mcp__auto-mobile__terminateApp, mcp__auto-mobile__openLink, mcp__auto-mobile__clipboard, mcp__auto-mobile__rotate, mcp__auto-mobile__shake, mcp__auto-mobile__deviceSnapshot, mcp__auto-mobile__installApp, mcp__auto-mobile__clearAppData, mcp__auto-mobile__explore, mcp__auto-mobile__getNavigationGraph, mcp__auto-mobile__navigateTo
 ---
 
-Explore and interact with connected mobile devices. This skill combines all interaction capabilities for comprehensive device control.
+Explore and interact with connected mobile devices. Use the navigation graph when an app benefits from repeatable discovery and learned-path replay.
 
 ## Getting Started
 
@@ -76,9 +76,17 @@ deviceSnapshot with action: "restore", snapshotName: "baseline"
 ## Workflow
 
 1. **Start** - Use `observe` to capture initial screen state
-2. **Navigate** - Use apps/system tools to reach target
-3. **Interact** - Perform gestures, input text (state updates automatically)
-4. **Verify** - Use `observe` only if action showed loading/incomplete state
+2. **Discover** - Run `explore` with a bounded `maxInteractions` to discover screens and transitions. Use `dryRun` when you only need the planned interactions.
+3. **Inspect** - Call `getNavigationGraph` to review the learned screens, transitions, and current screen for this device session.
+4. **Replay** - Use `navigateTo` with `targetScreen` when the graph already contains a route, then verify arrival with `observe`.
+5. **Recover** - If replay or exploration reports a recovery failure, observe the current screen, use the platform-aware system controls, and fall back to deliberate step-by-step interaction rather than assuming a learned path still applies.
+
+## Confidence and Platform Notes
+
+- Navigation graphs are learned from observations, tool calls, and SDK navigation events. Treat a route as a useful hypothesis and verify important arrivals.
+- SDK navigation events provide the strongest screen identity. Apps without them can have ambiguous, structurally similar screens.
+- Android supports graph workflows on devices and emulators. iOS graph workflow support uses the XCUITest CtrlProxy runner on simulators.
+- `explore` uses platform-aware back/home recovery. It reports an actionable failure instead of attempting Android shell recovery on iOS.
 
 ## Tips
 

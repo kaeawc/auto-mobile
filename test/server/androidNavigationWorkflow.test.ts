@@ -37,8 +37,7 @@ describe("Android navigation graph workflow (#4459)", () => {
     await harness.dispose();
   });
 
-  test("serves the debug-gated navigation tools through MCP tools/list", async () => {
-    setDebugModeEnabled(true);
+  test("serves navigation tools through MCP tools/list without debug mode", async () => {
     const server = createMcpServer();
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);

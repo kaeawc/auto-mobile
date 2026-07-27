@@ -456,6 +456,39 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       expect(emittedResults).toEqual([captures[0], captures[1]]);
     });
 
+    it("emits when rotation provenance changes even if image bytes are unchanged", async () => {
+      const emittedResults: ScreenshotCaptureResult[] = [];
+      const captures: ScreenshotCaptureResult[] = [
+        {
+          success: true,
+          data: "same-data",
+          captureBinding: { captureSequence: 7, width: 1080, height: 2340 },
+          rotation: null,
+        },
+        {
+          success: true,
+          data: "same-data",
+          captureBinding: { captureSequence: 7, width: 1080, height: 2340 },
+          rotation: 1,
+        },
+      ];
+      let captureIndex = 0;
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        async () => captures[captureIndex++]!,
+        result => {
+          emittedResults.push(result);
+        },
+        { intervals: [0, 100], keepAliveIntervalMs: null },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+
+      expect(emittedResults).toEqual(captures);
+    });
+
     it("emits when screenshot changes", async () => {
       let screenshotIndex = 0;
       const screenshots = ["frame1", "frame1", "frame2", "frame2", "frame3"];

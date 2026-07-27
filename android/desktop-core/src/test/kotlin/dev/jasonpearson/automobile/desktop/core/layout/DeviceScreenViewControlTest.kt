@@ -488,6 +488,7 @@ class DeviceScreenViewControlTest {
       deviceHeight = deviceHeight,
       screenshotData = null,
       hierarchy = null,
+      coordinateSpace = null,
       captureSequence = sequence,
       screenshotSequence = sequence,
       hierarchySequence = sequence,

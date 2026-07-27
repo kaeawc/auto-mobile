@@ -60,6 +60,17 @@ public protocol ElementLocating {
 
 // MARK: - GesturePerformer Protocol
 
+/// A screenshot and the device rotation sampled around the same capture operation.
+public struct ScreenshotCapture {
+    public let data: Data
+    public let rotation: Int?
+
+    public init(data: Data, rotation: Int?) {
+        self.data = data
+        self.rotation = rotation
+    }
+}
+
 /// Protocol for performing gestures and interactions
 public protocol GesturePerforming {
     // MARK: - Tap Gestures
@@ -158,6 +169,9 @@ public protocol GesturePerforming {
     /// Capture screenshot
     func getScreenshot() throws -> Data
 
+    /// Capture a screenshot with its device rotation provenance.
+    func getScreenshotCapture() throws -> ScreenshotCapture
+
     // MARK: - Device Control
 
     /// Set device orientation
@@ -165,6 +179,9 @@ public protocol GesturePerforming {
 
     /// Get current orientation
     func getOrientation() -> String
+
+    /// Get the current display rotation as Android-compatible 0...3, if available.
+    func getDisplayRotation() -> Int?
 
     /// Press home button
     func pressHome() throws
@@ -204,6 +221,22 @@ public protocol GesturePerforming {
     /// an unmapped name throws so the caller can surface a per-permission failure.
     /// Works on physical devices, not just simulators. (#2491/#3133)
     func resetAuthorizations(bundleId: String, resources: [String]) throws
+}
+
+extension GesturePerforming {
+    public func getScreenshotCapture() throws -> ScreenshotCapture {
+        let rotationBeforeCapture = getDisplayRotation()
+        let data = try getScreenshot()
+        let rotationAfterCapture = getDisplayRotation()
+        return ScreenshotCapture(
+            data: data,
+            rotation: rotationBeforeCapture == rotationAfterCapture ? rotationAfterCapture : nil
+        )
+    }
+
+    public func getDisplayRotation() -> Int? {
+        DeviceRotation.fromOrientationName(getOrientation())
+    }
 }
 
 // MARK: - StorageInspecting Protocol

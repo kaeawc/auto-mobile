@@ -2092,6 +2092,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     captureSequence?: number,
     coordinateSpace?: CoordinateSpace,
     frameContext?: string,
+    rotation?: number,
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -2109,6 +2110,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         captureSequence,
         ...(coordinateSpace ? { coordinateSpace } : {}),
         frameContext,
+        rotation,
       });
     } catch (error) {
       logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
@@ -2158,7 +2160,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
             result,
             binding?.captureSequence,
             binding?.coordinateSpace,
-            result.frameContext
+            result.frameContext,
+            result.rotation
           );
         },
         {
@@ -2199,6 +2202,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         data: result.data,
         captureBinding,
         frameContext: result.frameContext,
+        rotation: result.rotation,
         ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, result.format),
       };
     } catch (error) {

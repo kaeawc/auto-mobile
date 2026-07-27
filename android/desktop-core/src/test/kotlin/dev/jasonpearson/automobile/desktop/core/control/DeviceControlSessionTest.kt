@@ -1,8 +1,14 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.snapshots.SnapshotStateObserver
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorMockData
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
+import dev.jasonpearson.automobile.desktop.core.layout.buildParsedHierarchy
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
@@ -371,6 +377,7 @@ class DeviceControlSessionTest {
               receivedAtMs = 1_000L,
               width = 1080,
               height = 2340,
+              rotation = 0,
             )
         )
     val mirrored = assertNotNull(session.evaluate(withMirror).snapshotOrNull)
@@ -555,6 +562,413 @@ class DeviceControlSessionTest {
   }
 
   @Test
+  fun `a coordinate-space flip retires the retained frame before it can be tapped again`() =
+    runTest {
+      // Issue #4550. The daemon converts an incoming input coordinate using the runner's CURRENT
+      // scale metadata, not the frame's. Retention deliberately keeps the clicked frame clickable
+      // while its sources move on — so if iOS scale metadata appears (or a downgrade removes it)
+      // during that window, a coordinate mapped in one space would be converted as the other and
+      // land in the wrong physical place. The retained frame must stop being actionable instead.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client = FakeAutoMobileClient()
+      val session = session(scope, client)
+
+      // Clicked while the device was still publishing legacy point-space frames.
+      val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+      assertNotNull(session.evaluate(legacy).snapshotOrNull)
+      val retained = assertNotNull(session.interactionSnapshot)
+      assertNull(retained.coordinateSpace, "the clicked frame's space is bound to the snapshot")
+
+      session.tap(retained, point)
+      advanceUntilIdle()
+      assertEquals(1, client.inputTapCalls.size)
+      assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+      // A hierarchy arrives declaring canonical pixels — the runner now reports scale metadata.
+      // Nothing pairs yet, so the live decision is Blocked and the retained frame is still on
+      // screen; without the guard it would also still be clickable.
+      val flipped =
+        legacy.copy(
+          hierarchy =
+            legacy.hierarchy?.copy(
+              sequence = 20L,
+              captureSequence = 8L,
+              coordinateSpace = CoordinateSpace.Pixels,
+            )
+        )
+      assertNull(session.evaluate(flipped).snapshotOrNull)
+
+      assertNull(session.renderSnapshot, "a space flip is a context invalidation, like a reset")
+      assertNull(
+        session.interactionSnapshot,
+        "a frame mapped in the old space must not be dispatched under the new one",
+      )
+      scope.cancel()
+    }
+
+  @Test
+  fun `a screenshot-only space flip retires the retained frame just as a hierarchy flip does`() =
+    runTest {
+      // The two sources are gated independently, so each needs its own coverage: a regression that
+      // stopped checking the SCREENSHOT's declaration would still pass the hierarchy-flip test.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val session = session(scope, FakeAutoMobileClient())
+
+      val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+      assertNotNull(session.evaluate(legacy).snapshotOrNull)
+      val retained = assertNotNull(session.interactionSnapshot)
+      session.tap(retained, point)
+      advanceUntilIdle()
+      assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+      // Only the screenshot flips this time.
+      val flipped =
+        legacy.copy(
+          screenshot =
+            legacy.screenshot?.copy(
+              sequence = 20L,
+              captureSequence = 8L,
+              coordinateSpace = CoordinateSpace.Pixels,
+            )
+        )
+      assertNull(session.evaluate(flipped).snapshotOrNull)
+
+      assertNull(session.renderSnapshot, "a space flip is a context invalidation, like a reset")
+      assertNull(
+        session.interactionSnapshot,
+        "a screenshot-space flip must retire the retained frame too",
+      )
+      scope.cancel()
+    }
+
+  @Test
+  fun `a coordinate-space flip purges commands already queued for dispatch`() = runTest {
+    // Clearing the retained snapshot stops FUTURE clicks, but a command already accepted into the
+    // bounded FIFO is untouched by that. With a stalled daemon request ahead of it, a queued tap
+    // would be forwarded after the flip and converted by the daemon under the NEW scale metadata —
+    // actuating the wrong physical location. The flip must drain the queue, like every other
+    // control-context invalidation.
+    //
+    // StandardTestDispatcher (not Unconfined) so the single consumer is dispatched but has not run
+    // when the tap is enqueued — exactly the state a consumer blocked on a stalled daemon is in.
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val clients = mutableListOf<FakeAutoMobileClient>()
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { FakeAutoMobileClient().also { clients.add(it) } },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(testScheduler),
+      )
+
+    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    assertNotNull(session.evaluate(legacy).snapshotOrNull)
+    assertTrue(session.tap(assertNotNull(session.interactionSnapshot), point))
+    assertEquals(1, clients.size, "the tap is queued, with its client captured")
+
+    // The space flips while that tap is still sitting in the queue.
+    val flipped =
+      legacy.copy(
+        hierarchy =
+          legacy.hierarchy?.copy(
+            sequence = 20L,
+            captureSequence = 8L,
+            coordinateSpace = CoordinateSpace.Pixels,
+          )
+      )
+    session.evaluate(flipped)
+    advanceUntilIdle()
+
+    val queued = clients.single()
+    assertTrue(
+      queued.inputTapCalls.isEmpty(),
+      "a tap mapped in the old space must never reach the device after the flip",
+    )
+    assertTrue("close" in queued.calls, "and its captured client must be closed")
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a flip is caught at stream receipt, inside the hierarchy debounce window`() = runTest {
+    // The window the fact-level check cannot cover. LayoutInspectorState debounces hierarchy
+    // updates by ~100ms, so a `hierarchy_update` declaring the new space does not reach the frame
+    // facts — and therefore does not reach evaluate() — until that timer fires. The daemon,
+    // meanwhile, switched to converting input under the new scale metadata the moment it published.
+    // A tap inside that window would be mapped in the old unit and converted as the new one.
+    //
+    // This drives the REAL debounced path (a TestDispatcher-backed LayoutInspectorState) rather
+    // than calling applyHierarchyUpdateImmediate, so the window actually exists in the test.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val state = LayoutInspectorState(StandardTestDispatcher(testScheduler))
+
+    // Control is live on a legacy point-space frame.
+    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    session.onObservationSpaceDeclared(null, captureSequence = 7L)
+    assertNotNull(session.evaluate(legacy).snapshotOrNull)
+    val clicked = assertNotNull(session.interactionSnapshot)
+
+    // A hierarchy_update arrives declaring canonical pixels. The collector notes the space at
+    // RECEIPT and hands the parsed tree to the debounced apply.
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
+    state.applyHierarchyUpdate(
+      buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy),
+      emptySet(),
+      deviceId = "emulator-5554",
+      captureSequence = 8L,
+      coordinateSpace = CoordinateSpace.Pixels,
+    )
+
+    // INSIDE the debounce window. The facts still hold the OLD declaration — evaluate() has nothing
+    // new to see — yet control must already be dead, because there is no snapshot for the view to
+    // map a click through.
+    assertNull(state.hierarchyFacts?.coordinateSpace, "the debounce has not fired yet")
+    assertNull(
+      session.interactionSnapshot,
+      "receipt-time detection must retire control before the debounce fires",
+    )
+    assertNull(session.renderSnapshot)
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    assertNotNull(clicked, "the pre-flip frame existed, so this is a retirement and not a no-frame")
+
+    // And the window was real: the debounce only now delivers the new declaration to the facts,
+    // which is where a fact-level check would first have noticed.
+    advanceUntilIdle()
+    assertEquals(CoordinateSpace.Pixels, state.hierarchyFacts?.coordinateSpace)
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reached the device")
+    scope.cancel()
+  }
+
+  @Test
+  fun `the receipt-time retirement invalidates Compose readers of the interaction snapshot`() =
+    runTest {
+      // Half (a) of the receipt fix. Retiring the snapshot early is only useful if the VIEW
+      // notices:
+      // the hook fires from a stream collector with no other state change to ride on, so with a
+      // plain (non-snapshot) field DeviceScreenView would keep its stale controlFrame — and keep
+      // mapping clicks through it — until the next recomposition, which for the hierarchy path is
+      // the ~100ms debounce. Composing the real view here would need the whole host graph, so this
+      // asserts the property the view depends on: a Compose reader of interactionSnapshot is
+      // invalidated by the retirement.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val session = session(scope, FakeAutoMobileClient())
+
+      session.onObservationSpaceDeclared(null, captureSequence = 7L)
+      assertNotNull(
+        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+      )
+      assertNotNull(session.interactionSnapshot)
+
+      val observer = SnapshotStateObserver { block -> block() }
+      observer.start()
+      try {
+        var invalidated = false
+        // Records exactly what the view records: a read of the snapshot control maps clicks
+        // through.
+        observer.observeReads("view", { invalidated = true }) { session.interactionSnapshot }
+        Snapshot.sendApplyNotifications()
+        assertFalse(invalidated, "no write yet")
+
+        session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
+        Snapshot.sendApplyNotifications()
+
+        assertTrue(
+          invalidated,
+          "retiring the frame must invalidate the view's read, or the stale controlFrame survives " +
+            "until the debounce fires",
+        )
+        assertNull(session.interactionSnapshot)
+      } finally {
+        observer.stop()
+        observer.clear()
+      }
+      scope.cancel()
+    }
+
+  @Test
+  fun `a late screenshot bound to an older capture cannot roll the tracked space backward`() =
+    runTest {
+      // #4549 binds a screenshot's coordinate space when its capture is REQUESTED, so a mid-flight
+      // metadata change cannot relabel the frame. The consequence here: a screenshot can arrive
+      // AFTER a newer hierarchy while still carrying the OLDER declaration. Observing it
+      // unconditionally would roll the session's notion of "current" back to a space the device has
+      // already left — this hook fighting the binding that makes the frame trustworthy — and the
+      // dispatch gate would then accept old-space snapshots and reject new-space ones.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client = FakeAutoMobileClient()
+      val session = session(scope, client)
+
+      // Capture 7 is legacy; capture 8's hierarchy declares canonical pixels.
+      session.onObservationSpaceDeclared(null, captureSequence = 7L)
+      session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
+
+      // The capture-7 screenshot finally lands, still carrying its request-time legacy binding.
+      session.onObservationSpaceDeclared(null, captureSequence = 7L)
+
+      // The session must still consider PIXELS current: a px frame dispatches, a legacy one does
+      // not. If the stale observation had been recorded, both answers would be inverted.
+      assertTrue(
+        session.tap(testSnapshot(coordinateSpace = CoordinateSpace.Pixels), point),
+        "the newer declared space must still be the current one",
+      )
+      advanceUntilIdle()
+      assertEquals(1, client.inputTapCalls.size)
+
+      assertFalse(
+        session.tap(testSnapshot(coordinateSpace = null), point),
+        "the space the device already left must not be resurrected by a late frame",
+      )
+      advanceUntilIdle()
+      assertEquals(1, client.inputTapCalls.size, "nothing further reached the device")
+
+      // And an IN-ORDER observation still advances the tracker, so this is an ordering guard and
+      // not a freeze: capture 9 goes back to legacy and legacy becomes dispatchable again.
+      session.onObservationSpaceDeclared(null, captureSequence = 9L)
+      assertTrue(session.tap(testSnapshot(coordinateSpace = null), point))
+      advanceUntilIdle()
+      assertEquals(2, client.inputTapCalls.size)
+      scope.cancel()
+    }
+
+  @Test
+  fun `a tap or swipe carrying a retired snapshot is rejected at dispatch`() = runTest {
+    // Half (b): defence in depth. Even with the observable retirement, a pointer event that
+    // CAPTURED the snapshot before the flip can reach dispatch after it — the view cannot
+    // un-capture it. Dispatch is the last place to catch a coordinate in the wrong unit, and
+    // `inBounds` alone says nothing about units.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    session.onObservationSpaceDeclared(null, captureSequence = 7L)
+    assertNotNull(
+      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+    )
+    val clickedBeforeFlip = assertNotNull(session.interactionSnapshot)
+
+    // The device starts publishing canonical pixels; the in-flight click still carries the legacy
+    // frame it was mapped through.
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
+
+    assertFalse(
+      session.tap(clickedBeforeFlip, point),
+      "a tap mapped in the retired space must not be queued",
+    )
+    assertFalse(
+      session.swipe(
+        clickedBeforeFlip,
+        DevicePoint(100, 100, inBounds = true),
+        DevicePoint(100, 400, inBounds = true),
+      ),
+      "and neither must a swipe",
+    )
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reached the device")
+    assertTrue(client.inputSwipeCalls.isEmpty())
+
+    // A frame in the CURRENT space still dispatches, so this is a units gate and not a freeze.
+    val current = testSnapshot(coordinateSpace = CoordinateSpace.Pixels)
+    assertTrue(session.tap(current, point))
+    advanceUntilIdle()
+    assertEquals(1, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a flip into an unrecognized space retires the retained frame`() = runTest {
+    // The reason absent and declared-but-unknown must be different values: collapsed to one, this
+    // transition would compare equal to the retained legacy frame and pass unnoticed, leaving a
+    // frame clickable against a daemon whose input unit this client cannot know.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val session = session(scope, FakeAutoMobileClient())
+
+    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    assertNotNull(session.evaluate(legacy).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+    session.tap(retained, point)
+    advanceUntilIdle()
+
+    val flipped =
+      legacy.copy(
+        hierarchy =
+          legacy.hierarchy?.copy(
+            sequence = 20L,
+            captureSequence = 8L,
+            coordinateSpace = CoordinateSpace.Unrecognized("pt"),
+          )
+      )
+    assertNull(session.evaluate(flipped).snapshotOrNull)
+    assertNull(
+      session.interactionSnapshot,
+      "legacy -> unrecognized is a transition, not a no-op",
+    )
+    scope.cancel()
+  }
+
+  @Test
+  fun `the swipe threshold follows the clicked frame's coordinate space`() = runTest {
+    // The threshold is a PHYSICAL distance, so canonical pixels changed its numeric value. A
+    // 24-unit
+    // drag is a swipe in the legacy point space and is NOT one on a px frame, where 24 physical
+    // pixels reaches a 3x iOS runner as 8 logical points — below its own touch slop.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val start = DevicePoint(100, 100, inBounds = true)
+    val short = DevicePoint(124, 100, inBounds = true) // 24 units
+    val long = DevicePoint(172, 100, inBounds = true) // 72 units
+
+    val px = testSnapshot(coordinateSpace = CoordinateSpace.Pixels)
+    assertFalse(session.swipe(px, start, short), "24px is below the canonical-pixel threshold")
+    advanceUntilIdle()
+    assertTrue(client.inputSwipeCalls.isEmpty(), "and nothing reached the device")
+
+    assertTrue(session.swipe(px, start, long), "72px clears it")
+    advanceUntilIdle()
+    assertEquals(1, client.inputSwipeCalls.size)
+
+    // The legacy path keeps its 24-unit behavior exactly.
+    val legacy = testSnapshot(coordinateSpace = null)
+    assertTrue(session.swipe(legacy, start, short), "24 units is still a swipe in point space")
+    advanceUntilIdle()
+    assertEquals(2, client.inputSwipeCalls.size)
+    scope.cancel()
+  }
+
+  @Test
+  fun `retention survives source updates that keep the same coordinate space`() = runTest {
+    // The guard must fire on a TRANSITION, not on every update: a screenshot-only update in the
+    // same declared space is the ordinary post-input case and must keep the frame clickable.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val px =
+      paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = CoordinateSpace.Pixels)
+    assertNotNull(session.evaluate(px).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+    assertEquals(CoordinateSpace.Pixels, retained.coordinateSpace)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+
+    val sameSpace = px.copy(screenshot = px.screenshot?.copy(sequence = 20L, captureSequence = 8L))
+    assertNull(session.evaluate(sameSpace).snapshotOrNull)
+
+    assertEquals(retained, session.interactionSnapshot, "still clickable in the same space")
+    session.tap(assertNotNull(session.interactionSnapshot), point)
+    advanceUntilIdle()
+    assertEquals(2, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
+  @Test
   fun `retention does not outlive freshness`() = runTest {
     // Finding 1: tap a frame that is already near the freshness bound, then evaluate 200ms later.
     // The live decision correctly rejects it as stale, but the 3s refresh wait is still running —
@@ -598,6 +1012,68 @@ class DeviceControlSessionTest {
     scope.cancel()
   }
 
+  @Test
+  fun `rotation mismatch drops retained interaction while awaiting refresh`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    assertNotNull(session.evaluate(clicked).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // The retained screenshot remains useful for display, but a new hierarchy from a different
+    // rotation and capture makes its coordinate bounds unsafe for another gesture. Platform
+    // clients publish this hierarchy before beginning the next screenshot capture.
+    val mismatchedRotation =
+      clicked.copy(
+        hierarchy = clicked.hierarchy?.copy(sequence = 11L, captureSequence = 8L, rotation = 1)
+      )
+    val decision = session.evaluate(mismatchedRotation)
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      (decision as DeviceControlDecision.Blocked).reason,
+    )
+    assertEquals(retained, session.renderSnapshot, "the old frame can remain visible")
+    assertNull(session.interactionSnapshot, "a rotation mismatch must drop to Inspector")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a proven unpaired rotation drops retained interaction while awaiting refresh`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val session = session(scope, FakeAutoMobileClient())
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    assertNotNull(session.evaluate(clicked).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // Both new sources prove landscape, but neither has a capture identity yet. The policy cannot
+    // assemble them, so this is deliberately not RotationMismatch; it must nevertheless retire
+    // the portrait mapping before a second click can be sent through stale bounds.
+    val incomingLandscape =
+      clicked.copy(
+        screenshot = clicked.screenshot?.copy(sequence = 11L, captureSequence = null, rotation = 1),
+        hierarchy = clicked.hierarchy?.copy(sequence = 12L, captureSequence = null, rotation = 1),
+      )
+    val decision = session.evaluate(incomingLandscape)
+    assertEquals(
+      DeviceControlBlockReason.CaptureIdentityUnavailable,
+      (decision as DeviceControlDecision.Blocked).reason,
+    )
+    assertEquals(retained, session.renderSnapshot, "the old frame can remain visible")
+    assertNull(session.interactionSnapshot, "a proven incoming rotation must drop to Inspector")
+    scope.cancel()
+  }
+
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
   private fun paired(
     captureSequence: Long,
@@ -606,6 +1082,7 @@ class DeviceControlSessionTest {
     height: Int = 2340,
     data: ByteArray? = null,
     receivedAtMs: Long = 1_000L,
+    coordinateSpace: CoordinateSpace? = null,
   ) =
     DeviceControlInputs(
       enabled = true,
@@ -622,6 +1099,8 @@ class DeviceControlSessionTest {
           width = width,
           height = height,
           data = data,
+          coordinateSpace = coordinateSpace,
+          rotation = 0,
         ),
       hierarchy =
         HierarchyFrameFacts(
@@ -632,6 +1111,8 @@ class DeviceControlSessionTest {
           hierarchy = null,
           rootWidth = width,
           rootHeight = height,
+          coordinateSpace = coordinateSpace,
+          rotation = 0,
         ),
       liveFrame = null,
     )

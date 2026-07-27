@@ -914,6 +914,15 @@ fun AutoMobileContent(
     liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.hierarchyUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      // AT RECEIPT, before the parse below and before the layout state's debounce: the daemon has
+      // already switched to interpreting input under the new scale metadata by the time it
+      // publishes a new declaration, so a flip has to invalidate control NOW. Detecting it from
+      // the frame facts would be one debounce interval too late, and a tap in that window would be
+      // mapped in the old unit and converted as the new one (issue #4550).
+      deviceControlSession.onObservationSpaceDeclared(
+        update.coordinateSpace,
+        update.captureSequence,
+      )
       // Capture the generation before the async parse so a frame decoded across an invalidation
       // (device change / stream disconnect) is dropped instead of restoring stale bounds (#3347).
       val generation = layoutInspectorState.frameGeneration
@@ -943,6 +952,12 @@ fun AutoMobileContent(
             // resolution change can never supply the bounds a tap is mapped through — however few
             // milliseconds behind it is (issue #3348).
             captureSequence = update.captureSequence,
+            // The unit this update's bounds are in, as the daemon declared it. Carried per update
+            // rather than per session because the declaration is per message, and the control
+            // policy only compares dimensions exactly when the paired screenshot declared the same
+            // thing (issue #4550).
+            coordinateSpace = update.coordinateSpace,
+            captureRotation = update.rotation,
           )
         }
       }
@@ -955,6 +970,11 @@ fun AutoMobileContent(
     liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.screenshotUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      // Same receipt-time gate as the hierarchy collector; see its comment (issue #4550).
+      deviceControlSession.onObservationSpaceDeclared(
+        update.coordinateSpace,
+        update.captureSequence,
+      )
       // Capture the generation before the async decode so a screenshot decoded across an
       // invalidation (device change / stream disconnect) is dropped rather than restoring a stale
       // frame that would silently re-enable device control (#3347).
@@ -982,6 +1002,10 @@ fun AutoMobileContent(
           generation = generation,
           // Pairs by equality against the hierarchy's id; see the hierarchy collector above.
           captureSequence = update.captureSequence,
+          // Same reasoning as the hierarchy collector: the declared unit travels with the frame
+          // (issue #4550).
+          coordinateSpace = update.coordinateSpace,
+          rotation = update.rotation,
         )
       }
     }
@@ -1644,6 +1668,7 @@ fun AutoMobileContent(
                       receivedAtMs = frame.receivedAtMs,
                       width = frame.bitmap.width,
                       height = frame.bitmap.height,
+                      rotation = frame.rotation,
                     )
                   },
               )

@@ -29,11 +29,11 @@ describe("decodeCtrlProxyMessage", () => {
     expect(decoded).toEqual({ requestId: REQ, result: { hierarchy: data, perfTiming } });
   });
 
-  test("screenshot defaults format to png", () => {
-    const decoded = decodeCtrlProxyMessage(msg({ type: "screenshot", data: "b64" as never, timestamp: 9 }));
+  test("screenshot forwards capture-time rotation", () => {
+    const decoded = decodeCtrlProxyMessage(msg({ type: "screenshot", data: "b64" as never, timestamp: 9, rotation: 1 }));
     expect(decoded).toEqual({
       requestId: REQ,
-      result: { success: true, data: "b64", format: "png", timestamp: 9 },
+      result: { success: true, data: "b64", format: "png", timestamp: 9, rotation: 1 },
     });
   });
 

@@ -17,4 +17,9 @@ data class LiveVideoFrame(
   val bitmap: ImageBitmap,
   val sequence: Long,
   val receivedAtMs: Long,
+  /**
+   * Per-frame display rotation; absent until the relay protocol can attest it, so control fails
+   * closed.
+   */
+  val rotation: Int? = null,
 )

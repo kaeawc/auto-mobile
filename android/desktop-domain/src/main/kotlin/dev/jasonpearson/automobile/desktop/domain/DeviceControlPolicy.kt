@@ -32,6 +32,23 @@ public enum class DeviceControlBlockReason {
    * guessing.
    */
   CaptureIdentityUnavailable,
+  /**
+   * A contributing message declared a [CoordinateSpace] this client does not implement
+   * (issue #4550).
+   *
+   * Distinct from a message that declares nothing: an ABSENT field is the legacy point-space
+   * fallback, whose geometry and input-unit semantics this client knows exactly. A DECLARED but
+   * unknown space is a forward-compatibility failure — the client can know neither what the
+   * reported bounds mean nor what unit the daemon's input endpoints expect for that device — so
+   * control fails closed instead of guessing that it resembles the legacy space.
+   *
+   * Independent of [RotationMismatch]: a frame is actionable only when its rotation provenance AND
+   * its coordinate space are both current, so the two gates block separately and stay named
+   * separately.
+   */
+  UnsupportedCoordinateSpace,
+  /** Screenshot and hierarchy originated while the device had different rotations. */
+  RotationMismatch,
   /** The displayed frame is older than the freshness bound for its source. */
   StaleFrame,
   /** The displayed screenshot and the mapping bounds disagree geometrically. */
@@ -120,7 +137,12 @@ public object DeviceControlPolicy {
    */
   public const val LIVE_FRAME_MAX_AGE_MS: Long = 1_000L
 
-  /** Relative aspect-ratio tolerance for [isGeometryConsistent]. */
+  /**
+   * Relative aspect-ratio tolerance for the LEGACY branch of [isGeometryConsistent].
+   *
+   * Only reachable for frames that declare no [CoordinateSpace]; a `"px"` frame is compared
+   * exactly. See [isGeometryConsistent] for why the tolerance existed at all.
+   */
   private const val GEOMETRY_ASPECT_TOLERANCE = 0.05f
 
   /**
@@ -159,6 +181,18 @@ public object DeviceControlPolicy {
       return blocked(DeviceControlBlockReason.DeviceMismatch)
     }
 
+    // "Can these messages be interpreted at all" precedes "do they describe the same capture", so
+    // this runs before provenance pairing. A DECLARED but unknown space means this client can read
+    // neither the geometry nor the unit the daemon's input endpoints expect for the device, so
+    // there is nothing to pair and nothing safe to dispatch. An ABSENT declaration is untouched:
+    // that is the legacy point-space fallback, and it continues below.
+    if (
+      screenshot.coordinateSpace is CoordinateSpace.Unrecognized ||
+        hierarchy.coordinateSpace is CoordinateSpace.Unrecognized
+    ) {
+      return blocked(DeviceControlBlockReason.UnsupportedCoordinateSpace)
+    }
+
     // Provenance pairing by SHARED CAPTURE IDENTITY, not elapsed time.
     //
     // The daemon assigns a monotonic id per device on every hierarchy it pushes, and echoes that
@@ -169,9 +203,12 @@ public object DeviceControlPolicy {
     // Elapsed time cannot do this job. After an aspect-preserving resolution change
     // (1080x2340 -> 720x1560) the new screenshot and the not-yet-applied older hierarchy are
     // milliseconds apart and identical in aspect, so any window wide enough for normal streaming
-    // also admits the mis-scaled pair. Neither can a dimension comparison: on iOS the reported
-    // screen size is a uniform scale of the hierarchy's point-space bounds, indistinguishable from
-    // a uniform resolution change.
+    // also admits the mis-scaled pair.
+    //
+    // Neither can a dimension comparison, at any strictness. Canonical pixels do make the exact
+    // comparison below meaningful, and it does reject a resolution change — but two captures of
+    // DIFFERENT content at the SAME resolution are dimensionally identical, and that is the
+    // ordinary case (navigation). Identity is the only thing that separates them.
     //
     // The messages' `timestamp` fields are deliberately unused: the hierarchy's originates on the
     // DEVICE (its own wall clock, forwarded unchanged) while the screenshot's is stamped by the
@@ -180,6 +217,26 @@ public object DeviceControlPolicy {
     if (captureSequence == null || hierarchy.captureSequence == null) {
       return blocked(DeviceControlBlockReason.CaptureIdentityUnavailable)
     }
+
+    // Rotation is capture-time provenance, distinct from pixel orientation. iOS can deliver
+    // native-portrait screenshot pixels for a landscape device, so geometry intentionally accepts
+    // a rotated image below. What must agree here is the device orientation at which each source
+    // was captured; a missing value from an older daemon is not evidence and fails closed. This
+    // precedes capture pairing because a hierarchy-first rotation update has a new capture identity
+    // while the displayed screenshot still has the old orientation; retention must not leave that
+    // frame interactive during the ensuing screenshot capture.
+    val screenshotRotation = screenshot.rotation
+    val hierarchyRotation = hierarchy.rotation
+    if (
+      screenshotRotation == null ||
+        hierarchyRotation == null ||
+        screenshotRotation !in 0..3 ||
+        hierarchyRotation !in 0..3 ||
+        screenshotRotation != hierarchyRotation
+    ) {
+      return blocked(DeviceControlBlockReason.RotationMismatch)
+    }
+
     if (captureSequence != hierarchy.captureSequence) {
       return blocked(DeviceControlBlockReason.UnpairedHierarchy)
     }
@@ -198,9 +255,25 @@ public object DeviceControlPolicy {
       // reveals it.
       return blocked(DeviceControlBlockReason.StaleFrame)
     }
+    if (
+      liveFrame != null &&
+        (liveFrame.rotation == null ||
+          liveFrame.rotation !in 0..3 ||
+          liveFrame.rotation != screenshotRotation)
+    ) {
+      // A WebRTC frame has no observation capture identity, so its own rotation provenance is the
+      // only evidence that the displayed pixels still match the hierarchy bounds. In particular,
+      // 180-degree rotation keeps dimensions unchanged and defeats the exact-geometry check below.
+      return blocked(DeviceControlBlockReason.RotationMismatch)
+    }
 
     val frameWidth = liveFrame?.width ?: screenshot.width
     val frameHeight = liveFrame?.height ?: screenshot.height
+
+    // Resolved ONCE, then both compared against and bound into the snapshot, so the space a frame
+    // is
+    // judged in and the space it is later dispatched in cannot diverge.
+    val pairedSpace = pairedCoordinateSpace(screenshot, hierarchy)
 
     if (liveFrame != null) {
       // The live mirror carries NO capture identity — it is a separate WebRTC transport with no
@@ -210,10 +283,13 @@ public object DeviceControlPolicy {
       // a center click is then sent as (540,1170) instead of (360,780).
       //
       // So require the mirror's pixels to match the mapping bounds EXACTLY. That excludes a scale
-      // change, which is the whole failure mode. Where the platform makes an exact match
-      // impossible — iOS reports hierarchy bounds in logical points against pixel frames — control
-      // is blocked rather than accepting an unverifiable pair. Losing control while mirroring is
-      // acceptable; sending a mis-scaled tap to real hardware is not.
+      // change, which is the whole failure mode. This check has always been exact and is unchanged
+      // by canonical pixels — what canonical pixels changed is that it can now SUCCEED on iOS. A
+      // px-space hierarchy reports the same physical pixels the mirror decodes, so an iOS live
+      // frame matches its mapping bounds instead of being permanently unverifiable against
+      // point-space bounds. A legacy (undeclared) iOS frame still fails here, and blocking is
+      // still the right answer for it: losing control while mirroring is acceptable, sending a
+      // mis-scaled tap to real hardware is not.
       //
       // Giving live frames a real identity needs WebRTC-side plumbing; tracked under #1099.
       if (frameWidth != deviceWidth || frameHeight != deviceHeight) {
@@ -228,6 +304,7 @@ public object DeviceControlPolicy {
         // A polled screenshot may arrive in native pixel orientation (notably iOS) and the renderer
         // rotates it, so an orientation difference there is expected.
         allowRotation = true,
+        coordinateSpace = pairedSpace,
       )
     ) {
       return blocked(DeviceControlBlockReason.GeometryMismatch)
@@ -252,7 +329,13 @@ public object DeviceControlPolicy {
         deviceHeight = deviceHeight,
         screenshotData = screenshot.data,
         hierarchy = hierarchy.hierarchy,
+        // Bind the agreed space to the snapshot, exactly as captureSequence is bound: a snapshot
+        // outlives the facts it was built from (the post-input refresh retains it), and the unit
+        // its
+        // coordinates are in must travel with it rather than be re-derived at dispatch time.
+        coordinateSpace = pairedSpace,
         captureSequence = captureSequence,
+        rotation = screenshotRotation,
         screenshotSequence = screenshot.sequence,
         hierarchySequence = hierarchy.sequence,
         liveFrameSequence = liveFrame?.sequence,
@@ -278,19 +361,52 @@ public object DeviceControlPolicy {
   }
 
   /**
+   * The coordinate space the screenshot and the hierarchy AGREE on, or null when they do not
+   * (issue #4550).
+   *
+   * All-or-nothing on purpose, matching the daemon's own rule: a comparison between the two
+   * messages' dimensions is only meaningful when both are the same unit, and one declared `"px"`
+   * message paired with one undeclared message is exactly the mixed-unit state the exact check must
+   * not be applied to. In practice the two travel together — the daemon binds a screenshot's
+   * declaration at request initiation from the hierarchy that was current — so a disagreement means
+   * a transition is in flight, and a transition should take the conservative path.
+   */
+  private fun pairedCoordinateSpace(
+    screenshot: ScreenshotFrameFacts,
+    hierarchy: HierarchyFrameFacts,
+  ): CoordinateSpace? =
+    screenshot.coordinateSpace.takeIf { it != null && it == hierarchy.coordinateSpace }
+
+  /**
    * Whether the displayed frame and the effective device bounds used for mapping describe a
    * geometrically-consistent view of the same screen. A renderer fits the displayed frame by its
-   * own aspect ratio while mapping clicks through the device bounds, so disagreeing aspect ratios
-   * mean a tap is scaled wrong. Aspect ratios must agree within [GEOMETRY_ASPECT_TOLERANCE].
+   * own aspect ratio while mapping clicks through the device bounds, so disagreeing geometry means
+   * a tap is scaled wrong.
    *
-   * Absolute dimensions are deliberately *not* compared: a screenshot may be a downscale of the
-   * device screen, and iOS hierarchy bounds are logical points against pixel screenshots. That is
-   * precisely why this check alone cannot catch an equal-aspect resolution change — provenance
-   * pairing does that.
+   * There are two comparison modes, selected by [coordinateSpace] — the space the frame and the
+   * bounds were BOTH declared in (see [pairedCoordinateSpace]):
+   * - **[CoordinateSpace.Pixels] — exact.** Both sides are canonical physical pixels, one unit, so
+   *   absolute dimensions must be EQUAL. The rotation swap is still accepted, because it is a real
+   *   property of the pixels rather than a units artifact: a polled screenshot can arrive in native
+   *   portrait orientation while the bounds are display-oriented, and the renderer rotates it.
+   *   Nothing else is: a downscale, a resolution change, and a stale-bounds pair are all rejected,
+   *   where an aspect check would accept every one of them.
+   * - **`null` — LEGACY aspect-only fallback**, for a daemon (or a pre-#4548 runner) that declares
+   *   no space. There, iOS hierarchy bounds are logical points against a pixel screenshot, so the
+   *   two sides are a uniform scale apart by construction and absolute dimensions are simply not
+   *   comparable. All that can be checked is that the aspect ratios agree within
+   *   [GEOMETRY_ASPECT_TOLERANCE] — which is why this path cannot catch an equal-aspect resolution
+   *   change, and why provenance pairing exists. Retained only for those frames; do not extend it.
    *
-   * A non-positive displayed dimension (no frame yet) is inconsistent. Non-positive device
-   * dimensions mean neither source reported a size, in which case the renderer falls back to the
-   * displayed frame itself and the two are consistent by construction.
+   * [CoordinateSpace.Unrecognized] never reaches here from [evaluate]: a declared-but-unknown space
+   * blocks control outright with [DeviceControlBlockReason.UnsupportedCoordinateSpace], because a
+   * space this client cannot read is not a weaker version of the legacy space. A direct caller that
+   * passes one gets the conservative aspect-only comparison, which is the safe default for a
+   * geometry question but is NOT a licence to act on such a frame.
+   *
+   * A non-positive displayed dimension (no frame yet) is inconsistent in both modes. Non-positive
+   * device dimensions mean neither source reported a size, in which case the renderer falls back to
+   * the displayed frame itself and the two are consistent by construction.
    */
   public fun isGeometryConsistent(
     frameWidth: Int,
@@ -298,9 +414,15 @@ public object DeviceControlPolicy {
     deviceWidth: Int,
     deviceHeight: Int,
     allowRotation: Boolean = true,
+    coordinateSpace: CoordinateSpace? = null,
   ): Boolean {
     if (frameWidth <= 0 || frameHeight <= 0) return false
     if (deviceWidth <= 0 || deviceHeight <= 0) return true
+    if (coordinateSpace == CoordinateSpace.Pixels) {
+      val matchesExactly = frameWidth == deviceWidth && frameHeight == deviceHeight
+      if (!allowRotation) return matchesExactly
+      return matchesExactly || (frameWidth == deviceHeight && frameHeight == deviceWidth)
+    }
     val frameAspect = frameWidth.toFloat() / frameHeight.toFloat()
     val deviceAspect = deviceWidth.toFloat() / deviceHeight.toFloat()
     val matchesDirect = abs(frameAspect - deviceAspect) <= GEOMETRY_ASPECT_TOLERANCE * deviceAspect

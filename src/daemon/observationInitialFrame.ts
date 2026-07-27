@@ -155,7 +155,7 @@ async function pushAndroidInitialScreenshot(
       dimensions.width,
       dimensions.height,
       pickScreenshotMetadata(screenshot),
-      canonicalPixelScreenshotOptions(viewHierarchy)
+      { ...canonicalPixelScreenshotOptions(viewHierarchy), rotation: screenshot.rotation }
     );
   }
 }
@@ -224,7 +224,7 @@ async function pushIosInitialObservationFrame(
       dimensions.width,
       dimensions.height,
       metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format),
-      canonicalPixelScreenshotOptions(viewHierarchy)
+      { ...canonicalPixelScreenshotOptions(viewHierarchy), rotation: screenshot.rotation }
     );
   }
 }

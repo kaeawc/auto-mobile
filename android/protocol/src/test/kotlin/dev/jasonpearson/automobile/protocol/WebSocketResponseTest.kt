@@ -42,6 +42,7 @@ class WebSocketResponseTest {
         format = "png",
         width = 1080,
         height = 1920,
+        rotation = 1,
         screenshotCaptureDurationMs = 42L,
         screenshotEncodeDurationMs = 7L,
         screenshotByteLength = 1200,
@@ -49,6 +50,8 @@ class WebSocketResponseTest {
       )
 
     val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue("\"rotation\":1" in encoded)
 
     assertTrue(encoded.contains(""""type":"screenshot""""))
     assertTrue(encoded.contains(""""requestId":"ss-1""""))

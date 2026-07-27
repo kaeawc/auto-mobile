@@ -133,6 +133,7 @@ public class FakeGesturePerformer: GesturePerforming {
     // MARK: - Configurable State
 
     private var screenshotData: Data?
+    private var screenshotCapture: ScreenshotCapture?
     private var currentOrientation = "portrait"
     private var failureMap: [String: Error] = [:]
 
@@ -228,6 +229,10 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func setScreenshotData(_ data: Data?) {
         screenshotData = data
+    }
+
+    public func setScreenshotCapture(_ capture: ScreenshotCapture?) {
+        screenshotCapture = capture
     }
 
     public func setFailure(for operation: String, error: Error?) {
@@ -565,6 +570,15 @@ public class FakeGesturePerformer: GesturePerforming {
         try checkFailure("screenshot")
         screenshotCallCount += 1
         return screenshotData ?? Data()
+    }
+
+    public func getScreenshotCapture() throws -> ScreenshotCapture {
+        try checkFailure("screenshot")
+        screenshotCallCount += 1
+        return screenshotCapture ?? ScreenshotCapture(
+            data: screenshotData ?? Data(),
+            rotation: DeviceRotation.fromOrientationName(currentOrientation)
+        )
     }
 
     public func setOrientation(_ orientation: String) throws {

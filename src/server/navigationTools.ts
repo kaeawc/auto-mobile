@@ -5,6 +5,7 @@ import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { Explore, ExploreOptions } from "../features/navigation/Explore";
+import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
@@ -107,9 +108,11 @@ export function registerNavigationTools() {
       const manager = getNavigationManager(args.sessionUuid);
       const stats = await manager.getStats();
       const graph = await manager.exportGraph();
+      const observation = RealObserveScreen.getRecentCachedResultForDevice(device.deviceId);
+      const appId = observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId;
 
       return createJSONToolResponse({
-        message: `Navigation graph for app: ${graph.appId || "none"}`,
+        message: `Navigation graph for app: ${appId || "none"}`,
         currentScreen: stats.currentScreen,
         nodeCount: stats.nodeCount,
         edgeCount: stats.edgeCount,

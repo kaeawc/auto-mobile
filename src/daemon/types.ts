@@ -41,6 +41,12 @@ export interface DaemonResponse {
   result?: any;
   /** Error message if unsuccessful */
   error?: string;
+  /**
+   * Number of leading characters delivered by a failed Android
+   * `input/typeText` append request. Present only when the append operation
+   * reached the device before failing, or explicitly reports zero progress.
+   */
+  charsSent?: number;
 }
 
 /**

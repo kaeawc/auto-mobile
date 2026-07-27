@@ -596,17 +596,27 @@ string.** Android append types one key event per character in order, so it is at
 for a **single character**: a one-character append either lands or reports failure
 with nothing typed. A **multi-character** append is best-effort — if it fails
 partway (an adb reject/timeout mid-batch), a leading prefix of `text` has already
-been typed into the field. The failure is reported the same way as any other input
-error (a `success: false` response with a message; the daemon does **not** return a
-structured partial-progress count on the wire — see
-[#4537](https://github.com/kaeawc/auto-mobile/issues/4537)). Therefore a client
-that batches multiple characters into one request **must not blindly retry the
-whole string** on failure — re-sending `"ab"` after `"a"` already landed produces
-`"aab"`. A client that needs per-character atomicity must send **one character per
-`input/typeText` request**, which is exactly what the reference desktop client does
-(one request per keystroke). The in-process primitive already tracks how many
-characters landed (`SendTextResult.charsSent`); surfacing that on a failed wire
-response is deferred to [#4537](https://github.com/kaeawc/auto-mobile/issues/4537).
+been typed into the field. Its failed socket envelope includes `charsSent`, the
+number of leading characters that landed; retry only `text.slice(charsSent)`, not
+the whole string. For example, if `"ab"` fails after `"a"`, the response has
+`"charsSent": 1` and the client retries `"b"`, avoiding `"aab"`. `charsSent: 0`
+means retry the full text; a full-length value means all text landed and only a
+later part of the operation (such as submit) failed. The field is omitted for
+non-append failures. A client that needs per-character atomicity can still send
+**one character per `input/typeText` request**, which is exactly what the
+reference desktop client does (one request per keystroke).
+
+**Partial append failure response**
+
+```json
+{
+  "id": "type-3",
+  "type": "mcp_response",
+  "success": false,
+  "error": "append key event failed: adb rejected KEYCODE_B",
+  "charsSent": 1
+}
+```
 
 **Request**
 

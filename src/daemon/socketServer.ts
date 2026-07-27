@@ -130,6 +130,20 @@ interface CachedAppendTextInput {
   transportId?: string;
 }
 
+/**
+ * Preserve the normal failed socket envelope while carrying append progress for
+ * a client that can safely retry only the unsent suffix.
+ */
+class InputTypeTextAppendError extends Error {
+  constructor(
+    message: string,
+    readonly charsSent: number
+  ) {
+    super(message);
+    this.name = "InputTypeTextAppendError";
+  }
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private socketFileIdentity: SocketFileIdentity | null = null;
@@ -480,6 +494,7 @@ export class UnixSocketServer {
           type: "mcp_response",
           success: false,
           error: errorMessage,
+          ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
     });
@@ -1029,6 +1044,12 @@ export class UnixSocketServer {
     });
 
     if (!inputResult.success) {
+      if (args.append && inputResult.charsSent !== undefined) {
+        throw new InputTypeTextAppendError(
+          inputResult.error ?? `input/typeText failed on ${args.platform}`,
+          inputResult.charsSent
+        );
+      }
       throw new Error(inputResult.error ?? `input/typeText failed on ${args.platform}`);
     }
 
@@ -1134,7 +1155,7 @@ export class UnixSocketServer {
     imeAction: ImeAction | undefined,
     timeoutMs: number,
     append: boolean = false
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
     // timeout, letting the combined operation run up to 2x the caller's
@@ -1154,18 +1175,34 @@ export class UnixSocketServer {
     // timeout — it still waits for the operation to settle before releasing the
     // queue. An unbounded adb subprocess here would therefore wedge every later
     // input for this device, not just this one request.
-    const textResult = append
-      ? platform === "android"
-        ? await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs)
-        : await (client as IOSCtrlProxyClient).requestAppendText(text, timeoutMs)
-      : await client.requestSetText(text, { timeoutMs });
-    if (!textResult.success) {
-      return { success: false, error: textResult.error };
+    let appendCharsSent: number | undefined;
+    if (append && platform === "android") {
+      const textResult = await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs);
+      if (!textResult.success) {
+        return {
+          success: false,
+          error: textResult.error,
+          ...(textResult.charsSent !== undefined ? { charsSent: textResult.charsSent } : {}),
+        };
+      }
+      appendCharsSent = textResult.charsSent;
+    } else {
+      const textResult = append
+        ? await (client as IOSCtrlProxyClient).requestAppendText(text, timeoutMs)
+        : await client.requestSetText(text, { timeoutMs });
+      if (!textResult.success) {
+        return { success: false, error: textResult.error };
+      }
     }
     if (!imeAction) {
-      return { success: true };
+      return appendCharsSent !== undefined
+        ? { success: true, charsSent: appendCharsSent }
+        : { success: true };
     }
-    return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs);
+    const imeResult = await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs);
+    return appendCharsSent !== undefined
+      ? { ...imeResult, charsSent: appendCharsSent }
+      : imeResult;
   }
 
   private async runImeActionWithinBudget(

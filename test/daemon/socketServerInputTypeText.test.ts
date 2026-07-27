@@ -246,6 +246,33 @@ describe("UnixSocketServer input/typeText", () => {
     }
   });
 
+  test("failed multi-character append reports the landed prefix on the error envelope", async () => {
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({
+        success: false,
+        error: "append key event failed: adb rejected KEYCODE_B",
+        charsSent: 1,
+      }),
+    });
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "append key event failed: adb rejected KEYCODE_B",
+      charsSent: 1,
+    });
+    expect(response.result).toBeUndefined();
+  });
+
   // The review's Critical + P1 finding, which share one root cause: the append path
   // used to receive no timeout at all. `runInputOperationWithTimeout` detects the
   // socket deadline but then AWAITS the in-flight operation before releasing the
@@ -883,6 +910,7 @@ describe("UnixSocketServer input/typeText", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("return key unavailable");
+    expect(response.charsSent).toBeUndefined();
     expect(requestSetText).toHaveBeenCalledWith("hi there", { timeoutMs: 30_000 });
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });

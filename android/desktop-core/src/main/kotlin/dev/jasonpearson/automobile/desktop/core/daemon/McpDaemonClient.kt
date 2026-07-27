@@ -782,8 +782,7 @@ data class DaemonResponse(
   val error: String? = null,
 )
 
-@Serializable
-private data class DaemonCapabilitiesResult(val capabilities: List<String> = emptyList())
+@Serializable private data class DaemonCapabilitiesResult(val capabilities: List<String>)
 
 private data class SocketIdentity(
   val path: String,

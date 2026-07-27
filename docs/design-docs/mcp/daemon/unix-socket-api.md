@@ -31,7 +31,10 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
   "type": "mcp_request",
   "method": "ide/ping",
   "params": {},
-  "timeoutMs": 30000
+  "timeoutMs": 30000,
+  "clientVersion": "1.2.3",
+  "clientBuildId": "sha256:...",
+  "clientEntryScript": "/absolute/path/to/client-entry.js"
 }
 ```
 
@@ -42,6 +45,9 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
 | `method` | `string` | Yes | Endpoint name (e.g. `ide/ping`, `daemon/availableDevices`) |
 | `params` | `object` | Yes | Method-specific parameters; pass `{}` when none are needed |
 | `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000). Long-running `tools/call` requests may be raised to a tool-specific minimum timeout by the daemon (see [Tool-specific timeout floors](#tool-specific-timeout-floors)). |
+| `clientVersion` | `string` | No | Client package/release version. Supply it to opt into version mismatch detection; clients that omit every handshake field are treated as legacy and bypass the handshake. |
+| `clientBuildId` | `string` | No | Content hash of the client entry script. TypeScript clients should supply this together with `clientEntryScript` for build-identity detection. |
+| `clientEntryScript` | `string` | No | Absolute path to the client entry script. Supply it with `clientBuildId`; Kotlin and Swift clients use `clientVersion` only. |
 
 **Response**
 

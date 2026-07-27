@@ -204,6 +204,9 @@ describe("daemon input API consumer docs", () => {
     expect(unixSocketApi).toContain("that leaves append support unknown");
     expect(unixSocketApi).toContain("translate only the exact `input/typeText unsupported params: mode` response");
     expect(unixSocketApi).toContain("Unsupported daemon method: daemon/capabilities");
+    expect(unixSocketApi).toContain('"clientVersion": "1.2.3"');
+    expect(unixSocketApi).toContain('"clientBuildId": "sha256:..."');
+    expect(unixSocketApi).toContain('"clientEntryScript": "/absolute/path/to/client-entry.js"');
   });
 
   test("documents pressButton values that the socket actually accepts", async () => {

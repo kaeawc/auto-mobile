@@ -722,6 +722,39 @@ describe("InputText", () => {
     expect(afterRetry.success).toBe(true);
   });
 
+  test("a timed-out append key event is attempted ONCE, not retried up to 4x", async () => {
+    // Production AdbClient retries a retryable failure (a timeout IS retryable —
+    // "timed out" is not in the non-retryable list) up to MAX_ADB_RETRIES+1 = 4
+    // attempts, each charged the SAME budget. Because runInputOperationWithTimeout
+    // awaits the losing operation before releasing the per-device queue, an
+    // unbounded retry would hold the queue for ~4x the request deadline. The
+    // append path must pass noRetry so the whole append stays inside one budget.
+    let keyEventCalls = 0;
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes("getprop ro.build.version.sdk")) {
+        return Promise.resolve(execResult("31\n"));
+      }
+      if (command.includes("input keyevent")) {
+        keyEventCalls += 1;
+        // A retryable timeout: its message is NOT in AdbClient's non-retryable set,
+        // so without noRetry the retry executor would attempt it four times.
+        return Promise.reject(
+          new AdbCommandTimeoutError("Command timed out after 5ms: adb shell input keyevent KEYCODE_A")
+        );
+      }
+      return Promise.resolve(execResult(""));
+    };
+    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb);
+
+    const result = await inputText.appendText("a", 5000);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("append key event failed");
+    // Exactly one attempt: the deadline is not multiplied by the retry count.
+    expect(keyEventCalls).toBe(1);
+  });
+
   test("append charges the API probe and every key event against the caller's budget", async () => {
     // Without this the daemon's per-device queue is held by an unbounded subprocess:
     // the socket race only REPORTS the timeout, it still waits for the operation.

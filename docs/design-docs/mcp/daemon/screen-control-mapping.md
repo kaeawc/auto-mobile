@@ -261,13 +261,21 @@ rule that is correct for every host. Shift is **not** a chord modifier: it is ho
 a capital letter or a shifted symbol is produced, and treating it as one would
 make control mode unable to type half the keyboard.
 
-One documented exception is built in: **AltGr**. On many non-US layouts AltGr is
-how `@`, `€`, `{` and `\` are produced, and AWT-derived toolkits (Compose desktop
-among them) report it as Ctrl **and** Alt together. A Ctrl+Alt keystroke that
-produced a printable character is therefore treated as typing, not as a shortcut.
-A real Ctrl+Alt accelerator produces no printable character, so it still stays
-with the host — which is what keeps the exception from being a hole. Adding Meta
-never qualifies.
+One documented exception is built in: **Alt-family character composition** — AltGr
+and macOS Option. On many non-US layouts AltGr produces `@`, `€`, `{`, `\`, and
+AWT-derived toolkits (Compose desktop among them) report it as Ctrl **and** Alt
+together; on macOS the Option key composes the same kind of ASCII (German
+Option+L = `@`, Option+5 = `[`) and is reported as **Alt alone**. So an
+**Alt-held (Meta not) keystroke that produced a printable ASCII character** is
+treated as typing, not as a shortcut. A real accelerator — an Alt+letter menu
+mnemonic, a `⌥⌘` combo — produces no such character (or carries Meta), so it still
+stays with the host, which is what keeps the exception from being a hole. **Meta
+held never qualifies**: `Cmd`/`Meta` shortcuts never compose characters, so
+Meta-held is the reliable "this is a shortcut, not typing" signal. The chosen rule
+keys on *"a typable character was produced"* because that is the only signal
+available to tell composition from an accelerator; the rare host where Alt+letter
+both is a mnemonic and reports a printable character would forward, and that is the
+accepted tradeoff.
 
 A client that knows its own host leaves a particular chord unclaimed may opt it in
 explicitly (`forwardedChords`). The default list is **empty**. Entries match
@@ -464,8 +472,10 @@ nothing.
 
 The keyboard policy is pure too (`DeviceKeyboardInputPolicyTest`), pinning the
 chord rule from **both** sides — every chord modifier must stay with the host,
-and Shift must **not**, or capitals become untypable — plus AltGr from both sides
-(an AltGr-composed character types, a real Ctrl+Alt accelerator does not),
+and Shift must **not**, or capitals become untypable — plus Alt-family composition
+from both sides (an AltGr Ctrl+Alt character and a macOS Option Alt-alone character
+both type; a real Ctrl+Alt/Alt accelerator with no character, or one carrying Meta,
+does not),
 key-over-character precedence, the control-character filter, the character-keyed
 chord allowlist, the platform text gate, and the printable-ASCII range from both
 sides (every character in `U+0020`–`U+007E` forwards; `é`/`€`/CJK are declined and

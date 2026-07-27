@@ -98,20 +98,24 @@ class DeviceKeyboardInputPolicyTest {
   @Test
   fun `every chord modifier keeps the keystroke with the host`() {
     // The too-LOOSE direction. Stated per-modifier so a rule that only checked, say, Meta would
-    // fail here on Linux/Windows-style Ctrl accelerators.
-    val chords =
-      listOf(
-        DeviceKeyModifiers(ctrl = true),
-        DeviceKeyModifiers(alt = true),
-        DeviceKeyModifiers(meta = true),
-      )
-    chords.forEach { modifiers ->
+    // fail here on Linux/Windows-style Ctrl accelerators. Ctrl and Meta are chords even when a
+    // printable character is reported alongside — only Alt composes text (see the Option tests).
+    listOf(DeviceKeyModifiers(ctrl = true), DeviceKeyModifiers(meta = true)).forEach { modifiers ->
       assertEquals(
         DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
         DeviceKeyboardInputPolicy.evaluate(DeviceKeyStroke(character = 's', modifiers = modifiers)),
         "$modifiers",
       )
     }
+    // Alt is a chord ONLY when it did not compose a character — a real Alt accelerator / mnemonic
+    // reports no printable character. Alt WITH a composed character is macOS Option typing, covered
+    // separately; so the Alt chord case is pinned with the no-character shape it actually takes.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(character = null, modifiers = DeviceKeyModifiers(alt = true))
+      ),
+    )
   }
 
   @Test
@@ -193,6 +197,47 @@ class DeviceKeyboardInputPolicyTest {
           character = '@',
           modifiers = DeviceKeyModifiers(ctrl = true, alt = true),
         )
+      ),
+    )
+  }
+
+  @Test
+  fun `macOS Option-composed ASCII types instead of being refused as a chord`() {
+    // On macOS the Option key composes ASCII and AWT/Compose reports Alt WITHOUT Ctrl (German
+    // Option+L = @, Option+5 = [). The Ctrl+Alt-only AltGr reading missed these, so the device
+    // never got them. Alt-alone with a produced typable character is composition, not a shortcut.
+    assertEquals(
+      DeviceKeyboardDecision.TypeText("@"),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(character = '@', modifiers = DeviceKeyModifiers(alt = true))
+      ),
+    )
+    assertEquals(
+      DeviceKeyboardDecision.TypeText("["),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(character = '[', modifiers = DeviceKeyModifiers(alt = true))
+      ),
+    )
+  }
+
+  @Test
+  fun `a real Alt or Meta shortcut with no printable character stays with the host`() {
+    // The other direction, and the guard that keeps the Option allowance from being a hole. An
+    // Alt+letter menu mnemonic produces NO character (CHAR_UNDEFINED); a device-key chord likewise.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(
+          key = DeviceKeyboardKey.ArrowLeft,
+          modifiers = DeviceKeyModifiers(alt = true),
+        )
+      ),
+    )
+    // Option+Cmd (Alt+Meta) composing something is still a shortcut, because Meta never composes.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(character = '@', modifiers = DeviceKeyModifiers(alt = true, meta = true))
       ),
     )
   }

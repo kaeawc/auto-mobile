@@ -1635,6 +1635,22 @@ export class UnixSocketServer {
     await this.resetMcpClient(key);
   }
 
+  /**
+   * Drop the cached append helper for a device that has disconnected (issue #3351).
+   *
+   * The cache is keyed by deviceId and otherwise lives until the 5-minute idle
+   * close. If an emulator is replaced under a reused serial (`emulator-5554`)
+   * before then, the next device would inherit the previous one's cached API-level
+   * capability — an API 31+ / pre-31 mismatch that mis-handles SHIFT and uppercase.
+   * The daemon's device-disconnect monitor calls this on a confirmed disconnect so
+   * the replacement re-probes from scratch. Idempotent; safe for an unknown id.
+   */
+  evictDeviceInputCache(deviceId: string): void {
+    if (this.appendTextInputs.delete(deviceId)) {
+      logger.debug(`[UnixSocketServer] Evicted cached append helper for disconnected device ${deviceId}`);
+    }
+  }
+
   /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
   private getAppendTextInput(device: BootedDevice): AppendTextInput {
     const existing = this.appendTextInputs.get(device.deviceId);

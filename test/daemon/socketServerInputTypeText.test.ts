@@ -386,6 +386,49 @@ describe("UnixSocketServer input/typeText", () => {
     ]);
   });
 
+  // Issue #3351: an emulator replaced under a reused serial (emulator-5554) must not
+  // inherit the previous device's cached API-level capability. The daemon's
+  // disconnect monitor calls evictDeviceInputCache on a confirmed disconnect; after
+  // it, the next append rebuilds the helper and re-probes from scratch.
+  test("evicting the input cache forces the next append for that device to re-probe", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ProductionShapedAdbExecutor(fakeTimer);
+    let factoryCalls = 0;
+    server.appendTextFactory = device => {
+      factoryCalls += 1;
+      return createAppendTextInput(device, adb, fakeTimer);
+    };
+    await server.start();
+
+    const append = () =>
+      sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        text: "a",
+        mode: "append",
+      }, 1234);
+
+    expect((await append()).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+    expect(adb.probeCalls.length).toBe(1);
+
+    // The old emulator-5554 disconnects; the daemon evicts its cached helper.
+    server.evictDeviceInputCache("emulator-5554");
+
+    // The replacement (same serial) must rebuild the helper and probe again — its
+    // API level is not assumed from the device that used to hold this serial.
+    expect((await append()).success).toBe(true);
+    expect(factoryCalls).toBe(2);
+    expect(adb.probeCalls.length).toBe(2);
+  });
+
   // The client forwards every printable ASCII character, but uppercase and shifted
   // symbols need `input keycombination` (API 31+) and the client cannot see the API
   // level. The daemon therefore has to REPORT the failure; a silent success that

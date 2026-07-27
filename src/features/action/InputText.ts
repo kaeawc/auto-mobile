@@ -438,7 +438,12 @@ export class InputText extends BaseVisualChange {
         return this.appendBudgetExceeded(timeoutMs, "typing");
       }
       try {
-        await this.executeKeyEventPlan(plan, budget);
+        // noRetry: production AdbClient retries a timed-out command up to 4 total
+        // attempts, each charged the SAME budget — and runInputOperationWithTimeout
+        // awaits the losing operation before releasing the per-device queue, so a
+        // stalled key event would otherwise hold the queue for ~4x the request
+        // deadline. A single attempt keeps the whole append inside one budget.
+        await this.executeKeyEventPlan(plan, budget, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.warn(`[InputText] append key event failed: ${message}`, error);
@@ -611,7 +616,7 @@ export class InputText extends BaseVisualChange {
       return this.androidInputKeyCombinationSupported;
     }
 
-    const apiLevel = await readAndroidDeviceApiLevel(this.adb, timeoutMs);
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb, timeoutMs, this.timer);
     if (apiLevel === null) {
       // Unknown is not "unsupported": a transient probe failure (or the caller's
       // budget expiring mid-probe) must not permanently disable SHIFT chords for
@@ -625,9 +630,13 @@ export class InputText extends BaseVisualChange {
     return this.androidInputKeyCombinationSupported;
   }
 
-  private async executeKeyEventPlan(plan: KeyEventPlan, timeoutMs?: number): Promise<void> {
+  private async executeKeyEventPlan(
+    plan: KeyEventPlan,
+    timeoutMs?: number,
+    noRetry: boolean = false
+  ): Promise<void> {
     for (const command of plan.commands) {
-      await this.adb.executeCommand(command, timeoutMs);
+      await this.adb.executeCommand(command, timeoutMs, undefined, noRetry);
     }
   }
 

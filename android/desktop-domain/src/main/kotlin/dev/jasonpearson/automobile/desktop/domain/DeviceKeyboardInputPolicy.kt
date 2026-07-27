@@ -44,21 +44,27 @@ public data class DeviceKeyModifiers(
     get() = ctrl || alt || meta
 
   /**
-   * Whether this modifier set is the shape AltGr takes on layouts that report it as Ctrl+Alt.
+   * Whether this modifier set is one an Alt-family key press takes when it COMPOSES a character
+   * rather than triggering a shortcut — Alt held, Meta not.
    *
-   * AltGr is how a great many non-US layouts produce `@`, `€`, `{`, `\` and friends, and several
-   * toolkits (AWT among them, which Compose desktop is built on) surface it as Ctrl **and** Alt
-   * together rather than as a modifier of its own. Rejecting that shape outright — the obvious
-   * reading of "Ctrl/Alt/Meta means host chord" — makes those characters untypable on the layouts
-   * most of the world uses.
+   * Two toolkits, two shapes, one intent:
+   * - **Ctrl+Alt** is how a great many non-US layouts surface **AltGr** (`@`, `€`, `{`, `\`)
+   *   through AWT/Compose desktop — as Ctrl **and** Alt together rather than a modifier of its own.
+   * - **Alt alone** is how AWT/Compose reports the macOS **Option** key, which likewise composes
+   *   ASCII on many layouts (German Option+L = `@`, Option+5 = `[`). The old Ctrl+Alt-only reading
+   *   missed these, and the device never received them.
    *
-   * This is only ever consulted together with a printable character (see
-   * [DeviceKeyboardInputPolicy.evaluate]), which is what keeps a *real* Ctrl+Alt accelerator with
-   * the host: a shortcut chord produces no printable character, so it never takes this branch. Meta
-   * is excluded because no layout composes characters with it.
+   * Rejecting either outright — the obvious reading of "Ctrl/Alt/Meta means host chord" — makes
+   * those characters untypable on the layouts and platforms most of the world uses.
+   *
+   * Only ever consulted together with a produced printable character (see
+   * [DeviceKeyboardInputPolicy.evaluate]), which is what keeps a *real* accelerator with the host:
+   * a shortcut chord produces no printable character, so it never takes this branch. **Meta is
+   * excluded** on purpose — macOS `Cmd` and Windows `Meta` shortcuts never compose characters, so
+   * Meta-held is the reliable "this is a shortcut, not typing" signal.
    */
-  public val isAltGraphShape: Boolean
-    get() = ctrl && alt && !meta
+  public val composesTextViaAlt: Boolean
+    get() = alt && !meta
 }
 
 /**
@@ -314,17 +320,21 @@ public object DeviceKeyboardInputPolicy {
   }
 
   /**
-   * Whether a chord-modified [stroke] is on the caller's explicit forward list, or is AltGr
-   * composing a printable character rather than a shortcut.
+   * Whether a chord-modified [stroke] is on the caller's explicit forward list, or is an Alt-family
+   * key composing a printable character (AltGr / macOS Option) rather than a shortcut.
    */
   private fun isAllowedChord(
     stroke: DeviceKeyStroke,
     forwardedChords: Set<DeviceChordAllowance>,
   ): Boolean {
     val character = stroke.character
-    // AltGr-as-Ctrl+Alt, and only when it actually produced something typable. A real Ctrl+Alt
-    // accelerator produces no character, so it stays with the host.
-    if (stroke.modifiers.isAltGraphShape && character != null && isTypable(character)) return true
+    // AltGr (Ctrl+Alt) or macOS Option (Alt alone), and only when it actually produced a typable
+    // ASCII character. A real accelerator — Alt+letter mnemonic, ⌥⌘-combo — produces no such
+    // character (or carries Meta), so it stays with the host. This is the documented tradeoff: a
+    // keystroke that yields a typable character is treated as the user typing it, because "produced
+    // a character" is the only signal available to tell composition from an accelerator.
+    if (stroke.modifiers.composesTextViaAlt && character != null && isTypable(character))
+      return true
     return forwardedChords.any { allowance ->
       when (allowance) {
         is DeviceChordAllowance.OfKey -> stroke.key != null && stroke.key == allowance.key

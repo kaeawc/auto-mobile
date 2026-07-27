@@ -2714,8 +2714,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         startTime,
         gestureBuiltTime,
         frameContext,
-      ) {
-        outcome ->
+      ) { outcome ->
         if (outcome.completed) {
           Log.d(
             TAG,
@@ -2910,8 +2909,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         startTime,
         gestureBuiltTime,
         frameContext,
-      ) {
-        outcome ->
+      ) { outcome ->
         if (outcome.completed) {
           Log.d(
             TAG,

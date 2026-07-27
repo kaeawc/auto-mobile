@@ -273,7 +273,8 @@ class CtrlProxyMessageHandler(
         } else {
           actions.requestGlobalAction(request.requestId, request.action, request.frameContext)
         }
-      is ValidateFrameContext -> actions.validateFrameContext(request.requestId, request.frameContext)
+      is ValidateFrameContext ->
+        actions.validateFrameContext(request.requestId, request.frameContext)
       is RequestDeviceInfo -> actions.requestDeviceInfo(request.requestId)
       is GetDeviceOwnerStatus -> actions.getDeviceOwnerStatus(request.requestId)
       is GetPermission ->

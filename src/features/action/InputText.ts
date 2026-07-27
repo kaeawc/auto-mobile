@@ -612,8 +612,16 @@ export class InputText extends BaseVisualChange {
     }
 
     const apiLevel = await readAndroidDeviceApiLevel(this.adb, timeoutMs);
+    if (apiLevel === null) {
+      // Unknown is not "unsupported": a transient probe failure (or the caller's
+      // budget expiring mid-probe) must not permanently disable SHIFT chords for
+      // this instance — which now outlives a single request (the daemon caches
+      // InputText per device). Answer conservatively but leave the cache empty
+      // so the next call re-probes.
+      return false;
+    }
     this.androidInputKeyCombinationSupported =
-      apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
+      apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
     return this.androidInputKeyCombinationSupported;
   }
 

@@ -128,6 +128,18 @@ public enum class DeviceKeyboardRejection {
    * leaves the event unconsumed, so the host still gets it.
    */
   CharacterUnsupported,
+
+  /**
+   * A device-meaningful key pressed with Shift held (Shift-Tab, Shift-arrow, Shift-Enter).
+   *
+   * The daemon's `input/key` carries no modifiers — its contract explicitly rejects them — so the
+   * only thing that *could* be sent is the bare key, and a bare key is a semantically different
+   * keystroke: Shift-Tab means focus **backward**, sending `tab` would move it forward; Shift-arrow
+   * means extend selection, a bare arrow abandons it. The rule is the same one that governs
+   * characters: never deliver a different keystroke than the user pressed. Declined and left
+   * unconsumed, so the host (which CAN honor Shift-Tab) still receives it.
+   */
+  ShiftedKeyUnsupported,
 }
 
 /** What [DeviceKeyboardInputPolicy.evaluate] decided one keystroke should send. */
@@ -165,6 +177,9 @@ public sealed interface DeviceKeyboardDecision {
  *    is the only rule that is correct for all of them.
  * 2. **A device-meaningful key wins over the character it produced.** Enter, Tab and Backspace all
  *    report a control character; sending those as text would put a literal `\n` in a text field.
+ *    But a device key with **Shift held is declined**: the daemon's `input/key` transmits no
+ *    modifiers, and delivering the bare key would invert the keystroke's meaning (Shift-Tab is
+ *    focus-backward; `tab` is focus-forward). Declined means unconsumed — the host keeps it.
  * 3. **A printable ASCII character is typed.** Exactly one character per keystroke — this is not
  *    IME composition, which is explicitly out of scope for #3351. The ASCII restriction is not
  *    arbitrary: the daemon's non-destructive append path types by injecting Android key events, and
@@ -248,13 +263,24 @@ public object DeviceKeyboardInputPolicy {
       return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord)
     }
     stroke.key?.let {
-      return evaluateKey(it)
+      return evaluateKey(it, stroke.modifiers.shift)
     }
     return evaluateCharacter(stroke.character, textSupported)
   }
 
-  /** A key with a device meaning of its own becomes a button press or a discrete key event. */
-  private fun evaluateKey(key: DeviceKeyboardKey): DeviceKeyboardDecision {
+  /**
+   * A key with a device meaning of its own becomes a button press or a discrete key event — unless
+   * Shift is held. The daemon's `input/key` transmits no modifiers (its contract rejects them
+   * outright), so a shifted device key cannot be delivered as the keystroke the user pressed.
+   * Sending the bare key instead would *invert* its meaning — `tab` for Shift-Tab moves focus
+   * forward, not backward — so the stroke is declined and left with the host, which can honor it.
+   * Shifted *characters* are unaffected: they arrive with a null key and the character ('A', '?')
+   * already encodes the shift.
+   */
+  private fun evaluateKey(key: DeviceKeyboardKey, shift: Boolean): DeviceKeyboardDecision {
+    if (shift && (key in BUTTON_KEYS || key in DISCRETE_KEYS)) {
+      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.ShiftedKeyUnsupported)
+    }
     BUTTON_KEYS[key]?.let {
       return DeviceKeyboardDecision.PressButton(it)
     }

@@ -237,10 +237,16 @@ only affordance a user has to get it back.
 shortcuts in a *preview*/capture-phase handler — one that runs before the focused
 descendant — it will consume Tab, the arrows, Enter and Escape before the device
 canvas ever sees them, and Escape is the client's only device-button binding. The
-host must stand that handler down while the device canvas holds focus. The
-reference client reports focus changes out of the view and has the shell decline
-every **un-chorded** keystroke while control mode holds the keyboard; chorded
-host shortcuts keep working, which is consistent with the chord rule below.
+host must stand that handler down while the device canvas holds focus — but only
+for **keystrokes the policy will actually claim**, decided per event with this
+same policy, not with a blanket "canvas is focused" flag. The blanket version
+creates a dead zone: toolkits do not rerun a preview handler while an unconsumed
+event bubbles back up, so any keystroke the canvas then *declines* (a printable
+character on a platform whose daemon cannot append, a shifted device key) would
+reach neither the device nor the host binding it used to trigger. The reference
+client asks `DeviceControlSession.wouldForwardKey` — the same decision the
+dispatch path makes — per event; chords answer "no" there, so chorded host
+shortcuts keep working, consistent with the chord rule below.
 
 Control mode is additionally **inert without a frame snapshot**, the same
 fail-closed rule taps and drags follow: with no snapshot there is no frame the
@@ -284,7 +290,8 @@ Applied in this order:
 | --- | --- |
 | Any chord modifier held, key not explicitly opted in | **nothing**; leave unconsumed |
 | `Escape` | one `input/pressButton` with `back` |
-| `Enter`, `Tab`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right` | one `input/key` with `enter`, `tab`, `backspace`, `delete`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right` |
+| `Enter`, `Tab`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right` — **without Shift** | one `input/key` with `enter`, `tab`, `backspace`, `delete`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right` |
+| Any of those keys **with Shift held** (Shift-Tab, Shift-arrow, …) | **nothing**; leave unconsumed |
 | A printable **ASCII** character (`U+0020`–`U+007E`) | one `input/typeText` with that single character, in **append** mode |
 | A printable character outside that range (`é`, `€`, CJK, emoji) | **nothing**; leave unconsumed |
 | Anything else (function keys, a modifier pressed alone, a dead key) | **nothing**; leave unconsumed |
@@ -292,6 +299,16 @@ Applied in this order:
 A key with a device meaning **wins over the character it produced**. Hosts report
 a control character for Enter, Tab and Backspace; typing those as text would put
 a literal newline in a text field instead of pressing the key.
+
+**Shifted device keys are declined, never downgraded.** `input/key` transmits no
+modifiers — its contract rejects them — so the only thing that *could* be sent
+for Shift-Tab is bare `tab`, and that is a semantically different keystroke:
+Shift-Tab moves focus **backward**, `tab` moves it forward; Shift-arrow extends a
+selection, a bare arrow abandons it. The same governing rule as characters
+applies — never deliver a different keystroke than the user pressed — so the
+stroke is left unconsumed and the host (which can honor the shifted form) keeps
+it. Shifted *characters* (`A`, `?`) are unaffected: they arrive as characters
+that already encode the shift.
 
 **Text must be appended, never set.** `input/typeText`'s default Android path is
 `ACTION_SET_TEXT`, which *replaces* the focused field's contents. A client sending

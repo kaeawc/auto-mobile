@@ -160,6 +160,18 @@ export class UnixSocketServer {
   appendTextFactory: (device: BootedDevice) => AppendTextInput = device =>
     new InputText(device, defaultAdbClientFactory, undefined, this.timer);
 
+  /**
+   * Per-device append helpers, cached so the API-level probe (`adb shell getprop`)
+   * runs once per device instead of once PER KEYSTROKE — an interactive client
+   * sends one `input/typeText` per key press, and a fresh {@link InputText} would
+   * re-pay that round trip every time (issue #1099 tracks interactive latency).
+   *
+   * Evicted alongside the device's idle MCP-client close ({@link closeIdleMcpClient},
+   * same per-device key, same idle window), so a device that re-appears under the
+   * same id with a different image re-probes rather than trusting a stale API level.
+   */
+  private appendTextInputs: Map<string, AppendTextInput> = new Map();
+
   constructor(
     socketPath: string = SOCKET_PATH,
     mcpEndpoint: string,
@@ -1121,7 +1133,7 @@ export class UnixSocketServer {
     // queue. An unbounded adb subprocess here would therefore wedge every later
     // input for this device, not just this one request.
     const textResult = append
-      ? await this.appendTextFactory(targetDevice).appendText(text, timeoutMs)
+      ? await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs)
       : await client.requestSetText(text, { timeoutMs });
     if (!textResult.success) {
       return { success: false, error: textResult.error };
@@ -1613,7 +1625,25 @@ export class UnixSocketServer {
     if (this.mcpForwardTails.has(key)) {
       return;
     }
+    // The append helper shares the device's idle lifecycle: once nothing has
+    // used this device key for the idle window, drop the cached InputText so
+    // its API-level cache cannot go stale across a device swap under the same id.
+    const devicePrefix = "device:";
+    if (key.startsWith(devicePrefix)) {
+      this.appendTextInputs.delete(key.slice(devicePrefix.length));
+    }
     await this.resetMcpClient(key);
+  }
+
+  /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
+  private getAppendTextInput(device: BootedDevice): AppendTextInput {
+    const existing = this.appendTextInputs.get(device.deviceId);
+    if (existing) {
+      return existing;
+    }
+    const created = this.appendTextFactory(device);
+    this.appendTextInputs.set(device.deviceId, created);
+    return created;
   }
 
   /**
@@ -1695,6 +1725,7 @@ export class UnixSocketServer {
       }
     }
     this.mcpForwardTails.clear();
+    this.appendTextInputs.clear();
 
     // Clear sessions
     this.sessions.clear();

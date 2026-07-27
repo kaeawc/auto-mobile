@@ -169,6 +169,66 @@ class DeviceControlSessionKeyboardTest {
   }
 
   @Test
+  fun `a shifted device key is left with the host, never sent as the bare key`() = runTest {
+    // The daemon's input/key carries no modifiers, so Shift-Tab cannot be transmitted as what the
+    // user pressed — and sending bare `tab` would move focus FORWARD when the user asked for
+    // backward. The only correct answer is to decline and let the host (which honors Shift-Tab)
+    // keep the event.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val consumed =
+      session.key(
+        testSnapshot(),
+        DeviceKeyStroke(
+          key = DeviceKeyboardKey.Tab,
+          character = '\t',
+          modifiers = DeviceKeyModifiers(shift = true),
+        ),
+      )
+    advanceUntilIdle()
+
+    assertFalse(consumed, "a shifted device key must stay with the host")
+    assertTrue(
+      client.inputCalls().isEmpty(),
+      "nothing reaches the daemon (got ${client.inputCalls()})",
+    )
+    scope.cancel()
+  }
+
+  @Test
+  fun `wouldForwardKey mirrors what key() actually dispatches`() = runTest {
+    // The shell consults this predicate at PREVIEW time to decide whether to stand its own
+    // bindings down; if it ever disagreed with key(), a keystroke could die between the two —
+    // consumed by neither shell nor device.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val android = session(scope, FakeAutoMobileClient())
+    val ios = session(scope, FakeAutoMobileClient(), platform = "ios")
+
+    // Claimed on Android: printable ASCII text, plain device keys, Escape.
+    assertTrue(android.wouldForwardKey(DeviceKeyStroke(character = 'j')))
+    assertTrue(android.wouldForwardKey(DeviceKeyStroke(key = DeviceKeyboardKey.Tab)))
+    assertTrue(android.wouldForwardKey(DeviceKeyStroke(key = DeviceKeyboardKey.Escape)))
+    // Declined everywhere: host chords, shifted device keys, untypable characters.
+    assertFalse(
+      android.wouldForwardKey(
+        DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(meta = true))
+      )
+    )
+    assertFalse(
+      android.wouldForwardKey(
+        DeviceKeyStroke(key = DeviceKeyboardKey.Tab, modifiers = DeviceKeyModifiers(shift = true))
+      )
+    )
+    assertFalse(android.wouldForwardKey(DeviceKeyStroke(character = 'é')))
+    // Declined on iOS (no append-capable text helper) but keys/buttons still claimed.
+    assertFalse(ios.wouldForwardKey(DeviceKeyStroke(character = 'j')))
+    assertTrue(ios.wouldForwardKey(DeviceKeyStroke(key = DeviceKeyboardKey.Escape)))
+    scope.cancel()
+  }
+
+  @Test
   fun `enter reaches the daemon as a discrete key`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()

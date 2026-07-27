@@ -13,15 +13,21 @@ export async function readAndroidDeviceApiLevel(
   adb: AdbExecutor,
   timeoutMs?: number
 ): Promise<number | null> {
-  const extended = adb as AdbExecutor & { getAndroidApiLevel?: () => Promise<number | null> };
-  if (typeof extended.getAndroidApiLevel === "function") {
-    const fromClient = await extended.getAndroidApiLevel();
-    if (fromClient !== null && fromClient !== undefined) {
-      return fromClient;
-    }
-  }
+  const extended = adb as AdbExecutor & {
+    getAndroidApiLevel?: (timeoutMs?: number) => Promise<number | null>;
+  };
 
   try {
+    // The budget must reach BOTH branches. Production AdbClient takes this
+    // extended path, so leaving it unbounded reproduces the append-path wedge
+    // the fallback's timeout exists to prevent: a stalled getprop holds the
+    // daemon's per-device queue for as long as the subprocess lives.
+    if (typeof extended.getAndroidApiLevel === "function") {
+      const fromClient = await extended.getAndroidApiLevel(timeoutMs);
+      if (fromClient !== null && fromClient !== undefined) {
+        return fromClient;
+      }
+    }
     const r = await adb.executeCommand("shell getprop ro.build.version.sdk", timeoutMs, undefined, true);
     const n = parseInt(r.stdout.trim(), 10);
     return Number.isFinite(n) ? n : null;

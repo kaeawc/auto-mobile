@@ -430,8 +430,12 @@ export class AdbClient implements AdbExecutor {
 
   /**
    * Get the Android API level for the connected device.
+   *
+   * @param timeoutMs - Optional bound on the getprop subprocess. Callers running
+   *   under a request deadline (the daemon's append-text path) pass their
+   *   remaining budget so a wedged adb cannot outlive the request that asked.
    */
-  async getAndroidApiLevel(): Promise<number | null> {
+  async getAndroidApiLevel(timeoutMs?: number): Promise<number | null> {
     if (this.apiLevelCache !== undefined) {
       return this.apiLevelCache;
     }
@@ -439,7 +443,7 @@ export class AdbClient implements AdbExecutor {
     try {
       const result = await this.executeCommand(
         "shell getprop ro.build.version.sdk",
-        undefined,
+        timeoutMs,
         undefined,
         true
       );
@@ -448,7 +452,9 @@ export class AdbClient implements AdbExecutor {
       return this.apiLevelCache;
     } catch (error) {
       logger.warn(`[ADB] Failed to read API level: ${error}`);
-      this.apiLevelCache = null;
+      // Deliberately NOT cached: a transient failure (device busy, a caller's
+      // timeout expiring) must not permanently mark the device as unknown-API.
+      // The next caller re-probes; a genuinely broken device just fails again.
       return null;
     }
   }

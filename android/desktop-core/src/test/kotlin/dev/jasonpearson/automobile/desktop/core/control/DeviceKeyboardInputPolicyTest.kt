@@ -253,6 +253,48 @@ class DeviceKeyboardInputPolicyTest {
   }
 
   @Test
+  fun `a shifted device key is declined, never delivered as the bare key`() {
+    // The daemon's input/key transmits no modifiers (its contract rejects them), so the only
+    // deliverable would be the BARE key — a semantically different keystroke. Shift-Tab means
+    // focus-backward; sending `tab` would move focus forward. Declined and left unconsumed, so
+    // the host (which can honor the shifted form) still receives it.
+    listOf(
+        DeviceKeyboardKey.Tab,
+        DeviceKeyboardKey.Enter,
+        DeviceKeyboardKey.ArrowUp,
+        DeviceKeyboardKey.ArrowLeft,
+        DeviceKeyboardKey.Escape,
+      )
+      .forEach { key ->
+        assertEquals(
+          DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.ShiftedKeyUnsupported),
+          DeviceKeyboardInputPolicy.evaluate(
+            DeviceKeyStroke(key = key, modifiers = DeviceKeyModifiers(shift = true))
+          ),
+          "$key",
+        )
+      }
+  }
+
+  @Test
+  fun `the plain forms of those keys still forward`() {
+    // The other direction of the shift rule: declining the shifted form must not cost the plain
+    // one, or the mirrored device loses Tab and the arrows entirely.
+    assertEquals(
+      DeviceKeyboardDecision.SendKey("tab"),
+      DeviceKeyboardInputPolicy.evaluate(DeviceKeyStroke(key = DeviceKeyboardKey.Tab)),
+    )
+    assertEquals(
+      DeviceKeyboardDecision.SendKey("arrow_up"),
+      DeviceKeyboardInputPolicy.evaluate(DeviceKeyStroke(key = DeviceKeyboardKey.ArrowUp)),
+    )
+    assertEquals(
+      DeviceKeyboardDecision.PressButton("back"),
+      DeviceKeyboardInputPolicy.evaluate(DeviceKeyStroke(key = DeviceKeyboardKey.Escape)),
+    )
+  }
+
+  @Test
   fun `a printable character the daemon cannot type is left with the host`() {
     // The double-loss bug this guards: the daemon's append path types by injecting Android key
     // events from an ASCII-only table, so a non-ASCII character can never reach the device. If the

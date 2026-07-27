@@ -13,6 +13,9 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
+import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
+import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.junit.Test
@@ -40,6 +43,13 @@ class ThreePaneShellDeviceKeyTest {
     capturesKeys: Boolean,
     activity: ShellActivity,
     keys: androidx.compose.ui.test.KeyInjectionScope.() -> Unit,
+  ) = runShell({ capturesKeys }, activity, vimModeEnabled = false, keys)
+
+  private fun runShell(
+    capturesKeys: (androidx.compose.ui.input.key.KeyEvent) -> Boolean,
+    activity: ShellActivity,
+    vimModeEnabled: Boolean = false,
+    keys: androidx.compose.ui.test.KeyInjectionScope.() -> Unit,
   ) {
     runComposeUiTest {
       val centerFocus = FocusRequester()
@@ -65,7 +75,8 @@ class ThreePaneShellDeviceKeyTest {
             onNavigateDown = { activity.navigated.add("down") },
             onSelectEvent = { activity.navigated.add("select") },
             onDeselectEvent = { activity.navigated.add("deselect") },
-            deviceControlCapturesKeys = { capturesKeys },
+            vimModeEnabled = vimModeEnabled,
+            deviceControlCapturesKeys = capturesKeys,
             // Something inside the shell must hold focus, or the shell's preview handler is not on
             // the focus path and never runs at all — which would make every assertion below pass
             // vacuously. This stands in for the device canvas.
@@ -118,12 +129,79 @@ class ThreePaneShellDeviceKeyTest {
     assertEquals(listOf("up", "down", "select", "deselect"), idle.navigated)
   }
 
+  /**
+   * The production predicate shape: translate the event and ask the real policy, exactly as
+   * `AutoMobileContent` wires `DeviceControlSession.wouldForwardKey`. Using the real policy here is
+   * the point — the dead zone this guards is a DISAGREEMENT between the shell's stand-down and the
+   * canvas's decision, which a hand-rolled boolean cannot exhibit.
+   */
+  private fun policyPredicate(
+    textSupported: Boolean
+  ): (androidx.compose.ui.input.key.KeyEvent) -> Boolean = { event ->
+    DeviceKeyboardInputPolicy.evaluate(
+      stroke = DeviceKeyboardEventTranslator.translate(event),
+      textSupported = textSupported,
+    ) !is DeviceKeyboardDecision.Ignored
+  }
+
+  @Test
+  fun `a keystroke the device declines still reaches the shell binding`() {
+    // The dead-zone bug: Compose does not rerun a preview handler while an unconsumed event
+    // bubbles back up, so a blanket stand-down would leave a policy-declined key with NEITHER the
+    // device NOR the shell. On a platform whose daemon cannot append text, a bare printable key is
+    // exactly such a keystroke — with vim mode on, j must still navigate.
+    val activity = ShellActivity()
+    runShell(policyPredicate(textSupported = false), activity, vimModeEnabled = true) {
+      pressKey(Key.J)
+    }
+
+    assertEquals(
+      listOf("down"),
+      activity.navigated,
+      "a declined printable key must fall back to the shell's vim binding",
+    )
+  }
+
+  @Test
+  fun `the same keystroke stands the shell down where the device can type it`() {
+    // The other direction: on Android the policy claims 'j' as typed text, so the shell must NOT
+    // navigate — the canvas gets the key.
+    val activity = ShellActivity()
+    runShell(policyPredicate(textSupported = true), activity, vimModeEnabled = true) {
+      pressKey(Key.J)
+    }
+
+    assertTrue(
+      activity.navigated.isEmpty(),
+      "a forwarded printable key must not trigger shell navigation (got ${activity.navigated})",
+    )
+  }
+
+  @Test
+  fun `a shifted arrow the policy declines keeps its shell binding`() {
+    // Shift+arrow cannot be transmitted by the daemon (input/key has no modifiers), so the policy
+    // declines it — and the shell, asked per event, keeps navigating instead of dead-zoning it.
+    // The PLAIN arrow is claimed by the device and must not navigate.
+    val activity = ShellActivity()
+    runShell(policyPredicate(textSupported = true), activity) {
+      withKeyDown(Key.ShiftLeft) { pressKey(Key.DirectionUp) }
+      pressKey(Key.DirectionDown)
+    }
+
+    assertEquals(
+      listOf("up"),
+      activity.navigated,
+      "shifted arrow stays with the shell; the plain arrow goes to the device",
+    )
+  }
+
   @Test
   fun `chorded shell shortcuts survive the stand-down`() {
-    // The stand-down is scoped to UN-chorded keys precisely so this keeps working: the forwarding
-    // policy leaves modifier-bearing chords to the host, so the shell must still get them.
+    // The chord exclusion now lives in the policy the predicate consults — a modifier-bearing
+    // chord is a HostChord rejection, so the predicate answers false and the shell keeps its
+    // accelerators even while the device canvas owns the rest of the keyboard.
     val capturing = ShellActivity()
-    runShell(capturesKeys = true, activity = capturing) {
+    runShell(policyPredicate(textSupported = true), capturing) {
       withKeyDown(Key.MetaLeft) { pressKey(Key.Zero) }
     }
 

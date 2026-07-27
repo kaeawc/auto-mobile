@@ -266,16 +266,7 @@ class DeviceControlSession(
    * view received while focused and in control mode.
    */
   fun key(snapshot: DeviceFrameSnapshot, stroke: DeviceKeyStroke): Boolean {
-    // Text forwarding needs a daemon helper that APPENDS. Only Android has one (`mode: "append"`,
-    // real key events); iOS text input can only replace the focused field, which typing one
-    // character at a time would wipe on every keystroke. Buttons and discrete keys are unaffected.
-    val platformName = platform()
-    val decision =
-      DeviceKeyboardInputPolicy.evaluate(
-        stroke = stroke,
-        textSupported = platformName == ANDROID_PLATFORM,
-      )
-    when (decision) {
+    when (val decision = decide(stroke)) {
       is DeviceKeyboardDecision.PressButton ->
         enqueue { client, platformName, token ->
           DeviceControlInputCommand.PressButton(
@@ -311,6 +302,35 @@ class DeviceControlSession(
     }
     return true
   }
+
+  /**
+   * Whether [key] would forward [stroke] to the device, WITHOUT dispatching anything.
+   *
+   * Exists for the host's preview-phase handlers (issue #3351): Compose runs preview handlers
+   * top-down before the focused canvas sees the event and does **not** rerun them while an
+   * unconsumed event bubbles back up. A shell that stands its own bindings down for every
+   * un-chorded key therefore creates a dead zone for keystrokes this session then declines — the
+   * key reaches neither the device nor the shell. The shell instead asks this predicate per event
+   * and stands down only for keystrokes the session will actually claim.
+   *
+   * Delegates to the same [decide] the dispatch path uses, so the prediction and the dispatch
+   * cannot disagree.
+   */
+  fun wouldForwardKey(stroke: DeviceKeyStroke): Boolean =
+    decide(stroke) !is DeviceKeyboardDecision.Ignored
+
+  /**
+   * The one policy consultation both [key] and [wouldForwardKey] share.
+   *
+   * Text forwarding needs a daemon helper that APPENDS. Only Android has one (`mode: "append"`,
+   * real key events); iOS text input can only replace the focused field, which typing one character
+   * at a time would wipe on every keystroke. Buttons and discrete keys are unaffected.
+   */
+  private fun decide(stroke: DeviceKeyStroke): DeviceKeyboardDecision =
+    DeviceKeyboardInputPolicy.evaluate(
+      stroke = stroke,
+      textSupported = platform() == ANDROID_PLATFORM,
+    )
 
   /**
    * Claim the newest-attempt error token, clear the banner, and enqueue the command [build] makes

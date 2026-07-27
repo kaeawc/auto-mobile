@@ -45,15 +45,7 @@ class ScriptedAdbExecutor {
     this.commands.push({ command, timeoutMs });
 
     if (this.stallPattern !== undefined && command.includes(this.stallPattern)) {
-      return new Promise<ExecResult>((_resolve, reject) => {
-        if (timeoutMs === undefined) {
-          return;
-        }
-        this.timer.setTimeout(
-          () => reject(new Error(`adb command timed out after ${timeoutMs}ms: ${command}`)),
-          timeoutMs
-        );
-      });
+      return this.stalledSubprocess(command, timeoutMs);
     }
 
     const stdout = command.includes("ro.build.version.sdk") ? `${this.apiLevel}\n` : "";
@@ -66,11 +58,55 @@ class ScriptedAdbExecutor {
     } as unknown as ExecResult;
   }
 
+  /**
+   * How a real adb subprocess behaves under a deadline: it dies at its own
+   * `timeoutMs`, and runs FOREVER when it was handed none — which is exactly why
+   * dropping the threaded budget reproduces the original wedge instead of merely
+   * flipping an assertion.
+   */
+  stalledSubprocess<T>(label: string, timeoutMs?: number): Promise<T> {
+    return new Promise<T>((_resolve, reject) => {
+      if (timeoutMs === undefined) {
+        return;
+      }
+      this.timer.setTimeout(
+        () => reject(new Error(`adb command timed out after ${timeoutMs}ms: ${label}`)),
+        timeoutMs
+      );
+    });
+  }
+
   /** Only the `shell input ...` commands, i.e. what actually reached the device's input system. */
   inputCommands(): string[] {
     return this.commands
       .map(call => call.command)
       .filter(command => command.startsWith("shell input "));
+  }
+}
+
+/**
+ * The production-`AdbClient` shape: an own `getAndroidApiLevel` method, which
+ * `readAndroidDeviceApiLevel` prefers over the raw getprop fallback. The real
+ * daemon always takes this branch, so the wedge tests must be able to drive it —
+ * bounding only the fallback (as the first fix did) leaves production unbounded.
+ */
+class ProductionShapedAdbExecutor extends ScriptedAdbExecutor {
+  /** The budget each probe call received; `undefined` entries are the bug. */
+  readonly probeCalls: Array<number | undefined> = [];
+
+  constructor(
+    timer: FakeTimer,
+    private readonly options: { stallProbe?: boolean; probeApiLevel?: number } = {}
+  ) {
+    super(timer);
+  }
+
+  async getAndroidApiLevel(timeoutMs?: number): Promise<number | null> {
+    this.probeCalls.push(timeoutMs);
+    if (this.options.stallProbe) {
+      return this.stalledSubprocess<number | null>("getAndroidApiLevel", timeoutMs);
+    }
+    return this.options.probeApiLevel ?? 31;
   }
 }
 
@@ -257,6 +293,97 @@ describe("UnixSocketServer input/typeText", () => {
     );
     expect(next.success).toBe(true);
     expect(requestSetText).toHaveBeenCalledWith("next", { timeoutMs: 30_000 });
+  });
+
+  // The first wedge fix bounded only the getprop FALLBACK. Production AdbClient
+  // exposes getAndroidApiLevel, so readAndroidDeviceApiLevel takes the extended
+  // branch — which still received no budget, reproducing the identical wedge on
+  // the path real hardware actually takes. This sibling drives that exact shape.
+  test("a stalled PRODUCTION api-level probe fails inside the budget and frees the queue", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ProductionShapedAdbExecutor(fakeTimer, { stallProbe: true });
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
+    await server.start();
+
+    const stalledPromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "a",
+      mode: "append",
+    }, 100);
+
+    await flushMicrotasks();
+    fakeTimer.advanceTime(100);
+    await flushMicrotasks();
+
+    const stalled = await withWedgeGuard(stalledPromise, "the stalled production probe never answered");
+    expect(stalled.success).toBe(false);
+    expect(String(stalled.error)).toContain("input/typeText exceeded 100ms");
+    // The production branch received the budget — an undefined here IS the bug.
+    expect(adb.probeCalls.length).toBeGreaterThan(0);
+    for (const budget of adb.probeCalls) {
+      expect(budget).toBeDefined();
+      expect(budget).toBeLessThanOrEqual(100);
+    }
+
+    // And the queue is free for the next same-device input.
+    const next = await withWedgeGuard(
+      sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        text: "next",
+      }, 30_000),
+      "the per-device queue stayed wedged behind the stalled production probe"
+    );
+    expect(next.success).toBe(true);
+    expect(requestSetText).toHaveBeenCalledWith("next", { timeoutMs: 30_000 });
+  });
+
+  // Interactive latency (#1099): one input/typeText arrives PER KEYSTROKE, so a
+  // per-request InputText would re-pay the API-level probe on every key press.
+  // The server caches the helper per device; the probe must run exactly once.
+  test("consecutive append requests for one device probe the API level once", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ProductionShapedAdbExecutor(fakeTimer);
+    let factoryCalls = 0;
+    server.appendTextFactory = device => {
+      factoryCalls += 1;
+      return createAppendTextInput(device, adb, fakeTimer);
+    };
+    await server.start();
+
+    for (const char of ["a", "b", "c"]) {
+      const response = await sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        text: char,
+        mode: "append",
+      }, 1234);
+      expect(response.success).toBe(true);
+    }
+
+    // One helper, one probe, three keystrokes' worth of key events.
+    expect(factoryCalls).toBe(1);
+    expect(adb.probeCalls.length).toBe(1);
+    expect(adb.inputCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+      "shell input keyevent KEYCODE_C",
+    ]);
   });
 
   // The client forwards every printable ASCII character, but uppercase and shifted

@@ -168,13 +168,22 @@ describe("daemon input API consumer docs", () => {
       "| `input/tap` | Supported | Supported | Absolute device-screen coordinates. |",
       "| `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |",
       "| `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |",
-      "| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. |",
+      "| `input/typeText` | Supported | Supported (replace only) | Sends committed text only; IME composition is deferred. " +
+        "Non-destructive `mode: \"append\"` is **Android only** — iOS rejects it rather than silently replacing the field. |",
       "| `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |",
     ];
 
     for (const row of expectedStatusRows) {
       expect(unixSocketApi).toContain(row);
     }
+
+    // The append mode (#3351) is the only non-destructive keyboard path a
+    // third-party client has; the doc must state the field, its Android-only
+    // restriction, and both failure modes (iOS rejection, unmappable character).
+    expect(unixSocketApi).toContain("| `mode` | `\"append\"` | No |");
+    expect(unixSocketApi).toContain('input/typeText mode "append" is only supported on android');
+    expect(unixSocketApi).toContain("append cannot type");
+    expect(unixSocketApi).toContain('"mode": "append"');
 
     expect(unixSocketApi).toContain("Unsupported platforms or unsupported actions return `success: false`");
     expect(unixSocketApi).toContain("do not include a fresh observation");

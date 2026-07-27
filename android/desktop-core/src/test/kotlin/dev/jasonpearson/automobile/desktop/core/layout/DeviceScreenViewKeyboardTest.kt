@@ -88,7 +88,9 @@ class DeviceScreenViewKeyboardTest {
   /**
    * The device view under an ancestor that consumes navigation keys in a **preview** handler,
    * faithful to `ThreePaneShell`'s real one: same `onPreviewKeyEvent` position, same KeyDown gate,
-   * same key set (Tab, arrows, Enter, Escape), and the same `deviceControlCapturesKeys` stand-down.
+   * same key set (Tab, arrows, Enter, Escape). The real shell's `deviceControlCapturesKeys` is a
+   * per-event policy predicate (see `ThreePaneShellDeviceKeyTest`); [standDown] here is its value
+   * for the keys this test injects, all of which the policy claims unshifted.
    *
    * This is the composition shape that matters, and the one the isolated tests above cannot see: a
    * preview handler runs BEFORE any focused descendant, so without the stand-down every key the

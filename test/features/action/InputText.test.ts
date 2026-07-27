@@ -677,6 +677,34 @@ describe("InputText", () => {
     ]);
   });
 
+  test("a failed API probe is not cached as unsupported", async () => {
+    // The daemon now keeps one InputText per device across keystrokes, so a single
+    // transient probe failure (device busy, budget expired mid-probe) must not
+    // permanently disable SHIFT chords for that device. Unknown answers "no" for
+    // THIS call but leaves the cache empty, and the next call re-probes.
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+    factory.getFakeClient().setCommandError(
+      "shell getprop ro.build.version.sdk",
+      new Error("device temporarily busy")
+    );
+
+    const whileFailing = await inputText.appendText("A");
+    expect(whileFailing.success).toBe(false);
+    expect(whileFailing.error).toContain("append cannot type");
+
+    // The device recovers; the same instance must now discover API 31.
+    factory.getFakeClient().reset();
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+
+    const afterRecovery = await inputText.appendText("A");
+    expect(afterRecovery.success).toBe(true);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A"
+    ]);
+  });
+
   test("append charges the API probe and every key event against the caller's budget", async () => {
     // Without this the daemon's per-device queue is held by an unbounded subprocess:
     // the socket race only REPORTS the timeout, it still waits for the operation.

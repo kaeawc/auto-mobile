@@ -143,6 +143,8 @@ export interface WebSocketMessage {
   // synthesis, honors center) or "element-anchored" (public fallback, center-less).
   // See issue #2910.
   pinchPath?: string;
+  /** Opaque device-authored identity for the hierarchy/pixels in this message. */
+  frameContext?: string;
 }
 
 /**
@@ -154,6 +156,7 @@ export interface CtrlProxyScreenshotResult {
   format?: string;
   timestamp?: number;
   error?: string;
+  frameContext?: string;
 }
 
 /** Swipe result from CtrlProxy iOS */

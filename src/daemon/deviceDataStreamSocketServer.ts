@@ -127,6 +127,8 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
    * checks) can tell converted frames from a pre-#4548 runner's and fall back accordingly.
    */
   coordinateSpace?: CoordinateSpace;
+  /** Opaque device-authored UI identity used by input validation. */
+  frameContext?: string;
 }
 
 /**
@@ -184,6 +186,7 @@ interface PushScreenshotOptions {
    * omitted for a pre-#4548 runner, keeping the frame legacy point-space.
    */
   coordinateSpace?: CoordinateSpace;
+  frameContext?: string;
 }
 
 /**
@@ -272,6 +275,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   DeviceDataFilter,
   DeviceDataPush
 > {
+  /** Most recent device-authored identity received for each device. Kept even when no IDE is
+   * subscribed: daemon-side input validation must not depend on an inspector being open. */
+  private readonly currentFrameContexts = new Map<string, string>();
+
+  getCurrentFrameContext(deviceId: string): string | undefined {
+    return this.currentFrameContexts.get(deviceId);
+  }
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
   private onScreenshotCadenceChanged: OnScreenshotCadenceChangedCallback | null = null;
   private onHierarchyCadenceChanged: OnHierarchyCadenceChangedCallback | null = null;
@@ -337,7 +347,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   /**
    * Push a hierarchy update to all subscribers interested in this device.
    */
-  pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult): number | null {
+  pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult, frameContext?: string): number | null {
+    if (frameContext !== undefined) {
+      this.currentFrameContexts.set(deviceId, frameContext);
+    }
     // Skip the diff clone+walk when nobody is listening (the layout inspector is
     // usually closed): the frame would reach zero subscribers anyway. Drop the
     // baseline too so a later re-subscribe diffs from a fresh frame, not a tree
@@ -381,6 +394,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       hierarchyDiff: summary,
       captureSequence,
       ...(scaleMetadata ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
+      frameContext,
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
@@ -440,6 +454,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // against mapping bounds that may not describe these pixels.
       captureSequence: claimMatchesPixels ? options.captureSequence : undefined,
       ...(options.coordinateSpace ? { coordinateSpace: options.coordinateSpace } : {}),
+      frameContext: options.frameContext,
       screenshotMimeType,
       screenshotFormat,
       screenshotCaptureSource,
@@ -450,6 +465,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotByteLength,
       screenshotBase64Length,
     };
+    if (options.frameContext !== undefined) {
+      this.currentFrameContexts.set(deviceId, options.frameContext);
+    }
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
     if (sentCount > 0) {
@@ -607,6 +625,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // Drop the diff baseline: the next hierarchy after a reconnect is a fresh
     // full frame, not a delta from the tree captured before the connection dropped.
     this.previousHierarchyByDevice.delete(deviceId);
+    this.currentFrameContexts.delete(deviceId);
     // Nothing to reset for capture identity: ids are never reused (the source is monotonic for the
     // process), and clients drop their own bindings when the connection goes away.
 

@@ -281,7 +281,8 @@ public class WebSocketServer: WebSocketServing {
                     requestId: hierarchyResponse.requestId,
                     data: hierarchyResponse.data,
                     perfTiming: perfTiming,
-                    error: hierarchyResponse.error
+                    error: hierarchyResponse.error,
+                    frameContext: hierarchyResponse.frameContext
                 )
             }
             return try encoder.encode(hierarchyResponse)
@@ -306,7 +307,8 @@ public class WebSocketServer: WebSocketServing {
         let response = HierarchyUpdateResponse(
             requestId: nil, // No requestId for push updates
             data: hierarchy,
-            perfTiming: nil
+            perfTiming: nil,
+            frameContext: FrameContext.forHierarchy(hierarchy)
         )
 
         do {

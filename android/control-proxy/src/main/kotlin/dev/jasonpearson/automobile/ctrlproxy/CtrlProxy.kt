@@ -26,6 +26,7 @@ import android.view.Display
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import java.util.concurrent.atomic.AtomicLong
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
@@ -345,6 +346,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
   @Volatile private var lastWindowClassName: String? = null
+  /** Changes immediately on a native UI event; capture and input share this device-owned context. */
+  private val frameContext = AtomicLong(0)
 
   @Volatile private var isRecording: Boolean = false
 
@@ -1169,8 +1172,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     duration: Long,
   ) = performSwipe(requestId, x1, y1, x2, y2, duration)
 
+  override fun requestSwipe(
+    requestId: String?, x1: Double, y1: Double, x2: Double, y2: Double, duration: Long, frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "swipe")) return
+    performSwipe(requestId, x1, y1, x2, y2, duration)
+  }
+
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
     performTapCoordinates(requestId, x, y, duration)
+
+  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long, frameContext: String?) {
+    if (rejectStaleFrameContext(requestId, frameContext, "tap")) return
+    performTapCoordinates(requestId, x, y, duration)
+  }
 
   override fun requestTwoFingerSwipe(
     requestId: String?,
@@ -1192,6 +1207,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     dragDurationMs: Long,
     holdDurationMs: Long,
   ) = performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+
+  override fun requestDrag(
+    requestId: String?, x1: Double, y1: Double, x2: Double, y2: Double, pressDurationMs: Long,
+    dragDurationMs: Long, holdDurationMs: Long, frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "drag")) return
+    performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+  }
+
+  /** Rejects an input that was mapped through a screen state the service has since observed change. */
+  private fun rejectStaleFrameContext(requestId: String?, expected: String?, action: String): Boolean {
+    if (expected == null || expected == frameContext.get().toString()) return false
+    val error = "Stale frame context for input/$action; observe a fresh frame before retrying"
+    launchRequestScope(requestId) {
+      when (action) {
+        "tap" -> broadcastTapCoordinatesResult(requestId, false, error, 0)
+        "swipe" -> broadcastSwipeResult(requestId, false, error, 0, null)
+        "drag" -> broadcastDragResult(requestId, false, error, 0, null)
+      }
+    }
+    return true
+  }
 
   override fun requestPinch(
     requestId: String?,
@@ -1519,6 +1556,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
           event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
       ) {
+        frameContext.incrementAndGet()
         if (::hierarchyDebouncer.isInitialized) {
           hierarchyDebouncer.onAccessibilityEvent()
         }
@@ -2305,6 +2343,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(
             """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString"""
           )
+          append(""",\"frameContext\":\"${frameContext.get()}\"""")
           if (perfTiming != null) {
             append(""","perfTiming":$perfTiming""")
           }
@@ -5160,7 +5199,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // otherwise be logged-and-swallowed here, emitting neither `screenshot` nor `screenshot_error`
     // and hanging the awaiting client until timeout (issue #3023).
     asyncActionRunner.launch(requestId, "screenshot") {
+      val contextBeforeCapture = frameContext.get()
       val screenshot = takeScreenshotAsync()
+      val stableContext = contextBeforeCapture.takeIf { it == frameContext.get() }
       if (screenshot != null) {
         webSocketServer.broadcast(
           ProtocolScreenshotResult(
@@ -5172,6 +5213,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             screenshotEncodeDurationMs = screenshot.encodeDurationMs,
             screenshotByteLength = screenshot.byteLength,
             screenshotBase64Length = screenshot.base64Length,
+            frameContext = stableContext?.toString(),
           )
         )
         Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")

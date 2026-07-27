@@ -41,13 +41,14 @@ export class SharedGestureDelegate {
     y: number,
     duration: number = 0,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<BaseResult> {
     return sendCommand<BaseResult>(this.context, {
       idPrefix: "tap",
       responseType: "tap_coordinates",
       messageType: "request_tap_coordinates",
-      params: { x: this.coord(x), y: this.coord(y), duration },
+      params: { x: this.coord(x), y: this.coord(y), duration, frameContext },
       timeoutMs,
       perf,
       errorLabel: "Tap",
@@ -61,7 +62,8 @@ export class SharedGestureDelegate {
     y2: number,
     duration: number = 300,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    frameContext?: string,
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "swipe",
@@ -73,6 +75,7 @@ export class SharedGestureDelegate {
         x2: this.coord(x2),
         y2: this.coord(y2),
         duration,
+        frameContext,
       },
       timeoutMs,
       perf,
@@ -88,7 +91,8 @@ export class SharedGestureDelegate {
     pressDurationMs: number,
     dragDurationMs: number,
     holdDurationMs: number,
-    timeoutMs: number
+    timeoutMs: number,
+    frameContext?: string,
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "drag",
@@ -102,6 +106,7 @@ export class SharedGestureDelegate {
         pressDurationMs,
         dragDurationMs,
         holdDurationMs,
+        frameContext,
       },
       timeoutMs,
       errorLabel: "Drag",

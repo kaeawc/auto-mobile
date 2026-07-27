@@ -464,6 +464,7 @@ describe("Idle - Unit Tests", function() {
       { pkg: "com", expected: false, why: "bare com (was true via reverse containment)" },
       { pkg: "com.android", expected: false, why: "bare com.android (was true via reverse containment)" },
       { pkg: "android", expected: true, why: "bare Android framework package" },
+      { pkg: "android.example", expected: false, why: "not a sub-package of the bare framework package" },
       // Launcher-looking but not an actual system package (already false, stays false).
       { pkg: "com.example.launcherpad", expected: false, why: "looks launcher-y but unrelated" },
       // Falsy inputs.

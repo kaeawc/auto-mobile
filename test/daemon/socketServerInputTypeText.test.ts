@@ -8,6 +8,7 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { InputText } from "../../src/features/action/InputText";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
@@ -70,7 +71,7 @@ class ScriptedAdbExecutor {
         return;
       }
       this.timer.setTimeout(
-        () => reject(new Error(`adb command timed out after ${timeoutMs}ms: ${label}`)),
+        () => reject(new AdbCommandTimeoutError(`adb command timed out after ${timeoutMs}ms: ${label}`)),
         timeoutMs
       );
     });
@@ -352,6 +353,42 @@ describe("UnixSocketServer input/typeText", () => {
     );
     expect(next.success).toBe(true);
     expect(requestSetText).toHaveBeenCalledWith("next", { timeoutMs: 30_000 });
+  });
+
+  test("a timed-out later append key omits an unsafe retry boundary", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ScriptedAdbExecutor(fakeTimer, "KEYCODE_B");
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
+    await server.start();
+
+    const responsePromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+    }, 100);
+
+    await flushMicrotasks();
+    fakeTimer.advanceTime(100);
+    await flushMicrotasks();
+
+    const response = await withWedgeGuard(
+      responsePromise,
+      "the timed-out append did not release the per-device queue"
+    );
+    expect(response.success).toBe(false);
+    expect(response.charsSent).toBeUndefined();
+    expect(adb.inputCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+    ]);
   });
 
   // The first wedge fix bounded only the getprop FALLBACK. Production AdbClient

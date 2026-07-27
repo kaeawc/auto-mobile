@@ -1,7 +1,7 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, ClearAppDataResult, LaunchAppResult, ObserveResult } from "../../models";
+import { BootedDevice, ClearAppDataResult, LaunchAppResult, ObserveResult, TerminateAppResult } from "../../models";
 import { ActionableError } from "../../models";
 import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
@@ -35,6 +35,17 @@ export interface IosClearAppDataRunner {
   execute(bundleId: string): Promise<ClearAppDataResult>;
 }
 
+export interface AndroidClearAppDataAction {
+  execute(packageName: string, userId?: number): Promise<ClearAppDataResult>;
+}
+
+export interface AndroidColdBootAction {
+  execute(
+    packageName: string,
+    options?: { skipObservation?: boolean; userId?: number }
+  ): Promise<TerminateAppResult>;
+}
+
 /**
  * Launch an app on a physical iOS device via devicectl. Narrow injection point
  * so tests never shell out; parallels `DeviceAppUninstaller` in UninstallApp.
@@ -56,6 +67,8 @@ interface LaunchAppDependencies {
   performanceTrackerFactory?: () => PerformanceTracker;
   deviceAppLauncher?: DeviceAppLauncher;
   clearAppDataFactory?: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
+  createAndroidClearAppData?: (device: BootedDevice) => AndroidClearAppDataAction;
+  createAndroidColdBoot?: (device: BootedDevice) => AndroidColdBootAction;
 }
 
 export class LaunchApp extends BaseVisualChange {
@@ -66,6 +79,8 @@ export class LaunchApp extends BaseVisualChange {
   private installedAppsProvider: InstalledAppsProvider;
   private performanceTrackerFactory: () => PerformanceTracker;
   private clearAppDataFactory: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
+  private createAndroidClearAppData: (device: BootedDevice) => AndroidClearAppDataAction;
+  private createAndroidColdBoot: (device: BootedDevice) => AndroidColdBootAction;
   /**
    * Create an LaunchApp instance
    * @param device - Optional device
@@ -93,6 +108,20 @@ export class LaunchApp extends BaseVisualChange {
     this.clearAppDataFactory = dependencies.clearAppDataFactory ?? (
       (device, simctl) => new ClearAppDataIos(device, simctl)
     );
+    this.createAndroidClearAppData = this.resolveAndroidClearAppDataFactory(dependencies.createAndroidClearAppData);
+    this.createAndroidColdBoot = this.resolveAndroidColdBootFactory(dependencies.createAndroidColdBoot);
+  }
+
+  private resolveAndroidClearAppDataFactory(
+    factory: ((device: BootedDevice) => AndroidClearAppDataAction) | undefined
+  ): (device: BootedDevice) => AndroidClearAppDataAction {
+    return factory ?? (device => new ClearAppData(device));
+  }
+
+  private resolveAndroidColdBootFactory(
+    factory: ((device: BootedDevice) => AndroidColdBootAction) | undefined
+  ): (device: BootedDevice) => AndroidColdBootAction {
+    return factory ?? (device => new TerminateApp(device));
   }
 
   /**
@@ -605,12 +634,12 @@ export class LaunchApp extends BaseVisualChange {
     if (isRunning) {
       if (clearAppData) {
         await perf.track("clearAppData", async () => {
-          return new ClearAppData(this.device).execute(packageName, targetUserId);
+          return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
         });
         didTerminateOrClear = true;
       } else if (coldBoot) {
         await perf.track("terminateApp", async () => {
-          return new TerminateApp(this.device).execute(packageName, { skipObservation: true, userId: targetUserId });
+          return this.createAndroidColdBoot(this.device).execute(packageName, { skipObservation: true, userId: targetUserId });
         });
         didTerminateOrClear = true;
       }
@@ -633,7 +662,7 @@ export class LaunchApp extends BaseVisualChange {
     } else {
       if (clearAppData) {
         await perf.track("clearAppData", async () => {
-          return new ClearAppData(this.device).execute(packageName, targetUserId);
+          return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
         });
         didTerminateOrClear = true;
       }

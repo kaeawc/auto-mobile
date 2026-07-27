@@ -29,7 +29,12 @@ export class CtrlProxyText extends SharedTextDelegate {
     // Older released runners predate request_append_text, but their untargeted
     // request_set_text path already uses XCUITest typeText at the focused caret.
     // It is therefore the same non-destructive append operation for this call.
-    if (this.context.isCommandSupported?.("request_append_text") === false) {
+    const supportedCommands = await this.context.getSupportedCommands?.();
+    if (
+      supportedCommands === null ||
+      (supportedCommands !== undefined && !supportedCommands.includes("request_append_text")) ||
+      (supportedCommands === undefined && this.context.isCommandSupported?.("request_append_text") === false)
+    ) {
       return this.requestSetText(text, { timeoutMs, perf });
     }
 

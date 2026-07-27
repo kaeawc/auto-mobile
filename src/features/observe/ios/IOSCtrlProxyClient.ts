@@ -815,6 +815,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       ensureConnected: perf => this.ensureConnected(perf),
       getReconnectStatus: () => this.getReconnectStatus(),
       isCommandSupported: messageType => this.isCommandSupported(messageType),
+      getSupportedCommands: () => this.getSupportedCommands(),
       unsupportedCommandError: messageType => this.buildUnsupportedCommandError(messageType),
       cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),
     };

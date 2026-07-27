@@ -76,13 +76,13 @@ A few details worth knowing:
 | Drag → swipe | ✅ | ✅ |
 | Back button (`Esc`) | ✅ | ✅ |
 | Discrete keys (Enter, Tab, arrows) | ✅ | ❌ not available |
-| Typing text | ✅ (appended to the field) | ❌ **disabled** |
+| Typing text | ✅ (appended to the field) | ✅ (appended at the focused caret) |
 
-**Why typing is disabled on iOS.** Forwarding text to iOS could only *replace* the whole field on
-every keystroke, wiping what is there. Rather than corrupt the field, control mode does not forward
-printable text to iOS at all. Tapping, swiping, and the Back button all work on iOS. Non-destructive
-iOS typing is a tracked follow-up
-([#4519](https://github.com/kaeawc/auto-mobile/issues/4519)).
+**How typing works on iOS.** Control mode forwards printable ASCII text in append mode. CtrlProxy
+inserts it at the focused field's current caret through XCUITest `typeText`, without clearing the
+field or resolving a resource ID. Older runners use their existing focused-field text command as a
+compatibility path. Tapping, swiping, and the Back button continue to work on iOS; discrete keys
+such as Enter, Tab, and arrows remain unavailable.
 
 ## The IDE plugin is inspector-only
 

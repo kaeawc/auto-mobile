@@ -27,4 +27,27 @@ describe("CtrlProxyText requestAppendText", () => {
     expect(harness.resolveLast({ success: true, totalTimeMs: 1 })).toBe(true);
     await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
   });
+
+  test("waits for a stale runner handshake before choosing the compatibility command", async () => {
+    const harness = createIosDelegateHarness();
+    const handshake = new Promise<string[]>(resolve => {
+      harness.timer.setTimeout(() => resolve(["request_set_text"]), 50);
+    });
+    const text = new CtrlProxyText({
+      ...harness.context,
+      getSupportedCommands: () => handshake,
+    });
+
+    const pending = text.requestAppendText("a");
+    await flush();
+    expect(harness.sentMessages).toEqual([]);
+
+    harness.advanceTime(50);
+    await flush();
+    expect(harness.sentMessages).toEqual([
+      expect.objectContaining({ type: "request_set_text", text: "a" }),
+    ]);
+    expect(harness.resolveLast({ success: true, totalTimeMs: 1 })).toBe(true);
+    await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
+  });
 });

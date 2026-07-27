@@ -84,6 +84,8 @@ export interface DelegateContext {
   getReconnectStatus?(): CtrlProxyReconnectStatus | null;
   /** Return false when a connected service advertises that it cannot handle this wire command. */
   isCommandSupported?(messageType: string): boolean;
+  /** Wait for the connected service's command handshake, then return its advertised commands. */
+  getSupportedCommands?(): Promise<string[] | null>;
   /** Build a user-facing error for an advertised unsupported wire command. */
   unsupportedCommandError?(messageType: string): string;
   /** Cancel any pending screenshot backoff captures */

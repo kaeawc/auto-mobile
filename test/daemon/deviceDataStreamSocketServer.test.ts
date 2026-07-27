@@ -93,7 +93,7 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   describe("request_observation", () => {
-    const requestedObservation = (deviceId: string): RequestedObservation => ({
+    const requestedObservation = (deviceId: string, frameContext?: string): RequestedObservation => ({
       deviceId,
       observation: {
         updatedAt: "2026-06-24T00:00:00.000Z",
@@ -103,6 +103,7 @@ describe("DeviceDataStreamSocketServer", () => {
           updatedAt: 123,
           packageName: "com.example.app",
           hierarchy: { text: "Home" },
+          ...(frameContext === undefined ? {} : { frameContext }),
         } as any,
       },
     });
@@ -139,6 +140,37 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[1].type).toBe("subscription_response");
       expect(msgs[1].id).toBe("obs-1");
       expect(msgs[1].success).toBe(true);
+    });
+
+    it("forwards proven frame context and clears it when an explicit observation lacks provenance", async () => {
+      server.setOnObservationRequested(async request => [
+        requestedObservation(request.deviceId ?? "emulator-5554", "frame-A"),
+      ]);
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "obs-context",
+        command: "request_observation",
+        deviceId: "emulator-5554",
+      }));
+
+      const firstMessages = socket.getWrittenMessages<{
+        type: string;
+        frameContext?: string;
+      }>();
+      expect(firstMessages[0].frameContext).toBe("frame-A");
+      expect(server.getCurrentFrameContext("emulator-5554")).toBe("frame-A");
+
+      server.setOnObservationRequested(async request => [
+        requestedObservation(request.deviceId ?? "emulator-5554"),
+      ]);
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "obs-contextless",
+        command: "request_observation",
+        deviceId: "emulator-5554",
+      }));
+
+      expect(server.getCurrentFrameContext("emulator-5554")).toBeUndefined();
     });
 
     it("returns error when no observation callback is configured", async () => {

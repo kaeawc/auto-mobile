@@ -177,6 +177,7 @@ export interface CachedHierarchy {
   receivedAt: number;
   fresh: boolean;
   perfTiming?: AndroidPerfTiming[];
+  frameContext?: string;
 }
 
 /**
@@ -187,6 +188,7 @@ export interface AccessibilityHierarchyResponse {
   fresh: boolean;
   updatedAt?: number; // Timestamp from device (only present when hierarchy data exists)
   perfTiming?: AndroidPerfTiming[]; // Android-side performance timing data
+  frameContext?: string;
 }
 
 /**

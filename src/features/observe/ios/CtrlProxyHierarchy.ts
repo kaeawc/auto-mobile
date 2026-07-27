@@ -87,7 +87,11 @@ export class CtrlProxyHierarchy {
       return null;
     }
 
-    return this.convertToViewHierarchyResult(response.hierarchy);
+    const converted = this.convertToViewHierarchyResult(response.hierarchy);
+    if (response.frameContext !== undefined) {
+      converted.frameContext = response.frameContext;
+    }
+    return converted;
   }
 
   /**
@@ -117,7 +121,8 @@ export class CtrlProxyHierarchy {
           hierarchy: cachedHierarchy.hierarchy,
           fresh: true,
           updatedAt: cachedHierarchy.hierarchy.updatedAt,
-          perfTiming: cachedHierarchy.perfTiming
+          perfTiming: cachedHierarchy.perfTiming,
+          frameContext: cachedHierarchy.frameContext,
         };
       }
     }
@@ -142,7 +147,8 @@ export class CtrlProxyHierarchy {
           hierarchy: result.hierarchy,
           fresh: true,
           updatedAt: result.hierarchy.updatedAt,
-          perfTiming: result.perfTiming
+          perfTiming: result.perfTiming,
+          frameContext: result.frameContext,
         };
       }
 
@@ -173,6 +179,7 @@ export class CtrlProxyHierarchy {
         fresh: false,
         updatedAt: fallbackHierarchy.hierarchy.updatedAt,
         perfTiming: fallbackHierarchy.perfTiming,
+        frameContext: fallbackHierarchy.frameContext,
         reconnectStatus,
         reconnectMessage: reconnectStatus
           ? this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
@@ -205,7 +212,7 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     timeoutMs: number = 5000,
     suppressObservationStreamPush: boolean = false
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null> {
     if (!await this.context.ensureConnected(perf)) {
       return null;
     }
@@ -214,7 +221,11 @@ export class CtrlProxyHierarchy {
     if (suppressObservationStreamPush) {
       this.context.suppressHierarchyObservationStreamPush?.(requestId, timeoutMs);
     }
-    const promise = this.context.requestManager.register<{ hierarchy?: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming }>(
+    const promise = this.context.requestManager.register<{
+      hierarchy?: XCTestHierarchy;
+      perfTiming?: CtrlProxyPerfTiming;
+      frameContext?: string;
+    }>(
       requestId,
       "hierarchy",
       timeoutMs,
@@ -238,13 +249,15 @@ export class CtrlProxyHierarchy {
         hierarchy: result.hierarchy,
         receivedAt: this.context.timer.now(),
         fresh: true,
-        perfTiming: result.perfTiming
+        perfTiming: result.perfTiming,
+        frameContext: result.frameContext,
       };
       this.context.setCachedHierarchy(newCache);
 
       return {
         hierarchy: result.hierarchy,
-        perfTiming: result.perfTiming
+        perfTiming: result.perfTiming,
+        frameContext: result.frameContext,
       };
     }
 

@@ -152,7 +152,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       }
 
       // Convert XCTestHierarchy to ViewHierarchyResult format
-      return this.convertXCTestHierarchy(result.hierarchy, result.updatedAt, result.reconnectStatus);
+      return this.convertXCTestHierarchy(
+        result.hierarchy,
+        result.updatedAt,
+        result.reconnectStatus,
+        result.frameContext
+      );
     });
 
     perf.end();
@@ -165,7 +170,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   /**
    * Convert XCTestHierarchy to ViewHierarchyResult format
    */
-  private convertXCTestHierarchy(hierarchy: any, updatedAt?: number, ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"]): ViewHierarchyResult {
+  private convertXCTestHierarchy(
+    hierarchy: any,
+    updatedAt?: number,
+    ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
+    frameContext?: string
+  ): ViewHierarchyResult {
     const cleanedHierarchy = cleanupIosXCTestHierarchy(hierarchy);
     const result = {
       ...cleanedHierarchy,
@@ -173,6 +183,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     };
     if (ctrlProxyReconnect) {
       result.ctrlProxyReconnect = ctrlProxyReconnect;
+    }
+    if (frameContext !== undefined) {
+      result.frameContext = frameContext;
     }
     return result;
   }

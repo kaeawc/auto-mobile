@@ -916,7 +916,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           failures.push(this.describeMissingHierarchy(deviceId, observation));
           continue;
         }
-        this.pushHierarchyUpdate(deviceId, hierarchy);
+        this.pushHierarchyUpdate(deviceId, hierarchy, hierarchy.frameContext);
       }
 
       if (failures.length > 0) {

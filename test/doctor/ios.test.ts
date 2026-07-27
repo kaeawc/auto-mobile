@@ -656,7 +656,8 @@ describe("checkIosCtrlProxyRunner", () => {
     "request_screenshot",
     "request_tap_coordinates"
   ];
-  // The released v0.0.38 runner predates `request_shake` (and the other features).
+  // Remove a required feature command so the stale fixture remains meaningfully
+  // different from a fresh runner even while append has a compatibility fallback.
   const STALE_COMMANDS = FRESH_COMMANDS.filter(command => command !== "request_shake");
 
   const inspection = (over: Partial<IosRunnerInspection> = {}): IosRunnerInspection => ({

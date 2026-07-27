@@ -18,6 +18,38 @@ export class CtrlProxyText extends SharedTextDelegate {
   }
 
   /**
+   * Insert committed text at the focused field's current caret without clearing
+   * or resolving a resource id. This is the iOS half of daemon append mode.
+   */
+  async requestAppendText(
+    text: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<BaseResult> {
+    // Older released runners predate request_append_text, but their untargeted
+    // request_set_text path already uses XCUITest typeText at the focused caret.
+    // It is therefore the same non-destructive append operation for this call.
+    const supportedCommands = await this.context.getSupportedCommands?.();
+    if (
+      supportedCommands === null ||
+      (supportedCommands !== undefined && !supportedCommands.includes("request_append_text")) ||
+      (supportedCommands === undefined && this.context.isCommandSupported?.("request_append_text") === false)
+    ) {
+      return this.requestSetText(text, { timeoutMs, perf });
+    }
+
+    return sendCommand<BaseResult>(this.context, {
+      idPrefix: "appendText",
+      responseType: "append_text",
+      messageType: "request_append_text",
+      params: { text },
+      timeoutMs,
+      perf,
+      errorLabel: "Append text",
+    });
+  }
+
+  /**
    * iOS-specific clearText: sends `request_clear_text` which the iOS CtrlProxy
    * handles via Cmd+A (select all) + Delete. This is O(1) regardless of text
    * length and works with any content including emoji/Unicode.

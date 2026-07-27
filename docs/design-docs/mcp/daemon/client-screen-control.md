@@ -274,17 +274,16 @@ consistent.
 | Swipe / drag (`input/swipe`) | ✅ Supported | ✅ Supported |
 | Device buttons (`input/pressButton`) | ✅ Supported | ⚠️ Supported with platform gaps (unsupported buttons fail rather than being ignored) |
 | Discrete keys (`input/key`: Enter, Tab, arrows, …) | ✅ Supported | ❌ Unsupported — CtrlProxy exposes no discrete key events; the daemon returns an actionable error |
-| Printable text (`input/typeText`) | ✅ Supported via non-destructive `mode: "append"` | ❌ **Not forwarded by control clients** |
+| Printable text (`input/typeText`) | ✅ Supported via non-destructive `mode: "append"` | ✅ Supported via non-destructive `mode: "append"` |
 
-**Why iOS text is disabled.** `input/typeText`'s default path *replaces* the focused field's
-contents, so typing one character per keystroke would wipe the field on every key. The
-non-destructive `mode: "append"` (real key events, adds to the field) is **Android-only** — iOS's
-control proxy has only the destructive set-text primitive, and the daemon rejects `mode: "append"`
-on iOS rather than silently replacing. A control client targeting iOS must therefore **not forward
-printable text at all**; a disabled typing path is strictly better than one that erases the field.
-Buttons and taps/swipes are unaffected, so control mode stays useful on iOS. Lifting this needs an
-iOS-side non-destructive insert primitive, tracked in
-[#4519](https://github.com/kaeawc/auto-mobile/issues/4519).
+**Why iOS text is forwarded.** `input/typeText`'s default path *replaces* the focused field's
+contents, so a client that forwards each character must use `mode: "append"`. Android realizes
+append through real key events. iOS routes append through CtrlProxy's focused-field insertion
+primitive, which calls XCUITest `typeText` at the current caret without clearing or resolving a
+resource ID. Runners that predate the dedicated append command use the existing untargeted
+`request_set_text` command, which performs that same focused-field insertion. Control clients
+therefore forward printable ASCII text on both platforms, always in append mode. Discrete iOS keys
+remain unsupported.
 
 Uppercase/shifted characters on Android need `input keycombination`, available only on API 31+. A
 client cannot see the device API level, so it forwards them anyway; an older device answers with an
@@ -311,8 +310,9 @@ desktop app (or your client) connected to the daemon and a device/simulator stre
 1. Enter control mode as above.
 2. **Tap** and **swipe** — confirm both actuate.
 3. **Button** — `Esc` → back; confirm.
-4. **Text/keys** — confirm printable text is **not** forwarded (no field wipe) and `input/key`
-   presses surface an actionable error rather than being silently dropped.
+4. **Text/keys** — focus a text field and type ASCII text; confirm each character *appends* at the
+   current caret without clearing the field. Confirm `input/key` presses surface an actionable
+   error rather than being silently dropped.
 
 > **Status:** this plan is written but **manual execution is pending** — the sign-off environment
 > had no attached Android device or iOS simulator. Record pass/fail per step when a device fleet
@@ -327,7 +327,7 @@ tracked back to [#1099](https://github.com/kaeawc/auto-mobile/issues/1099):
 | --- | --- |
 | [#4502](https://github.com/kaeawc/auto-mobile/issues/4502) | Close the same-device rotation window in the client control-tap gate. |
 | [#4505](https://github.com/kaeawc/auto-mobile/issues/4505) | Daemon-side frame-context validation so the *daemon* rejects stale-context input (protects clients that will not reimplement the client-side snapshot rules). |
-| [#4519](https://github.com/kaeawc/auto-mobile/issues/4519) | iOS non-destructive text append for keyboard forwarding. |
+| [#4533](https://github.com/kaeawc/auto-mobile/issues/4533) | Bound `ensureAdbPath` discovery so a cold cache cannot wedge the per-device input queue. |
 | [#4534](https://github.com/kaeawc/auto-mobile/issues/4534) | Evict the append cache on rapid same-serial device reuse (needs a device-connect signal). |
 | [#4535](https://github.com/kaeawc/auto-mobile/issues/4535) | Optional daemon capability signal for newer input params (e.g. `input/typeText mode:append`). |
 | [#4536](https://github.com/kaeawc/auto-mobile/issues/4536) | Prefer a reliable native AltGraph signal over the `ctrl && alt` heuristic. |

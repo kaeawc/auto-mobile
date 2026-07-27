@@ -124,6 +124,9 @@ public protocol GesturePerforming {
     /// Type text using keyboard
     func typeText(text: String) throws
 
+    /// Insert text at the current caret without clearing or retargeting a field.
+    func appendText(text: String) throws
+
     /// Set text on a specific element
     func setText(resourceId: String, text: String) throws
 

@@ -226,6 +226,10 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     text: string, options?: SetTextOptions
   ): Promise<CtrlProxySetTextResult>;
 
+  requestAppendText(
+    text: string, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxySetTextResult>;
+
   requestClearText(
     resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxySetTextResult>;
@@ -354,7 +358,9 @@ function nullWhenAbsent<T>(value: T | null | undefined): T | null {
  * version/hash, so presence of all of these in `supportedCommands` is the runner
  * identity used by diagnostics (doctor) and the booted-devices resource to tell a
  * current runner from a stale one. Keep unreleased feature-gated commands out of
- * this list until they are present in the released runner registry.
+ * this list until they are present in the released runner registry. Append input
+ * deliberately uses request_set_text as a compatibility fallback until its
+ * dedicated command is released.
  */
 export const IOS_RUNNER_FEATURE_COMMANDS = [
   "request_shake",
@@ -809,6 +815,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       ensureConnected: perf => this.ensureConnected(perf),
       getReconnectStatus: () => this.getReconnectStatus(),
       isCommandSupported: messageType => this.isCommandSupported(messageType),
+      getSupportedCommands: () => this.getSupportedCommands(),
       unsupportedCommandError: messageType => this.buildUnsupportedCommandError(messageType),
       cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),
     };
@@ -1732,6 +1739,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     text: string, options?: SetTextOptions
   ): Promise<CtrlProxySetTextResult> {
     return this.text.requestSetText(text, options);
+  }
+
+  async requestAppendText(
+    text: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+  ): Promise<CtrlProxySetTextResult> {
+    return this.text.requestAppendText(text, timeoutMs, perf);
   }
 
   async requestClearText(

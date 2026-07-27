@@ -642,6 +642,10 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func appendText(text: String) throws {
+            try typeText(text: text)
+        }
+
         public func setText(resourceId: String, text: String) throws {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
@@ -1494,6 +1498,10 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func typeText(text _: String) throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func appendText(text _: String) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

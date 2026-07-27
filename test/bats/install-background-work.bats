@@ -37,6 +37,21 @@ wait_for_process_group_leader() {
   return 1
 }
 
+wait_for_child_process() {
+  local worker_pid="$1"
+  local pattern="$2"
+  local child_pid
+  for _ in {1..10}; do
+    child_pid=$("${PGREP}" -P "${worker_pid}" "${pattern}" 2>/dev/null || true)
+    if [[ -n "${child_pid}" ]]; then
+      printf '%s\n' "${child_pid}"
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 teardown() {
   export PATH="${ORIG_PATH}"
   rm -rf "${TEST_DIR}"
@@ -227,7 +242,7 @@ STUB
   start_post_bun_setup
   local worker_pid="${POST_BUN_SETUP_PID}"
   local child_pid
-  child_pid=$("${PGREP}" -P "${worker_pid}" sleep)
+  child_pid=$(wait_for_child_process "${worker_pid}" sleep)
 
   cleanup_background_installer_work
 
@@ -246,7 +261,7 @@ STUB
   start_post_bun_setup
   local worker_pid="${POST_BUN_SETUP_PID}"
   local child_pid
-  child_pid=$("${PGREP}" -P "${worker_pid}" sleep)
+  child_pid=$(wait_for_child_process "${worker_pid}" sleep)
 
   cat > "${STUB_BIN}/pgrep" <<'STUB'
 #!/usr/bin/env bash

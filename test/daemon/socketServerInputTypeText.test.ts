@@ -640,6 +640,33 @@ describe("UnixSocketServer input/typeText", () => {
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });
 
+  test("accepts iOS append mode and uses the CtrlProxy append primitive", async () => {
+    const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestAppendText,
+      requestSetText,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    for (const text of ["a", "b", "c"]) {
+      const response = await sendRequest(socketPath, "input/typeText", {
+        platform: "ios",
+        deviceId: "ios-sim-1",
+        text,
+        mode: "append",
+      });
+
+      expect(response.success).toBe(true);
+    }
+
+    expect(requestAppendText).toHaveBeenCalledTimes(3);
+    expect(requestAppendText.mock.calls.map(([text]) => text)).toEqual(["a", "b", "c"]);
+    expect(requestSetText).not.toHaveBeenCalled();
+  });
+
   test("uses the socket autolock device when deviceId is omitted", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
@@ -928,11 +955,6 @@ describe("UnixSocketServer input/typeText", () => {
       text: "hello",
       mode: "eventAll",
     });
-    const appendOnIos = await sendRequest(socketPath, "input/typeText", {
-      platform: "ios",
-      text: "hello",
-      mode: "append",
-    });
     const unsupportedImeAction = await sendRequest(socketPath, "input/typeText", {
       platform: "android",
       text: "hello",
@@ -954,10 +976,6 @@ describe("UnixSocketServer input/typeText", () => {
     expect(nonBooleanSubmit.error).toBe("input/typeText submit must be a boolean when provided");
     expect(unsupportedMode.success).toBe(false);
     expect(unsupportedMode.error).toBe('input/typeText mode must be "append" when provided');
-    // iOS has no append-capable text primitive, so the request is REJECTED rather
-    // than silently downgraded to the destructive replace path.
-    expect(appendOnIos.success).toBe(false);
-    expect(appendOnIos.error).toBe('input/typeText mode "append" is only supported on android');
     expect(unsupportedImeAction.success).toBe(false);
     expect(unsupportedImeAction.error).toBe("input/typeText unsupported params: imeAction");
     expect(unsupportedDismissKeyboard.success).toBe(false);

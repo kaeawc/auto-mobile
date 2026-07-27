@@ -114,6 +114,9 @@ public class CommandHandler: CommandHandling {
             case let .setText(payload):
                 return try handleSetText(payload, startTime: startTime)
 
+            case let .appendText(payload):
+                return try handleAppendText(payload, startTime: startTime)
+
             case let .clearText(payload):
                 return try handleClearText(payload, startTime: startTime)
 
@@ -586,6 +589,21 @@ public class CommandHandler: CommandHandling {
             type: ResponseType.setTextResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: elapsedMs
+        )
+    }
+
+    private func handleAppendText(_ request: RequestAppendText, startTime: Date) throws -> WebSocketResponse {
+        perfProvider.serial("handleAppendText")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("appendText") {
+            try gesturePerformer.appendText(text: request.text)
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.appendTextResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
         )
     }
 

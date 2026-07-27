@@ -47,6 +47,7 @@ describe("decodeCtrlProxyMessage", () => {
     "swipe_result",
     "drag_result",
     "set_text_result",
+    "append_text_result",
     "clear_text_result",
     "select_all_result",
     "press_button_result",
@@ -401,8 +402,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_mock_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 42 rawValues", () => {
-    expect(rawValues.length).toBe(42);
+  test("Swift ResponseType declares exactly 43 rawValues", () => {
+    expect(rawValues.length).toBe(43);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -415,8 +416,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 35 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(35);
+  test("the decoder explicitly reshapes exactly 36 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(36);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -439,7 +440,7 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
  */
 describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
   // One row per decoded response type → the value of `success` when the wire
-  // message omits it. 35 rows = the 35 explicitly-decoded ResponseTypes.
+  // message omits it. 36 rows = the 36 explicitly-decoded ResponseTypes.
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
     { type: "screenshot", expected: true },
@@ -448,6 +449,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "swipe_result", expected: true },
     { type: "drag_result", expected: true },
     { type: "set_text_result", expected: true },
+    { type: "append_text_result", expected: true },
     { type: "clear_text_result", expected: true },
     { type: "select_all_result", expected: true },
     { type: "press_button_result", expected: true },
@@ -478,8 +480,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "table_structure_result", expected: false },
   ];
 
-  test("the default table covers all 35 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(35);
+  test("the default table covers all 36 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(36);
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -496,8 +498,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     .filter(row => row.type !== "hierarchy_update" && row.type !== "screenshot")
     .map(row => row.type);
 
-  test("the passthrough set is the 33 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(33);
+  test("the passthrough set is the 34 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(34);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

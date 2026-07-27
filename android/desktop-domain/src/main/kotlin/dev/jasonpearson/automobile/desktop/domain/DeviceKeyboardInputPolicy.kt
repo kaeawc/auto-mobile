@@ -135,13 +135,6 @@ public enum class DeviceKeyboardRejection {
   Unsupported,
 
   /**
-   * A printable character on a platform whose daemon text helper can only REPLACE the focused
-   * field, not append to it. Typing one character at a time there would wipe the field on every
-   * keystroke, so text forwarding is disabled rather than destructive (issue #3351).
-   */
-  TextUnsupported,
-
-  /**
    * A printable character the daemon's append path cannot type at all — anything outside printable
    * ASCII (`é`, `€`, CJK, emoji).
    *
@@ -289,7 +282,6 @@ public object DeviceKeyboardInputPolicy {
   public fun evaluate(
     stroke: DeviceKeyStroke,
     forwardedChords: Set<DeviceChordAllowance> = emptySet(),
-    textSupported: Boolean = true,
   ): DeviceKeyboardDecision {
     if (stroke.modifiers.hasChordModifier && !isAllowedChord(stroke, forwardedChords)) {
       return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord)
@@ -297,7 +289,7 @@ public object DeviceKeyboardInputPolicy {
     stroke.key?.let {
       return evaluateKey(it, stroke.modifiers.shift)
     }
-    return evaluateCharacter(stroke.character, textSupported)
+    return evaluateCharacter(stroke.character)
   }
 
   /**
@@ -330,17 +322,12 @@ public object DeviceKeyboardInputPolicy {
    * is refused only because the daemon's append path cannot type it. Both leave the event
    * unconsumed — the rule is that a keystroke this policy cannot deliver is never swallowed.
    */
-  private fun evaluateCharacter(character: Char?, textSupported: Boolean): DeviceKeyboardDecision {
+  private fun evaluateCharacter(character: Char?): DeviceKeyboardDecision {
     if (character == null || !isPrintable(character)) {
       return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.Unsupported)
     }
     if (!isTypable(character)) {
       return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.CharacterUnsupported)
-    }
-    // A platform with no non-destructive text primitive must not receive text at all: replacing
-    // the field's contents on every keystroke is worse than typing nothing.
-    if (!textSupported) {
-      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.TextUnsupported)
     }
     return DeviceKeyboardDecision.TypeText(character.toString())
   }

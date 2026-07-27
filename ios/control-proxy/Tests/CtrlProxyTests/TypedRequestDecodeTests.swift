@@ -134,6 +134,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .requestDrag: #"{"x1":1,"y1":2,"x2":3,"y2":4}"#,
             .requestPinch: #"{"centerX":1,"centerY":2,"distanceStart":3,"distanceEnd":4}"#,
             .requestSetText: #"{"text":"hi"}"#,
+            .requestAppendText: #"{"text":"hi"}"#,
             .requestClearText: "{}",
             .requestImeAction: #"{"action":"done"}"#,
             .requestSelectAll: "{}",
@@ -374,6 +375,15 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             as: WebSocketResponse.self
         )
         XCTAssertEqual(fakeGesturePerformer.getSetTextHistory().first?.resourceId, "field")
+    }
+
+    func testAppendTextDecodeDispatchUsesFocusedFieldInsert() {
+        _ = dispatch(
+            #"{"type":"request_append_text","requestId":"append-1","text":"a"}"#,
+            as: WebSocketResponse.self
+        )
+        XCTAssertEqual(fakeGesturePerformer.getAppendTextHistory(), ["a"])
+        XCTAssertTrue(fakeGesturePerformer.getSetTextHistory().isEmpty)
     }
 
     func testClearTextDecodeDispatchForwardsResourceId() {

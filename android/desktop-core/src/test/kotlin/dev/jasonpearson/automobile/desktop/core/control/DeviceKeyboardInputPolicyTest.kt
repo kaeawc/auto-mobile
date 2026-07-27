@@ -362,22 +362,14 @@ class DeviceKeyboardInputPolicyTest {
   }
 
   @Test
-  fun `text is not forwarded on a platform whose daemon can only replace the field`() {
-    // iOS text input replaces the focused field wholesale, so per-keystroke typing would wipe it on
-    // every character. Disabled beats destructive; buttons and keys are unaffected.
+  fun `printable text forwards without a platform-specific gate`() {
     assertEquals(
-      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.TextUnsupported),
-      DeviceKeyboardInputPolicy.evaluate(
-        stroke = DeviceKeyStroke(character = 'a'),
-        textSupported = false,
-      ),
+      DeviceKeyboardDecision.TypeText("a"),
+      DeviceKeyboardInputPolicy.evaluate(stroke = DeviceKeyStroke(character = 'a')),
     )
     assertEquals(
       DeviceKeyboardDecision.PressButton("back"),
-      DeviceKeyboardInputPolicy.evaluate(
-        stroke = DeviceKeyStroke(key = DeviceKeyboardKey.Escape),
-        textSupported = false,
-      ),
+      DeviceKeyboardInputPolicy.evaluate(stroke = DeviceKeyStroke(key = DeviceKeyboardKey.Escape)),
     )
   }
 

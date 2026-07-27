@@ -1598,7 +1598,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // The debouncer uses structural hash comparison to detect animation vs real changes
       if (
         event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-          event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+          event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+          event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
       ) {
         frameContext.incrementAndGet()
         if (::hierarchyDebouncer.isInitialized) {

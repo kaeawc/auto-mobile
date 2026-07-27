@@ -28,6 +28,14 @@ function compareParsedVersions(partsA: number[], partsB: number[]): number {
   return 0;
 }
 
+/** Compares strictly numeric dotted version components and returns NaN for other formats. */
+export function compareStrictNumericVersions(a: string, b: string): number {
+  if (![a, b].every(version => version.split(".").every(component => /^\d+$/.test(component)))) {
+    return Number.NaN;
+  }
+  return compareParsedVersions(parseVersion(a), parseVersion(b));
+}
+
 export function compareVersions(a: string, b: string): number {
   const delta = compareParsedVersions(parseVersion(a), parseVersion(b));
   if (Number.isNaN(delta)) {

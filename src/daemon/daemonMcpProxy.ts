@@ -5,7 +5,7 @@ import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_V
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
-import { compareVersions } from "../server/deviceMatcher";
+import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
@@ -516,7 +516,7 @@ export class DaemonMcpProxy {
 
     if (!sameRelease) {
       const cmp = runningBase.length > 0
-        ? compareVersions(clientBase, runningBase)
+        ? compareStrictNumericVersions(clientBase, runningBase)
         : Number.POSITIVE_INFINITY;
 
       if (runningBase.length > 0 && !Number.isFinite(cmp)) {

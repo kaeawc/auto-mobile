@@ -136,13 +136,21 @@ export const putAppFileSchema = withAppIdAliases(addDeviceTargetingToSchema(z.ob
   if (args.contentBase64 !== undefined) {
     try {
       const decoded = Buffer.from(args.contentBase64, "base64");
-      if (decoded.toString("base64").replace(/=+$/, "") !== args.contentBase64.replace(/=+$/, "")) {
+      const canonical = decoded.toString("base64");
+      const unpadded = canonical.replace(/=+$/, "");
+      if (args.contentBase64 !== canonical && args.contentBase64 !== unpadded) {
         throw new Error("round-trip mismatch");
+      }
+      // An empty ("") or all-padding ("====") payload round-trips cleanly but
+      // decodes to zero bytes, silently writing an empty file to the device.
+      // Reject it so the caller must send real content (#4183 A4).
+      if (decoded.length === 0) {
+        throw new Error("empty payload");
       }
     } catch {
       ctx.addIssue({
         code: "custom",
-        message: "contentBase64 must be valid base64.",
+        message: "contentBase64 must be valid, non-empty base64.",
         path: ["contentBase64"],
       });
     }

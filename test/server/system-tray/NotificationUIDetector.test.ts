@@ -3,6 +3,7 @@ import { AndroidNotificationUIDetector } from "../../../src/server/system-tray/A
 import { IosNotificationUIDetector } from "../../../src/server/system-tray/IosNotificationUIDetector";
 import { createNotificationUIDetector } from "../../../src/server/system-tray/createNotificationUIDetector";
 import { FakeNotificationUIDetector } from "../../fakes/FakeNotificationUIDetector";
+import { ActionableError } from "../../../src/models";
 import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { NotificationUIDetector } from "../../../src/utils/interfaces/NotificationUIDetector";
 import type { SystemTrayDependencies } from "../../../src/server/systemTrayHelpers";
@@ -232,8 +233,11 @@ describe("NotificationUIDetector", () => {
       });
       await detector.tapElement(sampleElement);
       await detector.swipeElement(sampleElement);
-      expect(commands[0]).toContain("shell input tap");
-      expect(commands[1]).toContain("shell input swipe");
+      // Full command strings pin the element centre (55,50) and the left-swipe
+      // geometry (91,50 -> 19,50) + 300ms duration, so a corner-vs-centre bug
+      // or swapped x/y is caught (#4183 R3/R13).
+      expect(commands[0]).toBe("shell input tap 55 50");
+      expect(commands[1]).toBe("shell input swipe 91 50 19 50 300");
     });
 
     it("wraps expand failures in ActionableError", async () => {
@@ -244,6 +248,18 @@ describe("NotificationUIDetector", () => {
         getDeviceTimestampMs: async () => 0,
       });
       await expect(detector.expandTray()).rejects.toThrow(/Failed to expand system tray/);
+    });
+
+    it("wraps collapse failures in ActionableError", async () => {
+      const detector = new AndroidNotificationUIDetector(androidDevice, {
+        executeAdbCommand: async () => {
+          throw new Error("device offline");
+        },
+        getDeviceTimestampMs: async () => 0,
+      });
+      // Collapse must surface as an ActionableError, not raw ADB noise (#4183 A6).
+      await expect(detector.collapseTray()).rejects.toBeInstanceOf(ActionableError);
+      await expect(detector.collapseTray()).rejects.toThrow(/Failed to collapse system tray/);
     });
   });
 
@@ -321,6 +337,9 @@ describe("NotificationUIDetector", () => {
       });
       await detector.tapElement(sampleElement);
       expect(taps.length).toBe(1);
+      // Pin the exact centre coordinates so a corner-tap or swapped x/y regresses
+      // here (#4183 R13).
+      expect(taps[0]).toEqual({ x: 55, y: 50 });
     });
   });
 

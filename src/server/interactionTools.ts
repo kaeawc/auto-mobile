@@ -478,7 +478,9 @@ export function formatSwipeOnMessage(
   direction: string
 ): string {
   if (!result.success) {
-    return result.error ?? `Swipe ${direction} failed`;
+    // `||` not `??`: an empty-string error (`error: ""`) must still yield the
+    // non-empty fallback, otherwise the tool returns a blank message (#4183 P4).
+    return result.error || `Swipe ${direction} failed`;
   }
   return result.found
     ? `Swiped ${direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`

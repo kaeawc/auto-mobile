@@ -8,8 +8,20 @@ export interface DeviceMatcher {
   matchDeviceImage(criteria: DeviceMatchCriteria, images: DeviceInfo[], strategy: MatchingStrategy): DeviceInfo | null;
 }
 
-function parseVersion(version: string): number[] {
-  return version.split(".").map(Number);
+interface ParsedDeviceVersion {
+  components: number[];
+  qpr?: number;
+}
+
+function parseDeviceVersion(version: string): ParsedDeviceVersion | null {
+  const match = /^(\d+(?:\.\d+)*)(?:-QPR(\d+))?$/i.exec(version);
+  if (!match) {
+    return null;
+  }
+  return {
+    components: match[1].split(".").map(Number),
+    ...(match[2] === undefined ? {} : { qpr: Number(match[2]) }),
+  };
 }
 
 function compareParsedVersions(partsA: number[], partsB: number[]): number {
@@ -21,8 +33,29 @@ function compareParsedVersions(partsA: number[], partsB: number[]): number {
   return 0;
 }
 
+/** Compares strictly numeric dotted version components and returns NaN for other formats. */
+export function compareStrictNumericVersions(a: string, b: string): number {
+  if (![a, b].every(version => version.split(".").every(component => /^\d+$/.test(component)))) {
+    return Number.NaN;
+  }
+  return compareParsedVersions(a.split(".").map(Number), b.split(".").map(Number));
+}
+
 export function compareVersions(a: string, b: string): number {
-  return compareParsedVersions(parseVersion(a), parseVersion(b));
+  const parsedA = parseDeviceVersion(a);
+  const parsedB = parseDeviceVersion(b);
+  if (parsedA && parsedB) {
+    const delta = compareParsedVersions(parsedA.components, parsedB.components);
+    if (delta !== 0) {
+      return delta;
+    }
+    return (parsedA.qpr ?? 0) - (parsedB.qpr ?? 0);
+  }
+  if (parsedA || parsedB) {
+    return Number.NaN;
+  }
+  if (a === b) { return 0; }
+  return a < b ? -1 : 1;
 }
 
 function matchesCriteria(
@@ -42,9 +75,21 @@ function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCrit
 
 function matchesVersionRange(item: { osVersion?: string }, criteria: DeviceMatchCriteria): boolean {
   const version = item.osVersion;
-  const meetsMinimum = !criteria.minOsVersion || Boolean(version && compareVersions(version, criteria.minOsVersion) >= 0);
-  const meetsMaximum = !criteria.maxOsVersion || Boolean(version && compareVersions(version, criteria.maxOsVersion) <= 0);
+  const meetsMinimum = !criteria.minOsVersion || Boolean(version && compareVersionToBound(version, criteria.minOsVersion) >= 0);
+  const meetsMaximum = !criteria.maxOsVersion || Boolean(version && compareVersionToBound(version, criteria.maxOsVersion) <= 0);
   return meetsMinimum && meetsMaximum;
+}
+
+function compareVersionToBound(version: string, bound: string): number {
+  const parsedVersion = parseDeviceVersion(version);
+  const parsedBound = parseDeviceVersion(bound);
+  if (parsedVersion && parsedBound) {
+    const delta = compareParsedVersions(parsedVersion.components, parsedBound.components);
+    if (delta !== 0) { return delta; }
+    if (parsedBound.qpr === undefined) { return 0; }
+    return (parsedVersion.qpr ?? 0) - parsedBound.qpr;
+  }
+  return compareVersions(version, bound);
 }
 
 function matchesName(item: { name: string }, criteria: DeviceMatchCriteria): boolean {
@@ -63,6 +108,11 @@ function matchesScreenSize(item: { screenWidth?: number; screenHeight?: number }
   return widthRatio <= 0.1 && heightRatio <= 0.1;
 }
 
+function prefersNumericVersion<T extends { osVersion?: string }>(candidate: T, current: T): boolean {
+  return parseDeviceVersion(candidate.osVersion ?? "") !== null &&
+    parseDeviceVersion(current.osVersion ?? "") === null;
+}
+
 function applyStrategy<T extends { osVersion?: string }>(candidates: T[], strategy: MatchingStrategy, random: Random): T | null {
   if (candidates.length === 0) { return null; }
   if (candidates.length === 1) { return candidates[0]; }
@@ -72,6 +122,12 @@ function applyStrategy<T extends { osVersion?: string }>(candidates: T[], strate
   let best = candidates[0];
   for (const candidate of candidates.slice(1)) {
     const delta = compareVersions(candidate.osVersion ?? "0", best.osVersion ?? "0");
+    if (Number.isNaN(delta)) {
+      if (prefersNumericVersion(candidate, best)) {
+        best = candidate;
+      }
+      continue;
+    }
     if (wantLatest ? delta > 0 : delta < 0) { best = candidate; }
   }
   return best;

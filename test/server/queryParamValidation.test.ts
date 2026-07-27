@@ -75,6 +75,7 @@ describe("queryParamValidation", () => {
       ["non-numeric rejected", "abc", {}],
       ["empty-after-parse NaN rejected", "NaN", {}],
       ["infinity rejected", "Infinity", {}],
+      ["above MAX_SAFE_INTEGER rejected", "9007199254740993", {}],
       ["above explicit max rejected", "11", { max: 10 }],
       ["below explicit min rejected", "2", { min: 5 }],
     ] as const)("throws for %s", (_label, input, options) => {

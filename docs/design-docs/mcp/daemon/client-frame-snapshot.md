@@ -156,12 +156,17 @@ carry screen A's identity and pair with screen A's hierarchy. No client-side
 signal distinguishes this: the dimensions are identical, and the client has no
 visibility into what was on screen at capture time.
 
-Current CtrlProxy runners report an opaque `frameContext` with each hierarchy and
-with a screenshot only when it can prove the hierarchy stayed unchanged across
-pixel capture. A control client requires matching, non-null contexts alongside
-`captureSequence`, then echoes that exact value on `input/*`. The daemon rejects
-a stale or unavailable echo before executing the request. The token is opaque,
-device-specific, and must never be synthesized or compared across reconnects.
+A CtrlProxy runner that supports frame context reports an opaque `frameContext`
+with each hierarchy and with a screenshot only when it can prove the hierarchy
+stayed unchanged across pixel capture. A control client requires matching,
+non-null contexts alongside `captureSequence`, then echoes that exact value on
+`input/*`. The daemon rejects a stale or unavailable echo before executing the
+request. The token is opaque, device-specific, and must never be synthesized or
+compared across reconnects.
+
+The default `0.0.46` CtrlProxy artifacts predate this protocol. A client must
+treat those artifacts as legacy and remain in inspector mode until its runner
+publishes `frameContext`.
 
 The identity source is monotonic for the daemon process's lifetime and is never
 reset, so an id cannot be reused after a device reconnect and collide with a

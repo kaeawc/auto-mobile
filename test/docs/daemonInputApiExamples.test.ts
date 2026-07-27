@@ -160,6 +160,7 @@ describe("daemon input API consumer docs", () => {
 
   test("documents frame-context pairing, echoing, and recovery for third-party screen control", async () => {
     const clientGuide = await readRepoFile("docs/design-docs/mcp/daemon/client-screen-control.md");
+    const snapshotGuide = await readRepoFile("docs/design-docs/mcp/daemon/client-frame-snapshot.md");
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
 
     expect(clientGuide).toContain('"frameContext": "android-generation-42"');
@@ -170,7 +171,10 @@ describe("daemon input API consumer docs", () => {
     expect(clientGuide).toContain("stale-context rejection");
     expect(clientGuide).toContain("wait for a newly paired snapshot before");
     expect(clientGuide).toContain("runner that does not publish `frameContext` cannot produce a controllable");
+    expect(clientGuide).toContain("default `0.0.46` CtrlProxy artifacts predate `frameContext`");
+    expect(snapshotGuide).toContain("default `0.0.46` CtrlProxy artifacts predate this protocol");
     expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
+    expect(unixSocketApi).toContain("default `0.0.46` CtrlProxy artifacts are legacy");
     expect(unixSocketApi).toMatch(/"duration": 50,\r?\n    "frameContext": "android-generation-42"/);
     expect(unixSocketApi).toMatch(/"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/);
     expect(unixSocketApi).toMatch(/"button": "back",\r?\n    "frameContext": "android-generation-42"/);

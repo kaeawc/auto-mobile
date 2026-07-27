@@ -169,6 +169,9 @@ client ignores them.)
   snapshot. Keep its mirror in inspector mode rather than omitting `frameContext` from an input
   request and guessing. The optional field remains compatible with generic, non-screen-control
   socket clients that do not have an observation snapshot.
+- **Release availability:** the default `0.0.46` CtrlProxy artifacts predate `frameContext`
+  support. Use runners built from a revision that publishes the field before enabling this control
+  flow; otherwise treat the runner as legacy and keep the mirror in inspector mode.
 - **Active device:** every message's `deviceId` identifies its device. Subscribe with the selected
   device's id (rather than the all-devices `null`) so you only receive its frames, and still confirm
   each message's `deviceId` matches the selection before pairing — a lingering frame from a

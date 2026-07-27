@@ -111,6 +111,17 @@ interface SocketFileIdentity {
  */
 export type McpClientFactory = () => Promise<Client>;
 
+/**
+ * The narrow append-text surface `input/typeText mode:"append"` needs.
+ *
+ * Exactly one method, deliberately: the daemon never wants the observe round trip
+ * or the replace-shaped modes {@link InputText} also exposes, and a narrow seam is
+ * what lets a test inject a fake adb instead of shelling out.
+ */
+export interface AppendTextInput {
+  appendText(text: string, timeoutMs?: number): Promise<{ success: boolean; error?: string }>;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private socketFileIdentity: SocketFileIdentity | null = null;
@@ -138,6 +149,16 @@ export class UnixSocketServer {
    * exercise forwarding without a live HTTP endpoint.
    */
   mcpClientFactory: McpClientFactory = () => this.createMcpClient();
+
+  /**
+   * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
+   *
+   * Defaults to the real {@link InputText} bound to the default adb client factory and
+   * this server's timer; tests assign a fake so the append path is exercised without
+   * shelling out to a real `adb` (and so a stalled subprocess can be simulated).
+   */
+  appendTextFactory: (device: BootedDevice) => AppendTextInput = device =>
+    new InputText(device, defaultAdbClientFactory, undefined, this.timer);
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -1093,8 +1114,14 @@ export class UnixSocketServer {
 
     // Append never touches requestSetText: that is ACTION_SET_TEXT, which
     // REPLACES the field. Real key events are the only non-destructive path.
+    //
+    // The budget is threaded in for the same reason the replace path gets it: this
+    // runs while the per-device queue is held, and the outer race only *reports* a
+    // timeout — it still waits for the operation to settle before releasing the
+    // queue. An unbounded adb subprocess here would therefore wedge every later
+    // input for this device, not just this one request.
     const textResult = append
-      ? await new InputText(targetDevice).appendText(text)
+      ? await this.appendTextFactory(targetDevice).appendText(text, timeoutMs)
       : await client.requestSetText(text, { timeoutMs });
     if (!textResult.success) {
       return { success: false, error: textResult.error };

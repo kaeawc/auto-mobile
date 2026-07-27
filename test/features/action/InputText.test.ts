@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -633,6 +634,81 @@ describe("InputText", () => {
     expect(result.method).toBe("append");
     expect(result.error).toContain("append cannot type");
     expect(setTextCalls).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  // Issue #3351 review: the client forwards every printable ASCII character, but
+  // uppercase and shifted symbols need `input keycombination` (API 31+). The client
+  // cannot see the API level, so the daemon has to REPORT the failure — the one
+  // outcome that must never happen is a silent success that typed nothing.
+  test("append reports an actionable failure for uppercase below API 31", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await inputText.appendText("A");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("append cannot type \"A\"");
+    // Not typed, and emphatically not repaired by a setText that would wipe the field.
+    expect(setTextCalls).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  test("append still types uppercase on API 31 and above", async () => {
+    // The other direction: the failure above must be the device's limitation, not
+    // the append path refusing capitals outright.
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await inputText.appendText("A");
+
+    expect(result.success).toBe(true);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A"
+    ]);
+  });
+
+  test("append charges the API probe and every key event against the caller's budget", async () => {
+    // Without this the daemon's per-device queue is held by an unbounded subprocess:
+    // the socket race only REPORTS the timeout, it still waits for the operation.
+    const factory = new FakeAdbClientFactory();
+    const timer = new FakeTimer();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await inputText.appendText("ab", 5_000);
+
+    expect(result.success).toBe(true);
+    const calls = factory.getFakeClient().getCommandCalls();
+    expect(calls.length).toBeGreaterThan(1);
+    for (const call of calls) {
+      expect(call.timeoutMs).toBeDefined();
+      expect(call.timeoutMs).toBeLessThanOrEqual(5_000);
+    }
+  });
+
+  test("append gives up once the budget is spent instead of issuing more key events", async () => {
+    const factory = new FakeAdbClientFactory();
+    const timer = new FakeTimer();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, timer);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    // The budget is already gone by the time the first device round trip is due.
+    const result = await inputText.appendText("a", 0);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("append exceeded its 0ms budget");
     expect(inputCommands(factory)).toEqual([]);
   });
 

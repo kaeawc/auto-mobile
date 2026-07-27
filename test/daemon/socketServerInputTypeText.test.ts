@@ -5,6 +5,10 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { InputText } from "../../src/features/action/InputText";
+import type { BootedDevice, ExecResult } from "../../src/models";
+import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -18,6 +22,89 @@ import {
   sendRequest,
   sendRequestAfterConnect,
 } from "./helpers/inputSocketHarness";
+
+/**
+ * An adb executor that behaves the way a real `adb` subprocess does under a deadline:
+ * a command matching `stallPattern` runs until its own `timeoutMs` kills it, and runs
+ * FOREVER when it was handed no timeout at all.
+ *
+ * That second half is what makes the append-timeout tests mutation-sensitive. Dropping
+ * the threaded budget does not merely change an assertion — it reproduces the original
+ * bug, an adb call nothing ever cancels.
+ */
+class ScriptedAdbExecutor {
+  readonly commands: Array<{ command: string; timeoutMs?: number }> = [];
+
+  constructor(
+    private readonly timer: FakeTimer,
+    private readonly stallPattern?: string,
+    private readonly apiLevel: string = "31"
+  ) {}
+
+  async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
+    this.commands.push({ command, timeoutMs });
+
+    if (this.stallPattern !== undefined && command.includes(this.stallPattern)) {
+      return new Promise<ExecResult>((_resolve, reject) => {
+        if (timeoutMs === undefined) {
+          return;
+        }
+        this.timer.setTimeout(
+          () => reject(new Error(`adb command timed out after ${timeoutMs}ms: ${command}`)),
+          timeoutMs
+        );
+      });
+    }
+
+    const stdout = command.includes("ro.build.version.sdk") ? `${this.apiLevel}\n` : "";
+    return {
+      stdout,
+      stderr: "",
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (search: string) => stdout.includes(search),
+    } as unknown as ExecResult;
+  }
+
+  /** Only the `shell input ...` commands, i.e. what actually reached the device's input system. */
+  inputCommands(): string[] {
+    return this.commands
+      .map(call => call.command)
+      .filter(command => command.startsWith("shell input "));
+  }
+}
+
+/** The real append path, bound to a fake adb so no subprocess is ever spawned. */
+function createAppendTextInput(
+  device: BootedDevice,
+  adb: ScriptedAdbExecutor,
+  timer: FakeTimer
+): InputText {
+  const factory = { create: () => adb as unknown as AdbExecutor };
+  return new InputText(device, factory, undefined, timer);
+}
+
+/** Let every already-queued microtask run before the fake clock moves. */
+async function flushMicrotasks(iterations: number = 10): Promise<void> {
+  for (let i = 0; i < iterations; i++) {
+    await new Promise<void>(resolve => setImmediate(resolve));
+  }
+}
+
+/**
+ * Fail loudly instead of hanging when a response never arrives. The failure mode
+ * these tests guard is a wedge, so the guard has to be real time — a fake clock the
+ * wedged code is no longer driving cannot rescue it.
+ */
+function withWedgeGuard<T>(promise: Promise<T>, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      const handle = defaultTimer.setTimeout(() => reject(new Error(message)), 2_000);
+      void promise.finally(() => defaultTimer.clearTimeout(handle));
+    }),
+  ]);
+}
 
 describe("UnixSocketServer input/typeText", () => {
   let socketPath: string;
@@ -89,7 +176,7 @@ describe("UnixSocketServer input/typeText", () => {
   // field. A client mirroring a keyboard one keystroke at a time must never
   // reach it, or typing "abc" leaves the field saying "c" and anything already
   // there is destroyed on the first key.
-  test("append mode never reaches the destructive requestSetText path", async () => {
+  test("append mode types with real key events and never reaches requestSetText", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({
@@ -98,19 +185,109 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ScriptedAdbExecutor(fakeTimer);
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
 
-    await sendRequest(socketPath, "input/typeText", {
+    const response = await sendRequest(socketPath, "input/typeText", {
       platform: "android",
       deviceId: "emulator-5554",
       text: "a",
       mode: "append",
     }, 1234);
 
-    // The request may or may not succeed here (the append path shells out to
-    // adb, which this harness does not provide), but it must NOT have taken the
-    // replace path. That is the property worth pinning.
+    expect(response.success).toBe(true);
+    // The append actually happened, through a real key event...
+    expect(adb.inputCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
+    // ...with no clear and no ACTION_SET_TEXT, so whatever the field already held
+    // survives the keystroke.
+    expect(adb.commands.some(call => call.command.includes("KEYCODE_DEL"))).toBe(false);
     expect(requestSetText).not.toHaveBeenCalled();
+    // Every device round trip is bounded by the request's own budget.
+    for (const call of adb.commands) {
+      expect(call.timeoutMs).toBeDefined();
+      expect(call.timeoutMs).toBeLessThanOrEqual(1234);
+    }
+  });
+
+  // The review's Critical + P1 finding, which share one root cause: the append path
+  // used to receive no timeout at all. `runInputOperationWithTimeout` detects the
+  // socket deadline but then AWAITS the in-flight operation before releasing the
+  // per-device queue, so an unbounded adb subprocess wedged the response AND every
+  // later input for that device — indefinitely.
+  test("a stalled adb key event fails inside the budget and frees the device queue", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    // Models a real adb subprocess: it runs until its own timeout kills it, and
+    // runs FOREVER when it was handed no timeout.
+    const adb = new ScriptedAdbExecutor(fakeTimer, "input keyevent");
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
+    await server.start();
+
+    const stalledPromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "a",
+      mode: "append",
+    }, 100);
+
+    await flushMicrotasks();
+    fakeTimer.advanceTime(100);
+    await flushMicrotasks();
+
+    const stalled = await withWedgeGuard(stalledPromise, "the stalled append never answered");
+    expect(stalled.success).toBe(false);
+    expect(String(stalled.error)).toContain("input/typeText exceeded 100ms");
+
+    // And the queue is free: a following input on the SAME device runs rather than
+    // queueing behind a subprocess nobody is waiting on any more.
+    const next = await withWedgeGuard(
+      sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        text: "next",
+      }, 30_000),
+      "the per-device queue stayed wedged behind the stalled append"
+    );
+    expect(next.success).toBe(true);
+    expect(requestSetText).toHaveBeenCalledWith("next", { timeoutMs: 30_000 });
+  });
+
+  // The client forwards every printable ASCII character, but uppercase and shifted
+  // symbols need `input keycombination` (API 31+) and the client cannot see the API
+  // level. The daemon therefore has to REPORT the failure; a silent success that
+  // typed nothing is the one outcome that loses the keystroke twice.
+  test("append reports a failure for uppercase on a device below API 31", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ScriptedAdbExecutor(fakeTimer, undefined, "30");
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "A",
+      mode: "append",
+    }, 1234);
+
+    expect(response.success).toBe(false);
+    expect(String(response.error)).toContain("append cannot type \"A\"");
+    // Not silently repaired by the replace path, which would wipe the field.
+    expect(requestSetText).not.toHaveBeenCalled();
+    expect(adb.inputCommands()).toEqual([]);
   });
 
   test("routes iOS text input through existing platform input infrastructure", async () => {

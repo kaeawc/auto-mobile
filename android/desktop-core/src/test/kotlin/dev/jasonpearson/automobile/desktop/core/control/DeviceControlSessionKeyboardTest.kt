@@ -110,6 +110,65 @@ class DeviceControlSessionKeyboardTest {
   }
 
   @Test
+  fun `a character the daemon cannot type is left with the host, not swallowed`() = runTest {
+    // The double-loss bug: the daemon's append path injects Android key events from an ASCII-only
+    // table, so a non-ASCII character can never reach the device. Consuming it anyway would lose
+    // the keystroke twice — not typed on the device, and not delivered to the host either.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val published = mutableListOf<String?>()
+    val session = session(scope, client, publishError = { published.add(it) })
+
+    val accented = session.key(testSnapshot(), DeviceKeyStroke(character = 'é'))
+    val euro = session.key(testSnapshot(), DeviceKeyStroke(character = '€'))
+    advanceUntilIdle()
+
+    assertFalse(accented, "an untypable character must reach the host")
+    assertFalse(euro, "an untypable character must reach the host")
+    assertTrue(
+      client.inputCalls().isEmpty(),
+      "nothing reaches the daemon (got ${client.inputCalls()})",
+    )
+    // Nothing was attempted, so nothing failed: no banner, and no refresh wait for a device change
+    // that was never requested.
+    assertTrue(published.isEmpty(), "a declined keystroke publishes nothing (got $published)")
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `an uppercase letter the device cannot type surfaces the daemon's error`() = runTest {
+    // The residual gap the client cannot close: uppercase and shifted symbols need `input
+    // keycombination` (API 31+), and the API level is invisible from here. Refusing them outright
+    // would make capitals untypable on every device. So they forward, and on an older device the
+    // daemon's actionable error must reach the SAME banner as any other failed input — a reported
+    // failure, never a silent loss.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    client.inputTypeTextResult =
+      InputActionResult(
+        action = "input/typeText",
+        success = false,
+        error = "append cannot type \"A\" with Android key events",
+      )
+    val published = mutableListOf<String?>()
+    val session = session(scope, client, publishError = { published.add(it) })
+
+    val consumed =
+      session.key(
+        testSnapshot(),
+        DeviceKeyStroke(character = 'A', modifiers = DeviceKeyModifiers(shift = true)),
+      )
+    advanceUntilIdle()
+
+    assertTrue(consumed, "a forwarded keystroke is consumed even when the device rejects it")
+    assertEquals("A", client.inputTypeTextCalls.single().text)
+    assertEquals(listOf(null, "append cannot type \"A\" with Android key events"), published)
+    assertEquals(PostInputRefreshState.Settled, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
   fun `enter reaches the daemon as a discrete key`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()

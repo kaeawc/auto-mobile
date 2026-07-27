@@ -253,6 +253,52 @@ class DeviceKeyboardInputPolicyTest {
   }
 
   @Test
+  fun `a printable character the daemon cannot type is left with the host`() {
+    // The double-loss bug this guards: the daemon's append path types by injecting Android key
+    // events from an ASCII-only table, so a non-ASCII character can never reach the device. If the
+    // policy consumed it anyway the keystroke would be lost twice — not typed on the device, and
+    // not delivered to the host either. Declining keeps the host's copy.
+    listOf('é', '€', 'ß', 'あ', '\u00A0').forEach { character ->
+      assertEquals(
+        DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.CharacterUnsupported),
+        DeviceKeyboardInputPolicy.evaluate(DeviceKeyStroke(character = character)),
+        "U+${character.code.toString(radix = 16)}",
+      )
+    }
+  }
+
+  @Test
+  fun `every printable ASCII character is still forwarded`() {
+    // The other direction, and the reason the refusal above is a range rather than a blocklist:
+    // narrowing further would make ordinary punctuation and capitals untypable in control mode.
+    // Every character here has an entry in src/features/action/asciiKeyEvents.ts.
+    (0x20..0x7E).forEach { code ->
+      val character = code.toChar()
+      assertEquals(
+        DeviceKeyboardDecision.TypeText(character.toString()),
+        DeviceKeyboardInputPolicy.evaluate(DeviceKeyStroke(character = character)),
+        "U+${code.toString(radix = 16)}",
+      )
+    }
+  }
+
+  @Test
+  fun `AltGr composing a non-ASCII character stays with the host`() {
+    // The AltGr allowance is scoped to characters the daemon can actually type. AltGr-EUR on a
+    // German layout is a real keystroke, but forwarding it would consume the host's copy of an
+    // event that can never reach the device, so it is refused as an ordinary Ctrl+Alt chord.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(
+          character = '€',
+          modifiers = DeviceKeyModifiers(ctrl = true, alt = true),
+        )
+      ),
+    )
+  }
+
+  @Test
   fun `control characters are never typed as text`() {
     // Hosts report a control character for several unmapped keys. Typing one would insert an
     // invisible control byte into whatever field has device focus.

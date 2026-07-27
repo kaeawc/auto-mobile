@@ -285,7 +285,8 @@ Applied in this order:
 | Any chord modifier held, key not explicitly opted in | **nothing**; leave unconsumed |
 | `Escape` | one `input/pressButton` with `back` |
 | `Enter`, `Tab`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right` | one `input/key` with `enter`, `tab`, `backspace`, `delete`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right` |
-| A printable character | one `input/typeText` with that single character, in **append** mode |
+| A printable **ASCII** character (`U+0020`–`U+007E`) | one `input/typeText` with that single character, in **append** mode |
+| A printable character outside that range (`é`, `€`, CJK, emoji) | **nothing**; leave unconsumed |
 | Anything else (function keys, a modifier pressed alone, a dead key) | **nothing**; leave unconsumed |
 
 A key with a device meaning **wins over the character it produced**. Hosts report
@@ -306,6 +307,25 @@ strictly better than one that erases the field on every keystroke. Buttons and
 discrete keys are unaffected, so control mode stays useful there. Lifting this
 needs an iOS-side insert primitive, tracked under
 [#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
+
+**Only printable ASCII is forwarded, because that is exactly what append can
+type.** Append works by injecting real Android key events, and the daemon's
+character→keycode table (`src/features/action/asciiKeyEvents.ts`) covers
+`U+0020`–`U+007E` and nothing else. Forwarding a character outside that range
+would lose the keystroke *twice*: consumed at the host, then rejected by the
+device. So a non-ASCII character is declined and left unconsumed — never
+swallowed. The governing rule for a porting client is: **never consume a
+keystroke you cannot deliver.** Typing accented or non-Latin text on a device
+belongs to the device's own IME, not to keystroke mirroring.
+
+One gap is deliberately left to the daemon rather than to the client. Uppercase
+letters and shifted symbols need `input keycombination`, which exists only on
+Android 12 (API 31) and newer, and a client cannot see the device's API level.
+Refusing every shifted character would make capitals untypable on *every* device
+in order to protect the older ones, so those characters are forwarded; on an
+older device the daemon answers with an actionable error
+(`append cannot type "A" with Android key events`) that the client surfaces
+through its normal error path. A reported failure, not a silent loss.
 
 `Escape` is the only key bound to a device *button*, and deliberately so.
 Escape→back is the mapping Android itself applies to a hardware ESC key, and
@@ -330,6 +350,9 @@ Two different situations, handled differently:
 - **The platform has no non-destructive text path.** Printable characters are
   dropped before any request is made (see the append rule above). This is a
   client-side refusal, not a daemon error.
+- **The character is outside printable ASCII.** Dropped before any request is
+  made, for the same reason and with the same handling: the append path has no
+  key event for it, so consuming the keystroke would lose it at both ends.
 
 ### Scope
 
@@ -427,9 +450,15 @@ chord rule from **both** sides — every chord modifier must stay with the host,
 and Shift must **not**, or capitals become untypable — plus AltGr from both sides
 (an AltGr-composed character types, a real Ctrl+Alt accelerator does not),
 key-over-character precedence, the control-character filter, the character-keyed
-chord allowlist, and the platform text gate. `InputText.test.ts` pins the daemon
-append mode itself: it issues key events and makes **no** `ACTION_SET_TEXT` call
-and **no** clear, so N single-character calls accumulate.
+chord allowlist, the platform text gate, and the printable-ASCII range from both
+sides (every character in `U+0020`–`U+007E` forwards; `é`/`€`/CJK are declined and
+left unconsumed). `InputText.test.ts` pins the daemon append mode itself: it
+issues key events and makes **no** `ACTION_SET_TEXT` call and **no** clear, so N
+single-character calls accumulate; that uppercase fails with an actionable error
+below API 31 and succeeds at 31+; and that every adb round trip is charged against
+the caller's timeout budget. `socketServerInputTypeText.test.ts` pins the same
+through the socket against a fake adb, including that a stalled adb call answers
+inside the request budget and leaves the per-device queue free for the next input.
 `DeviceKeyboardEventTranslatorTest` pins the toolkit-key translation.
 `DeviceControlSessionKeyboardTest` asserts the exact daemon payloads a keystroke
 produces against a fake client, that keyboard shares the one ordered queue with

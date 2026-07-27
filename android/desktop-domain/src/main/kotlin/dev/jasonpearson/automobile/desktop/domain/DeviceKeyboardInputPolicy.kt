@@ -117,6 +117,17 @@ public enum class DeviceKeyboardRejection {
    * keystroke, so text forwarding is disabled rather than destructive (issue #3351).
    */
   TextUnsupported,
+
+  /**
+   * A printable character the daemon's append path cannot type at all — anything outside printable
+   * ASCII (`é`, `€`, CJK, emoji).
+   *
+   * Append types by injecting real Android key events, and the ASCII→keycode table behind it
+   * (`src/features/action/asciiKeyEvents.ts`) has no entry for anything else. Forwarding such a
+   * character would consume the host keystroke and then fail on the device: lost twice. Declining
+   * leaves the event unconsumed, so the host still gets it.
+   */
+  CharacterUnsupported,
 }
 
 /** What [DeviceKeyboardInputPolicy.evaluate] decided one keystroke should send. */
@@ -154,9 +165,21 @@ public sealed interface DeviceKeyboardDecision {
  *    is the only rule that is correct for all of them.
  * 2. **A device-meaningful key wins over the character it produced.** Enter, Tab and Backspace all
  *    report a control character; sending those as text would put a literal `\n` in a text field.
- * 3. **A printable character is typed.** Exactly one character per keystroke — this is not IME
- *    composition, which is explicitly out of scope for #3351.
+ * 3. **A printable ASCII character is typed.** Exactly one character per keystroke — this is not
+ *    IME composition, which is explicitly out of scope for #3351. The ASCII restriction is not
+ *    arbitrary: the daemon's non-destructive append path types by injecting Android key events, and
+ *    its character→keycode table covers exactly `U+0020`–`U+007E`. A character it cannot type must
+ *    not be consumed here, or the keystroke is lost twice — never typed on the device, and never
+ *    delivered to the host either. Non-ASCII therefore yields
+ *    [DeviceKeyboardRejection.CharacterUnsupported] and stays with the host.
  * 4. **Everything else is ignored**, and must be left unconsumed so the host can still use it.
+ *
+ * One residual gap is deliberately left to the daemon: uppercase letters and shifted symbols need
+ * `input keycombination`, which exists only on Android 12 (API 31) and newer. The API level is not
+ * visible from here, and refusing every shifted character would make capitals untypable on *every*
+ * device in order to protect the older ones. So those are forwarded, and on an older device the
+ * daemon answers with an actionable error that the client surfaces in its error banner — a reported
+ * failure rather than a silent loss.
  *
  * This object says nothing about **when** a client is allowed to consult it. Focus and mode gating
  * are host concerns — the reference implementation relies on the toolkit's own focus routing, so a
@@ -224,26 +247,44 @@ public object DeviceKeyboardInputPolicy {
     if (stroke.modifiers.hasChordModifier && !isAllowedChord(stroke, forwardedChords)) {
       return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord)
     }
-    val key = stroke.key
-    if (key != null) {
-      BUTTON_KEYS[key]?.let {
-        return DeviceKeyboardDecision.PressButton(it)
-      }
-      DISCRETE_KEYS[key]?.let {
-        return DeviceKeyboardDecision.SendKey(it)
-      }
-      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.Unsupported)
+    stroke.key?.let {
+      return evaluateKey(it)
     }
-    val character = stroke.character
-    if (character != null && isTypable(character)) {
-      // A platform with no non-destructive text primitive must not receive text at all: replacing
-      // the field's contents on every keystroke is worse than typing nothing.
-      if (!textSupported) {
-        return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.TextUnsupported)
-      }
-      return DeviceKeyboardDecision.TypeText(character.toString())
+    return evaluateCharacter(stroke.character, textSupported)
+  }
+
+  /** A key with a device meaning of its own becomes a button press or a discrete key event. */
+  private fun evaluateKey(key: DeviceKeyboardKey): DeviceKeyboardDecision {
+    BUTTON_KEYS[key]?.let {
+      return DeviceKeyboardDecision.PressButton(it)
+    }
+    DISCRETE_KEYS[key]?.let {
+      return DeviceKeyboardDecision.SendKey(it)
     }
     return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.Unsupported)
+  }
+
+  /**
+   * Decide what a keystroke that produced only a character should send.
+   *
+   * The two rejections are deliberately distinct, because they answer different questions. A
+   * non-printable character was never a text keystroke at all; a printable non-ASCII one *was*, and
+   * is refused only because the daemon's append path cannot type it. Both leave the event
+   * unconsumed — the rule is that a keystroke this policy cannot deliver is never swallowed.
+   */
+  private fun evaluateCharacter(character: Char?, textSupported: Boolean): DeviceKeyboardDecision {
+    if (character == null || !isPrintable(character)) {
+      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.Unsupported)
+    }
+    if (!isTypable(character)) {
+      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.CharacterUnsupported)
+    }
+    // A platform with no non-destructive text primitive must not receive text at all: replacing
+    // the field's contents on every keystroke is worse than typing nothing.
+    if (!textSupported) {
+      return DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.TextUnsupported)
+    }
+    return DeviceKeyboardDecision.TypeText(character.toString())
   }
 
   /**
@@ -271,16 +312,37 @@ public object DeviceKeyboardInputPolicy {
     this == other || lowercaseChar() == other.lowercaseChar()
 
   /**
-   * Whether [character] is something a device text field can receive.
+   * Whether [character] is a character the user actually meant to type, as opposed to a host's way
+   * of reporting a non-text key.
    *
    * Excludes ISO control characters (which is how hosts report Enter, Tab, Backspace and friends as
    * characters) and the "no character" sentinel every AWT-derived toolkit uses. Without the first
    * exclusion an unmapped control key would type an invisible control character into whatever field
    * has device focus.
    */
-  private fun isTypable(character: Char): Boolean =
+  private fun isPrintable(character: Char): Boolean =
     !character.isISOControl() && character != NO_CHARACTER
+
+  /**
+   * Whether [character] is one the daemon's non-destructive append path can actually type.
+   *
+   * That path injects Android key events from a fixed character\u2192keycode table covering
+   * printable ASCII only, so this is the exact set \u2014 no more, because forwarding a character
+   * the daemon cannot type would consume the host keystroke for nothing, and no less, because
+   * narrowing further would make ordinary punctuation untypable in control mode.
+   */
+  private fun isTypable(character: Char): Boolean =
+    isPrintable(character) && character.code in PRINTABLE_ASCII
 
   /** `KeyEvent.CHAR_UNDEFINED`: "this keystroke produced no character". */
   private const val NO_CHARACTER: Char = '\uFFFF'
+
+  /**
+   * The printable ASCII range, `U+0020` (space) through `U+007E` (`~`).
+   *
+   * This mirrors `buildAsciiKeyEventPlan` in `src/features/action/asciiKeyEvents.ts`, which has a
+   * keycode for every character in this range and for nothing outside it. The two must stay in
+   * step; widening one without the other reintroduces the double loss this range exists to prevent.
+   */
+  private val PRINTABLE_ASCII: IntRange = 0x20..0x7E
 }

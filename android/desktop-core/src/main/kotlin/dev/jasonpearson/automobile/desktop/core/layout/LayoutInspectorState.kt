@@ -298,6 +298,7 @@ class LayoutInspectorState(
     newRotation: Int = 0,
     deviceId: String? = null,
     captureSequence: Long? = null,
+    captureRotation: Int? = null,
   ) {
     // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
     // immediate
@@ -305,7 +306,7 @@ class LayoutInspectorState(
     debounceJob?.cancel()
     val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
     val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
-    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence)
+    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence, captureRotation)
   }
 
   /**

@@ -576,7 +576,7 @@ describe("DeviceDataStreamSocketServer", () => {
     return buffer.toString("base64");
   };
 
-    describe("hierarchy diff annotation", () => {
+  describe("hierarchy diff annotation", () => {
     const frame = (text: string, rotation: number = 0) =>
       ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } }, rotation }) as any;
 

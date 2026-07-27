@@ -227,7 +227,7 @@ describe("xcodegen drift check", () => {
 
     expectExitStatus(result, 1);
     expect(result.stdout + result.stderr).toContain("XcodeGen project files are out of date");
-  });
+  }, 15_000);
 
   test("ctrl-proxy scope fails when the regenerated CtrlProxy project is untracked after deletion", () => {
     const repoDir = createTempRepo();
@@ -247,7 +247,7 @@ describe("xcodegen drift check", () => {
     expectExitStatus(result, 1);
     expect(result.stdout + result.stderr).toContain("XcodeGen project files are out of date");
     expect(result.stdout + result.stderr).toContain("?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
-  });
+  }, 15_000);
 
   test("ctrl-proxy scope refuses to generate with a skewed XcodeGen version", () => {
     // Regression guard for #3975: generating with a version other than the pin

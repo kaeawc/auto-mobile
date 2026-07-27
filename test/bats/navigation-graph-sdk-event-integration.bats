@@ -45,7 +45,7 @@ if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
   printf "{\"ios\":{\"checks\":[]}}\\n"
   exit 0
 fi
-if [ "$1" = "--debug" ] && [ "$2" = "--cli" ] && [ "$3" = "getNavigationGraph" ]; then
+if [ "$1" = "--debug" ] && [ "$2" = "--cli" ] && [ "$3" = "--session-uuid" ] && [ "$5" = "getNavigationGraph" ]; then
   attempts=0
   [ -f "$GRAPH_ATTEMPTS_FILE" ] && attempts="$(cat "$GRAPH_ATTEMPTS_FILE")"
   attempts=$((attempts + 1))

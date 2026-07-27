@@ -1206,23 +1206,21 @@ export class UnixSocketServer {
         return { success: false, error: textResult.error };
       }
     }
-    if (!imeAction) {
-      return appendCharsSent !== undefined
-        ? { success: true, charsSent: appendCharsSent }
-        : { success: true };
-    }
     return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs, appendCharsSent);
   }
 
   private async runImeActionWithinBudget(
     client: Pick<DeviceService, "requestImeAction">,
-    imeAction: ImeAction,
+    imeAction: ImeAction | undefined,
     deadline: number,
     totalTimeoutMs: number,
     appendCharsSent?: number
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     const withAppendProgress = (result: { success: boolean; error?: string }) =>
       appendCharsSent !== undefined ? { ...result, charsSent: appendCharsSent } : result;
+    if (!imeAction) {
+      return withAppendProgress({ success: true });
+    }
     const remainingTimeoutMs = deadline - this.timer.now();
     if (remainingTimeoutMs <= 0) {
       // Defensive: in practice the outer Promise.race timeout fires first, so

@@ -77,6 +77,18 @@
       "expectedX": -20, "expectedY": -20, "expectedInBounds": 0
     },
     {
+      "comment": "x-only negative out of bounds: y well inside — pins the x lower-bound predicate independently (deleting x >= 0 flips only this row)",
+      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
+      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": -10, "viewportY": 585,
+      "expectedX": -20, "expectedY": 1170, "expectedInBounds": 0
+    },
+    {
+      "comment": "y-only negative out of bounds: x well inside — pins the y lower-bound predicate independently (deleting y >= 0 flips only this row)",
+      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
+      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 270, "viewportY": -10,
+      "expectedX": 540, "expectedY": -20, "expectedInBounds": 0
+    },
+    {
       "comment": "y-only out of bounds: x well inside, y exactly at deviceHeight (exclusive) — pins the y bounds predicate independently of x",
       "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
       "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 270, "viewportY": 1170,
@@ -313,6 +325,11 @@
     {
       "comment": "single-axis off-by-one rejected: the check is exact, not approximate",
       "measuredWidth": 1080, "measuredHeight": 2339, "claimedWidth": 1080, "claimedHeight": 2340,
+      "expectedMatch": 0
+    },
+    {
+      "comment": "ONE-axis swap rejected: measured.width == claimedHeight (1170) but measured.height != claimedWidth (2532 vs 2500) — the swap acceptance is a conjunction, so a frame matching only one opposite axis must never receive a capture identity",
+      "measuredWidth": 1170, "measuredHeight": 2532, "claimedWidth": 2500, "claimedHeight": 1170,
       "expectedMatch": 0
     }
   ],

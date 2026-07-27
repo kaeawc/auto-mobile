@@ -62,6 +62,10 @@ class CoordinateMappingGoldenVectorTest {
       ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, 540f, 585f, 1080, 1170, 0),
       // Negative out of bounds: raw coordinates returned, never clamped.
       ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, -10f, -10f, -20, -20, 0),
+      // x-only negative out of bounds: y inside (pins the x lower bound independently).
+      ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, -10f, 585f, -20, 1170, 0),
+      // y-only negative out of bounds: x inside (pins the y lower bound independently).
+      ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, 270f, -10f, 540, -20, 0),
       // y-only out of bounds: x inside, y exactly at deviceHeight (exclusive).
       ViewportToDeviceVector(540f, 1170f, 1f, 0f, 0f, 1080, 2340, 270f, 1170f, 540, 2340, 0),
       // Far past the bottom-right edge.

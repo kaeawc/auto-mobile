@@ -7,6 +7,7 @@ import type { ChecksumCalculator } from "../../src/utils/ChecksumCalculator";
 
 export interface ChecksumCalculatorContractFactory {
   make(expectedChecksum: string): ChecksumCalculator;
+  makeFailure(): ChecksumCalculator;
 }
 
 export const runChecksumCalculatorContract = (
@@ -29,6 +30,11 @@ export const runChecksumCalculatorContract = (
       } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
       }
+    });
+
+    test("rejects a missing file instead of fabricating a checksum", async function() {
+      await expect(factory.makeFailure().computeFileSha256("/missing-contract-file.bin"))
+        .rejects.toThrow();
     });
   });
 };

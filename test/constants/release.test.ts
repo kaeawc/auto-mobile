@@ -386,6 +386,7 @@ describe("resolveVideoJarChecksum (video-server jar delivery, #3830)", function(
   });
 
   test("registry entries carry empty or well-formed 64-char videoJarSha256 values", function() {
+    expect(RELEASE_CHECKSUM_REGISTRY.length).toBeGreaterThan(0);
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const jar = entry.videoJarSha256 ?? "";
       expect(jar === "" || /^[a-f0-9]{64}$/.test(jar)).toBe(true);
@@ -420,6 +421,7 @@ describe("screen-capture-helper release delivery", function() {
   });
 
   test("registry helper checksums are empty or SHA-256 values", function() {
+    expect(RELEASE_CHECKSUM_REGISTRY.length).toBeGreaterThan(0);
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const checksum = entry.screenCaptureHelperSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
@@ -529,13 +531,16 @@ describe("package.json as canonical version source", function() {
     readFileSync(join(import.meta.dir, "../../package.json"), "utf8")
   ) as { version: string };
 
-  test("resolveLatestVersion() equals package.json version", function() {
+  test("keeps a non-empty newest registry entry coherent with package.json", function() {
+    expect(RELEASE_CHECKSUM_REGISTRY.length).toBeGreaterThan(0);
+    expect(RELEASE_CHECKSUM_REGISTRY[0].version).toBe(pkg.version);
     expect(resolveLatestVersion()).toBe(pkg.version);
   });
 });
 
 describe("iOS runner-binary checksum", function() {
   test("registry entries carry empty or well-formed 64-char runner sha256 values", function() {
+    expect(RELEASE_CHECKSUM_REGISTRY.length).toBeGreaterThan(0);
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       expect(entry.runnerSha256 === "" || /^[a-f0-9]{64}$/.test(entry.runnerSha256)).toBe(true);
     }

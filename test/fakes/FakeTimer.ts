@@ -69,6 +69,8 @@ export class FakeTimer implements Timer {
   private pendingAutoAdvanceTasks: PendingAutoAdvanceTask[] = [];
   private nextAutoAdvanceTaskOrder: number = 1;
   private autoAdvanceDispatchScheduled: boolean = false;
+  // Invalidates auto-advance callbacks that were scheduled before reset().
+  private autoAdvanceGeneration: number = 0;
   // Monotonic registration counter so manual advanceTime() can break equal
   // due-time ties by FIFO registration order across sleeps/timeouts/intervals.
   private nextEventSeq: number = 1;
@@ -307,6 +309,7 @@ export class FakeTimer implements Timer {
    * Reset all state (clears pending sleeps, timeouts, intervals, history, and time).
    */
   reset(): void {
+    this.autoAdvanceGeneration++;
     // Resolve all pending sleeps before clearing to avoid hanging promises
     this.resolveAll();
     this.sleepHistory = [];
@@ -372,19 +375,28 @@ export class FakeTimer implements Timer {
   /**
    * Schedule a callback to be executed repeatedly at a specified interval.
    * In normal mode: fires each time advanceTime() moves past the interval.
-   * In auto-advance mode: fires once at its scheduled fake time (intervals should not repeat in tests).
+   * In auto-advance mode: reschedules itself at each fake interval until cancelled.
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
     const id = this.nextIntervalId as unknown as NodeJS.Timeout;
     const numericId = this.nextIntervalId;
     this.nextIntervalId++;
     if (this.autoAdvance) {
-      this.enqueueAutoAdvanceTask(() => {
-        if (!this.cancelledIntervalIds.has(numericId)) {
+      const period = ms > 0 ? ms : 1;
+      const generation = this.autoAdvanceGeneration;
+      const scheduleNext = (): void => this.enqueueAutoAdvanceTask(() => {
+        if (generation === this.autoAdvanceGeneration && !this.cancelledIntervalIds.has(numericId)) {
           callback();
+          if (generation === this.autoAdvanceGeneration && !this.cancelledIntervalIds.has(numericId)) {
+            scheduleNext();
+            return;
+          }
         }
-        this.cancelledIntervalIds.delete(numericId);
-      }, ms);
+        if (generation === this.autoAdvanceGeneration) {
+          this.cancelledIntervalIds.delete(numericId);
+        }
+      }, period);
+      scheduleNext();
       return id;
     }
     this.pendingIntervals.push({

@@ -9,13 +9,19 @@ export class FakeFileDownloader implements FileDownloader {
   public shouldThrow: Error | null = null;
   public lastWrittenPath: string | null = null;
 
-  public async download(url: string, destination: string): Promise<void> {
+  public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) {
+      throw new Error(`Download aborted before starting: ${url}`);
+    }
     if (this.shouldThrow) {
       throw this.shouldThrow;
     }
     this.downloadedUrls.push(url);
     this.downloadedDestinations.push(destination);
     await fs.mkdir(path.dirname(destination), { recursive: true });
+    if (signal?.aborted) {
+      throw new Error(`Download aborted while writing: ${url}`);
+    }
     await fs.writeFile(destination, this.payload);
     this.lastWrittenPath = destination;
   }

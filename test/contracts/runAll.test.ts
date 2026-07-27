@@ -55,14 +55,20 @@ runFileSystemContract("FakeFileSystem", () => new FakeFileSystem(), {
 });
 
 runChecksumCalculatorContract("DefaultChecksumCalculator", {
-  make: () => new DefaultChecksumCalculator()
+  make: () => new DefaultChecksumCalculator(),
+  makeFailure: () => new DefaultChecksumCalculator(),
 });
 runChecksumCalculatorContract("FakeChecksumCalculator", {
   make: expectedChecksum => {
     const calculator = new FakeChecksumCalculator();
     calculator.checksum = expectedChecksum;
     return calculator;
-  }
+  },
+  makeFailure: () => {
+    const calculator = new FakeChecksumCalculator();
+    calculator.shouldThrow = new Error("missing contract file");
+    return calculator;
+  },
 });
 
 runFileDownloaderContract("DefaultFileDownloader", () => new DefaultFileDownloader());

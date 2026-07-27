@@ -663,3 +663,16 @@ steps:
     });
   });
 });
+
+describe("PlanSchemaValidator.validateFile", () => {
+  it("returns the schema-loading error before attempting to read a missing file", async () => {
+    const validator = new PlanSchemaValidator();
+
+    const result = await validator.validateFile("/definitely-missing-plan.yaml");
+
+    expect(result).toEqual({
+      valid: false,
+      errors: [{ field: "schema", message: "Schema not loaded. Call loadSchema() first." }],
+    });
+  });
+});

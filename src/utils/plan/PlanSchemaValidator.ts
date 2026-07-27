@@ -180,6 +180,16 @@ export class PlanSchemaValidator {
    * @returns Validation result
    */
   async validateFile(filePath: string): Promise<PlanValidationResult> {
+    if (!this.schemaLoaded) {
+      return {
+        valid: false,
+        errors: [{
+          field: "schema",
+          message: "Schema not loaded. Call loadSchema() first."
+        }]
+      };
+    }
+
     try {
       const content = await fs.readFile(filePath, "utf-8");
       return this.validateYaml(content);

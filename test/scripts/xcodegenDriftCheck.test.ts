@@ -3,12 +3,12 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { loadJobSteps } from "../helpers/workflowSteps";
 
 const repoRoot = join(import.meta.dir, "../..");
 const driftCheckScript = join(repoRoot, "scripts/ios/xcodegen-drift-check.sh");
 const versionScript = join(repoRoot, "scripts/ios/xcodegen_version.sh");
 const normalizeScript = join(repoRoot, "scripts/ios/pbxproj_normalize.sh");
-const workflowPath = join(repoRoot, ".github/workflows/pull_request.yml");
 const tempDirs: string[] = [];
 
 // A minimal PBXProject `targets = (...)` block in two of the orders XcodeGen
@@ -358,19 +358,21 @@ describe("xcodegen drift check", () => {
   });
 
   test("pull request workflow gates both Xcode project jobs on the drift check", () => {
-    const workflow = readFileSync(workflowPath, "utf8");
-    const xcodeBuildJob = workflow.indexOf("ios-xcode-build:");
-    const xctestRunnerJob = workflow.indexOf("ios-xctest-runner-simulator-tests:");
-    const xcodeBuildDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh --all", xcodeBuildJob);
-    const xcodeBuild = workflow.indexOf("./scripts/ios/xcode-build.sh", xcodeBuildJob);
-    const xctestRunnerDriftCheck = workflow.indexOf("./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy", xctestRunnerJob);
-    const xctestRunnerBuild = workflow.indexOf("./scripts/ios/ctrl-proxy-build-for-testing.sh", xctestRunnerJob);
+    const xcodeBuildSteps = loadJobSteps(".github/workflows/pull_request.yml", "ios-xcode-build");
+    const xctestRunnerSteps = loadJobSteps(".github/workflows/pull_request.yml", "ios-xctest-runner-simulator-tests");
+    const indexOfRun = (steps: typeof xcodeBuildSteps, command: string) =>
+      steps.findIndex(step => step.run?.includes(command));
 
-    expect(xcodeBuildJob).toBeGreaterThan(-1);
-    expect(xctestRunnerJob).toBeGreaterThan(-1);
-    expect(xcodeBuildDriftCheck).toBeGreaterThan(xcodeBuildJob);
+    const xcodeBuildDriftCheck = indexOfRun(xcodeBuildSteps, "./scripts/ios/xcodegen-drift-check.sh --all");
+    const xcodeBuild = indexOfRun(xcodeBuildSteps, "./scripts/ios/xcode-build.sh");
+    const xctestRunnerDriftCheck = indexOfRun(xctestRunnerSteps, "./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy");
+    const xctestRunnerBuild = indexOfRun(xctestRunnerSteps, "./scripts/ios/ctrl-proxy-build-for-testing.sh");
+
+    expect(xcodeBuildSteps.length).toBeGreaterThan(0);
+    expect(xctestRunnerSteps.length).toBeGreaterThan(0);
+    expect(xcodeBuildDriftCheck).toBeGreaterThanOrEqual(0);
     expect(xcodeBuildDriftCheck).toBeLessThan(xcodeBuild);
-    expect(xctestRunnerDriftCheck).toBeGreaterThan(xctestRunnerJob);
+    expect(xctestRunnerDriftCheck).toBeGreaterThanOrEqual(0);
     expect(xctestRunnerDriftCheck).toBeLessThan(xctestRunnerBuild);
   });
 });

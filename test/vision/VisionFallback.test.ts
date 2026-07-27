@@ -73,6 +73,13 @@ describe("VisionFallback orchestrator", () => {
     ).rejects.toThrow(/not enabled/);
   });
 
+  test("rejects an unsupported provider before attempting a paid analysis", async () => {
+    const fallback = new VisionFallback(config({ provider: "unsupported" as any }), timer, undefined, checksums);
+
+    await expect(fallback.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login")))
+      .rejects.toThrow("Unsupported vision provider: unsupported");
+  });
+
   test("caches a result: an identical query hits the analyzer only once", async () => {
     const fb = new VisionFallback(config(), timer, undefined, checksums);
     const count = stubAnalyzer(fb, result());
@@ -95,8 +102,12 @@ describe("VisionFallback orchestrator", () => {
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     expect(count()).toBe(1);
 
-    // Past the TTL: the stale entry is evicted and the analyzer runs again.
-    timer.advanceTime(2 * 60 * 1000);
+    // The exact TTL remains a cache hit; expiry starts one millisecond later.
+    timer.advanceTime(1 * 60 * 1000);
+    await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
+    expect(count()).toBe(1);
+
+    timer.advanceTime(1);
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     expect(count()).toBe(2);
   });

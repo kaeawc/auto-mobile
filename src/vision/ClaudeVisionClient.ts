@@ -16,6 +16,89 @@ import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 
+export function parseClaudeResponse(response: Anthropic.Message): ClaudeVisionAnalysis {
+  let responseText = "";
+  for (const block of response.content) {
+    if (block.type === "text") {
+      responseText += block.text;
+    }
+  }
+
+  const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/) || responseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error("Failed to parse JSON from Claude response");
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+  } catch (error) {
+    throw new Error(`Failed to parse JSON from Claude response: ${(error as Error).message}`);
+  }
+
+  return {
+    elementFound: parsed.elementFound || false,
+    elementLocation: parsed.elementLocation || undefined,
+    suggestedText: parsed.suggestedText || undefined,
+    suggestedResourceId: parsed.suggestedResourceId || undefined,
+    navigationRequired: parsed.navigationRequired || false,
+    steps: parsed.steps || undefined,
+    visualDescription: parsed.visualDescription || "",
+    similarElements: parsed.similarElements || [],
+    confidence: parsed.confidence || 0,
+    reasoning: parsed.reasoning || "",
+  };
+}
+
+export function calculateClaudeCost(inputTokens: number, outputTokens: number): number {
+  return (inputTokens / 1_000_000) * 3 + (outputTokens / 1_000_000) * 15;
+}
+
+export function toClaudeVisionFallbackResult(
+  analysis: ClaudeVisionAnalysis,
+  costUsd: number,
+  durationMs: number,
+  screenshotPath: string
+): VisionFallbackResult {
+  const confidence: VisionFallbackResult["confidence"] =
+    analysis.confidence >= 0.9 ? "high" : analysis.confidence >= 0.7 ? "medium" : "low";
+  const navigationSteps: NavigationStep[] | undefined = analysis.steps?.map(step => ({
+    action: mapClaudeAction(step.action),
+    target: step.target,
+    description: step.reasoning,
+  }));
+  const alternativeSelectors: AlternativeSelector[] = [];
+  if (analysis.suggestedText) {
+    alternativeSelectors.push({ type: "text", value: analysis.suggestedText, confidence: analysis.confidence, reasoning: "Claude suggested this text as alternative" });
+  }
+  if (analysis.suggestedResourceId) {
+    alternativeSelectors.push({ type: "resourceId", value: analysis.suggestedResourceId, confidence: analysis.confidence, reasoning: "Claude suggested this resource ID as alternative" });
+  }
+
+  return {
+    found: analysis.elementFound,
+    confidence,
+    navigationSteps: navigationSteps?.length ? navigationSteps : undefined,
+    alternativeSelectors: alternativeSelectors.length ? alternativeSelectors : undefined,
+    reason: analysis.elementFound ? undefined : analysis.reasoning,
+    similarElements: analysis.similarElements,
+    costUsd,
+    durationMs,
+    screenshotPath,
+    provider: "claude",
+  };
+}
+
+function mapClaudeAction(action: string): NavigationStep["action"] {
+  const normalized = action.toLowerCase();
+  if (normalized.includes("tap") || normalized.includes("click")) { return "tap"; }
+  if (normalized.includes("swipe")) { return "swipe"; }
+  if (normalized.includes("scroll")) { return "scroll"; }
+  if (normalized.includes("input") || normalized.includes("type")) { return "input"; }
+  if (normalized.includes("wait")) { return "wait"; }
+  return "tap";
+}
+
 export class ClaudeVisionClient {
   private client: Anthropic;
   private model: string;
@@ -70,17 +153,17 @@ export class ClaudeVisionClient {
       });
 
       // Parse response
-      const analysis = this.parseClaudeResponse(response);
+      const analysis = parseClaudeResponse(response);
 
       // Calculate cost (approximate)
       const inputTokens = response.usage.input_tokens;
       const outputTokens = response.usage.output_tokens;
-      const costUsd = this.calculateCost(inputTokens, outputTokens);
+      const costUsd = calculateClaudeCost(inputTokens, outputTokens);
 
       const durationMs = this.timer.now() - startTime;
 
       // Convert analysis to VisionFallbackResult
-      return this.convertToFallbackResult(
+      return toClaudeVisionFallbackResult(
         analysis,
         costUsd,
         durationMs,
@@ -171,113 +254,4 @@ export class ClaudeVisionClient {
     return parts.join("\n");
   }
 
-  private parseClaudeResponse(response: Anthropic.Message): ClaudeVisionAnalysis {
-    // Extract text from response
-    let responseText = "";
-    for (const block of response.content) {
-      if (block.type === "text") {
-        responseText += block.text;
-      }
-    }
-
-    // Try to extract JSON from the response
-    const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/) || responseText.match(/\{[\s\S]*\}/);
-
-    if (!jsonMatch) {
-      throw new Error("Failed to parse JSON from Claude response");
-    }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0];
-    let parsed: any;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch (err) {
-      throw new Error(
-        `Failed to parse JSON from Claude response: ${(err as Error).message}`
-      );
-    }
-
-    return {
-      elementFound: parsed.elementFound || false,
-      elementLocation: parsed.elementLocation || undefined,
-      suggestedText: parsed.suggestedText || undefined,
-      suggestedResourceId: parsed.suggestedResourceId || undefined,
-      navigationRequired: parsed.navigationRequired || false,
-      steps: parsed.steps || undefined,
-      visualDescription: parsed.visualDescription || "",
-      similarElements: parsed.similarElements || [],
-      confidence: parsed.confidence || 0,
-      reasoning: parsed.reasoning || "",
-    };
-  }
-
-  private convertToFallbackResult(
-    analysis: ClaudeVisionAnalysis,
-    costUsd: number,
-    durationMs: number,
-    screenshotPath: string
-  ): VisionFallbackResult {
-    // Determine confidence level
-    const confidenceLevel: "high" | "medium" | "low" =
-      analysis.confidence >= 0.9 ? "high" :
-        analysis.confidence >= 0.7 ? "medium" : "low";
-
-    // Build navigation steps if provided
-    const navigationSteps: NavigationStep[] | undefined = analysis.steps?.map(step => ({
-      action: this.mapAction(step.action),
-      target: step.target,
-      description: step.reasoning,
-    }));
-
-    // Build alternative selectors
-    const alternativeSelectors: AlternativeSelector[] = [];
-    if (analysis.suggestedText) {
-      alternativeSelectors.push({
-        type: "text",
-        value: analysis.suggestedText,
-        confidence: analysis.confidence,
-        reasoning: "Claude suggested this text as alternative",
-      });
-    }
-    if (analysis.suggestedResourceId) {
-      alternativeSelectors.push({
-        type: "resourceId",
-        value: analysis.suggestedResourceId,
-        confidence: analysis.confidence,
-        reasoning: "Claude suggested this resource ID as alternative",
-      });
-    }
-
-    return {
-      found: analysis.elementFound,
-      confidence: confidenceLevel,
-      navigationSteps: navigationSteps && navigationSteps.length > 0 ? navigationSteps : undefined,
-      alternativeSelectors: alternativeSelectors.length > 0 ? alternativeSelectors : undefined,
-      reason: !analysis.elementFound ? analysis.reasoning : undefined,
-      similarElements: analysis.similarElements,
-      costUsd,
-      durationMs,
-      screenshotPath,
-      provider: "claude",
-    };
-  }
-
-  private mapAction(action: string): NavigationStep["action"] {
-    const normalized = action.toLowerCase();
-    if (normalized.includes("tap") || normalized.includes("click")) {return "tap";}
-    if (normalized.includes("swipe")) {return "swipe";}
-    if (normalized.includes("scroll")) {return "scroll";}
-    if (normalized.includes("input") || normalized.includes("type")) {return "input";}
-    if (normalized.includes("wait")) {return "wait";}
-    return "tap"; // Default
-  }
-
-  private calculateCost(inputTokens: number, outputTokens: number): number {
-    // Claude Sonnet 4.5 pricing (as of 2025)
-    // Input: $3 per million tokens
-    // Output: $15 per million tokens
-    const inputCost = (inputTokens / 1_000_000) * 3.0;
-    const outputCost = (outputTokens / 1_000_000) * 15.0;
-    return inputCost + outputCost;
-  }
 }

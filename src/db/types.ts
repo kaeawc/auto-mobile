@@ -496,6 +496,14 @@ export interface FeatureFlagsTable {
   updated_at: Generated<string>;
 }
 
+/** Persistent per-device-session MCP tool capability overrides. */
+export interface SessionToolCapabilitiesTable {
+  session_uuid: string;
+  capability: string;
+  enabled: number;
+  updated_at: Generated<string>;
+}
+
 // Device snapshot tables
 export interface DeviceSnapshotsTable {
   snapshot_name: string;
@@ -674,6 +682,7 @@ export interface Database {
   test_execution_steps: TestExecutionStepsTable;
   test_execution_screens: TestExecutionScreensTable;
   feature_flags: FeatureFlagsTable;
+  session_tool_capabilities: SessionToolCapabilitiesTable;
   device_snapshots: DeviceSnapshotsTable;
   device_snapshot_configs: DeviceSnapshotConfigsTable;
   video_recordings: VideoRecordingsTable;

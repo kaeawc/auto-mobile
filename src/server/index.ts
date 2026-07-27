@@ -29,7 +29,6 @@ import { registerDebugTools } from "./debugTools";
 import { registerNavigationTools } from "./navigationTools";
 import { registerNotificationTools } from "./notificationTools";
 import { registerPlanTools } from "./planTools";
-import { registerDoctorTools } from "./doctorTools";
 import { registerCriticalSectionTools } from "./criticalSectionTools";
 import { registerBarrierTools } from "./barrierTools";
 import { registerVideoRecordingTools } from "./videoRecordingTools";
@@ -67,6 +66,8 @@ import { registerFeatureFlagResources } from "./featureFlagResources";
 import { registerNetworkResources } from "./networkResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { startupBenchmark } from "../utils/startupBenchmark";
+import { getSessionToolProfileService } from "../features/toolCapabilities/SessionToolProfileService";
+import { TOOL_CAPABILITY_BY_NAME } from "../features/toolCapabilities/toolCapabilityMap";
 
 export interface McpServerOptions {
   debug?: boolean;
@@ -76,6 +77,19 @@ export interface McpServerOptions {
 }
 
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
+const boundDeviceSessions = new Map<string, string>();
+
+function effectiveSessionUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
+  const explicit = params && typeof params === "object" && !Array.isArray(params)
+    ? (params as Record<string, unknown>).sessionUuid
+    : undefined;
+  return typeof explicit === "string" ? explicit : mcpSessionId ? boundDeviceSessions.get(mcpSessionId) : undefined;
+}
+
+async function isToolVisibleForSession(name: string, sessionUuid: string | undefined): Promise<boolean> {
+  const capability = TOOL_CAPABILITY_BY_NAME.get(name);
+  return !capability || await getSessionToolProfileService().isEnabled(sessionUuid, capability);
+}
 
 function extractInternalMcpSessionId(params: unknown): string | undefined {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
@@ -186,7 +200,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     registerCriticalSectionTools();
     registerBarrierTools();
   }
-  registerDoctorTools();
   registerVideoRecordingTools();
   registerSnapshotTools();
   registerBiometricTools();
@@ -264,8 +277,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register tool definitions using the lower-level interface
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const sessionUuid = effectiveSessionUuid(options.sessionContext?.sessionId);
+    const definitions = ToolRegistry.getToolDefinitions();
     return {
-      tools: ToolRegistry.getToolDefinitions()
+      tools: (await Promise.all(definitions.map(async definition =>
+        await isToolVisibleForSession(definition.name, sessionUuid) ? definition : undefined
+      ))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
     };
   });
 
@@ -297,13 +314,20 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       throw new ActionableError("Tool name is missing in the request");
     }
 
+    const sessionId = options.sessionContext?.sessionId;
+    const sessionUuid = effectiveSessionUuid(sessionId, toolParams);
+
+    if (!await isToolVisibleForSession(name, sessionUuid)) {
+      const capability = TOOL_CAPABILITY_BY_NAME.get(name);
+      throw new ActionableError(`Tool ${name} requires the '${capability}' capability for device session ${sessionUuid ?? "(not yet bound)"}.`);
+    }
+
     // Get the registered tool
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
     }
 
-    const sessionId = options.sessionContext?.sessionId;
     const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
     const implicitAutolockMcpSessionId = requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     const rawSessionUuid =
@@ -312,13 +336,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       "sessionUuid" in toolParams
         ? (toolParams as { sessionUuid?: string }).sessionUuid
         : undefined;
-    const sessionUuid = typeof rawSessionUuid === "string" ? rawSessionUuid : undefined;
+    const providedSessionUuid = typeof rawSessionUuid === "string" ? rawSessionUuid : undefined;
+    if (sessionId && providedSessionUuid && boundDeviceSessions.get(sessionId) !== providedSessionUuid) {
+      boundDeviceSessions.set(sessionId, providedSessionUuid);
+      try { server.sendToolListChanged(); } catch (error) { logger.warn(`Failed to refresh session tool list: ${error}`); }
+    }
 
     // Check if tool call should be blocked due to active executePlan in this session
     const decision = planExecutionLock.evaluate({
       toolName: name,
       sessionId,
-      sessionUuid,
+      sessionUuid: providedSessionUuid ?? sessionUuid,
     });
     if (decision.blocked) {
       logger.warn(
@@ -335,7 +363,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       throw new ActionableError(`Invalid parameters for tool ${name}: ${formatToolParamError(name, error)}`);
     }
 
-    const execution = executionTracker.startExecution(name, sessionId, sessionUuid);
+    const execution = executionTracker.startExecution(name, sessionId, providedSessionUuid ?? sessionUuid);
     const handlerParams = implicitAutolockMcpSessionId && parsedParams && typeof parsedParams === "object"
       ? { ...parsedParams, [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
       : parsedParams;

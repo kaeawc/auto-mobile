@@ -39,6 +39,21 @@ describe("compareVersions", () => {
     expect(compareVersions("17.0.0", "17")).toBe(0);
     expect(compareVersions("17.1", "17")).toBeGreaterThan(0);
   });
+
+  // Regression #4183 P1: a non-numeric osVersion segment must never make
+  // compareVersions return NaN, because NaN is neither >= min nor <= max, so
+  // the device is silently dropped by BOTH range filters at once.
+  it("coerces a quarterly-release suffix to its leading integer", () => {
+    expect(compareVersions("14-QPR1", "14")).toBe(0);
+    expect(compareVersions("14-QPR2", "14-QPR1")).toBe(0);
+    expect(compareVersions("15-QPR1", "14")).toBeGreaterThan(0);
+  });
+
+  it("never returns NaN for a codename osVersion", () => {
+    expect(Number.isNaN(compareVersions("Tiramisu", "14"))).toBe(false);
+    expect(Number.isNaN(compareVersions("Tiramisu", "Tiramisu"))).toBe(false);
+    expect(compareVersions("Tiramisu", "Tiramisu")).toBe(0);
+  });
 });
 
 describe("DefaultDeviceMatcher.matchBootedDevice", () => {
@@ -260,6 +275,21 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       "LATEST"
     );
     expect(result).toBeNull();
+  });
+
+  it("does not silently drop a device whose osVersion has a non-numeric suffix", () => {
+    // "14-QPR1" is Android 14; before the fix it parsed to NaN and was rejected
+    // by BOTH the min and max filters, so the device vanished entirely (#4183).
+    const devices = [
+      bootedDevice({ deviceId: "1", osVersion: "14-QPR1" }),
+    ];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", minOsVersion: "14", maxOsVersion: "14" },
+      devices,
+      "LATEST"
+    );
+    expect(result?.deviceId).toBe("1");
   });
 
   it("skips devices without osVersion when minOsVersion filter is set", () => {

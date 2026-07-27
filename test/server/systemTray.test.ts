@@ -893,8 +893,10 @@ describe("systemTray group expansion", () => {
     expect(tapCommands.length).toBe(1);
 
     const tapCmd = tapCommands[0];
-    expect(tapCmd).toContain("input tap");
-    expect(tapCmd).toMatch(/input tap \d+ \d+/);
+    // Pin the expand-button CENTRE (1190,697) — centre of bounds [1084,663]
+    // [1296,731]. A corner-tap regression taps 1084 663 and opens the app
+    // generically instead of expanding the group (#4183 R1).
+    expect(tapCmd).toContain("input tap 1190 697");
   });
 
   test("expandNotificationGroup throws when no expand button exists", async () => {
@@ -966,6 +968,17 @@ describe("systemTray group expansion", () => {
 
     expect(result.match).not.toBeNull();
     expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
+
+    // Actually expand the group between the two matches. If expandNotificationGroup
+    // is deleted or gutted, no expand-button tap is issued and this fails — the
+    // pre-supplied expanded observation would otherwise mask a missing expand
+    // (#4183 R2).
+    const expanded = await expandNotificationGroup(device, result.match!);
+    expect(expanded).toBe(true);
+
+    const tapCommands = fakeAdb.getExecutedCommands()
+      .filter(cmd => cmd.includes("input tap 1190 697"));
+    expect(tapCommands.length).toBe(1);
 
     const reResult = await waitForNotificationMatch(
       device,

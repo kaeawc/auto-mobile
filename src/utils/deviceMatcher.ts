@@ -9,7 +9,14 @@ export interface DeviceMatcher {
 }
 
 function parseVersion(version: string): number[] {
-  return version.split(".").map(Number);
+  // parseInt (not Number) tolerates a trailing non-numeric suffix such as the
+  // quarterly-release marker in "14-QPR1", coercing the segment to its leading
+  // integer instead of NaN. A segment with no leading digit (an Android
+  // codename like "Tiramisu") still yields NaN and is handled in compareVersions.
+  return version.split(".").map(segment => {
+    const parsed = parseInt(segment, 10);
+    return Number.isNaN(parsed) ? NaN : parsed;
+  });
 }
 
 function compareParsedVersions(partsA: number[], partsB: number[]): number {
@@ -22,7 +29,16 @@ function compareParsedVersions(partsA: number[], partsB: number[]): number {
 }
 
 export function compareVersions(a: string, b: string): number {
-  return compareParsedVersions(parseVersion(a), parseVersion(b));
+  const delta = compareParsedVersions(parseVersion(a), parseVersion(b));
+  if (Number.isNaN(delta)) {
+    // A fully non-numeric segment (e.g. an Android codename like "Tiramisu")
+    // cannot be ordered numerically. Fall back to a deterministic string
+    // comparison so the version is never silently dropped by BOTH the min and
+    // max filters at once via a NaN comparison (issue #4183).
+    if (a === b) { return 0; }
+    return a < b ? -1 : 1;
+  }
+  return delta;
 }
 
 function matchesCriteria(

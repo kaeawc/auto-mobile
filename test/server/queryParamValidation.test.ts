@@ -65,6 +65,9 @@ describe("queryParamValidation", () => {
       ["exponent literal silently accepted", "1e3", {}, 1000],
       ["explicit min honored", "5", { min: 5 }, 5],
       ["negative allowed when min is negative", "-3", { min: -5 }, -3],
+      // Beyond MAX_SAFE_INTEGER Number() collapses to the nearest double, which
+      // is still an integer, so it is accepted (with silent precision loss).
+      ["above MAX_SAFE_INTEGER accepted as nearest double", "9007199254740993", {}, 9007199254740992],
     ] as const)("returns %s", (_label, input, options, expected) => {
       expect(optionalInteger(input, "limit", options)).toBe(expected);
     });

@@ -8,6 +8,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import { resolveAutoInputMode } from "./resolveAutoInputMode";
 import { serverConfig } from "../../utils/ServerConfig";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
@@ -373,8 +374,8 @@ export class InputText extends BaseVisualChange {
 
     const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs);
     if (typed.error) {
-      // Partial failure: `charsSent` characters already landed on the device. The
-      // caller must retry only `text.slice(charsSent)`, never the whole string.
+      // A non-timeout failure leaves an exact confirmed prefix, while a timed-out
+      // key event is ambiguous: Android may have accepted it before adb was killed.
       return this.appendFailure(text, typed.error, typed.charsSent);
     }
 
@@ -463,7 +464,7 @@ export class InputText extends BaseVisualChange {
     plans: KeyEventPlan[],
     remaining: () => number | undefined,
     timeoutMs: number | undefined
-  ): Promise<{ charsSent: number; error?: string }> {
+  ): Promise<{ charsSent?: number; error?: string }> {
     let charsSent = 0;
     for (const plan of plans) {
       const budget = remaining();
@@ -481,7 +482,13 @@ export class InputText extends BaseVisualChange {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.warn(`[InputText] append key event failed after ${charsSent} char(s): ${message}`, error);
-        return { charsSent, error: `append key event failed: ${message}` };
+        // An adb timeout kills the host child but cannot establish whether Android
+        // accepted the current key event. Reporting the earlier prefix as an exact
+        // retry boundary would let a caller duplicate this ambiguous character.
+        return {
+          ...(error instanceof AdbCommandTimeoutError ? {} : { charsSent }),
+          error: `append key event failed: ${message}`,
+        };
       }
       charsSent += 1;
     }
@@ -520,9 +527,15 @@ export class InputText extends BaseVisualChange {
   private appendFailure(
     text: string,
     error: string,
-    charsSent: number
+    charsSent?: number
   ): SendTextResult & { method?: InputTextMode } {
-    return { success: false, text, error, method: "append", charsSent };
+    return {
+      success: false,
+      text,
+      error,
+      method: "append",
+      ...(charsSent !== undefined ? { charsSent } : {}),
+    };
   }
 
   private async executeAndroidEventOnlyTextInput(

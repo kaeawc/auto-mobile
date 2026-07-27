@@ -331,4 +331,3 @@ tracked back to [#1099](https://github.com/kaeawc/auto-mobile/issues/1099):
 | [#4534](https://github.com/kaeawc/auto-mobile/issues/4534) | Evict the append cache on rapid same-serial device reuse (needs a device-connect signal). |
 | [#4535](https://github.com/kaeawc/auto-mobile/issues/4535) | Optional daemon capability signal for newer input params (e.g. `input/typeText mode:append`). |
 | [#4536](https://github.com/kaeawc/auto-mobile/issues/4536) | Prefer a reliable native AltGraph signal over the `ctrl && alt` heuristic. |
-| [#4537](https://github.com/kaeawc/auto-mobile/issues/4537) | Surface partial-progress (`charsSent`) on a failed multi-character `input/typeText` append over the wire. |

@@ -832,8 +832,30 @@ describe("InputText", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("append key event failed");
+    expect(result.charsSent).toBeUndefined();
     // Exactly one attempt: the deadline is not multiplied by the retry count.
     expect(keyEventCalls).toBe(1);
+  });
+
+  test("a timed-out later append key leaves the retry boundary ambiguous", async () => {
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes("input keyevent KEYCODE_B")) {
+        return Promise.reject(
+          new AdbCommandTimeoutError("Command timed out after 5ms: adb shell input keyevent KEYCODE_B")
+        );
+      }
+      return Promise.resolve(execResult(""));
+    };
+    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
+
+    const result = await inputText.appendText("ab", 5000);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("append key event failed");
+    // KEYCODE_A was confirmed, but Android may have accepted KEYCODE_B before
+    // adb timed out, so `1` would be an unsafe retry boundary.
+    expect(result.charsSent).toBeUndefined();
   });
 
   test("append charges the API probe and every key event against the caller's budget", async () => {

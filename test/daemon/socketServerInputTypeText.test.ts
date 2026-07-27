@@ -8,6 +8,7 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { InputText } from "../../src/features/action/InputText";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
@@ -70,7 +71,7 @@ class ScriptedAdbExecutor {
         return;
       }
       this.timer.setTimeout(
-        () => reject(new Error(`adb command timed out after ${timeoutMs}ms: ${label}`)),
+        () => reject(new AdbCommandTimeoutError(`adb command timed out after ${timeoutMs}ms: ${label}`)),
         timeoutMs
       );
     });
@@ -246,6 +247,137 @@ describe("UnixSocketServer input/typeText", () => {
     }
   });
 
+  test("failed multi-character append reports the landed prefix on the error envelope", async () => {
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({
+        success: false,
+        error: "append key event failed: adb rejected KEYCODE_B",
+        charsSent: 1,
+      }),
+    });
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "append key event failed: adb rejected KEYCODE_B",
+      charsSent: 1,
+    });
+    expect(response.result).toBeUndefined();
+  });
+
+  test("append reports full progress when submit fails after all text lands", async () => {
+    const requestImeAction = mock(async () => ({
+      success: false,
+      error: "enter key unavailable",
+      totalTimeMs: 1,
+    }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({ success: true, charsSent: 2 }),
+    });
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+      submit: true,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "enter key unavailable",
+      charsSent: 2,
+    });
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+  });
+
+  test("append reports full progress when submit throws after all text lands", async () => {
+    const requestImeAction = mock(async () => {
+      throw new Error("CtrlProxy send failed");
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({ success: true, charsSent: 2 }),
+    });
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+      submit: true,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "CtrlProxy send failed",
+      charsSent: 2,
+    });
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+  });
+
+  test("append preserves full progress when submit reaches the shared deadline", async () => {
+    const requestImeAction = mock(
+      () =>
+        new Promise(resolve => {
+          fakeTimer.setTimeout(
+            () => resolve({ success: false, error: "enter key unavailable", totalTimeMs: 1 }),
+            100
+          );
+        })
+    );
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({ success: true, charsSent: 2 }),
+    });
+    await server.start();
+
+    const responsePromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+      submit: true,
+    }, 100);
+
+    await flushMicrotasks();
+    expect(requestImeAction).toHaveBeenCalledWith("done", 100);
+    fakeTimer.advanceTime(100);
+    await flushMicrotasks();
+
+    const response = await withWedgeGuard(
+      responsePromise,
+      "the timed-out submit did not release the per-device queue"
+    );
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("input/typeText exceeded 100ms");
+    expect(response.charsSent).toBe(2);
+  });
+
   // The review's Critical + P1 finding, which share one root cause: the append path
   // used to receive no timeout at all. `runInputOperationWithTimeout` detects the
   // socket deadline but then AWAITS the in-flight operation before releasing the
@@ -293,6 +425,42 @@ describe("UnixSocketServer input/typeText", () => {
     );
     expect(next.success).toBe(true);
     expect(requestSetText).toHaveBeenCalledWith("next", { timeoutMs: 30_000 });
+  });
+
+  test("a timed-out later append key omits an unsafe retry boundary", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ScriptedAdbExecutor(fakeTimer, "KEYCODE_B");
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
+    await server.start();
+
+    const responsePromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+    }, 100);
+
+    await flushMicrotasks();
+    fakeTimer.advanceTime(100);
+    await flushMicrotasks();
+
+    const response = await withWedgeGuard(
+      responsePromise,
+      "the timed-out append did not release the per-device queue"
+    );
+    expect(response.success).toBe(false);
+    expect(response.charsSent).toBeUndefined();
+    expect(adb.inputCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+    ]);
   });
 
   // The first wedge fix bounded only the getprop FALLBACK. Production AdbClient
@@ -604,6 +772,7 @@ describe("UnixSocketServer input/typeText", () => {
 
     expect(response.success).toBe(false);
     expect(String(response.error)).toContain("append cannot type \"A\"");
+    expect(response.charsSent).toBe(0);
     // Not silently repaired by the replace path, which would wipe the field.
     expect(requestSetText).not.toHaveBeenCalled();
     expect(adb.inputCommands()).toEqual([]);
@@ -883,6 +1052,7 @@ describe("UnixSocketServer input/typeText", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("return key unavailable");
+    expect(response.charsSent).toBeUndefined();
     expect(requestSetText).toHaveBeenCalledWith("hi there", { timeoutMs: 30_000 });
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });

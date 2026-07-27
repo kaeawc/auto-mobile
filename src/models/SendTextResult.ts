@@ -8,12 +8,13 @@ export interface SendTextResult extends BaseActionResult {
   imeAction?: string;
   /**
    * For the Android `append` mode only: how many leading characters of `text`
-   * were actually sent to the device as key events. Append is best-effort and
-   * char-by-char, so on a partial failure (an adb reject/timeout mid-batch) this
-   * is the length of the prefix that landed — a caller must retry only
-   * `text.slice(charsSent)`, never the whole string, or it doubles the prefix
-   * (issue #3351). Present on both success (== full length) and partial-failure
-   * results; omitted by the non-append modes.
+   * were confirmed by adb as sent to the device as key events. Append is
+   * best-effort and char-by-char, so after a definitive partial failure this is
+   * the safe retry boundary: retry only `text.slice(charsSent)`, never the whole
+   * string, or it doubles the prefix (issue #3351). Omitted if an in-flight key
+   * event times out because adb cannot establish whether Android accepted it;
+   * callers must re-observe before retrying in that case. Present on success
+   * (== full length) and some failed append results; omitted by non-append modes.
    */
   charsSent?: number;
 }

@@ -185,6 +185,10 @@ describe("daemon input API consumer docs", () => {
     expect(snapshotGuide).toContain("Legacy desktop implementation");
     expect(snapshotGuide).toContain("does not pair or echo `frameContext`");
     expect(snapshotGuide).toMatch(/not a reference implementation for\s+this protocol/);
+    expect(snapshotGuide).toMatch(
+      /`input\/tap` and `input\/swipe`, the\s+daemon rejects a stale echoed context/,
+    );
+    expect(snapshotGuide).toContain("[#4586](https://github.com/kaeawc/auto-mobile/issues/4586)");
     expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
     expect(unixSocketApi).toContain(
       `default \`${defaultReleaseVersion}\` CtrlProxy artifacts are legacy`,

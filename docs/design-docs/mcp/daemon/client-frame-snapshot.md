@@ -299,8 +299,7 @@ fakes and no device, socket or real timer.
 
 ## Scope note
 
-This is the **client-side** consolidation. The durable cross-client fix — echoing
-frame identity on `input/*` so the *daemon* rejects stale-context input, which
-protects third-party clients that will not reimplement these rules — is tracked
-separately under [#4505](https://github.com/kaeawc/auto-mobile/issues/4505) and
-[#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
+This is the **client-side** consolidation. For `input/tap` and `input/swipe`, the
+daemon rejects a stale echoed context for every client, including one that does
+not reimplement this policy. Device-boundary validation for the remaining input
+methods is tracked separately under [#4586](https://github.com/kaeawc/auto-mobile/issues/4586).

@@ -18,13 +18,17 @@ AutoMobile daemon, see the
 3. When a live, paired frame is available for the selected real device, the mirror becomes
    **interactive automatically** — that is control mode. Until then it stays a read-only inspector.
 
-To **exit**, turn the **Live** toggle off, close the panel, or press **Escape** when the mirror is
-not focused. Leaving control mode returns the view to the ordinary inspector (click-to-select,
-hover-to-highlight).
+To **exit**, turn the **Live** toggle off or close the Layout panel. (Pressing **Escape** does not
+exit control mode: while the mirror is focused, Escape is forwarded to the device as the Back
+button; while it is unfocused, Escape only deselects/closes the inspector pane.) Leaving control
+mode returns the view to the ordinary inspector (click-to-select, hover-to-highlight).
 
-Control mode is **opt-in and only in the desktop app**. It never turns on for mock/demo data, for a
-device that is not explicitly selected, or when the stream is disconnected — in every one of those
-cases the mirror falls back to the plain inspector.
+Control mode is **opt-in**. Among AutoMobile's own surfaces only the desktop app enables it — the
+IDE plugin stays inspector-only — though any third-party client built on the daemon can offer the
+same control surface (see the
+[third-party client guide](../design-docs/mcp/daemon/client-screen-control.md)). It never turns on
+for mock/demo data, for a device that is not explicitly selected, or when the stream is
+disconnected — in every one of those cases the mirror falls back to the plain inspector.
 
 ## Supported interactions
 
@@ -45,8 +49,12 @@ A few details worth knowing:
   this stops pointer jitter from actuating the device.
 - **Keyboard needs focus.** Click the mirror first so it holds keyboard focus; only then do
   keystrokes forward. Clicking the mirror always re-focuses it.
-- **App/window shortcuts still work.** Any shortcut with Ctrl, Alt, or Cmd/Win stays with the
-  desktop app and is not sent to the device, so your menus and window shortcuts are unaffected.
+- **App/window shortcuts still work.** A shortcut with Ctrl, Alt, or Cmd/Win generally stays with
+  the desktop app and is not sent to the device, so your menus and window shortcuts are unaffected.
+  The one exception is character composition — AltGr on Windows/Linux, Option on macOS — which
+  still types the composed character; see the
+  [keyboard forwarding policy](../design-docs/mcp/daemon/screen-control-mapping.md#keyboard-forwarding-policy)
+  for the exact rule.
 
 ## Feedback
 

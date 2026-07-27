@@ -2,19 +2,25 @@ package dev.jasonpearson.automobile.desktop.domain
 
 /**
  * A transient marker for a control-mode input the client actually forwarded, used to draw a brief
- * touch pulse where a tap landed (issue
- * [#3352](https://github.com/kaeawc/auto-mobile/issues/3352)).
+ * touch pulse where a tap landed (issue #3352).
  *
- * Pure model: device coordinates (the same space as hierarchy `bounds` and [DevicePoint]) plus the
- * client-clock instant the input was forwarded. A UI layer maps [x]/[y] back to viewport pixels
- * through the same geometry the tap was mapped with, and fades the pulse out over
- * [TouchFeedbackModel.DURATION_MS].
- *
- * The marker is recorded only for an input that reached the daemon dispatch queue — never for a
- * dropped one (an off-screen point, or a keystroke the policy declined) — so the pulse is honest
- * feedback rather than noise. Deciding that is the caller's job; this type only carries a point.
+ * The point is in device coordinates (the same space as hierarchy `bounds` and [DevicePoint]), and
+ * [deviceWidth]/[deviceHeight] are the mapping bounds of the frame snapshot the tap was mapped
+ * through — captured with the marker so the pulse renders back through the SAME geometry the tap
+ * used. Binding the mapping bounds to the marker is what keeps the pulse from drifting if a
+ * resolution or rotation change arrives during its fade, and what makes it land where the tap went
+ * rather than where the live (possibly stale) hierarchy would put it.
  */
-public data class TouchFeedbackMarker(val x: Int, val y: Int, val startedAtMs: Long)
+public data class TouchFeedbackMarker(
+  val x: Int,
+  val y: Int,
+  val deviceWidth: Int,
+  val deviceHeight: Int,
+  val startedAtMs: Long,
+)
+
+/** Frame-pixel center of a pulse, produced by [ActiveTouchFeedback.frameOffset]. */
+public data class TouchFeedbackFrameOffset(val x: Float, val y: Float)
 
 /**
  * A [TouchFeedbackMarker] still visible at a given instant, with its fade resolved.
@@ -23,12 +29,25 @@ public data class TouchFeedbackMarker(val x: Int, val y: Int, val startedAtMs: L
  * pulse fully expires, so a UI layer derives alpha (`1 - progress`) and an expanding radius from it
  * without repeating the clock math.
  */
-public data class ActiveTouchFeedback(val marker: TouchFeedbackMarker, val progress: Float)
+public data class ActiveTouchFeedback(val marker: TouchFeedbackMarker, val progress: Float) {
+  /**
+   * The pulse's center in frame pixels, for a device frame [frameWidthPx] wide.
+   *
+   * Scaled through the marker's OWN captured [TouchFeedbackMarker.deviceWidth] — a single
+   * width-based ratio for both axes, the exact inverse of the width-based viewport→device mapping —
+   * so the pulse lands where the tap did and cannot drift when the live frame geometry changes
+   * mid-fade. A non-positive captured width yields the origin (a degenerate snapshot has no
+   * addressable pixel to place a pulse at).
+   */
+  public fun frameOffset(frameWidthPx: Float): TouchFeedbackFrameOffset {
+    val scale = if (marker.deviceWidth > 0) frameWidthPx / marker.deviceWidth else 0f
+    return TouchFeedbackFrameOffset(marker.x * scale, marker.y * scale)
+  }
+}
 
 /**
  * Holds the transient touch-feedback pulses for a mirrored device screen and resolves which are
- * still visible at a given client-clock instant (issue
- * [#3352](https://github.com/kaeawc/auto-mobile/issues/3352)).
+ * still visible at a given client-clock instant (issue #3352).
  *
  * Pure and clock-free: every method takes `nowMs`, so the fade transitions are unit-tested with a
  * fed clock and no timer, exactly like the other `desktop-domain` policies. The reads
@@ -42,13 +61,31 @@ public class TouchFeedbackModel(private val durationMs: Long = DURATION_MS) {
   private val markers = ArrayDeque<TouchFeedbackMarker>()
 
   /**
-   * Record a forwarded input at device coordinate ([x], [y]) as of [nowMs], starting a fresh pulse.
-   * Fully-faded markers are pruned first, and the oldest live one is dropped if this would exceed
+   * Record a pulse only when the input was actually [forwarded] to the device — i.e. the client's
+   * dispatch accepted it. A tap that was dropped (off-screen, a full bounded queue) or never
+   * dispatched (control unwired) must NOT pulse, or the indicator would claim a success that never
+   * happened. This is the gate; [record] itself is unconditional.
+   */
+  public fun recordIfForwarded(
+    forwarded: Boolean,
+    x: Int,
+    y: Int,
+    deviceWidth: Int,
+    deviceHeight: Int,
+    nowMs: Long,
+  ) {
+    if (forwarded) record(x, y, deviceWidth, deviceHeight, nowMs)
+  }
+
+  /**
+   * Record a forwarded input at device coordinate ([x], [y]) — mapped through a snapshot whose
+   * bounds are [deviceWidth] x [deviceHeight] — as of [nowMs], starting a fresh pulse. Fully-faded
+   * markers are pruned first, and the oldest live one is dropped if this would exceed
    * [MAX_MARKERS].
    */
-  public fun record(x: Int, y: Int, nowMs: Long) {
+  public fun record(x: Int, y: Int, deviceWidth: Int, deviceHeight: Int, nowMs: Long) {
     markers.removeAll { progress(it, nowMs) >= 1f }
-    markers.addLast(TouchFeedbackMarker(x, y, nowMs))
+    markers.addLast(TouchFeedbackMarker(x, y, deviceWidth, deviceHeight, nowMs))
     while (markers.size > MAX_MARKERS) {
       markers.removeFirst()
     }
@@ -60,9 +97,7 @@ public class TouchFeedbackModel(private val durationMs: Long = DURATION_MS) {
     if (p >= 1f) null else ActiveTouchFeedback(marker, p)
   }
 
-  /**
-   * Whether any pulse is still visible at [nowMs]; drives whether a UI layer needs to keep ticking.
-   */
+  /** Whether any pulse is still visible at [nowMs]; drives whether a UI layer keeps ticking. */
   public fun hasActive(nowMs: Long): Boolean = markers.any { progress(it, nowMs) < 1f }
 
   /** Drop every pulse. Called when control mode exits, so a stale pulse never lingers. */

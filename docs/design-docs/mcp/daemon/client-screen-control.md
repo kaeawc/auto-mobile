@@ -12,7 +12,7 @@ device key.
 The contract is deliberately published rather than kept as private UI detail, because the
 **desktop app is not the only consumer**: any client that speaks the daemon's Unix-socket
 `input/*` protocol can implement the same control surface. Everything a third-party author needs
-is on this page or in the four documents it links; **you do not need to read any Compose or
+is on this page or in the documents it links; **you do not need to read any Compose or
 Kotlin source to implement a correct client.** The desktop inspector is merely the reference
 implementation.
 
@@ -38,10 +38,10 @@ the normative spec for its piece.
 | # | Contract | Where it lives |
 | --- | --- | --- |
 | 1 | The `input/*` socket endpoints (tap, swipe, pressButton, typeText, key) | [Unix Socket API → Input API](unix-socket-api.md#input-api) |
-| 2 | Viewport→device **coordinate mapping** (#3346) | [Screen Control Mapping](screen-control-mapping.md#viewport--device-mapping) |
-| 3 | **Drag-to-swipe** threshold and cancellation (#3350) | [Screen Control Mapping → Drag-to-swipe policy](screen-control-mapping.md#drag-to-swipe-policy) |
-| 4 | **Key-forwarding** and host-shortcut policy (#3351) | [Screen Control Mapping → Keyboard forwarding policy](screen-control-mapping.md#keyboard-forwarding-policy) |
-| 5 | **Frame snapshot** pairing + **post-input refresh** (#3348) | [Client Frame Snapshot](client-frame-snapshot.md) |
+| 2 | Viewport→device **coordinate mapping** ([#3346](https://github.com/kaeawc/auto-mobile/issues/3346)) | [Screen Control Mapping](screen-control-mapping.md#viewport--device-mapping) |
+| 3 | **Drag-to-swipe** threshold and cancellation ([#3350](https://github.com/kaeawc/auto-mobile/issues/3350)) | [Screen Control Mapping → Drag-to-swipe policy](screen-control-mapping.md#drag-to-swipe-policy) |
+| 4 | **Key-forwarding** and host-shortcut policy ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) | [Screen Control Mapping → Keyboard forwarding policy](screen-control-mapping.md#keyboard-forwarding-policy) |
+| 5 | **Frame snapshot** pairing + **post-input refresh** ([#3348](https://github.com/kaeawc/auto-mobile/issues/3348)) | [Client Frame Snapshot](client-frame-snapshot.md) |
 
 ## Implementing a client, end to end
 

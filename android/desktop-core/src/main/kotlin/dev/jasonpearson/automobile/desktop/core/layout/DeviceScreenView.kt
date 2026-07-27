@@ -90,8 +90,8 @@ private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCas
 
 /**
  * Base radius, in frame pixels at zoom 1.0, of the transient control-tap feedback pulse
- * (issue #3352). Scaled up with the device frame by the same `boundsToFrameScale` the element
- * overlays use, and grown further as the pulse fades.
+ * (issue #3352). Placed via the marker's captured `frameOffset`, and grown further as the pulse
+ * fades.
  */
 private const val TOUCH_PULSE_BASE_RADIUS_PX = 12f
 
@@ -343,8 +343,13 @@ fun DeviceScreenView(
    * same frame: a snapshot swap between the click and the caller's dispatch cannot change the
    * mapping this point was produced with. The point carries [DevicePoint.inBounds]; a null default
    * makes control mode inert until a caller wires it. No-op in inspector mode.
+   *
+   * Returns whether the tap was actually **forwarded** — dispatched to the device AND accepted by
+   * the caller's input queue (false for an off-screen point or a full queue). The view uses that
+   * answer to decide whether to show the transient touch pulse (issue #3352), so a tap that never
+   * reached the device shows no success feedback. The inert null default counts as not forwarded.
    */
-  onControlTap: ((DeviceFrameSnapshot, DevicePoint) -> Unit)? = null,
+  onControlTap: ((DeviceFrameSnapshot, DevicePoint) -> Boolean)? = null,
   /**
    * Called in [DeviceScreenControlMode.Control] when a pointer drag completes, with the snapshot
    * the drag began on and the raw mapped start/end device coordinates (issue #3350). Both endpoints
@@ -820,12 +825,24 @@ fun DeviceScreenView(
                           ViewportPoint(offset.x, offset.y),
                           geometry,
                         )
-                      currentOnControlTap?.invoke(snapshot, point)
-                      // Pulse where the tap landed, but only for a point the session will actually
-                      // forward: an out-of-bounds tap is dropped per the coordinate-mapping
-                      // contract, so showing a marker for it would be misleading feedback.
-                      if (point.inBounds) {
-                        touchFeedback.record(point.x, point.y, System.currentTimeMillis())
+                      // Pulse ONLY when the tap was actually forwarded and accepted (issue
+                      // #3352): the callback answers dispatched-and-accepted, false for an
+                      // off-screen point, a full queue, or an unwired (null) control view. Showing
+                      // a
+                      // marker for anything else would claim a success that never reached the
+                      // device. The marker captures the snapshot's mapping bounds so it renders
+                      // back
+                      // through the same geometry the tap used and cannot drift mid-fade.
+                      val forwarded = currentOnControlTap?.invoke(snapshot, point) ?: false
+                      touchFeedback.recordIfForwarded(
+                        forwarded = forwarded,
+                        x = point.x,
+                        y = point.y,
+                        deviceWidth = snapshot.deviceWidth,
+                        deviceHeight = snapshot.deviceHeight,
+                        nowMs = System.currentTimeMillis(),
+                      )
+                      if (forwarded) {
                         touchFeedbackNow = System.currentTimeMillis()
                         touchFeedbackGeneration++
                       }
@@ -991,24 +1008,24 @@ fun DeviceScreenView(
                   }
 
                   // Transient touch-point feedback (issue #3352): a blue pulse at each forwarded
-                  // control tap, fading and expanding over its lifetime. Marker coordinates are in
-                  // device (== hierarchy bounds) space, so they scale to frame pixels the same way
-                  // element overlays do. Empty in inspector mode.
+                  // control tap, fading and expanding over its lifetime. Each marker is placed
+                  // through its OWN captured snapshot bounds (frameOffset), not the live
+                  // boundsToFrameScale — so it lands where the tap mapped and does not drift if a
+                  // resolution/rotation change arrives mid-fade. Empty in inspector mode.
                   for (feedback in activeTouchFeedback) {
-                    val cx = feedback.marker.x * boundsToFrameScale
-                    val cy = feedback.marker.y * boundsToFrameScale
+                    val center = feedback.frameOffset(size.width)
                     val alpha = (1f - feedback.progress).coerceIn(0f, 1f)
                     val radius = TOUCH_PULSE_BASE_RADIUS_PX * (0.7f + 0.6f * feedback.progress)
                     val pulseColor = Color(0xFF2196F3)
                     drawCircle(
                       color = pulseColor.copy(alpha = alpha * 0.25f),
                       radius = radius,
-                      center = Offset(cx, cy),
+                      center = Offset(center.x, center.y),
                     )
                     drawCircle(
                       color = pulseColor.copy(alpha = alpha),
                       radius = radius,
-                      center = Offset(cx, cy),
+                      center = Offset(center.x, center.y),
                       style = Stroke(width = 2f),
                     )
                   }

@@ -129,7 +129,7 @@ class DeviceScreenViewKeyboardTest {
         elementMap = mapOf("root" to root),
         controlMode = DeviceScreenControlMode.Control,
         controlSnapshot = snapshot(),
-        onControlTap = { _, _ -> },
+        onControlTap = { _, _ -> true },
         onControlKey = { _, stroke ->
           observed.forwarded.add(stroke)
           true
@@ -247,7 +247,7 @@ class DeviceScreenViewKeyboardTest {
             elementMap = mapOf("root" to root),
             controlMode = DeviceScreenControlMode.Control,
             controlSnapshot = snapshot(),
-            onControlTap = { _, _ -> },
+            onControlTap = { _, _ -> true },
             onControlKey = { _, _ -> true },
             onControlFocusChanged = { focusStates.add(it) },
           )
@@ -294,7 +294,7 @@ class DeviceScreenViewKeyboardTest {
         elementMap = mapOf("root" to root),
         controlMode = mode,
         controlSnapshot = snapshot,
-        onControlTap = { _, _ -> },
+        onControlTap = { _, _ -> true },
         onControlKey = { _, stroke ->
           observed.forwarded.add(stroke)
           forwardsEverything

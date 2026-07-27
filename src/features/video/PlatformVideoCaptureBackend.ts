@@ -182,18 +182,22 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         // every stop (issue #4170).
         logger.info(`[VideoCapture] Cleaning up temp file on device`);
         const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
-        const rmProcess = await adb.spawn(rmArgs);
+        try {
+          const rmProcess = await adb.spawn(rmArgs);
 
-        await new Promise<void>(resolve => {
-          rmProcess.once("exit", () => {
-            logger.info(`[VideoCapture] Temp file cleaned up`);
-            resolve();
+          await new Promise<void>(resolve => {
+            rmProcess.once("exit", () => {
+              logger.info(`[VideoCapture] Temp file cleaned up`);
+              resolve();
+            });
+            rmProcess.once("error", err => {
+              logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+              resolve();
+            });
           });
-          rmProcess.once("error", err => {
-            logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-            resolve(); // Don't fail the whole operation if cleanup fails
-          });
-        });
+        } catch (err) {
+          logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+        }
       }
     } else {
       await this.finalizeIosRecording(backendHandle);

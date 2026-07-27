@@ -349,6 +349,24 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       // The finally block runs the cleanup even though the pull rejected.
       expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
     });
+
+    test("preserves the pull error when cleanup cannot start", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      fakeClient.setSpawnExit("pull", 1);
+      fakeClient.setSpawnRejection("rm", new Error("cleanup spawn failed"));
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+
+      await expect(backend.stop(handle)).rejects.toThrow(/adb pull failed/);
+
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
+    });
   });
 
   describe("clampBitrateKbps", () => {

@@ -56,7 +56,7 @@ import type { SimulatedErrorType } from "../../../server/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
-import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
+import { COORDINATE_SPACE_PX, type CoordinateSpace } from "../../../daemon/canonicalPixels";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import {
   ScreenshotBackoffScheduler,
@@ -2075,7 +2075,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     screenWidth: number,
     screenHeight: number,
     metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
-    captureSequence?: number
+    captureSequence?: number,
+    coordinateSpace?: CoordinateSpace
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -2083,16 +2084,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     try {
-      // The identity travels with the frame from the moment it was requested (issue #3348). The
-      // daemon still verifies these declared dimensions against the frame's real pixels before
-      // stamping it, which catches a geometry change between binding and delivery.
-      //
-      // Declare canonical pixels (#4549) when the runner supplied complete scale metadata — the
-      // published screenWidth/screenHeight are then native-scale pixels, matching the hierarchy
-      // stamp. A pre-#4548 runner has no metadata, so the frame stays legacy point-space.
+      // The identity AND the coordinate space travel with the frame from the moment it was
+      // requested (issues #3348, #4549) — both are read from the binding taken at request
+      // initiation, NEVER from the client's LATEST scale metadata at delivery time. A hierarchy
+      // that flips the metadata (canonical<->legacy) while this frame is in flight must not
+      // relabel it: the declared space must match the geometry the frame was captured under. The
+      // daemon still verifies the declared dimensions against the frame's real pixels.
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
         captureSequence,
-        ...(this.getScreenScaleMetadata() ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
+        ...(coordinateSpace ? { coordinateSpace } : {}),
       });
     } catch (error) {
       logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
@@ -2140,7 +2140,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
             screenWidth,
             screenHeight,
             result,
-            binding?.captureSequence
+            binding?.captureSequence,
+            binding?.coordinateSpace
           );
         },
         {
@@ -2222,8 +2223,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       ];
     // A change clears the forwarded flag: the geometry becomes capture-tracked only once a
     // hierarchy carrying it is forwarded (see pushHierarchyToObservationStream) — which will NOT
-    // happen while hierarchy pushes are suppressed, or when there is no stream server.
-    this.screenGeometry.update(pixelWidth, pixelHeight);
+    // happen while hierarchy pushes are suppressed, or when there is no stream server. The
+    // coordinate space is bound here too (#4549), from the metadata present for THIS hierarchy, so
+    // a later metadata flip cannot restamp a frame whose request was bound now.
+    this.screenGeometry.update(pixelWidth, pixelHeight, metadata ? COORDINATE_SPACE_PX : undefined);
   }
 
   /**

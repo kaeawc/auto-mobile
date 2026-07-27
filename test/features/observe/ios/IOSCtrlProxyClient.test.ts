@@ -2918,6 +2918,46 @@ describe("IOSCtrlProxyClient", function() {
           });
         }
       });
+
+      test("stamps the screenshot's coordinateSpace from the request-time binding, not later metadata (#4549)", async function() {
+        const socket = await startStreamServer();
+        const geometry = (ctrlProxyClient as any).screenGeometry;
+
+        // Bind a CANONICAL-PIXEL capture: forward a hierarchy carrying complete #4548 scale metadata.
+        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+          screenWidth: 375, screenHeight: 812, screenScale: 3,
+          nativeScale: 3, pixelWidth: 1125, pixelHeight: 2436,
+        });
+        const boundPx = geometry.bind();
+        expect(boundPx.coordinateSpace).toBe("px");
+
+        // A legacy hierarchy arrives while the frame is in flight, flipping the LATEST metadata to
+        // null. Reading it at delivery would DROP the px declaration from a canonical-bound frame.
+        (ctrlProxyClient as any).reportedScaleMetadata = null;
+        socket.reset();
+
+        (ctrlProxyClient as any).pushScreenshotToObservationStream(
+          "c2hvdA==", boundPx.width, boundPx.height, undefined, boundPx.captureSequence, boundPx.coordinateSpace
+        );
+        const pxShot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+        expect(pxShot.coordinateSpace).toBe("px"); // the bound value, NOT the flipped-to-null metadata
+
+        // Reverse: a LEGACY-bound capture must not gain px just because metadata later appeared.
+        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+          screenWidth: 320, screenHeight: 693, screenScale: 3, // no nativeScale => legacy binding
+        });
+        const boundLegacy = geometry.bind();
+        expect(boundLegacy.coordinateSpace).toBeUndefined();
+
+        (ctrlProxyClient as any).reportedScaleMetadata = { nativeScale: 3, pixelWidth: 960, pixelHeight: 2079 };
+        socket.reset();
+
+        (ctrlProxyClient as any).pushScreenshotToObservationStream(
+          "c2hvdA==", boundLegacy.width, boundLegacy.height, undefined, boundLegacy.captureSequence, boundLegacy.coordinateSpace
+        );
+        const legacyShot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+        expect(legacyShot.coordinateSpace).toBeUndefined(); // bound legacy, NOT the flipped-to-px metadata
+      });
     });
 
     describe("coordinate-mapping golden vectors: LIVE iOS point->pixel (issue #4547)", function() {

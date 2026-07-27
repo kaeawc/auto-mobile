@@ -44,7 +44,7 @@ import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
-import { TrackedScreenGeometry, type ScreenGeometryBinding } from "../TrackedScreenGeometry";
+import { TrackedScreenGeometry, screenshotBindingPushOptions, type ScreenGeometryBinding } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
 import {
@@ -2947,15 +2947,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2340;
 
     try {
-      // The identity travels with the frame from the moment it was requested (issue #3348). The
-      // daemon still verifies these declared dimensions against the frame's real pixels before
-      // stamping it, which catches a geometry change between binding and delivery.
-      server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
-        captureSequence: binding?.captureSequence,
-        // Android bounds are already physical pixels (nativeScale === 1), so a post-#4548 runner's
-        // frame is canonical pixels as-is — declare it so the client reads px uniformly (#4549).
-        ...(this.getScreenScaleMetadata() ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
-      });
+      // The identity AND the coordinate space travel with the frame from the moment it was
+      // requested (issues #3348, #4549) — both from the binding taken at initiation, never the
+      // client's LATEST metadata at delivery. Android bounds are already physical pixels
+      // (nativeScale === 1), so a post-#4548 runner's frame is canonical pixels as-is; the binding
+      // carries that declaration so a mid-flight metadata flip cannot relabel the frame.
+      server.pushScreenshotUpdate(
+        this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata,
+        screenshotBindingPushOptions(binding)
+      );
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
     }
@@ -2990,8 +2990,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (bestDimensions) {
       // A change clears the identity: it becomes capture-tracked only once the hierarchy carrying
       // it reaches the daemon (see pushHierarchyToObservationStream) — which will NOT happen when
-      // this hierarchy is suppressed, or when there is no stream server.
-      this.screenGeometry.update(bestDimensions.width, bestDimensions.height);
+      // this hierarchy is suppressed, or when there is no stream server. The coordinate space is
+      // bound here (#4549) from the metadata present for THIS hierarchy, so a later metadata flip
+      // cannot restamp a frame whose request was bound now.
+      this.screenGeometry.update(
+        bestDimensions.width,
+        bestDimensions.height,
+        this.reportedScaleMetadata ? COORDINATE_SPACE_PX : undefined
+      );
     } else {
       // No usable window bounds in this hierarchy. Clearing (rather than keeping the previous
       // entry) stops a later push from vouching for dimensions this hierarchy cannot confirm.

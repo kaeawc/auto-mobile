@@ -89,7 +89,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("LEGACY iOS swipe (no runner scale metadata) passes coordinates through unchanged", async () => {
     const requestDrag = mock(async () => ({ success: true }));
-    const fetchHierarchy = mock(async () => null);
+    const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestDrag,
       getScreenScaleMetadata: () => null,

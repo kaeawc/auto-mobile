@@ -322,12 +322,17 @@ unit conversion of its own.
 
 The daemon performs any runner-specific conversion internally: the iOS XCUITest
 runner addresses the screen in **logical points**, so for iOS the daemon divides
-each incoming pixel coordinate by the runner-reported `nativeScale` (round-half-
-even) before dispatch. Android runners already take physical pixels, so nothing
-is converted. If the iOS runner supplied no scale metadata (a pre-#4548 runner,
-so its frames were never published as `coordinateSpace: "px"`), the daemon leaves
-the coordinates untouched — the legacy point-space fallback, in which the client
-was already working in points. See
+each incoming pixel coordinate by the runner-reported `nativeScale` before
+dispatch. That divide is an **exact fractional quotient** — it is NOT rounded —
+because XCUITest accepts fractional (`Double`) points and quantizing would discard
+sub-point precision. (Round-half-even applies only on the publish side, where
+points are converted to integer physical pixels; the input divide is its exact
+inverse, so the round-trip carries only that single publish-side quantization.)
+Android runners already take physical pixels, so nothing is converted. If the iOS
+runner supplied no scale metadata (a pre-#4548 runner, so its frames were never
+published as `coordinateSpace: "px"`), the daemon leaves the coordinates
+untouched — the legacy point-space fallback, in which the client was already
+working in points. See
 [Client Frame Snapshot: coordinate space](client-frame-snapshot.md#coordinate-space-canonical-pixels).
 
 ### Implementation status

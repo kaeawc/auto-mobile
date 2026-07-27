@@ -64,6 +64,7 @@ import {
 } from "../features/action/InputKey";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
@@ -180,6 +181,14 @@ export class UnixSocketServer {
    * same id with a different image re-probes rather than trusting a stale API level.
    */
   private appendTextInputs: Map<string, CachedAppendTextInput> = new Map();
+
+  /**
+   * Device ids whose iOS runner a scale probe CONFIRMED report no scale metadata (a genuine
+   * pre-#4548 runner). Cached so subsequent legacy taps skip the hierarchy-sync round trip (#4549).
+   * A probe FAILURE is never cached (it must re-probe); the entry is dropped the moment metadata
+   * appears, so a runner upgrade is not pinned to the stale legacy verdict.
+   */
+  private confirmedLegacyScaleDevices: Set<string> = new Set();
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -889,25 +898,88 @@ export class UnixSocketServer {
    * The scale metadata is populated by #4548 on hierarchy RECEIPT, which has not happened yet if a
    * control client sends its first input before the daemon has received any hierarchy for this
    * device — dispatching those pixels as points would land a 3x tap at 1/3 scale. So when the
-   * metadata is null we fetch one hierarchy first (no observation-stream push) to populate it, then
-   * decide. If it is STILL null (a pre-#4548 legacy runner), the control client never received px
-   * bounds either, so it is sending point-space coordinates and we pass them through unchanged.
+   * metadata is null we fetch one hierarchy first (no observation-stream push, bounded by
+   * `probeTimeoutMs`) to populate it, then decide:
+   *  - probe FAILS (throws, or returns no hierarchy — not connected / timed out): fail closed with
+   *    an actionable error rather than mis-dispatching; do NOT cache (the next input re-probes).
+   *  - probe SUCCEEDS but the runner carries no metadata: a genuine pre-#4548 legacy runner, whose
+   *    control client sends point-space coordinates — pass through, and cache the verdict so
+   *    subsequent legacy taps skip the round trip. The cache entry is dropped the moment metadata
+   *    appears, so a runner upgrade is not pinned to the legacy verdict.
+   *
+   * The caller must charge the probe's elapsed time against the gesture budget (recompute the
+   * remaining timeout after this resolves) so probe + gesture never exceed one request budget.
    */
+  /**
+   * The gesture budget remaining after the iOS scale probe (if any) ran, charging its elapsed
+   * wall-time against the request's total budget so probe + gesture never exceed one budget (#3351).
+   * Throws a timeout when the probe already consumed the budget, rather than starting a full-budget
+   * gesture on top of it. On the common path (metadata already known) the probe is synchronous, so
+   * the elapsed time is just the queue wait and this returns ~the full remaining budget.
+   */
+  private remainingBudgetAfterProbe(
+    queueEnterMs: number,
+    totalTimeoutMs: number,
+    toolName: string,
+    origin: string
+  ): number {
+    const remaining = totalTimeoutMs - (this.timer.now() - queueEnterMs);
+    if (remaining <= 0) {
+      throw new McpTimeoutError({
+        toolName,
+        timeoutMs: totalTimeoutMs,
+        origin: `UnixSocketServer.${origin}`,
+        detail: "iOS screen-scale probe consumed the request budget",
+      });
+    }
+    return remaining;
+  }
+
   private async toIosRunnerCoordinates(
     client: IOSCtrlProxyClient,
+    deviceId: string,
     coordinates: number[],
-    timeoutMs: number
+    probeTimeoutMs: number
   ): Promise<number[]> {
-    let nativeScale = client.getScreenScaleMetadata()?.nativeScale;
-    if (nativeScale === undefined) {
-      await client.requestHierarchySyncWithoutObservationStreamPush(undefined, false, undefined, timeoutMs);
-      nativeScale = client.getScreenScaleMetadata()?.nativeScale;
+    const knownScale = client.getScreenScaleMetadata()?.nativeScale;
+    if (knownScale !== undefined) {
+      // Metadata present: a runner upgrade drops any stale confirmed-legacy verdict for this device.
+      this.confirmedLegacyScaleDevices.delete(deviceId);
+      return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, knownScale));
     }
-    if (nativeScale === undefined) {
+    if (this.confirmedLegacyScaleDevices.has(deviceId)) {
+      // A prior probe SUCCEEDED with no metadata: a confirmed legacy runner. Skip the round trip.
       return coordinates;
     }
-    const scale = nativeScale;
-    return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, scale));
+
+    // Startup window: no hierarchy received yet, so #4548 receipt-based retention has not run. Fetch
+    // one (without an observation-stream push) so the scale is known before we decide the space.
+    let probed: unknown;
+    try {
+      probed = await client.requestHierarchySyncWithoutObservationStreamPush(undefined, false, undefined, probeTimeoutMs);
+    } catch (error) {
+      // Probe threw: a transient failure, NOT evidence of a legacy runner. Fail closed rather than
+      // mis-dispatching pixels as points.
+      throw toActionableError(error, `Could not determine iOS screen scale for ${deviceId}; the input coordinate scale probe failed`);
+    }
+    if (!probed) {
+      // Probe returned no hierarchy (not connected / timed out): a FAILURE, distinct from a runner
+      // that answered with no metadata. Fail closed and do NOT cache — the next input re-probes.
+      throw new ActionableError(
+        `Could not determine iOS screen scale for ${deviceId}: the hierarchy probe returned no data. ` +
+        `Retry once the device has produced a hierarchy.`
+      );
+    }
+
+    const probedScale = client.getScreenScaleMetadata()?.nativeScale;
+    if (probedScale === undefined) {
+      // Probe SUCCEEDED but the runner reported no scale metadata: a genuine pre-#4548 legacy
+      // runner. The control client never received px bounds, so it sends points — pass through, and
+      // cache the verdict so subsequent legacy taps skip the probe.
+      this.confirmedLegacyScaleDevices.add(deviceId);
+      return coordinates;
+    }
+    return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, probedScale));
   }
 
   private async handleInputTap(
@@ -941,8 +1013,14 @@ export class UnixSocketServer {
           .requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs);
       }
       const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
-      const [x, y] = await this.toIosRunnerCoordinates(iosClient, [args.x, args.y], remainingTimeoutMs);
-      return await iosClient.requestTapCoordinates(x, y, args.duration, remainingTimeoutMs);
+      const [x, y] = await this.toIosRunnerCoordinates(
+        iosClient,
+        targetDevice.deviceId,
+        [args.x, args.y],
+        remainingTimeoutMs
+      );
+      const gestureTimeoutMs = this.remainingBudgetAfterProbe(queueEnterMs, totalTimeoutMs, request.method, "handleInputTap");
+      return await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs);
     });
 
     if (!gestureResult.success) {
@@ -991,10 +1069,12 @@ export class UnixSocketServer {
       const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
       const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
         iosClient,
+        targetDevice.deviceId,
         [args.startX, args.startY, args.endX, args.endY],
         remainingTimeoutMs
       );
-      return await iosClient.requestDrag(startX, startY, endX, endY, 0, args.durationMs, 0, remainingTimeoutMs);
+      const gestureTimeoutMs = this.remainingBudgetAfterProbe(queueEnterMs, totalTimeoutMs, request.method, "handleInputSwipe");
+      return await iosClient.requestDrag(startX, startY, endX, endY, 0, args.durationMs, 0, gestureTimeoutMs);
     });
 
     if (!gestureResult.success) {

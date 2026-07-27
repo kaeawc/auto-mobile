@@ -192,15 +192,20 @@ describe("convertHierarchyToCanonicalPixels", () => {
       expect(hierarchy["accessibility-focused-element"]!.$["bounds"]).toEqual({ left: 6, top: 12, right: 18, bottom: 24 });
     });
 
-    it("leaves insets untouched (they carry their own self-describing units field)", () => {
+    it("converts the systemInsets alias (no units field) but leaves typed insets alone", () => {
       const hierarchy: ViewHierarchyResult = {
         hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 10, bottom: 20 } } } },
         screenWidth: 390,
         screenHeight: 844,
         systemInsets: { top: 47, right: 0, bottom: 34, left: 0 },
+        // Typed insets self-describe via `units`, so they are NOT touched by the coordinateSpace stamp.
+        insets: { available: true, source: "ios-sdk-safe-area", units: "points", safeArea: { top: 47, right: 0, bottom: 34, left: 0 } },
       };
       convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 });
-      expect(hierarchy.systemInsets).toEqual({ top: 47, right: 0, bottom: 34, left: 0 });
+      // systemInsets follows coordinateSpace -> pixels.
+      expect(hierarchy.systemInsets).toEqual({ top: 141, right: 0, bottom: 102, left: 0 });
+      // Typed insets untouched (points, self-describing).
+      expect(hierarchy.insets).toEqual({ available: true, source: "ios-sdk-safe-area", units: "points", safeArea: { top: 47, right: 0, bottom: 34, left: 0 } });
     });
   });
 });

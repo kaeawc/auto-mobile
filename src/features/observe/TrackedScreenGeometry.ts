@@ -17,19 +17,47 @@
  * Both the Android and iOS clients own one of these, so the rule is identical on both platforms by
  * construction rather than by two parallel implementations agreeing.
  */
+import type { CoordinateSpace } from "../../daemon/canonicalPixels";
+
 /**
  * The geometry and capture identity a screenshot request was initiated under. Captured at
  * request-send time and used when the response is pushed, so an intervening hierarchy cannot
  * relabel the in-flight frame with a capture it does not belong to.
+ *
+ * `coordinateSpace` travels with the binding for the same reason as the dimensions (#4549): whether
+ * this frame's geometry is canonical pixels is fixed the moment the request is initiated, so an
+ * intervening hierarchy that flips the client's latest scale metadata (legacy<->canonical) cannot
+ * stamp the in-flight frame with a space its geometry does not describe.
  */
 export interface ScreenGeometryBinding {
   captureSequence: number;
   width: number;
   height: number;
+  coordinateSpace?: CoordinateSpace;
+}
+
+/**
+ * The `pushScreenshotUpdate` options a screenshot inherits from the binding taken at request
+ * initiation: the capture identity AND (from #4549) the coordinate space it was captured under.
+ * Kept as a free function so both platform clients derive them the same way and neither method has
+ * to inline the optional-field spreads.
+ */
+export function screenshotBindingPushOptions(
+  binding: ScreenGeometryBinding | undefined
+): { captureSequence?: number; coordinateSpace?: CoordinateSpace } {
+  return {
+    captureSequence: binding?.captureSequence,
+    ...(binding?.coordinateSpace ? { coordinateSpace: binding.coordinateSpace } : {}),
+  };
 }
 
 export class TrackedScreenGeometry {
-  private current: { width: number; height: number; captureSequence: number | null } | null = null;
+  private current: {
+    width: number;
+    height: number;
+    captureSequence: number | null;
+    coordinateSpace?: CoordinateSpace;
+  } | null = null;
 
   /** Current width, or null when no hierarchy has produced dimensions yet. */
   get width(): number | null {
@@ -75,6 +103,7 @@ export class TrackedScreenGeometry {
       captureSequence: current.captureSequence,
       width: current.width,
       height: current.height,
+      ...(current.coordinateSpace ? { coordinateSpace: current.coordinateSpace } : {}),
     };
   }
 
@@ -83,7 +112,7 @@ export class TrackedScreenGeometry {
    * already established; a change replaces the entry as NOT forwarded, because the daemon has not
    * yet seen a hierarchy carrying the new geometry.
    */
-  update(width: number, height: number): void {
+  update(width: number, height: number, coordinateSpace?: CoordinateSpace): void {
     // Unusable geometry CLEARS rather than leaving the previous entry intact: keeping stale
     // forwarded dimensions here would let a later hierarchy push vouch for geometry that no longer
     // describes the device. Non-finite values are rejected for the same reason — they can only come
@@ -92,10 +121,18 @@ export class TrackedScreenGeometry {
       this.clear();
       return;
     }
-    if (this.current?.width === width && this.current.height === height) {
+    // The coordinate space is part of the identity: a change to it (canonical<->legacy) is a change
+    // even when the numeric dimensions coincide — on a non-Display-Zoom device points*screenScale
+    // and points*nativeScale are equal, so a metadata appearance/disappearance that does not move
+    // the pixels must still reset provenance rather than be deduplicated away.
+    if (
+      this.current?.width === width &&
+      this.current.height === height &&
+      this.current.coordinateSpace === coordinateSpace
+    ) {
       return;
     }
-    this.current = { width, height, captureSequence: null };
+    this.current = { width, height, captureSequence: null, coordinateSpace };
   }
 
   /**

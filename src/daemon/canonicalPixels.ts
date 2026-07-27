@@ -136,15 +136,16 @@ function scaleWindowBounds(window: ViewHierarchyWindowInfo, nativeScale: number)
 }
 
 /**
- * Scale EVERY bounds-bearing field a hierarchy result carries to the wire, so a message stamped
+ * Scale EVERY geometry field a hierarchy result carries to the wire, so a message stamped
  * `coordinateSpace:"px"` is entirely pixels — no field is left in points. Enumerated from
  * `CtrlProxyHierarchy.convertToViewHierarchyResult` (iOS) and the Android converter: the root node
  * tree, the iOS root `hierarchy.bounds`, each `windows[*]` frame bounds and its nested node tree,
- * `contentHiddenRegions[*].bounds`, and the `accessibility-focused-element` node.
+ * `contentHiddenRegions[*].bounds`, the `accessibility-focused-element` node, and the `systemInsets`
+ * alias (a compatibility field with NO units discriminator, so it must follow `coordinateSpace`).
  *
- * NOT scaled here: `insets` / `systemInsets`. `ObservationInsets` carries its own `units` field
- * ("points" | "physical-pixels"), so it is self-describing independent of `coordinateSpace`; those
- * are inset offsets, not element bounds, and stay as the runner reported them.
+ * NOT scaled: the typed `insets` (`ObservationInsets`). It carries its own `units` field
+ * ("points" | "physical-pixels"), so it is self-describing independent of `coordinateSpace` and
+ * stays exactly as the runner reported it.
  */
 function scaleAllBounds(hierarchy: ViewHierarchyResult, nativeScale: number): void {
   if (hierarchy.hierarchy?.node) {
@@ -169,6 +170,19 @@ function scaleAllBounds(hierarchy: ViewHierarchyResult, nativeScale: number): vo
       if (regionBounds) {
         scaleBoundsInPlace(regionBounds, nativeScale);
       }
+    }
+  }
+  if (hierarchy.systemInsets) {
+    scaleEdgeInsetsInPlace(hierarchy.systemInsets, nativeScale);
+  }
+}
+
+/** Scale a `{top,right,bottom,left}` inset alias in place by `nativeScale`, round-half-even. */
+function scaleEdgeInsetsInPlace(insets: Record<string, unknown>, nativeScale: number): void {
+  for (const edge of ["top", "right", "bottom", "left"]) {
+    const value = insets[edge];
+    if (typeof value === "number") {
+      insets[edge] = roundHalfEven(value * nativeScale);
     }
   }
 }

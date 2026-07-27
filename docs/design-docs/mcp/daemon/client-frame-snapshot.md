@@ -120,8 +120,9 @@ and a client keeps its aspect-only (±tolerance) geometry check. A client that
 sees no `coordinateSpace` must not assume pixels; a client that sees `"px"` can
 compare absolute dimensions exactly. On the input side, a client that renders a
 `"px"` frame sends `input/*` coordinates in **pixels**; the daemon divides by
-`nativeScale` before dispatching to the iOS runner (which addresses the screen in
-points), so the physical tap location is unchanged. (The desktop client's
+`nativeScale` (an exact fractional quotient — the runner takes `Double` points)
+before dispatching to the iOS runner, so the physical tap location is unchanged.
+(The desktop client's
 migration to exact px checks is issue
 [#4550](https://github.com/kaeawc/auto-mobile/issues/4550); #4549 ships the field.)
 

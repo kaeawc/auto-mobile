@@ -83,11 +83,11 @@ describe("UnixSocketServer input/tap", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
-  test("LEGACY iOS tap (no runner scale metadata) passes pixel coordinates through unchanged", async () => {
-    // No metadata even after fetching a hierarchy: a pre-#4548 runner. The control client never got
-    // px bounds, so it is sending point-space coordinates — pass through, no division.
+  test("LEGACY iOS tap: probe SUCCEEDS with no metadata -> pass through unchanged", async () => {
+    // The probe returns a hierarchy (success) but it carries no scale metadata: a genuine pre-#4548
+    // runner. The control client never got px bounds, so it sends points — pass through, no divide.
     const requestTapCoordinates = mock(async () => ({ success: true }));
-    const fetchHierarchy = mock(async () => null);
+    const fetchHierarchy = mock(async () => ({ hierarchy: {} }));
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
@@ -105,15 +105,114 @@ describe("UnixSocketServer input/tap", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(response.result).toMatchObject({
-      action: "input/tap",
-      platform: "ios",
-      deviceId: "ios-sim-1",
-      success: true,
-      coordinates: { x: 20, y: 30 },
-    });
-    expect(fetchHierarchy).toHaveBeenCalledTimes(1); // it tried to learn the scale first
+    expect(response.result).toMatchObject({ coordinates: { x: 20, y: 30 } });
+    expect(fetchHierarchy).toHaveBeenCalledTimes(1); // it probed to learn the scale first
     expect(requestTapCoordinates).toHaveBeenCalledWith(20, 30, undefined, 30_000);
+  });
+
+  test("iOS tap: a confirmed-legacy device probes only ONCE across consecutive taps (#4549 D)", async () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+      getScreenScaleMetadata: () => null,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    await sendRequest(socketPath, "input/tap", { platform: "ios", deviceId: "ios-sim-1", x: 20, y: 30 });
+    await sendRequest(socketPath, "input/tap", { platform: "ios", deviceId: "ios-sim-1", x: 40, y: 50 });
+
+    expect(fetchHierarchy).toHaveBeenCalledTimes(1); // cached after the first confirms legacy
+    expect(requestTapCoordinates).toHaveBeenCalledTimes(2);
+  });
+
+  test("iOS tap: a FAILED probe (no hierarchy) rejects the input instead of assuming legacy (#4549 C)", async () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const fetchHierarchy = mock(async () => null); // not connected / timed out -> FAILURE
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+      getScreenScaleMetadata: () => null,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", { platform: "ios", deviceId: "ios-sim-1", x: 600, y: 900 });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Could not determine iOS screen scale");
+    expect(requestTapCoordinates).not.toHaveBeenCalled(); // fail closed, no mis-dispatch
+  });
+
+  test("iOS tap: a THROWN probe rejects the input (#4549 C)", async () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const fetchHierarchy = mock(async () => { throw new Error("ws disconnected"); });
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+      getScreenScaleMetadata: () => null,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", { platform: "ios", deviceId: "ios-sim-1", x: 600, y: 900 });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("scale probe failed");
+    expect(requestTapCoordinates).not.toHaveBeenCalled();
+  });
+
+  test("iOS tap: the scale probe is charged against the gesture budget (#4549 B)", async () => {
+    // The probe consumes 20s of the 30s budget; the gesture must get only the ~10s remainder, not a
+    // fresh 30s (which would let probe + gesture run ~2x the declared budget).
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
+    const fetchHierarchy = mock(async () => {
+      fakeTimer.advanceTime(20_000);
+      scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
+      return { hierarchy: {} };
+    });
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+      getScreenScaleMetadata: () => scale,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", { platform: "ios", deviceId: "ios-sim-1", x: 600, y: 900 });
+
+    expect(response.success).toBe(true);
+    expect(requestTapCoordinates).toHaveBeenCalledWith(200, 300, undefined, 10_000);
+  });
+
+  test("iOS tap: a probe that consumes the whole budget fails with a timeout, not a full-budget gesture (#4549 B)", async () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    let scale: { nativeScale: number } | null = null;
+    const fetchHierarchy = mock(async () => {
+      fakeTimer.advanceTime(31_000); // exceeds the 30s budget
+      scale = { nativeScale: 3 };
+      return { hierarchy: {} };
+    });
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+      getScreenScaleMetadata: () => scale,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", { platform: "ios", deviceId: "ios-sim-1", x: 600, y: 900 });
+
+    expect(response.success).toBe(false);
+    expect(requestTapCoordinates).not.toHaveBeenCalled();
   });
 
   test("canonical-pixel iOS tap divides by nativeScale (exact) before dispatch to the points-based runner", async () => {
@@ -151,9 +250,10 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(async () => ({ success: true }));
     let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
     const fetchHierarchy = mock(async () => {
-      // Simulate #4548 receipt-based retention populating the scale during the fetch.
+      // Simulate #4548 receipt-based retention populating the scale during the fetch. The probe
+      // SUCCEEDS (returns a hierarchy); the scale is now known.
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
-      return null;
+      return { hierarchy: {} };
     });
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,

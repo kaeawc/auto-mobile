@@ -315,6 +315,21 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("qpr2");
   });
 
+  it("trims surrounding whitespace from version bounds", () => {
+    const devices = [
+      bootedDevice({ deviceId: "13", osVersion: "13" }),
+      bootedDevice({ deviceId: "14", osVersion: "14" }),
+      bootedDevice({ deviceId: "15", osVersion: "15" }),
+    ];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", minOsVersion: " 14 ", maxOsVersion: "\t14\n" },
+      devices,
+      "LATEST"
+    );
+    expect(result?.deviceId).toBe("14");
+  });
+
   it("does not let a codename satisfy a numeric minimum or outrank a numeric release", () => {
     const devices = [
       bootedDevice({ deviceId: "codename", osVersion: "Tiramisu" }),

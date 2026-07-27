@@ -198,6 +198,7 @@ export interface ScreenshotResult extends ScreenshotPerformanceMetadata {
   format?: string;
   timestamp?: number;
   error?: string;
+  frameContext?: string;
 }
 
 /** Swipe result from accessibility service */

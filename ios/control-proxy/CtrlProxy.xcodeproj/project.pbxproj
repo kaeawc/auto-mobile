@@ -25,12 +25,14 @@
 		2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */; };
 		2DD69FF84C0520EED9B77AFF /* ObjCExceptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */; };
 		31606D9CB665D76FBF91C86C /* MultiFingerSwipeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CB532F74A3F3A670BD526CC /* MultiFingerSwipeDiagnostics.swift */; };
+		37667E0852D846E2C5D1DA4A /* FrameContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD4BE559FB2C03A096815C9F /* FrameContext.swift */; };
 		3841CE71EF7F67B82441E6E3 /* DisplayLinkFPSMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */; };
 		416E49D98E779D4D7D060F16 /* ObjCExceptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */; };
 		42E706C81F51E89DEBD9C1A9 /* CtrlProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; };
 		4413FD9E4C8BF4071C74D482 /* HierarchyDebouncerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */; };
 		45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
 		47A050F2D8153251E395B7B9 /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
+		4917F959900833F074F22C34 /* FrameContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD4BE559FB2C03A096815C9F /* FrameContext.swift */; };
 		4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
 		51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		5278294A4F04317461A1FBE4 /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
@@ -221,6 +223,7 @@
 		B4CB9272A186932D89EB1072 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		B7BE98EA2924A42A6CD22993 /* ElementLocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocatorTests.swift; sourceTree = "<group>"; };
 		CCAAB1439B71724CA0BF2401 /* GesturePerformerSymbolsUnavailableWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerformerSymbolsUnavailableWiringTests.swift; sourceTree = "<group>"; };
+		CD4BE559FB2C03A096815C9F /* FrameContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameContext.swift; sourceTree = "<group>"; };
 		D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ObjCExceptionCatcher.h; sourceTree = "<group>"; };
 		D81453AD074F2A392251CFC3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		DBA97A6C3A1240A055D9876C /* OSLogReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSLogReader.swift; sourceTree = "<group>"; };
@@ -369,6 +372,7 @@
 				1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */,
 				95565999DC108319DEED894A /* ElementLocator.swift */,
 				9A1B2931E58B158EE51C5F4F /* Fakes.swift */,
+				CD4BE559FB2C03A096815C9F /* FrameContext.swift */,
 				F2144B84CD70DB35A1030624 /* GesturePerformer.swift */,
 				034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */,
 				FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */,
@@ -591,6 +595,7 @@
 				F469E7EF16C59A99DBD519DA /* DisplayLinkFPSMonitor.swift in Sources */,
 				9FE4564D1819768FEFD62606 /* ElementLocator.swift in Sources */,
 				A603343B94D35DDF48F7AA4D /* Fakes.swift in Sources */,
+				4917F959900833F074F22C34 /* FrameContext.swift in Sources */,
 				D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */,
 				EA65C486C9E6DBB5BFE9CA41 /* HierarchyDebouncer.swift in Sources */,
 				158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */,
@@ -657,6 +662,7 @@
 				CDEF0C911EA979C4E9C54B0B /* DefaultStorageInspecting.swift in Sources */,
 				3841CE71EF7F67B82441E6E3 /* DisplayLinkFPSMonitor.swift in Sources */,
 				1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */,
+				37667E0852D846E2C5D1DA4A /* FrameContext.swift in Sources */,
 				5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */,
 				5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */,
 				45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */,

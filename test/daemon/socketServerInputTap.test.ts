@@ -110,6 +110,28 @@ describe("UnixSocketServer input/tap", () => {
     expect(requestTapCoordinates).toHaveBeenCalledWith(20, 30, undefined, 30_000);
   });
 
+  test("rejects an Android frameContext without a matching device observation", async () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      x: 12.5,
+      y: 34.25,
+      frameContext: "screen-A",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("stale or unavailable");
+    expect(requestTapCoordinates).not.toHaveBeenCalled();
+  });
+
   test("iOS tap: a confirmed-legacy device probes only ONCE across consecutive taps (#4549 D)", async () => {
     const requestTapCoordinates = mock(async () => ({ success: true }));
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
@@ -275,6 +297,22 @@ describe("UnixSocketServer input/tap", () => {
     expect(fetchHierarchy).toHaveBeenCalledTimes(1);
     // 600/3 = 200, 900/3 = 300 — NOT dispatched as 600/900 points (which would tap at 1/3 scale).
     expect(requestTapCoordinates).toHaveBeenCalledWith(200, 300, undefined, 30_000);
+  });
+
+  test("rejects an iOS frameContext without a matching device observation", async () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    IOSCtrlProxyClient.getInstance = mock(() => ({ requestTapCoordinates })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", {
+      platform: "ios", deviceId: "ios-sim-1", x: 20, y: 30, frameContext: "7",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("stale or unavailable");
+    expect(requestTapCoordinates).not.toHaveBeenCalled();
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
@@ -476,5 +514,17 @@ describe("UnixSocketServer input/tap", () => {
       y: 10,
       duration: 200,
     });
+  });
+
+  test("accepts optional frameContext on every non-pointer input contract", () => {
+    const target = server as unknown as {
+      parseInputTypeTextParams(value: unknown): { frameContext?: string };
+      parseInputPressButtonParams(value: unknown): { frameContext?: string };
+      parseInputKeyParams(value: unknown): { frameContext?: string };
+    };
+
+    expect(target.parseInputTypeTextParams({ platform: "android", text: "x", frameContext: "frame-A" }).frameContext).toBe("frame-A");
+    expect(target.parseInputPressButtonParams({ platform: "android", button: "home", frameContext: "frame-A" }).frameContext).toBe("frame-A");
+    expect(target.parseInputKeyParams({ platform: "android", key: "enter", frameContext: "frame-A" }).frameContext).toBe("frame-A");
   });
 });

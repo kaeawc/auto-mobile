@@ -65,6 +65,7 @@ data class RequestTapCoordinates(
   val x: Double,
   val y: Double,
   val duration: Long = 10L,
+  val frameContext: String? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -76,6 +77,7 @@ data class RequestSwipe(
   val x2: Double,
   val y2: Double,
   val duration: Long = 300L,
+  val frameContext: String? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -101,6 +103,7 @@ data class RequestDrag(
   val pressDurationMs: Long = 600L,
   val dragDurationMs: Long = 300L,
   val holdDurationMs: Long = 100L,
+  val frameContext: String? = null,
   // Legacy field names for backward compatibility
   val holdTime: Long? = null,
   val duration: Long? = null,

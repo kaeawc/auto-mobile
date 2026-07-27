@@ -84,6 +84,10 @@ import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
+import java.util.Collections
+import java.util.IdentityHashMap
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
@@ -345,6 +349,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
   @Volatile private var lastWindowClassName: String? = null
+  /**
+   * Changes immediately on a native UI event; capture and input share this device-owned context.
+   */
+  private val frameContext = AtomicLong(0)
+  /** Fresh for every service process, preventing a restarted runner from reusing an old token. */
+  private val frameContextEpoch = UUID.randomUUID().toString()
+
+  private fun currentFrameContext(): String = "$frameContextEpoch:${frameContext.get()}"
+
+  // A hierarchy has object identity for its short trip from extraction to broadcast. Retaining the
+  // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
+  private val extractedHierarchyFrameContexts =
+    Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
 
   @Volatile private var isRecording: Boolean = false
 
@@ -970,6 +987,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 if (broadcastThrottler.shouldBroadcast()) {
                   broadcastHierarchyUpdate(result.hierarchy)
                 } else {
+                  extractedHierarchyFrameContexts.remove(result.hierarchy)
                   Log.d(
                     TAG,
                     "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
@@ -984,6 +1002,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 if (broadcastThrottler.shouldBroadcast()) {
                   broadcastHierarchyUpdate(result.hierarchy)
                 } else {
+                  extractedHierarchyFrameContexts.remove(result.hierarchy)
                   Log.d(
                     TAG,
                     "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
@@ -1169,8 +1188,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     duration: Long,
   ) = performSwipe(requestId, x1, y1, x2, y2, duration)
 
+  override fun requestSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "swipe")) return
+    performSwipe(requestId, x1, y1, x2, y2, duration)
+  }
+
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
     performTapCoordinates(requestId, x, y, duration)
+
+  override fun requestTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long,
+    frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "tap")) return
+    performTapCoordinates(requestId, x, y, duration)
+  }
 
   override fun requestTwoFingerSwipe(
     requestId: String?,
@@ -1192,6 +1235,41 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     dragDurationMs: Long,
     holdDurationMs: Long,
   ) = performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+
+  override fun requestDrag(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
+    frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "drag")) return
+    performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+  }
+
+  /**
+   * Rejects an input that was mapped through a screen state the service has since observed change.
+   */
+  private fun rejectStaleFrameContext(
+    requestId: String?,
+    expected: String?,
+    action: String,
+  ): Boolean {
+    if (expected == null || expected == currentFrameContext()) return false
+    val error = "Stale frame context for input/$action; observe a fresh frame before retrying"
+    launchRequestScope(requestId) {
+      when (action) {
+        "tap" -> broadcastTapCoordinatesResult(requestId, false, error, 0)
+        "swipe" -> broadcastSwipeResult(requestId, false, error, 0, null)
+        "drag" -> broadcastDragResult(requestId, false, error, 0, null)
+      }
+    }
+    return true
+  }
 
   override fun requestPinch(
     requestId: String?,
@@ -1510,15 +1588,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             recordInteractionEvent(event, "inputText")
           }
         }
-        AccessibilityEvent.TYPE_VIEW_SCROLLED -> recordDebouncedScroll(event)
+        AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+          frameContext.incrementAndGet()
+          recordDebouncedScroll(event)
+        }
       }
 
       // Delegate to the smart debouncer for content/window changes
       // The debouncer uses structural hash comparison to detect animation vs real changes
       if (
         event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-          event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+          event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+          event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
       ) {
+        frameContext.incrementAndGet()
         if (::hierarchyDebouncer.isInitialized) {
           hierarchyDebouncer.onAccessibilityEvent()
         }
@@ -2025,6 +2108,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * all visible windows to capture popups, toolbars, etc.
    */
   private fun extractHierarchyDirect(disableAllFiltering: Boolean = false): ViewHierarchy? {
+    val contextAtExtractionStart = currentFrameContext()
     // Get all windows to capture popups, toolbars, and other floating windows
     val allWindows = windows
     val rootNode = rootInActiveWindow
@@ -2086,7 +2170,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         deviceModel = Build.MODEL,
         isEmulator = getIsEmulator(),
       )
-    return withScaleMetadata(enriched, screenDimensions)
+    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
+    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
+      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
+    }
+    return hierarchyWithScaleMetadata
   }
 
   /**
@@ -2200,6 +2288,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     textFilter: String? = null,
     disableAllFiltering: Boolean = false,
   ): ViewHierarchy? {
+    val contextAtExtractionStart = currentFrameContext()
     val allWindows = windows
     val rootNode = rootInActiveWindow
     val screenDimensions = getScreenDimensions()
@@ -2235,7 +2324,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
     // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
     // add the other device metadata, but the daemon retains scale metadata off any route).
-    return withScaleMetadata(hierarchy, screenDimensions)
+    val hierarchyWithScaleMetadata = withScaleMetadata(hierarchy, screenDimensions)
+    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
+      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
+    }
+    return hierarchyWithScaleMetadata
   }
 
   private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {
@@ -2283,6 +2376,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    *   ordering.
    */
   private suspend fun broadcastHierarchyUpdate(hierarchy: ViewHierarchy, sync: Boolean = false) {
+    val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping broadcast")
       return
@@ -2305,6 +2399,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(
             """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString"""
           )
+          if (contextAtExtraction != null && contextAtExtraction == currentFrameContext()) {
+            append(""","frameContext":"$contextAtExtraction"""")
+          }
           if (perfTiming != null) {
             append(""","perfTiming":$perfTiming""")
           }
@@ -5160,7 +5257,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // otherwise be logged-and-swallowed here, emitting neither `screenshot` nor `screenshot_error`
     // and hanging the awaiting client until timeout (issue #3023).
     asyncActionRunner.launch(requestId, "screenshot") {
+      val contextBeforeCapture = currentFrameContext()
       val screenshot = takeScreenshotAsync()
+      val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       if (screenshot != null) {
         webSocketServer.broadcast(
           ProtocolScreenshotResult(
@@ -5172,6 +5271,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             screenshotEncodeDurationMs = screenshot.encodeDurationMs,
             screenshotByteLength = screenshot.byteLength,
             screenshotBase64Length = screenshot.base64Length,
+            frameContext = stableContext?.toString(),
           )
         )
         Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")

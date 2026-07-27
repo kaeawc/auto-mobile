@@ -227,6 +227,7 @@ interface WsHierarchyUpdateMessage extends WsMessageBase {
   type: "hierarchy_update";
   data: AccessibilityHierarchy;
   perfTiming?: AndroidPerfTiming[];
+  frameContext?: string;
 }
 
 interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetadata {
@@ -234,6 +235,7 @@ interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetada
   requestId: string;
   data: string;
   format?: string;
+  frameContext?: string;
 }
 
 interface WsScreenshotErrorMessage extends WsMessageBase {
@@ -750,12 +752,17 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   requestSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<A11ySwipeResult>;
+
+  requestTapCoordinates(
+    x: number, y: number,
+    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
+  ): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(
     x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number
+    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
   ): Promise<A11yDragResult>;
 
   requestPinch(
@@ -1443,15 +1450,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   async requestSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    duration: number = 300, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    duration: number = 300, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker(), frameContext?: string
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf);
+    return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
   }
 
   async requestTapCoordinates(
-    x: number, y: number, duration: number = 10, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    x: number, y: number, duration: number = 10, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker(), frameContext?: string
   ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf);
+    return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
   }
 
   async requestTwoFingerSwipe(
@@ -1463,9 +1470,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   async requestDrag(
     x1: number, y1: number, x2: number, y2: number,
-    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number
+    pressDurationMs: number, dragDurationMs: number, holdDurationMs: number, timeoutMs: number, frameContext?: string
   ): Promise<A11yDragResult> {
-    return this.gestures.requestDrag(x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs);
+    return this.gestures.requestDrag(x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs, frameContext);
   }
 
   async requestPinch(
@@ -2325,7 +2332,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       if (message.type === "hierarchy_update" && message.data) {
-        this.handleHierarchyUpdate(message.data, message.perfTiming);
+        this.handleHierarchyUpdate(message.data, message.perfTiming, message.frameContext);
       }
 
       // Handle screenshot response
@@ -2341,7 +2348,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.pushScreenshotToObservationStream(
             message.data,
             metadata,
-            binding
+            binding,
+            message.frameContext,
           );
         } else {
           logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
@@ -2351,6 +2359,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           data: message.data,
           format: message.format || "jpeg",
           timestamp: message.timestamp,
+          frameContext: message.frameContext,
           ...screenshotPerformanceMetadataFrom(message),
         });
       }
@@ -2816,7 +2825,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private handleHierarchyUpdate(data: AccessibilityHierarchy, perfTiming?: AndroidPerfTiming[]): void {
+  private handleHierarchyUpdate(data: AccessibilityHierarchy, perfTiming?: AndroidPerfTiming[], frameContext?: string): void {
     const now = this.timer.now();
     logger.debug(`[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`);
 
@@ -2844,7 +2853,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
     if (!suppressObservationStreamPush) {
       // Push to observation stream
-      this.pushHierarchyToObservationStream(data);
+      this.pushHierarchyToObservationStream(data, frameContext);
 
       // Start screenshot backoff
       this.startScreenshotBackoff();
@@ -2911,14 +2920,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return !this.sdkNavigationAppIds.has(packageName);
   }
 
-  private pushHierarchyToObservationStream(hierarchy: ViewHierarchyResult): void {
+  private pushHierarchyToObservationStream(hierarchy: ViewHierarchyResult, frameContext?: string): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
     }
 
     try {
-      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
+      const captureSequence = server.pushHierarchyUpdate(this.device.deviceId, hierarchy, frameContext);
       // Record the identity the daemon assigned, so screenshot requests initiated from here on are
       // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
       // geometry untracked, and the daemon then omits the identity so a control client fails closed.
@@ -2933,7 +2942,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private pushScreenshotToObservationStream(
     screenshotBase64: string,
     metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-    binding?: ScreenGeometryBinding
+    binding?: ScreenGeometryBinding,
+    frameContext?: string,
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -2954,7 +2964,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // carries that declaration so a mid-flight metadata flip cannot relabel the frame.
       server.pushScreenshotUpdate(
         this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata,
-        screenshotBindingPushOptions(binding)
+        {
+          ...screenshotBindingPushOptions(binding),
+          ...(frameContext !== undefined ? { frameContext } : {}),
+        }
       );
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
@@ -3022,7 +3035,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         },
         (result: ScreenshotCaptureResult) => {
           if (result.data) {
-            this.pushScreenshotToObservationStream(result.data, result, result.captureBinding);
+            this.pushScreenshotToObservationStream(result.data, result, result.captureBinding, result.frameContext);
           }
         },
         {
@@ -3099,6 +3112,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         data: result.data,
         checksum,
         captureBinding,
+        frameContext: result.frameContext,
         ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),
         ...screenshotPerformanceMetadataFrom(result),
       };

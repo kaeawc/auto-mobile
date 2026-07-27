@@ -65,6 +65,7 @@ import {
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
@@ -1011,6 +1012,7 @@ export class UnixSocketServer {
       "input/tap"
     );
     const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/tap");
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
       if (remainingTimeoutMs <= 0) {
@@ -1023,9 +1025,10 @@ export class UnixSocketServer {
       }
 
       if (args.platform === "android") {
-        return await AndroidCtrlProxyClient
-          .getInstance(targetDevice, defaultAdbClientFactory)
-          .requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs);
+        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        return args.frameContext === undefined
+          ? await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)
+          : await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs, undefined, args.frameContext);
       }
       const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
       const [x, y] = await this.toIosRunnerCoordinates(
@@ -1035,7 +1038,9 @@ export class UnixSocketServer {
         remainingTimeoutMs
       );
       const gestureTimeoutMs = this.remainingBudgetAfterProbe(queueEnterMs, totalTimeoutMs, request.method, "handleInputTap");
-      return await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs);
+      return args.frameContext === undefined
+        ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
+        : await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs, undefined, args.frameContext);
     });
 
     if (!gestureResult.success) {
@@ -1065,6 +1070,7 @@ export class UnixSocketServer {
       "input/swipe"
     );
     const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/swipe");
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
       if (remainingTimeoutMs <= 0) {
@@ -1077,19 +1083,41 @@ export class UnixSocketServer {
       }
 
       if (args.platform === "android") {
-        return await AndroidCtrlProxyClient
-          .getInstance(targetDevice, defaultAdbClientFactory)
-          .requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs);
+        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        return args.frameContext === undefined
+          ? await client.requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs)
+          : await client.requestSwipe(
+            args.startX,
+            args.startY,
+            args.endX,
+            args.endY,
+            args.durationMs,
+            remainingTimeoutMs,
+            undefined,
+            args.frameContext
+          );
       }
-      const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
+      const client = IOSCtrlProxyClient.getInstance(targetDevice);
       const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
-        iosClient,
+        client,
         targetDevice.deviceId,
         [args.startX, args.startY, args.endX, args.endY],
         remainingTimeoutMs
       );
       const gestureTimeoutMs = this.remainingBudgetAfterProbe(queueEnterMs, totalTimeoutMs, request.method, "handleInputSwipe");
-      return await iosClient.requestDrag(startX, startY, endX, endY, 0, args.durationMs, 0, gestureTimeoutMs);
+      return args.frameContext === undefined
+        ? await client.requestDrag(startX, startY, endX, endY, 0, args.durationMs, 0, gestureTimeoutMs)
+        : await client.requestDrag(
+          startX,
+          startY,
+          endX,
+          endY,
+          0,
+          args.durationMs,
+          0,
+          gestureTimeoutMs,
+          args.frameContext
+        );
     });
 
     if (!gestureResult.success) {
@@ -1135,6 +1163,7 @@ export class UnixSocketServer {
           true
         )
         : targetDevice;
+      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/typeText");
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
       if (remainingTimeoutMs <= 0) {
@@ -1205,6 +1234,7 @@ export class UnixSocketServer {
       "input/pressButton"
     );
     const buttonResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/pressButton");
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
       if (remainingTimeoutMs <= 0) {
@@ -1249,6 +1279,7 @@ export class UnixSocketServer {
       "input/key"
     );
     const keyResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      this.requireCurrentFrameContext(targetDevice.deviceId, args.frameContext, "input/key");
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
       if (remainingTimeoutMs <= 0) {
@@ -1420,6 +1451,7 @@ export class UnixSocketServer {
     x: number;
     y: number;
     duration?: number;
+    frameContext?: string;
   } {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error("input/tap requires params object");
@@ -1445,6 +1477,12 @@ export class UnixSocketServer {
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/tap deviceId must be a string when provided");
     }
+    if (
+      args.frameContext !== undefined &&
+      (typeof args.frameContext !== "string" || args.frameContext.length === 0)
+    ) {
+      throw new Error("input/tap frameContext must be a non-empty string when provided");
+    }
 
     return {
       platform: args.platform,
@@ -1452,6 +1490,7 @@ export class UnixSocketServer {
       x: args.x,
       y: args.y,
       duration: args.duration,
+      frameContext: args.frameContext,
     };
   }
 
@@ -1463,6 +1502,7 @@ export class UnixSocketServer {
     endX: number;
     endY: number;
     durationMs: number;
+    frameContext?: string;
   } {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error("input/swipe requires params object");
@@ -1498,6 +1538,12 @@ export class UnixSocketServer {
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/swipe deviceId must be a string when provided");
     }
+    if (
+      args.frameContext !== undefined &&
+      (typeof args.frameContext !== "string" || args.frameContext.length === 0)
+    ) {
+      throw new Error("input/swipe frameContext must be a non-empty string when provided");
+    }
 
     return {
       platform: args.platform,
@@ -1507,6 +1553,7 @@ export class UnixSocketServer {
       endX: args.endX,
       endY: args.endY,
       durationMs: args.durationMs ?? 300,
+      frameContext: args.frameContext,
     };
   }
 
@@ -1516,13 +1563,14 @@ export class UnixSocketServer {
     text: string;
     submit: boolean;
     append: boolean;
+    frameContext?: string;
   } {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error("input/typeText requires params object");
     }
 
     const args = params as Record<string, unknown>;
-    const supportedParams = new Set(["platform", "deviceId", "text", "submit", "mode"]);
+    const supportedParams = new Set(["platform", "deviceId", "text", "submit", "mode", "frameContext"]);
     const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
     if (unsupportedParams.length > 0) {
       throw new Error(`input/typeText unsupported params: ${unsupportedParams.join(", ")}`);
@@ -1539,6 +1587,7 @@ export class UnixSocketServer {
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/typeText deviceId must be a string when provided");
     }
+    this.validateFrameContextParam(args.frameContext, "input/typeText");
     // "append" adds to the focused field instead of replacing it, which is what
     // an interactive client mirroring one keystroke at a time needs: the default
     // replace semantics would leave only the last character typed (#3351).
@@ -1551,6 +1600,7 @@ export class UnixSocketServer {
       text: args.text,
       submit: args.submit ?? false,
       append: args.mode === "append",
+      frameContext: args.frameContext as string | undefined,
     };
   }
 
@@ -1559,6 +1609,7 @@ export class UnixSocketServer {
     deviceId?: string;
     button: string;
     responseButton: string;
+    frameContext?: string;
   } {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error("input/pressButton requires params object");
@@ -1578,6 +1629,7 @@ export class UnixSocketServer {
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/pressButton deviceId must be a string when provided");
     }
+    this.validateFrameContextParam(args.frameContext, "input/pressButton");
     const button = args.button === "app_switch" ? "recent" : args.button;
 
     return {
@@ -1585,6 +1637,7 @@ export class UnixSocketServer {
       deviceId: args.deviceId,
       button,
       responseButton: args.button,
+      frameContext: args.frameContext as string | undefined,
     };
   }
 
@@ -1592,13 +1645,14 @@ export class UnixSocketServer {
     platform: "android" | "ios";
     deviceId?: string;
     key: InputKeyName;
+    frameContext?: string;
   } {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new Error("input/key requires params object");
     }
 
     const args = params as Record<string, unknown>;
-    const supportedParams = new Set(["platform", "deviceId", "key"]);
+    const supportedParams = new Set(["platform", "deviceId", "key", "frameContext"]);
     const unsupportedParams = Object.keys(args).filter(key => !supportedParams.has(key));
     if (unsupportedParams.length > 0) {
       throw new Error(`input/key unsupported params: ${unsupportedParams.join(", ")}`);
@@ -1615,12 +1669,33 @@ export class UnixSocketServer {
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/key deviceId must be a string when provided");
     }
+    this.validateFrameContextParam(args.frameContext, "input/key");
 
     return {
       platform: args.platform,
       deviceId: args.deviceId,
       key: args.key,
+      frameContext: args.frameContext as string | undefined,
     };
+  }
+
+  private validateFrameContextParam(frameContext: unknown, action: string): void {
+    if (frameContext !== undefined && (typeof frameContext !== "string" || frameContext.length === 0)) {
+      throw new Error(`${action} frameContext must be a non-empty string when provided`);
+    }
+  }
+
+  /**
+   * Input that carries a device-authored context is safe only if the newest observation from that
+   * device still reports that exact context. Missing context fails closed: a caller can re-observe
+   * and retry, whereas executing against an unproven screen could actuate the wrong UI.
+   */
+  private requireCurrentFrameContext(deviceId: string, frameContext: string | undefined, action: string): void {
+    if (frameContext === undefined) {return;}
+    const current = getDeviceDataStreamServer()?.getCurrentFrameContext(deviceId);
+    if (current !== frameContext) {
+      throw new Error(`${action} frameContext is stale or unavailable; observe a fresh frame before retrying`);
+    }
   }
 
   private async resolveInputTargetDevice(

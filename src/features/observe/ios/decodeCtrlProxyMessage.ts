@@ -50,6 +50,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       result = {
         hierarchy: message.data,
         perfTiming: message.perfTiming,
+        frameContext: message.frameContext,
       };
       break;
 
@@ -59,6 +60,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         data: message.data,
         format: message.format ?? "png",
         timestamp: message.timestamp,
+        frameContext: message.frameContext,
       };
       break;
 

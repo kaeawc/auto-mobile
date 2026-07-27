@@ -285,6 +285,7 @@ data class ScreenshotResult(
   val format: String = "jpeg",
   val width: Int? = null,
   val height: Int? = null,
+  val frameContext: String? = null,
   val screenshotCaptureDurationMs: Long? = null,
   val screenshotEncodeDurationMs: Long? = null,
   val screenshotByteLength: Int? = null,

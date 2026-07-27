@@ -19,6 +19,8 @@ export interface ScreenshotCaptureResult extends ScreenshotMetadata {
    * was in flight. Absent when there was no forwarded capture to bind.
    */
   captureBinding?: ScreenGeometryBinding;
+  /** Device-authored identity captured with the pixels, if the native runner could prove it. */
+  frameContext?: string;
 }
 
 /**

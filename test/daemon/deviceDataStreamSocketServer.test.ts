@@ -70,6 +70,28 @@ describe("DeviceDataStreamSocketServer", () => {
     await server.startFake();
   });
 
+  it("records a device-authored frame context even without an IDE subscriber", () => {
+    server.pushHierarchyUpdate("device-1", {
+      updatedAt: 123,
+      packageName: "com.example.app",
+      hierarchy: { text: "Home" },
+    } as any, "frame-A");
+
+    expect(server.getCurrentFrameContext("device-1")).toBe("frame-A");
+  });
+
+  it("clears a device frame context when a hierarchy has no proven context", () => {
+    const hierarchy = {
+      updatedAt: 123,
+      packageName: "com.example.app",
+      hierarchy: { text: "Home" },
+    } as any;
+    server.pushHierarchyUpdate("device-1", hierarchy, "frame-A");
+    server.pushHierarchyUpdate("device-1", hierarchy);
+
+    expect(server.getCurrentFrameContext("device-1")).toBeUndefined();
+  });
+
   describe("request_observation", () => {
     const requestedObservation = (deviceId: string): RequestedObservation => ({
       deviceId,
@@ -593,6 +615,13 @@ describe("DeviceDataStreamSocketServer", () => {
       const messages = socket.getWrittenMessages<any>();
       const hierarchyMessages = messages.filter(m => m.type === "hierarchy_update");
       expect(hierarchyMessages[hierarchyMessages.length - 1].hierarchyDiff.hasBaseline).toBe(false);
+    });
+
+    it("forgets a device frame context when the connection is lost", () => {
+      server.pushHierarchyUpdate("device-1", frame("a"), "frame-A");
+      server.onDeviceConnectionLost("device-1");
+
+      expect(server.getCurrentFrameContext("device-1")).toBeUndefined();
     });
 
     it("stamps a monotonic capture identity on each hierarchy and echoes it on matching screenshots", () => {

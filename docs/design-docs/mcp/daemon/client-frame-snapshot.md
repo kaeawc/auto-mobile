@@ -21,8 +21,8 @@ several sources that update independently:
 
 | Source | Carries | Updates |
 | --- | --- | --- |
-| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence`, `coordinateSpace` | continuously while subscribed |
-| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence`, `coordinateSpace` | continuously, usually debounced client-side |
+| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence`, `coordinateSpace`, device `frameContext` | continuously while subscribed |
+| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence`, `coordinateSpace`, device `frameContext` | continuously, usually debounced client-side |
 | live mirror relay (optional) | decoded video frames | at the mirror's frame rate |
 | daemon connection state | transport liveness | on connect/disconnect |
 | device selection | which device the user chose | on user action |
@@ -52,6 +52,7 @@ DeviceFrameSnapshot(
   deviceId,             // the one device every contributing source agreed on
   sequence,             // monotonic; orders snapshots against each other (see below)
   captureSequence,      // the daemon capture identity screenshot and hierarchy agreed on
+  frameContext,         // device-authored identity screenshot and hierarchy agreed on
   capturedAtMs,         // client clock, for recency
   source,               // Screenshot | LiveVideo — which pixels are displayed
   frameWidth/Height,    // the displayed frame's dimensions
@@ -96,6 +97,7 @@ and unit-testable without a device.
 | A screenshot **and** a hierarchy have been applied | Mapping needs both |
 | Every source's device id equals the selection | After a device switch the previous device's frame lingers |
 | `screenshot.captureSequence == hierarchy.captureSequence` | **Shared capture identity** — this is what catches the equal-aspect resolution change |
+| `screenshot.frameContext == hierarchy.frameContext`, both non-null | **Device capture identity** — this catches same-size navigation between request and pixel capture |
 | Both messages carry a `captureSequence` at all | Older daemons do not stamp one; control fails closed rather than guessing |
 | `now - screenshot.receivedAt <= 5000 ms` | The daemon may stop pushing without disconnecting |
 | `now - liveFrame.receivedAt <= 1000 ms` (when a live frame is displayed) | **Recency** — this is what catches the stalled mirror |
@@ -145,7 +147,7 @@ mis-scaled tap one level down. So the daemon measures the frame's header and
 refuses to stamp on mismatch. It also publishes the *measured* dimensions, so a
 client falling back to them maps through the pixels it is actually rendering.
 
-### Residual: request-send is not device-capture
+### Device capture identity
 
 Identity is bound when the client **sends** the screenshot request, not when the
 device actually captures the pixels. The device captures some time later, so if
@@ -154,11 +156,12 @@ carry screen A's identity and pair with screen A's hierarchy. No client-side
 signal distinguishes this: the dimensions are identical, and the client has no
 visibility into what was on screen at capture time.
 
-Closing it requires the device to report the hierarchy or UI state it captured
-against — a CtrlProxy protocol change plus an APK/IPA re-cut — so it is out of
-scope for the client-side consolidation. It is tracked with the daemon-side
-frame-context validation work in
-[#4505](https://github.com/kaeawc/auto-mobile/issues/4505).
+Current CtrlProxy runners report an opaque `frameContext` with each hierarchy and
+with a screenshot only when it can prove the hierarchy stayed unchanged across
+pixel capture. A control client requires matching, non-null contexts alongside
+`captureSequence`, then echoes that exact value on `input/*`. The daemon rejects
+a stale or unavailable echo before executing the request. The token is opaque,
+device-specific, and must never be synthesized or compared across reconnects.
 
 The identity source is monotonic for the daemon process's lifetime and is never
 reset, so an id cannot be reused after a device reconnect and collide with a

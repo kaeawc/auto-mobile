@@ -20,6 +20,8 @@ import { readFileSync } from "fs";
 import {
   COORDINATE_KOTLIN_TEST_PATH,
   DEVICE_TO_VIEWPORT_FIELDS,
+  fixtureNativeScales,
+  loadDragPolicyThresholdConstants,
   diffNumericRows,
   FIT_SCALE_FIELDS,
   FIT_TO_VIEWPORT_FIELDS,
@@ -276,5 +278,34 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
         expect(row.deviceWidth).toBeGreaterThan(row.frameWidthPx);
       }
     }
+  });
+
+  describe("canonical-pixel swipe threshold is sized against THIS fixture (#4550)", function() {
+    // The client's drag threshold is a PHYSICAL distance, so under canonical pixels its numeric
+    // value depends on nativeScale — which the observation stream does not publish (#4582). Until
+    // it does, `MIN_SWIPE_DISTANCE_PX` is a conservative floor whose coverage is bounded by
+    // `MAX_COVERED_NATIVE_SCALE`. That bound is only meaningful if it tracks the scales we actually
+    // carry, so it is derived from this fixture rather than restated next to it: adding a scale row
+    // here forces a threshold review instead of silently leaving the constant under-sized.
+    const constants = loadDragPolicyThresholdConstants();
+    const scales = fixtureNativeScales(canonical);
+
+    test("MAX_COVERED_NATIVE_SCALE equals the fixture's largest device scale", function() {
+      expect(constants.maxCoveredNativeScale).toBe(Math.max(...scales));
+    });
+
+    test("MIN_SWIPE_DISTANCE_PX clears the iOS touch slop at every fixture scale", function() {
+      for (const scale of scales) {
+        const effectivePoints = constants.minSwipeDistancePx / scale;
+        expect(`${scale}:${effectivePoints > constants.iosTouchSlopPoints}`).toBe(`${scale}:true`);
+      }
+    });
+
+    test("the bound is a floor, not a guarantee: beyond it the threshold under-shoots", function() {
+      // Pins the honest framing. `readScreenScaleMetadata` accepts any finite positive scale, so a
+      // device above the bound divides the constant back below the slop — which is what #4582 fixes.
+      const beyond = constants.maxCoveredNativeScale * 2;
+      expect(constants.minSwipeDistancePx / beyond > constants.iosTouchSlopPoints).toBe(false);
+    });
   });
 });

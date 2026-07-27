@@ -170,41 +170,32 @@ class DeviceDragGesturePolicyTest {
   fun `the canonical-pixel threshold clears iOS touch slop at every covered scale`() {
     // The arithmetic the constant is chosen for, asserted rather than left in a comment. The daemon
     // divides an incoming pixel coordinate by nativeScale before dispatch, so the threshold has to
-    // survive that division at every scale this project carries. These are exactly the values in
-    // test/fixtures/coordinate-mapping-golden-vectors.json — the constant is chosen from evidence,
-    // and this is what keeps the two in step if a new scale is ever added to the fixture.
-    val goldenVectorScales = listOf(1.0, 2.0, 2.608696, 3.0, 3.144, 3.5)
+    // survive that division at every scale this project carries.
+    //
+    // Only the BOUND is checked here, and that is sufficient rather than lazy: threshold / scale is
+    // strictly decreasing in scale, so clearing the slop at the largest covered scale clears it at
+    // every smaller one. The bound itself is tied to the fixture mechanically — the parity suite
+    // (`coordinateMappingGoldenVectorParity.test.ts`) asserts MAX_COVERED_NATIVE_SCALE equals the
+    // largest scale in coordinate-mapping-golden-vectors.json, parsed from THIS source's constant.
+    // Enumerating the fixture's scales here as well would be a hand-copy that goes stale silently,
+    // which is the failure this pair of tests exists to prevent.
     val slop = DeviceDragGesturePolicy.IOS_TOUCH_SLOP_POINTS
     val threshold = DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE_PX
+    val bound = DeviceDragGesturePolicy.MAX_COVERED_NATIVE_SCALE
 
-    goldenVectorScales.forEach { scale ->
-      val effectivePoints = threshold / scale
-      assertEquals(
-        true,
-        effectivePoints > slop,
-        "$threshold px at ${scale}x is $effectivePoints points, below the ~${slop}pt slop",
-      )
-    }
-
-    // The declared bound must BE the tightest case covered, or the claim drifts from the constant.
-    // This is the assertion that would have caught the previous 32px value: 32 / 3.5 is 9.14
-    // points, below the slop, even though the fixture already carried a 3.5x row.
-    assertEquals(
-      goldenVectorScales.max(),
-      DeviceDragGesturePolicy.MAX_COVERED_NATIVE_SCALE,
-      "the documented bound must be the largest scale the goldens carry",
-    )
+    // The assertion that would have caught the previous 32px value: 32 / 3.5 is 9.14 points, below
+    // the slop, even though the fixture already carried a 3.5x row.
     assertEquals(
       true,
-      threshold / DeviceDragGesturePolicy.MAX_COVERED_NATIVE_SCALE > slop,
-      "the constant must clear the slop at its own declared bound",
+      threshold / bound > slop,
+      "$threshold px at the ${bound}x bound is ${threshold / bound} points, below the ~${slop}pt slop",
     )
     // And the bound is a real ceiling, not a universal claim: readScreenScaleMetadata accepts any
     // finite positive scale, and beyond the bound this constant under-shoots. That is what #4582
     // exists to fix, and pinning it here stops the docs from drifting back to "worst case".
     assertEquals(
       false,
-      threshold / (DeviceDragGesturePolicy.MAX_COVERED_NATIVE_SCALE * 2) > slop,
+      threshold / (bound * 2) > slop,
       "a scale beyond the bound is expected to under-shoot — this is a floor, not a guarantee",
     )
 

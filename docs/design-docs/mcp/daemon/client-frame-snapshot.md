@@ -151,6 +151,15 @@ and land in the wrong physical place. So a client must:
   Both messages are checked independently, and a move into (or out of) an
   *unrecognized* space counts as a change like any other.
 
+**Check the declaration when the message ARRIVES, not when your frame state
+catches up.** The daemon starts converting input under the new scale metadata the
+moment it publishes the new declaration. A client that parses hierarchies
+off-thread, or debounces its layout state (the reference client does both), would
+otherwise leave a frame clickable in the old unit for the whole of that lag — and
+a tap in that window is mapped in one unit and converted as the other. Read
+`coordinateSpace` off the raw message first, before any parsing or coalescing,
+and invalidate there.
+
 One consequence worth calling out: a **live mirror** frame on iOS is verifiable
 again. The live-frame check below has always demanded an exact match, which a
 point-space hierarchy could never satisfy against pixel mirror frames; published

@@ -84,14 +84,41 @@ class DeviceControlSession(
 
   private val dispatcher = DeviceControlInputDispatcher(scope) { command -> execute(command) }
 
-  // The coordinate space each source last declared, tracked so a change can invalidate the control
-  // context (issue #4550). The `seen` flags distinguish "declared nothing" from "not observed yet":
-  // both are null, but only the former can be flipped AWAY from. Cleared by reset(), so the first
-  // observation in a new context is a baseline rather than a transition.
-  private var lastScreenshotSpace: CoordinateSpace? = null
-  private var seenScreenshotSpace: Boolean = false
-  private var lastHierarchySpace: CoordinateSpace? = null
-  private var seenHierarchySpace: Boolean = false
+  /**
+   * Remembers the last [CoordinateSpace] observed at one point in the pipeline and reports whether
+   * a new observation differs from it (issue #4550).
+   *
+   * [seen] distinguishes "declared nothing" from "not observed yet": both are a null space, but
+   * only the former can be flipped AWAY from, so the first observation must be a baseline rather
+   * than a transition. [forget] restores that state for a new control context.
+   */
+  private class SpaceTracker {
+    private var seen: Boolean = false
+    private var last: CoordinateSpace? = null
+
+    /** Records [space] and returns whether it DIFFERS from the previously recorded one. */
+    fun observe(space: CoordinateSpace?): Boolean {
+      val flipped = seen && space != last
+      seen = true
+      last = space
+      return flipped
+    }
+
+    fun forget() {
+      seen = false
+      last = null
+    }
+  }
+
+  // The declaration seen at STREAM RECEIPT — the earliest point in the pipeline, ahead of hierarchy
+  // parsing and the layout state's debounce. This is the one that matters (see
+  // [onObservationSpaceDeclared]).
+  private val streamSpace = SpaceTracker()
+
+  // Backstop trackers on the frame FACTS, for updates that never came through the stream collectors
+  // (see [resetOnCoordinateSpaceTransition]).
+  private val screenshotFactSpace = SpaceTracker()
+  private val hierarchyFactSpace = SpaceTracker()
 
   /** The post-input refresh state a client should be rendering; see [PostInputRefreshTracker]. */
   val refreshState: PostInputRefreshState
@@ -195,52 +222,53 @@ class DeviceControlSession(
   }
 
   /**
-   * Treat a change in a source's declared [CoordinateSpace] as a control-context invalidation, and
-   * [reset] on it (issue #4550).
+   * BACKSTOP for a [CoordinateSpace] change that reaches the frame facts without having passed
+   * through [onObservationSpaceDeclared] (issue #4550).
    *
-   * The daemon converts an incoming `input/tap` or `input/swipe` coordinate using the runner's
-   * **current** scale metadata, not the frame's. Two pieces of client state outlive the sources a
-   * coordinate was mapped against, and both are dangerous when the space flips underneath them:
-   * - the **retained snapshot**, which the post-input refresh deliberately keeps clickable while
-   *   its sources move on, and
-   * - the **queued backlog**, which holds commands already accepted into the bounded FIFO but not
-   *   yet forwarded. With a stalled daemon request ahead of it, a queued tap can be forwarded long
-   *   after the flip and be converted as the wrong unit — landing in the wrong physical place.
+   * The primary detection is at stream receipt, which is strictly earlier than this and is the only
+   * point early enough to beat the debounce. This check earns its place because not every fact
+   * update comes from a stream message:
+   * [dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState] is also written by
+   * programmatic paths (an initial hierarchy fetch, a manual refresh) that carry their own
+   * declaration and never reach the collectors. A frame installed that way could otherwise
+   * re-establish a space the stream had already moved off, with no reset.
    *
-   * Clearing only the first would stop future clicks while leaving the already-queued ones armed,
-   * so this routes through the SAME [reset] every other context change uses (device change,
-   * transport/mode change, stream disconnect, live-layout open/close). That drains the queue and
-   * closes each pending command's captured client, drops the retention, advances the error token
-   * and clears the banner — one mechanism, not a second one that has to be kept in step.
+   * Both paths funnel into the same reset, so this is one mechanism observed at two points, not two
+   * mechanisms. Each source is tracked independently because either can be the first to change, and
+   * a source not seen yet is a baseline rather than a transition.
    *
-   * Each source is tracked independently, because either can be the first to declare the new space,
-   * and a source not seen yet is not a transition — there is nothing for it to differ from. The
-   * first observation after a [reset] likewise only records; it never re-fires.
-   *
-   * Scope note: this closes the windows the client can observe, which are the ones that last (a
-   * retention is bounded by the 3 s refresh timeout; a queued command by the daemon's stall). The
-   * residual sub-dispatch race — metadata flipping after a command has already left the queue —
+   * Scope note: receipt-time detection plus this backstop close the windows the client can observe.
+   * The residual sub-dispatch race — metadata flipping after a command has already left the queue —
    * cannot be closed from the client at all; it needs the input endpoints to accept a
    * caller-declared space, which is a wire change and deliberately out of scope here.
    */
   private fun resetOnCoordinateSpaceTransition(inputs: DeviceControlInputs) {
-    val screenshot = inputs.screenshot
-    val hierarchy = inputs.hierarchy
     val screenshotFlipped =
-      seenScreenshotSpace && screenshot != null && screenshot.coordinateSpace != lastScreenshotSpace
-    val hierarchyFlipped =
-      seenHierarchySpace && hierarchy != null && hierarchy.coordinateSpace != lastHierarchySpace
-    // reset() clears the tracking below, so re-record AFTER it: the new space becomes the baseline
-    // and the very next evaluate must not see the same flip a second time.
-    if (screenshotFlipped || hierarchyFlipped) reset()
-    if (screenshot != null) {
-      lastScreenshotSpace = screenshot.coordinateSpace
-      seenScreenshotSpace = true
-    }
-    if (hierarchy != null) {
-      lastHierarchySpace = hierarchy.coordinateSpace
-      seenHierarchySpace = true
-    }
+      inputs.screenshot?.let { screenshotFactSpace.observe(it.coordinateSpace) }
+    val hierarchyFlipped = inputs.hierarchy?.let { hierarchyFactSpace.observe(it.coordinateSpace) }
+    // The trackers already hold the new space, so this reset must NOT forget them — otherwise the
+    // very next evaluate would re-establish a baseline and could see the same flip twice.
+    if (screenshotFlipped == true || hierarchyFlipped == true) resetPreservingSpaceBaseline()
+  }
+
+  /**
+   * Note the [CoordinateSpace] a stream message declared, AT RECEIPT, and invalidate the control
+   * context if it changed (issue #4550).
+   *
+   * Call this the moment a `hierarchy_update` or `screenshot_update` is observed — before the
+   * hierarchy is parsed and before the layout state's debounce. That timing is the whole point. The
+   * daemon starts converting input coordinates under the new scale metadata as soon as it publishes
+   * the new declaration, while the client's frame facts do not catch up until the debounce fires
+   * (~100 ms later, and the parse before it is off-thread). A tap in that window would be mapped in
+   * the OLD unit and converted as the new one — landing in the wrong physical place, silently.
+   * Detecting the change downstream, from the facts, is by construction too late for exactly that
+   * window.
+   *
+   * Routes through the same [reset] every other control-context change uses, so a flip drains the
+   * queued backlog and drops the retention rather than only stopping future clicks.
+   */
+  fun onObservationSpaceDeclared(coordinateSpace: CoordinateSpace?) {
+    if (streamSpace.observe(coordinateSpace)) resetPreservingSpaceBaseline()
   }
 
   /**
@@ -421,15 +449,26 @@ class DeviceControlSession(
    * coordinate spaces so the next frame is a baseline rather than a transition.
    */
   fun reset() {
+    resetPreservingSpaceBaseline()
+    streamSpace.forget()
+    screenshotFactSpace.forget()
+    hierarchyFactSpace.forget()
+  }
+
+  /**
+   * Everything [reset] does except forgetting the observed coordinate spaces.
+   *
+   * Used by the space-transition paths, which have already recorded the NEW space as their
+   * baseline: forgetting it there would make the next observation re-establish a baseline and could
+   * report the same flip twice. Every other caller wants the full [reset] — a new device or a
+   * reconnected stream must not be compared against the previous context's space.
+   */
+  private fun resetPreservingSpaceBaseline() {
     dispatcher.reset()
     errorToken.incrementAndGet()
     refreshTracker.reset()
     renderSnapshot = null
     interactionSnapshot = null
-    lastScreenshotSpace = null
-    seenScreenshotSpace = false
-    lastHierarchySpace = null
-    seenHierarchySpace = false
     publishError(null)
   }
 

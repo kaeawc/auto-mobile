@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorMockData
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
+import dev.jasonpearson.automobile.desktop.core.layout.buildParsedHierarchy
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
@@ -683,6 +686,58 @@ class DeviceControlSessionTest {
     )
     assertTrue("close" in queued.calls, "and its captured client must be closed")
     assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a flip is caught at stream receipt, inside the hierarchy debounce window`() = runTest {
+    // The window the fact-level check cannot cover. LayoutInspectorState debounces hierarchy
+    // updates by ~100ms, so a `hierarchy_update` declaring the new space does not reach the frame
+    // facts — and therefore does not reach evaluate() — until that timer fires. The daemon,
+    // meanwhile, switched to converting input under the new scale metadata the moment it published.
+    // A tap inside that window would be mapped in the old unit and converted as the new one.
+    //
+    // This drives the REAL debounced path (a TestDispatcher-backed LayoutInspectorState) rather
+    // than calling applyHierarchyUpdateImmediate, so the window actually exists in the test.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val state = LayoutInspectorState(StandardTestDispatcher(testScheduler))
+
+    // Control is live on a legacy point-space frame.
+    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    session.onObservationSpaceDeclared(null)
+    assertNotNull(session.evaluate(legacy).snapshotOrNull)
+    val clicked = assertNotNull(session.interactionSnapshot)
+
+    // A hierarchy_update arrives declaring canonical pixels. The collector notes the space at
+    // RECEIPT and hands the parsed tree to the debounced apply.
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels)
+    state.applyHierarchyUpdate(
+      buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy),
+      emptySet(),
+      deviceId = "emulator-5554",
+      captureSequence = 8L,
+      coordinateSpace = CoordinateSpace.Pixels,
+    )
+
+    // INSIDE the debounce window. The facts still hold the OLD declaration — evaluate() has nothing
+    // new to see — yet control must already be dead, because there is no snapshot for the view to
+    // map a click through.
+    assertNull(state.hierarchyFacts?.coordinateSpace, "the debounce has not fired yet")
+    assertNull(
+      session.interactionSnapshot,
+      "receipt-time detection must retire control before the debounce fires",
+    )
+    assertNull(session.renderSnapshot)
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    assertNotNull(clicked, "the pre-flip frame existed, so this is a retirement and not a no-frame")
+
+    // And the window was real: the debounce only now delivers the new declaration to the facts,
+    // which is where a fact-level check would first have noticed.
+    advanceUntilIdle()
+    assertEquals(CoordinateSpace.Pixels, state.hierarchyFacts?.coordinateSpace)
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reached the device")
     scope.cancel()
   }
 

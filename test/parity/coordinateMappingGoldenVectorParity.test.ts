@@ -103,7 +103,22 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
     const tampered = kotlinViewportToDevice.map(row => ({ ...row }));
     delete (tampered[3] as Partial<(typeof tampered)[number]>).expectedY;
     const diffs = diffNumericRows(tampered, canonical.viewportToDevice, VIEWPORT_TO_DEVICE_FIELDS);
-    expect(diffs.some(d => d.includes("row 3 field expectedY") && d.includes("missing or non-finite"))).toBe(true);
+    expect(diffs.some(d => d.includes("row 3 field expectedY") && d.includes("missing or non-numeric"))).toBe(true);
+  });
+
+  test("AC2: the guard rejects a coercible non-numeric field, not just a missing one", function() {
+    // `Number(null)`, `Number(false)`, and `Number("0")` all coerce to 0, so a ZERO-valued
+    // canonical input (offsetX is 0 in most rows) corrupted to one of those would pass a
+    // coercing comparison — the raw value must be validated as a genuine finite number.
+    for (const corrupted of [null, false, "0"]) {
+      const tampered = canonical.viewportToDevice.map(row => ({ ...row }));
+      expect(tampered[0].offsetX).toBe(0); // the coercion-equivalent target the guard must catch
+      (tampered[0] as Record<string, unknown>).offsetX = corrupted;
+      const diffs = diffNumericRows(kotlinViewportToDevice, tampered, VIEWPORT_TO_DEVICE_FIELDS);
+      expect(
+        diffs.some(d => d.includes("row 0 field offsetX") && d.includes("missing or non-numeric")),
+      ).toBe(true);
+    }
   });
 
   test("the Kotlin runtime golden loops still drive the real mapper", function() {

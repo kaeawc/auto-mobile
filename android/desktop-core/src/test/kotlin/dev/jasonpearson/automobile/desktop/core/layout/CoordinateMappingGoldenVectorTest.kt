@@ -74,6 +74,9 @@ class CoordinateMappingGoldenVectorTest {
       ViewportToDeviceVector(375f, 667f, 1f, 0f, 0f, 375, 667, 100.4f, 200.6f, 100, 201, 1),
       // iOS Display Zoom-like device (320x693 zoomed points at 3x); changes under #4549.
       ViewportToDeviceVector(320f, 693f, 1f, 0f, 0f, 320, 693, 160f, 346.5f, 160, 347, 1),
+      // Width-derived-ratio invariant: aspect-MISMATCHED frame (width ratio 2, height ratio
+      // 4). Pins that BOTH axes scale by deviceWidth/frameWidthPx (height-derived y = 800).
+      ViewportToDeviceVector(500f, 500f, 1f, 0f, 0f, 1000, 2000, 100f, 200f, 200, 400, 1),
     )
 
   private data class DeviceToViewportVector(

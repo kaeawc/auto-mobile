@@ -114,6 +114,12 @@
       "frameWidthPx": 320, "frameHeightPx": 693, "scale": 1, "offsetX": 0, "offsetY": 0,
       "deviceWidth": 320, "deviceHeight": 693, "viewportX": 160, "viewportY": 346.5,
       "expectedX": 160, "expectedY": 347, "expectedInBounds": 1
+    },
+    {
+      "comment": "width-derived-ratio invariant: deliberately aspect-MISMATCHED frame (500x500 frame, 1000x2000 device; width ratio 2, height ratio 4). Not a realistic aspect-fitted frame — the pipeline pre-aligns rotation and fits to the device aspect — but it pins the documented rule that BOTH axes scale by deviceWidth/frameWidthPx: a height-derived y would give 800, not 400.",
+      "frameWidthPx": 500, "frameHeightPx": 500, "scale": 1, "offsetX": 0, "offsetY": 0,
+      "deviceWidth": 1000, "deviceHeight": 2000, "viewportX": 100, "viewportY": 200,
+      "expectedX": 200, "expectedY": 400, "expectedInBounds": 1
     }
   ],
   "deviceToViewport": [

@@ -369,15 +369,20 @@ export function diffNumericRows<T extends Record<string, number | boolean | unde
   }
   for (let i = 0; i < expected.length; i++) {
     for (const field of fields) {
-      const a = Number(actual[i][field]);
-      const e = Number(expected[i][field]);
-      // Fail CLOSED on a missing or non-numeric field: `Number(undefined)` is NaN and every
-      // NaN comparison is false, so a malformed fixture/table row would otherwise sail through
-      // the tolerance check as "not different" and neuter the drift guard.
-      if (!Number.isFinite(a) || !Number.isFinite(e)) {
+      const a = actual[i][field];
+      const e = expected[i][field];
+      // Fail CLOSED on a missing, non-numeric, or non-finite field — validating the RAW value,
+      // never a coerced one. `Number(undefined)` is NaN (silently "not different" under any
+      // tolerance), and `Number(null)` / `Number(false)` / `Number("0")` all coerce to 0, so a
+      // zero-valued canonical input corrupted to one of those would pass a coercing comparison
+      // and neuter the drift guard exactly when the fixture is broken.
+      if (
+        typeof a !== "number" || !Number.isFinite(a) ||
+        typeof e !== "number" || !Number.isFinite(e)
+      ) {
         diffs.push(
-          `row ${i} field ${field}: missing or non-finite value ` +
-            `(actual=${String(actual[i][field])}, expected=${String(expected[i][field])})`,
+          `row ${i} field ${field}: missing or non-numeric value ` +
+            `(actual=${JSON.stringify(a)}, expected=${JSON.stringify(e)})`,
         );
         continue;
       }

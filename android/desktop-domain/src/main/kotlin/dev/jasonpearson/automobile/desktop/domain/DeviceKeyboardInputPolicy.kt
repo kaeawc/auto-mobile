@@ -55,13 +55,16 @@ public data class DeviceKeyModifiers(
  * @param modifiers the modifiers held at the time.
  * @param altComposesText the host's platform-resolved verdict that this Alt-family keystroke is
  *   **composing a character** (AltGr on Windows/Linux, Option on macOS) rather than triggering a
- *   menu accelerator. The distinction cannot be made from modifiers alone — on Windows/Linux AWT
- *   reports a printable `keyChar` for a plain `Alt+F` menu accelerator, so `alt && printable` would
- *   swallow it — so the toolkit adapter that CAN see the platform (the reference client resolves it
- *   in `DeviceKeyboardEventTranslator`: `!meta && (isMac ? alt : ctrl && alt)`) decides and passes
- *   the clean boolean in. The policy stays platform-agnostic and only forwards such a keystroke
- *   when it ALSO produced a typable character. Defaults false: absent a host verdict, an
- *   Alt-modified keystroke is a host chord, never swallowed.
+ *   menu accelerator. The toolkit adapter that sees the host decides it: on Linux, use the native
+ *   AltGraph state when available so a genuine Ctrl+Alt shortcut with AltGraph false stays with the
+ *   host; if the signal is unavailable, fall back to Ctrl+Alt for AltGr. Windows uses the same
+ *   fallback when the JDK omits the native AltGraph mask for real AltGr; on macOS, Option (plain
+ *   Alt) composes. A plain `Alt+F` accelerator can report a printable `keyChar`, so `alt &&
+ *   printable` would swallow it. The reference client resolves the verdict in
+ *   `DeviceKeyboardEventTranslator` and passes the clean boolean in. The policy stays
+ *   platform-agnostic and only forwards such a keystroke when it ALSO produced a typable character.
+ *   Defaults false: absent a host verdict, an Alt-modified keystroke is a host chord, never
+ *   swallowed.
  */
 public data class DeviceKeyStroke(
   val key: DeviceKeyboardKey? = null,
@@ -195,10 +198,12 @@ public sealed interface DeviceKeyboardDecision {
  *    of *modifiers*, not one host's keymap, precisely because the host is not knowable from here:
  *    the desktop app has its own menu accelerators, and a third-party host has different ones
  *    again. Refusing every chord by default is the only rule correct for all of them. The one
- *    exception — composition — is **platform-dependent** (AltGr is Ctrl+Alt on Windows/Linux;
- *    Option is plain Alt on macOS, where menus use Cmd) and therefore cannot be decided here: the
- *    toolkit adapter that sees the host OS resolves it and passes the verdict in. Deciding it from
- *    `alt && printable` would swallow a Windows/Linux `Alt+F` menu accelerator, which reports a
+ *    exception — composition — is **platform-dependent** and therefore cannot be decided here:
+ *    Linux uses native AltGraph when available so a genuine Ctrl+Alt chord stays with the host, and
+ *    falls back to Ctrl+Alt when the signal is unavailable; Windows uses the same fallback when the
+ *    JDK omits the signal for real AltGr; and macOS uses Option (plain Alt), where menus use Cmd.
+ *    The toolkit adapter that sees the host OS resolves the verdict and passes it in. Deciding it
+ *    from `alt && printable` would swallow a plain `Alt+F` menu accelerator, which reports a
  *    printable char too.
  * 2. **A device-meaningful key wins over the character it produced.** Enter, Tab and Backspace all
  *    report a control character; sending those as text would put a literal `\n` in a text field.

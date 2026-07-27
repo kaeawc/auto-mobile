@@ -3,7 +3,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BootedDevice, GrantAndroidPermissionItemResult, GrantAndroidPermissionsResult } from "../../models";
 import { logger } from "../../utils/logger";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { createGlobalPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
 
@@ -22,13 +22,20 @@ export class GrantAndroidPermissions {
 
   private adb: AdbExecutor;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  private createPerformanceTracker: () => PerformanceTracker;
+
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker
+  ) {
     this.device = device;
     this.adb = adbFactory.create(device);
+    this.createPerformanceTracker = performanceTrackerFactory;
   }
 
   async execute(packageName: string, input: GrantAndroidPermissionsInput): Promise<GrantAndroidPermissionsResult> {
-    const perf = createGlobalPerformanceTracker();
+    const perf = this.createPerformanceTracker();
     perf.serial("changeAndroidPermissions");
 
     const permissions = input.permissions ?? [];
@@ -57,7 +64,7 @@ export class GrantAndroidPermissions {
     permissions: string[],
     userId: number | undefined,
     action: Exclude<AndroidPermissionChangeAction, "reset">,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>
+    perf: PerformanceTracker
   ): Promise<GrantAndroidPermissionsResult> {
     if (permissions.length === 0) {
       perf.end();
@@ -163,7 +170,7 @@ export class GrantAndroidPermissions {
     packageName: string,
     permissions: string[],
     userId: number | undefined,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>
+    perf: PerformanceTracker
   ): Promise<GrantAndroidPermissionsResult> {
     const resetPermissions = permissions;
     if (userId !== undefined) {

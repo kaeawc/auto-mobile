@@ -13,6 +13,7 @@ import { registerNavigationTools } from "../../src/server/navigationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { setDebugModeEnabled } from "../../src/utils/debug";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import { installInMemoryNavManager, type InMemoryNavManagerHarness } from "../helpers/navigationTestHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -28,17 +29,20 @@ describe("Android navigation graph workflow (#4459)", () => {
   beforeEach(async () => {
     ToolRegistry.clearTools();
     setDebugModeEnabled(false);
+    serverConfig.setEmbeddedSdkEnabled(false);
     harness = await installInMemoryNavManager();
   });
 
   afterEach(async () => {
     ToolRegistry.clearTools();
     setDebugModeEnabled(false);
+    serverConfig.setEmbeddedSdkEnabled(false);
     await harness.dispose();
   });
 
   test("serves the debug-gated navigation tools through MCP tools/list", async () => {
     setDebugModeEnabled(true);
+    serverConfig.setEmbeddedSdkEnabled(true);
     const server = createMcpServer();
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
@@ -144,6 +148,7 @@ describe("Android navigation graph workflow (#4459)", () => {
     expect(exploration).toMatchObject({ success: true, interactionsPerformed: 1, screensDiscovered: 1 });
 
     setDebugModeEnabled(true);
+    serverConfig.setEmbeddedSdkEnabled(true);
     registerNavigationTools();
 
     const graphTool = ToolRegistry.getTool("getNavigationGraph");

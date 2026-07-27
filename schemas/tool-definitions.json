@@ -986,25 +986,6 @@
     }
   },
   {
-    "name": "doctor",
-    "description": "Run AutoMobile setup diagnostics",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "android": {
-          "description": "Run Android-specific checks only",
-          "type": "boolean"
-        },
-        "ios": {
-          "description": "Run iOS-specific checks only",
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "dragAndDrop",
     "description": "Drag and drop element",
     "inputSchema": {

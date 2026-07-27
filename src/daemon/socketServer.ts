@@ -39,6 +39,7 @@ import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers"
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
+import { getSessionToolProfileService, TOOL_CAPABILITIES, type ToolCapability } from "../features/toolCapabilities/SessionToolProfileService";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -766,6 +767,14 @@ export class UnixSocketServer {
           args.config
         );
         return updated;
+      }
+      case "ide/setSessionToolCapability": {
+        const args = request.params as { sessionUuid?: string; capability?: string; enabled?: boolean };
+        if (!args.sessionUuid || !TOOL_CAPABILITIES.includes(args.capability as ToolCapability) || typeof args.enabled !== "boolean") {
+          throw new Error("setSessionToolCapability requires sessionUuid, a known capability, and enabled boolean params");
+        }
+        await getSessionToolProfileService().setEnabled(args.sessionUuid, args.capability as ToolCapability, args.enabled);
+        return { sessionUuid: args.sessionUuid, capability: args.capability, enabled: args.enabled };
       }
       case "ide/ping": {
         return { ok: true, timestamp: this.timer.now() };

@@ -919,7 +919,10 @@ fun AutoMobileContent(
       // publishes a new declaration, so a flip has to invalidate control NOW. Detecting it from
       // the frame facts would be one debounce interval too late, and a tap in that window would be
       // mapped in the old unit and converted as the new one (issue #4550).
-      deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace)
+      deviceControlSession.onObservationSpaceDeclared(
+        update.coordinateSpace,
+        update.captureSequence,
+      )
       // Capture the generation before the async parse so a frame decoded across an invalidation
       // (device change / stream disconnect) is dropped instead of restoring stale bounds (#3347).
       val generation = layoutInspectorState.frameGeneration
@@ -968,7 +971,10 @@ fun AutoMobileContent(
     liveStreamClient.screenshotUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
       // Same receipt-time gate as the hierarchy collector; see its comment (issue #4550).
-      deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace)
+      deviceControlSession.onObservationSpaceDeclared(
+        update.coordinateSpace,
+        update.captureSequence,
+      )
       // Capture the generation before the async decode so a screenshot decoded across an
       // invalidation (device change / stream disconnect) is dropped rather than restoring a stale
       // frame that would silently re-enable device control (#3347).

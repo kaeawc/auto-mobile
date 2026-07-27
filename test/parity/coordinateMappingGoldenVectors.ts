@@ -606,11 +606,37 @@ export interface DragPolicyThresholdConstants {
   iosTouchSlopPoints: number;
 }
 
+/**
+ * Strip everything the Kotlin compiler ignores: block comments (KDoc included) and the commented
+ * tail of every line.
+ *
+ * Without this the constant match is satisfied by a COMMENTED-OUT declaration. A stale
+ * `// const val MIN_SWIPE_DISTANCE_PX: Int = 36` left above a real `... = 1` would keep the
+ * fixture-sync and slop assertions green while production used the other value — a guard that
+ * passes while the thing it guards is broken.
+ */
+function executableKotlinSource(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map(line => {
+      const comment = line.indexOf("//");
+      return comment === -1 ? line : line.slice(0, comment);
+    })
+    .join("\n");
+}
+
 function parseKotlinNumericConstant(source: string, name: string): number {
-  // `public const val NAME: Int = 36` / `: Double = 3.5`
-  const match = new RegExp(`const val ${name}\\s*:\\s*\\w+\\s*=\\s*(-?\\d+(?:\\.\\d+)?)`).exec(source);
+  // Anchored to the start of a line so only a real declaration matches — belt and braces with the
+  // comment stripping above. `public const val NAME: Int = 36` / `: Double = 3.5`.
+  const match = new RegExp(
+    `^\\s*(?:public\\s+|internal\\s+|private\\s+)?const val ${name}\\s*:\\s*\\w+\\s*=\\s*(-?\\d+(?:\\.\\d+)?)`,
+    "m",
+  ).exec(source);
   if (!match) {
-    throw new Error(`${DRAG_POLICY_KOTLIN_PATH}: could not find "const val ${name}"`);
+    // Loudly, never a silent default: a renamed or deleted constant must fail the guard rather
+    // than let it assert against a fallback nobody ships.
+    throw new Error(`${DRAG_POLICY_KOTLIN_PATH}: could not find executable "const val ${name}"`);
   }
   const value = Number(match[1]);
   if (!Number.isFinite(value)) {
@@ -620,16 +646,26 @@ function parseKotlinNumericConstant(source: string, name: string): number {
 }
 
 /**
+ * Parse the drag-threshold constants out of Kotlin SOURCE TEXT.
+ *
+ * Separate from the file read so the parser itself is testable against synthetic sources (a
+ * commented-out decoy, a missing constant) without touching the shipped Kotlin.
+ */
+export function parseDragPolicyThresholdConstants(source: string): DragPolicyThresholdConstants {
+  const executable = executableKotlinSource(source);
+  return {
+    minSwipeDistancePx: parseKotlinNumericConstant(executable, "MIN_SWIPE_DISTANCE_PX"),
+    maxCoveredNativeScale: parseKotlinNumericConstant(executable, "MAX_COVERED_NATIVE_SCALE"),
+    iosTouchSlopPoints: parseKotlinNumericConstant(executable, "IOS_TOUCH_SLOP_POINTS"),
+  };
+}
+
+/**
  * Read the drag-threshold constants from the Kotlin source, the same way this module already reads
  * the golden tables — so the assertion below compares the SHIPPED value, not a copy of it.
  */
 export function loadDragPolicyThresholdConstants(): DragPolicyThresholdConstants {
-  const source = readFileSync(DRAG_POLICY_KOTLIN_PATH, "utf8");
-  return {
-    minSwipeDistancePx: parseKotlinNumericConstant(source, "MIN_SWIPE_DISTANCE_PX"),
-    maxCoveredNativeScale: parseKotlinNumericConstant(source, "MAX_COVERED_NATIVE_SCALE"),
-    iosTouchSlopPoints: parseKotlinNumericConstant(source, "IOS_TOUCH_SLOP_POINTS"),
-  };
+  return parseDragPolicyThresholdConstants(readFileSync(DRAG_POLICY_KOTLIN_PATH, "utf8"));
 }
 
 /**

@@ -21,7 +21,22 @@ import kotlin.test.fail
  */
 class CoordinateSpaceReceiptWiringTest {
 
-  private val hook = "deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace)"
+  /**
+   * The receipt-time call, whitespace-normalized.
+   *
+   * ktfmt wraps a call this long across lines, and the exact argument list is load-bearing (the
+   * capture id is what keeps a late frame from rolling the tracked space backward), so the guard
+   * matches on a normalized form rather than on one particular line breaking.
+   */
+  private val hook =
+    "deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace,update.captureSequence)"
+
+  /**
+   * Collapse whitespace and drop the trailing comma ktfmt adds when it wraps an argument list, so
+   * only the CALL matters and not how it happens to be laid out.
+   */
+  private fun normalize(source: String): String =
+    source.replace(Regex("\\s+"), "").replace(",)", ")")
 
   /**
    * One collector's source region: from where it starts consuming the flow to where it writes the
@@ -79,9 +94,9 @@ class CoordinateSpaceReceiptWiringTest {
       "could not find `${span.apply}` after the ${span.name} collector in AutoMobileContent.kt",
     )
 
-    val region = source.substring(start, applyIndex)
+    val region = normalize(source.substring(start, applyIndex))
     assertTrue(
-      region.contains(hook),
+      region.contains(normalize(hook)),
       "The ${span.name} collector must call `$hook` at RECEIPT — inside its own body and BEFORE " +
         "`${span.apply}` (issue #4550). Detecting the transition from the frame facts instead is " +
         "one debounce interval too late, and a tap in that window is mapped in the old coordinate " +

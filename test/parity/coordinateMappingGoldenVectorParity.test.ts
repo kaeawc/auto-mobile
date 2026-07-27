@@ -22,6 +22,7 @@ import {
   DEVICE_TO_VIEWPORT_FIELDS,
   fixtureNativeScales,
   loadDragPolicyThresholdConstants,
+  parseDragPolicyThresholdConstants,
   diffNumericRows,
   FIT_SCALE_FIELDS,
   FIT_TO_VIEWPORT_FIELDS,
@@ -299,6 +300,41 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
         const effectivePoints = constants.minSwipeDistancePx / scale;
         expect(`${scale}:${effectivePoints > constants.iosTouchSlopPoints}`).toBe(`${scale}:true`);
       }
+    });
+
+    test("the parser reads the EXECUTABLE declaration, not a commented-out decoy", function() {
+      // The guard has to isolate what it claims. An unanchored match would take the stale value out
+      // of the comment and keep every assertion above green while production shipped the other one.
+      // Uses synthetic source text — the shipped Kotlin is never edited.
+      const decoyed = [
+        "public object DeviceDragGesturePolicy {",
+        "  // Historical value, kept for context:",
+        "  // public const val MIN_SWIPE_DISTANCE_PX: Int = 999",
+        "  /* public const val MAX_COVERED_NATIVE_SCALE: Double = 99.0 */",
+        "  public const val MIN_SWIPE_DISTANCE_PX: Int = 36",
+        "  public const val MAX_COVERED_NATIVE_SCALE: Double = 3.5",
+        "  public const val IOS_TOUCH_SLOP_POINTS: Double = 10.0 // trailing note",
+        "}",
+      ].join("\n");
+
+      const parsed = parseDragPolicyThresholdConstants(decoyed);
+      expect(parsed.minSwipeDistancePx).toBe(36);
+      expect(parsed.maxCoveredNativeScale).toBe(3.5);
+      expect(parsed.iosTouchSlopPoints).toBe(10);
+    });
+
+    test("a missing constant fails loudly instead of silently defaulting", function() {
+      // A renamed or deleted constant must break the guard, not let it assert against a fallback
+      // nobody ships.
+      expect(() => parseDragPolicyThresholdConstants("public object Empty {}")).toThrow(
+        /could not find executable "const val MIN_SWIPE_DISTANCE_PX"/,
+      );
+      expect(() =>
+        parseDragPolicyThresholdConstants(
+          "  public const val MIN_SWIPE_DISTANCE_PX: Int = 36\n" +
+            "  public const val MAX_COVERED_NATIVE_SCALE: Double = 3.5\n",
+        ),
+      ).toThrow(/IOS_TOUCH_SLOP_POINTS/);
     });
 
     test("the bound is a floor, not a guarantee: beyond it the threshold under-shoots", function() {

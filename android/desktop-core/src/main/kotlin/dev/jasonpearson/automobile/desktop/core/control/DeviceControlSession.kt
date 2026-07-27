@@ -128,6 +128,11 @@ class DeviceControlSession(
   // [onObservationSpaceDeclared]).
   private val streamSpace = SpaceTracker()
 
+  // Newest capture identity whose coordinate space has been observed at receipt, so a late frame
+  // carrying an older binding cannot roll the tracked space backward (see
+  // [onObservationSpaceDeclared]).
+  private var lastObservedSpaceCapture: Long? = null
+
   // Newest device rotation any source has proven, for the dispatch-time gate. Null until one is
   // observed, which is why a session that has seen no rotation accepts every snapshot.
   private var lastProvenRotation: Int? = null
@@ -310,8 +315,28 @@ class DeviceControlSession(
    *
    * Routes through the same [reset] every other control-context change uses, so a flip drains the
    * queued backlog and drops the retention rather than only stopping future clicks.
+   *
+   * **The tracker only ever advances**, ordered by [captureSequence]. A screenshot deliberately
+   * keeps the coordinate space bound when its capture was REQUESTED (issue #4549's
+   * bind-at-initiation, so a mid-flight metadata change cannot relabel the frame), which means a
+   * screenshot can arrive AFTER a newer hierarchy while still carrying the older declaration.
+   * Observing that unconditionally would roll the session's notion of "current" backward to a space
+   * the device has already left — this hook fighting the very binding that makes the frame
+   * trustworthy — and, before the debounce, would leave the dispatch gate accepting old-space
+   * snapshots and rejecting new-space ones. So an observation that is PROVABLY older than one
+   * already seen is ignored outright: it neither records nor resets.
+   *
+   * `captureSequence` is the ordering signal because it is already bound to each frame and is
+   * monotonic per device (issue #3348) — no new clock, no third notion of "current". It is absent
+   * only on frames the policy already refuses to pair, and on those there is nothing to order
+   * against, so they are observed as before. The hierarchy path is unaffected: the daemon assigns
+   * the id on every hierarchy push, so a hierarchy's id is always the newest at the time it is sent
+   * and can never be rejected here.
    */
-  fun onObservationSpaceDeclared(coordinateSpace: CoordinateSpace?) {
+  fun onObservationSpaceDeclared(coordinateSpace: CoordinateSpace?, captureSequence: Long?) {
+    val lastSeen = lastObservedSpaceCapture
+    if (captureSequence != null && lastSeen != null && captureSequence <= lastSeen) return
+    if (captureSequence != null) lastObservedSpaceCapture = captureSequence
     if (streamSpace.observe(coordinateSpace)) resetPreservingSpaceBaseline()
   }
 
@@ -541,6 +566,7 @@ class DeviceControlSession(
     streamSpace.forget()
     screenshotFactSpace.forget()
     hierarchyFactSpace.forget()
+    lastObservedSpaceCapture = null
     lastProvenRotation = null
   }
 

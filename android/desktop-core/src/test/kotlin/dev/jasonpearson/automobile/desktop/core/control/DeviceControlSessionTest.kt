@@ -709,13 +709,13 @@ class DeviceControlSessionTest {
 
     // Control is live on a legacy point-space frame.
     val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
-    session.onObservationSpaceDeclared(null)
+    session.onObservationSpaceDeclared(null, captureSequence = 7L)
     assertNotNull(session.evaluate(legacy).snapshotOrNull)
     val clicked = assertNotNull(session.interactionSnapshot)
 
     // A hierarchy_update arrives declaring canonical pixels. The collector notes the space at
     // RECEIPT and hands the parsed tree to the debounced apply.
-    session.onObservationSpaceDeclared(CoordinateSpace.Pixels)
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
     state.applyHierarchyUpdate(
       buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy),
       emptySet(),
@@ -758,7 +758,7 @@ class DeviceControlSessionTest {
       val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
       val session = session(scope, FakeAutoMobileClient())
 
-      session.onObservationSpaceDeclared(null)
+      session.onObservationSpaceDeclared(null, captureSequence = 7L)
       assertNotNull(
         session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
       )
@@ -774,7 +774,7 @@ class DeviceControlSessionTest {
         Snapshot.sendApplyNotifications()
         assertFalse(invalidated, "no write yet")
 
-        session.onObservationSpaceDeclared(CoordinateSpace.Pixels)
+        session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
         Snapshot.sendApplyNotifications()
 
         assertTrue(
@@ -791,6 +791,51 @@ class DeviceControlSessionTest {
     }
 
   @Test
+  fun `a late screenshot bound to an older capture cannot roll the tracked space backward`() =
+    runTest {
+      // #4549 binds a screenshot's coordinate space when its capture is REQUESTED, so a mid-flight
+      // metadata change cannot relabel the frame. The consequence here: a screenshot can arrive
+      // AFTER a newer hierarchy while still carrying the OLDER declaration. Observing it
+      // unconditionally would roll the session's notion of "current" back to a space the device has
+      // already left — this hook fighting the binding that makes the frame trustworthy — and the
+      // dispatch gate would then accept old-space snapshots and reject new-space ones.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client = FakeAutoMobileClient()
+      val session = session(scope, client)
+
+      // Capture 7 is legacy; capture 8's hierarchy declares canonical pixels.
+      session.onObservationSpaceDeclared(null, captureSequence = 7L)
+      session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
+
+      // The capture-7 screenshot finally lands, still carrying its request-time legacy binding.
+      session.onObservationSpaceDeclared(null, captureSequence = 7L)
+
+      // The session must still consider PIXELS current: a px frame dispatches, a legacy one does
+      // not. If the stale observation had been recorded, both answers would be inverted.
+      assertTrue(
+        session.tap(testSnapshot(coordinateSpace = CoordinateSpace.Pixels), point),
+        "the newer declared space must still be the current one",
+      )
+      advanceUntilIdle()
+      assertEquals(1, client.inputTapCalls.size)
+
+      assertFalse(
+        session.tap(testSnapshot(coordinateSpace = null), point),
+        "the space the device already left must not be resurrected by a late frame",
+      )
+      advanceUntilIdle()
+      assertEquals(1, client.inputTapCalls.size, "nothing further reached the device")
+
+      // And an IN-ORDER observation still advances the tracker, so this is an ordering guard and
+      // not a freeze: capture 9 goes back to legacy and legacy becomes dispatchable again.
+      session.onObservationSpaceDeclared(null, captureSequence = 9L)
+      assertTrue(session.tap(testSnapshot(coordinateSpace = null), point))
+      advanceUntilIdle()
+      assertEquals(2, client.inputTapCalls.size)
+      scope.cancel()
+    }
+
+  @Test
   fun `a tap or swipe carrying a retired snapshot is rejected at dispatch`() = runTest {
     // Half (b): defence in depth. Even with the observable retirement, a pointer event that
     // CAPTURED the snapshot before the flip can reach dispatch after it — the view cannot
@@ -800,7 +845,7 @@ class DeviceControlSessionTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
 
-    session.onObservationSpaceDeclared(null)
+    session.onObservationSpaceDeclared(null, captureSequence = 7L)
     assertNotNull(
       session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
     )
@@ -808,7 +853,7 @@ class DeviceControlSessionTest {
 
     // The device starts publishing canonical pixels; the in-flight click still carries the legacy
     // frame it was mapped through.
-    session.onObservationSpaceDeclared(CoordinateSpace.Pixels)
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
 
     assertFalse(
       session.tap(clickedBeforeFlip, point),

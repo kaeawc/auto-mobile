@@ -656,9 +656,9 @@ describe("checkIosCtrlProxyRunner", () => {
     "request_screenshot",
     "request_tap_coordinates"
   ];
-  // A runner that predates append input must be classified stale before desktop
-  // keyboard forwarding tries the capability-gated command.
-  const STALE_COMMANDS = FRESH_COMMANDS.filter(command => command !== "request_append_text");
+  // Remove a required feature command so the stale fixture remains meaningfully
+  // different from a fresh runner even while append has a compatibility fallback.
+  const STALE_COMMANDS = FRESH_COMMANDS.filter(command => command !== "request_shake");
 
   const inspection = (over: Partial<IosRunnerInspection> = {}): IosRunnerInspection => ({
     deviceId: "SIM-1",
@@ -724,7 +724,7 @@ describe("checkIosCtrlProxyRunner", () => {
 
     expect(result.status).toBe("warn");
     expect(result.message).toContain("versionStatus=stale");
-    expect(result.message).toContain("request_append_text");
+    expect(result.message).toContain("request_shake");
     expect(result.recommendation).toContain("ctrl-proxy-build-for-testing.sh");
     // BUNDLE_PATH takes an .ipa file and cannot consume the build script's
     // derived-data output; DERIVED_DATA is the followable override (#4221).

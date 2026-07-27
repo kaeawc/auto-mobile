@@ -126,8 +126,8 @@ class DeviceKeyboardEventTranslatorTest {
   }
 
   @Test
-  fun `live Linux event reads native AltGraph through Compose`() {
-    val awtEvent =
+  fun `live Linux events read native AltGraph through Compose`() {
+    val altGraphEvent =
       AwtKeyEvent(
         Canvas(),
         AwtKeyEvent.KEY_PRESSED,
@@ -139,11 +139,31 @@ class DeviceKeyboardEventTranslatorTest {
 
     assertTrue(
       DeviceKeyboardEventTranslator.translate(
-          composeEvent(awtEvent),
+          composeEvent(altGraphEvent),
           isMac = false,
           isLinux = true,
         )
         .altComposesText
+    )
+
+    val ctrlAltShortcut =
+      AwtKeyEvent(
+        Canvas(),
+        AwtKeyEvent.KEY_PRESSED,
+        0L,
+        InputEvent.CTRL_DOWN_MASK or InputEvent.ALT_DOWN_MASK,
+        AwtKeyEvent.VK_F,
+        'f',
+      )
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyboardEventTranslator.translate(
+          composeEvent(ctrlAltShortcut),
+          isMac = false,
+          isLinux = true,
+        )
+      ),
     )
   }
 

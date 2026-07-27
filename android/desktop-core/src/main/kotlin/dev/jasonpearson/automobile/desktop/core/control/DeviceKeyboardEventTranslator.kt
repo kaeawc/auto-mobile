@@ -147,7 +147,7 @@ object DeviceKeyboardEventTranslator {
    * KNOWN LIMITATION (Windows): many Windows JDKs report a real AltGr keystroke as plain Ctrl+Alt
    * with the native ALT_GRAPH mask unset. Therefore Windows keeps the Ctrl+Alt heuristic: a genuine
    * Ctrl+Alt host shortcut that produces a printable character can still be forwarded to the
-   * device. Linux uses the reliable native signal instead. Tracked in #4536.
+   * device. Linux uses the reliable native signal instead.
    */
   private fun resolvesAltComposition(
     modifiers: DeviceKeyModifiers,

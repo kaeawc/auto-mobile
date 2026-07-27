@@ -307,8 +307,7 @@ report a real AltGr keystroke as plain Ctrl+Alt with the `ALT_GRAPH` mask **unse
 Requiring the mask would regress common AltGr typing (`@`, `€`, `{`) on those JDKs.
 The accepted consequence is that **a genuine Ctrl+Alt host shortcut that produces a
 printable character may still be forwarded to the device rather than reaching the
-host** on Windows. Linux uses the reliable native signal. Tracked in
-[#4536](https://github.com/kaeawc/auto-mobile/issues/4536).
+host** on Windows. Linux uses the reliable native signal.
 
 A client that knows its own host leaves a particular chord unclaimed may opt it in
 explicitly (`forwardedChords`). The default list is **empty**. Entries match

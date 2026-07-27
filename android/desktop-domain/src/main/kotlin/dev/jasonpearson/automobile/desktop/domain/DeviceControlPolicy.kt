@@ -286,6 +286,7 @@ public object DeviceControlPolicy {
         screenshotData = screenshot.data,
         hierarchy = hierarchy.hierarchy,
         captureSequence = captureSequence,
+        rotation = screenshotRotation,
         screenshotSequence = screenshot.sequence,
         hierarchySequence = hierarchy.sequence,
         liveFrameSequence = liveFrame?.sequence,

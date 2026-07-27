@@ -151,6 +151,9 @@ public data class LiveFrameFacts(
  * @param hierarchy the hierarchy paired into this snapshot; may be null only when the update
  *   carried no parsed tree.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
+ * @param rotation the device rotation the contributing sources agreed on when this snapshot was
+ *   captured. Retention compares later source observations against this value so a partially
+ *   received rotation update cannot leave old coordinate bounds clickable.
  * @param screenshotSequence provenance of the observation screenshot this snapshot was built from.
  * @param hierarchySequence provenance of the hierarchy this snapshot was built from.
  * @param liveFrameSequence provenance of the live frame, or null when none is displayed.
@@ -167,6 +170,7 @@ public data class DeviceFrameSnapshot(
   val screenshotData: ByteArray?,
   val hierarchy: ParsedHierarchy?,
   val captureSequence: Long,
+  val rotation: Int = 0,
   val screenshotSequence: Long,
   val hierarchySequence: Long,
   val liveFrameSequence: Long?,
@@ -189,6 +193,7 @@ public data class DeviceFrameSnapshot(
     return deviceId == other.deviceId &&
       sequence == other.sequence &&
       captureSequence == other.captureSequence &&
+      rotation == other.rotation &&
       screenshotSequence == other.screenshotSequence &&
       hierarchySequence == other.hierarchySequence &&
       liveFrameSequence == other.liveFrameSequence
@@ -198,6 +203,7 @@ public data class DeviceFrameSnapshot(
     var result = deviceId.hashCode()
     result = 31 * result + sequence.hashCode()
     result = 31 * result + captureSequence.hashCode()
+    result = 31 * result + rotation
     result = 31 * result + screenshotSequence.hashCode()
     result = 31 * result + hierarchySequence.hashCode()
     result = 31 * result + (liveFrameSequence?.hashCode() ?: 0)

@@ -63,32 +63,35 @@ enum DeviceRotation {
     }
 
     #if canImport(XCTest) && os(iOS)
-        private static let changeGeneration = RotationChangeGeneration()
-        private static let orientationChangeObserver: NSObjectProtocol = {
+        /// Captures a value while observing every orientation transition that occurs in the capture
+        /// interval. The observer is deliberately scoped to this operation: it detects an A→B→A
+        /// cycle without keeping a process-lifetime notification registration alive.
+        static func capture<T>(_ operation: () throws -> T) rethrows -> (value: T, rotation: Int?) {
+            let changeGeneration = RotationChangeGeneration()
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            return NotificationCenter.default.addObserver(
+            let orientationChangeObserver = NotificationCenter.default.addObserver(
                 forName: UIDevice.orientationDidChangeNotification,
                 object: UIDevice.current,
                 queue: nil
             ) { _ in
                 changeGeneration.recordOrientationChange()
             }
-        }()
+            let beforeCapture = changeGeneration.captureSample(rotation: current())
+            defer {
+                NotificationCenter.default.removeObserver(orientationChangeObserver)
+                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+            }
+
+            let value = try operation()
+            let afterCapture = changeGeneration.captureSample(rotation: current())
+            return (
+                value,
+                RotationCaptureSample.stableRotation(between: beforeCapture, and: afterCapture)
+            )
+        }
 
         static func current() -> Int? {
             fromInterfaceOrientation(currentInterfaceOrientation(fallback: .unknown))
-        }
-
-        static func captureSample() -> RotationCaptureSample {
-            _ = orientationChangeObserver
-            return changeGeneration.captureSample(rotation: current())
-        }
-
-        static func stableRotation(
-            between before: RotationCaptureSample,
-            and after: RotationCaptureSample
-        ) -> Int? {
-            RotationCaptureSample.stableRotation(between: before, and: after)
         }
 
         static func fromInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Int? {
@@ -1013,14 +1016,8 @@ public class GesturePerformer: GesturePerforming {
             }
 
             return try runOnMainThread {
-                let rotationBeforeCapture = DeviceRotation.captureSample()
-                let screenshot = app.screenshot()
-                let rotationAfterCapture = DeviceRotation.captureSample()
-                let rotation = DeviceRotation.stableRotation(
-                    between: rotationBeforeCapture,
-                    and: rotationAfterCapture
-                )
-                return ScreenshotCapture(data: screenshot.pngRepresentation, rotation: rotation)
+                let capture = DeviceRotation.capture { app.screenshot() }
+                return ScreenshotCapture(data: capture.value.pngRepresentation, rotation: capture.rotation)
             }
         }
 

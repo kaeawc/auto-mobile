@@ -616,7 +616,9 @@ class DeviceControlSessionTest {
     // rotation and capture makes its coordinate bounds unsafe for another gesture. Platform
     // clients publish this hierarchy before beginning the next screenshot capture.
     val mismatchedRotation =
-      clicked.copy(hierarchy = clicked.hierarchy?.copy(sequence = 11L, captureSequence = 8L, rotation = 1))
+      clicked.copy(
+        hierarchy = clicked.hierarchy?.copy(sequence = 11L, captureSequence = 8L, rotation = 1)
+      )
     val decision = session.evaluate(mismatchedRotation)
     assertEquals(
       DeviceControlBlockReason.RotationMismatch,

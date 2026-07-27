@@ -48,7 +48,7 @@ export class Idle {
     // or "com" as system launchers because they are substrings of a real system
     // package name (issue #4172). A package is a system launcher only when it IS
     // one of these packages or a sub-package (e.g. "com.miui.home.settings").
-    return systemPackages.some(sysPackage =>
+    return packageName === "android" || systemPackages.some(sysPackage =>
       packageName === sysPackage || packageName.startsWith(`${sysPackage}.`)
     );
   }

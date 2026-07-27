@@ -434,7 +434,7 @@ describe("Idle - Unit Tests", function() {
     // A package is a system launcher only when it IS a known system package or a
     // sub-package of one (exact match or a `<pkg>.` prefix). The prior
     // implementation used two-way substring containment, which classified any
-    // short substring of a system package name -- "a", "com", "android" -- as a
+    // short substring of a system package name -- "a" or "com" -- as a
     // system launcher (issue #4172). These rows pin the prefix semantics; the
     // reverse-containment rows are the regression guard.
     const invoke = (packageName: string | null | undefined): boolean =>
@@ -463,7 +463,8 @@ describe("Idle - Unit Tests", function() {
       { pkg: "a", expected: false, why: "single char (was true via reverse containment)" },
       { pkg: "com", expected: false, why: "bare com (was true via reverse containment)" },
       { pkg: "com.android", expected: false, why: "bare com.android (was true via reverse containment)" },
-      { pkg: "android", expected: false, why: "bare android is not in the curated list" },
+      { pkg: "android", expected: true, why: "bare Android framework package" },
+      { pkg: "android.example", expected: false, why: "not a sub-package of the bare framework package" },
       // Launcher-looking but not an actual system package (already false, stays false).
       { pkg: "com.example.launcherpad", expected: false, why: "looks launcher-y but unrelated" },
       // Falsy inputs.

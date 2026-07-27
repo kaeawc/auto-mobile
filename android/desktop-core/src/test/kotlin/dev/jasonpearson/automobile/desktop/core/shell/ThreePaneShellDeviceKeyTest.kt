@@ -136,9 +136,8 @@ class ThreePaneShellDeviceKeyTest {
    * canvas's decision, which a hand-rolled boolean cannot exhibit.
    */
   private fun policyPredicate(): (androidx.compose.ui.input.key.KeyEvent) -> Boolean = { event ->
-    DeviceKeyboardInputPolicy.evaluate(
-      stroke = DeviceKeyboardEventTranslator.translate(event),
-    ) !is DeviceKeyboardDecision.Ignored
+    DeviceKeyboardInputPolicy.evaluate(stroke = DeviceKeyboardEventTranslator.translate(event)) !is
+      DeviceKeyboardDecision.Ignored
   }
 
   @Test

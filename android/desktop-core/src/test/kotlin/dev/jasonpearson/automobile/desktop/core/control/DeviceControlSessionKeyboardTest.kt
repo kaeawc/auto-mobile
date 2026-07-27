@@ -99,9 +99,10 @@ class DeviceControlSessionKeyboardTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client, platform = "ios")
 
-    val consumed = listOf('a', 'b', 'c').map { character ->
-      session.key(testSnapshot(), DeviceKeyStroke(character = character))
-    }
+    val consumed =
+      listOf('a', 'b', 'c').map { character ->
+        session.key(testSnapshot(), DeviceKeyStroke(character = character))
+      }
     advanceUntilIdle()
 
     assertTrue(consumed.all { it }, "every forwarded keystroke is consumed")
